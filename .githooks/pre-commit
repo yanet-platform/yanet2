@@ -10,3 +10,15 @@ if ! go run ./lint/logger/cmd/loglint/; then
 	echo "loglint failed; fix the violation above, or bypass with 'git commit --no-verify'" >&2
 	exit 1
 fi
+
+# Rejects commits that reach into a private field or method from outside
+# the receiver m, or that add an internal _test.go package, per the
+# encapsulation rule in CLAUDE.md.
+#
+# Runs a full-repo scan rather than a staged-files-only check, since the
+# linter's stale-allowlist check needs to see every violation to know which
+# rows are still live.
+if ! go run ./lint/encapsulation/cmd/enclint/; then
+	echo "enclint failed; fix the violation above, or bypass with 'git commit --no-verify'" >&2
+	exit 1
+fi

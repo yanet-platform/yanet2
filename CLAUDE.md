@@ -249,7 +249,20 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   `WithLog()` is defined per constructor. Enforced mechanically by
   `lint/logger/` (`make lint-go`); known violations are ledgered in
   `lint/logger/allowlist.txt` — do not add new rows.
-- **Encapsulation**: mutex and the fields it guards stay private.
+- **Encapsulation**: mutex and the fields it guards stay private. A
+  private field or method may only be reached through a base spelled
+  `m` — the receiver, or the value under construction in a
+  constructor. Any other base is a violation: another object, or a
+  chain such as `m.opts.log` (write `m.opts.Log`). The fix is to give
+  the type an exported method or field, even when the type itself is
+  unexported: only an exported surface makes decomposition
+  reviewable. The check keys on the identifier `m` rather than on
+  true receiver identity, so it is a convention aid, not a proof.
+  Enforced mechanically by `lint/encapsulation/` (pre-commit hook via
+  `make hooks`, and `make lint-go`); known violations are ledgered in
+  `lint/encapsulation/allowlist-private.txt` — do not add new rows.
+  Files that `import "C"` are exempt, because C struct fields cannot
+  be distinguished from Go private fields without type information.
 - **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
 - **No log-only RPC stubs**: when a brief names an RPC, actually invoke
   the client. `m.log.Debug("would call …")` is a bug, not a stub.
@@ -260,7 +273,13 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   period. If detail follows, separate with a blank `//` line, then the
   body paragraph. Never glue brief and detail on consecutive `//` lines.
 - **Tests**: table-driven, use `require.NoError(t, err)`. Do not
-  reference tests inside production-code comments.
+  reference tests inside production-code comments. Every `_test.go`
+  file declares `package <pkg>_test`, so the compiler — not a
+  linter — forbids reaching into private fields and functions; known
+  violations are ledgered in
+  `lint/encapsulation/allowlist-testpkg.txt` — do not add new rows.
+  A `package main` command is exempt, because main packages are
+  unimportable, so an external test could never reach anything.
 
 ### Rust
 
