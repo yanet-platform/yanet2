@@ -25,7 +25,7 @@ counter_add_packets_bytes(
 	values[1] += bytes;
 }
 
-void
+static inline void
 module_ectx_process(
 	struct dp_worker *dp_worker,
 	struct module_ectx *module_ectx,
@@ -112,7 +112,7 @@ module_ectx_process(
 	);
 }
 
-void
+static inline void
 chain_ectx_process(
 	struct dp_worker *dp_worker,
 	struct chain_ectx *chain_ectx,
@@ -230,7 +230,7 @@ function_ectx_drain(
 	function_ectx_run_chains(dp_worker, function_ectx, packet_front);
 }
 
-void
+static inline void
 function_ectx_process(
 	struct dp_worker *dp_worker,
 	struct function_ectx *function_ectx,
@@ -293,7 +293,7 @@ function_ectx_process(
 	);
 }
 
-void
+static inline void
 pipeline_ectx_process(
 	struct dp_worker *dp_worker,
 	struct pipeline_ectx *pipeline_ectx,
