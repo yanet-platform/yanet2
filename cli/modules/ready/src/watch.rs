@@ -93,6 +93,8 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
         services: &reports,
     };
 
+    let mut aggregate = Aggregate::seed(&reports);
+
     output::data(&snapshot_payload, false, format_args!(""), || {
         if reports.is_empty() {
             eprintln!("no readiness services registered");
@@ -107,14 +109,11 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
         }
 
         render::print_watching_line();
-    });
 
-    let mut snapshot: BTreeMap<(String, String), Scope> = BTreeMap::new();
-    for report in &reports {
-        for scope in &report.scopes {
-            snapshot.insert((report.service.clone(), scope.name.clone()), scope.clone());
+        if aggregate.all_ready {
+            render::print_all_ready_line();
         }
-    }
+    });
 
     let (sender, mut receiver) = mpsc::unbounded_channel::<Event>();
 
@@ -130,7 +129,7 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
     drop(sender);
 
     while let Some(event) = receiver.recv().await {
-        render_event(event, &mut snapshot, scope_width, alias_width);
+        render_event(event, &mut aggregate, scope_width, alias_width);
     }
 
     Ok(true)
@@ -181,6 +180,14 @@ enum EventData {
     /// The stream ended or errored; the supervisor is retrying after
     /// `retry_after`.
     Lost { cause: String, retry_after: Duration },
+    /// A re-discovery sweep just found this service and is about to spawn
+    /// its supervisor.
+    ///
+    /// Carries no data — it exists purely to tell the render loop's
+    /// `Aggregate` that this service now exists, before its supervisor's
+    /// first `Message` can arrive, so the banner blocks on it like any
+    /// other unreported service. Never reaches `output::data`.
+    Discovered,
 }
 
 /// The wire discriminator shared by [`SnapshotPayload`]'s and
@@ -195,16 +202,6 @@ enum EventKind {
     Message,
     Reattached,
     Lost,
-}
-
-impl EventData {
-    fn kind(&self) -> EventKind {
-        match self {
-            Self::Message(..) => EventKind::Message,
-            Self::Reattached => EventKind::Reattached,
-            Self::Lost { .. } => EventKind::Lost,
-        }
-    }
 }
 
 /// The wire shape of the snapshot line an aggregate `--watch` JSON stream
@@ -262,6 +259,14 @@ impl Event {
             service: service.to_owned(),
             alias: alias.to_owned(),
             data: EventData::Lost { cause: cause.to_owned(), retry_after },
+        }
+    }
+
+    fn discovered(service: &str, alias: &str) -> Self {
+        Self {
+            service: service.to_owned(),
+            alias: alias.to_owned(),
+            data: EventData::Discovered,
         }
     }
 }
@@ -393,8 +398,9 @@ fn next_backoff(backoff: Duration) -> Duration {
     (backoff * 2).min(MAX_BACKOFF)
 }
 
-/// Periodically re-lists the gateway's registered readiness services and
-/// spawns a supervisor for each one not already known.
+/// Periodically re-lists the gateway's registered readiness services,
+/// announces each newly discovered one to the render loop, and spawns its
+/// supervisor.
 ///
 /// A failed or stalled sweep is silent: the next tick retries, and a service
 /// that really is unreachable already has its own supervisor saying so via
@@ -420,6 +426,8 @@ async fn rediscover(
             continue;
         };
 
+        let mut discovered = Vec::new();
+
         for service in services {
             if !known.insert(service.clone()) {
                 continue;
@@ -428,6 +436,16 @@ async fn rediscover(
             let alias = assign_alias(&service, &aliases);
             aliases.insert(service.clone(), alias.clone());
 
+            let _ = sender.send(Event::discovered(&service, &alias));
+            discovered.push((service, alias));
+        }
+
+        // Every discovery from this sweep is announced above before any of
+        // its supervisors is spawned below, so `Discovered` for a service
+        // is always enqueued ahead of any `Message` a sibling's supervisor
+        // could emit — `tokio::spawn` only schedules the task and may run
+        // it concurrently with the rest of this loop.
+        for (service, alias) in discovered {
             tokio::spawn(supervise(connection.clone(), service, alias, sender.clone()));
         }
     }
@@ -450,38 +468,169 @@ fn assign_alias(service: &str, aliases: &BTreeMap<String, String>) -> String {
     if collides { service.to_owned() } else { candidate }
 }
 
+/// The merged readiness state aggregate `--watch` tracks across every
+/// supervisor, used solely to detect the whole set crossing into fully
+/// ready and print [`render::print_all_ready_line`] exactly once per
+/// crossing.
+///
+/// Kept separate from the per-scope `snapshot` diffing
+/// [`render::record_transition`] already does, because "all ready" needs one
+/// more fact `snapshot` alone cannot answer: whether any service is currently
+/// unreachable. `blocking` is that set of service names — a service that
+/// errored at its initial probe and has not since been observed, or whose
+/// stream is currently [`EventData::Lost`] — mirroring the one-shot
+/// [`all_ready`]'s own rule that an unreachable service is never ready.
+struct Aggregate {
+    snapshot: BTreeMap<(String, String), Scope>,
+    blocking: HashSet<String>,
+    all_ready: bool,
+}
+
+impl Aggregate {
+    /// Builds the initial aggregate from the services' probe `reports`.
+    ///
+    /// `snapshot` starts from every OK report's scopes, exactly as the old
+    /// startup seeding loop did. `blocking` starts as the set of services
+    /// whose initial probe errored.
+    fn seed(reports: &[ServiceReport]) -> Self {
+        let mut snapshot = BTreeMap::new();
+        let mut blocking = HashSet::new();
+
+        for report in reports {
+            for scope in &report.scopes {
+                snapshot.insert((report.service.clone(), scope.name.clone()), scope.clone());
+            }
+
+            if report.error.is_some() {
+                blocking.insert(report.service.clone());
+            }
+        }
+
+        let mut aggregate = Self { snapshot, blocking, all_ready: false };
+        aggregate.all_ready = aggregate.compute();
+
+        aggregate
+    }
+
+    /// Computes whether the aggregate is currently fully ready.
+    ///
+    /// `all_ready` per the task's definition: the snapshot is non-empty, no
+    /// service is blocking, and every scope currently in the snapshot is
+    /// [`crate::is_ready`].
+    fn compute(&self) -> bool {
+        !self.snapshot.is_empty() && self.blocking.is_empty() && self.snapshot.values().all(crate::is_ready)
+    }
+
+    /// Records one `Message` event's `scope` from `service` and classifies
+    /// its transition.
+    ///
+    /// Diffs the scope into `snapshot` only — it does not touch `blocking`,
+    /// since a message may carry any number of scopes (including zero) and
+    /// `blocking` must be cleared exactly once per message regardless. See
+    /// [`Self::mark_reported`] for that.
+    fn observe(&mut self, service: &str, scope: &Scope) -> Transition {
+        render::record_transition(&mut self.snapshot, service, scope)
+    }
+
+    /// Recomputes [`Self::all_ready`] and reports whether it just crossed
+    /// from not-ready into ready.
+    ///
+    /// A crossing prints the banner exactly once: a second `refresh` call
+    /// while already ready recomputes the same `true` but returns `false`,
+    /// since `all_ready` was already `true` going in.
+    fn refresh(&mut self) -> bool {
+        let now = self.compute();
+        let crossed = now && !self.all_ready;
+        self.all_ready = now;
+
+        crossed
+    }
+
+    /// Inserts `service` into `blocking` and forces `all_ready` false
+    /// immediately, without waiting for the next recompute.
+    ///
+    /// Shared by [`Self::mark_lost`] and [`Self::mark_discovered`], which
+    /// differ only in why `service` is currently unreported.
+    fn block(&mut self, service: &str) {
+        self.blocking.insert(service.to_owned());
+        self.all_ready = false;
+    }
+
+    /// Records that `service`'s stream was lost.
+    ///
+    /// Forces `all_ready` false immediately, without waiting for the next
+    /// `Message`: an unreachable service must stop the aggregate from
+    /// reading as ready the instant it is known, not merely once the loss
+    /// happens to be recomputed.
+    fn mark_lost(&mut self, service: &str) {
+        self.block(service);
+    }
+
+    /// Records that a re-discovery sweep just found `service`.
+    ///
+    /// A newly discovered service has not reported anything yet, so it
+    /// must hold the "all ready" banner back exactly like an unreachable
+    /// one until its first `Message` clears it from `blocking` via
+    /// [`Self::observe`] — otherwise the aggregate could read ready before
+    /// a service that registers later than the others has had a chance to
+    /// report in.
+    fn mark_discovered(&mut self, service: &str) {
+        self.block(service);
+    }
+
+    /// Records that `service` has sent a `Watch` message, so it has
+    /// reported its state and no longer blocks the banner.
+    ///
+    /// Called once per `Message` event, regardless of how many scopes it
+    /// carries — even a message carrying zero scopes clears the block,
+    /// unlike the per-scope [`Self::observe`].
+    fn mark_reported(&mut self, service: &str) {
+        self.blocking.remove(service);
+    }
+}
+
 /// Renders one event from a supervisor.
 ///
-/// A `Message` diffs its scopes against the merged `snapshot` and prints
-/// one transition line per scope that actually changed; `Reattached`
-/// prints one dim [`render::print_lifecycle_line`]; `Lost` composes its
-/// cause and retry delay via [`render::print_lost_line`]. Always calls
-/// `output::data` so JSON mode sees every event exactly as received, even
-/// when nothing is worth printing in human mode.
-fn render_event(
-    event: Event,
-    snapshot: &mut BTreeMap<(String, String), Scope>,
-    scope_width: usize,
-    alias_width: usize,
-) {
+/// `Message`, `Reattached`, and `Lost` are the three observable events:
+/// each always calls `output::data` so JSON mode sees it exactly as
+/// received, even when nothing is worth printing in human mode. A
+/// `Message` first calls [`Aggregate::mark_reported`] once, unblocking
+/// `service` regardless of how many scopes the message carries, then diffs
+/// its scopes against the merged `aggregate` and prints one transition line
+/// per scope that actually changed, then prints
+/// [`render::print_all_ready_line`] if that message's transitions crossed
+/// the whole set into ready; `Reattached` prints one dim
+/// [`render::print_lifecycle_line`] only — it deliberately leaves `service`
+/// blocked, since a reattached service must stay blocked until its own
+/// next `Message` clears it, so a message from another supervisor cannot
+/// cross the aggregate into ready off this service's stale pre-disconnect
+/// scopes; `Lost` composes its cause and retry delay via
+/// [`render::print_lost_line`].
+///
+/// `Discovered` is internal bookkeeping only: it updates `aggregate`'s
+/// blocking set so the "all ready" banner waits for this service's first
+/// message, and never reaches `output::data` — it renders neither a
+/// human line nor a JSON line.
+fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, alias_width: usize) {
     let Event { service, alias, data } = event;
-    let kind = data.kind();
 
     match data {
         EventData::Message(scopes) => {
             let payload = EventPayload {
                 service: &service,
-                event: kind,
+                event: EventKind::Message,
                 scopes: &scopes,
                 error: None,
             };
 
             output::data(&payload, false, format_args!(""), || {
+                aggregate.mark_reported(&service);
+
                 let mut scopes = scopes.clone();
                 scopes.sort_by(|a, b| a.name.cmp(&b.name));
 
                 for scope in &scopes {
-                    let transition = render::record_transition(snapshot, &service, scope);
+                    let transition = aggregate.observe(&service, scope);
 
                     if transition != Transition::Unchanged {
                         render::print_transition_line(
@@ -492,12 +641,16 @@ fn render_event(
                         );
                     }
                 }
+
+                if aggregate.refresh() {
+                    render::print_all_ready_line();
+                }
             });
         }
         EventData::Reattached => {
             let payload = EventPayload {
                 service: &service,
-                event: kind,
+                event: EventKind::Reattached,
                 scopes: &[],
                 error: None,
             };
@@ -509,21 +662,53 @@ fn render_event(
         EventData::Lost { cause, retry_after } => {
             let payload = EventPayload {
                 service: &service,
-                event: kind,
+                event: EventKind::Lost,
                 scopes: &[],
                 error: Some(&cause),
             };
 
             output::data(&payload, false, format_args!(""), || {
+                aggregate.mark_lost(&service);
                 render::print_lost_line(&alias, alias_width, &cause, retry_after);
             });
+        }
+        EventData::Discovered => {
+            aggregate.mark_discovered(&service);
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use readinesspb::pb::State;
+
     use super::*;
+
+    fn scope(name: &str, state: State) -> Scope {
+        Scope {
+            name: name.to_owned(),
+            state: state as i32,
+            reasons: Vec::new(),
+            observed_at: None,
+            last_transition_time: None,
+        }
+    }
+
+    fn report(service: &str, scopes: Vec<Scope>) -> ServiceReport {
+        ServiceReport {
+            service: service.to_owned(),
+            scopes,
+            error: None,
+        }
+    }
+
+    fn failed_report(service: &str) -> ServiceReport {
+        ServiceReport {
+            service: service.to_owned(),
+            scopes: Vec::new(),
+            error: Some("unknown service".to_owned()),
+        }
+    }
 
     #[test]
     fn backoff_doubles_up_to_the_ceiling() {
@@ -628,20 +813,6 @@ mod test {
     }
 
     #[test]
-    fn event_data_kind_matches_its_variant() {
-        assert_eq!(EventKind::Message, EventData::Message(Vec::new()).kind());
-        assert_eq!(EventKind::Reattached, EventData::Reattached.kind());
-        assert_eq!(
-            EventKind::Lost,
-            EventData::Lost {
-                cause: "boom".to_owned(),
-                retry_after: Duration::from_secs(1)
-            }
-            .kind()
-        );
-    }
-
-    #[test]
     fn lost_event_keeps_the_raw_cause_with_no_composed_wording() {
         let event = Event::lost("svc", "alias", "boom", Duration::from_secs(5));
 
@@ -654,5 +825,102 @@ mod test {
         // the human renderer's job, done only at render time.
         assert_eq!("boom", cause);
         assert_eq!(Duration::from_secs(5), retry_after);
+    }
+
+    #[test]
+    fn aggregate_seed_is_ready_when_every_scope_of_every_service_is_ready() {
+        let reports = vec![
+            report("a", vec![scope("rib", State::Ready)]),
+            report("b", vec![scope("fib", State::Ready)]),
+        ];
+
+        let aggregate = Aggregate::seed(&reports);
+
+        assert!(aggregate.all_ready);
+    }
+
+    #[test]
+    fn aggregate_seed_is_not_ready_when_one_service_errored() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)]), failed_report("b")];
+
+        let aggregate = Aggregate::seed(&reports);
+
+        assert!(!aggregate.all_ready);
+    }
+
+    #[test]
+    fn aggregate_seed_is_not_ready_when_empty() {
+        let aggregate = Aggregate::seed(&[]);
+
+        assert!(!aggregate.all_ready);
+    }
+
+    #[test]
+    fn aggregate_refresh_crosses_into_ready_exactly_once() {
+        let reports = vec![report("a", vec![scope("rib", State::NotReady)])];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(!aggregate.all_ready);
+
+        aggregate.observe("a", &scope("rib", State::Ready));
+        assert!(aggregate.refresh());
+
+        // Still fully ready, but this is not a new crossing.
+        assert!(!aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_mark_lost_drops_ready_and_a_later_message_re_crosses() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(aggregate.all_ready);
+
+        aggregate.mark_lost("a");
+        assert!(!aggregate.all_ready);
+
+        aggregate.mark_reported("a");
+        aggregate.observe("a", &scope("rib", State::Ready));
+        assert!(aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_mark_discovered_blocks_the_banner_until_its_first_message() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(aggregate.all_ready);
+
+        aggregate.mark_discovered("b");
+        assert!(!aggregate.all_ready);
+        assert!(aggregate.blocking.contains("b"));
+
+        aggregate.mark_reported("b");
+        aggregate.observe("b", &scope("fib", State::Ready));
+        assert!(aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_ready_message_does_not_cross_while_a_discovered_service_still_blocks() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
+        let mut aggregate = Aggregate::seed(&reports);
+
+        aggregate.mark_discovered("b");
+
+        aggregate.observe("a", &scope("rib", State::Ready));
+        assert!(!aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_mark_reported_clears_a_block_even_with_no_scopes() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(aggregate.all_ready);
+
+        aggregate.mark_discovered("b");
+        assert!(!aggregate.all_ready);
+        assert!(aggregate.blocking.contains("b"));
+
+        // A message carrying zero scopes never reaches `observe`, but it
+        // must still clear the block and let the aggregate re-cross.
+        aggregate.mark_reported("b");
+        assert!(aggregate.refresh());
     }
 }

@@ -134,6 +134,28 @@ pub fn print_watching_line() {
     println!();
 }
 
+/// Builds the green all-ready banner's text.
+///
+/// Reuses [`StateStyle`] for `State::Ready` rather than a bespoke mark, so
+/// this line's glyph and color can never drift from the `READY` marks used
+/// everywhere else in the render.
+fn all_ready_line(colored: bool) -> String {
+    let style = StateStyle::new(State::Ready, colored);
+
+    format!("{} {}", style.styled_mark(), style.paint("all subsystems are ready"))
+}
+
+/// Prints the distinct banner aggregate `--watch` shows each time the whole
+/// set of watched subsystems crosses into fully ready.
+///
+/// No surrounding blank lines: at startup [`print_watching_line`] already
+/// leaves a trailing blank above it, and mid-stream it sits flush under the
+/// transition lines that caused the crossing.
+pub fn print_all_ready_line() {
+    let colored = output::is_colored();
+    println!("{}", all_ready_line(colored));
+}
+
 /// Prints one scope's row plus any reason continuation lines.
 fn print_scope_row(
     scope: &Scope,
@@ -342,5 +364,13 @@ mod test {
         assert!(symbols.dash.is_ascii());
         assert!(symbols.separator.is_ascii());
         assert!(symbols.ellipsis.is_ascii());
+    }
+
+    #[test]
+    fn all_ready_line_uncolored_is_ascii_and_escape_free() {
+        let line = all_ready_line(false);
+
+        assert!(line.is_ascii());
+        assert!(!line.contains('\x1b'));
     }
 }
