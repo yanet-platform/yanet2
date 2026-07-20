@@ -22,7 +22,7 @@ use ync::{
 mod args;
 
 use ::commonpb::pb as commonpb;
-use commonpb::GetMetricsRequest;
+use commonpb::{GetMetricsRequest, MetricTag};
 
 #[allow(non_snake_case)]
 pub mod aclpb {
@@ -405,34 +405,26 @@ impl ACLService {
     }
 
     pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
+        let tags = cmd
+            .tags
+            .iter()
+            .map(|entry| parse_tag(entry))
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|message| Error::invalid_argument("metrics", self.metrics.endpoint(), message))?;
+
         let response = self
             .metrics
             .client()
-            .get_metrics(GetMetricsRequest {})
+            .get_metrics(GetMetricsRequest { tags })
             .await
             .map_err(self.metrics.status("metrics"))?
             .into_inner();
-        let label_filters: Vec<(&str, &str)> = cmd
-            .labels
-            .iter()
-            .filter_map(|s| {
-                let mut it = s.splitn(2, '=');
-                Some((it.next()?, it.next()?))
-            })
-            .collect();
 
         let metrics: Vec<Metric> = response
             .metrics
             .into_iter()
             .map(Metric::from_proto)
-            .filter(|m| {
-                if let Some(ref f) = cmd.name {
-                    if !m.name.contains(f.as_filter()) {
-                        return false;
-                    }
-                }
-                label_filters.iter().all(|(k, v)| m.label_value(k) == Some(v))
-            })
+            .filter(|m| cmd.name.as_ref().is_none_or(|f| m.name.contains(f.as_filter())))
             .collect();
 
         output::data(&metrics, metrics.is_empty(), format_args!("no metrics"), || {
@@ -441,6 +433,21 @@ impl ACLService {
 
         Ok(())
     }
+}
+
+/// Parses a `NAME=VALUE` tag entry into a [`MetricTag`].
+///
+/// An entry without `=` is bad input — the message is turned into an
+/// invalid-argument [`Error`] once at the call site.
+fn parse_tag(entry: &str) -> Result<MetricTag, String> {
+    let Some((name, value)) = entry.split_once('=') else {
+        return Err(format!("invalid --tag \"{entry}\": expected NAME=VALUE"));
+    };
+
+    Ok(MetricTag {
+        name: name.to_string(),
+        value: value.to_string(),
+    })
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -504,5 +511,28 @@ mod test {
         let content = include_str!("../../../../tests/functional/testdata/acl+fwstate.yaml");
         let config: ACLConfig = serde_yaml::from_str(content).expect("acl+fwstate.yaml fixture must deserialize");
         assert!(!config.rules.is_empty());
+    }
+
+    #[test]
+    fn a_tag_entry_splits_on_the_first_equals() {
+        let tag = parse_tag("config=my-acl").expect("a well-formed tag must parse");
+
+        assert_eq!("config", tag.name);
+        assert_eq!("my-acl", tag.value);
+    }
+
+    #[test]
+    fn an_empty_tag_value_requires_the_label_absent() {
+        let tag = parse_tag("config=").expect("an empty value must parse");
+
+        assert_eq!("config", tag.name);
+        assert_eq!("", tag.value);
+    }
+
+    #[test]
+    fn a_tag_entry_without_equals_is_rejected() {
+        let err = parse_tag("config").expect_err("a bare tag name must be rejected");
+
+        assert!(err.contains("NAME=VALUE"));
     }
 }

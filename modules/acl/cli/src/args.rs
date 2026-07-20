@@ -80,9 +80,13 @@ impl MetricName {
 
 #[derive(Debug, Clone, Parser, Default)]
 pub struct MetricsCmd {
-    /// Label filter, e.g. --label config=my-acl --label device=eth0
-    #[arg(long = "label", short = 'l', value_name = "KEY=VALUE")]
-    pub labels: Vec<String>,
+    /// Server-side tag filter, e.g. --tag config=my-acl --tag device=eth0.
+    ///
+    /// An empty value requires the label to be absent, `*` requires it to be
+    /// present with any value, and any other value requires an exact match.
+    /// Mirrors the counters `CounterTag` semantics.
+    #[arg(long = "tag", short = 't', value_name = "NAME=VALUE")]
+    pub tags: Vec<String>,
     /// Show only metrics matching this category
     #[arg(long, short, value_enum)]
     pub name: Option<MetricName>,

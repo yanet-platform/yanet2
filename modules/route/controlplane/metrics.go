@@ -6,12 +6,13 @@ import (
 	"slices"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
-// metricsSource provides the module's collected metrics.
+// metricsSource provides the module's metrics, filtered by tags.
 type metricsSource interface {
-	Metrics() ([]*commonpb.Metric, error)
+	Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
 }
 
 // MetricsService exposes route module metrics over its own gRPC service.
@@ -26,9 +27,10 @@ func NewMetricsService(source metricsSource) *MetricsService {
 	return &MetricsService{source: source}
 }
 
-// GetMetrics returns a snapshot of all route module metrics.
+// GetMetrics returns a snapshot of route module metrics matching the
+// request's tags.
 func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetricsRequest) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.Metrics()
+	all, err := m.source.Metrics(req.GetTags()...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,17 +103,24 @@ var counterNames = slices.Sorted(maps.Keys(counterMappings))
 // collectDataplaneMetrics gathers the module-level packet and byte counters
 // of every config, summed across worker instances.
 //
-// Every known counter is emitted even when it reads zero. A series that
-// disappears and reappears breaks rate() in Prometheus, and the empty route
-// list counters are invariant canaries expected to read zero forever, which
-// only works if they are visible.
-func (m *RouteService) collectDataplaneMetrics() []*commonpb.Metric {
+// A "counter" tag is pushed down into the dataplane counter read, so
+// counters excluded by tags are never read from shared memory. Every known
+// counter is emitted even when it reads zero. A series that disappears and
+// reappears breaks rate() in Prometheus, and the empty route list counters
+// are invariant canaries expected to read zero forever, which only works if
+// they are visible.
+func (m *RouteService) collectDataplaneMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
 	m.shmLock.RLock()
 	defer m.shmLock.RUnlock()
 
+	names, read := metrics.Query(tags, counterNames, counterNames)
+	if !read {
+		return []*commonpb.Metric{}
+	}
+
 	result := make([]*commonpb.Metric, 0)
 	for configName := range m.configs {
-		for _, counter := range m.backend.ModuleCounters(configName, counterNames) {
+		for _, counter := range m.backend.ModuleCounters(configName, names) {
 			mapping, ok := counterMappings[counter.Name]
 			if !ok {
 				continue

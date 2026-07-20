@@ -4,7 +4,25 @@ package common.commonpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
-message GetMetricsRequest {}
+message GetMetricsRequest {
+  // Predicates a returned metric's labels must all satisfy.
+  //
+  // A metric is included only if it satisfies every tag in the list
+  // (logical AND). An empty list imposes no filter, preserving the
+  // current behavior of returning all metrics.
+  repeated MetricTag tags = 1;
+}
+
+// A predicate against a metric's labels.
+//
+// The check is encoded in value: an empty string requires the label to
+// be absent, "*" requires the label to be present with any value, and
+// any other string requires the label to be present with exactly that
+// value. This mirrors controlplane.ynpb.v1.CounterTag.
+message MetricTag {
+  string name = 1;
+  string value = 2;
+}
 
 message GetMetricsResponse { repeated Metric metrics = 1; }
 

@@ -276,8 +276,11 @@ func (m *RouteService) UpdateFIB(
 	return &routepb.UpdateFIBResponse{}, nil
 }
 
-// Metrics returns all route module metrics: per-config FIB gauges, the
-// module-level dataplane counters, plus gRPC call metrics.
+// Metrics returns route module metrics matching tags: per-config FIB
+// gauges, the module-level dataplane counters, plus gRPC call metrics.
+//
+// A "counter" tag is pushed down into the dataplane counter read, so
+// counters excluded by tags are never read from shared memory.
 //
 // Labels:
 //   - config:       route config name (all gauge and counter metrics)
@@ -293,13 +296,13 @@ func (m *RouteService) UpdateFIB(
 //   - grpc_service: fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:  RPC name (gRPC metrics)
 //   - grpc_code:    gRPC status code string (grpc_server_handled_total only)
-func (m *RouteService) Metrics() ([]*commonpb.Metric, error) {
+func (m *RouteService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	result := m.collectConfigMetrics()
-	result = append(result, m.collectDataplaneMetrics()...)
+	result = append(result, m.collectDataplaneMetrics(tags)...)
 	if m.metrics != nil {
 		result = append(result, m.metrics.Collect()...)
 	}
-	return result, nil
+	return metrics.Filter(result, tags), nil
 }
 
 // collectConfigMetrics gathers the gauges describing what each config

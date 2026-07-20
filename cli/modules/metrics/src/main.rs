@@ -5,7 +5,7 @@ use clap_complete::{
     CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
-use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, metric::Value};
+use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, MetricTag, metric::Value};
 use tabled::{
     Table, Tabled,
     settings::{
@@ -52,6 +52,15 @@ pub struct Cmd {
     pub name: Option<String>,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Server-side tag filter: `NAME=VALUE`, repeatable — a metric is
+    /// returned only if it satisfies every tag (logical AND).
+    ///
+    /// An empty `VALUE` requires the label to be absent, `*` requires it to
+    /// be present with any value, and any other string requires an exact
+    /// value match. Shells typically expand `*`, so quote it, e.g.
+    /// `--tag 'config=*'`.
+    #[arg(long = "tag", short = 't', value_name = "NAME=VALUE", global = true)]
+    pub tags: Vec<String>,
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
@@ -95,6 +104,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ));
     }
 
+    let tags = cmd
+        .tags
+        .iter()
+        .map(|entry| parse_tag(entry))
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(|message| Error::invalid_argument("metrics", &cmd.connection.endpoint, message))?;
+
     let connection = Connection::connect_for(&cmd.connection, "metrics").await?;
 
     let name = if name.contains('.') {
@@ -103,7 +119,22 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         resolve_alias(&cmd, &connection, &name).await?
     };
 
-    run_probe(&connection, &name).await
+    run_probe(&connection, &name, tags).await
+}
+
+/// Parses a `NAME=VALUE` tag entry into a [`MetricTag`].
+///
+/// An entry without `=` is bad input — the message is turned into an
+/// invalid-argument [`Error`] once at the call site.
+fn parse_tag(entry: &str) -> Result<MetricTag, String> {
+    let Some((name, value)) = entry.split_once('=') else {
+        return Err(format!("invalid --tag \"{entry}\": expected NAME=VALUE"));
+    };
+
+    Ok(MetricTag {
+        name: name.to_string(),
+        value: value.to_string(),
+    })
 }
 
 /// Whether a service name is empty or whitespace only.
@@ -137,9 +168,9 @@ async fn require_service(cmd: &Cmd) -> Error {
 /// Probes one metrics service's `GetMetrics` over the shared connection, and
 /// suggests the services that do exist when the probe finds none under that
 /// name.
-async fn run_probe(connection: &Connection, name: &str) -> Result<(), Error> {
+async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) -> Result<(), Error> {
     let result = connection
-        .invoke_unary::<_, GetMetricsResponse>("metrics", name, "GetMetrics", GetMetricsRequest {})
+        .invoke_unary::<_, GetMetricsResponse>("metrics", name, "GetMetrics", GetMetricsRequest { tags })
         .await;
 
     let response = match result {
@@ -417,5 +448,28 @@ mod test {
         let cmd = Cmd::try_parse_from(["yanet-cli-metrics", "route"]).expect("a service name must parse");
 
         assert_eq!(Some("route".to_owned()), cmd.name);
+    }
+
+    #[test]
+    fn a_tag_entry_splits_on_the_first_equals() {
+        let tag = parse_tag("config=my-acl").expect("a well-formed tag must parse");
+
+        assert_eq!("config", tag.name);
+        assert_eq!("my-acl", tag.value);
+    }
+
+    #[test]
+    fn an_empty_tag_value_requires_the_label_absent() {
+        let tag = parse_tag("config=").expect("an empty value must parse");
+
+        assert_eq!("config", tag.name);
+        assert_eq!("", tag.value);
+    }
+
+    #[test]
+    fn a_tag_entry_without_equals_is_rejected() {
+        let err = parse_tag("config").expect_err("a bare tag name must be rejected");
+
+        assert!(err.contains("NAME=VALUE"));
     }
 }

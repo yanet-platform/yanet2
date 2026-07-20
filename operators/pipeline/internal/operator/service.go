@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
 )
 
@@ -44,9 +45,9 @@ func (m *Service) GetMetrics(
 	ctx context.Context,
 	req *commonpb.GetMetricsRequest,
 ) (*commonpb.GetMetricsResponse, error) {
-	metrics := m.metrics.Collect()
+	all := m.metrics.Collect()
 
 	return &commonpb.GetMetricsResponse{
-		Metrics: metrics,
+		Metrics: metrics.Filter(all, req.GetTags()),
 	}, nil
 }

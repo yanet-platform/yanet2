@@ -282,7 +282,7 @@ impl Balancer2Service {
     }
 
     async fn metrics(&mut self, _cmd: MetricsCmd) -> Result<(), Error> {
-        let request = GetMetricsRequest {};
+        let request = GetMetricsRequest::default();
         log::trace!("get metrics request: {request:?}");
 
         let response = self

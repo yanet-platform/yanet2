@@ -4,6 +4,7 @@ import (
 	"context"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -31,12 +32,12 @@ func (m *MetricsService) GetMetrics(
 	ctx context.Context,
 	req *commonpb.GetMetricsRequest,
 ) (*commonpb.GetMetricsResponse, error) {
-	metrics := make([]*commonpb.Metric, 0)
+	all := make([]*commonpb.Metric, 0)
 	for _, collector := range m.collectors {
-		metrics = append(metrics, collector.Collect()...)
+		all = append(all, collector.Collect()...)
 	}
 
-	return &commonpb.GetMetricsResponse{Metrics: metrics}, nil
+	return &commonpb.GetMetricsResponse{Metrics: metrics.Filter(all, req.GetTags())}, nil
 }
 
 func metricsCollectors(server metricsCollector, entries []serviceEntry) []metricsCollector {

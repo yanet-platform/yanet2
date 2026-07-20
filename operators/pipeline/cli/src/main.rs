@@ -95,7 +95,7 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
 
             let response = service
                 .client()
-                .get_metrics(GetMetricsRequest {})
+                .get_metrics(GetMetricsRequest::default())
                 .await
                 .map_err(service.status("get_metrics"))?
                 .into_inner();

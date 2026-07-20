@@ -4,6 +4,7 @@ import (
 	"context"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -42,6 +43,6 @@ func (m *MetricsService) GetMetrics(
 	req *commonpb.GetMetricsRequest,
 ) (*commonpb.GetMetricsResponse, error) {
 	return &commonpb.GetMetricsResponse{
-		Metrics: m.metrics.Collect(),
+		Metrics: metrics.Filter(m.metrics.Collect(), req.GetTags()),
 	}, nil
 }

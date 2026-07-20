@@ -10,9 +10,9 @@ import (
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
-// metricsSource provides the module's collected metrics.
+// metricsSource provides the module's metrics, filtered by tags.
 type metricsSource interface {
-	Metrics() ([]*commonpb.Metric, error)
+	Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
 }
 
 // MetricsService exposes FWState module metrics over its own gRPC service.
@@ -27,12 +27,13 @@ func NewMetricsService(source metricsSource) *MetricsService {
 	return &MetricsService{source: source}
 }
 
-// GetMetrics returns a snapshot of all FWState module metrics.
+// GetMetrics returns a snapshot of FWState module metrics matching the
+// request's tags.
 func (m *MetricsService) GetMetrics(
 	ctx context.Context,
 	req *commonpb.GetMetricsRequest,
 ) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.Metrics()
+	all, err := m.source.Metrics(req.GetTags()...)
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +57,23 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 	}
 }
 
-// Metrics returns all FWState module metrics: per-config map statistics
-// (gauge) and gRPC call metrics.
+// fwstateStructuralCounters lists the fixed fwstate counters whose metrics
+// carry no "counter" label.
+//
+// It MUST mirror the named cases of the switch in emitCounterMetrics.
+// Anything else is exported per-entry with a "counter" label. Used to
+// derive the counter-name query so per-entry counters are not read from
+// shm when filtered out.
+var fwstateStructuralCounters = []string{
+	"fwstate_sync", "fwstate_passthrough",
+	"fwstate_sync_v4_inserted", "fwstate_sync_v6_inserted",
+	"fwstate_sync_v4_insert_failed", "fwstate_sync_v6_insert_failed",
+	"fwstate_external_dropped", "fwstate_internal_forwarded",
+	"rx", "tx", "drop", "pending_input", "pending_output",
+}
+
+// Metrics returns FWState module metrics matching tags: per-config map
+// statistics (gauge), dataplane counters, and gRPC call metrics.
 //
 // Gauge metrics are emitted per address family (af=ipv4|ipv6) for every
 // loaded fwstate config.
@@ -69,10 +85,10 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 //   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:   RPC name (gRPC metrics)
 //   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
-func (m *FWStateService) Metrics() ([]*commonpb.Metric, error) {
+func (m *FWStateService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	result := m.collectMapStats()
 
-	dpMetrics, err := m.collectDataplaneMetrics()
+	dpMetrics, err := m.collectDataplaneMetrics(tags)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +96,7 @@ func (m *FWStateService) Metrics() ([]*commonpb.Metric, error) {
 	if m.metrics != nil {
 		result = append(result, m.metrics.Collect()...)
 	}
-	return result, nil
+	return metrics.Filter(result, tags), nil
 }
 
 // collectMapStats emits gauge metrics derived from the per-config map
@@ -105,6 +121,8 @@ func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 // collectDataplaneMetrics emits per-config packet/byte counters read from the
 // dataplane counter storage via DPConfig.
 //
+// A "counter" tag is pushed down into the dataplane counter read, so
+// per-entry counters excluded by tags are never read from shared memory.
 // Counter metrics are omitted when all worker values are zero to reduce
 // output noise.
 //
@@ -116,13 +134,15 @@ func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 //   - chain:    pipeline chain name
 //   - counter:  dataplane counter name (fwstate_counter_packets /
 //     fwstate_counter_bytes only)
-func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
+func (m *FWStateService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	dpConfig := m.agent.DPConfig()
 	if dpConfig == nil {
 		return []*commonpb.Metric{}, nil
 	}
 
 	positions := dpConfig.AllModulePositions("fwstate")
+
+	names, read := metrics.Query(tags, nil, fwstateStructuralCounters)
 
 	result := make([]*commonpb.Metric, 0)
 	for pos := range positions {
@@ -136,15 +156,18 @@ func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 			{Name: "chain", Value: pos.Chain},
 		}
 
-		counters := dpConfig.ModuleCounters(
-			pos.Device,
-			pos.Pipeline,
-			pos.Function,
-			pos.Chain,
-			"fwstate",
-			configName,
-			nil,
-		)
+		var counters []ffi.CounterInfo
+		if read {
+			counters = dpConfig.ModuleCounters(
+				pos.Device,
+				pos.Pipeline,
+				pos.Function,
+				pos.Chain,
+				"fwstate",
+				configName,
+				names,
+			)
+		}
 
 		for _, counter := range counters {
 			result = append(result, emitCounterMetrics(counter, baseLabels)...)

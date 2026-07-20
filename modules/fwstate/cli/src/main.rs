@@ -380,7 +380,7 @@ impl FWStateService {
         let response = self
             .metrics
             .client()
-            .get_metrics(GetMetricsRequest {})
+            .get_metrics(GetMetricsRequest::default())
             .await
             .map_err(self.metrics.status("metrics"))?
             .into_inner();

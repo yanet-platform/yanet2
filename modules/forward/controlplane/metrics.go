@@ -4,12 +4,13 @@ import (
 	"context"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
-// metricsSource provides the module's collected metrics.
+// metricsSource provides the module's metrics, filtered by tags.
 type metricsSource interface {
-	Metrics() ([]*commonpb.Metric, error)
+	Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
 }
 
 // MetricsService exposes Forward module per-rule metrics over its own gRPC service.
@@ -24,9 +25,10 @@ func NewMetricsService(source metricsSource) *MetricsService {
 	return &MetricsService{source: source}
 }
 
-// GetMetrics returns a snapshot of Forward per-rule metrics.
+// GetMetrics returns a snapshot of Forward per-rule metrics matching the
+// request's tags.
 func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetricsRequest) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.Metrics()
+	all, err := m.source.Metrics(req.GetTags()...)
 	if err != nil {
 		return nil, err
 	}
@@ -43,20 +45,38 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 	}
 }
 
-// Metrics returns Forward per-rule metrics collected from the dataplane.
-func (m *ForwardService) Metrics() ([]*commonpb.Metric, error) {
-	return m.collectDataplaneMetrics()
+// Metrics returns Forward per-rule metrics matching tags, collected from the
+// dataplane.
+func (m *ForwardService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+	all, err := m.collectDataplaneMetrics(tags)
+	if err != nil {
+		return nil, err
+	}
+	return metrics.Filter(all, tags), nil
 }
 
-// collectDataplaneMetrics gathers packet and byte counters for all configured Forward dataplane rules.
-func (m *ForwardService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
+// collectDataplaneMetrics gathers packet and byte counters for all configured
+// Forward dataplane rules.
+//
+// A "counter" tag is pushed down into the dataplane counter read, so
+// per-rule counters excluded by tags are never read from shared memory.
+// Forward has no structural (non-per-rule) counters, so its full name list
+// is exactly the rule set. An empty derived name list therefore means there
+// is nothing to read, never "read everything", so the read is skipped
+// rather than passed on to ModuleCounters, which treats an empty list as
+// "all counters".
+func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	result := make([]*commonpb.Metric, 0)
 	for configName, config := range m.configs {
-		counterNames := ruleCounterNames(config.rules)
-		for _, counter := range m.backend.ModuleCounters(configName, counterNames) {
+		names, read := metrics.Query(tags, ruleCounterNames(config.rules), nil)
+		if !read || len(names) == 0 {
+			continue
+		}
+
+		for _, counter := range m.backend.ModuleCounters(configName, names) {
 			var packets, bytes uint64
 			for _, instance := range counter.Values {
 				if len(instance) > 0 {

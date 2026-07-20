@@ -4,12 +4,14 @@ import (
 	"context"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
-// metricsSource provides the module's collected metrics.
+// metricsSource provides the module's metrics, filtered by tags.
 type metricsSource interface {
-	Metrics() ([]*commonpb.Metric, error)
+	Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
 }
 
 // MetricsService exposes ACL module metrics over its own gRPC service.
@@ -24,9 +26,10 @@ func NewMetricsService(source metricsSource) *MetricsService {
 	return &MetricsService{source: source}
 }
 
-// GetMetrics returns a snapshot of all ACL module metrics.
+// GetMetrics returns a snapshot of ACL module metrics matching the
+// request's tags.
 func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetricsRequest) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.Metrics()
+	all, err := m.source.Metrics(req.GetTags()...)
 	if err != nil {
 		return nil, err
 	}
@@ -50,11 +53,25 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 	}
 }
 
-// Metrics returns all ACL module metrics: per-pipeline packet counters,
-// per-rule counters, ACL compilation info, and gRPC call metrics.
+// aclStructuralCounters lists the fixed ACL counters whose metrics carry no
+// "counter" label.
+//
+// It MUST mirror the named cases of the switch in collectDataplaneMetrics.
+// A per-rule ("counter"-labelled) metric is anything not in this set. Used
+// to derive the counter-name query so per-rule counters are not read from
+// shm when they are filtered out.
+var aclStructuralCounters = []string{
+	"acl_no_match", "acl_action_allow", "acl_action_deny", "acl_action_count",
+	"acl_action_check_state", "acl_action_create_state", "acl_action_unknown",
+	"acl_state_miss", "acl_sync_sent",
+}
+
+// Metrics returns ACL module metrics matching tags: per-pipeline packet
+// counters, per-rule counters, ACL compilation info, and gRPC call metrics.
 //
 // Counter metrics are omitted when all worker values are zero to reduce output
-// noise.
+// noise. A "counter" tag is pushed down into the dataplane counter read, so
+// per-rule counters excluded by tags are never read from shared memory.
 //
 // Labels:
 //   - config:        ACL config name (all counter metrics)
@@ -67,18 +84,18 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 //   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:   RPC name (gRPC metrics)
 //   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
-func (m *ACLService) Metrics() ([]*commonpb.Metric, error) {
-	metrics, err := m.collectDataplaneMetrics()
+func (m *ACLService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+	all, err := m.collectDataplaneMetrics(tags)
 	if err != nil {
 		return nil, err
 	}
 	if m.metrics != nil {
-		metrics = append(metrics, m.metrics.Collect()...)
+		all = append(all, m.metrics.Collect()...)
 	}
-	return metrics, nil
+	return metrics.Filter(all, tags), nil
 }
 
-func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
+func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	snapshot := m.metricsState.load()
 
 	dpConfig := m.backend.DPConfig()
@@ -87,6 +104,8 @@ func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 	}
 
 	positions := dpConfig.AllModulePositions("acl")
+
+	names, read := metrics.Query(tags, nil, aclStructuralCounters)
 
 	result := make([]*commonpb.Metric, 0)
 	gaugesEmitted := make(map[string]struct{})
@@ -101,15 +120,18 @@ func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 			{Name: "chain", Value: pos.Chain},
 		}
 
-		counters := dpConfig.ModuleCounters(
-			pos.Device,
-			pos.Pipeline,
-			pos.Function,
-			pos.Chain,
-			"acl",
-			configName,
-			nil,
-		)
+		var counters []ffi.CounterInfo
+		if read {
+			counters = dpConfig.ModuleCounters(
+				pos.Device,
+				pos.Pipeline,
+				pos.Function,
+				pos.Chain,
+				"acl",
+				configName,
+				names,
+			)
+		}
 
 		for _, counter := range counters {
 			var packets, bytes uint64
