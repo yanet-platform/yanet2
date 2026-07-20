@@ -28,3 +28,5 @@ usr/bin/yanet-cli-operator-neighbour
 usr/bin/yanet-cli-operator-route
 usr/bin/yanet-cli-operator-decap
 usr/bin/yanet-cli-operator-forward
+usr/share/bash-completion/completions/*
+usr/share/zsh/vendor-completions/*

@@ -27,6 +27,11 @@ override_dh_auto_configure:
 			-Dtrace=disabled \
 			-Dversion=$(DEB_VERSION); \
 
+execute_after_dh_auto_install:
+	./scripts/gen-shell-completions.sh debian/yanet2-cli.install \
+		debian/tmp/usr/share/bash-completion/completions \
+		debian/tmp/usr/share/zsh/vendor-completions
+
 # Handle missing files more gracefully
 override_dh_missing:
 	dh_missing --fail-missing

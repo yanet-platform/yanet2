@@ -47,6 +47,7 @@ Package: yanet2-cli
 Architecture: any
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
+Recommends: bash-completion
 Description: Yanet2 CLI utilities
  Command-line tools for Yanet2: yanet-cli-nat64, yanet-cli-route,
  yanet-cli-decap, yanet-cli-dscp, yanet-cli-forward,
