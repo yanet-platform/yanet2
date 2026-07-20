@@ -32,6 +32,19 @@ dp_topology_set_device_rss(
 	const uint16_t *reta,
 	uint16_t reta_size
 ) {
+	// Reject an out-of-contract report before allocating or storing
+	// anything, so every consumer of dp_port's RSS fields can trust
+	// reta_size and key_len without re-checking them. The 512-RETA and
+	// key_len>=4 bounds are otherwise only enforced by the live NIC
+	// producer, and a different producer (or a fuzzed/malicious caller)
+	// bypassing it would leave the shared config in a state that
+	// overflows a consumer's fixed-size stack buffer or under-reads a
+	// short key.
+	if (reta_size == 0 || reta_size > DP_TOPOLOGY_RSS_RETA_SIZE_MAX ||
+	    key_len < DP_TOPOLOGY_RSS_KEY_LEN_MIN) {
+		return -1;
+	}
+
 	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
 	struct dp_port *device = devices + device_id;
 

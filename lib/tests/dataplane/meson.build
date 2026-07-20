@@ -39,3 +39,16 @@ clock_test = executable(
   include_directories: yanet_rootdir,
 )
 test('clock', clock_test, suite: 'lib_dataplane')
+
+topology_test = executable(
+  'topology_test',
+  'topology_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_config_dp_dep,
+    lib_logging_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('topology', topology_test, suite: 'lib_dataplane')
