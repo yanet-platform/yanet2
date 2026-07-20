@@ -20,6 +20,7 @@ struct cp_device;
 
 struct cp_config_gen;
 struct cp_config_counter_storage_registry;
+struct dp_config;
 
 struct module_ectx {
 	module_handler handler;
@@ -127,3 +128,13 @@ struct config_gen_ectx {
 	uint64_t device_count;
 	struct device_ectx *devices[];
 };
+
+// Returns the dp_config that the worker's active config generation
+// belongs to, reached through the module_ectx -> config_gen_ectx ->
+// cp_config_gen offset-pointer chain.
+//
+// Returns NULL if any hop of the chain is not wired, so callers must treat
+// a NULL result as "unavailable" and fall back accordingly rather than
+// dereferencing it.
+struct dp_config *
+module_ectx_dp_config(struct module_ectx *module_ectx);

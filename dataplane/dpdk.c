@@ -258,3 +258,91 @@ int
 dpdk_port_get_mac(uint16_t port_id, struct rte_ether_addr *ether_addr) {
 	return rte_eth_macaddr_get(port_id, ether_addr);
 }
+
+int
+dpdk_port_get_rss_key(
+	uint16_t port_id,
+	uint8_t *key_buf,
+	uint16_t key_buf_len,
+	uint16_t *key_len
+) {
+	struct rte_eth_dev_info dev_info;
+	memset(&dev_info, 0, sizeof(dev_info));
+	if (rte_eth_dev_info_get(port_id, &dev_info)) {
+		return -1;
+	}
+	if (dev_info.hash_key_size == 0 ||
+	    dev_info.hash_key_size > key_buf_len) {
+		return -1;
+	}
+
+	struct rte_eth_rss_conf rss_conf;
+	memset(&rss_conf, 0, sizeof(rss_conf));
+	rss_conf.rss_key = key_buf;
+	rss_conf.rss_key_len = dev_info.hash_key_size;
+
+	if (rte_eth_dev_rss_hash_conf_get(port_id, &rss_conf)) {
+		return -1;
+	}
+
+	// A driver can answer the hash-config query even when RSS is not
+	// active on the port (RSS disabled at configuration time, an
+	// un-negotiated virtio feature, a ring device). An all-zero rss_hf
+	// means the NIC is not steering traffic by RSS, so the key and RETA
+	// it would report describe no usable RSS state.
+	if (rss_conf.rss_hf == 0) {
+		return -1;
+	}
+
+	*key_len = dev_info.hash_key_size;
+	return 0;
+}
+
+int
+dpdk_port_get_rss_reta(
+	uint16_t port_id,
+	uint16_t *reta_buf,
+	uint16_t reta_buf_len,
+	uint16_t *reta_size
+) {
+	struct rte_eth_dev_info dev_info;
+	memset(&dev_info, 0, sizeof(dev_info));
+	if (rte_eth_dev_info_get(port_id, &dev_info)) {
+		return -1;
+	}
+	if (dev_info.reta_size == 0 || dev_info.reta_size > reta_buf_len ||
+	    dev_info.reta_size > RTE_ETH_RSS_RETA_SIZE_512) {
+		return -1;
+	}
+
+	// RETA entries are queried in fixed-size groups of
+	// RTE_ETH_RETA_GROUP_SIZE. RTE_ETH_RSS_RETA_SIZE_512 is the largest
+	// table size any driver reports today, so a group array sized for it
+	// covers every real device without a dynamic allocation.
+	uint16_t group_count =
+		(dev_info.reta_size + RTE_ETH_RETA_GROUP_SIZE - 1) /
+		RTE_ETH_RETA_GROUP_SIZE;
+	struct rte_eth_rss_reta_entry64
+		reta_conf[RTE_ETH_RSS_RETA_SIZE_512 / RTE_ETH_RETA_GROUP_SIZE];
+	memset(reta_conf,
+	       0,
+	       sizeof(struct rte_eth_rss_reta_entry64) * group_count);
+	for (uint16_t group = 0; group < group_count; ++group) {
+		reta_conf[group].mask = UINT64_MAX;
+	}
+
+	if (rte_eth_dev_rss_reta_query(
+		    port_id, reta_conf, dev_info.reta_size
+	    )) {
+		return -1;
+	}
+
+	for (uint16_t idx = 0; idx < dev_info.reta_size; ++idx) {
+		uint16_t group = idx / RTE_ETH_RETA_GROUP_SIZE;
+		uint16_t slot = idx % RTE_ETH_RETA_GROUP_SIZE;
+		reta_buf[idx] = reta_conf[group].reta[slot];
+	}
+
+	*reta_size = dev_info.reta_size;
+	return 0;
+}

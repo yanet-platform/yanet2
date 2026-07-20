@@ -153,3 +153,13 @@ flatmap_test = executable(
 )
 test('flatmap', flatmap_test, suite: ['common'])
 
+thash_test = executable(
+  'thash_test',
+  ['thash_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+  include_directories: yanet_rootdir,
+)
+test('thash', thash_test, suite: ['common'])
+

@@ -8,6 +8,7 @@
 #include "dataplane/config/zone.h"
 #include "dataplane/packet/packet.h"
 #include "dataplane/time/tsc.h"
+#include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 
 #include <rte_cycles.h>
@@ -110,6 +111,23 @@ module_ectx_process(
 		packet_front_pending_output_bytes(packet_front) -
 			pending_output_bytes
 	);
+}
+
+struct dp_config *
+module_ectx_dp_config(struct module_ectx *module_ectx) {
+	struct config_gen_ectx *config_gen_ectx =
+		ADDR_OF(&module_ectx->config_gen_ectx);
+	if (config_gen_ectx == NULL) {
+		return NULL;
+	}
+
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&config_gen_ectx->cp_config_gen);
+	if (cp_config_gen == NULL) {
+		return NULL;
+	}
+
+	return ADDR_OF(&cp_config_gen->dp_config);
 }
 
 static inline void
