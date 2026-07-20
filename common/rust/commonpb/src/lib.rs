@@ -75,6 +75,10 @@ impl TryFrom<&pb::IpAddress> for IpAddr {
 impl Display for pb::IpAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         match IpAddr::try_from(self) {
+            Ok(IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
+                Some(v4) => v4.fmt(f),
+                None => v6.fmt(f),
+            },
             Ok(addr) => addr.fmt(f),
             Err(..) => f.write_str("invalid"),
         }
@@ -212,6 +216,18 @@ mod test {
     fn display_invalid_length() {
         let ip = pb::IpAddress { addr: vec![0u8; 5] };
         assert_eq!("invalid", ip.to_string());
+    }
+
+    #[test]
+    fn ip_address_display_unwraps_ipv4_mapped() {
+        let ip = pb::IpAddress::from(IpAddr::V6(Ipv4Addr::new(141, 8, 128, 254).to_ipv6_mapped()));
+        assert_eq!("141.8.128.254", ip.to_string());
+    }
+
+    #[test]
+    fn display_v6_unspecified() {
+        let ip = pb::IpAddress::from(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+        assert_eq!("::", ip.to_string());
     }
 
     #[test]
