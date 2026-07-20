@@ -400,7 +400,8 @@ func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
 	)))
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name: "acl0",
+		Name:  "acl0",
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
 	})
 	require.NoError(t, err)
 
@@ -469,7 +470,8 @@ func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 	svc := newTestService(newFakeBackend(0))
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name: "acl0",
+		Name:  "acl0",
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}},
 	})
 	require.NoError(t, err)
 
