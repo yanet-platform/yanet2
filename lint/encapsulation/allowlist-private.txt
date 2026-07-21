@@ -86,17 +86,6 @@ modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopDstMAC
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopSrcMAC  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixFrom  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixTo  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:routeMPLSConfig.buildRules:nh.toFFI  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.CreateConfig:config.buildRules  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.CreateConfig:config.handle  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.CreateConfig:old.handle  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.DeleteConfig:config.handle  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.ShowConfig:config.prefixes  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:config.buildRules  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:config.handle  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:config.prefixes  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:oldConfig.handle  # legacy: encapsulate behind an exported method or field
-modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:oldConfig.prefixes  # legacy: encapsulate behind an exported method or field
 operators/route/internal/operator/metrics.go:GatewayMetrics.collect:g.entries  # legacy: encapsulate behind an exported method or field
 operators/route/internal/operator/metrics.go:GatewayMetrics.collect:g.filteredRoutes  # legacy: encapsulate behind an exported method or field
 operators/route/internal/operator/metrics.go:GatewayMetrics.collect:g.routes  # legacy: encapsulate behind an exported method or field

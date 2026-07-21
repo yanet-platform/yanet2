@@ -102,21 +102,30 @@ func (m *NextHopList) Remove(nextHop NextHop) {
 }
 
 type routeMPLSConfig struct {
-	prefixes maptrie.MapTrie[netip.Prefix, netip.Addr, NextHopList]
-	handle   ModuleHandle
+	Prefixes maptrie.MapTrie[netip.Prefix, netip.Addr, NextHopList]
+	Handle   ModuleHandle
 }
 
-// buildRules iterates the maptrie from longest to shortest prefix and
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *routeMPLSConfig) Free() {
+	if m.Handle != nil {
+		m.Handle.Free()
+	}
+}
+
+// BuildRules iterates the maptrie from longest to shortest prefix and
 // assembles the croutempls.Rule slice, appending default drop rules for both
 // IPv4 and IPv6 at the end.
-func (m *routeMPLSConfig) buildRules() []croutempls.Rule {
+func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 	rules := make([]croutempls.Rule, 0)
 
 	for prefixLen := 128; prefixLen >= 0; prefixLen-- {
-		for prefix, nextHopList := range m.prefixes[prefixLen] {
+		for prefix, nextHopList := range m.Prefixes[prefixLen] {
 			nexthops := make([]croutempls.Nexthop, 0, len(nextHopList.NextHops))
 			for _, nh := range nextHopList.NextHops {
-				nexthops = append(nexthops, nh.toFFI())
+				nexthops = append(nexthops, nh.ToFFI())
 			}
 
 			dst4s, _ := filter.Net4sFromPrefixes([]netip.Prefix{prefix})
@@ -159,7 +168,9 @@ func (m *routeMPLSConfig) buildRules() []croutempls.Rule {
 	return rules
 }
 
-func (m *NextHop) toFFI() croutempls.Nexthop {
+// ToFFI converts the nexthop into its bindings representation for the
+// route-mpls dataplane.
+func (m *NextHop) ToFFI() croutempls.Nexthop {
 	return croutempls.Nexthop{
 		Kind:        croutempls.KindTun,
 		Source:      m.Source,
@@ -222,7 +233,7 @@ func (m *RouteMPLSService) ShowConfig(
 	}
 
 	rules := make([]*routemplspb.Rule, 0)
-	for _, prefixes := range config.prefixes {
+	for _, prefixes := range config.Prefixes {
 		for prefix, nexthops := range prefixes {
 			for _, nexthop := range nexthops.NextHops {
 				rules = append(rules, &routemplspb.Rule{
@@ -271,9 +282,7 @@ func (m *RouteMPLSService) DeleteConfig(
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
 
-	if config.handle != nil {
-		config.handle.Free()
-	}
+	config.Free()
 	delete(m.configs, name)
 
 	return &routemplspb.DeleteConfigResponse{}, nil
@@ -318,22 +327,22 @@ func (m *RouteMPLSService) CreateConfig(
 	}
 
 	config := routeMPLSConfig{
-		prefixes: prefixes,
+		Prefixes: prefixes,
 	}
 
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
-	handle, err := m.backend.UpdateModule(name, config.buildRules())
+	handle, err := m.backend.UpdateModule(name, config.BuildRules())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
-	if old, ok := m.configs[name]; ok && old.handle != nil {
-		old.handle.Free()
+	if old, ok := m.configs[name]; ok {
+		old.Free()
 	}
 
-	config.handle = handle
+	config.Handle = handle
 	m.configs[name] = config
 
 	return &routemplspb.CreateConfigResponse{}, nil
@@ -356,12 +365,12 @@ func (m *RouteMPLSService) UpdateConfig(
 	oldConfig, ok := m.configs[name]
 	if !ok {
 		oldConfig = routeMPLSConfig{
-			prefixes: maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0),
+			Prefixes: maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0),
 		}
 	}
 
 	config := routeMPLSConfig{
-		prefixes: oldConfig.prefixes.Clone(),
+		Prefixes: oldConfig.Prefixes.Clone(),
 	}
 
 	for _, update := range req.Updates {
@@ -376,7 +385,7 @@ func (m *RouteMPLSService) UpdateConfig(
 				return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
 			}
 
-			config.prefixes.InsertOrUpdate(
+			config.Prefixes.InsertOrUpdate(
 				prefix,
 				func() NextHopList {
 					return NextHopList{
@@ -401,7 +410,7 @@ func (m *RouteMPLSService) UpdateConfig(
 				return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
 			}
 
-			config.prefixes.UpdateOrDelete(
+			config.Prefixes.UpdateOrDelete(
 				prefix,
 				func(list NextHopList) (NextHopList, bool) {
 					list.Remove(nextHop)
@@ -411,16 +420,14 @@ func (m *RouteMPLSService) UpdateConfig(
 		}
 	}
 
-	handle, err := m.backend.UpdateModule(name, config.buildRules())
+	handle, err := m.backend.UpdateModule(name, config.BuildRules())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
-	if oldConfig.handle != nil {
-		oldConfig.handle.Free()
-	}
+	oldConfig.Free()
 
-	config.handle = handle
+	config.Handle = handle
 	m.configs[name] = config
 
 	return &routemplspb.UpdateConfigResponse{}, nil
