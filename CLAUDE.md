@@ -365,6 +365,20 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Exported Go APIs whose arguments cross CGO into C-side array indexing**
   (device IDs, queue/worker indices) validate the range on the Go side
   before the call.
+- **Human-readable CLI output is NOT part of the contract — never pin its
+  format in a test.** No `test_*_output` test that builds a response and
+  asserts the formatted block, and no assert on a literal format string
+  inside a helper test either (`assert_eq!("2h 46m", format_age(..))`,
+  `assert_eq!("3/5 ready · 1 degraded", summary_line(..))`). The look
+  keeps changing, so such tests are pure churn. Test the LOGIC instead —
+  a state diff, a staleness predicate, rounding bands, a width clamp,
+  word wrapping. Where a real invariant hides behind a string, assert
+  the invariant: "the age renders as at most two whitespace-separated
+  components" survives a format change; `assert_eq!("1year 1month", ..)`
+  does not. Two things ARE fair game, because they are contracts rather
+  than looks: a behavioural guarantee such as "the ASCII path emits zero
+  non-ASCII bytes" (for pipes and non-UTF-8 locales), and value
+  contracts such as a canonical MAC rendering or a hex round-trip.
 
 ### TypeScript/React
 
@@ -422,6 +436,17 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 - At `(seen: 3)` the lesson graduates into this `CLAUDE.md`: add it to the appropriate section, then delete the lesson file and its index line.
 - **Delete notes that turn out to be wrong or stale.** Before acting on a note, verify the referenced file/symbol still exists — trust the code over the note, and remove or fix the note when they disagree.
 - When updating a note, keep its first line and its index line identical.
+
+### Delegation & verification (architect)
+
+Graduated from architect memory after recurring three or more times. These bind the agent that delegates work, not the agent that writes it.
+
+- **Verify every specialist claim yourself.** After each round, run the real build/test rather than trusting the report. A mechanism explanation in a comment, a "pre-existing failure", and a "flake" are all unverified until you reproduce them. This extends to injected diagnostics: "new" errors surfaced against a worktree or a stale LSP index are frequently phantom — confirm against a real build before acting.
+- **Never put an unverified detail in a brief.** A rationale, a magic token, or the semantics of an existing flag will be implemented verbatim, so anything you cannot cite from the code is a defect you are authoring. Read it first or leave it out.
+- **Demand a whole-class audit at brief time.** When a change introduces a hazard class, require the specialist to enumerate and fix the whole class in one pass. A reviewer's (or Codex's) `file:line` list is a SAMPLE, not the population — accepting it as complete means finding the same class one instance per round.
+- **Keep your own cwd at the repo root when launching an agent.** An agent inherits it, and a worktree lacks every gitignored tree — `.arch/` (planner tracker, bug-hunter scratch) and `.claude/agent-memory/`. So a drifted cwd does not merely misplace a write: the state reads as *uninitialised* and a helpful agent rebuilds it (a planner bootstrapped 15 colliding tasks over a live 106-task tracker), while memory goes split-brain — agents write lessons into the worktree copy that dies with it, and read that stub instead of the root. Before removing a worktree, salvage `.claude/agent-memory/*/` out of it. And when you and an agent disagree about whether a file exists, establish which tree each of you is in before concluding anyone fabricated anything.
+- **A reviewer's finding is binding; its prescribed remedy is not.** Take the defect, then pick the minimal fix yourself — shipping the suggested remedy unexamined is how a one-line bug grows a subsystem. The corollary also holds: when a proposed fix dwarfs the bug, the premise is wrong, not the fix.
+- **After a design pivot, re-derive every constraint you carried over.** Requirements inherited from the old shape are usually dead weight, and sometimes unsatisfiable — a brief that makes an API infallible cannot also demand "keep logging the failure", and obeying both leaves dead code the reviewer then blocks on.
 
 ## Key Dependencies
 
