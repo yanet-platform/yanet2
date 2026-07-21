@@ -31,8 +31,8 @@ type Backend interface {
 }
 
 type forwardConfig struct {
-	rules  []*forwardpb.Rule
-	module ModuleHandle
+	Rules  []*forwardpb.Rule
+	Module ModuleHandle
 }
 
 type ForwardService struct {
@@ -85,7 +85,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 
 	response := &forwardpb.ShowConfigResponse{
 		Name:  req.Name,
-		Rules: config.rules,
+		Rules: config.Rules,
 	}
 
 	return response, nil
@@ -157,12 +157,12 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 	}
 
 	if oldModule, ok := m.configs[name]; ok {
-		oldModule.module.Free()
+		oldModule.Module.Free()
 	}
 
 	m.configs[name] = forwardConfig{
-		rules:  reqRules,
-		module: module,
+		Rules:  reqRules,
+		Module: module,
 	}
 
 	return &forwardpb.UpdateConfigResponse{}, nil
@@ -186,8 +186,8 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 
-	if config.module != nil {
-		config.module.Free()
+	if config.Module != nil {
+		config.Module.Free()
 	}
 
 	delete(m.configs, name)

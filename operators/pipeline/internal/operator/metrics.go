@@ -113,7 +113,7 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 	))
 
 	for _, g := range m.gateways {
-		out = append(out, g.collect()...)
+		out = append(out, g.Collect()...)
 	}
 
 	return out
@@ -186,7 +186,9 @@ func (m *GatewayMetrics) OnGC(deleted, failed int, err error) {
 	}
 }
 
-func (m *GatewayMetrics) collect() []*commonpb.Metric {
+// Collect renders the current state of this gateway's metrics as a
+// []*commonpb.Metric.
+func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	gw := makeLabel("gateway", m.name)
 	out := make([]*commonpb.Metric, 0)
 

@@ -28,8 +28,8 @@ type Backend interface {
 }
 
 type mirrorConfig struct {
-	rules  []*mirrorpb.Rule
-	module ModuleHandle
+	Rules  []*mirrorpb.Rule
+	Module ModuleHandle
 }
 
 type MirrorService struct {
@@ -85,7 +85,7 @@ func (m *MirrorService) ShowConfig(
 
 	response := &mirrorpb.ShowConfigResponse{
 		Name:  req.Name,
-		Rules: config.rules,
+		Rules: config.Rules,
 	}
 
 	return response, nil
@@ -165,12 +165,12 @@ func (m *MirrorService) UpdateConfig(
 	}
 
 	if oldModule, ok := m.configs[name]; ok {
-		oldModule.module.Free()
+		oldModule.Module.Free()
 	}
 
 	m.configs[name] = mirrorConfig{
-		rules:  reqRules,
-		module: module,
+		Rules:  reqRules,
+		Module: module,
 	}
 
 	return &mirrorpb.UpdateConfigResponse{}, nil
@@ -197,8 +197,8 @@ func (m *MirrorService) DeleteConfig(
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 
-	if config.module != nil {
-		config.module.Free()
+	if config.Module != nil {
+		config.Module.Free()
 	}
 
 	delete(m.configs, name)

@@ -71,7 +71,7 @@ func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]
 
 	result := make([]*commonpb.Metric, 0)
 	for configName, config := range m.configs {
-		names, read := metrics.Query(tags, ruleCounterNames(config.rules), nil)
+		names, read := metrics.Query(tags, ruleCounterNames(config.Rules), nil)
 		if !read || len(names) == 0 {
 			continue
 		}

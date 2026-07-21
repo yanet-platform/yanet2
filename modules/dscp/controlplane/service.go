@@ -48,8 +48,8 @@ func (m *config) Clone() *config {
 }
 
 type dscpConfig struct {
-	flag uint8
-	mark uint8
+	Flag uint8
+	Mark uint8
 }
 
 func NewDscpService(backend Backend) *DscpService {
@@ -104,8 +104,8 @@ func (m *DscpService) ShowConfig(
 	response.Config = &dscppb.Config{
 		Prefixes: prefixes,
 		DscpConfig: &dscppb.DscpConfig{
-			Flag: uint32(config.Config.flag),
-			Mark: uint32(config.Config.mark),
+			Flag: uint32(config.Config.Flag),
+			Mark: uint32(config.Config.Mark),
 		},
 	}
 
@@ -212,8 +212,8 @@ func (m *DscpService) SetDscpMarking(
 		cfg = currConfig.Clone()
 	}
 	cfg.Config = dscpConfig{
-		flag: flag,
-		mark: mark,
+		Flag: flag,
+		Mark: mark,
 	}
 
 	if err := m.updateModuleConfig(name, cfg); err != nil {
@@ -230,8 +230,8 @@ func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 	module, err := m.backend.UpdateModule(
 		name,
 		cfg.Prefixes,
-		cfg.Config.flag,
-		cfg.Config.mark,
+		cfg.Config.Flag,
+		cfg.Config.Mark,
 	)
 	if err != nil {
 		return err

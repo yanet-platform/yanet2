@@ -27,7 +27,7 @@ type Backend interface {
 }
 
 type config struct {
-	module ModuleHandle
+	Module ModuleHandle
 }
 
 // BlackholeService implements the BlackholeService gRPC server.
@@ -117,11 +117,11 @@ func (m *BlackholeService) updateConfig(name string) error {
 		return err
 	}
 
-	if old, ok := m.configs[name]; ok && old.module != nil {
-		old.module.Free()
+	if old, ok := m.configs[name]; ok && old.Module != nil {
+		old.Module.Free()
 	}
 
-	m.configs[name] = &config{module: mod}
+	m.configs[name] = &config{Module: mod}
 
 	return nil
 }
@@ -152,8 +152,8 @@ func (m *BlackholeService) DeleteConfig(
 		)
 	}
 
-	if entry.module != nil {
-		entry.module.Free()
+	if entry.Module != nil {
+		entry.Module.Free()
 	}
 
 	delete(m.configs, name)

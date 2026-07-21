@@ -14,8 +14,8 @@ func (m *SyncConfig) ValidateTimeouts() error {
 	}
 
 	type timeoutField struct {
-		name  string
-		value uint64
+		Name  string
+		Value uint64
 	}
 
 	fields := []timeoutField{
@@ -29,8 +29,8 @@ func (m *SyncConfig) ValidateTimeouts() error {
 
 	var invalid []string
 	for _, field := range fields {
-		if field.value > cfwstate.TTL48Max {
-			invalid = append(invalid, field.name)
+		if field.Value > cfwstate.TTL48Max {
+			invalid = append(invalid, field.Name)
 		}
 	}
 
