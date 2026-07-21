@@ -270,6 +270,10 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   `lint/encapsulation/allowlist-private.txt` — do not add new rows.
   Files that `import "C"` are exempt, because C struct fields cannot
   be distinguished from Go private fields without type information.
+  A method may also reach into the private fields or methods of a
+  parameter declared with the same type as its receiver, because an
+  operation on another value of one's own type crosses no
+  encapsulation boundary.
 - **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
 - **No log-only RPC stubs**: when a brief names an RPC, actually invoke
   the client. `m.log.Debug("would call …")` is a bug, not a stub.

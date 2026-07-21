@@ -21,8 +21,6 @@
 
 common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg  # legacy: encapsulate behind an exported method or field
 common/go/operator/operator.go:NewOperator:opts.GRPCServer.services  # legacy: encapsulate behind an exported method or field
-common/go/xnetip/uint128.go:uint128.Xor:other.hi  # legacy: encapsulate behind an exported method or field
-common/go/xnetip/uint128.go:uint128.Xor:other.lo  # legacy: encapsulate behind an exported method or field
 controlplane/bundle/bundle.go:buildServices:factory.name  # legacy: encapsulate behind an exported method or field
 controlplane/bundle/bundle.go:buildServices:factory.new  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/gateway.go:Gateway.Run:runner.module  # legacy: encapsulate behind an exported method or field

@@ -157,6 +157,162 @@ var handler = a.b
 `,
 			expectedTexts: []string{"a.b"},
 		},
+		{
+			name: "same-type value parameter clean",
+			source: `package foo
+
+type uint128 struct {
+	hi uint64
+	lo uint64
+}
+
+func (m uint128) Xor(other uint128) uint128 {
+	return uint128{
+		hi: m.hi ^ other.hi,
+		lo: m.lo ^ other.lo,
+	}
+}
+`,
+		},
+		{
+			name: "same-type pointer parameter with pointer receiver clean",
+			source: `package foo
+
+type Service struct {
+	log int
+}
+
+func (m *Service) Merge(other *Service) {
+	m.log = other.log
+}
+`,
+		},
+		{
+			name: "same-type generic parameter clean",
+			source: `package foo
+
+type Set[T any] struct {
+	items int
+}
+
+func (m *Set[T]) Add(other *Set[T]) {
+	m.items = other.items
+}
+`,
+		},
+		{
+			name: "multi-name same-type parameter field clean",
+			source: `package foo
+
+type Point struct {
+	x int
+}
+
+func (m Point) Pick(a, b Point) int {
+	return a.x + b.x
+}
+`,
+		},
+		{
+			name: "different-type parameter still flagged",
+			source: `package foo
+
+type Service struct {
+	log int
+}
+
+type Other struct {
+	log int
+}
+
+func (m *Service) Merge(other *Other) {
+	_ = other.log
+}
+`,
+			expectedTexts: []string{"other.log"},
+		},
+		{
+			name: "same-named local variable in plain function still flagged",
+			source: `package foo
+
+func Run() {
+	other := getOther()
+	_ = other.log
+}
+`,
+			expectedTexts: []string{"other.log"},
+		},
+		{
+			name: "chained base through same-type parameter still flagged",
+			source: `package foo
+
+type Service struct {
+	service int
+}
+
+func (m *Service) Merge(other *Service) {
+	_ = other.service.configs
+}
+`,
+			expectedTexts: []string{"other.service.configs"},
+		},
+		{
+			name: "qualified same-named type parameter still flagged",
+			source: `package foo
+
+type Service struct {
+	log int
+}
+
+func (m *Service) Merge(other pkg.Service) {
+	_ = other.log
+}
+`,
+			expectedTexts: []string{"other.log"},
+		},
+		{
+			name: "qualified same-named pointer type parameter still flagged",
+			source: `package foo
+
+type Service struct {
+	log int
+}
+
+func (m *Service) Merge(other *pkg.Service) {
+	_ = other.log
+}
+`,
+			expectedTexts: []string{"other.log"},
+		},
+		{
+			name: "receiverless function with same-typed parameter still flagged",
+			source: `package foo
+
+type Service struct {
+	log int
+}
+
+func Run(other Service) {
+	_ = other.log
+}
+`,
+			expectedTexts: []string{"other.log"},
+		},
+		{
+			name: "named result of receiver type still flagged",
+			source: `package foo
+
+type Service struct {
+	log int
+}
+
+func (m *Service) Clone() (result *Service) {
+	_ = result.log
+	return result
+}
+`,
+			expectedTexts: []string{"result.log"},
+		},
 	}
 
 	for _, tt := range tests {

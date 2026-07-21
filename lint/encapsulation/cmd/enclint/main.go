@@ -5,6 +5,12 @@
 // test package so it cannot reach into private fields or methods at all
 // (rule 2). Known violations are tracked in two allowlists so that paying
 // down the debt is enforced by deleting the corresponding row.
+//
+// A file that imports "C" is exempt from rule 1, since C struct fields are
+// syntactically indistinguishable from Go private fields without type
+// information. A method parameter declared with the same type as its
+// receiver is exempt too, since an operation on another value of one's own
+// type crosses no encapsulation boundary.
 package main
 
 import (
@@ -163,7 +169,7 @@ func checkPrivateAccess(path string, file *ast.File, fset *token.FileSet) []priv
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			violations = append(violations, scanPrivateSelectors(d, path, funcEnclosingName(d), fset)...)
+			violations = append(violations, scanPrivateSelectors(d, path, funcEnclosingName(d), sameTypeParamNames(d), fset)...)
 		case *ast.GenDecl:
 			if d.Tok != token.VAR && d.Tok != token.CONST {
 				continue
@@ -174,7 +180,7 @@ func checkPrivateAccess(path string, file *ast.File, fset *token.FileSet) []priv
 					continue
 				}
 				enclosing := valueSpec.Names[0].Name
-				violations = append(violations, scanPrivateSelectors(valueSpec, path, enclosing, fset)...)
+				violations = append(violations, scanPrivateSelectors(valueSpec, path, enclosing, nil, fset)...)
 			}
 		}
 	}
@@ -183,9 +189,9 @@ func checkPrivateAccess(path string, file *ast.File, fset *token.FileSet) []priv
 }
 
 // scanPrivateSelectors walks node and returns a violation for every
-// *ast.SelectorExpr whose selector is unexported and whose base is not the
-// bare identifier m.
-func scanPrivateSelectors(node ast.Node, path, enclosing string, fset *token.FileSet) []privateViolation {
+// *ast.SelectorExpr whose selector is unexported and whose base is neither
+// the bare identifier m nor a name in exemptParams.
+func scanPrivateSelectors(node ast.Node, path, enclosing string, exemptParams map[string]bool, fset *token.FileSet) []privateViolation {
 	var violations []privateViolation
 
 	ast.Inspect(node, func(n ast.Node) bool {
@@ -196,7 +202,7 @@ func scanPrivateSelectors(node ast.Node, path, enclosing string, fset *token.Fil
 		if ast.IsExported(sel.Sel.Name) {
 			return true
 		}
-		if base, ok := sel.X.(*ast.Ident); ok && base.Name == "m" {
+		if base, ok := sel.X.(*ast.Ident); ok && (base.Name == "m" || exemptParams[base.Name]) {
 			return true
 		}
 
@@ -227,13 +233,23 @@ func funcEnclosingName(decl *ast.FuncDecl) string {
 // receiverTypeName returns the bare receiver type name for recv, stripping
 // any pointer and generic-instantiation wrapping.
 //
-// For example, both "*Foo" and "*Foo[T]" return "Foo".
+// For example, both "*Foo" and "*Foo[T]" return "Foo". It returns "" if
+// recv has no receiver or the receiver's type is not a named type.
 func receiverTypeName(recv *ast.FieldList) string {
 	if recv == nil || len(recv.List) == 0 {
 		return ""
 	}
 
-	expr := recv.List[0].Type
+	return bareTypeName(recv.List[0].Type)
+}
+
+// bareTypeName returns the bare type name denoted by expr, stripping any
+// pointer and generic-instantiation wrapping.
+//
+// For example, "*Foo", "Foo[T]", and "*Foo[T]" all return "Foo". It returns
+// "" for an expression that does not resolve to a named type, such as a
+// qualified identifier or a struct type literal.
+func bareTypeName(expr ast.Expr) string {
 	for {
 		switch t := expr.(type) {
 		case *ast.StarExpr:
@@ -248,6 +264,40 @@ func receiverTypeName(recv *ast.FieldList) string {
 			return ""
 		}
 	}
+}
+
+// sameTypeParamNames returns the set of decl's parameter names whose
+// declared type is the same bare named type as decl's receiver, ignoring
+// pointer and generic-instantiation wrapping.
+//
+// It returns an empty set for a decl with no receiver. This is a
+// name-based approximation, like the rest of this file's AST-only
+// analysis: the exempt set is computed once per FuncDecl and applied to
+// the whole body, so a same-type parameter's name that gets shadowed
+// anywhere inside it — by a local variable, or by a nested closure
+// parameter of a different type — is still treated as exempt.
+func sameTypeParamNames(decl *ast.FuncDecl) map[string]bool {
+	names := map[string]bool{}
+
+	if decl.Recv == nil || len(decl.Recv.List) == 0 || decl.Type.Params == nil {
+		return names
+	}
+
+	receiverType := receiverTypeName(decl.Recv)
+	if receiverType == "" {
+		return names
+	}
+
+	for _, field := range decl.Type.Params.List {
+		if bareTypeName(field.Type) != receiverType {
+			continue
+		}
+		for _, name := range field.Names {
+			names[name.Name] = true
+		}
+	}
+
+	return names
 }
 
 // report prints every unsuppressed violation from both rules, every
