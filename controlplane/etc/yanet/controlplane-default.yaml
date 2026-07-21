@@ -25,6 +25,21 @@ gateway:
   auth:
     disabled: true
     permissions_path: /etc/yanet/auth/permissions.yaml
+  registry:
+    # The gateway drops backends that stopped refreshing their registration,
+    # so a stopped operator disappears from the registry instead of
+    # lingering.
+    #
+    # Set to true to keep every backend registered until the gateway stops,
+    # even after it disappears.
+    preserve_stale_backends: false
+    # How long a backend may go silent before it is evicted.
+    #
+    # Raise this above the registration period of any operator configured to
+    # re-register more slowly than the default.
+    ttl: 5m
+    # How often the eviction check runs.
+    sweep_interval: 30s
 modules:
   route:
     # MemoryPath is the path to the shared-memory file that is used

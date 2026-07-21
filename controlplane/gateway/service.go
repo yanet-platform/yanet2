@@ -140,7 +140,7 @@ func (m *GatewayService) Register(
 	// A registration that races in between this check and RegisterBackend
 	// below is resolved there authoritatively (the redundant connection is
 	// closed), so this check need not be the linearization point.
-	if m.registry.Renew(backendDesc.GetName(), backendDesc.GetEndpoint(), kind) {
+	if m.registry.Renew(backendDesc.GetName(), backendDesc.GetEndpoint()) {
 		log.Debug("renewed service registration in registry")
 		return &ynpb.RegisterResponse{Status: registrationStatusToProto(RegistrationRenewed)}, nil
 	}

@@ -417,6 +417,10 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 
+	wg.Go(func() error {
+		return m.runRegistrySweeper(ctx)
+	})
+
 	// Schedule Run for any in-process BackgroundService.
 	for _, service := range m.services {
 		if service.Endpoint() == "" {
@@ -466,6 +470,61 @@ func (m *Gateway) Run(ctx context.Context) error {
 	})
 
 	return wg.Wait()
+}
+
+// runRegistrySweeper periodically evicts stale external backends from the
+// registry until ctx is canceled.
+//
+// Eviction is skipped entirely when PreserveStaleBackends is set.
+func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
+	if m.cfg.Registry.PreserveStaleBackends {
+		m.log.Info("registry eviction disabled, preserving stale backends")
+		return nil
+	}
+
+	// The YAML path is covered by validation: xcfg.NonZero rejects a zero
+	// TTL or sweep interval, and RegistryConfig.Validate rejects a negative
+	// one. gateway.Config is exported, though, so the fallback below still
+	// guards a programmatic literal that sets either field to zero or
+	// below, which would otherwise panic this goroutine (and the director
+	// with it) or evict every live external backend on the first sweep.
+	ttl := m.cfg.Registry.TTL.Unwrap()
+	if ttl <= 0 {
+		m.log.Warn("non-positive registry ttl, falling back to default",
+			zap.Duration("configured", ttl),
+			zap.Duration("default", defaultRegistryTTL),
+		)
+		ttl = defaultRegistryTTL
+	}
+
+	interval := m.cfg.Registry.SweepInterval.Unwrap()
+	if interval <= 0 {
+		m.log.Warn("non-positive registry sweep interval, falling back to default",
+			zap.Duration("configured", interval),
+			zap.Duration("default", defaultRegistrySweepInterval),
+		)
+		interval = defaultRegistrySweepInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			before := time.Now().UTC().Add(-ttl)
+			for _, entry := range m.registry.EvictStale(before) {
+				m.log.Info("evicted stale service from registry",
+					zap.String("service", entry.Service()),
+					zap.String("endpoint", entry.Endpoint()),
+					zap.Time("last_seen_at", entry.LastSeenAt()),
+					zap.Stringer("kind", entry.Kind()),
+				)
+			}
+		}
+	}
 }
 
 // runHTTPServer runs the HTTP server that provides access to gRPC services

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -244,4 +246,180 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("ServiceRunner.Run did not return within the shutdown grace period")
 	}
+}
+
+// TestGateway_RunRegistrySweeper_PreserveModeShortCircuits verifies that
+// PreserveStaleBackends returns immediately without touching a long-stale
+// external entry.
+func TestGateway_RunRegistrySweeper_PreserveModeShortCircuits(t *testing.T) {
+	t.Parallel()
+
+	reg := NewBackendRegistry()
+	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
+
+	entry := reg.backends["svc.Foo"]
+	entry.lastSeenAt = time.Now().UTC().Add(-24 * time.Hour)
+	reg.backends["svc.Foo"] = entry
+
+	gw := &Gateway{
+		cfg: &Config{
+			Registry: RegistryConfig{
+				PreserveStaleBackends: true,
+				TTL:                   xcfg.MustNonZero(time.Minute),
+				SweepInterval:         xcfg.MustNonZero(time.Second),
+			},
+		},
+		registry: reg,
+		log:      zap.NewNop(),
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- gw.runRegistrySweeper(t.Context()) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("runRegistrySweeper did not return promptly in preserve mode")
+	}
+
+	require.False(t, b.Closed(), "preserved backend must not be closed")
+
+	_, ok := reg.backends["svc.Foo"]
+	require.True(t, ok, "preserved entry must remain registered")
+}
+
+// TestGateway_RunRegistrySweeper_EvictsStaleExternal verifies that a stale
+// external entry is evicted and its backend closed once the sweeper's
+// ticker fires.
+func TestGateway_RunRegistrySweeper_EvictsStaleExternal(t *testing.T) {
+	t.Parallel()
+
+	reg := NewBackendRegistry()
+	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
+
+	entry := reg.backends["svc.Foo"]
+	entry.lastSeenAt = time.Now().UTC().Add(-time.Hour)
+	reg.backends["svc.Foo"] = entry
+
+	gw := &Gateway{
+		cfg: &Config{
+			Registry: RegistryConfig{
+				TTL:           xcfg.MustNonZero(time.Millisecond),
+				SweepInterval: xcfg.MustNonZero(5 * time.Millisecond),
+			},
+		},
+		registry: reg,
+		log:      zap.NewNop(),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- gw.runRegistrySweeper(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return b.Closed()
+	}, time.Second, 5*time.Millisecond, "stale external backend must be evicted and closed")
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("runRegistrySweeper did not return after cancel")
+	}
+
+	_, ok := reg.backends["svc.Foo"]
+	require.False(t, ok, "evicted entry must be removed from the registry")
+}
+
+// TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack verifies that a
+// programmatic RegistryConfig with a zero SweepInterval falls back to the
+// default instead of panicking.
+//
+// A zero interval reaches time.NewTicker directly, which panics; the
+// fallback is the guard against that.
+func TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack(t *testing.T) {
+	t.Parallel()
+
+	reg := NewBackendRegistry()
+
+	gw := &Gateway{
+		cfg: &Config{
+			Registry: RegistryConfig{
+				TTL: xcfg.MustNonZero(time.Minute),
+			},
+		},
+		registry: reg,
+		log:      zap.NewNop(),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("runRegistrySweeper panicked: %v", r)
+			}
+		}()
+		done <- gw.runRegistrySweeper(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("runRegistrySweeper did not return after context timeout")
+	}
+}
+
+// TestGateway_RunRegistrySweeper_ZeroTTLFallsBack verifies that a
+// programmatic RegistryConfig with a zero TTL falls back to the default
+// instead of evicting a live entry on the first sweep.
+//
+// The sweep interval is small and positive so a sweep genuinely runs before
+// the test's deadline; the fallback TTL must still land far enough in the
+// past to spare an entry seen moments ago, or the cutoff would land at or
+// after time.Now and wipe every live backend on the first sweep.
+func TestGateway_RunRegistrySweeper_ZeroTTLFallsBack(t *testing.T) {
+	t.Parallel()
+
+	reg := NewBackendRegistry()
+	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
+
+	gw := &Gateway{
+		cfg: &Config{
+			Registry: RegistryConfig{
+				SweepInterval: xcfg.MustNonZero(5 * time.Millisecond),
+			},
+		},
+		registry: reg,
+		log:      zap.NewNop(),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- gw.runRegistrySweeper(ctx) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("runRegistrySweeper did not return after context timeout")
+	}
+
+	require.False(t, b.Closed(), "live entry must survive the fallback ttl")
+
+	_, ok := reg.backends["svc.Foo"]
+	require.True(t, ok, "live entry must remain registered")
 }

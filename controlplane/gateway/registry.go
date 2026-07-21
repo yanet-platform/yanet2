@@ -82,6 +82,14 @@ func (m *BackendEntry) GetBackend() proxy.Backend {
 	return m.backend
 }
 
+// Close closes the entry's underlying backend.
+//
+// Only the owning registry closes an entry. An entry handed out by
+// ListBackends must not be closed by its receiver.
+func (m *BackendEntry) Close() error {
+	return m.backend.Close()
+}
+
 // BackendRegistry is a registry of backends for Gateway API.
 type BackendRegistry struct {
 	mu       sync.RWMutex
@@ -147,18 +155,24 @@ func (m *BackendRegistry) registerBackend(service string, b Backend, kind Backen
 	}
 }
 
-// Renew refreshes the last-seen timestamp and hosting kind when service is
-// already registered at endpoint, and reports whether it did.
+// Renew refreshes the last-seen timestamp when service is already registered
+// at endpoint, and reports whether it did.
+//
+// An entry's kind is fixed at registration and never changes here. The
+// sweeper acts only on BackendKindExternal, so letting a caller relabel an
+// existing entry would let it either arm eviction against a backend the
+// gateway shares across its own services, or exempt itself from eviction
+// entirely. A same-name registration at a different endpoint falls through
+// to registerBackend's same-name branch instead, which is out of scope here.
 //
 // A false result means the caller must dial a new backend and call
 // RegisterBackend (new service or changed endpoint).
-func (m *BackendRegistry) Renew(service, endpoint string, kind BackendKind) bool {
+func (m *BackendRegistry) Renew(service, endpoint string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	entry, ok := m.backends[service]
 	if ok && entry.backend.Endpoint() == endpoint {
-		entry.kind = kind
 		entry.lastSeenAt = time.Now().UTC()
 		m.backends[service] = entry
 		return true
@@ -176,10 +190,44 @@ func (m *BackendRegistry) Renew(service, endpoint string, kind BackendKind) bool
 func (m *BackendRegistry) Close() error {
 	var err error
 	for _, entry := range m.takeBackends() {
-		err = errors.Join(err, entry.backend.Close())
+		err = errors.Join(err, entry.Close())
 	}
 
 	return err
+}
+
+// EvictStale removes external backends not refreshed since before and
+// returns the entries it removed.
+//
+// Only BackendKindExternal entries are eligible. That is the sole kind that
+// heartbeats — builtin and in-process entries are registered once and never
+// renewed, so a stale lastSeenAt on them reflects gateway startup, not a dead
+// process. It is also the sole kind with a 1:1 connection: builtin and
+// in-process entries share one loopback backend across several service keys,
+// and closing it here would tear down every other service hosted on that
+// backend along with the one that looked stale.
+func (m *BackendRegistry) EvictStale(before time.Time) []BackendEntry {
+	evicted := m.evictStale(before)
+	for _, entry := range evicted {
+		_ = entry.Close()
+	}
+
+	return evicted
+}
+
+func (m *BackendRegistry) evictStale(before time.Time) []BackendEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var evicted []BackendEntry
+	for service, entry := range m.backends {
+		if entry.Kind() == BackendKindExternal && entry.LastSeenAt().Before(before) {
+			evicted = append(evicted, entry)
+			delete(m.backends, service)
+		}
+	}
+
+	return evicted
 }
 
 // takeBackends atomically returns the registered backends and clears the

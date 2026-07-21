@@ -27,14 +27,12 @@ controlplane/gateway/gateway.go:Gateway.Run:runner.module  # legacy: encapsulate
 controlplane/gateway/gateway.go:NewGateway:entry.kind  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/gateway.go:NewGateway:entry.service  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/metrics_service.go:metricsCollectors:entry.service  # legacy: encapsulate behind an exported method or field
-controlplane/gateway/registry.go:BackendRegistry.Close:entry.backend  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.GetBackend:entry.backend  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.ListBackends:entry.service  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.kind  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.lastSeenAt  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.Renew:entry.backend  # legacy: encapsulate behind an exported method or field
-controlplane/gateway/registry.go:BackendRegistry.Renew:entry.kind  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.Renew:entry.lastSeenAt  # legacy: encapsulate behind an exported method or field
 controlplane/internal/auth/sshcert/authenticator.go:Authenticator.Authenticate:token.canonicalSignedData  # legacy: encapsulate behind an exported method or field
 controlplane/internal/auth/sshcert/authenticator.go:Authenticator.Authenticate:token.checkTimestamp  # legacy: encapsulate behind an exported method or field
