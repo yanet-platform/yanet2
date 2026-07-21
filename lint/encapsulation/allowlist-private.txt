@@ -109,10 +109,6 @@ modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:config.
 modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:config.prefixes  # legacy: encapsulate behind an exported method or field
 modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:oldConfig.handle  # legacy: encapsulate behind an exported method or field
 modules/route-mpls/controlplane/service.go:RouteMPLSService.UpdateConfig:oldConfig.prefixes  # legacy: encapsulate behind an exported method or field
-operators/decap/internal/operator/actuator_gateway.go:GatewayActuator.Apply:entry.applier  # legacy: encapsulate behind an exported method or field
-operators/decap/internal/operator/actuator_gateway.go:GatewayActuator.Apply:entry.name  # legacy: encapsulate behind an exported method or field
-operators/forward/internal/operator/actuator_gateway.go:GatewayActuator.Apply:entry.applier  # legacy: encapsulate behind an exported method or field
-operators/forward/internal/operator/actuator_gateway.go:GatewayActuator.Apply:entry.name  # legacy: encapsulate behind an exported method or field
 operators/route/internal/operator/metrics.go:GatewayMetrics.collect:g.entries  # legacy: encapsulate behind an exported method or field
 operators/route/internal/operator/metrics.go:GatewayMetrics.collect:g.filteredRoutes  # legacy: encapsulate behind an exported method or field
 operators/route/internal/operator/metrics.go:GatewayMetrics.collect:g.routes  # legacy: encapsulate behind an exported method or field

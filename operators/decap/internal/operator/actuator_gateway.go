@@ -15,19 +15,12 @@ import (
 	decappb "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
-// funcApplierEntry bundles a FunctionApplier with its function name for
-// logging.
-type funcApplierEntry struct {
-	name    string
-	applier *operator.FunctionApplier
-}
-
 // GatewayActuator publishes the desired decap state to a single gateway.
 type GatewayActuator struct {
 	name     string
 	conn     *grpc.ClientConn
 	decap    decappb.DecapServiceClient
-	appliers []funcApplierEntry
+	appliers []*operator.FunctionApplier
 	log      *zap.Logger
 }
 
@@ -54,7 +47,7 @@ func NewGatewayActuator(
 	}
 
 	fnClient := ynpb.NewFunctionServiceClient(conn)
-	appliers := make([]funcApplierEntry, 0, len(functions))
+	appliers := make([]*operator.FunctionApplier, 0, len(functions))
 	for _, fn := range functions {
 		spec := operator.FunctionChainSpec{
 			Name:   fn.Name.Unwrap(),
@@ -65,14 +58,11 @@ func NewGatewayActuator(
 				Name: fn.Module.Unwrap(),
 			}},
 		}
-		appliers = append(appliers, funcApplierEntry{
-			name: fn.Name.Unwrap(),
-			applier: operator.NewFunctionApplier(
-				fnClient,
-				spec,
-				operator.WithIgnorePdump(fn.IgnorePdump),
-			),
-		})
+		appliers = append(appliers, operator.NewFunctionApplier(
+			fnClient,
+			spec,
+			operator.WithIgnorePdump(fn.IgnorePdump),
+		))
 	}
 
 	return &GatewayActuator{
@@ -106,22 +96,22 @@ func (m *GatewayActuator) Apply(ctx context.Context, state State) error {
 		}
 	}
 
-	for _, entry := range m.appliers {
-		skipped, e := entry.applier.Apply(ctx)
+	for _, applier := range m.appliers {
+		skipped, e := applier.Apply(ctx)
 		if e != nil {
 			err = errors.Join(err, fmt.Errorf(
 				"failed to update function %q on gateway %q: %w",
-				entry.name, m.name, e,
+				applier.Name(), m.name, e,
 			))
 			continue
 		}
 		if skipped {
 			m.log.Debug("function already correct, skipped",
-				zap.String("function", entry.name),
+				zap.String("function", applier.Name()),
 			)
 		} else {
 			m.log.Info("updated function",
-				zap.String("function", entry.name),
+				zap.String("function", applier.Name()),
 			)
 		}
 	}

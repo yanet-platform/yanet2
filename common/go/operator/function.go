@@ -79,6 +79,11 @@ func NewFunctionApplier(
 	}
 }
 
+// Name returns the function identifier the applier publishes.
+func (m *FunctionApplier) Name() string {
+	return m.spec.Name
+}
+
 // Apply publishes the captured spec to the gateway, or returns true
 // if the gateway is already correctly configured.
 func (m *FunctionApplier) Apply(ctx context.Context) (bool, error) {
