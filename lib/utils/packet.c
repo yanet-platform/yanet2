@@ -264,6 +264,11 @@ alloc_mbuf(uint16_t headroom, uint16_t pkt_len, uint16_t tailroom) {
 
 void
 init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len) {
+	// Callers hand in a plain malloc'd buffer, so every field this
+	// function does not set below is allocator residue. Some of them are
+	// read further down the pipeline -- an uninitialized ol_flags, for
+	// one, reads as a hardware checksum verdict.
+	memset(m, 0, sizeof(*m));
 	m->priv_size = 0;
 	m->buf_len = buf_len;
 	uint32_t mbuf_size = sizeof(struct rte_mbuf) + m->priv_size;
