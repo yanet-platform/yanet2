@@ -2,6 +2,7 @@ package framework
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -9,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,6 +145,103 @@ func OverlayHasSnapshot(imagePath, name string) bool {
 	return strings.Contains(string(out), name)
 }
 
+// qemuHardwareArgs returns the QEMU machine and network topology used by test
+// VMs.
+//
+// socketPaths selects stream-backed test interfaces; without it, all interfaces
+// use user networking for image preparation.
+func qemuHardwareArgs(vmName string, socketPaths []string) []string {
+	arguments := []string{
+		"-name", vmName,
+		"-smp", "2",
+		"-m", "1G",
+		"-machine", "q35,kernel-irqchip=split",
+		"-cpu", "max",
+		"-device", "intel-iommu,intremap=on,device-iotlb=on",
+		"-device", "ioh3420,id=pcie.1,chassis=1",
+		"-device", "ioh3420,id=pcie.2,chassis=2",
+	}
+	if isKVMEnabled() {
+		arguments = append(arguments, "-enable-kvm")
+	} else {
+		arguments = append(arguments, "-accel", "tcg,thread=multi")
+	}
+
+	arguments = append(arguments,
+		"-netdev", "user,id=net0",
+		"-device", "virtio-net-pci,netdev=net0,mac=AA:BB:CC:DD:CA:B0",
+	)
+	if len(socketPaths) == 2 {
+		arguments = append(arguments,
+			"-netdev", "stream,id=net1,server=on,addr.type=unix,addr.path="+socketPaths[0],
+			"-device", "virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
+			"-netdev", "stream,id=net2,server=on,addr.type=unix,addr.path="+socketPaths[1],
+			"-device", "virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
+		)
+		return arguments
+	}
+
+	return append(arguments,
+		"-netdev", "user,id=net1",
+		"-device", "virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
+		"-netdev", "user,id=net2",
+		"-device", "virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
+	)
+}
+
+// PrepareQEMUImage applies cloud-init to an image using the test VM topology.
+func PrepareQEMUImage(imagePath string, cloudInitISO string, timeout time.Duration) error {
+	if _, err := exec.LookPath("qemu-system-x86_64"); err != nil {
+		return fmt.Errorf("qemu-system-x86_64 not found in PATH: %w", err)
+	}
+	if _, err := os.Stat(imagePath); err != nil {
+		return fmt.Errorf("QEMU image %s not found: %w", imagePath, err)
+	}
+	if _, err := os.Stat(cloudInitISO); err != nil {
+		return fmt.Errorf("cloud-init ISO %s not found: %w", cloudInitISO, err)
+	}
+
+	serialLog, err := os.CreateTemp("", "yanet-cloud-init-serial-*.log")
+	if err != nil {
+		return fmt.Errorf("create cloud-init serial log: %w", err)
+	}
+	serialPath := serialLog.Name()
+	if err := serialLog.Close(); err != nil {
+		return fmt.Errorf("close cloud-init serial log: %w", err)
+	}
+	defer os.Remove(serialPath)
+
+	arguments := qemuHardwareArgs("yanet-cloud-init", nil)
+	arguments = append(arguments,
+		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", imagePath),
+		"-drive", fmt.Sprintf("file=%s,media=cdrom,readonly=on", cloudInitISO),
+		"-serial", "file:"+serialPath,
+		"-display", "none",
+		"-no-reboot",
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "qemu-system-x86_64", arguments...).CombinedOutput()
+	serialOutput, readErr := os.ReadFile(serialPath)
+	if readErr != nil {
+		return fmt.Errorf("read cloud-init serial log: %w", readErr)
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("cloud-init preparation timed out after %v\nserial output:\n%s\nQEMU output:\n%s", timeout, serialOutput, output)
+	}
+	if err != nil {
+		return fmt.Errorf("cloud-init preparation failed: %w\nserial output:\n%s\nQEMU output:\n%s", err, serialOutput, output)
+	}
+	if !strings.Contains(string(serialOutput), "YANET VM FULLY READY") {
+		return fmt.Errorf("cloud-init readiness marker not found\nserial output:\n%s\nQEMU output:\n%s", serialOutput, output)
+	}
+	checkOutput, err := exec.Command("qemu-img", "check", imagePath).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("check prepared QEMU image: %w\noutput:\n%s", err, checkOutput)
+	}
+	return nil
+}
+
 // Start launches a QEMU virtual machine. When TemplateOverlay is set the
 // overlay is copied from it and QEMU starts with -loadvm for the requested
 // TemplateSnapshotName, skipping the slow cold boot path.
@@ -195,9 +292,6 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 	q.log.Debug("Socket paths generated.")
 
-	// Detect OS
-	osType := runtime.GOOS
-
 	// Create or copy the QCOW2 overlay. When TemplateOverlay is set,
 	// copy it (it already contains the "booted" snapshot) and start
 	// with -loadvm to skip the ~44s Linux boot. Otherwise create a
@@ -234,62 +328,37 @@ func (q *QEMUManager) Start() (bool, error) {
 		q.log.Debugf("Created QCOW2 overlay: %s -> %s", overlayPath, absImagePath)
 	}
 
-	// Base arguments
-	args := []string{
-		"-name", vmName,
-		"-smp", "2",
-		"-m", "1G",
-		"-machine", "q35,kernel-irqchip=split",
-		"-cpu", "max",
-		"-device", "intel-iommu,intremap=on,device-iotlb=on",
-		"-device", "ioh3420,id=pcie.1,chassis=1",
-		"-device", "ioh3420,id=pcie.2,chassis=2",
-	}
-
-	// OS-specific configuration
-	if osType == "linux" {
-		if isKVMEnabled() {
-			args = append(args, "-enable-kvm")
-		}
-	}
+	arguments := qemuHardwareArgs(vmName, q.SocketPaths)
 
 	// Drive configuration.
-	args = append(args,
+	arguments = append(arguments,
 		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", overlayPath),
 	)
 
 	// When booting from a template overlay, restore VM state instantly via -loadvm.
 	if fromSnapshot {
-		args = append(args, "-loadvm", templateSnapshot)
+		arguments = append(arguments, "-loadvm", templateSnapshot)
 	}
 
-	// Network interface configuration. SSH forwarding is added in
-	// keep-alive mode for manual debugging.
-	netdev := "user,id=net0"
 	if ShouldKeepVMAlive() {
-		// Get a random free port for SSH forwarding to support multiple VMs
 		var err error
 		q.sshPort, err = getFreePort()
 		if err != nil {
 			return false, fmt.Errorf("failed to get free port for SSH forwarding: %w", err)
 		}
 		q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", q.sshPort)
-		netdev += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:22", q.sshPort)
+		for idx := range arguments {
+			if arguments[idx] == "user,id=net0" {
+				arguments[idx] += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:22", q.sshPort)
+				break
+			}
+		}
 	}
-	args = append(args, "-netdev", netdev)
-
-	args = append(args,
-		"-device", "virtio-net-pci,netdev=net0,mac=AA:BB:CC:DD:CA:B0",
-		"-netdev", "stream,id=net1,server=on,addr.type=unix,addr.path="+q.SocketPaths[0],
-		"-device", "virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
-		"-netdev", "stream,id=net2,server=on,addr.type=unix,addr.path="+q.SocketPaths[1],
-		"-device", "virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
-	)
 
 	// Add 9P filesystem sharing for YANET logs and configuration
 	// This allows the VM to access host files for testing
 	// Match the mount configuration used in Makefile
-	args = append(args,
+	arguments = append(arguments,
 		// Share temporary directory for logs
 		"-fsdev", "local,id=fsdev0,path="+q.LogsDir+",security_model=none",
 		"-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=logs",
@@ -309,7 +378,7 @@ func (q *QEMUManager) Start() (bool, error) {
 
 	qemuLogfile := filepath.Join(q.WorkDir, "yanet-test-vm.log")
 	// Logging and display options - using unix sockets
-	args = append(args,
+	arguments = append(arguments,
 		"-D", qemuLogfile,
 		"-serial", fmt.Sprintf("unix:%s,server=on", q.SerialPath),
 		"-monitor", fmt.Sprintf("unix:%s,server=on", q.MonitorPath),
@@ -324,9 +393,9 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 
 	// Start QEMU
-	q.Command = exec.Command("qemu-system-x86_64", args...)
+	q.Command = exec.Command("qemu-system-x86_64", arguments...)
 
-	q.log.Debugf("Starting QEMU with command: %s %s", q.Command.Path, strings.Join(args, " "))
+	q.log.Debugf("Starting QEMU with command: %s %s", q.Command.Path, strings.Join(arguments, " "))
 	q.log.Debugf("QEMU logs will be written to: %s", logFile)
 
 	// Create stderr pipe for logging
