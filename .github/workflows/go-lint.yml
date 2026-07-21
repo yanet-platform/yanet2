@@ -5,12 +5,14 @@ on:
     paths:
       - '**/*.go'
       - 'lint/logger/**'
+      - 'lint/encapsulation/**'
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
   pull_request:
     paths:
       - '**/*.go'
       - 'lint/logger/**'
+      - 'lint/encapsulation/**'
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
 
@@ -30,6 +32,22 @@ jobs:
 
       - name: Run linter
         run: go run ./lint/logger/cmd/loglint/
+
+  enclint:
+    name: Custom enclint linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./lint/encapsulation/cmd/enclint/
+
+      - name: Run linter
+        run: go run ./lint/encapsulation/cmd/enclint/
 
   modernize:
     name: golangci-lint modernize

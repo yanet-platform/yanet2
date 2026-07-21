@@ -45,7 +45,7 @@ clang-format -i <file>        # C
 cargo +nightly fmt            # Rust (uses nightly-only options in .rustfmt.toml)
 cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
-make lint-go                  # loglint + golangci-lint modernize (lint/logger/, .golangci.yml)
+make lint-go                  # loglint + enclint + golangci-lint modernize (lint/logger/, lint/encapsulation/, .golangci.yml)
 make lint-commit              # commit-subject convention check (lint/commit/)
 make proto-go                 # generate *.pb.go via protoc (needed before go lint locally)
 make hooks                    # install the git hooks (run once per clone)
@@ -265,7 +265,8 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   reviewable. The check keys on the identifier `m` rather than on
   true receiver identity, so it is a convention aid, not a proof.
   Enforced mechanically by `lint/encapsulation/` (pre-commit hook via
-  `make hooks`, and `make lint-go`); known violations are ledgered in
+  `make hooks`, `make lint-go`, and CI via the `enclint` job in
+  `go-lint.yml`); known violations are ledgered in
   `lint/encapsulation/allowlist-private.txt` — do not add new rows.
   Files that `import "C"` are exempt, because C struct fields cannot
   be distinguished from Go private fields without type information.
