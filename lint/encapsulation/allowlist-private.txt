@@ -30,7 +30,6 @@ controlplane/gateway/metrics_service.go:metricsCollectors:entry.service  # legac
 controlplane/gateway/registry.go:BackendRegistry.GetBackend:entry.backend  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.ListBackends:entry.service  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend  # legacy: encapsulate behind an exported method or field
-controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.kind  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.lastSeenAt  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.Renew:entry.backend  # legacy: encapsulate behind an exported method or field
 controlplane/gateway/registry.go:BackendRegistry.Renew:entry.lastSeenAt  # legacy: encapsulate behind an exported method or field

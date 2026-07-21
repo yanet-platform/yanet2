@@ -118,12 +118,12 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 // the registry changed.
 //
 // The displaced backend (the previous one on an endpoint change, or the
-// redundant new one on an unchanged-endpoint re-registration) is closed after
-// the lock is released.
-//
-// This close-on-displace path applies only to 1:1 external module backends.
-// The shared loopback backend is registered once under distinct keys and is
-// never displaced, so it is only closed by Close().
+// redundant new one on an unchanged-endpoint re-registration) is closed
+// after the lock is released, but only once no service name in the registry
+// still resolves to it: displacing one of the names a backend is registered
+// under leaves it open for as long as another name still points at it. This
+// matters because one dialed connection, such as the gateway's own loopback
+// backend, is commonly registered under several service names at once.
 func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind BackendKind) RegistrationStatus {
 	status, evicted := m.registerBackend(service, b, kind)
 	if evicted != nil {
@@ -142,17 +142,30 @@ func (m *BackendRegistry) registerBackend(service string, b Backend, kind Backen
 	existing, ok := m.backends[service]
 	switch {
 	case ok && existing.backend.Endpoint() == b.Endpoint():
-		existing.kind = kind
 		existing.lastSeenAt = now
 		m.backends[service] = existing
-		return RegistrationRenewed, b
+		return RegistrationRenewed, m.unreferencedBackend(b)
 	case ok:
 		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
-		return RegistrationUpdated, existing.backend
+		return RegistrationUpdated, m.unreferencedBackend(existing.backend)
 	default:
 		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
 		return RegistrationRegistered, nil
 	}
+}
+
+// unreferencedBackend returns backend if no entry in the registry points at
+// it, or nil if some entry still does.
+//
+// Must be called with m.mu held.
+func (m *BackendRegistry) unreferencedBackend(backend Backend) Backend {
+	for _, entry := range m.backends {
+		if entry.GetBackend() == backend {
+			return nil
+		}
+	}
+
+	return backend
 }
 
 // Renew refreshes the last-seen timestamp when service is already registered

@@ -87,7 +87,8 @@ func TestBackendRegistry_SameEndpointRenews(t *testing.T) {
 	original := &fakeBackend{endpoint: "127.0.0.1:9000"}
 	reg.RegisterBackend("svc.Foo", original, BackendKindExternal)
 
-	// Re-register with a different object but the same endpoint and a changed kind.
+	// Re-register with a different object but the same endpoint and a claimed
+	// kind change.
 	second := &fakeBackend{endpoint: "127.0.0.1:9000"}
 
 	status := reg.RegisterBackend("svc.Foo", second, BackendKindInProcess)
@@ -104,10 +105,13 @@ func TestBackendRegistry_SameEndpointRenews(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, original, entry.backend)
 
-	// A changed kind on the same-endpoint path must be reflected.
-	require.Equal(t, BackendKindInProcess, entry.Kind())
+	// The kind claim must have no effect: it is fixed at registration.
+	require.Equal(t, BackendKindExternal, entry.Kind())
 }
 
+// TestBackendRegistry_DifferentEndpointUpdates verifies that a registration
+// at a changed endpoint replaces the entry and closes the now-unreferenced
+// previous backend exactly once.
 func TestBackendRegistry_DifferentEndpointUpdates(t *testing.T) {
 	reg := NewBackendRegistry()
 	prev := &fakeBackend{endpoint: "127.0.0.1:9000"}
@@ -119,8 +123,8 @@ func TestBackendRegistry_DifferentEndpointUpdates(t *testing.T) {
 
 	require.Equal(t, RegistrationUpdated, status)
 
-	// The previous backend must be closed.
-	require.True(t, prev.Closed(), "previous backend should be closed")
+	// The previous backend must be closed exactly once.
+	require.Equal(t, 1, prev.CloseCount(), "previous backend should be closed exactly once")
 
 	// The new backend must be open.
 	require.False(t, next.Closed(), "new backend must remain open")
@@ -129,6 +133,82 @@ func TestBackendRegistry_DifferentEndpointUpdates(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, next, entry.backend)
 	require.Equal(t, "127.0.0.1:9001", entry.Endpoint())
+}
+
+// TestBackendRegistry_FreshNameSucceedsForEveryKind verifies that
+// registering a name with no existing entry succeeds regardless of the
+// backend kind.
+//
+// This guards the invariant that admitting a not-yet-known name never
+// depends on which kind is claimed for it.
+func TestBackendRegistry_FreshNameSucceedsForEveryKind(t *testing.T) {
+	kinds := []BackendKind{BackendKindBuiltin, BackendKindInProcess, BackendKindExternal}
+
+	for _, kind := range kinds {
+		t.Run(kind.String(), func(t *testing.T) {
+			reg := NewBackendRegistry()
+			b := &fakeBackend{endpoint: "127.0.0.1:9000"}
+
+			regStatus := reg.RegisterBackend("svc.Foo", b, kind)
+
+			require.Equal(t, RegistrationRegistered, regStatus)
+			require.False(t, b.Closed())
+		})
+	}
+}
+
+// TestBackendRegistry_DisplacingOneOfSeveralSharedNamesKeepsBackendOpen
+// verifies that displacing one of several service names sharing a backend
+// leaves that backend open and every other name still resolving to it.
+//
+// This is the regression guard for the shared loopback hazard: the gateway
+// dials one connection and registers it under many service names, so
+// closing it out from under the names that still use it would take down
+// every one of those services, not just the displaced name.
+func TestBackendRegistry_DisplacingOneOfSeveralSharedNamesKeepsBackendOpen(t *testing.T) {
+	reg := NewBackendRegistry()
+	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
+	reg.RegisterBackend("svc.A", shared, BackendKindBuiltin)
+	reg.RegisterBackend("svc.B", shared, BackendKindBuiltin)
+
+	other := &fakeBackend{endpoint: "127.0.0.1:9999"}
+	status := reg.RegisterBackend("svc.A", other, BackendKindExternal)
+
+	require.Equal(t, RegistrationUpdated, status)
+	require.False(t, shared.Closed(), "the shared backend must not be closed")
+
+	entryA, ok := reg.backends["svc.A"]
+	require.True(t, ok)
+	require.Equal(t, other, entryA.backend)
+
+	entryB, ok := reg.backends["svc.B"]
+	require.True(t, ok)
+	require.Equal(t, shared, entryB.backend)
+}
+
+// TestBackendRegistry_DisplacingLastSharedNameClosesBackend verifies that
+// displacing the last service name still referencing a backend does close
+// it, exactly once, so the fix does not simply leak every displaced
+// connection.
+func TestBackendRegistry_DisplacingLastSharedNameClosesBackend(t *testing.T) {
+	reg := NewBackendRegistry()
+	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
+	reg.RegisterBackend("svc.A", shared, BackendKindBuiltin)
+	reg.RegisterBackend("svc.B", shared, BackendKindBuiltin)
+
+	otherA := &fakeBackend{endpoint: "127.0.0.1:9998"}
+	reg.RegisterBackend("svc.A", otherA, BackendKindExternal)
+	require.False(t, shared.Closed(), "the shared backend must remain open while svc.B references it")
+
+	otherB := &fakeBackend{endpoint: "127.0.0.1:9999"}
+	status := reg.RegisterBackend("svc.B", otherB, BackendKindExternal)
+
+	require.Equal(t, RegistrationUpdated, status)
+	require.Equal(t, 1, shared.CloseCount(), "the last-referenced backend must be closed exactly once")
+
+	entryB, ok := reg.backends["svc.B"]
+	require.True(t, ok)
+	require.Equal(t, otherB, entryB.backend)
 }
 
 func TestBackendRegistry_Close(t *testing.T) {
