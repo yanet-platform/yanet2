@@ -278,7 +278,7 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 	m.gatewaysMu.Unlock()
 
 	for _, g := range gateways {
-		out = append(out, g.collect()...)
+		out = append(out, g.Collect()...)
 	}
 
 	return out
@@ -287,11 +287,28 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 // fibGauges holds the per-module FIB build gauges reported by a single
 // gateway.
 type fibGauges struct {
-	entries            metrics.Gauge
-	routes             metrics.Gauge
-	unresolvedNexthops metrics.Gauge
-	skippedPrefixes    metrics.Gauge
-	filteredRoutes     metrics.Gauge
+	// Entries is the number of FIB prefixes added by the last build.
+	Entries metrics.Gauge
+	// Routes is the total number of routes seen by the last build.
+	Routes metrics.Gauge
+	// UnresolvedNexthops is the number of routes dropped for lack of a
+	// resolved neighbour.
+	UnresolvedNexthops metrics.Gauge
+	// SkippedPrefixes is the number of prefixes with no routes at all in
+	// the last build.
+	SkippedPrefixes metrics.Gauge
+	// FilteredRoutes is the number of eligible routes dropped because a
+	// better route of the same source exists.
+	FilteredRoutes metrics.Gauge
+}
+
+// Store records the outcome of one FIB build as gauge values.
+func (m *fibGauges) Store(stats FIBBuildStats) {
+	m.Entries.Store(float64(stats.PrefixesAdded))
+	m.Routes.Store(float64(stats.TotalRoutes))
+	m.UnresolvedNexthops.Store(float64(stats.NeighbourNotFound))
+	m.SkippedPrefixes.Store(float64(stats.SkippedPrefixes))
+	m.FilteredRoutes.Store(float64(stats.FilteredRoutes))
 }
 
 // GatewayMetrics is the per-gateway observability sink, fed by
@@ -336,16 +353,12 @@ func (m *GatewayMetrics) OnFIBBuilt(module string, stats FIBBuildStats) {
 	}
 	m.fibMu.Unlock()
 
-	g.entries.Store(float64(stats.PrefixesAdded))
-	g.routes.Store(float64(stats.TotalRoutes))
-	g.unresolvedNexthops.Store(float64(stats.NeighbourNotFound))
-	g.skippedPrefixes.Store(float64(stats.SkippedPrefixes))
-	g.filteredRoutes.Store(float64(stats.FilteredRoutes))
+	g.Store(stats)
 }
 
-// collect renders this gateway's metrics as a slice of commonpb.Metric
+// Collect renders this gateway's metrics as a slice of commonpb.Metric
 // values.
-func (m *GatewayMetrics) collect() []*commonpb.Metric {
+func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	gateway := makeLabel("gateway", m.name)
 	out := make([]*commonpb.Metric, 0)
 
@@ -361,11 +374,11 @@ func (m *GatewayMetrics) collect() []*commonpb.Metric {
 	for module, g := range m.fib {
 		labels := []*commonpb.Label{gateway, makeLabel("module", module)}
 		out = append(out,
-			makeGauge("route_operator_fib_entries", g.entries.Load(), labels...),
-			makeGauge("route_operator_fib_routes", g.routes.Load(), labels...),
-			makeGauge("route_operator_fib_unresolved_nexthops", g.unresolvedNexthops.Load(), labels...),
-			makeGauge("route_operator_fib_skipped_prefixes", g.skippedPrefixes.Load(), labels...),
-			makeGauge("route_operator_fib_filtered_routes", g.filteredRoutes.Load(), labels...),
+			makeGauge("route_operator_fib_entries", g.Entries.Load(), labels...),
+			makeGauge("route_operator_fib_routes", g.Routes.Load(), labels...),
+			makeGauge("route_operator_fib_unresolved_nexthops", g.UnresolvedNexthops.Load(), labels...),
+			makeGauge("route_operator_fib_skipped_prefixes", g.SkippedPrefixes.Load(), labels...),
+			makeGauge("route_operator_fib_filtered_routes", g.FilteredRoutes.Load(), labels...),
 		)
 	}
 

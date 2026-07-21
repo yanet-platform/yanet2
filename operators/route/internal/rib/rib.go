@@ -115,7 +115,7 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 		func(routesList RoutesList) (RoutesList, bool) {
 			newRoutes := make([]Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
-				if r.isSameIdentity(candidate) {
+				if r.IsSameIdentity(candidate) {
 					found++
 					continue // skip means remove
 				}

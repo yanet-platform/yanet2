@@ -79,7 +79,7 @@ type Route struct {
 	ToRemove bool
 }
 
-// isSameIdentity reports whether two routes share the same RIB identity.
+// IsSameIdentity reports whether two routes share the same RIB identity.
 //
 // BGP-sourced routes are identified by peer and GlobalID because of BGP
 // implicit replace: a peer re-announcing a prefix reuses its GlobalID and must
@@ -89,7 +89,7 @@ type Route struct {
 // same prefix with distinct nexthops to coexist. Static nexthops are compared
 // in normalized (unmapped) form because the API accepts both native IPv4 and
 // IPv4-in-IPv6 encodings.
-func (m Route) isSameIdentity(other Route) bool {
+func (m Route) IsSameIdentity(other Route) bool {
 	if m.SourceID != other.SourceID || m.Peer != other.Peer {
 		return false
 	}
@@ -128,7 +128,7 @@ type RoutesList struct {
 func (m *RoutesList) Insert(route Route) bool {
 	insertedIdx := -1
 	for idx, r := range m.Routes {
-		if r.isSameIdentity(route) {
+		if r.IsSameIdentity(route) {
 			m.Routes[idx] = route
 			insertedIdx = idx
 			break
@@ -193,7 +193,7 @@ func (m *RoutesList) BestPerSource() []Route {
 func (m *RoutesList) Remove(route Route) bool {
 	// Sorting is not need on removing
 	for idx, r := range m.Routes {
-		if r.isSameIdentity(route) {
+		if r.IsSameIdentity(route) {
 			// Delete with preserving order
 			m.Routes = slices.Delete(m.Routes, idx, idx+1)
 

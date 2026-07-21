@@ -34,7 +34,7 @@ func routesForPrefix(t *testing.T, r *RIB, prefix netip.Prefix) []Route {
 //
 // BGP route identity is peer-scoped; the unary API carries no peer, so the
 // candidate Peer is IPv6Unspecified. A real BGP route has a non-unspecified
-// Peer, so isSameIdentity must return false and neither route may be removed.
+// Peer, so IsSameIdentity must return false and neither route may be removed.
 func TestRemoveUnicastRoute_BGPPeerIsolation(t *testing.T) {
 	pfx := netip.MustParsePrefix("10.0.0.0/24")
 	nh := netip.MustParseAddr("192.0.2.1")
