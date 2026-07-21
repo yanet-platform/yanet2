@@ -23,7 +23,8 @@ use self::{
 pub use self::{
     layout::name_width,
     watch::{
-        ServiceColumn, Transition, print_lifecycle_line, print_lost_line, print_transition_line, record_transition,
+        Membership, ServiceColumn, Transition, print_lifecycle_line, print_lost_line, print_membership_line,
+        print_transition_line, record_transition,
     },
 };
 

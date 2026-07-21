@@ -1,11 +1,13 @@
 //! `--watch` transition tracking: the merged snapshot diff, the append-only
-//! transition log line renderer, and the transport-lifecycle line renderer
-//! used by aggregate watch's reconnect-with-backoff supervisors.
+//! transition log line renderer, the transport-lifecycle line renderer used
+//! by aggregate watch's reconnect-with-backoff supervisors, and the
+//! registry membership line renderer used by its re-discovery sweep.
 
 use core::time::Duration;
 use std::collections::BTreeMap;
 
 use chrono::Local;
+use colored::Colorize;
 use readinesspb::pb::{Scope, State};
 use ync::{display, output};
 
@@ -230,14 +232,17 @@ pub fn print_transition_line(service: ServiceColumn, scope: &Scope, name_width: 
     println!();
 }
 
-/// Prints one lifecycle line for a `--watch` supervisor event that is not a
-/// readiness change, given an already-composed `message`: a stream
-/// reattaching, or — via [`print_lost_line`] — one being lost.
+/// Prints one dim lifecycle line for `--watch` reconnect chatter that is
+/// neither a readiness change nor a registry membership change, given an
+/// already-composed `message`.
 ///
+/// Callers compose `message` themselves — [`print_lost_line`] shows how a
+/// lost stream's cause and retry delay become one such message.
 /// `HH:MM:SS  [!] alias  message`, the whole line dim — this is transport
 /// chatter, not a readiness state, and must never borrow a [`StateStyle`]
-/// colour. Long messages wrap with a hanging indent, the same way a
-/// transition line's reason text does.
+/// colour or [`print_membership_line`]'s full weight. Long messages wrap
+/// with a hanging indent, the same way a transition line's reason text
+/// does.
 pub fn print_lifecycle_line(alias: &str, alias_width: usize, message: &str) {
     let colored = output::is_colored();
     let wrap_width = display::terminal_width();
@@ -281,6 +286,104 @@ pub fn print_lost_line(alias: &str, alias_width: usize, cause: &str, retry_after
     let message = format!("stream lost: {cause}{}reconnecting in {delay}", symbols.dash);
 
     print_lifecycle_line(alias, alias_width, &message);
+}
+
+/// One direction of the single re-discovery-sweep delta the render loop
+/// reports: a service the sweep found newly registered, or one it found
+/// missing.
+///
+/// [`print_membership_line`] is parameterised by this enum precisely so a
+/// service joining and a service departing render through one shared code
+/// path rather than two independently maintained ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Membership {
+    /// The sweep found a service that was not previously known.
+    Discovered,
+    /// The sweep found a previously known service now missing.
+    Gone,
+}
+
+impl Membership {
+    /// This direction's line message.
+    fn message(self) -> &'static str {
+        match self {
+            Self::Discovered => "discovered in the gateway registry",
+            Self::Gone => "gone from the gateway registry",
+        }
+    }
+}
+
+/// [`Membership`]'s mark and color, resolved once per call from the same
+/// `colored` gate every other glyph in this render uses.
+///
+/// Mirrors [`StateStyle`]'s shape: the glyph itself changes between the
+/// Unicode and ASCII forms, not just its color, chosen so neither
+/// direction is ever confused with a readiness-state mark or with
+/// [`print_lifecycle_line`]'s own `[!]` / `[--]` transport marks.
+struct MembershipStyle {
+    mark: &'static str,
+    color: fn(&str) -> String,
+    colored: bool,
+}
+
+impl MembershipStyle {
+    fn new(membership: Membership, colored: bool) -> Self {
+        let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = match membership {
+            Membership::Discovered => ("[▲]", "[^^]", |s| s.green().to_string()),
+            Membership::Gone => ("[▼]", "[vv]", |s| s.red().to_string()),
+        };
+
+        let mark = if colored { unicode_mark } else { ascii_mark };
+
+        Self { mark, color, colored }
+    }
+
+    /// Returns the mark glyph in this direction's color.
+    fn styled_mark(&self) -> String {
+        if self.colored {
+            (self.color)(self.mark)
+        } else {
+            self.mark.to_string()
+        }
+    }
+}
+
+/// Prints one full-weight line for a `--watch` registry membership change:
+/// a service joining or leaving the gateway's registry.
+///
+/// Structured like [`print_lifecycle_line`] — timestamp, bracketed mark,
+/// alias padded to `alias_width`, wrapped message with a hanging indent —
+/// but printed at full weight rather than dim: a backend joining or
+/// leaving the registry is a state-level event, not transport chatter.
+/// `membership` alone selects the mark, its color, and the message text,
+/// so the joined and departed lines can never drift apart from one
+/// another.
+pub fn print_membership_line(alias: &str, alias_width: usize, membership: Membership) {
+    let colored = output::is_colored();
+    let wrap_width = display::terminal_width();
+    let timestamp = Local::now().format("%H:%M:%S").to_string();
+    let style = MembershipStyle::new(membership, colored);
+    let message = membership.message();
+    let name = format!("{alias:<alias_width$}");
+
+    let plain_prefix = format!("{timestamp}  {} {name}  ", style.mark);
+    let indent = plain_prefix.chars().count();
+
+    print!("{}  {} {name}  ", dim(&timestamp, colored), style.styled_mark());
+
+    let lines = match wrap_width {
+        Some(width) if width > indent => wrap_words(message, width - indent),
+        _ => vec![normalize_whitespace(message)],
+    };
+
+    for (idx, line) in lines.iter().enumerate() {
+        if idx > 0 {
+            print!("\n{:indent$}", "");
+        }
+        print!("{line}");
+    }
+
+    println!();
 }
 
 #[cfg(test)]
@@ -409,6 +512,17 @@ mod test {
             without_service.plain.chars().count() + 11,
             with_service.plain.chars().count()
         );
+    }
+
+    #[test]
+    fn membership_style_uncolored_mark_is_ascii_for_both_directions() {
+        for membership in [Membership::Discovered, Membership::Gone] {
+            let style = MembershipStyle::new(membership, false);
+
+            assert!(style.mark.is_ascii());
+            assert_eq!(style.mark, style.styled_mark());
+            assert!(membership.message().is_ascii());
+        }
     }
 
     #[test]

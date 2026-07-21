@@ -11,13 +11,13 @@
 
 use core::time::Duration;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
 use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope};
 use serde::Serialize;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::AbortHandle};
 use ync::{client::Connection, discovery, errors::Error, output};
 
 use crate::{
@@ -117,14 +117,16 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
 
     let (sender, mut receiver) = mpsc::unbounded_channel::<Event>();
 
+    let mut supervisors: HashMap<String, AbortHandle> = HashMap::with_capacity(services.len());
+
     for service in &services {
         let alias = aliases.get(service).cloned().unwrap_or_else(|| service.clone());
 
-        tokio::spawn(supervise(connection.clone(), service.clone(), alias, sender.clone()));
+        let handle = tokio::spawn(supervise(connection.clone(), service.clone(), alias, sender.clone()));
+        supervisors.insert(service.clone(), handle.abort_handle());
     }
 
-    let known: HashSet<String> = services.into_iter().collect();
-    tokio::spawn(rediscover(connection.clone(), known, aliases, sender.clone()));
+    tokio::spawn(rediscover(connection.clone(), supervisors, aliases, sender.clone()));
 
     drop(sender);
 
@@ -154,18 +156,36 @@ async fn probe_bounded(connection: &Connection, service: String) -> ServiceRepor
     }
 }
 
-/// One update delivered by a supervisor to the render loop.
+/// One update delivered to the render loop: either a change concerning one
+/// already-known service, or one re-discovery sweep's whole membership
+/// delta.
 ///
-/// `service` and `data` are the serialized payload's source (via
-/// [`EventPayload`]); `alias` steers human rendering only and is never
-/// serialized.
-struct Event {
-    service: String,
-    alias: String,
-    data: EventData,
+/// [`Self::Service`]'s `service` and `data` are the serialized payload's
+/// source (via [`EventPayload`]); `alias` steers human rendering only and
+/// is never serialized. [`Self::Membership`] cannot share that shape — a
+/// sweep's delta can name any number of services on either side, not one —
+/// so it carries its own `(service, alias)` pairs and serializes through
+/// [`MembershipPayload`] instead. Both sides of the same sweep travel in
+/// one event so the render loop can apply the whole delta and check for a
+/// readiness crossing exactly once, against the final state, rather than
+/// once per service.
+enum Event {
+    /// A supervisor's update about one already-known service.
+    Service {
+        service: String,
+        alias: String,
+        data: EventData,
+    },
+    /// One re-discovery sweep's whole membership delta: every service it
+    /// found newly registered, and every one it found missing, as
+    /// `(service, alias)` pairs on each side.
+    Membership {
+        discovered: Vec<(String, String)>,
+        departed: Vec<(String, String)>,
+    },
 }
 
-/// The event-specific data carried by an [`Event`].
+/// The event-specific data carried by an [`Event::Service`].
 ///
 /// A [`Lost`](Self::Lost) event keeps its disconnect `cause` and its
 /// `retry_after` backoff separate rather than pre-composed into one
@@ -180,21 +200,14 @@ enum EventData {
     /// The stream ended or errored; the supervisor is retrying after
     /// `retry_after`.
     Lost { cause: String, retry_after: Duration },
-    /// A re-discovery sweep just found this service and is about to spawn
-    /// its supervisor.
-    ///
-    /// Carries no data — it exists purely to tell the render loop's
-    /// `Aggregate` that this service now exists, before its supervisor's
-    /// first `Message` can arrive, so the banner blocks on it like any
-    /// other unreported service. Never reaches `output::data`.
-    Discovered,
 }
 
-/// The wire discriminator shared by [`SnapshotPayload`]'s and
-/// [`EventPayload`]'s `event` field.
+/// The wire discriminator shared by [`SnapshotPayload`]'s,
+/// [`EventPayload`]'s, and [`MembershipPayload`]'s `event` field.
 ///
-/// `Snapshot` is the stream's first line ([`SnapshotPayload`]); the other
-/// three each describe one [`EventPayload`] line that follows it.
+/// `Snapshot` is the stream's first line ([`SnapshotPayload`]); `Message`,
+/// `Reattached`, and `Lost` each describe one [`EventPayload`] line;
+/// `Membership` describes one [`MembershipPayload`] line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EventKind {
@@ -202,15 +215,17 @@ enum EventKind {
     Message,
     Reattached,
     Lost,
+    Membership,
 }
 
 /// The wire shape of the snapshot line an aggregate `--watch` JSON stream
 /// opens with.
 ///
-/// Every later line is an [`EventPayload`], which always names one
+/// Most later lines are an [`EventPayload`], which always names one
 /// `service`; this envelope instead lists every service probed before any
 /// supervisor's stream opened, so it needs its own struct rather than
-/// reusing that shape. Wrapping `services` behind the same `event`
+/// reusing that shape — [`MembershipPayload`] is the other exception, for
+/// the same reason. Wrapping `services` behind the same `event`
 /// discriminator means line 1 is a JSON object like every other line, not
 /// a bare array a `jq -c 'select(.event == …)'` pipeline would choke on.
 #[derive(Serialize)]
@@ -220,8 +235,8 @@ struct SnapshotPayload<'a> {
 }
 
 /// The self-describing JSON Lines wire shape of one aggregate `--watch`
-/// per-service event: every line after the stream's first (see
-/// [`SnapshotPayload`]).
+/// per-service event: every [`Event::Service`] line after the stream's
+/// first (see [`SnapshotPayload`]).
 ///
 /// `event` is the discriminator a monitoring script switches on; `error`
 /// means an error and nothing else — it is set only when `event` is
@@ -237,9 +252,25 @@ struct EventPayload<'a> {
     error: Option<&'a str>,
 }
 
+/// The wire shape of a `--watch` membership line: the one
+/// [`Event::Membership`] line a re-discovery sweep emits when its delta is
+/// non-empty on either side.
+///
+/// Needs its own struct rather than [`EventPayload`]'s single-`service`
+/// shape for the same reason [`SnapshotPayload`] does: this event names as
+/// many services as the sweep found on each side, not one. Lists only
+/// service names — `alias` steers human rendering alone and is
+/// deliberately never serialized.
+#[derive(Serialize)]
+struct MembershipPayload<'a> {
+    event: EventKind,
+    discovered: &'a [&'a str],
+    departed: &'a [&'a str],
+}
+
 impl Event {
     fn message(service: &str, alias: &str, scopes: Vec<Scope>) -> Self {
-        Self {
+        Self::Service {
             service: service.to_owned(),
             alias: alias.to_owned(),
             data: EventData::Message(scopes),
@@ -247,7 +278,7 @@ impl Event {
     }
 
     fn reattached(service: &str, alias: &str) -> Self {
-        Self {
+        Self::Service {
             service: service.to_owned(),
             alias: alias.to_owned(),
             data: EventData::Reattached,
@@ -255,19 +286,17 @@ impl Event {
     }
 
     fn lost(service: &str, alias: &str, cause: &str, retry_after: Duration) -> Self {
-        Self {
+        Self::Service {
             service: service.to_owned(),
             alias: alias.to_owned(),
             data: EventData::Lost { cause: cause.to_owned(), retry_after },
         }
     }
 
-    fn discovered(service: &str, alias: &str) -> Self {
-        Self {
-            service: service.to_owned(),
-            alias: alias.to_owned(),
-            data: EventData::Discovered,
-        }
+    /// Builds one re-discovery sweep's whole membership-delta event from
+    /// the `discovered` and `departed` sides of that sweep.
+    fn membership(discovered: Vec<(String, String)>, departed: Vec<(String, String)>) -> Self {
+        Self::Membership { discovered, departed }
     }
 }
 
@@ -399,22 +428,38 @@ fn next_backoff(backoff: Duration) -> Duration {
 }
 
 /// Periodically re-lists the gateway's registered readiness services,
-/// announces each newly discovered one to the render loop, and spawns its
-/// supervisor.
+/// announces each newly discovered one to the render loop and spawns its
+/// supervisor, and tears down every service that has since fallen out of
+/// the list.
 ///
-/// A failed or stalled sweep is silent: the next tick retries, and a service
-/// that really is unreachable already has its own supervisor saying so via
-/// `Lost` events. The `list_services` call is bounded by
-/// [`REDISCOVER_INTERVAL`] rather than left to hang indefinitely — a stuck
-/// gateway connection must not park this task forever, since it is the only
-/// path that picks up services registering after startup. `known` and
-/// `aliases` are owned exclusively by this task from the moment it is
-/// spawned, so assigning a newly discovered service's alias needs no shared
-/// or locked state, and never rewrites an alias a running supervisor has
-/// already been handed.
+/// A failed or stalled sweep changes nothing: every existing supervisor
+/// keeps running, and the next tick simply retries. Misreading it as
+/// "every service disappeared" would not end the watch — this task holds
+/// its own `sender` clone and is never aborted — but it would still abort
+/// every supervisor over one network hiccup, flooding the render loop with
+/// spurious departure lines, resetting every supervisor's backoff, and
+/// risking a premature "all ready" banner once they all reappear. So
+/// membership is only ever compared against a sweep that actually
+/// completed. A genuinely shrunken registry — for example every backend
+/// re-registering after a gateway restart — produces that same departure
+/// and rediscovery churn legitimately and recovers on its own, so this
+/// guard covers only the failed-or-stalled-sweep half, not membership
+/// churn in general.
+///
+/// The `list_services` call is bounded by [`REDISCOVER_INTERVAL`] itself
+/// rather than left to hang indefinitely, since a stuck gateway connection
+/// must not park this task forever — it is the only path that picks up
+/// both newly registering services and departed ones. `supervisors` and
+/// `aliases` are owned exclusively by this task, so recording a joined or
+/// departed service needs no shared or locked state, and never rewrites an
+/// alias a running supervisor has already been handed.
+///
+/// Both sides are sent to the render loop together, as one
+/// [`Event::Membership`], so the whole sweep is applied to the aggregate
+/// atomically rather than one service at a time.
 async fn rediscover(
     connection: Arc<Connection>,
-    mut known: HashSet<String>,
+    mut supervisors: HashMap<String, AbortHandle>,
     mut aliases: BTreeMap<String, String>,
     sender: mpsc::UnboundedSender<Event>,
 ) {
@@ -426,27 +471,76 @@ async fn rediscover(
             continue;
         };
 
-        let mut discovered = Vec::new();
+        let listed: HashSet<&str> = services.iter().map(String::as_str).collect();
 
-        for service in services {
-            if !known.insert(service.clone()) {
-                continue;
-            }
+        let departed_services: Vec<String> = supervisors
+            .keys()
+            .filter(|service| !listed.contains(service.as_str()))
+            .cloned()
+            .collect();
 
-            let alias = assign_alias(&service, &aliases);
-            aliases.insert(service.clone(), alias.clone());
+        let discovered_services: Vec<String> = services
+            .into_iter()
+            .filter(|service| !supervisors.contains_key(service))
+            .collect();
 
-            let _ = sender.send(Event::discovered(&service, &alias));
-            discovered.push((service, alias));
+        // The invariant this bookkeeping upholds is that no two live services ever
+        // share an alias — both halves of it, not just the departure half. A departed
+        // service's alias is captured here for the membership event's departed side but
+        // deliberately left in `aliases` until after every newcomer below has been
+        // assigned, so a newcomer can never claim a still-nominally-live departing
+        // service's alias out from under it. `assign_newcomer_aliases` covers the other
+        // half: it inserts each newcomer as it goes, so two newcomers discovered in
+        // this very sweep that derive the same short alias collide against each other
+        // too, not only against services outside the sweep.
+        let departed: Vec<(String, String)> = departed_services
+            .into_iter()
+            .map(|service| {
+                let alias = aliases.get(&service).cloned().unwrap_or_else(|| service.clone());
+                (service, alias)
+            })
+            .collect();
+
+        let discovered = assign_newcomer_aliases(discovered_services, &mut aliases);
+
+        // Only now is it safe to free a departed service's alias: every
+        // newcomer this sweep found has already been assigned above, so
+        // removing it here can no longer hand it to one.
+        for (service, _) in &departed {
+            aliases.remove(service);
         }
 
-        // Every discovery from this sweep is announced above before any of
-        // its supervisors is spawned below, so `Discovered` for a service
-        // is always enqueued ahead of any `Message` a sibling's supervisor
-        // could emit — `tokio::spawn` only schedules the task and may run
-        // it concurrently with the rest of this loop.
+        for (service, _) in &departed {
+            // `departed` was built from `supervisors`' own distinct keys,
+            // so this loop can never call `remove` on the same key twice.
+            let handle = supervisors
+                .remove(service)
+                .expect("`departed` was just collected from `supervisors`' own keys");
+
+            // `abort` only requests cancellation, so it happens before the
+            // membership event below: otherwise the departing service's
+            // supervisor could queue a `Lost` event behind its own
+            // departure. This binary's `current_thread` runtime makes that
+            // free today; it only guards a hypothetical multi-thread one.
+            handle.abort();
+        }
+
+        // Emitted only when this sweep actually changed something: a sweep
+        // that finds the same membership as before has nothing worth
+        // telling the operator, and an empty `Event::Membership` would
+        // print no lines and never cross the aggregate either way.
+        if !discovered.is_empty() || !departed.is_empty() {
+            let _ = sender.send(Event::membership(discovered.clone(), departed));
+        }
+
+        // This sweep's whole membership delta is announced above before
+        // any of its supervisors is spawned below, so it is always
+        // enqueued ahead of any `Message` a sibling's supervisor could
+        // emit — `tokio::spawn` only schedules the task and may run it
+        // concurrently with the rest of this loop.
         for (service, alias) in discovered {
-            tokio::spawn(supervise(connection.clone(), service, alias, sender.clone()));
+            let handle = tokio::spawn(supervise(connection.clone(), service.clone(), alias, sender.clone()));
+            supervisors.insert(service, handle.abort_handle());
         }
     }
 }
@@ -466,6 +560,27 @@ fn assign_alias(service: &str, aliases: &BTreeMap<String, String>) -> String {
     let collides = aliases.keys().any(|known| discovery::derive_alias(known) == candidate);
 
     if collides { service.to_owned() } else { candidate }
+}
+
+/// Assigns each newly discovered service in `discovered` its display alias
+/// via [`assign_alias`], inserting each into `aliases` before the next is
+/// considered.
+///
+/// This insert-as-you-go order is what lets two services discovered in the
+/// very same sweep collide with each other: [`assign_alias`]'s collision
+/// check only ever sees the map it is handed, so if both were assigned
+/// against a snapshot of `aliases` taken before either ran, the second
+/// would never see the first's freshly derived alias and both would end up
+/// with it.
+fn assign_newcomer_aliases(discovered: Vec<String>, aliases: &mut BTreeMap<String, String>) -> Vec<(String, String)> {
+    discovered
+        .into_iter()
+        .map(|service| {
+            let alias = assign_alias(&service, aliases);
+            aliases.insert(service.clone(), alias.clone());
+            (service, alias)
+        })
+        .collect()
 }
 
 /// The merged readiness state aggregate `--watch` tracks across every
@@ -587,93 +702,167 @@ impl Aggregate {
     fn mark_reported(&mut self, service: &str) {
         self.blocking.remove(service);
     }
+
+    /// Forgets `service`: a re-discovery sweep found it missing from the
+    /// gateway's registry.
+    ///
+    /// Removes every `snapshot` entry keyed by `service` — the snapshot is
+    /// keyed by `(service, scope name)` precisely so this can target one
+    /// service's entries without touching a sibling's same-named scope —
+    /// and drops it from `blocking`, so a departed service stops holding
+    /// stale scopes and stops blocking the banner on a supervisor that no
+    /// longer exists. Unlike [`Self::block`], does not touch `all_ready`
+    /// directly: a departure can move it in either direction, up by
+    /// unblocking the last blocking service or down by emptying the
+    /// snapshot entirely, so it cannot be forced here and must instead be
+    /// recomputed by [`Self::refresh`].
+    fn forget(&mut self, service: &str) {
+        self.snapshot.retain(|(known, _), _| known != service);
+        self.blocking.remove(service);
+    }
+
+    /// Applies one re-discovery sweep's whole membership delta as a single
+    /// atomic update and reports whether it crossed the aggregate into
+    /// fully ready.
+    ///
+    /// Records every arrival in `discovered` via [`Self::mark_discovered`]
+    /// and forgets every departure in `departed` via [`Self::forget`], then
+    /// calls [`Self::refresh`] exactly once against the resulting state. A
+    /// sweep is one membership change, not a sequence of them, so this is
+    /// the one place that decides its readiness crossing: checking after
+    /// each side, or after each service within a side, could catch an
+    /// intermediate state the sweep's delta never actually left the
+    /// aggregate in — such as one that is briefly non-empty and all-ready
+    /// between forgetting the only blocking service and forgetting the
+    /// last remaining ready one.
+    fn apply_membership(&mut self, discovered: &[(String, String)], departed: &[(String, String)]) -> bool {
+        for (service, _) in discovered {
+            self.mark_discovered(service);
+        }
+
+        for (service, _) in departed {
+            self.forget(service);
+        }
+
+        self.refresh()
+    }
 }
 
-/// Renders one event from a supervisor.
+/// Renders one event from a supervisor or the re-discovery sweep.
 ///
-/// `Message`, `Reattached`, and `Lost` are the three observable events:
-/// each always calls `output::data` so JSON mode sees it exactly as
-/// received, even when nothing is worth printing in human mode. A
-/// `Message` first calls [`Aggregate::mark_reported`] once, unblocking
-/// `service` regardless of how many scopes the message carries, then diffs
-/// its scopes against the merged `aggregate` and prints one transition line
-/// per scope that actually changed, then prints
-/// [`render::print_all_ready_line`] if that message's transitions crossed
-/// the whole set into ready; `Reattached` prints one dim
-/// [`render::print_lifecycle_line`] only — it deliberately leaves `service`
-/// blocked, since a reattached service must stay blocked until its own
-/// next `Message` clears it, so a message from another supervisor cannot
-/// cross the aggregate into ready off this service's stale pre-disconnect
-/// scopes; `Lost` composes its cause and retry delay via
-/// [`render::print_lost_line`].
+/// [`Event::Service`]'s `Message`, `Reattached`, and `Lost` are three of
+/// the four observable events; [`Event::Membership`] is the fourth. Each
+/// always calls `output::data` so JSON mode sees it exactly as received,
+/// even when nothing is worth printing in human mode. A `Message` first
+/// calls [`Aggregate::mark_reported`] once, unblocking `service` regardless
+/// of how many scopes the message carries, then diffs its scopes against
+/// the merged `aggregate` and prints one transition line per scope that
+/// actually changed, then prints [`render::print_all_ready_line`] if that
+/// message's transitions crossed the whole set into ready; `Reattached`
+/// prints one dim [`render::print_lifecycle_line`] only — it deliberately
+/// leaves `service` blocked, since a reattached service must stay blocked
+/// until its own next `Message` clears it, so a message from another
+/// supervisor cannot cross the aggregate into ready off this service's
+/// stale pre-disconnect scopes; `Lost` composes its cause and retry delay
+/// via [`render::print_lost_line`].
 ///
-/// `Discovered` is internal bookkeeping only: it updates `aggregate`'s
-/// blocking set so the "all ready" banner waits for this service's first
-/// message, and never reaches `output::data` — it renders neither a
-/// human line nor a JSON line.
+/// `Membership` is one re-discovery sweep's whole membership delta: every
+/// service it found newly registered, and every one it found missing, on either
+/// side. [`Aggregate::apply_membership`] applies the whole delta and checks for
+/// a readiness crossing exactly once, against the final state, before either
+/// loop runs. Every service on either side then renders through
+/// [`render::print_membership_line`], one line each, so a joined and a departed
+/// service can never drift apart from one another. The lines print arrivals
+/// before departures purely because that reads better; what makes that order
+/// unable to affect the crossing check is that there is exactly one recheck for
+/// the whole delta, not one per side or per service, not merely that the
+/// recheck now happens first.
 fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, alias_width: usize) {
-    let Event { service, alias, data } = event;
+    match event {
+        Event::Service { service, alias, data } => match data {
+            EventData::Message(scopes) => {
+                let payload = EventPayload {
+                    service: &service,
+                    event: EventKind::Message,
+                    scopes: &scopes,
+                    error: None,
+                };
 
-    match data {
-        EventData::Message(scopes) => {
-            let payload = EventPayload {
-                service: &service,
-                event: EventKind::Message,
-                scopes: &scopes,
-                error: None,
+                output::data(&payload, false, format_args!(""), || {
+                    aggregate.mark_reported(&service);
+
+                    let mut scopes = scopes.clone();
+                    scopes.sort_by(|a, b| a.name.cmp(&b.name));
+
+                    for scope in &scopes {
+                        let transition = aggregate.observe(&service, scope);
+
+                        if transition != Transition::Unchanged {
+                            render::print_transition_line(
+                                ServiceColumn::Named { alias: &alias, width: alias_width },
+                                scope,
+                                scope_width,
+                                transition,
+                            );
+                        }
+                    }
+
+                    if aggregate.refresh() {
+                        render::print_all_ready_line();
+                    }
+                });
+            }
+            EventData::Reattached => {
+                let payload = EventPayload {
+                    service: &service,
+                    event: EventKind::Reattached,
+                    scopes: &[],
+                    error: None,
+                };
+
+                output::data(&payload, false, format_args!(""), || {
+                    render::print_lifecycle_line(&alias, alias_width, "stream reattached");
+                });
+            }
+            EventData::Lost { cause, retry_after } => {
+                let payload = EventPayload {
+                    service: &service,
+                    event: EventKind::Lost,
+                    scopes: &[],
+                    error: Some(&cause),
+                };
+
+                output::data(&payload, false, format_args!(""), || {
+                    aggregate.mark_lost(&service);
+                    render::print_lost_line(&alias, alias_width, &cause, retry_after);
+                });
+            }
+        },
+        Event::Membership { discovered, departed } => {
+            let discovered_names: Vec<&str> = discovered.iter().map(|(service, _)| service.as_str()).collect();
+            let departed_names: Vec<&str> = departed.iter().map(|(service, _)| service.as_str()).collect();
+
+            let payload = MembershipPayload {
+                event: EventKind::Membership,
+                discovered: &discovered_names,
+                departed: &departed_names,
             };
 
             output::data(&payload, false, format_args!(""), || {
-                aggregate.mark_reported(&service);
+                let crossed = aggregate.apply_membership(&discovered, &departed);
 
-                let mut scopes = scopes.clone();
-                scopes.sort_by(|a, b| a.name.cmp(&b.name));
-
-                for scope in &scopes {
-                    let transition = aggregate.observe(&service, scope);
-
-                    if transition != Transition::Unchanged {
-                        render::print_transition_line(
-                            ServiceColumn::Named { alias: &alias, width: alias_width },
-                            scope,
-                            scope_width,
-                            transition,
-                        );
-                    }
+                for (_, alias) in &discovered {
+                    render::print_membership_line(alias, alias_width, render::Membership::Discovered);
                 }
 
-                if aggregate.refresh() {
+                for (_, alias) in &departed {
+                    render::print_membership_line(alias, alias_width, render::Membership::Gone);
+                }
+
+                if crossed {
                     render::print_all_ready_line();
                 }
             });
-        }
-        EventData::Reattached => {
-            let payload = EventPayload {
-                service: &service,
-                event: EventKind::Reattached,
-                scopes: &[],
-                error: None,
-            };
-
-            output::data(&payload, false, format_args!(""), || {
-                render::print_lifecycle_line(&alias, alias_width, "stream reattached");
-            });
-        }
-        EventData::Lost { cause, retry_after } => {
-            let payload = EventPayload {
-                service: &service,
-                event: EventKind::Lost,
-                scopes: &[],
-                error: Some(&cause),
-            };
-
-            output::data(&payload, false, format_args!(""), || {
-                aggregate.mark_lost(&service);
-                render::print_lost_line(&alias, alias_width, &cause, retry_after);
-            });
-        }
-        EventData::Discovered => {
-            aggregate.mark_discovered(&service);
         }
     }
 }
@@ -813,10 +1002,32 @@ mod test {
     }
 
     #[test]
+    fn assign_newcomer_aliases_resolves_two_same_sweep_collisions_to_different_aliases() {
+        // Both of these real FQNs derive "route" — a regression test for a
+        // sweep that discovers them together, rather than picking two
+        // synthetic names.
+        let discovered = vec![
+            "operators.route.operatorpb.v1.ReadinessService".to_owned(),
+            "operators.route.neighbourpb.v1.ReadinessService".to_owned(),
+        ];
+        let mut aliases = BTreeMap::new();
+
+        let assigned = assign_newcomer_aliases(discovered, &mut aliases);
+
+        assert_eq!(2, assigned.len());
+        // Whichever fallback spelling `assign_alias` picks, the two
+        // newcomers must not end up naming the same alias.
+        assert_ne!(assigned[0].1, assigned[1].1);
+    }
+
+    #[test]
     fn lost_event_keeps_the_raw_cause_with_no_composed_wording() {
         let event = Event::lost("svc", "alias", "boom", Duration::from_secs(5));
 
-        let EventData::Lost { cause, retry_after } = event.data else {
+        let Event::Service { data, .. } = event else {
+            panic!("expected a Service event");
+        };
+        let EventData::Lost { cause, retry_after } = data else {
             panic!("expected a Lost event");
         };
 
@@ -922,5 +1133,123 @@ mod test {
         // must still clear the block and let the aggregate re-cross.
         aggregate.mark_reported("b");
         assert!(aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_forget_the_blocking_service_crosses_into_ready() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)]), failed_report("b")];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(!aggregate.all_ready);
+
+        aggregate.forget("b");
+        assert!(aggregate.refresh());
+
+        // Still fully ready, but this is not a new crossing.
+        assert!(!aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_forget_removes_only_the_departed_services_scopes() {
+        // Both services share a scope name on purpose — the snapshot is
+        // keyed by `(service, scope name)` precisely because operators
+        // share names like `reconcile`, and a naive `retain` keyed on scope
+        // name alone would wipe both.
+        let reports = vec![
+            report("a", vec![scope("reconcile", State::Ready)]),
+            report("b", vec![scope("reconcile", State::Ready)]),
+        ];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(aggregate.all_ready);
+
+        aggregate.forget("b");
+
+        assert!(
+            aggregate
+                .snapshot
+                .contains_key(&("a".to_owned(), "reconcile".to_owned()))
+        );
+        assert!(
+            !aggregate
+                .snapshot
+                .contains_key(&("b".to_owned(), "reconcile".to_owned()))
+        );
+
+        // `a`'s readiness survives untouched: no crossing since the
+        // aggregate was already ready and still is.
+        assert!(!aggregate.refresh());
+        assert!(aggregate.all_ready);
+    }
+
+    #[test]
+    fn aggregate_forget_a_blocking_service_with_no_scopes_still_unblocks_it() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(aggregate.all_ready);
+
+        aggregate.mark_discovered("b");
+        assert!(!aggregate.all_ready);
+        assert!(aggregate.blocking.contains("b"));
+
+        aggregate.forget("b");
+        assert!(!aggregate.blocking.contains("b"));
+        assert!(aggregate.refresh());
+    }
+
+    #[test]
+    fn aggregate_forget_the_only_service_leaves_the_aggregate_not_ready() {
+        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(aggregate.all_ready);
+
+        aggregate.forget("a");
+        assert!(!aggregate.refresh());
+        assert!(!aggregate.all_ready);
+    }
+
+    #[test]
+    fn aggregate_apply_membership_departing_the_only_blocker_and_the_last_ready_service_together_does_not_cross() {
+        // One sweep departing both the only blocking service and the last
+        // remaining ready service must leave the aggregate empty, never
+        // crossed. `b` (the blocker) is listed ahead of `a` (the last
+        // ready service) on purpose — that is the order that would leave
+        // a non-empty, all-ready snapshot if the readiness recheck ran
+        // after `b`'s departure alone, so this must go red if
+        // `apply_membership` is changed to recheck inside its departure
+        // loop instead of once at the end.
+        let reports = vec![report("a", vec![scope("rib", State::Ready)]), failed_report("b")];
+        let mut aggregate = Aggregate::seed(&reports);
+        assert!(!aggregate.all_ready);
+
+        let departed = vec![("b".to_owned(), "b".to_owned()), ("a".to_owned(), "a".to_owned())];
+        assert!(!aggregate.apply_membership(&[], &departed));
+        assert!(!aggregate.all_ready);
+    }
+
+    #[test]
+    fn aggregate_apply_membership_departing_the_blocker_while_discovering_a_newcomer_does_not_cross() {
+        // A newcomer blocks the banner until its own first message, so a
+        // sweep that both loses its only blocker and discovers a newcomer
+        // must not cross — this must go red if `apply_membership` drops
+        // the loop that records arrivals via `mark_discovered` before the
+        // recheck.
+        let reports = vec![report("a", vec![scope("rib", State::Ready)]), failed_report("b")];
+        let mut aggregate = Aggregate::seed(&reports);
+
+        let discovered = vec![("c".to_owned(), "c".to_owned())];
+        let departed = vec![("b".to_owned(), "b".to_owned())];
+        assert!(!aggregate.apply_membership(&discovered, &departed));
+    }
+
+    #[test]
+    fn aggregate_apply_membership_departing_only_the_blocker_crosses() {
+        // With nothing else arriving in the same sweep and a ready service
+        // remaining, departing the only blocking service does cross the
+        // aggregate into ready — the crossing is not simply suppressed
+        // unconditionally.
+        let reports = vec![report("a", vec![scope("rib", State::Ready)]), failed_report("b")];
+        let mut aggregate = Aggregate::seed(&reports);
+
+        let departed = vec![("b".to_owned(), "b".to_owned())];
+        assert!(aggregate.apply_membership(&[], &departed));
     }
 }
