@@ -79,16 +79,6 @@ modules/acl/controlplane/service.go:ACLService.ShowConfig:config.rules  # legacy
 modules/acl/controlplane/service.go:ACLService.UpdateConfig:existing.rules  # legacy: encapsulate behind an exported method or field
 modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl  # legacy: encapsulate behind an exported method or field
 modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.fwstateName  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.AddMapping:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.AddPrefix:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.RemoveMapping:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.RemoveMapping:next.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.RemovePrefix:next.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.SetDropUnknown:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.SetMTU:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.ShowConfig:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.updateModuleConfig:inst.config  # legacy: encapsulate behind an exported method or field
-modules/nat64/controlplane/service.go:NAT64Service.updateModuleConfig:inst.module  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.addressFamily  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.destroy  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.next  # legacy: encapsulate behind an exported method or field

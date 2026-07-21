@@ -48,14 +48,14 @@ type NAT64Service struct {
 }
 
 type config struct {
-	config NAT64Config
-	module ModuleHandle
+	Config NAT64Config
+	Module ModuleHandle
 }
 
 func (m config) Clone() config {
 	return config{
-		config: m.config.Clone(),
-		module: m.module,
+		Config: m.Config.Clone(),
+		Module: m.Module,
 	}
 }
 
@@ -147,7 +147,7 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
 
-	cfg := inst.config
+	cfg := inst.Config
 	response.Config = &nat64pb.Config{
 		Prefixes: make([]*nat64pb.Prefix, 0, len(cfg.Prefixes)),
 		Mappings: make([]*nat64pb.Mapping, 0, len(cfg.Mappings)),
@@ -189,7 +189,7 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
-	inst.config.Prefixes = append(inst.config.Prefixes, slices.Clone(req.Prefix))
+	inst.Config.Prefixes = append(inst.Config.Prefixes, slices.Clone(req.Prefix))
 
 	if err := m.updateModuleConfig(name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
@@ -218,7 +218,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 	next := inst.Clone()
 
 	removeIdx := -1
-	for idx, prefix := range next.config.Prefixes {
+	for idx, prefix := range next.Config.Prefixes {
 		if bytes.Equal(prefix, req.Prefix) {
 			removeIdx = idx
 			break
@@ -228,8 +228,8 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 		return &nat64pb.RemovePrefixResponse{}, nil
 	}
 
-	next.config.Prefixes = slices.Delete(next.config.Prefixes, removeIdx, removeIdx+1)
-	next.config.Mappings = adjustMappingsAfterPrefixRemove(next.config.Mappings, uint32(removeIdx))
+	next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
+	next.Config.Mappings = adjustMappingsAfterPrefixRemove(next.Config.Mappings, uint32(removeIdx))
 
 	if err := m.updateModuleConfig(name, next); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
@@ -263,15 +263,15 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
-	if req.PrefixIndex >= uint32(len(inst.config.Prefixes)) {
+	if req.PrefixIndex >= uint32(len(inst.Config.Prefixes)) {
 		return nil, status.Errorf(
 			codes.InvalidArgument,
 			"invalid prefix index: got %d, prefixes count %d",
 			req.PrefixIndex,
-			len(inst.config.Prefixes),
+			len(inst.Config.Prefixes),
 		)
 	}
-	inst.config.Mappings = append(inst.config.Mappings, Mapping{
+	inst.Config.Mappings = append(inst.Config.Mappings, Mapping{
 		IPv4:        ipv4,
 		IPv6:        ipv6,
 		PrefixIndex: req.PrefixIndex,
@@ -307,10 +307,10 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 	}
 	next := inst.Clone()
 
-	next.config.Mappings = slices.DeleteFunc(next.config.Mappings, func(mapping Mapping) bool {
+	next.Config.Mappings = slices.DeleteFunc(next.Config.Mappings, func(mapping Mapping) bool {
 		return mapping.IPv4 == ipv4
 	})
-	if len(next.config.Mappings) == len(inst.config.Mappings) {
+	if len(next.Config.Mappings) == len(inst.Config.Mappings) {
 		return &nat64pb.RemoveMappingResponse{}, nil
 	}
 
@@ -341,7 +341,7 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
-	inst.config.MTU = MTUConfig{
+	inst.Config.MTU = MTUConfig{
 		IPv4MTU: req.Mtu.Ipv4Mtu,
 		IPv6MTU: req.Mtu.Ipv6Mtu,
 	}
@@ -363,8 +363,8 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
-	inst.config.DropUnknownPrefix = req.DropUnknownPrefix
-	inst.config.DropUnknownMapping = req.DropUnknownMapping
+	inst.Config.DropUnknownPrefix = req.DropUnknownPrefix
+	inst.Config.DropUnknownMapping = req.DropUnknownMapping
 
 	if err := m.updateModuleConfig(name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
@@ -377,22 +377,22 @@ func (m *NAT64Service) instanceFor(name string) config {
 	inst, ok := m.configs[name]
 	if !ok {
 		return config{
-			config: defaultNAT64Config(),
+			Config: defaultNAT64Config(),
 		}
 	}
 	return inst
 }
 
 func (m *NAT64Service) updateModuleConfig(name string, inst config) error {
-	module, err := m.backend.UpdateModule(name, &inst.config)
+	module, err := m.backend.UpdateModule(name, &inst.Config)
 	if err != nil {
 		return err
 	}
 
-	if inst.module != nil {
-		inst.module.Free()
+	if inst.Module != nil {
+		inst.Module.Free()
 	}
-	inst.module = module
+	inst.Module = module
 	m.configs[name] = inst
 
 	return nil
