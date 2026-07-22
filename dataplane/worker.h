@@ -16,10 +16,23 @@ struct dp_worker;
 
 // log2 of the per-connection SPSC data pipe capacity.
 #define WORKER_TX_PIPE_SIZE 10
-// The per-pipe deferred-free ring holds 2^(WORKER_TX_PIPE_SIZE + this)
-// mbufs, sized above the pipe capacity to absorb consumer-side NIC tx
-// backlog before backpressure drops further packets.
-#define WORKER_TX_PIPE_PENDING_SHIFT 2
+
+// Bounds head-of-line blocking by a persistently rejected packet.
+//
+// A worker_rx_pipe retries a rejected head instead of dropping it, so a
+// packet that can never be transmitted (for example a chain exceeding the
+// destination NIC's segment limit) would otherwise block the rest of the
+// pipe forever. This is not a flat "drop after N rounds" budget: once the
+// same head has been rejected for this many consecutive rounds, the
+// consumer probes whether the NIC still accepts a different packet from
+// the same batch. Only a head that keeps being rejected while other
+// packets get through is dropped to let the pipe proceed. A ring that is
+// stalled end to end keeps failing the probe too, so it keeps retrying
+// indefinitely and never drops — except when the head sits in the ring's
+// last slot before the wrap, where no probe is possible and the budget
+// falls back to an unconditional drop, bounded to at most one per stall
+// episode.
+#define WORKER_TX_RETRY_ROUND_LIMIT 4096
 
 struct worker_read_ctx {
 	uint16_t read_size;
@@ -36,6 +49,11 @@ struct worker_pending_mbuf {
 // and records it in `pending_mbufs`; the reference is released once the
 // consumer's NIC tx completes. Per-pipe completion is FIFO, so the ring
 // is drained head-first.
+//
+// The deferred-free ring is sized by the consumer's tx queue depth rather
+// than a fixed multiple of the pipe capacity: see the pending_capacity
+// computation in dataplane_worker_connect for the liveness invariant this
+// depends on.
 struct worker_tx_pipe {
 	struct data_pipe pipe;
 	struct worker_pending_mbuf *pending_mbufs;
@@ -49,6 +67,20 @@ struct worker_tx_connection {
 	struct worker_tx_pipe *pipes;
 };
 
+// A consumer-side rx pipe paired with retry-budget tracking for its head.
+//
+// A rejected batch is left in the pipe rather than freed, so the next
+// nonzero tx_burst gets another chance to drain it and, on virtio, lets
+// the PMD reclaim completed descriptors in the process. stall_head and
+// stall_rounds bound how long a single persistently untransmittable
+// packet may block the rest of the pipe behind it, per
+// WORKER_TX_RETRY_ROUND_LIMIT.
+struct worker_rx_pipe {
+	struct data_pipe pipe;
+	struct rte_mbuf *stall_head;
+	uint32_t stall_rounds;
+};
+
 struct worker_write_ctx {
 
 	uint16_t write_size;
@@ -58,7 +90,7 @@ struct worker_write_ctx {
 
 	// pipes to read from another workers
 	uint32_t rx_pipe_count;
-	struct data_pipe *rx_pipes;
+	struct worker_rx_pipe *rx_pipes;
 };
 
 struct dataplane_worker {

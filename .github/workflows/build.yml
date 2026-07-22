@@ -584,6 +584,10 @@ jobs:
           tail -n 100 main/test.log 2>/dev/null || echo "main/test.log not found"
 
           echo ""
+          echo "=== virtio_stall/test.log (last 100 lines) ==="
+          tail -n 100 virtio_stall/test.log 2>/dev/null || echo "virtio_stall/test.log not found"
+
+          echo ""
           echo "=== converted/test.log (last 100 lines) ==="
           tail -n 100 converted/test.log 2>/dev/null || echo "converted/test.log not found"
 
@@ -597,4 +601,5 @@ jobs:
           name: functional-test-logs
           path: |
             tests/functional/main/test.log
+            tests/functional/virtio_stall/test.log
             tests/functional/converted/test.log

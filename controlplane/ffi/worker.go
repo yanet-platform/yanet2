@@ -29,6 +29,7 @@ type WorkerCounter struct {
 	LocalTxDrops    uint64
 	RemoteTxDrops   uint64
 	Drops           uint64
+	RemoteTxPending uint64
 }
 
 func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
@@ -56,6 +57,9 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	localTxDropsHandle := counterByName["local_tx_drops"]
 	remoteTxDropsHandle := counterByName["remote_tx_drops"]
 	dropsHandle := counterByName["drops"]
+	// This counter is absent in an older, version-skewed dataplane, so its
+	// handle may be nil and must be guarded before use.
+	remoteTxPendingHandle := counterByName["remote_tx_pending"]
 
 	workerCount := counters.instance_count
 	result := make([]WorkerCounter, workerCount)
@@ -122,6 +126,13 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			)),
 		}
 
+		if remoteTxPendingHandle != nil {
+			worker.RemoteTxPending = uint64(C.yanet_get_counter_value(
+				remoteTxPendingHandle.values,
+				workerCounterSingleValueIdx,
+				idx,
+			))
+		}
 		rxBurstSize := uint32(metadata.rx_burst_size) + 1
 		worker.RxBursts = make([]uint64, rxBurstSize)
 		for burstIdx := C.uint64_t(0); burstIdx < rxBurstsHandle.size; burstIdx++ {

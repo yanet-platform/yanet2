@@ -69,9 +69,9 @@ dataplane_worker_connect(
 
 	if (!(wrk_rx->write_ctx.rx_pipe_count &
 	      (wrk_rx->write_ctx.rx_pipe_count + 1))) {
-		struct data_pipe *pipes = (struct data_pipe *)realloc(
+		struct worker_rx_pipe *pipes = (struct worker_rx_pipe *)realloc(
 			wrk_rx->write_ctx.rx_pipes,
-			sizeof(struct data_pipe) * 2 *
+			sizeof(struct worker_rx_pipe) * 2 *
 				(wrk_rx->write_ctx.rx_pipe_count + 1)
 		);
 		if (pipes == NULL)
@@ -83,8 +83,22 @@ dataplane_worker_connect(
 	if (data_pipe_init(&tx_pipe->pipe, WORKER_TX_PIPE_SIZE))
 		return -1;
 
+	// Size the deferred-free ring so the pipe can never wedge waiting for
+	// space.
+	//
+	// Pending occupancy is bounded by packets still in the pipe (at most
+	// the pipe capacity) plus accepted-but-unreclaimed packets (at most
+	// the consumer's tx queue depth, since completions are reclaimed in
+	// order). So the pending ring can never fill while the pipe is empty.
+	// A producer always makes progress into the pipe, and un-accepted
+	// packets left in the pipe guarantee the consumer keeps issuing the
+	// nonzero tx bursts that let the PMD reclaim completions.
+	uint16_t consumer_tx_queue_len = wrk_rx->config.tx_queue_len
+						 ? wrk_rx->config.tx_queue_len
+						 : 4096;
+	uint32_t pipe_capacity = 1u << WORKER_TX_PIPE_SIZE;
 	uint32_t pending_capacity =
-		1u << (WORKER_TX_PIPE_SIZE + WORKER_TX_PIPE_PENDING_SHIFT);
+		rte_align32pow2(pipe_capacity + consumer_tx_queue_len + 1);
 	tx_pipe->pending_mbufs = (struct worker_pending_mbuf *)malloc(
 		sizeof(struct worker_pending_mbuf) * pending_capacity
 	);
@@ -98,8 +112,11 @@ dataplane_worker_connect(
 
 	++tx_conn->count;
 
-	*(wrk_rx->write_ctx.rx_pipes + wrk_rx->write_ctx.rx_pipe_count++) =
-		tx_pipe->pipe;
+	struct worker_rx_pipe *rx_pipe =
+		wrk_rx->write_ctx.rx_pipes + wrk_rx->write_ctx.rx_pipe_count++;
+	rx_pipe->pipe = tx_pipe->pipe;
+	rx_pipe->stall_head = NULL;
+	rx_pipe->stall_rounds = 0;
 
 	return 0;
 }

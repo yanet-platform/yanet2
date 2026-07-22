@@ -187,6 +187,7 @@ func (m *Counters) Workers(
 			LocalTxDrops:    worker.LocalTxDrops,
 			RemoteTxDrops:   worker.RemoteTxDrops,
 			Drops:           worker.Drops,
+			RemoteTxPending: worker.RemoteTxPending,
 		})
 	}
 
@@ -279,6 +280,7 @@ func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
 			makeCounter("yanet_worker_local_tx_drops", worker.LocalTxDrops, labels...),
 			makeCounter("yanet_worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
 			makeCounter("yanet_worker_drops", worker.Drops, labels...),
+			makeGauge("yanet_worker_remote_tx_pending", float64(worker.RemoteTxPending), labels...),
 		)
 
 		if len(worker.RxBursts) > 0 {
@@ -297,6 +299,14 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 		Name:   name,
 		Labels: labels,
 		Value:  &commonpb.Metric_Counter{Counter: value},
+	}
+}
+
+func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
+	return &commonpb.Metric{
+		Name:   name,
+		Labels: labels,
+		Value:  &commonpb.Metric_Gauge{Gauge: value},
 	}
 }
 

@@ -87,6 +87,12 @@ struct dp_worker {
 	uint32_t device_id;
 	uint32_t queue_id;
 	uint32_t rx_burst_size;
+
+	// Packets currently held in this worker's remote tx pending FIFOs,
+	// awaiting NIC tx completion.
+	//
+	// A gauge, overwritten each round rather than accumulated.
+	uint64_t *remote_tx_pending;
 };
 
 // Value written to dp_config.ready_magic by dp_config_mark_ready once the

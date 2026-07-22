@@ -74,6 +74,9 @@ message WorkerCounter {
   uint64 remote_tx_drops = 15;
   // Total packets dropped by this worker for any reason.
   uint64 drops = 16;
+  // Packets currently held in this worker's remote-tx pending FIFOs
+  // awaiting NIC completion.
+  uint64 remote_tx_pending = 17;
 }
 
 // Requests a snapshot of raw cumulative per-port extended stats counters.

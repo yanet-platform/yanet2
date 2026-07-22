@@ -51,5 +51,8 @@ worker_counters_register(struct dp_config *dp_config) {
 	if (register_one(dp_config, "drops", 1)) {
 		return -1;
 	}
+	if (register_one(dp_config, "remote_tx_pending", 1)) {
+		return -1;
+	}
 	return 0;
 }

@@ -119,29 +119,191 @@ worker_connection_push_cb(void **item, size_t count, void *data) {
 	return 0;
 }
 
+// Carries the per-pipe retry state into worker_rx_pipe_pop_cb, which the
+// data_pipe callback signature has no room for.
+struct worker_rx_pop_ctx {
+	struct dataplane_worker *worker;
+	struct worker_rx_pipe *rx_pipe;
+};
+
+// Tracks how many consecutive rounds the same head has been rejected,
+// reporting when the retry budget is spent.
+static bool
+worker_rx_pipe_note_rejected_head(
+	struct worker_rx_pipe *rx_pipe, struct rte_mbuf *head
+) {
+	if (rx_pipe->stall_head == head) {
+		++rx_pipe->stall_rounds;
+	} else {
+		rx_pipe->stall_head = head;
+		rx_pipe->stall_rounds = 1;
+	}
+
+	if (rx_pipe->stall_rounds > WORKER_TX_RETRY_ROUND_LIMIT) {
+		// Saturate so a very long stall cannot wrap the counter.
+		rx_pipe->stall_rounds = WORKER_TX_RETRY_ROUND_LIMIT + 1;
+		return true;
+	}
+
+	return false;
+}
+
+// Drops a rejected head and folds its accounting into the shared
+// counters, then clears stall tracking so the next round starts fresh.
+static void
+worker_rx_pipe_drop_head(
+	struct dataplane_worker *worker,
+	struct worker_rx_pipe *rx_pipe,
+	struct rte_mbuf *head
+) {
+	rte_pktmbuf_free(head);
+	*(worker->dp_worker->local_tx_drops) += 1;
+	*(worker->dp_worker->drop_count) += 1;
+	(*worker->dp_worker->remote_rx_count) += 1;
+
+	rx_pipe->stall_head = NULL;
+	rx_pipe->stall_rounds = 0;
+}
+
+// Handles a rejected head whose retry budget is spent.
+//
+// Probes ahead of it to tell a truly stuck head apart from one merely
+// stalled behind a full ring, and returns how many mbufs were consumed
+// from the front of the batch.
+static size_t
+worker_rx_pipe_resolve_stalled_head(
+	struct dataplane_worker *worker,
+	struct worker_rx_pipe *rx_pipe,
+	struct rte_mbuf **mbufs,
+	size_t count
+) {
+	// The budget alone cannot tell a head the NIC will never
+	// accept apart from a head merely caught behind a fully
+	// stalled ring: dropping in the latter case only frees a
+	// pipe slot that the producer immediately refills, so the
+	// pending ring fills up around a consumer that never moves.
+	//
+	// Discriminate by probing the next packet in the batch alone:
+	// if the NIC accepts it, the ring is making progress and the
+	// head itself is at fault, so drop it.
+	//
+	// If the probe is rejected too, every packet is being rejected
+	// right now, so dropping would only feed more packets into the
+	// same trap. Keep retrying instead and the pending occupancy
+	// never grows.
+	if (count >= 2) {
+		uint16_t probe = rte_eth_tx_burst(
+			worker->port_id, worker->queue_id, &mbufs[1], 1
+		);
+
+		if (probe == 1) {
+			*(worker->dp_worker->tx_count) += 1;
+			(*worker->dp_worker->remote_rx_count) += 1;
+
+			// The probe is transmitted ahead of the head
+			// we are about to drop, reordering the two
+			// relative to each other. That is acceptable
+			// here: the alternative is dropping the head
+			// regardless, and the rest of the pipe still
+			// drains in order behind this pair.
+			worker_rx_pipe_drop_head(worker, rx_pipe, mbufs[0]);
+			// Consumes a contiguous prefix: the dropped
+			// head and the transmitted probe.
+			return 2;
+		}
+	} else if (count == 1) {
+		// The window handed to the callback is clipped at the
+		// ring boundary: a head parked in the ring's last
+		// masked slot always sees count == 1, even with a
+		// large backlog wrapped behind it. Tell that case
+		// apart from a genuinely lone head by testing the
+		// head's own slot index against the ring's last slot,
+		// rather than inferring it from count: item points
+		// into pipe->data at the read side's masked_from, so
+		// the head is at the boundary iff that offset is the
+		// ring's last slot. Read the true backlog directly off
+		// the pipe's positions to know whether anything is
+		// queued behind a boundary head worth waiting for.
+		// This mirrors the ordering data_pipe_ring_handle
+		// itself uses for a pop: r_pos is ours (relaxed),
+		// w_pos is the producer's (acquire).
+		struct data_pipe *pipe = &rx_pipe->pipe;
+		size_t backlog =
+			atomic_load_explicit(
+				pipe->w_pos, memory_order_acquire
+			) -
+			atomic_load_explicit(pipe->r_pos, memory_order_relaxed);
+		bool head_at_last_slot = (size_t)((void **)mbufs - pipe->data
+					 ) == (1u << pipe->size) - 1;
+
+		if (head_at_last_slot && backlog >= 2) {
+			// The head sits in the ring's last slot
+			// before the wrap, guaranteed by the
+			// positional check above rather than inferred
+			// from count: the window handed to us is
+			// clipped at the boundary, not because the
+			// head is genuinely alone. There is no second
+			// packet in this batch to probe with, and the
+			// probe above could not reach across the wrap
+			// anyway: the callback may only consume a
+			// contiguous prefix bounded by count, so an
+			// accepted cross-boundary probe could not be
+			// consumed. Fall back to a plain timeout drop
+			// of the head instead, but only once
+			// backlog >= 2 confirms something is actually
+			// queued behind it: a lone boundary head with
+			// nothing behind it must keep waiting, not
+			// drop. During a total stall this costs at
+			// most one drop per stall episode, because
+			// dropping moves the head to the ring's first
+			// slot, where the discriminating probe above
+			// is active again and the pending-occupancy
+			// invariant keeps its slack.
+			worker_rx_pipe_drop_head(worker, rx_pipe, mbufs[0]);
+			return 1;
+		}
+	}
+
+	// Either there was nobody to probe with and nothing queued
+	// behind the head in the ring, so the lone head blocks
+	// nobody, or the probe was rejected too and the ring is
+	// genuinely stalled. Either way, keep waiting instead of
+	// dropping.
+	return 0;
+}
+
 static size_t
 worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
-	struct dataplane_worker *worker = (struct dataplane_worker *)data;
+	struct worker_rx_pop_ctx *pop_ctx = (struct worker_rx_pop_ctx *)data;
+	struct dataplane_worker *worker = pop_ctx->worker;
+	struct worker_rx_pipe *rx_pipe = pop_ctx->rx_pipe;
 	struct rte_mbuf **mbufs = (struct rte_mbuf **)item;
-
-	(*worker->dp_worker->remote_rx_count) += count;
 
 	size_t written = rte_eth_tx_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
 	*(worker->dp_worker->tx_count) += written;
+	// Count each relayed packet once, at acceptance, not on every retry
+	// of a rejected tail.
+	(*worker->dp_worker->remote_rx_count) += written;
 
-	size_t dropped = count - written;
-	if (dropped > 0) {
-		*(worker->dp_worker->local_tx_drops) += dropped;
-		*(worker->dp_worker->drop_count) += dropped;
+	if (written > 0) {
+		rx_pipe->stall_head = NULL;
+		rx_pipe->stall_rounds = 0;
+		return written;
 	}
 
-	for (size_t idx = written; idx < count; ++idx) {
-		rte_pktmbuf_free(mbufs[idx]);
+	// Nothing was accepted this round: leave the whole batch in the pipe
+	// instead of freeing it, so the next round issues another nonzero
+	// tx_burst and, on virtio, gives the PMD another chance to reclaim
+	// completed descriptors inside that call.
+	if (!worker_rx_pipe_note_rejected_head(rx_pipe, mbufs[0])) {
+		return 0;
 	}
 
-	return count;
+	return worker_rx_pipe_resolve_stalled_head(
+		worker, rx_pipe, mbufs, count
+	);
 }
 
 static size_t
@@ -212,15 +374,23 @@ worker_tx_pipe_reclaim(struct worker_tx_pipe *tx_pipe) {
 
 static void
 worker_collect_from_port(struct dataplane_worker *worker) {
+	uint64_t pending = 0;
+
 	for (uint32_t conn_idx = 0; conn_idx < worker->dataplane->device_count;
 	     ++conn_idx) {
 		struct worker_tx_connection *tx_conn =
 			worker->write_ctx.tx_connections + conn_idx;
 		for (uint32_t pipe_idx = 0; pipe_idx < tx_conn->count;
 		     ++pipe_idx) {
-			worker_tx_pipe_reclaim(tx_conn->pipes + pipe_idx);
+			struct worker_tx_pipe *tx_pipe =
+				tx_conn->pipes + pipe_idx;
+			worker_tx_pipe_reclaim(tx_pipe);
+			pending +=
+				tx_pipe->pending_stop - tx_pipe->pending_start;
 		}
 	}
+
+	*(worker->dp_worker->remote_tx_pending) = pending;
 }
 
 static void
@@ -306,8 +476,12 @@ worker_write(
 
 	// Read incoming mbufs from remote workers and write them to device
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
+		struct worker_rx_pop_ctx pop_ctx = {
+			.worker = worker,
+			.rx_pipe = ctx->rx_pipes + pipe_idx,
+		};
 		data_pipe_item_pop(
-			ctx->rx_pipes + pipe_idx, worker_rx_pipe_pop_cb, worker
+			&pop_ctx.rx_pipe->pipe, worker_rx_pipe_pop_cb, &pop_ctx
 		);
 	}
 }
@@ -580,6 +754,9 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	dp_worker->remote_tx_drops =
 		counter_get_address(7, worker_counter_storage);
 	dp_worker->drop_count = counter_get_address(8, worker_counter_storage);
+
+	dp_worker->remote_tx_pending =
+		counter_get_address(9, worker_counter_storage);
 
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);

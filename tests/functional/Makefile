@@ -53,7 +53,7 @@ endif
 # falling back to the preyanet snapshot only when baseline fails.
 test: prepare-vm
 	@echo "Running all functional tests..."
-	go test -count=1 -v ./main/...
+	go test -count=1 -v -p 1 ./main/... ./virtio_stall/...
 
 # Run main functional tests
 test-main: prepare-vm
