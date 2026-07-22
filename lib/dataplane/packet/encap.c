@@ -159,7 +159,10 @@ fill_outer_ip6_from_inner(struct rte_ipv6_hdr *outer, struct packet *inner) {
 
 int
 packet_ip4_encap(
-	struct packet *packet, const uint8_t *dst, const uint8_t *src
+	struct packet *packet,
+	const uint8_t *dst,
+	const uint8_t *src,
+	uint8_t dscp_flag
 ) {
 	struct rte_ipv4_hdr outer_hdr;
 	rte_memcpy(&outer_hdr.src_addr, src, NET4_LEN);
@@ -169,6 +172,9 @@ packet_ip4_encap(
 	int inner_size = fill_outer_ip4_from_inner(&outer_hdr, packet);
 	if (inner_size < 0) {
 		return -1;
+	}
+	if (dscp_flag != DSCP_MARK_ALWAYS) {
+		outer_hdr.type_of_service &= DSCP_ECN_MASK;
 	}
 	outer_hdr.total_length =
 		rte_cpu_to_be_16(sizeof(outer_hdr) + inner_size);
@@ -186,7 +192,10 @@ packet_ip4_encap(
 
 int
 packet_ip6_encap(
-	struct packet *packet, const uint8_t *dst, const uint8_t *src
+	struct packet *packet,
+	const uint8_t *dst,
+	const uint8_t *src,
+	uint8_t dscp_flag
 ) {
 	struct rte_ipv6_hdr outer_hdr;
 	rte_memcpy(&outer_hdr.src_addr, src, NET6_LEN);
@@ -195,6 +204,11 @@ packet_ip6_encap(
 	int inner_size = fill_outer_ip6_from_inner(&outer_hdr, packet);
 	if (inner_size < 0) {
 		return -1;
+	}
+	if (dscp_flag != DSCP_MARK_ALWAYS) {
+		outer_hdr.vtc_flow &= ~rte_cpu_to_be_32(
+			(uint32_t)DSCP_MARK_MASK << RTE_IPV6_HDR_TC_SHIFT
+		);
 	}
 	outer_hdr.payload_len = rte_cpu_to_be_16(inner_size);
 
@@ -413,4 +427,94 @@ packet_ip6_encap_gre(
 		&outer,
 		sizeof(outer)
 	);
+}
+
+/*
+ * Read the DSCP bits of the inner header of an encapsulated packet.
+ *
+ * proto is the next-header value of the outer header and offset the position
+ * of the inner header from the start of the packet data.
+ *
+ * Returns the DSCP value aligned to a TOS / traffic class byte, that is
+ * masked with DSCP_MARK_MASK, or -1 if the outer header does not carry an
+ * inner IP packet.
+ */
+static int
+inner_dscp(struct packet *packet, uint8_t proto, uint32_t offset) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	if (proto == IPPROTO_IPIP) {
+		const struct rte_ipv4_hdr *inner = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_ipv4_hdr *, offset
+		);
+		return inner->type_of_service & DSCP_MARK_MASK;
+	}
+
+	if (proto == IPPROTO_IPV6) {
+		const struct rte_ipv6_hdr *inner = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_ipv6_hdr *, offset
+		);
+		return (rte_be_to_cpu_32(inner->vtc_flow) >>
+			RTE_IPV6_HDR_TC_SHIFT) &
+		       DSCP_MARK_MASK;
+	}
+
+	return -1;
+}
+
+int
+packet_ip4_copy_inner_dscp(struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	uint16_t offset = packet->network_header.offset;
+
+	struct rte_ipv4_hdr *outer =
+		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv4_hdr *, offset);
+
+	int dscp = inner_dscp(
+		packet, outer->next_proto_id, offset + rte_ipv4_hdr_len(outer)
+	);
+	if (dscp < 0) {
+		return -1;
+	}
+
+	uint8_t old_dscp = outer->type_of_service & DSCP_MARK_MASK;
+	if (dscp == old_dscp) {
+		return 0;
+	}
+
+	uint16_t checksum = ~rte_be_to_cpu_16(outer->hdr_checksum);
+	checksum = csum_minus(checksum, old_dscp);
+	checksum = csum_plus(checksum, dscp);
+	outer->hdr_checksum = ~rte_cpu_to_be_16(checksum);
+
+	outer->type_of_service =
+		dscp | (outer->type_of_service & DSCP_ECN_MASK);
+
+	return 0;
+}
+
+int
+packet_ip6_copy_inner_dscp(struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	uint16_t offset = packet->network_header.offset;
+
+	struct rte_ipv6_hdr *outer =
+		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv6_hdr *, offset);
+
+	int dscp = inner_dscp(
+		packet, outer->proto, offset + sizeof(struct rte_ipv6_hdr)
+	);
+	if (dscp < 0) {
+		return -1;
+	}
+
+	uint32_t vtc_flow = rte_be_to_cpu_32(outer->vtc_flow);
+	uint32_t ecn =
+		vtc_flow & ((uint32_t)DSCP_ECN_MASK << RTE_IPV6_HDR_TC_SHIFT);
+
+	vtc_flow &= ~(uint32_t)RTE_IPV6_HDR_TC_MASK;
+	vtc_flow |= ((uint32_t)dscp << RTE_IPV6_HDR_TC_SHIFT) | ecn;
+	outer->vtc_flow = rte_cpu_to_be_32(vtc_flow);
+
+	return 0;
 }

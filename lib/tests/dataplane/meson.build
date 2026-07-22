@@ -28,6 +28,21 @@ gre_test = executable(
 )
 test('gre', gre_test, suite: 'lib_packet')
 
+encap_dscp_test = executable(
+  'encap_dscp_test',
+  'encap_dscp_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_packet_dp_dep,
+    lib_lib_utils_dep,
+    lib_logging_dep,
+    libdpdk_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('encap_dscp', encap_dscp_test, suite: 'lib_packet')
+
 clock_test = executable(
   'clock_test',
   'clock_test.c',
