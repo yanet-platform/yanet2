@@ -31,12 +31,11 @@ use ync::{
     completion,
     errors::Error,
     output::{self, CommonFormat},
-    readiness,
 };
 
 use crate::operatorpb::{
     DeleteRouteRequest, FlushRoutesRequest, InsertRouteRequest, ListConfigsRequest, LookupRouteRequest, RouteSourceId,
-    ShowRoutesRequest, readiness_service_client::ReadinessServiceClient, route_service_client::RouteServiceClient,
+    ShowRoutesRequest, route_service_client::RouteServiceClient,
 };
 
 #[allow(clippy::all, non_snake_case)]
@@ -46,12 +45,6 @@ pub mod operatorpb {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
-
-/// The fully-qualified gRPC readiness service name used in error messages.
-const READINESS_SERVICE_NAME: &str = "operators.route.operatorpb.v1.ReadinessService";
-
-/// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
-const EXIT_NOT_READY: i32 = 2;
 
 /// Route operator CLI (RIB management).
 #[derive(Debug, Clone, Parser)]
@@ -83,14 +76,6 @@ pub enum ModeCmd {
     Remove(RouteRemoveCmd),
     /// Flush RIB to FIB for a configuration.
     Flush(RouteFlushCmd),
-    /// Show per-scope readiness of the route operator.
-    Ready(ReadyCmd),
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct ReadyCmd {
-    /// Restrict output to these scope names; empty means all.
-    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -188,8 +173,7 @@ async fn start() {
     ync::init(cmd.verbose, cmd.format);
 
     match run(cmd).await {
-        Ok(true) => {}
-        Ok(false) => std::process::exit(EXIT_NOT_READY),
+        Ok(()) => {}
         Err(err) => {
             output::failure(&err);
             std::process::exit(err.exit_code());
@@ -215,26 +199,23 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 /// Run the requested subcommand.
 ///
-/// Returns `Ok(true)` when the RPC succeeded and every returned scope is
-/// `STATE_READY`, `Ok(false)` when the RPC succeeded but at least one scope
-/// is not ready, and `Err(_)` on transport or RPC failure.
-async fn run(cmd: Cmd) -> Result<bool, Error> {
+/// Returns `Ok(())` when the RPC succeeded, `Err(_)` on transport or RPC
+/// failure.
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = RouteService::new(&cmd.connection).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await.map(|()| true),
-        ModeCmd::Show(c) => service.show_routes(c).await.map(|()| true),
-        ModeCmd::Lookup(c) => service.lookup_route(c).await.map(|()| true),
-        ModeCmd::Insert(c) => service.insert_route(c).await.map(|()| true),
-        ModeCmd::Remove(c) => service.remove_route(c).await.map(|()| true),
-        ModeCmd::Flush(c) => service.flush_routes(c).await.map(|()| true),
-        ModeCmd::Ready(c) => service.ready(c).await,
+        ModeCmd::List => service.list_configs().await,
+        ModeCmd::Show(c) => service.show_routes(c).await,
+        ModeCmd::Lookup(c) => service.lookup_route(c).await,
+        ModeCmd::Insert(c) => service.insert_route(c).await,
+        ModeCmd::Remove(c) => service.remove_route(c).await,
+        ModeCmd::Flush(c) => service.flush_routes(c).await,
     }
 }
 
 pub struct RouteService {
     service: Service<RouteServiceClient<LayeredChannel>>,
-    readiness: Service<ReadinessServiceClient<LayeredChannel>>,
 }
 
 impl RouteService {
@@ -245,13 +226,8 @@ impl RouteService {
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         });
-        let readiness = Service::new(&conn, READINESS_SERVICE_NAME, |channel| {
-            ReadinessServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
 
-        Ok(Self { service, readiness })
+        Ok(Self { service })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -423,20 +399,6 @@ impl RouteService {
         output::success("flush", format_args!("Flushed {}.", cmd.name));
 
         Ok(())
-    }
-
-    pub async fn ready(&mut self, cmd: ReadyCmd) -> Result<bool, Error> {
-        let request = readinesspb::pb::ReadyRequest { scopes: cmd.scopes.clone() };
-
-        let response = self
-            .readiness
-            .client()
-            .ready(request)
-            .await
-            .map_err(self.readiness.status("ready"))?
-            .into_inner();
-
-        Ok(readiness::report(&response.scopes, &cmd.scopes))
     }
 }
 

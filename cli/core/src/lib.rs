@@ -11,7 +11,6 @@ pub mod humanfmt;
 pub mod logging;
 pub mod metrics;
 pub mod output;
-pub mod readiness;
 
 /// Initialise the logger and output backend from a `Format` choice.
 ///

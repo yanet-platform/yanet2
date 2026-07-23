@@ -5,29 +5,20 @@ use clap_complete::CompleteEnv;
 use commonpb::pb::GetMetricsRequest;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{ConnectionArgs, Service},
     errors::Error,
     output::{self, CommonFormat},
-    readiness,
 };
 
-use crate::operatorpb::{
-    metrics_service_client::MetricsServiceClient, readiness_service_client::ReadinessServiceClient,
-};
+use crate::operatorpb::metrics_service_client::MetricsServiceClient;
 
 #[allow(clippy::all, non_snake_case)]
 pub mod operatorpb {
     tonic::include_proto!("operators.pipeline.operatorpb.v1");
 }
 
-/// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "operators.pipeline.operatorpb.v1.ReadinessService";
-
 /// The fully-qualified metrics service name used in error messages.
 const METRICS_SERVICE_NAME: &str = "operators.pipeline.operatorpb.v1.MetricsService";
-
-/// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
-const EXIT_NOT_READY: i32 = 2;
 
 /// Pipeline operator CLI.
 #[derive(Debug, Clone, Parser)]
@@ -49,14 +40,6 @@ pub struct Cmd {
 pub enum ModeCmd {
     /// Show operator metrics.
     Metrics,
-    /// Show per-scope readiness of the pipeline operator.
-    Ready(ReadyCmd),
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct ReadyCmd {
-    /// Restrict output to these scope names; empty means all.
-    pub scopes: Vec<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -68,8 +51,7 @@ pub async fn main() {
     ync::init(cmd.verbose, cmd.format);
 
     match run(cmd).await {
-        Ok(true) => {}
-        Ok(false) => std::process::exit(EXIT_NOT_READY),
+        Ok(()) => {}
         Err(err) => {
             output::failure(&err);
             std::process::exit(err.exit_code());
@@ -79,11 +61,9 @@ pub async fn main() {
 
 /// Run the requested subcommand.
 ///
-/// Returns `Ok(true)` when the subcommand succeeded (and, for `ready`,
-/// every returned scope is `STATE_READY`), `Ok(false)` when `ready` succeeded
-/// but at least one scope is not ready, and `Err(_)` on transport or RPC
-/// failure.
-async fn run(cmd: Cmd) -> Result<bool, Error> {
+/// Returns `Ok(())` when the metrics RPC succeeded, `Err(_)` on transport or
+/// RPC failure.
+async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::Metrics => {
             let mut service = Service::connect(&cmd.connection, METRICS_SERVICE_NAME, |channel| {
@@ -103,42 +83,7 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
             let data = serde_json::to_string(&response).expect("metrics serialization must not fail");
             println!("{data}");
 
-            Ok(true)
+            Ok(())
         }
-        ModeCmd::Ready(ready_cmd) => {
-            let mut service = PipelineReadinessService::new(&cmd.connection).await?;
-            service.ready(ready_cmd).await
-        }
-    }
-}
-
-pub struct PipelineReadinessService {
-    service: Service<ReadinessServiceClient<LayeredChannel>>,
-}
-
-impl PipelineReadinessService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
-            ReadinessServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
-
-        Ok(Self { service })
-    }
-
-    pub async fn ready(&mut self, cmd: ReadyCmd) -> Result<bool, Error> {
-        let request = readinesspb::pb::ReadyRequest { scopes: cmd.scopes.clone() };
-
-        let response = self
-            .service
-            .client()
-            .ready(request)
-            .await
-            .map_err(self.service.status("ready"))?
-            .into_inner();
-
-        Ok(readiness::report(&response.scopes, &cmd.scopes))
     }
 }

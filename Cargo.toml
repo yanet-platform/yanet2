@@ -38,8 +38,6 @@ members = [
     "devices/plain/cli",
     "devices/vlan/cli",
     "devices/trafgen/cli",
-    "operators/decap/cli",
-    "operators/forward/cli",
     "operators/pipeline/cli",
     "operators/route/cli/route",
     "operators/route/cli/neighbour",
