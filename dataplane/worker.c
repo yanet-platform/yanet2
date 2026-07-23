@@ -310,6 +310,15 @@ worker_write(
 			ctx->rx_pipes + pipe_idx, worker_rx_pipe_pop_cb, worker
 		);
 	}
+
+	// Give the PMD a chance to reclaim completed TX descriptors even
+	// when no packet was transmitted this round. On virtio this is the
+	// only way to drain the accepted-but-unreclaimed tail of the last
+	// burst at quiescence (the driver does not reclaim outside a nonzero
+	// tx_burst without this op). For PMDs that already reclaim inside
+	// tx_burst it is a cheap no-op; for those without the op (e.g. ring)
+	// it returns -ENOTSUP, which we ignore.
+	rte_eth_tx_done_cleanup(worker->port_id, worker->queue_id, 0);
 }
 
 static void
