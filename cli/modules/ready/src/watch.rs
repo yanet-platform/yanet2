@@ -77,8 +77,8 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
     }
 
     let aliases = discovery::alias_map(&services);
-    let alias_width = render::name_width(aliases.values().map(String::as_str));
-    let scope_width = render::name_width(
+    let mut alias_width = render::name_width(aliases.values().map(String::as_str));
+    let mut scope_width = render::name_width(
         reports
             .iter()
             .flat_map(|report| report.scopes.iter())
@@ -131,10 +131,40 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
     drop(sender);
 
     while let Some(event) = receiver.recv().await {
+        grow_widths(&event, &mut scope_width, &mut alias_width);
         render_event(event, &mut aggregate, scope_width, alias_width);
     }
 
     Ok(true)
+}
+
+/// Grows `scope_width` and `alias_width` to fit every name `event` carries,
+/// reusing [`render::name_width`]'s own `[MIN, MAX]` clamp for each name
+/// rather than a hardcoded bound.
+///
+/// Only ever widens: a name shorter than the running width leaves it
+/// unchanged, since a line already printed against the wider column must
+/// not go stale. `service` is registered gateway-side before its
+/// supervisor's `Watch` stream can carry a scope, so an `Event::Service`
+/// widens `alias_width` off its own `alias` unconditionally, but only
+/// widens `scope_width` when `data` is a `Message` — `Reattached` and
+/// `Lost` carry no scopes. `Event::Membership` widens `alias_width` off
+/// every alias on either side of the sweep's delta.
+fn grow_widths(event: &Event, scope_width: &mut usize, alias_width: &mut usize) {
+    match event {
+        Event::Service { alias, data, .. } => {
+            *alias_width = render::name_width([alias.as_str()]).max(*alias_width);
+
+            if let EventData::Message(scopes) = data {
+                let names = scopes.iter().map(|scope| scope.name.as_str());
+                *scope_width = render::name_width(names).max(*scope_width);
+            }
+        }
+        Event::Membership { discovered, departed } => {
+            let aliases = discovered.iter().chain(departed).map(|(_, alias)| alias.as_str());
+            *alias_width = render::name_width(aliases).max(*alias_width);
+        }
+    }
 }
 
 /// Probes one service for the initial snapshot, bounded by [`PROBE_TIMEOUT`].
@@ -897,6 +927,92 @@ mod test {
             scopes: Vec::new(),
             error: Some("unknown service".to_owned()),
         }
+    }
+
+    #[test]
+    fn grow_widths_widens_alias_width_from_a_service_event_and_never_shrinks_it() {
+        let mut scope_width = 12;
+        let mut alias_width = 12;
+
+        let event = Event::Service {
+            service: "svc".to_owned(),
+            alias: "x".repeat(16),
+            data: EventData::Message(Vec::new()),
+        };
+        grow_widths(&event, &mut scope_width, &mut alias_width);
+
+        assert_eq!(16, alias_width);
+        assert_eq!(12, scope_width);
+
+        let shorter = Event::Service {
+            service: "svc2".to_owned(),
+            alias: "a".to_owned(),
+            data: EventData::Message(Vec::new()),
+        };
+        grow_widths(&shorter, &mut scope_width, &mut alias_width);
+
+        assert_eq!(16, alias_width);
+    }
+
+    #[test]
+    fn grow_widths_clamps_alias_width_to_the_maximum_name_width() {
+        let mut scope_width = 12;
+        let mut alias_width = 12;
+
+        let event = Event::Service {
+            service: "svc".to_owned(),
+            alias: "x".repeat(100),
+            data: EventData::Message(Vec::new()),
+        };
+        grow_widths(&event, &mut scope_width, &mut alias_width);
+
+        assert_eq!(40, alias_width);
+    }
+
+    #[test]
+    fn grow_widths_widens_scope_width_from_a_message_events_scopes() {
+        let mut scope_width = 12;
+        let mut alias_width = 12;
+
+        let event = Event::Service {
+            service: "svc".to_owned(),
+            alias: "svc".to_owned(),
+            data: EventData::Message(vec![scope(&"x".repeat(20), State::Ready)]),
+        };
+        grow_widths(&event, &mut scope_width, &mut alias_width);
+
+        assert_eq!(20, scope_width);
+    }
+
+    #[test]
+    fn grow_widths_leaves_scope_width_untouched_for_lifecycle_events() {
+        let mut scope_width = 12;
+        let mut alias_width = 12;
+
+        let event = Event::Service {
+            service: "svc".to_owned(),
+            alias: "x".repeat(20),
+            data: EventData::Reattached,
+        };
+        grow_widths(&event, &mut scope_width, &mut alias_width);
+
+        assert_eq!(20, alias_width);
+        assert_eq!(12, scope_width);
+    }
+
+    #[test]
+    fn grow_widths_widens_alias_width_from_both_sides_of_a_membership_event() {
+        let mut scope_width = 12;
+        let mut alias_width = 12;
+
+        let event = Event::Membership {
+            discovered: vec![("svc".to_owned(), "x".repeat(15))],
+            departed: vec![("svc2".to_owned(), "y".repeat(18))],
+        };
+        grow_widths(&event, &mut scope_width, &mut alias_width);
+
+        assert_eq!(18, alias_width);
+        assert_eq!(12, scope_width);
     }
 
     #[test]

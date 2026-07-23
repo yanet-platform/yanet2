@@ -88,8 +88,9 @@ pub fn record_transition(snapshot: &mut BTreeMap<(String, String), Scope>, servi
 ///
 /// [`ServiceColumn::None`] is single-service watch, where every line names
 /// the same service and repeating it would be noise. [`ServiceColumn::Named`]
-/// is aggregate watch: `alias` is padded to `width`, which must be measured
-/// once (via [`super::name_width`]) and held for the whole session.
+/// is aggregate watch: `alias` is padded to `width`, which is measured at
+/// startup and only ever widened as new services or scopes appear, never
+/// shrunk.
 #[derive(Debug, Clone, Copy)]
 pub enum ServiceColumn<'a> {
     None,
@@ -158,7 +159,13 @@ fn transition_prefix(
             )
         }
         Transition::ReasonChanged | Transition::Unchanged | Transition::FirstSeen => {
-            (label.to_string(), style.paint(label))
+            // Padded to `STATE_WIDTH` so the trailing `first seen` tag and
+            // any inline reason line up at a fixed column across every
+            // single-label line — a `StateChanged`'s `PREV -> NEXT` shape
+            // cannot share that column anyway, so it is left unpadded.
+            let label = format!("{label:<width$}", width = super::STATE_WIDTH);
+
+            (label.clone(), style.paint(&label))
         }
     };
 
@@ -238,9 +245,9 @@ pub fn print_transition_line(service: ServiceColumn, scope: &Scope, name_width: 
 ///
 /// Callers compose `message` themselves — [`print_lost_line`] shows how a
 /// lost stream's cause and retry delay become one such message.
-/// `HH:MM:SS  [!] alias  message`, the whole line dim — this is transport
+/// `HH:MM:SS  [!] alias message`, the whole line dim — this is transport
 /// chatter, not a readiness state, and must never borrow a [`StateStyle`]
-/// colour or [`print_membership_line`]'s full weight. Long messages wrap
+/// colour or [`print_membership_line`]'s colored mark. Long messages wrap
 /// with a hanging indent, the same way a transition line's reason text
 /// does.
 pub fn print_lifecycle_line(alias: &str, alias_width: usize, message: &str) {
@@ -250,7 +257,7 @@ pub fn print_lifecycle_line(alias: &str, alias_width: usize, message: &str) {
     let mark = if colored { "[!]" } else { "[--]" };
     let name = format!("{alias:<alias_width$}");
 
-    let prefix = format!("{timestamp}  {mark} {name}  ");
+    let prefix = format!("{timestamp}  {mark} {name} ");
     let indent = prefix.chars().count();
 
     print!("{}", dim(&prefix, colored));
@@ -348,16 +355,19 @@ impl MembershipStyle {
     }
 }
 
-/// Prints one full-weight line for a `--watch` registry membership change:
-/// a service joining or leaving the gateway's registry.
+/// Prints one `--watch` registry membership change line: a service joining
+/// or leaving the gateway's registry.
 ///
 /// Structured like [`print_lifecycle_line`] — timestamp, bracketed mark,
 /// alias padded to `alias_width`, wrapped message with a hanging indent —
-/// but printed at full weight rather than dim: a backend joining or
-/// leaving the registry is a state-level event, not transport chatter.
-/// `membership` alone selects the mark, its color, and the message text,
-/// so the joined and departed lines can never drift apart from one
-/// another.
+/// but the mark keeps `membership`'s own color instead of [`dim`]'s grey: a
+/// backend joining or leaving the registry is a state-level event, not
+/// transport chatter, so the mark stays as prominent as a readiness
+/// [`StateStyle`] mark. The alias prints at full weight and only the
+/// descriptive message is dimmed, the same split a transition line makes
+/// between its state labels and its dim reason text. `membership` alone
+/// selects the mark, its color, and the message text, so the joined and
+/// departed lines can never drift apart from one another.
 pub fn print_membership_line(alias: &str, alias_width: usize, membership: Membership) {
     let colored = output::is_colored();
     let wrap_width = display::terminal_width();
@@ -366,10 +376,10 @@ pub fn print_membership_line(alias: &str, alias_width: usize, membership: Member
     let message = membership.message();
     let name = format!("{alias:<alias_width$}");
 
-    let plain_prefix = format!("{timestamp}  {} {name}  ", style.mark);
+    let plain_prefix = format!("{timestamp}  {} {name} ", style.mark);
     let indent = plain_prefix.chars().count();
 
-    print!("{}  {} {name}  ", dim(&timestamp, colored), style.styled_mark());
+    print!("{}  {} {name} ", dim(&timestamp, colored), style.styled_mark());
 
     let lines = match wrap_width {
         Some(width) if width > indent => wrap_words(message, width - indent),
@@ -380,7 +390,7 @@ pub fn print_membership_line(alias: &str, alias_width: usize, membership: Member
         if idx > 0 {
             print!("\n{:indent$}", "");
         }
-        print!("{line}");
+        print!("{}", dim(line, colored));
     }
 
     println!();
