@@ -203,7 +203,9 @@ cp_config_gen_install(
 	SET_OFFSET_OF(&new_config_gen->config_gen_ectxs, new_config_gen_ectxs);
 	new_config_gen->config_gen_ectx_count = worker_count;
 
-	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
+	// Release-publish the new generation so workers never observe this
+	// pointer before its contents are fully written.
+	ATOMIC_SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
 	cp_config_gen_free(cp_config, old_config_gen);
 

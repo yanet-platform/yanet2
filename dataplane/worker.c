@@ -323,8 +323,10 @@ worker_loop_round(struct dataplane_worker *worker) {
 	}
 
 	struct cp_config *cp_config = worker->instance->cp_config;
+	// Acquire the generation pointer, paired with the release-publish
+	// in cp_config_gen_install.
 	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+		ATOMIC_ADDR_OF(&cp_config->cp_config_gen);
 	struct config_gen_ectx *config_gen_ectx = cp_config_gen_worker_ectx(
 		cp_config_gen, worker->dp_worker->idx
 	);
