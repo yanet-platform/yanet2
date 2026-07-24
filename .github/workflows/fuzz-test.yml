@@ -1,6 +1,14 @@
 name: Fuzz test
 
 on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/fuzz-test.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/fuzz-test.yml"
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
@@ -22,10 +30,10 @@ jobs:
           sudo apt-get clean
           docker rmi $(docker images -q) 2>/dev/null || true
 
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
-          version: 1.1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
       - uses: actions/checkout@v4
         with:

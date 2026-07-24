@@ -46,10 +46,10 @@ jobs:
           key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-check-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: protobuf-compiler
-          version: 1.0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - run: cargo check --workspace
 
   test:
@@ -70,10 +70,10 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: protobuf-compiler
-          version: 1.0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - run: cargo test --workspace
 
   clippy:
@@ -95,8 +95,8 @@ jobs:
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-clippy-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: protobuf-compiler
-          version: 1.0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - run: cargo clippy --workspace -- -D warnings
