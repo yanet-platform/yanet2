@@ -121,7 +121,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debs-${{ matrix.unbtver }}
-          path: outdeb/*
+          path: |
+            outdeb/*.deb
+            outdeb/*.ddeb
 
   release:
     needs: build-deb
