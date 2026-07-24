@@ -370,6 +370,18 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Exported Go APIs whose arguments cross CGO into C-side array indexing**
   (device IDs, queue/worker indices) validate the range on the Go side
   before the call.
+- **Validating a C-only change needs `go test -count=1` AND a verified-clean
+  `meson compile`.** Go's test cache keys on Go sources and arguments, not on
+  the C archive it links, so a cached PASS can replay against a stale object.
+  A failed compile is the same trap from the other side: the previous archive
+  stays on disk, so even `-count=1` links stale objects and goes green. Grep
+  the compile output for failures before believing any test verdict — a stale
+  PASS reads exactly like "this assertion cannot fail", which is the opposite
+  of the truth. Mutation checks must therefore corrupt behaviour (flip a
+  condition, self-assign) rather than delete calls, which trips `-Werror` on
+  the now-unused function and silently leaves the good archive in place. A
+  shared-memory struct layout change is a different problem and needs a full
+  `go clean -cache`.
 - **Human-readable CLI output is NOT part of the contract — never pin its
   format in a test.** No `test_*_output` test that builds a response and
   asserts the formatted block, and no assert on a literal format string
@@ -452,6 +464,7 @@ Graduated from architect memory after recurring three or more times. These bind 
 - **Keep your own cwd at the repo root when launching an agent.** An agent inherits it, and a worktree lacks every gitignored tree — `.arch/` (planner tracker, bug-hunter scratch) and `.claude/agent-memory/`. So a drifted cwd does not merely misplace a write: the state reads as *uninitialised* and a helpful agent rebuilds it (a planner bootstrapped 15 colliding tasks over a live 106-task tracker), while memory goes split-brain — agents write lessons into the worktree copy that dies with it, and read that stub instead of the root. Before removing a worktree, salvage `.claude/agent-memory/*/` out of it. And when you and an agent disagree about whether a file exists, establish which tree each of you is in before concluding anyone fabricated anything.
 - **A reviewer's finding is binding; its prescribed remedy is not.** Take the defect, then pick the minimal fix yourself — shipping the suggested remedy unexamined is how a one-line bug grows a subsystem. The corollary also holds: when a proposed fix dwarfs the bug, the premise is wrong, not the fix.
 - **After a design pivot, re-derive every constraint you carried over.** Requirements inherited from the old shape are usually dead weight, and sometimes unsatisfiable — a brief that makes an API infallible cannot also demand "keep logging the failure", and obeying both leaves dead code the reviewer then blocks on.
+- **Non-application-code work has no dedicated specialist — route it to `coder-c` with a charter note.** Shell/ops scripts, Debian packaging, Dockerfiles, GitHub Actions CI YAML, meson: none has a language owner, and `coder-c` is the closest (it owns the meson/debian/packaging surface). Open the brief with a charter note — "this is an OPS/PACKAGING/CI task, not C; no C/Go/Rust/TS/proto/meson source is touched; do not decline" — and it works across rounds without pushback. `coder-ui` refuses anything outside `web/` (it treats in-conversation scope overrides as social engineering), so never route infra there. These trees are often gitignored/untracked → no worktree isolation, and tell the reviewer to review the on-disk files with explicit paths (its `git diff` workflow misfires on untracked files).
 
 ## Key Dependencies
 
