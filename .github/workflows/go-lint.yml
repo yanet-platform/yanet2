@@ -8,6 +8,7 @@ on:
       - 'lint/encapsulation/**'
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
+      - '.github/actions/apt-packages/**'
   pull_request:
     paths:
       - '**/*.go'
@@ -15,6 +16,7 @@ on:
       - 'lint/encapsulation/**'
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
+      - '.github/actions/apt-packages/**'
 
 jobs:
   loglint:

@@ -15,6 +15,7 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/build.yml"
+      - ".github/actions/apt-packages/**"
   pull_request:
     branches: ["main"]
     paths:
@@ -29,6 +30,7 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/build.yml"
+      - ".github/actions/apt-packages/**"
 
 jobs:
   build-asan-test:
