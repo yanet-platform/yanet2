@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cpu_pause.h"
+
 #include <sched.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -12,13 +14,6 @@ struct spinlock {
 static inline void
 spinlock_init(struct spinlock *lock) {
 	atomic_init(&lock->locked, false);
-}
-
-static inline void
-spinlock_cpu_relax(void) {
-#if defined(__x86_64__) || defined(__i386__)
-	__asm__ __volatile__("pause");
-#endif
 }
 
 /* Acquire the lock (blocking) */
@@ -50,7 +45,7 @@ spinlock_lock(struct spinlock *lock) {
 
 		while (atomic_load_explicit(&lock->locked, memory_order_relaxed)
 		) {
-			spinlock_cpu_relax();
+			cpu_pause();
 			if (++spins >= 1024) {
 				sched_yield();
 				spins = 0;

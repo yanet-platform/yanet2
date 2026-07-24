@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include <emmintrin.h>
+#include "cpu_pause.h"
+
 #include <stdatomic.h>
 
 #ifndef likely
@@ -63,7 +64,7 @@ rwlock_read_lock(rwlock_t *rwl) {
 		    // really help
 			// Wait while writer is present or pending
 			while (atomic_load_explicit(&rwl->cnt,
-		   memory_order_relaxed) & YANET_RWLOCK_MASK) { _mm_pause();
+		   memory_order_relaxed) & YANET_RWLOCK_MASK) { cpu_pause();
 			}
 		*/
 
@@ -115,7 +116,7 @@ rwlock_write_lock(rwlock_t *rwl) {
 		while ((x = atomic_load_explicit(
 				&rwl->cnt, memory_order_relaxed
 			)) > YANET_RWLOCK_WAIT) {
-			_mm_pause();
+			cpu_pause();
 		}
 
 		/* No readers or writers? */

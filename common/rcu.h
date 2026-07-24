@@ -150,6 +150,7 @@
  * writers. The RCU mechanism does not serialize writers.
  */
 
+#include "cpu_pause.h"
 #include "memory.h"
 #include "memory_address.h"
 
@@ -301,23 +302,6 @@ rcu_read_end(rcu_t *rcu, size_t w) {
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
- * @brief CPU relaxation hint for busy-wait loops
- *
- * This function provides a hint to the CPU that we're in a busy-wait loop,
- * allowing it to optimize power consumption and potentially improve
- * performance of hyper-threaded cores.
- *
- * @note On x86/x86_64, this emits a PAUSE instruction. On other architectures,
- *       it's a no-op but the compiler barrier still prevents optimization.
- */
-static inline void
-cpu_relax(void) {
-#if defined(__x86_64__) || defined(__i386__)
-	__asm__ __volatile__("pause");
-#endif
-}
-
-/**
  * @brief Wait for all workers to finish reading from a specific epoch
  *
  * This function implements the grace period mechanism by busy-waiting until
@@ -356,7 +340,7 @@ wait_epoch_flush(rcu_t *rcu, unsigned e) {
 		}
 		if (!any)
 			break;
-		cpu_relax();
+		cpu_pause();
 	}
 }
 
