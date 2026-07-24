@@ -3,7 +3,6 @@
 #include <time.h>
 
 #include <rte_cycles.h>
-#include <x86intrin.h>
 
 int
 tsc_clock_init(struct tsc_clock *clock) {
@@ -36,7 +35,7 @@ tsc_clock_adjust(struct tsc_clock *clock) {
 
 uint64_t
 tsc_clock_get_time_ns(struct tsc_clock *clock) {
-	uint64_t tsc = _rdtsc();
+	uint64_t tsc = rte_rdtsc();
 
 	return clock->real_time_ns +
 	       tsc_clock_ticks_to_ns(tsc, clock->tsc_to_ns_mult);
