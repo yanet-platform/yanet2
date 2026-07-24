@@ -372,7 +372,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	if err = pool.StartAll(); err != nil {
 		return nil, nil, fmt.Errorf("failed to start VM pool: %w", err)
 	}
-	if err = pool.WaitAllReady(120 * time.Second); err != nil {
+	if err = pool.WaitAllReady(VMReadyTimeout()); err != nil {
 		return nil, nil, fmt.Errorf("failed to wait for VM pool readiness: %w", err)
 	}
 
@@ -476,7 +476,7 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	if err := prepPool.StartAll(); err != nil {
 		return fmt.Errorf("failed to start baseline prep pool: %w", err)
 	}
-	if err := prepPool.WaitAllReady(120 * time.Second); err != nil {
+	if err := prepPool.WaitAllReady(VMReadyTimeout()); err != nil {
 		return fmt.Errorf("baseline prep pool not ready: %w", err)
 	}
 

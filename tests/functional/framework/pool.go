@@ -209,7 +209,7 @@ func (p *VMPool) validateBootedTemplate() error {
 	}
 	defer valFW.Stop() //nolint:errcheck
 
-	if err := valMgr.WaitForReady(60 * time.Second); err != nil {
+	if err := valMgr.WaitForReady(VMReadyTimeout()); err != nil {
 		return fmt.Errorf("validation VM not ready after start: %w", err)
 	}
 
@@ -277,7 +277,7 @@ func (p *VMPool) bootstrapTemplate() error {
 	if _, err := vm0.fw.Start(); err != nil {
 		return fmt.Errorf("failed to start VM0 for bootstrap: %w", err)
 	}
-	if err := vm0.manager.WaitForReady(120 * time.Second); err != nil {
+	if err := vm0.manager.WaitForReady(VMReadyTimeout()); err != nil {
 		_ = vm0.fw.Stop()
 		return fmt.Errorf("VM0 not ready during bootstrap: %w", err)
 	}

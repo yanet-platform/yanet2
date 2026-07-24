@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // findProjectRoot locates the YANET project root directory by traversing up the
@@ -90,4 +91,23 @@ func IsDebugEnabled() bool {
 func ShouldKeepVMAlive() bool {
 	_, ok := os.LookupEnv("YANET_KEEP_VM_ALIVE")
 	return ok
+}
+
+// VMReadyTimeout returns how long to wait for a VM to reach the shell prompt.
+//
+// It defaults to 120 seconds and is overridable via YANET_VM_READY_TIMEOUT, a
+// Go duration string such as "5m" or "300s". An unset, empty, unparseable, or
+// non-positive value falls back to the default, which slow TCG (no-KVM) runners
+// routinely need to raise.
+func VMReadyTimeout() time.Duration {
+	const defaultTimeout = 120 * time.Second
+	raw, ok := os.LookupEnv("YANET_VM_READY_TIMEOUT")
+	if !ok {
+		return defaultTimeout
+	}
+	timeout, err := time.ParseDuration(raw)
+	if err != nil || timeout <= 0 {
+		return defaultTimeout
+	}
+	return timeout
 }

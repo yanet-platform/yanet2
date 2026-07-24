@@ -984,7 +984,7 @@ func (q *QEMUManager) RestoreBooted() error {
 	go q.readSerial()
 
 	// Wait for shell readiness.
-	if err := q.WaitForReady(120 * time.Second); err != nil {
+	if err := q.WaitForReady(VMReadyTimeout()); err != nil {
 		return fmt.Errorf("wait for ready after booted restore: %w", err)
 	}
 
