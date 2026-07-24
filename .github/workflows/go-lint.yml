@@ -61,10 +61,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: awalsh128/cache-apt-pkgs-action@latest
+      - uses: ./.github/actions/apt-packages
         with:
           packages: protobuf-compiler libpcap-dev
-          version: 1.0
 
       - name: Install Go protobuf plugins
         run: |

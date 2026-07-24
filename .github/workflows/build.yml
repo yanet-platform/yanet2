@@ -37,18 +37,13 @@ jobs:
       cache_name: build-asan-test
 
     steps:
-      - name: update apt (act hack)
-        if: ${{ env.ACT }}
-        run: apt-get update
-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
-          version: 1.1
-
       - uses: actions/checkout@v4
         with:
           submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
@@ -105,18 +100,13 @@ jobs:
       cache_name: build-tsan-test
 
     steps:
-      - name: update apt (act hack)
-        if: ${{ env.ACT }}
-        run: apt-get update
-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
-          version: 1.1
-
       - uses: actions/checkout@v4
         with:
           submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
@@ -165,18 +155,13 @@ jobs:
       cache_name: build-release-artifacts
 
     steps:
-      - name: update apt (act hack)
-        if: ${{ env.ACT }}
-        run: apt-get update
-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
-          version: 1.1
-
       - uses: actions/checkout@v4
         with:
           submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -295,15 +280,6 @@ jobs:
       cache_name: clang-tidy
 
     steps:
-      - name: update apt (act hack)
-        if: ${{ env.ACT }}
-        run: apt-get update
-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
-          version: 1.1
-
       - name: Install LLVM 19 toolchain
         id: llvm
         uses: KyleMayes/install-llvm-action@v2
@@ -314,6 +290,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
@@ -438,13 +418,9 @@ jobs:
           go-version: "1.24.x"
           cache: true
 
-      - name: update apt (act hack)
-        if: ${{ env.ACT }}
-        run: apt-get update
-      - uses: awalsh128/cache-apt-pkgs-action@latest
+      - uses: ./.github/actions/apt-packages
         with:
           packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev
-          version: 1.1
 
       - name: Configure system for QEMU
         run: |

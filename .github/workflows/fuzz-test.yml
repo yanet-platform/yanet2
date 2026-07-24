@@ -22,14 +22,13 @@ jobs:
           sudo apt-get clean
           docker rmi $(docker images -q) 2>/dev/null || true
 
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
-          version: 1.1
-
       - uses: actions/checkout@v4
         with:
           submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
       - uses: actions/setup-go@v5
         with:

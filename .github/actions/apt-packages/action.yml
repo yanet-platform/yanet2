@@ -1,0 +1,33 @@
+name: 'apt packages (cached)'
+description: 'Refresh the apt index, install packages via cache-apt-pkgs-action, then verify they landed'
+
+inputs:
+  packages:
+    description: 'Space-separated list of apt packages to install'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: refresh apt index
+      shell: bash
+      run: sudo apt-get update
+
+    - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+      with:
+        packages: ${{ inputs.packages }}
+        version: 2
+
+    # cache-apt-pkgs-action reports success even when the underlying install failed.
+    # It also saves its cache before this step runs, so a silent install failure
+    # still writes an empty cache entry, and this check only makes that loud
+    # rather than preventing it, so recovering from a poisoned entry means
+    # bumping the version salt above.
+    - name: verify packages installed
+      shell: bash
+      run: |
+        for package in ${{ inputs.packages }}; do
+          dpkg-query -W -f='${Status}\n' "$package" 2>/dev/null \
+            | grep -q '^install ok installed$' \
+            || { echo "package not installed: $package"; exit 1; }
+        done
