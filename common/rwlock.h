@@ -7,6 +7,7 @@
 #include "cpu_pause.h"
 
 #include <stdatomic.h>
+#include <stdint.h>
 
 #ifndef likely
 #define likely(x) __builtin_expect(!!(x), 1)
