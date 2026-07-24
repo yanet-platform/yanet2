@@ -14,10 +14,11 @@ project(
   ],
 )
 
-add_project_arguments(
-  ['-march=' + get_option('cpu_arch'), '-g', '-D_GNU_SOURCE'],
-  language: 'c',
-)
+yanet_project_args = ['-g', '-D_GNU_SOURCE']
+if host_machine.cpu_family() in ['x86', 'x86_64']
+  yanet_project_args += '-march=' + get_option('cpu_arch')
+endif
+add_project_arguments(yanet_project_args, language: 'c')
 
 yanet_conf = configuration_data()
 yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
@@ -119,23 +120,27 @@ yanet_rootdir = include_directories('.')
 # Modules will populate this with their fuzzing targets
 fuzzing_targets = {}
 
+libdpdk_default_options = [
+  'platform=' + get_option('dpdk_platform'),
+  'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
+  'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
+  'enable_apps=',
+  'disable_libs=bitratestats,cfgfile,flow_classify,gpudev,gro,gso,kni,jobstats,latencystats,metrics,node,pdump,pipeline,port,power,table,vhost',
+  'enable_driver_sdk=true',
+  'enable_drivers=net/mlx5,common/mlx5,bus/auxiliary,net/virtio,net/e1000,net/iavf,common/iavf,net/i40e,net/ring',
+  'default_library=static',
+  'tests=false',
+  'examples=',
+  'werror=false',
+  'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
+]
+if host_machine.cpu_family() in ['x86', 'x86_64']
+  libdpdk_default_options += 'cpu_instruction_set=' + get_option('cpu_arch')
+endif
+
 libdpdk = subproject(
   'dpdk',
-  default_options: [
-    'platform=generic',
-    'cpu_instruction_set=' + get_option('cpu_arch'),
-    'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
-    'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
-    'enable_apps=',
-    'disable_libs=bitratestats,cfgfile,flow_classify,gpudev,gro,gso,kni,jobstats,latencystats,metrics,node,pdump,pipeline,port,power,table,vhost',
-    'enable_driver_sdk=true',
-    'enable_drivers=net/mlx5,common/mlx5,bus/auxiliary,net/virtio,net/e1000,net/iavf,common/iavf,net/i40e,net/ring',
-    'default_library=static',
-    'tests=false',
-    'examples=',
-    'werror=false',
-    'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
-  ],
+  default_options: libdpdk_default_options,
 )
 
 libdpdk_dep = libdpdk.get_variable('dpdk_dep')

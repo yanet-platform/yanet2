@@ -38,7 +38,20 @@ option(
   'cpu_arch',
   type: 'string',
   value: 'haswell',
-  description: 'Target CPU architecture for -march flag.',
+  description: 'x86 microarchitecture passed as the -march flag; '
+                + 'ignored on other architectures.',
+)
+
+option(
+  'dpdk_platform',
+  type: 'string',
+  value: 'generic',
+  description: 'DPDK platform for a native build; a cross build takes '
+                + 'the platform from the cross file instead. "generic" '
+                + 'produces a portable build, while an SoC name such as '
+                + '"altra" or "ampereone" produces a tuned, non-portable '
+                + 'one; an unrecognised value is only diagnosed on '
+                + 'architectures that consult it.',
 )
 
 option(
