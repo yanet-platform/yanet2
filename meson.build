@@ -17,6 +17,13 @@ project(
 yanet_project_args = ['-g', '-D_GNU_SOURCE']
 if host_machine.cpu_family() in ['x86', 'x86_64']
   yanet_project_args += '-march=' + get_option('cpu_arch')
+elif host_machine.cpu_family() == 'aarch64'
+  # The CRC32C intrinsics used by common/crc32.h are not part of the
+  # aarch64 baseline instruction set, so the CRC extension must be
+  # requested explicitly.
+  #
+  # Both Ampere Altra and AmpereOne implement it.
+  yanet_project_args += '-march=armv8-a+crc'
 endif
 add_project_arguments(yanet_project_args, language: 'c')
 

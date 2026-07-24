@@ -163,3 +163,13 @@ thash_test = executable(
 )
 test('thash', thash_test, suite: ['common'])
 
+crc32_test = executable(
+  'crc32_test',
+  ['crc32_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+  include_directories: yanet_rootdir,
+)
+test('crc32', crc32_test, suite: ['common'])
+

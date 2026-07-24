@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(__x86_64__) || defined(__i386__)
+
 static inline uint32_t
 crc32_u8(uint8_t v, uint32_t hash) {
 	return __builtin_ia32_crc32qi(hash, v);
@@ -22,6 +24,42 @@ static inline uint32_t
 crc32_u64(uint64_t v, uint32_t hash) {
 	return __builtin_ia32_crc32di(hash, v);
 }
+
+#elif defined(__aarch64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+
+#include <arm_acle.h>
+
+// The c variants compute CRC-32C (Castagnoli), matching the x86
+// crc32 instruction bit for bit.
+//
+// The plain (non-c) intrinsics compute the Ethernet polynomial
+// instead and must never be used here.
+
+static inline uint32_t
+crc32_u8(uint8_t v, uint32_t hash) {
+	return __crc32cb(hash, v);
+}
+
+static inline uint32_t
+crc32_u16(uint16_t v, uint32_t hash) {
+	return __crc32ch(hash, v);
+}
+
+static inline uint32_t
+crc32_u32(uint32_t v, uint32_t hash) {
+	return __crc32cw(hash, v);
+}
+
+static inline uint32_t
+crc32_u64(uint64_t v, uint32_t hash) {
+	return __crc32cd(hash, v);
+}
+
+#else
+
+#error "crc32: no CRC-32C implementation for this architecture"
+
+#endif
 
 static inline uint32_t
 crc32(const void *data, uint64_t size, uint32_t hash) {
