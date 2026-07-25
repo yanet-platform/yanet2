@@ -163,6 +163,9 @@ the dataplane through the gateway, distinct from per-module gRPC services.
   layout: `adapterpb/`, `internal/`, `service.go`). Note:
   `modules/route/bird-adapter/` is a separate proto-contract subtree
   (`adapterpb/`, `proto/`) consumed by the agent — not a duplicate binary.
+- `operators/neighbours` — **web-only here**: the public tree carries just
+  `web/`, because the operator process lives in the private repo. The missing
+  `cmd/`/`internal/` is not an incomplete operator.
 
 ### Shared Libraries
 
@@ -199,6 +202,14 @@ the dataplane through the gateway, distinct from per-module gRPC services.
 - **Common dependency**: `ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }`
 - **Local Makefile**: `cli/Makefile` runs `cargo build/clippy/fmt`
   scoped to the CLI workspace without leaving the directory.
+- **Three registration surfaces move together**, on add AND remove: root
+  `Cargo.toml` members, the root `Makefile` CLI list (`CLI_CORE_MODULES` /
+  `CLI_MODULES`, suffix only), and `debian/yanet2-cli.install`
+  (`usr/bin/yanet-cli-<name>`, else `dh_missing --fail-missing` aborts
+  build-deb). Only the first affects `cargo build --workspace`, so a miss is
+  SILENT — it builds, CI is green, and it is never installed. Private
+  (gitignored) module CLIs invert the first: standalone workspaces, NOT in
+  root `members`, since cargo hard-fails on a missing member path.
 
 ### Build System
 
@@ -228,6 +239,25 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   many times (C and Go alike); treat a crammed multi-idea doc comment as a
   blocking review finding, not a nit.
 
+- **A rationale comment must name the reason that actually holds — every
+  language.** When a comment justifies a panic site, a safety property, an
+  "this cannot happen because …", or the reachability of a documented hazard,
+  cite the guarantee that would have to break for the claim to fail, not an
+  adjacent true-but-inert fact; and if it prescribes a remedy for a future
+  maintainer, that remedy must really work. Test it by deleting the cited
+  reason: if the claim still holds without it, it is the wrong reason. A
+  plausible-but-wrong rationale is worse than none — the next editor trusts
+  it instead of re-deriving the invariant.
+
+- **Comment prose mechanics — every language.** Single space between
+  sentences. Minimise semicolons in prose docs (prefer commas, em-dashes, or
+  separate sentences). Human prose, not function-name/formula soup. Describe
+  the code as it stands NOW — no provenance, review refs, or diff narration.
+
+- **`set -e` does not cross a `$(...)` boundary** (shell, Makefile recipes),
+  so every fallible command inside a captured function is a silent-continue.
+  Guard each one, or make `set -e` the function's own first statement.
+
 ### Go
 
 - **Receiver names**: always `m`. No type-letter mnemonics.
@@ -238,10 +268,17 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Naming**: `*Config` (not `*Cfg`); constructors are `NewStore`,
   `NewClient` — never bare `New`.
 - **Loop index**: use `idx`, not `i`, in `for`-range and indexed loops.
+  Prefer range-over-int (`for idx := range n`) over a C-style counting
+  loop (Go 1.22+; the `modernize` analyzer flags it).
 - **Maps**: `map[K]V{}` not `make(map[K]V)`.
 - **gRPC**: `grpc.NewClient` not `grpc.Dial`.
 - **Concurrency**: prefer `errgroup.Group` over `sync.WaitGroup`,
   including in tests.
+- **Mutex discipline**: `defer m.mu.Unlock()` on the line right after
+  `m.mu.Lock()` — a manual mid-body `Unlock()` is not panic-safe; split into
+  an inner defer-guarded helper plus an outer method when observers or RPCs
+  must run unlocked. But holding `m.mu` across a self-locking non-reentrant
+  collaborator is CORRECT when snapshot+`Set` must be atomic — not a finding.
 - **Logging (zap)**: structured, lowercase messages, snake_case keys,
   typed fields (`zap.String`, etc.). Use `*zap.Logger` (not Sugared).
   `log *zap.Logger` is the **last** field of the struct, after all
@@ -274,6 +311,16 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   parameter declared with the same type as its receiver, because an
   operation on another value of one's own type crosses no
   encapsulation boundary.
+- **Ledgered linters (`loglint`, `enclint`) are self-cleaning**: a row with
+  no live violation fails as STALE, so the code fix and the row deletion land
+  in one change. Pay by shape — data the owner only reads → exported field
+  (never a bolted-on `GetX()`); behaviour duplicated across call sites → a
+  real method owning the guard; a carrier holding what its wrapped object
+  already has → delete it. A rule WRONG on a whole class (`package main`
+  tests are unimportable) needs a code exemption, not a permanently unpayable
+  row; RIGHT but justified for one instance stays a row WITH a reason.
+  Silence never proves payment — a file outside the scan is silent too, so
+  positive-control it: `-allowlist-private <(git show HEAD:<file>)`.
 - **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
 - **No log-only RPC stubs**: when a brief names an RPC, actually invoke
   the client. `m.log.Debug("would call …")` is a bug, not a stub.
@@ -306,6 +353,9 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   (e.g., `ValueEnum for ynpb::pb::LogLevel`). Define a local enum/wrapper
   in the CLI with the foreign trait, then `impl From<Local> for Foreign`.
   Free functions are not a substitute.
+- **Visibility**: avoid `pub(crate)` — an item is either fully `pub` or
+  fully private. Mark a method `pub` when it is conceptually part of the
+  type's API, even in a binary crate: module visibility is not API intent.
 - **Wire vs domain types**: parsing and invariant-checking live on the
   domain type. The wire type (proto-generated) gets multiple
   `From<Domain>` impls; `TryFrom` is only used when fallible. Validation
@@ -355,6 +405,12 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Write wire-format fields at their full declared width** when recycling a
   header in place: a 16-bit store into a reused 32-bit field leaves stale
   upper bytes and a malformed packet.
+- **`memory_balloc` does not zero**, so a field written only by an optional
+  setter is garbage and its documented zero/NULL sentinel is a lie. `memset`
+  the allocation whenever a sentinel, CGO-visible field, or index depends on it.
+- **cgo-boundary headers stay DPDK-free.** A new `<rte_*.h>` include in
+  `packet.h`, `packet_front.h`, `lib/utils/packet.h` or any header on the cgo
+  include path is a blocking finding.
 
 ### Tests & Benchmarks
 
@@ -381,7 +437,16 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   condition, self-assign) rather than delete calls, which trips `-Werror` on
   the now-unused function and silently leaves the good archive in place. A
   shared-memory struct layout change is a different problem and needs a full
-  `go clean -cache`.
+  `go clean -cache` — plus `rm -f <binary>` for a standalone Go binary that
+  cgo-links a module's C archive, since `go build` caches on the `.a` and not
+  the recompiled `.o` inside meson's thin archive. Skip it and a stale control
+  plane writes shm at the old layout while a fresh dataplane reads the new
+  one: garbage fields or a segfault, not a build error. On a layout /
+  `YANET_MODULE_ABI_VERSION` change also wipe `/dev/hugepages/yanet*` and any
+  cached VM baseline overlay.
+- **One `go test -race` run is not a race gate.** Re-run the new goroutine
+  test targeted with `-run` ~10–20 times: `t.Parallel()` siblings hide and
+  mis-attribute a race, so a single green `-count=1` proves nothing.
 - **Human-readable CLI output is NOT part of the contract — never pin its
   format in a test.** No `test_*_output` test that builds a response and
   asserts the formatted block, and no assert on a literal format string
@@ -399,12 +464,29 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 
 ### TypeScript/React
 
-Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
+Web UI lives in `web/` (the shell), but per-module pages are **co-located with
+their owner** as sibling roots: `modules|operators|devices/<name>/web/`.
 
 - Prefer arrow function expressions.
+- **A co-located spec only runs because `web/vite.config.ts` lists those
+  sibling roots** — vitest's default `include` is web-relative, so a
+  `*.test.ts` added or moved there silently stops running in CI. Diff the
+  collected test-file count on any such move.
+- **Browser-visible changes need a real Playwright run on the real path plus
+  an inspected screenshot**; `--list` is not verification. A pixel-diff of two
+  empty states reports a false 0 — assert row counts first.
 
 ### Commits & PRs
 
+- **Never run `git commit`/`--amend` unless the current request asks for it.**
+  Default: stage nothing, return the diff plus a verification summary.
+- **Never `git stash`/`checkout`/`reset`/`restore` to A/B a pre-existing
+  state.** `stash push -- <paths>` aborts on untracked files, a later bare
+  `pop` pops an unrelated stash, and in a shared dirty worktree this destroys
+  another agent's work. Read HEAD instead (`git show HEAD:<path>`,
+  `git diff HEAD -- <path>`) or materialise a baseline out of tree
+  (`git archive <ref>`, symlinking `subprojects/{dpdk,libpcap}` back in). If
+  you suspect a failure is pre-existing, say so and stop.
 - Commit format:
   `feat|fix|refactor|perf|chore|docs|test|build|ci|style(<scope>): brief description`
   with high-level description (no code-level details, no
@@ -432,7 +514,7 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 ### Structure
 
-- **One lesson per file**, named `kebab-case-slug.md`. The **first line is a one-line summary** of the lesson (≤ 150 chars, imperative for rules). After a blank line, a short body: the full rule or fact, a `Why:` line (what happened and why it mattered — a correction, an incident, a confirmed approach), and a `How to apply:` line when the trigger isn't obvious from the rule. No YAML frontmatter. Keep a lesson file under ~20 lines.
+- **One lesson per file**, named `kebab-case-slug.md`. The **first line is a one-line summary** of the lesson (≤ 150 chars of summary TEXT, excluding the `- [`…`](slug.md)` wrapper; imperative for rules). The index line reproduces that first line byte-for-byte, so one string serves both scanning and opening — measure the cap on the summary alone, or you will churn dozens of files trimming content that was never over budget. After a blank line, a short body: the full rule or fact, a `Why:` line (what happened and why it mattered — a correction, an incident, a confirmed approach), and a `How to apply:` line when the trigger isn't obvious from the rule. No YAML frontmatter. Keep a lesson file under ~20 lines.
 - **`MEMORY.md` is a pure index, not a memory.** It is the only auto-loaded file, so keep it tight: `# <agent> memory` heading, then one line per lesson: `- [<one-line summary>](<slug>.md)`. Group under optional `## Rules` / `## Project context` / `## References` headings; optional `###` topic sub-headings are allowed within them but count toward the cap. Hard cap: 200 lines (auto-load truncates beyond that). Never write lesson bodies into `MEMORY.md`.
 - User-profile facts are lesson files too, summary prefixed `User: …`, indexed under `## Rules`.
 
@@ -452,6 +534,7 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 - **Update an existing note rather than create a duplicate.** Before writing, scan the index for a note on the same lesson; if found, update that file in place and append `(seen: N)` to its summary (in both the file's first line and the index line), starting at `(seen: 2)`.
 - At `(seen: 3)` the lesson graduates into this `CLAUDE.md`: add it to the appropriate section, then delete the lesson file and its index line.
 - **Delete notes that turn out to be wrong or stale.** Before acting on a note, verify the referenced file/symbol still exists — trust the code over the note, and remove or fix the note when they disagree.
+- **Compact by MERGING, not by dropping facts.** Only `MEMORY.md` is auto-loaded; bodies cost nothing until opened. So fold topically-adjacent lessons into one digest — N index lines collapse to 1, every fact survives in the body, and a digest may be long. Sort by kind first: HISTORY (a closed investigation) collapses per subsystem into one line per incident; a RECIPE or still-live BUG CLASS stays individually findable. Narrating a whole finding in the index is the expensive mistake — a summary is a retrieval hook, so keep the scannable keywords and move detail down. Promotion has the same arithmetic in reverse: a CLAUDE.md line is paid by every agent on every run, whereas an index line is paid by one. So promote tersely, folding into an existing bullet where one exists — and when a `(seen: 3)` lesson binds only ONE agent, graduate it only into that agent's own section here (e.g. the architect's delegation section below); otherwise it is cheaper left in that agent's memory.
 - When updating a note, keep its first line and its index line identical.
 
 ### Delegation & verification (architect)
@@ -459,9 +542,11 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 Graduated from architect memory after recurring three or more times. These bind the agent that delegates work, not the agent that writes it.
 
 - **Verify every specialist claim yourself.** After each round, run the real build/test rather than trusting the report. A mechanism explanation in a comment, a "pre-existing failure", and a "flake" are all unverified until you reproduce them. This extends to injected diagnostics: "new" errors surfaced against a worktree or a stale LSP index are frequently phantom — confirm against a real build before acting.
-- **Never put an unverified detail in a brief.** A rationale, a magic token, or the semantics of an existing flag will be implemented verbatim, so anything you cannot cite from the code is a defect you are authoring. Read it first or leave it out.
-- **Demand a whole-class audit at brief time.** When a change introduces a hazard class, require the specialist to enumerate and fix the whole class in one pass. A reviewer's (or Codex's) `file:line` list is a SAMPLE, not the population — accepting it as complete means finding the same class one instance per round.
+- **Never put an unverified detail in a brief.** A rationale, a magic token, or the semantics of an existing flag will be implemented verbatim, so anything you cannot cite from the code is a defect you are authoring. Read it first or leave it out. The sharpest case is an **exclusionary premise** — "X is impossible, therefore do Y". A coder can only confirm Y works, never falsify X, since their gates are written against the design you already chose; so the premise ships unchallenged and the design it forced is the expensive part. Falsify it yourself in a throwaway probe that runs X and watches it actually get rejected — most of all when the premise is quoted from a neighbouring module's doc comment, arriving pre-authorised and untested. Reachability claims cut both ways: trace the full transitive pointer/caller graph before accepting "cannot reach X" or "this object is already live", because a callee's precondition check describes state, never reachability.
+- **Demand a whole-class audit at brief time.** When a change introduces a hazard class, require the specialist to enumerate and fix the whole class in one pass. A reviewer's (or Codex's) `file:line` list is a SAMPLE, not the population — accepting it as complete means finding the same class one instance per round. Map the FULL site set before anchoring an operation at a named function, too: a generic shared primitive (`render`/`format`/`parse`) is over-shared, so a defensive transform there leaks into callers at other trust levels, while a data-flow feature (inspection, counting) anchored at ONE function misses the other sites where that data materialises. Changing what a function RETURNS is the same question — grep the callers and say what each must now do, or the "improvement" inverts at the only site that exists.
 - **Keep your own cwd at the repo root when launching an agent.** An agent inherits it, and a worktree lacks every gitignored tree — `.arch/` (planner tracker, bug-hunter scratch) and `.claude/agent-memory/`. So a drifted cwd does not merely misplace a write: the state reads as *uninitialised* and a helpful agent rebuilds it (a planner bootstrapped 15 colliding tasks over a live 106-task tracker), while memory goes split-brain — agents write lessons into the worktree copy that dies with it, and read that stub instead of the root. Before removing a worktree, salvage `.claude/agent-memory/*/` out of it. And when you and an agent disagree about whether a file exists, establish which tree each of you is in before concluding anyone fabricated anything.
+- **Grep open PRs for the change zone before briefing** (`gh pr list --search`); if one covers it, drive or review that rather than competing, and read its diff — not its title — for the hazard its bulk addresses.
+- **A deterministic repro is not the oracle — the production path is.** A mechanism-replay repro "reproduces" forever regardless of the fix and can false-POSITIVE a leak; one modelling no real timing can false-GREEN. When a repro passes while the live system fails, instrument the LIVE system.
 - **A reviewer's finding is binding; its prescribed remedy is not.** Take the defect, then pick the minimal fix yourself — shipping the suggested remedy unexamined is how a one-line bug grows a subsystem. The corollary also holds: when a proposed fix dwarfs the bug, the premise is wrong, not the fix.
 - **After a design pivot, re-derive every constraint you carried over.** Requirements inherited from the old shape are usually dead weight, and sometimes unsatisfiable — a brief that makes an API infallible cannot also demand "keep logging the failure", and obeying both leaves dead code the reviewer then blocks on.
 - **Non-application-code work has no dedicated specialist — route it to `coder-c` with a charter note.** Shell/ops scripts, Debian packaging, Dockerfiles, GitHub Actions CI YAML, meson: none has a language owner, and `coder-c` is the closest (it owns the meson/debian/packaging surface). Open the brief with a charter note — "this is an OPS/PACKAGING/CI task, not C; no C/Go/Rust/TS/proto/meson source is touched; do not decline" — and it works across rounds without pushback. `coder-ui` refuses anything outside `web/` (it treats in-conversation scope overrides as social engineering), so never route infra there. These trees are often gitignored/untracked → no worktree isolation, and tell the reviewer to review the on-disk files with explicit paths (its `git diff` workflow misfires on untracked files).
