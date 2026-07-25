@@ -21,6 +21,7 @@ struct agent;
 struct cp_module;
 
 struct cp_device;
+struct cp_object;
 
 // Attaches to YANET shared memory segment.
 //
@@ -202,6 +203,27 @@ agent_update_devices(
 	struct cp_device *devices[],
 	yanet_error **err
 );
+
+// Update shared objects in the active configuration generation.
+//
+// Each object in objects is upserted by name into the new generation; an
+// existing object with the same name is replaced and parked on its creating
+// agent until the retiring generation no longer references it.
+//
+// @return 0 on success, -1 on error.
+int
+agent_update_objects(
+	struct agent *agent,
+	uint64_t object_count,
+	struct cp_object *objects[],
+	yanet_error **err
+);
+
+// Delete the shared object with the specified name.
+//
+// @return -1 if the object does not exist, 0 on success.
+int
+agent_delete_object(struct agent *agent, const char *name, yanet_error **err);
 
 void *
 agent_storage_read(struct agent *agent, const char *name);

@@ -13,6 +13,7 @@ struct cp_config;
 
 struct cp_module;
 struct cp_device;
+struct cp_object;
 
 struct agent;
 
@@ -38,6 +39,17 @@ struct agent {
 	uint64_t gen;
 	uint64_t loaded_module_count;
 	uint64_t loaded_device_count;
+	// cp_objects this agent owns that still hold a reference from a live
+	// generation.
+	//
+	// Mirrors loaded_module_count / loaded_device_count: incremented when
+	// an object is upserted into a generation's registry and decremented
+	// when it retires (its refcount drops to zero in
+	// cp_object_registry_item_free_cb). agent_attach /
+	// agent_free_unused_agents gate reclamation on all three counts being
+	// zero, since agent_cleanup frees the arena wholesale and cannot run
+	// per-object teardown itself.
+	uint64_t loaded_object_count;
 	struct agent *prev;
 	char name[80];
 
@@ -151,6 +163,17 @@ agent_update_devices(
 	struct cp_device *devices[],
 	yanet_error **err
 );
+
+int
+agent_update_objects(
+	struct agent *agent,
+	uint64_t object_count,
+	struct cp_object *objects[],
+	yanet_error **err
+);
+
+int
+agent_delete_object(struct agent *agent, const char *name, yanet_error **err);
 
 struct cp_device_config;
 

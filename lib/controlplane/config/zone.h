@@ -15,6 +15,7 @@
 #include "controlplane/config/cp_device.h"
 #include "controlplane/config/cp_function.h"
 #include "controlplane/config/cp_module.h"
+#include "controlplane/config/cp_object.h"
 #include "controlplane/config/cp_pipeline.h"
 
 #include "controlplane/config/cp_counter.h"
@@ -55,6 +56,7 @@ struct cp_config_gen {
 	struct cp_function_registry function_registry;
 	struct cp_pipeline_registry pipeline_registry;
 	struct cp_device_registry device_registry;
+	struct cp_object_registry object_registry;
 };
 
 /*
@@ -194,6 +196,23 @@ cp_config_update_devices(
 	yanet_error **err
 );
 
+int
+cp_config_update_objects(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	uint64_t object_count,
+	struct cp_object *objects[],
+	yanet_error **err
+);
+
+int
+cp_config_delete_object(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name,
+	yanet_error **err
+);
+
 struct cp_config_gen *
 cp_config_gen_new(struct agent *agent, yanet_error **err);
 
@@ -215,6 +234,11 @@ cp_config_gen_get_pipeline(struct cp_config_gen *config_gen, uint64_t index) {
 static inline struct cp_device *
 cp_config_gen_get_device(struct cp_config_gen *config_gen, uint64_t index) {
 	return cp_device_registry_get(&config_gen->device_registry, index);
+}
+
+static inline struct cp_object *
+cp_config_gen_get_object(struct cp_config_gen *config_gen, uint64_t index) {
+	return cp_object_registry_get(&config_gen->object_registry, index);
 }
 
 // Return the execution context built for the given worker, or NULL when the
@@ -248,6 +272,14 @@ cp_config_gen_lookup_pipeline(
 
 int
 cp_config_gen_lookup_pipeline_index(
+	struct cp_config_gen *config_gen, const char *name, uint64_t *index
+);
+
+struct cp_object *
+cp_config_gen_lookup_object(struct cp_config_gen *config_gen, const char *name);
+
+int
+cp_config_gen_lookup_object_index(
 	struct cp_config_gen *config_gen, const char *name, uint64_t *index
 );
 

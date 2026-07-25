@@ -11,6 +11,7 @@ sources = files(
   'cp_function.c',
   'cp_pipeline.c',
   'cp_device.c',
+  'cp_object.c',
   'cp_counter.c',
   'econtext.c',
   'zone.c',

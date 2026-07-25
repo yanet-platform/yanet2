@@ -16,6 +16,7 @@
 #include "common/strutils.h"
 
 #include "controlplane/config/cp_module.h"
+#include "controlplane/config/cp_object.h"
 #include "controlplane/config/zone.h"
 #include "counters/counters.h"
 #include "dataplane/config/zone.h"
@@ -672,6 +673,48 @@ agent_update_devices(
 	if (ret != 0) {
 		return -1;
 	}
+
+	agent_free_unused_agents(agent);
+
+	return 0;
+}
+
+int
+agent_update_objects(
+	struct agent *agent,
+	uint64_t object_count,
+	struct cp_object *objects[],
+	yanet_error **err
+) {
+	int ret = cp_config_update_objects(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		object_count,
+		objects,
+		err
+	);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	agent_free_unused_agents(agent);
+
+	return 0;
+}
+
+int
+agent_delete_object(struct agent *agent, const char *name, yanet_error **err) {
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	int ret = cp_config_delete_object(dp_config, cp_config, name, err);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	agent_free_unused_agents(agent);
 
 	return 0;
 }
@@ -1929,7 +1972,8 @@ agent_free_unused_agents(struct agent *agent) {
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
 
 		if (prev_agent->loaded_module_count == 0 &&
-		    prev_agent->loaded_device_count == 0) {
+		    prev_agent->loaded_device_count == 0 &&
+		    prev_agent->loaded_object_count == 0) {
 			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
 			agent_cleanup(prev_agent);
 			continue;

@@ -6,6 +6,7 @@
 
 #include "cp_device.h"
 #include "cp_module.h"
+#include "cp_object.h"
 #include "cp_pipeline.h"
 
 #include "lib/dataplane/config/zone.h"
@@ -136,6 +137,16 @@ cp_config_gen_new_from(
 		goto error;
 	}
 
+	if (cp_object_registry_copy(
+		    &cp_config->memory_context,
+		    &new_config_gen->object_registry,
+		    &old_config_gen->object_registry,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to copy object registry");
+		goto error;
+	}
+
 	return new_config_gen;
 
 error:
@@ -175,6 +186,7 @@ cp_config_gen_free(
 	cp_function_registry_fini(&config_gen->function_registry);
 	cp_pipeline_registry_fini(&config_gen->pipeline_registry);
 	cp_device_registry_fini(&config_gen->device_registry);
+	cp_object_registry_fini(&config_gen->object_registry);
 
 	memory_bfree(
 		&cp_config->memory_context,
@@ -600,6 +612,22 @@ cp_config_gen_lookup_pipeline_index(
 	);
 }
 
+struct cp_object *
+cp_config_gen_lookup_object(
+	struct cp_config_gen *config_gen, const char *name
+) {
+	return cp_object_registry_lookup(&config_gen->object_registry, name);
+}
+
+int
+cp_config_gen_lookup_object_index(
+	struct cp_config_gen *config_gen, const char *name, uint64_t *index
+) {
+	return cp_object_registry_lookup_index(
+		&config_gen->object_registry, name, index
+	);
+}
+
 int
 cp_config_update_devices(
 	struct dp_config *dp_config,
@@ -633,6 +661,97 @@ cp_config_update_devices(
 			);
 			goto error_free;
 		}
+	}
+
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		goto error_free;
+	}
+	cp_config_unlock(cp_config);
+
+	return 0;
+
+error_free:
+	cp_config_gen_free(cp_config, new_config_gen);
+error_unlock:
+	cp_config_unlock(cp_config);
+	return -1;
+}
+
+int
+cp_config_update_objects(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	uint64_t object_count,
+	struct cp_object *objects[],
+	yanet_error **err
+) {
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *old_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *new_config_gen =
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
+	if (new_config_gen == NULL) {
+		goto error_unlock;
+	}
+
+	for (uint64_t idx = 0; idx < object_count; ++idx) {
+		if (cp_object_registry_upsert(
+			    &new_config_gen->object_registry,
+			    objects[idx]->name,
+			    objects[idx],
+			    err
+		    )) {
+			yanet_error_add(
+				err,
+				"failed to upsert object '%s'",
+				objects[idx]->name
+			);
+			goto error_free;
+		}
+	}
+
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		goto error_free;
+	}
+	cp_config_unlock(cp_config);
+
+	return 0;
+
+error_free:
+	cp_config_gen_free(cp_config, new_config_gen);
+error_unlock:
+	cp_config_unlock(cp_config);
+	return -1;
+}
+
+int
+cp_config_delete_object(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name,
+	yanet_error **err
+) {
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *old_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	uint64_t index;
+	if (cp_config_gen_lookup_object_index(old_config_gen, name, &index)) {
+		yanet_error_add(err, "object '%s' not found", name);
+		goto error_unlock;
+	}
+
+	struct cp_config_gen *new_config_gen =
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
+	if (new_config_gen == NULL) {
+		goto error_unlock;
+	}
+
+	if (cp_object_registry_delete(&new_config_gen->object_registry, name)) {
+		yanet_error_add(err, "failed to delete object");
+		goto error_free;
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
@@ -712,6 +831,15 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 		    err
 	    )) {
 		yanet_error_add(err, "failed to init device registry");
+		goto error;
+	}
+
+	if (cp_object_registry_init(
+		    &cp_config->memory_context,
+		    &cp_config_gen->object_registry,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to init object registry");
 		goto error;
 	}
 
