@@ -79,6 +79,12 @@ cp_config_gen_new_from(
 		return NULL;
 	}
 
+	// Zero the struct so every registry starts in a fini-safe state, which
+	// lets the error path reclaim any partially copied registries. The
+	// allocator recycles freed blocks with stale content, so untracked
+	// fields would otherwise hold garbage offset pointers.
+	memset(new_config_gen, 0, sizeof(*new_config_gen));
+
 	new_config_gen->gen = old_config_gen->gen + 1;
 	new_config_gen->config_gen_ectx_count = 0;
 	new_config_gen->config_gen_ectxs = NULL;
@@ -133,11 +139,7 @@ cp_config_gen_new_from(
 	return new_config_gen;
 
 error:
-	memory_bfree(
-		&cp_config->memory_context,
-		new_config_gen,
-		sizeof(struct cp_config_gen)
-	);
+	cp_config_gen_free(cp_config, new_config_gen);
 	return NULL;
 }
 
@@ -663,6 +665,12 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 		return NULL;
 	}
 
+	// Zero the struct so every registry starts in a fini-safe state, which
+	// lets the error path reclaim any partially initialized registries. The
+	// allocator recycles freed blocks with stale content, so untracked
+	// fields would otherwise hold garbage offset pointers.
+	memset(cp_config_gen, 0, sizeof(*cp_config_gen));
+
 	cp_config_gen->gen = 0;
 	cp_config_gen->config_gen_ectx_count = 0;
 	cp_config_gen->config_gen_ectxs = NULL;
@@ -760,10 +768,6 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	return cp_config_gen;
 
 error:
-	memory_bfree(
-		&cp_config->memory_context,
-		cp_config_gen,
-		sizeof(struct cp_config_gen)
-	);
+	cp_config_gen_free(cp_config, cp_config_gen);
 	return NULL;
 }
