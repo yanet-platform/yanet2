@@ -1983,13 +1983,17 @@ agent_free_unused_agents(struct agent *agent) {
 	if (agent == NULL) {
 		return;
 	}
-	agent = ADDR_OF(&agent->prev);
-	while (agent != NULL) {
+
+	while (ADDR_OF(&agent->prev) != NULL) {
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
-		if (agent->loaded_module_count == 0) {
-			agent_cleanup(agent);
+
+		if (prev_agent->loaded_module_count == 0) {
+			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
+			agent_cleanup(prev_agent);
+			continue;
 		}
-		agent = prev_agent;
+
+		agent = ADDR_OF(&agent->prev);
 	}
 }
 
