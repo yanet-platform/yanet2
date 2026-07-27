@@ -132,6 +132,18 @@ cp_module_init(
 void
 cp_module_fini(struct cp_module *cp_module);
 
+// Reclaim every module parked on the agent's unused_module list.
+//
+// Detaches the list under cp_config_lock and runs free_handler on each
+// module. Call it from the owning control plane after the retiring
+// generation no longer references the parked modules, passing the module
+// type's free handler. Must not be called while cp_config_lock is already
+// held.
+void
+cp_module_agent_drain_unused(
+	struct agent *agent, cp_module_free_handler free_handler
+);
+
 struct cp_module_registry {
 	struct memory_context *memory_context;
 	struct registry registry;

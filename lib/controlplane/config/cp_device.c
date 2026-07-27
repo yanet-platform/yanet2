@@ -453,6 +453,14 @@ cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
 
 void
 cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	// Parking (cp_device_registry_item_free_cb) runs under cp_config_lock
+	// via cp_config_gen_free on every update path, so the detach that
+	// steals the list must take the same lock to avoid racing a concurrent
+	// park. Must not be called with cp_config_lock already held.
+	cp_config_lock(cp_config);
+
 	// Detach the whole list first so a device's own free cannot observe a
 	// half-walked list.
 	struct cp_device *device = ADDR_OF(&agent->unused_device);
@@ -464,6 +472,8 @@ cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn) {
 		free_fn(device);
 		device = prev;
 	}
+
+	cp_config_unlock(cp_config);
 }
 
 void

@@ -18,6 +18,7 @@
 #include "controlplane/agent/agent.h"
 #include "controlplane/config/cp_device.h"
 #include "controlplane/config/cp_module.h"
+#include "controlplane/config/zone.h"
 
 #include "devices/plain/api/controlplane.h"
 
@@ -33,12 +34,43 @@
 #define UNUSED_PARK_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
 
 static uint64_t free_call_count;
+// Records whether cp_config_lock was held when the drain free callback ran.
+static bool drain_held_lock;
 
 static void
 counting_device_free(struct cp_device *device) {
 	free_call_count += 1;
 	cp_device_fini(device);
 	cp_device_free(device);
+}
+
+// Device free callback that records whether cp_config_lock was held by the
+// drain when the callback ran. try_lock succeeds (and acquires) only when the
+// lock is free, i.e. the drain did NOT hold it; in that case release it again
+// so the post-drain check is not contaminated.
+static void
+device_free_checking_lock(struct cp_device *device) {
+	struct agent *agent = ADDR_OF(&device->agent);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	bool acquired = cp_config_try_lock(cp_config);
+	drain_held_lock = !acquired;
+	if (acquired) {
+		cp_config_unlock(cp_config);
+	}
+	free_call_count += 1;
+	cp_device_fini(device);
+	cp_device_free(device);
+}
+
+// Module twin of counting_device_free: finalizes the base module and returns
+// the struct to the creating agent's arena. Test modules here are raw
+// cp_module allocations, so sizeof(struct cp_module) is the right size.
+static void
+counting_module_free(struct cp_module *module) {
+	struct agent *agent = ADDR_OF(&module->agent);
+	free_call_count += 1;
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(struct cp_module));
 }
 
 // Verifies that parking two devices back-to-back onto an agent's
@@ -223,17 +255,94 @@ test_module_park_chain(struct yanet_shm *shm) {
 		ADDR_OF(&second->prev), "first parked module's prev is not NULL"
 	);
 
-	// Nothing drains unused_module today, so reclaim the parked chain by
-	// hand instead of leaving it for agent_detach.
-	struct cp_module *module = head;
-	while (module != NULL) {
-		struct cp_module *prev = ADDR_OF(&module->prev);
-		cp_module_fini(module);
-		memory_bfree(
-			&agent->memory_context, module, sizeof(struct cp_module)
-		);
-		module = prev;
-	}
+	// Drain the parked chain through the module drain helper instead of
+	// leaving it for agent_detach.
+	free_call_count = 0;
+	cp_module_agent_drain_unused(agent, counting_module_free);
+	TEST_ASSERT_EQUAL(
+		free_call_count, 2, "drain did not free exactly two modules"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_module),
+		"unused_module is not NULL after drain"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// Regression test for GH#1537: cp_device_agent_drain_unused must take and
+// release cp_config_lock so the detach does not race the parking free_cb
+// (which always runs under the lock via cp_config_gen_free). The harness is
+// single-threaded, so this guards the two observable consequences: the drain
+// still reclaims the parked device, and the lock is free before and after.
+static int
+test_drain_takes_and_releases_lock(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "drain-lock", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	TEST_ASSERT(
+		cp_config_try_lock(cp_config),
+		"cp_config_lock is held before drain (precondition)"
+	);
+	cp_config_unlock(cp_config);
+
+	struct cp_device_config cfg;
+	TEST_ASSERT_SUCCESS(
+		cp_device_config_init(&cfg, "plain", "dlock0", 0, 0, &err),
+		"device config init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_device *device = cp_device_new(&agent->memory_context);
+	TEST_ASSERT_NOT_NULL(device, "cp_device_new failed");
+	TEST_ASSERT_SUCCESS(
+		cp_device_init(device, agent, &cfg, &err),
+		"cp_device_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_device_config_fini(&cfg);
+
+	struct cp_device_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_init(
+			&agent->memory_context, &registry, &err
+		),
+		"device registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_upsert(&registry, "dlock0", device, &err),
+		"device registry upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	// Releasing the registry parks the device under cp_config_lock.
+	cp_device_registry_fini(&registry);
+
+	// Drain must hold cp_config_lock across each free callback (the parking
+	// free_cb runs under the same lock), and must release it before return.
+	free_call_count = 0;
+	drain_held_lock = false;
+	cp_device_agent_drain_unused(agent, device_free_checking_lock);
+	TEST_ASSERT_EQUAL(
+		free_call_count, 1, "drain did not free the parked device"
+	);
+	TEST_ASSERT(
+		drain_held_lock,
+		"drain did not hold cp_config_lock during the free callback"
+	);
+
+	TEST_ASSERT(
+		cp_config_try_lock(cp_config),
+		"cp_config_lock is held after drain (lock leaked)"
+	);
+	cp_config_unlock(cp_config);
 
 	agent_detach(agent);
 	return TEST_SUCCESS;
@@ -275,6 +384,9 @@ main(void) {
 	int res = test_device_park_and_drain(shm);
 	if (res == TEST_SUCCESS) {
 		res = test_module_park_chain(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_drain_takes_and_releases_lock(shm);
 	}
 
 	dataplane_ut_free(ut);

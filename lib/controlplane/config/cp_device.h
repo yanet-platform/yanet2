@@ -147,10 +147,11 @@ cp_device_fini(struct cp_device *self);
 
 // Reclaim every device parked on the agent's unused_device list.
 //
-// Detaches the list and runs free_fn on each device. Call it from the owning
-// control plane after the retiring generation no longer references the parked
-// devices (i.e. after the device-update wait-for-gen), passing the device
-// type's free function.
+// Detaches the list under cp_config_lock and runs free_fn on each device.
+// Call it from the owning control plane after the retiring generation no
+// longer references the parked devices (i.e. after the device-update
+// wait-for-gen), passing the device type's free function. Must not be called
+// while cp_config_lock is already held.
 void
 cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn);
 
