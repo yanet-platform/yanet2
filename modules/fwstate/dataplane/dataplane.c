@@ -9,6 +9,7 @@
 
 #include "common/memory_address.h"
 #include "dataplane/module/module.h"
+#include "fwstate/fwmap_typed.h"
 #include "fwstate/layermap.h"
 #include "fwstate/types.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -175,7 +176,7 @@ fwstate_build_value(
 // Process IPv4 state sync frame
 static void
 fwstate_process_sync_v4(
-	fwmap_t *fw4state,
+	fwmap4_t fw4state,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
@@ -198,7 +199,7 @@ fwstate_process_sync_v4(
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
-	int64_t result = layermap_put(
+	int64_t result = fwmap4_put(
 		fw4state, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
@@ -218,7 +219,7 @@ fwstate_process_sync_v4(
 // Process IPv6 state sync frame
 static void
 fwstate_process_sync_v6(
-	fwmap_t *fw6state,
+	fwmap6_t fw6state,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
@@ -241,7 +242,7 @@ fwstate_process_sync_v6(
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
-	int64_t result = layermap_put(
+	int64_t result = fwmap6_put(
 		fw6state, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
@@ -372,7 +373,7 @@ fwstate_handle_packets(
 
 			if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
 				fwstate_process_sync_v4(
-					fw4state,
+					fwmap4_from_raw(fw4state),
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
@@ -384,7 +385,7 @@ fwstate_handle_packets(
 			} else if (sync_frame->addr_type ==
 				   FW_STATE_ADDR_TYPE_IP6) {
 				fwstate_process_sync_v6(
-					fw6state,
+					fwmap6_from_raw(fw6state),
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,

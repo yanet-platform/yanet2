@@ -1,16 +1,24 @@
 #pragma once
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "types.h"
 
+/*
+ * NOTE: the `size` argument of every callback below is currently ignored
+ * (the hard-cast makes it redundant). A temporary assert is kept as a
+ * correctness net until Phase 2 removes the `size` parameter entirely.
+ * See https://github.com/yanet-platform/yanet2/issues/1534.
+ */
+
 // === Custom copy functions for fwmap keys and values.
 
 static inline void
 fwmap_copy_key_fw4(void *dst, const void *src, size_t size) {
-	(void)size;
+	assert(size == sizeof(struct fw4_state_key));
 	const struct fw4_state_key *s = (const struct fw4_state_key *)src;
 	struct fw4_state_key *d = (struct fw4_state_key *)dst;
 
@@ -19,7 +27,7 @@ fwmap_copy_key_fw4(void *dst, const void *src, size_t size) {
 
 static inline void
 fwmap_copy_key_fw6(void *dst, const void *src, size_t size) {
-	(void)size;
+	assert(size == sizeof(struct fw6_state_key));
 	const struct fw6_state_key *s = (const struct fw6_state_key *)src;
 	struct fw6_state_key *d = (struct fw6_state_key *)dst;
 
@@ -36,7 +44,7 @@ static inline void
 fwmap_update_value_fwstate(
 	void *dst, const void *src, bool dst_empty, size_t size
 ) {
-	(void)size;
+	assert(size == sizeof(struct fw_state_value));
 	const struct fw_state_value *s = (const struct fw_state_value *)src;
 	struct fw_state_value *d = (struct fw_state_value *)dst;
 
@@ -77,7 +85,7 @@ static inline void
 fwmap_promote_value_fwstate(
 	void *dst, const void *new_value, const void *old_value, size_t size
 ) {
-	(void)size;
+	assert(size == sizeof(struct fw_state_value));
 
 	struct fw_state_value *d = (struct fw_state_value *)dst;
 	const struct fw_state_value *new_v =
@@ -104,7 +112,7 @@ fwmap_promote_value_fwstate(
 
 static inline bool
 fwmap_fw4_key_equal(const void *a, const void *b, size_t size) {
-	(void)size;
+	assert(size == sizeof(struct fw4_state_key));
 	const struct fw4_state_key *k1 = (const struct fw4_state_key *)a;
 	const struct fw4_state_key *k2 = (const struct fw4_state_key *)b;
 
@@ -116,7 +124,7 @@ fwmap_fw4_key_equal(const void *a, const void *b, size_t size) {
 
 static inline bool
 fwmap_fw6_key_equal(const void *a, const void *b, size_t size) {
-	(void)size;
+	assert(size == sizeof(struct fw6_state_key));
 	const struct fw6_state_key *k1 = (const struct fw6_state_key *)a;
 	const struct fw6_state_key *k2 = (const struct fw6_state_key *)b;
 

@@ -70,7 +70,6 @@ acl_handle_packets(
 	struct fwstate_sync_config *sync_config = &fwstate_config->sync_config;
 	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
 	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
-	fwmap_t *state_table = NULL;
 
 	struct counter_storage *counter_storage =
 		ADDR_OF_NONNULL(&module_ectx->counter_storage);
@@ -222,8 +221,6 @@ acl_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			state_table = fw4state;
-
 			if (ip4_result[ip4_idx] < action) {
 				action = ip4_result[ip4_idx];
 			}
@@ -240,8 +237,6 @@ acl_handle_packets(
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			state_table = fw6state;
-
 			if (ip6_result[ip6_idx] < action) {
 				action = ip6_result[ip6_idx];
 			}
@@ -295,7 +290,8 @@ acl_handle_packets(
 				}
 				case ACTION_CHECK_STATE: {
 					if (fwstate_check_state(
-						    state_table,
+						    fw4state,
+						    fw6state,
 						    packet,
 						    now,
 						    &push_sync_packet
