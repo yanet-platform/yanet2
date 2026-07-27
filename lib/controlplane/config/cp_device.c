@@ -449,21 +449,41 @@ cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
 	struct agent *agent = ADDR_OF(&device->agent);
 	EQUATE_OFFSET(&device->prev, &agent->unused_device);
 	SET_OFFSET_OF(&agent->unused_device, device);
+	agent->loaded_device_count++;
 }
 
 void
 cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn) {
-	// Detach the whole list first so a device's own free cannot observe a
-	// half-walked list.
-	struct cp_device *device = ADDR_OF(&agent->unused_device);
-	SET_OFFSET_OF(&agent->unused_device, NULL);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	while (device != NULL) {
-		struct cp_device *prev = ADDR_OF(&device->prev);
-		SET_OFFSET_OF(&device->prev, NULL);
-		free_fn(device);
-		device = prev;
+	// Parking (cp_device_registry_item_free_cb) runs under cp_config_lock
+	// via cp_config_gen_free on every update path, so the detach that
+	// steals the list must take the same lock to avoid racing a concurrent
+	// park. Must not be called with cp_config_lock already held.
+	cp_config_lock(cp_config);
+
+	// Walk the agent and every prior agent in its prev chain so devices
+	// parked by a retired creating agent are reclaimed too. Freeing is
+	// agent-agnostic: free_fn uses each device's own memory_context,
+	// which stays valid as long as the creating agent is alive (the
+	// loaded_device_count gate keeps a prior agent from being cleaned up
+	// while it still holds parked devices).
+	for (; agent != NULL; agent = ADDR_OF(&agent->prev)) {
+		// Detach the whole list first so a device's own free cannot
+		// observe a half-walked list.
+		struct cp_device *device = ADDR_OF(&agent->unused_device);
+		SET_OFFSET_OF(&agent->unused_device, NULL);
+
+		while (device != NULL) {
+			struct cp_device *prev = ADDR_OF(&device->prev);
+			SET_OFFSET_OF(&device->prev, NULL);
+			free_fn(device);
+			agent->loaded_device_count--;
+			device = prev;
+		}
 	}
+
+	cp_config_unlock(cp_config);
 }
 
 void

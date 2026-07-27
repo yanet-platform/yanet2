@@ -36,7 +36,22 @@ struct agent {
 	pid_t pid;
 	uint64_t memory_limit;
 	uint64_t gen;
+	// Count of cp_modules created by this agent and not yet finalized.
+	//
+	// Read at the reclamation gate, but not yet maintained: cp_module_init
+	// and cp_module_fini do not touch it, so it stays zero and module
+	// reclamation is not gated on it yet.
 	uint64_t loaded_module_count;
+	// Count of cp_devices parked on this agent's unused_device list and not
+	// yet drained.
+	//
+	// Incremented when a device is parked by
+	// cp_device_registry_item_free_cb and decremented when the drain frees
+	// it, so it tracks parked devices rather than every initialized device.
+	// agent_attach and agent_free_unused_agents gate reclamation of a
+	// previous agent on this count being zero, since agent_cleanup does not
+	// drain unused_device itself.
+	uint64_t loaded_device_count;
 	uint64_t active_module_count;
 	struct agent *prev;
 	char name[80];

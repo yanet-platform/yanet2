@@ -189,6 +189,37 @@ cp_module_fini(struct cp_module *cp_module) {
 	memory_context_fini(&cp_module->memory_context);
 }
 
+void
+cp_module_agent_drain_unused(
+	struct agent *agent, cp_module_free_handler free_handler
+) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	// Parking (cp_module_registry_item_free_cb) runs under cp_config_lock
+	// via cp_config_gen_free on every update path, so the detach that
+	// steals the list must take the same lock to avoid racing a concurrent
+	// park. Must not be called with cp_config_lock already held.
+	cp_config_lock(cp_config);
+
+	// Walk the agent and every prior agent in its prev chain so modules
+	// parked by a retired creating agent are reclaimed too. Freeing is
+	// agent-agnostic: free_handler uses each module's own memory_context,
+	// which stays valid as long as the creating agent is alive.
+	for (; agent != NULL; agent = ADDR_OF(&agent->prev)) {
+		struct cp_module *module = ADDR_OF(&agent->unused_module);
+		SET_OFFSET_OF(&agent->unused_module, NULL);
+
+		while (module != NULL) {
+			struct cp_module *prev = ADDR_OF(&module->prev);
+			SET_OFFSET_OF(&module->prev, NULL);
+			free_handler(module);
+			module = prev;
+		}
+	}
+
+	cp_config_unlock(cp_config);
+}
+
 int
 cp_module_link_device(
 	struct cp_module *cp_module,

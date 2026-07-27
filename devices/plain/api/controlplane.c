@@ -58,6 +58,11 @@ cp_device_plain_free(struct cp_device *cp_device) {
 void
 cp_device_plain_drain_unused(struct agent *agent) {
 	cp_device_agent_drain_unused(agent, cp_device_plain_free);
+	// The drain just freed devices parked on prior agents, dropping their
+	// loaded_device_count; reclaim any prior agent that reached zero so the
+	// count gate does not retain empty predecessors. Runs after the drain,
+	// which releases cp_config_lock.
+	agent_free_unused_agents(agent);
 }
 
 struct cp_device_plain_config *

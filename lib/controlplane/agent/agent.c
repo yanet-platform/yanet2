@@ -271,7 +271,8 @@ agent_attach(
 	while (ADDR_OF(&agent->prev) != NULL) {
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
 
-		if (prev_agent->loaded_module_count == 0) {
+		if (prev_agent->loaded_module_count == 0 &&
+		    prev_agent->loaded_device_count == 0) {
 			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
 			agent_cleanup(prev_agent);
 			continue;
@@ -1939,7 +1940,8 @@ agent_free_unused_agents(struct agent *agent) {
 	while (ADDR_OF(&agent->prev) != NULL) {
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
 
-		if (prev_agent->loaded_module_count == 0) {
+		if (prev_agent->loaded_module_count == 0 &&
+		    prev_agent->loaded_device_count == 0) {
 			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
 			agent_cleanup(prev_agent);
 			continue;

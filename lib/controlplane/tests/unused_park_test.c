@@ -41,6 +41,17 @@ counting_device_free(struct cp_device *device) {
 	cp_device_free(device);
 }
 
+// Module twin of counting_device_free: finalizes the base module and returns
+// the struct to the creating agent's arena. Test modules here are raw
+// cp_module allocations, so sizeof(struct cp_module) is the right size.
+static void
+counting_module_free(struct cp_module *module) {
+	struct agent *agent = ADDR_OF(&module->agent);
+	free_call_count += 1;
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(struct cp_module));
+}
+
 // Verifies that parking two devices back-to-back onto an agent's
 // unused_device list, then draining it, reclaims exactly the parked devices
 // without crashing and returns the agent's arena to its pre-park size.
@@ -223,19 +234,111 @@ test_module_park_chain(struct yanet_shm *shm) {
 		ADDR_OF(&second->prev), "first parked module's prev is not NULL"
 	);
 
-	// Nothing drains unused_module today, so reclaim the parked chain by
-	// hand instead of leaving it for agent_detach.
-	struct cp_module *module = head;
-	while (module != NULL) {
-		struct cp_module *prev = ADDR_OF(&module->prev);
-		cp_module_fini(module);
-		memory_bfree(
-			&agent->memory_context, module, sizeof(struct cp_module)
-		);
-		module = prev;
-	}
+	// Drain the parked chain through the module drain helper instead of
+	// leaving it for agent_detach.
+	free_call_count = 0;
+	cp_module_agent_drain_unused(agent, counting_module_free);
+	TEST_ASSERT_EQUAL(
+		free_call_count, 2, "drain did not free exactly two modules"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_module),
+		"unused_module is not NULL after drain"
+	);
 
 	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// Regression test for GH#1535: a device parked on a prior (creating) agent
+// must still be drained when the current agent reclaims its unused lists.
+// loaded_device_count keeps the prior agent alive until the parked device is
+// finalized, and the drain walks the prev chain to reach it.
+static int
+test_drain_reaches_prior_agent(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	// agentA creates and parks a device; its loaded_device_count keeps it
+	// alive when agentB attaches with the same name.
+	struct agent *agentA = agent_attach(
+		shm, 0, "xagent", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agentA, "agentA attach failed");
+
+	struct cp_device_config cfg;
+	TEST_ASSERT_SUCCESS(
+		cp_device_config_init(&cfg, "plain", "xa0", 0, 0, &err),
+		"device config init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_device *device = cp_device_new(&agentA->memory_context);
+	TEST_ASSERT_NOT_NULL(device, "cp_device_new failed");
+	TEST_ASSERT_SUCCESS(
+		cp_device_init(device, agentA, &cfg, &err),
+		"cp_device_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_device_config_fini(&cfg);
+	TEST_ASSERT_EQUAL(
+		agentA->loaded_device_count,
+		0,
+		"cp_device_init accounted the device before it was parked"
+	);
+
+	struct cp_device_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_init(
+			&agentA->memory_context, &registry, &err
+		),
+		"device registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_upsert(&registry, "xa0", device, &err),
+		"device registry upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	// Releasing the registry parks the device on agentA, which accounts it.
+	cp_device_registry_fini(&registry);
+	TEST_ASSERT(
+		ADDR_OF(&agentA->unused_device) == device,
+		"device is not parked on agentA"
+	);
+	TEST_ASSERT_EQUAL(
+		agentA->loaded_device_count,
+		1,
+		"parking did not account the device on agentA"
+	);
+
+	// agentB attaches with the same name; agentA has a live device so it
+	// must survive as agentB->prev instead of being cleaned up.
+	struct agent *agentB = agent_attach(
+		shm, 0, "xagent", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agentB, "agentB attach failed");
+	TEST_ASSERT(
+		ADDR_OF(&agentB->prev) == agentA,
+		"agentA was cleaned up instead of staying as agentB->prev"
+	);
+
+	// Draining from agentB must reach agentA's parked device through the
+	// prev chain, finalizing it (which drops agentA's count to zero).
+	free_call_count = 0;
+	cp_device_agent_drain_unused(agentB, counting_device_free);
+	TEST_ASSERT_EQUAL(
+		free_call_count, 1, "drain did not free agentA's parked device"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agentA->unused_device),
+		"agentA unused_device is not empty after drain"
+	);
+	TEST_ASSERT_EQUAL(
+		agentA->loaded_device_count,
+		0,
+		"agentA loaded_device_count did not drop to zero after drain"
+	);
+
+	agent_detach(agentB);
 	return TEST_SUCCESS;
 }
 
@@ -248,7 +351,7 @@ main(void) {
 	const char *devs_to_load[] = {"plain"};
 
 	struct dataplane_ut_config cfg = {
-		.cp_memory = 1u << 25,
+		.cp_memory = 1u << 27,
 		.dp_memory = 1u << 20,
 		.worker_count = 1,
 		.devices = port_names,
@@ -275,6 +378,9 @@ main(void) {
 	int res = test_device_park_and_drain(shm);
 	if (res == TEST_SUCCESS) {
 		res = test_module_park_chain(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_drain_reaches_prior_agent(shm);
 	}
 
 	dataplane_ut_free(ut);

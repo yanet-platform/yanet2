@@ -60,6 +60,8 @@ cp_device_vlan_free(struct cp_device *cp_device) {
 void
 cp_device_vlan_drain_unused(struct agent *agent) {
 	cp_device_agent_drain_unused(agent, cp_device_vlan_free);
+	// Reclaim prior agents whose parked devices the drain just freed.
+	agent_free_unused_agents(agent);
 }
 
 struct cp_device_vlan_config *
