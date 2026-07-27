@@ -362,6 +362,40 @@ cp_module_registry_lookup(
 	);
 }
 
+// Remove new_module from its creating agent's unused_module list if it is
+// parked there.
+//
+// Re-inserting a parked module via registry upsert would otherwise leave it
+// on the unused list while the registry also owns it, so a later drain would
+// free memory the registry still references. Called only after the replace
+// succeeds, so a failed upsert leaves the module parked and reachable by the
+// drain. Every production upsert path holds cp_config_lock, the same lock
+// parking uses.
+static void
+cp_module_unpark(struct cp_module *new_module) {
+	struct agent *agent = ADDR_OF(&new_module->agent);
+	if (agent == NULL) {
+		return;
+	}
+
+	struct cp_module *cursor = ADDR_OF(&agent->unused_module);
+	struct cp_module *above = NULL;
+	while (cursor != NULL) {
+		struct cp_module *next = ADDR_OF(&cursor->prev);
+		if (cursor == new_module) {
+			if (above == NULL) {
+				SET_OFFSET_OF(&agent->unused_module, next);
+			} else {
+				SET_OFFSET_OF(&above->prev, next);
+			}
+			SET_OFFSET_OF(&new_module->prev, NULL);
+			return;
+		}
+		above = cursor;
+		cursor = next;
+	}
+}
+
 int
 cp_module_registry_upsert(
 	struct cp_module_registry *module_registry,
@@ -384,14 +418,22 @@ cp_module_registry_upsert(
 		err
 	);
 
-	return registry_replace(
-		&module_registry->registry,
-		cp_module_registry_item_cmp,
-		&cmp_data,
-		&new_module->config_item,
-		cp_module_registry_item_free_cb,
-		ADDR_OF(&module_registry->memory_context)
-	);
+	if (registry_replace(
+		    &module_registry->registry,
+		    cp_module_registry_item_cmp,
+		    &cmp_data,
+		    &new_module->config_item,
+		    cp_module_registry_item_free_cb,
+		    ADDR_OF(&module_registry->memory_context)
+	    )) {
+		return -1;
+	}
+
+	// The replace owns the module now, so it is safe to drop any stale
+	// park.
+	cp_module_unpark(new_module);
+
+	return 0;
 }
 
 int

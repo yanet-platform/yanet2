@@ -41,6 +41,17 @@ counting_device_free(struct cp_device *device) {
 	cp_device_free(device);
 }
 
+// Module twin of counting_device_free: finalizes the base module and returns
+// the struct to the creating agent's arena. Test modules here are raw
+// cp_module allocations, so sizeof(struct cp_module) is the right size.
+static void
+counting_module_free(struct cp_module *module) {
+	struct agent *agent = ADDR_OF(&module->agent);
+	free_call_count += 1;
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(struct cp_module));
+}
+
 // Verifies that parking two devices back-to-back onto an agent's
 // unused_device list, then draining it, reclaims exactly the parked devices
 // without crashing and returns the agent's arena to its pre-park size.
@@ -239,6 +250,194 @@ test_module_park_chain(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Regression test for GH#1538: re-inserting a parked cp_device via registry
+// upsert must unlink it from the creating agent's unused_device list.
+//
+// Without the unpark the device ends up both registry-owned and on the
+// unused list, so a later drain frees memory the registry still references.
+static int
+test_upsert_unparks_device(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "unpark-dev", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_device_config cfg;
+	TEST_ASSERT_SUCCESS(
+		cp_device_config_init(&cfg, "plain", "upark0", 0, 0, &err),
+		"device config init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_device *device = cp_device_new(&agent->memory_context);
+	TEST_ASSERT_NOT_NULL(device, "cp_device_new failed");
+	TEST_ASSERT_SUCCESS(
+		cp_device_init(device, agent, &cfg, &err),
+		"cp_device_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_device_config_fini(&cfg);
+
+	// Park the device by building and releasing a registry that owns it.
+	struct cp_device_registry park_registry;
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_init(
+			&agent->memory_context, &park_registry, &err
+		),
+		"park registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_upsert(
+			&park_registry, "upark0", device, &err
+		),
+		"park registry upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_device_registry_fini(&park_registry);
+	TEST_ASSERT(
+		ADDR_OF(&agent->unused_device) == device,
+		"device is not parked on unused_device before re-upsert"
+	);
+
+	// Re-insert the parked device into a fresh registry: this must unpark.
+	struct cp_device_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_init(
+			&agent->memory_context, &registry, &err
+		),
+		"device registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_registry_upsert(&registry, "upark0", device, &err),
+		"device re-upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_device),
+		"re-upsert left the device parked on unused_device"
+	);
+	TEST_ASSERT(
+		cp_device_registry_lookup(&registry, "upark0") == device,
+		"device is not resident in the registry after re-upsert"
+	);
+
+	// Releasing the registry parks the device once; draining reclaims it
+	// exactly once.
+	cp_device_registry_fini(&registry);
+	free_call_count = 0;
+	cp_device_agent_drain_unused(agent, counting_device_free);
+	TEST_ASSERT_EQUAL(
+		free_call_count, 1, "drain did not free the device exactly once"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_device),
+		"unused_device is not NULL after drain"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// Regression test for GH#1538 (module facet): re-inserting a parked cp_module
+// via registry upsert must unlink it from the creating agent's unused_module
+// list.
+static int
+test_upsert_unparks_module(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "unpark-mod", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_module *module = (struct cp_module *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_module)
+	);
+	TEST_ASSERT_NOT_NULL(module, "failed to allocate module");
+	TEST_ASSERT_SUCCESS(
+		cp_module_init(module, agent, "route", "uparkm", &err),
+		"cp_module_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_module_registry park_registry;
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_init(
+			&agent->memory_context, &park_registry, &err
+		),
+		"park registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_upsert(
+			&park_registry, "route", "uparkm", module, &err
+		),
+		"park registry upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_module_registry_fini(&park_registry);
+	TEST_ASSERT(
+		ADDR_OF(&agent->unused_module) == module,
+		"module is not parked on unused_module before re-upsert"
+	);
+
+	// Re-insert the parked module into a fresh registry: this must unpark.
+	struct cp_module_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_init(
+			&agent->memory_context, &registry, &err
+		),
+		"module registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_upsert(
+			&registry, "route", "uparkm", module, &err
+		),
+		"module re-upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_module),
+		"re-upsert left the module parked on unused_module"
+	);
+	TEST_ASSERT(
+		cp_module_registry_lookup(&registry, "route", "uparkm") ==
+			module,
+		"module is not resident in the registry after re-upsert"
+	);
+
+	// Releasing the registry parks the module once; reclaim it by hand
+	// (no module drain helper on this branch) and check the count.
+	cp_module_registry_fini(&registry);
+	TEST_ASSERT(
+		ADDR_OF(&agent->unused_module) == module,
+		"module is not parked again after registry fini"
+	);
+
+	free_call_count = 0;
+	struct cp_module *cursor = ADDR_OF(&agent->unused_module);
+	SET_OFFSET_OF(&agent->unused_module, NULL);
+	while (cursor != NULL) {
+		struct cp_module *prev = ADDR_OF(&cursor->prev);
+		counting_module_free(cursor);
+		cursor = prev;
+	}
+	TEST_ASSERT_EQUAL(
+		free_call_count, 1, "drain did not free the module exactly once"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_module),
+		"unused_module is not NULL after drain"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -248,7 +447,7 @@ main(void) {
 	const char *devs_to_load[] = {"plain"};
 
 	struct dataplane_ut_config cfg = {
-		.cp_memory = 1u << 25,
+		.cp_memory = 1u << 27,
 		.dp_memory = 1u << 20,
 		.worker_count = 1,
 		.devices = port_names,
@@ -275,6 +474,12 @@ main(void) {
 	int res = test_device_park_and_drain(shm);
 	if (res == TEST_SUCCESS) {
 		res = test_module_park_chain(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_upsert_unparks_device(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_upsert_unparks_module(shm);
 	}
 
 	dataplane_ut_free(ut);

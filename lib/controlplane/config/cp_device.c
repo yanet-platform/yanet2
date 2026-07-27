@@ -518,6 +518,40 @@ cp_device_registry_lookup(
 	);
 }
 
+// Remove new_device from its creating agent's unused_device list if it is
+// parked there.
+//
+// Re-inserting a parked device via registry upsert would otherwise leave it
+// on the unused list while the registry also owns it, so a later drain would
+// free memory the registry still references. Called only after the replace
+// succeeds, so a failed upsert leaves the device parked and reachable by the
+// drain. Every production upsert path holds cp_config_lock, the same lock
+// parking uses.
+static void
+cp_device_unpark(struct cp_device *new_device) {
+	struct agent *agent = ADDR_OF(&new_device->agent);
+	if (agent == NULL) {
+		return;
+	}
+
+	struct cp_device *cursor = ADDR_OF(&agent->unused_device);
+	struct cp_device *above = NULL;
+	while (cursor != NULL) {
+		struct cp_device *next = ADDR_OF(&cursor->prev);
+		if (cursor == new_device) {
+			if (above == NULL) {
+				SET_OFFSET_OF(&agent->unused_device, next);
+			} else {
+				SET_OFFSET_OF(&above->prev, next);
+			}
+			SET_OFFSET_OF(&new_device->prev, NULL);
+			return;
+		}
+		above = cursor;
+		cursor = next;
+	}
+}
+
 int
 cp_device_registry_upsert(
 	struct cp_device_registry *device_registry,
@@ -552,6 +586,10 @@ cp_device_registry_upsert(
 		yanet_error_add(err, "failed to replace device in registry");
 		return -1;
 	}
+
+	// The replace owns the device now, so it is safe to drop any stale
+	// park.
+	cp_device_unpark(new_device);
 
 	return 0;
 }
