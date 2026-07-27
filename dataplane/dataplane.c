@@ -741,6 +741,22 @@ dataplane_init(
 			return -1;
 		}
 
+		for (uint64_t device_idx = 0;
+		     device_idx < dataplane->device_count;
+		     ++device_idx) {
+			if (dp_topology_set_device_worker_count(
+				    dp_config,
+				    device_idx,
+				    dataplane->devices[device_idx].worker_count
+			    ) != 0) {
+				LOG(ERROR,
+				    "failed to set dp_topology worker count "
+				    "for device %lu",
+				    device_idx);
+				return -1;
+			}
+		}
+
 		cp_config_unlock(cp_config);
 		dp_config_mark_ready(dp_config);
 	}

@@ -104,21 +104,11 @@ dp_config_lookup_device(
 	return -1;
 }
 
-int
-dp_config_worker_idx_by_device_queue(
-	struct dp_config *dp_config,
-	uint32_t device_id,
-	uint16_t queue_id,
-	uint64_t *out_idx
-) {
-	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
-	for (uint64_t idx = 0; idx < dp_config->worker_count; ++idx) {
-		struct dp_worker *worker = ADDR_OF(workers + idx);
-		if (worker->device_id == device_id &&
-		    worker->queue_id == queue_id) {
-			*out_idx = worker->idx;
-			return 0;
-		}
+uint64_t
+dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id) {
+	if (device_id >= dp_config->dp_topology.device_count) {
+		return 0;
 	}
-	return -1;
+	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
+	return devices[device_id].worker_count;
 }

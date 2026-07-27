@@ -23,12 +23,17 @@ struct dp_port {
 	uint16_t rss_key_len;
 	uint8_t *rss_key;
 
-	// Redirection table: rss_reta[slot] is the rx-queue id the NIC maps
-	// RETA slot to.
+	// Redirection table (RETA): rss_reta[slot] is the rx-queue id the NIC
+	// maps that slot to.
 	//
 	// The table size is queried at runtime and also varies by driver.
 	uint16_t rss_reta_size;
 	uint16_t *rss_reta;
+
+	// Count of workers bound to this device, across every instance -- not
+	// to be confused with dp_config->worker_count, the instance-wide
+	// total across every device.
+	uint64_t worker_count;
 };
 
 struct dp_topology {
@@ -75,7 +80,12 @@ dp_topology_alloc_devices(struct dp_config *dp_config, size_t count);
 // be at least DP_TOPOLOGY_RSS_KEY_LEN_MIN. A call outside that contract is
 // rejected outright — nothing is allocated or stored, and rss_valid stays
 // false — so the device falls back to its non-RSS-aware path instead of an
-// out-of-contract report reaching a consumer.
+// out-of-contract report reaching a consumer. An out-of-range device_id is
+// rejected the same way.
+//
+// Assumes a single call per (instance, device) at device start — a
+// re-invocation for the same device would leak the previously allocated
+// key and reta arrays instead of freeing them.
 //
 // On success the device's rss_valid flag is set. Returns non-zero on
 // rejection or allocation failure, leaving the device's RSS state untouched.
@@ -87,4 +97,18 @@ dp_topology_set_device_rss(
 	uint16_t key_len,
 	const uint16_t *reta,
 	uint16_t reta_size
+);
+
+// Set the count of workers bound to device_id, across every instance, so
+// dp_config_device_worker_count can answer in O(1).
+//
+// Must be the device-wide count, not a single instance's tally: queue ids
+// are handed out per device across every instance, so a device spanning
+// more than one instance would otherwise be undercounted.
+//
+// Returns non-zero if device_id is out of range for dp_topology, leaving
+// the count untouched.
+int
+dp_topology_set_device_worker_count(
+	struct dp_config *dp_config, uint32_t device_id, uint64_t worker_count
 );

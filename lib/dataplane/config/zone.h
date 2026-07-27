@@ -173,21 +173,13 @@ dp_config_lookup_device(
 	struct dp_config *dp_config, const char *name, uint64_t *index
 );
 
-// Find the global dp_worker->idx of the worker owning the given
-// (device_id, rx_queue) pair by scanning dp_config->workers. Writes the
-// found index to *out_idx and returns 0, or returns non-zero if no worker
-// owns that device/queue pair.
+// Count of workers bound to device_id, across every instance.
 //
-// The returned index is the GLOBAL worker index, not the queue id — the two
-// diverge whenever a device's queue ids are not a prefix of the global
-// worker index space.
-int
-dp_config_worker_idx_by_device_queue(
-	struct dp_config *dp_config,
-	uint32_t device_id,
-	uint16_t queue_id,
-	uint64_t *out_idx
-);
+// O(1), reading a count dp_topology_set_device_worker_count publishes per
+// device. Zero for an out-of-range device_id or one whose count was never
+// set.
+uint64_t
+dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
 
 void
 dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen);

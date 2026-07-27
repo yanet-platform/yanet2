@@ -419,6 +419,13 @@ dataplane_worker_init(
 	}
 	memset(dp_worker, 0, sizeof(struct dp_worker));
 	dp_worker->idx = dp_config->worker_count;
+	// Set before dp_config->worker_count is incremented below: a reader
+	// bounds its walk of dp_config->workers by that count, so these
+	// fields must be live before the count moves, not still zeroed.
+	dp_worker->device_id = worker->device_id;
+	dp_worker->queue_id = queue_id;
+	dp_worker->core_id = config->core_id;
+	dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
 	// Init worker clock
 	int init_clock_result = tsc_clock_init(&dp_worker->clock);
@@ -457,10 +464,6 @@ dataplane_worker_init(
 	worker->read_ctx.read_size = WORKER_RX_BURST_SIZE;
 	worker->write_ctx.write_size = 32;
 	worker->write_ctx.rx_pipes = NULL;
-	dp_worker->core_id = config->core_id;
-	dp_worker->device_id = worker->device_id;
-	dp_worker->queue_id = queue_id;
-	dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
 	uint16_t rx_queue_len =
 		config->rx_queue_len ? config->rx_queue_len : 4096;

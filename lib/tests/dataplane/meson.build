@@ -52,3 +52,16 @@ topology_test = executable(
   include_directories: yanet_rootdir,
 )
 test('topology', topology_test, suite: 'lib_dataplane')
+
+zone_test = executable(
+  'zone_test',
+  'zone_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_config_dp_dep,
+    lib_logging_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('zone', zone_test, suite: 'lib_dataplane')

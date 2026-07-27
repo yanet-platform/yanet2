@@ -335,6 +335,44 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		SET_OFFSET_OF(dp_workers + idx, dp_worker);
 	}
 
+	// Skipped when device_count == 0: the implicit device 0 (see above)
+	// has no dp_topology slot, so per-device worker counts stay
+	// unavailable in that mode -- a known, deferred gap.
+	if (cfg->device_count > 0) {
+		uint64_t *device_worker_counts = (uint64_t *)calloc(
+			effective_device_count, sizeof(uint64_t)
+		);
+		if (device_worker_counts == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to allocate device "
+			    "worker counts");
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		for (size_t idx = 0; idx < cfg->worker_count; ++idx) {
+			struct dp_worker *dp_worker = ADDR_OF(dp_workers + idx);
+			++device_worker_counts[dp_worker->device_id];
+		}
+		for (size_t device_idx = 0; device_idx < effective_device_count;
+		     ++device_idx) {
+			if (dp_topology_set_device_worker_count(
+				    ut->dp_config,
+				    device_idx,
+				    device_worker_counts[device_idx]
+			    ) != 0) {
+				LOG(ERROR,
+				    "dataplane_ut_new: failed to set "
+				    "dp_topology worker count for device "
+				    "%zu",
+				    device_idx);
+				free(device_worker_counts);
+				dataplane_ut_free(ut);
+				return NULL;
+			}
+		}
+		free(device_worker_counts);
+	}
+
 	return ut;
 }
 

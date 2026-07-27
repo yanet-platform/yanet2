@@ -1,52 +1,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common/memory.h"
-#include "common/memory_block.h"
 #include "common/test_assert.h"
 
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/logging/log.h"
-
-#define ARENA_SIZE (1 << 20)
+#include "lib/tests/dataplane/fixture.h"
 
 // A single dp_config wired up with a fresh arena-backed memory context and
 // one topology slot, ready for dp_topology_set_device_rss calls.
-struct topology_fixture {
-	void *arena;
-	struct block_allocator block_allocator;
-	struct dp_config dp_config;
-};
-
 static int
-fixture_init(struct topology_fixture *fixture) {
-	memset(&fixture->dp_config, 0, sizeof(fixture->dp_config));
-
-	fixture->arena = malloc(ARENA_SIZE);
-	TEST_ASSERT_NOT_NULL(fixture->arena, "failed to allocate arena");
-
-	block_allocator_init(&fixture->block_allocator);
-	block_allocator_put_arena(
-		&fixture->block_allocator, fixture->arena, ARENA_SIZE
-	);
-	memory_context_init(
-		&fixture->dp_config.memory_context,
-		"topology_test",
-		&fixture->block_allocator
-	);
-
-	TEST_ASSERT_NOT_NULL(
-		dp_topology_alloc_devices(&fixture->dp_config, 1),
-		"dp_topology_alloc_devices failed"
-	);
-
-	return TEST_SUCCESS;
+fixture_init(struct dataplane_test_fixture *fixture) {
+	return dataplane_test_fixture_init(fixture, "topology_test", 1);
 }
 
 static void
-fixture_fini(struct topology_fixture *fixture) {
-	free(fixture->arena);
+fixture_fini(struct dataplane_test_fixture *fixture) {
+	dataplane_test_fixture_fini(fixture);
 }
 
 // Verifies that a reta_size over DP_TOPOLOGY_RSS_RETA_SIZE_MAX is rejected
@@ -55,7 +26,7 @@ fixture_fini(struct topology_fixture *fixture) {
 // exactly 512 slots.
 static int
 test_reject_reta_size_too_large(void) {
-	struct topology_fixture fixture;
+	struct dataplane_test_fixture fixture;
 	TEST_ASSERT_SUCCESS(fixture_init(&fixture), "fixture init failed");
 
 	uint8_t key[40] = {0};
@@ -86,7 +57,7 @@ test_reject_reta_size_too_large(void) {
 // carries no usable RSS state.
 static int
 test_reject_reta_size_zero(void) {
-	struct topology_fixture fixture;
+	struct dataplane_test_fixture fixture;
 	TEST_ASSERT_SUCCESS(fixture_init(&fixture), "fixture init failed");
 
 	uint8_t key[40] = {0};
@@ -112,7 +83,7 @@ test_reject_reta_size_zero(void) {
 // since thash_toeplitz reads its first four bytes unconditionally.
 static int
 test_reject_key_len_too_short(void) {
-	struct topology_fixture fixture;
+	struct dataplane_test_fixture fixture;
 	TEST_ASSERT_SUCCESS(fixture_init(&fixture), "fixture init failed");
 
 	uint8_t key[3] = {0};
@@ -143,7 +114,7 @@ test_reject_key_len_too_short(void) {
 // stored verbatim, with rss_valid set.
 static int
 test_accept_valid_rss_state(void) {
-	struct topology_fixture fixture;
+	struct dataplane_test_fixture fixture;
 	TEST_ASSERT_SUCCESS(fixture_init(&fixture), "fixture init failed");
 
 	uint8_t key[40];
