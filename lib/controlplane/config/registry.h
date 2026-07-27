@@ -25,7 +25,10 @@ registry_item_unref(
 	void *free_func_data
 ) {
 	item->refcnt -= 1;
-	if (!item->refcnt)
+	// A NULL free_func drops the reference without any side effect, which
+	// the rollback paths use to abandon an unpublished generation without
+	// parking its items on an agent's unused list.
+	if (!item->refcnt && free_func)
 		free_func(item, free_func_data);
 }
 

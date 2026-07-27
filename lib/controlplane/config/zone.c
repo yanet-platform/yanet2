@@ -305,6 +305,10 @@ cp_config_update_modules(
 	return 0;
 
 error_free:
+	// The new generation was never published, so the modules already
+	// upserted into it must not be parked on an agent's unused list; the
+	// caller still owns them and reclaims them directly.
+	cp_module_registry_fini_rollback(&new_config_gen->module_registry);
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
 	cp_config_unlock(cp_config);

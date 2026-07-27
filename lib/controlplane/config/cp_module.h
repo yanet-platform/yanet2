@@ -181,6 +181,15 @@ cp_module_registry_copy(
 void
 cp_module_registry_fini(struct cp_module_registry *module_registry);
 
+// Drop every reference the registry holds without parking modules on an
+// agent's unused list.
+//
+// Used on the failure path of a batched upsert: the new generation was never
+// published, so its modules must not be retired (parked); the caller still
+// owns them and reclaims them directly. Idempotent on zero-init.
+void
+cp_module_registry_fini_rollback(struct cp_module_registry *module_registry);
+
 /**
  * Get a module from the registry by index.
  *

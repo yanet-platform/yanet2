@@ -41,6 +41,17 @@ counting_device_free(struct cp_device *device) {
 	cp_device_free(device);
 }
 
+// Module twin of counting_device_free: finalizes the base module and returns
+// the struct to the creating agent's arena. Test modules here are raw
+// cp_module allocations, so sizeof(struct cp_module) is the right size.
+static void
+counting_module_free(struct cp_module *module) {
+	struct agent *agent = ADDR_OF(&module->agent);
+	free_call_count += 1;
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(struct cp_module));
+}
+
 // Verifies that parking two devices back-to-back onto an agent's
 // unused_device list, then draining it, reclaims exactly the parked devices
 // without crashing and returns the agent's arena to its pre-park size.
@@ -239,6 +250,112 @@ test_module_park_chain(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Regression test for GH#1536: finalizing an unpublished generation must not
+// park its modules on the creating agent's unused_module list. A batched
+// upsert that fails partway through rolls back without retiring the already
+// submitted modules; the caller still owns them.
+static int
+test_module_rollback_does_not_park(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "rollback-mod", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	// old gen holds module O.
+	struct cp_module_registry old_registry;
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_init(
+			&agent->memory_context, &old_registry, &err
+		),
+		"old module registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_module *module_old = (struct cp_module *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_module)
+	);
+	TEST_ASSERT_NOT_NULL(module_old, "failed to allocate module_old");
+	TEST_ASSERT_SUCCESS(
+		cp_module_init(module_old, agent, "route", "rol0", &err),
+		"cp_module_init failed for module_old: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_upsert(
+			&old_registry, "route", "rol0", module_old, &err
+		),
+		"old registry upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	// new gen copies old (module_old refcnt 2) and adds a new module N.
+	struct cp_module_registry new_registry;
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_copy(
+			&agent->memory_context,
+			&new_registry,
+			&old_registry,
+			&err
+		),
+		"module registry copy failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_module *module_new = (struct cp_module *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_module)
+	);
+	TEST_ASSERT_NOT_NULL(module_new, "failed to allocate module_new");
+	TEST_ASSERT_SUCCESS(
+		cp_module_init(module_new, agent, "route", "rol1", &err),
+		"cp_module_init failed for module_new: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_module_registry_upsert(
+			&new_registry, "route", "rol1", module_new, &err
+		),
+		"new registry upsert failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	// Roll back the new gen: module_new must NOT be parked (caller owns
+	// it), and module_old must stay resident in the old gen.
+	cp_module_registry_fini_rollback(&new_registry);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&agent->unused_module),
+		"rollback parked a submitted module on unused_module"
+	);
+	TEST_ASSERT(
+		cp_module_registry_lookup(&old_registry, "route", "rol0") ==
+			module_old,
+		"old gen lost its module during rollback"
+	);
+
+	// The caller reclaims module_new directly (rollback left it at refcnt
+	// 0).
+	cp_module_fini(module_new);
+	memory_bfree(
+		&agent->memory_context, module_new, sizeof(struct cp_module)
+	);
+
+	// Releasing the old gen parks module_old the normal way; reclaim it.
+	cp_module_registry_fini(&old_registry);
+	TEST_ASSERT(
+		ADDR_OF(&agent->unused_module) == module_old,
+		"old gen module did not park on normal fini"
+	);
+	free_call_count = 0;
+	struct cp_module *parked = ADDR_OF(&agent->unused_module);
+	SET_OFFSET_OF(&agent->unused_module, NULL);
+	counting_module_free(parked);
+	TEST_ASSERT_EQUAL(
+		free_call_count, 1, "did not free the parked old module"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -248,7 +365,7 @@ main(void) {
 	const char *devs_to_load[] = {"plain"};
 
 	struct dataplane_ut_config cfg = {
-		.cp_memory = 1u << 25,
+		.cp_memory = 1u << 27,
 		.dp_memory = 1u << 20,
 		.worker_count = 1,
 		.devices = port_names,
@@ -275,6 +392,9 @@ main(void) {
 	int res = test_device_park_and_drain(shm);
 	if (res == TEST_SUCCESS) {
 		res = test_module_park_chain(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_module_rollback_does_not_park(shm);
 	}
 
 	dataplane_ut_free(ut);

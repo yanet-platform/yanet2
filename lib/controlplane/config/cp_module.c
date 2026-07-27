@@ -287,6 +287,14 @@ cp_module_registry_fini(struct cp_module_registry *module_registry) {
 	);
 }
 
+void
+cp_module_registry_fini_rollback(struct cp_module_registry *module_registry) {
+	// NULL free_func: items that reach refcnt zero are left in place for
+	// the caller to reclaim instead of being parked on an agent's unused
+	// list.
+	registry_fini(&module_registry->registry, NULL, NULL);
+}
+
 struct cp_module *
 cp_module_registry_get(
 	struct cp_module_registry *module_registry, uint64_t index
