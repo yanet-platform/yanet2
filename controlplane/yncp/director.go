@@ -125,7 +125,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 			builtin.NewFunction(cfg.Gateway.InstanceID, shm, builtin.WithFunctionLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewCounters(cfg.Gateway.InstanceID, shm),
+			builtin.NewCounters(cfg.Gateway.InstanceID, shm, builtin.WithCountersLog(log)),
 		),
 		gateway.WithBuiltinService(
 			builtin.NewDevice(cfg.Gateway.InstanceID, shm),

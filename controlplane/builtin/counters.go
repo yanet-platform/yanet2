@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -18,13 +19,40 @@ type Counters struct {
 
 	instanceID uint32
 	shm        *ffi.SharedMemory
+	log        *zap.Logger
+}
+
+// CountersOption configures the Counters constructor.
+type CountersOption func(*countersOptions)
+
+type countersOptions struct {
+	Log *zap.Logger
+}
+
+func newCountersOptions() *countersOptions {
+	return &countersOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithCountersLog sets the logger for the counters service.
+func WithCountersLog(log *zap.Logger) CountersOption {
+	return func(o *countersOptions) {
+		o.Log = log
+	}
 }
 
 // NewCounters creates a new Counters service.
-func NewCounters(instanceID uint32, shm *ffi.SharedMemory) *Counters {
+func NewCounters(instanceID uint32, shm *ffi.SharedMemory, options ...CountersOption) *Counters {
+	opts := newCountersOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &Counters{
 		instanceID: instanceID,
 		shm:        shm,
+		log:        opts.Log,
 	}
 }
 
@@ -225,6 +253,9 @@ func (m *Counters) Ports(
 }
 
 // Collect returns a generic metrics snapshot for port and worker counters.
+//
+// A family that fails to collect is omitted from the snapshot, so a
+// consumer sees a gap for that scrape rather than stale values.
 func (m *Counters) Collect() []*commonpb.Metric {
 	dpConfig := m.shm.DPConfig(m.instanceID)
 
@@ -232,10 +263,14 @@ func (m *Counters) Collect() []*commonpb.Metric {
 
 	if ports, err := dpConfig.PortCounters(); err == nil {
 		metrics = append(metrics, portMetrics(ports)...)
+	} else {
+		m.log.Warn("failed to collect port counters", zap.Error(err))
 	}
 
 	if workers, err := dpConfig.WorkerCounters(); err == nil {
 		metrics = append(metrics, workerMetrics(workers)...)
+	} else {
+		m.log.Warn("failed to collect worker counters", zap.Error(err))
 	}
 
 	return metrics
