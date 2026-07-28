@@ -425,13 +425,13 @@ cp_device_registry_copy(
 
 static void
 cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
-	(void)item;
+	struct cp_device *device =
+		container_of(item, struct cp_device, config_item);
+	struct agent *agent = ADDR_OF(&device->agent);
+	if (agent != NULL) {
+		agent->loaded_device_count -= 1;
+	}
 	(void)data;
-
-	// Registry membership is not ownership: a device whose refcount reaches
-	// zero is not freed here. The Go control plane that created the device
-	// frees it explicitly once the generation it published has superseded
-	// the old one, so the registry has nothing to reclaim at this point.
 }
 
 void
@@ -519,6 +519,11 @@ cp_device_registry_upsert(
 	    )) {
 		yanet_error_add(err, "failed to replace device in registry");
 		return -1;
+	}
+
+	struct agent *agent = ADDR_OF(&new_device->agent);
+	if (agent != NULL) {
+		agent->loaded_device_count += 1;
 	}
 
 	return 0;

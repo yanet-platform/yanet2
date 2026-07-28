@@ -266,7 +266,12 @@ cp_module_registry_copy(
 
 static void
 cp_module_registry_item_free_cb(struct registry_item *item, void *data) {
-	(void)item;
+	struct cp_module *module =
+		container_of(item, struct cp_module, config_item);
+	struct agent *agent = ADDR_OF(&module->agent);
+	if (agent != NULL) {
+		agent->loaded_module_count -= 1;
+	}
 	(void)data;
 }
 
@@ -378,14 +383,24 @@ cp_module_registry_upsert(
 		err
 	);
 
-	return registry_replace(
-		&module_registry->registry,
-		cp_module_registry_item_cmp,
-		&cmp_data,
-		&new_module->config_item,
-		cp_module_registry_item_free_cb,
-		ADDR_OF(&module_registry->memory_context)
-	);
+	if (registry_replace(
+		    &module_registry->registry,
+		    cp_module_registry_item_cmp,
+		    &cmp_data,
+		    &new_module->config_item,
+		    cp_module_registry_item_free_cb,
+		    ADDR_OF(&module_registry->memory_context)
+	    )) {
+		yanet_error_add(err, "failed to replace module in registry");
+		return -1;
+	}
+
+	struct agent *agent = ADDR_OF(&new_module->agent);
+	if (agent != NULL) {
+		agent->loaded_module_count += 1;
+	}
+
+	return 0;
 }
 
 int

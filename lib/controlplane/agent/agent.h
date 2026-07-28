@@ -37,7 +37,7 @@ struct agent {
 	uint64_t memory_limit;
 	uint64_t gen;
 	uint64_t loaded_module_count;
-	uint64_t active_module_count;
+	uint64_t loaded_device_count;
 	struct agent *prev;
 	char name[80];
 
@@ -180,6 +180,6 @@ cp_device_config_set_output_pipeline(
 	uint64_t weight
 );
 
-// Allows to clean up previous agents which have no loaded modules.
+// Allows to clean up previous agents which have no loaded modules or devices.
 void
 agent_free_unused_agents(struct agent *agent);
