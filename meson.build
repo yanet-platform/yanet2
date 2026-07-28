@@ -18,8 +18,8 @@ yanet_project_args = ['-g', '-D_GNU_SOURCE']
 if host_machine.cpu_family() in ['x86', 'x86_64']
   yanet_project_args += '-march=' + get_option('cpu_arch')
 endif
-# aarch64 appends its own ISA flag to yanet_project_args further down,
-# once DPDK's subproject() has resolved its ISA baseline.
+# The aarch64 branch appends its own ISA flag to yanet_project_args
+# further down, once the DPDK subproject() has resolved its ISA baseline.
 
 yanet_conf = configuration_data()
 yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
@@ -146,9 +146,9 @@ libdpdk = subproject(
 
 libdpdk_dep = libdpdk.get_variable('dpdk_dep')
 
-# partial_dependency(includes: true) strips the compile args carried by
-# dpdk_dep, including -include rte_config.h, so it has to be re-added here.
-# DPDK's machine args are deliberately left out.
+# Taking only the include directories strips the compile args carried
+# by dpdk_dep, including -include rte_config.h, so it has to be
+# re-added here. DPDK's machine args are deliberately left out.
 libdpdk_inc_dep = declare_dependency(
   dependencies: libdpdk_dep.partial_dependency(includes: true),
   compile_args: ['-include', 'rte_config.h'],
