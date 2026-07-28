@@ -254,34 +254,46 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 module_name: perf.module.module_name,
             };
             let response = service.perf(request).await?;
-            output::data(&response, false, format_args!(""), || {
-                format_perf_counters(&response);
-            });
+            output::data(
+                || &response,
+                || {
+                    format_perf_counters(&response);
+                },
+            );
         }
         Some(ModeCmd::Workers) => {
             let response = service.workers().await?;
-            output::data(&response, false, format_args!(""), || {
-                format_worker_counters(&response);
-            });
+            output::data(
+                || &response,
+                || {
+                    format_worker_counters(&response);
+                },
+            );
         }
         Some(ModeCmd::Ports) => {
             let response = service.ports().await?;
-            output::data(&response, false, format_args!(""), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
-                );
-            });
+            output::data(
+                || &response,
+                || {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
+                    );
+                },
+            );
         }
         mode => {
             let request = tags_request(mode, cmd.by_tags);
             let response = service.by_tags(request).await?;
-            output::data(&response, false, format_args!(""), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
-                );
-            });
+            output::data(
+                || &response,
+                || {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
+                    );
+                },
+            );
         }
     }
 

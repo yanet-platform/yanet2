@@ -237,10 +237,13 @@ impl RouteService {
         let response = self.client.list_configs(ListConfigsRequest {}).await?.into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("No FIB configs found."),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("No FIB configs found."));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }
@@ -265,10 +268,15 @@ impl RouteService {
             .collect();
 
         output::data(
-            &entries,
-            entries.is_empty(),
-            format_args!("No FIB entries found for {}.", cmd.config_name),
-            || print_table(entries.clone()),
+            || &entries,
+            || {
+                if entries.is_empty() {
+                    output::empty(format_args!("No FIB entries found for {}.", cmd.config_name));
+                    return;
+                }
+
+                print_table(entries.clone());
+            },
         );
 
         Ok(())

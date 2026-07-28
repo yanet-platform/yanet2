@@ -108,10 +108,13 @@ impl PdumpService {
         log::debug!("list configs response: {response:?}");
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no pdump configs"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no pdump configs"));
+                    return;
+                }
+
                 let mut tree = TreeBuilder::new("List Pdump Configs".to_owned());
                 for config in &response.configs {
                     tree.add_empty_child(config.clone());
@@ -126,7 +129,7 @@ impl PdumpService {
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let response = self.get_config(&cmd.config_name).await?;
 
-        output::data(&response, false, format_args!(""), || print_tree(&response));
+        output::data(|| &response, || print_tree(&response));
 
         Ok(())
     }

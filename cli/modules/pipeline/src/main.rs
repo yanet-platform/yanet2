@@ -112,21 +112,32 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_pipelines().await?;
-            output::data(&ids, ids.is_empty(), format_args!("No pipelines found."), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&ids).expect("pipeline list YAML serialization must not fail")
-                );
-            });
+            output::data(
+                || &ids,
+                || {
+                    if ids.is_empty() {
+                        output::empty(format_args!("No pipelines found."));
+                        return;
+                    }
+
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&ids).expect("pipeline list YAML serialization must not fail")
+                    );
+                },
+            );
         }
         ModeCmd::Show(show) => {
             let pipeline = service.get_pipeline(&show.name).await?;
-            output::data(&pipeline, false, format_args!(""), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&pipeline).expect("pipeline YAML serialization must not fail")
-                );
-            });
+            output::data(
+                || &pipeline,
+                || {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&pipeline).expect("pipeline YAML serialization must not fail")
+                    );
+                },
+            );
         }
         ModeCmd::Update(update) => {
             let name = update.name.clone();

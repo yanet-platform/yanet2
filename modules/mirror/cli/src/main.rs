@@ -192,12 +192,15 @@ impl MirrorService {
             .map_err(self.service.status("show"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            print!(
-                "{}",
-                serde_yaml::to_string(&response).expect("mirror config YAML serialization must not fail")
-            );
-        });
+        output::data(
+            || &response,
+            || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("mirror config YAML serialization must not fail")
+                );
+            },
+        );
 
         Ok(())
     }
@@ -213,10 +216,13 @@ impl MirrorService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no mirror configs"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no mirror configs"));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }

@@ -50,7 +50,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = DeviceService::new(&cmd.connection).await?;
     let response = service.list().await?;
 
-    output::data(&response, false, format_args!(""), || render(&response));
+    output::data(|| &response, || render(&response));
 
     Ok(())
 }

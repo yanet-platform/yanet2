@@ -101,10 +101,13 @@ impl FWStateService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no fwstate configs"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no fwstate configs"));
+                    return;
+                }
+
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&response.configs)
@@ -129,12 +132,15 @@ impl FWStateService {
             .map_err(self.service.status("show"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response).expect("fwstate config JSON serialization must not fail")
-            );
-        });
+        output::data(
+            || &response,
+            || {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response).expect("fwstate config JSON serialization must not fail")
+                );
+            },
+        );
 
         Ok(())
     }
@@ -281,12 +287,15 @@ impl FWStateService {
             .map_err(self.service.status("stats"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response).expect("fwstate stats JSON serialization must not fail")
-            );
-        });
+        output::data(
+            || &response,
+            || {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response).expect("fwstate stats JSON serialization must not fail")
+                );
+            },
+        );
 
         Ok(())
     }
@@ -410,9 +419,17 @@ impl FWStateService {
             })
             .collect();
 
-        output::data(&metrics, metrics.is_empty(), format_args!("no metrics"), || {
-            print_metrics_table(&metrics)
-        });
+        output::data(
+            || &metrics,
+            || {
+                if metrics.is_empty() {
+                    output::empty(format_args!("no metrics"));
+                    return;
+                }
+
+                print_metrics_table(&metrics)
+            },
+        );
 
         Ok(())
     }

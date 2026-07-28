@@ -192,12 +192,15 @@ impl ForwardService {
             .map_err(self.service.status("show"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            print!(
-                "{}",
-                serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
-            );
-        });
+        output::data(
+            || &response,
+            || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
+                );
+            },
+        );
 
         Ok(())
     }
@@ -213,10 +216,13 @@ impl ForwardService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no forward configs"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no forward configs"));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }

@@ -157,10 +157,13 @@ impl TrafgenService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no configurations"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no configurations"));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }
@@ -180,11 +183,14 @@ impl TrafgenService {
             .map_err(self.service.status("show"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            println!("rate (pps):  {}", response.rate_pps);
-            println!("frame count: {}", response.frame_count);
-            println!("total bytes: {}", response.total_bytes);
-        });
+        output::data(
+            || &response,
+            || {
+                println!("rate (pps):  {}", response.rate_pps);
+                println!("frame count: {}", response.frame_count);
+                println!("total bytes: {}", response.total_bytes);
+            },
+        );
 
         Ok(())
     }

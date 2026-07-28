@@ -220,10 +220,13 @@ async fn run_once(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool
     let all_ready = all_scopes_ready && missing.is_empty();
 
     output::data(
-        &response.scopes,
-        response.scopes.is_empty() && missing.is_empty(),
-        format_args!("no scopes"),
+        || &response.scopes,
         || {
+            if response.scopes.is_empty() && missing.is_empty() {
+                output::empty(format_args!("no scopes"));
+                return;
+            }
+
             let mut scopes = response.scopes.clone();
             scopes.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -256,32 +259,45 @@ async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
         "Watch",
         ReadyRequest { scopes: cmd.scopes.clone() },
         |resp| {
-            output::data(&resp.scopes, resp.scopes.is_empty(), format_args!("no scopes"), || {
-                let mut scopes = resp.scopes.clone();
-                scopes.sort_by(|a, b| a.name.cmp(&b.name));
-
-                match name_width {
-                    None => {
-                        let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
-                        name_width = Some(width);
-
-                        for scope in &scopes {
-                            snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
-                        }
-
-                        render::print_status_block(name, &scopes, width, cmd.stale_after, true);
+            output::data(
+                || &resp.scopes,
+                || {
+                    if resp.scopes.is_empty() {
+                        output::empty(format_args!("no scopes"));
+                        return;
                     }
-                    Some(width) => {
-                        for scope in &scopes {
-                            let transition = render::record_transition(&mut snapshot, name, scope);
 
-                            if transition != render::Transition::Unchanged {
-                                render::print_transition_line(render::ServiceColumn::None, scope, width, transition);
+                    let mut scopes = resp.scopes.clone();
+                    scopes.sort_by(|a, b| a.name.cmp(&b.name));
+
+                    match name_width {
+                        None => {
+                            let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
+                            name_width = Some(width);
+
+                            for scope in &scopes {
+                                snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
+                            }
+
+                            render::print_status_block(name, &scopes, width, cmd.stale_after, true);
+                        }
+                        Some(width) => {
+                            for scope in &scopes {
+                                let transition = render::record_transition(&mut snapshot, name, scope);
+
+                                if transition != render::Transition::Unchanged {
+                                    render::print_transition_line(
+                                        render::ServiceColumn::None,
+                                        scope,
+                                        width,
+                                        transition,
+                                    );
+                                }
                             }
                         }
                     }
-                }
-            });
+                },
+            );
         },
     )
     .await
@@ -309,10 +325,13 @@ async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
     let all_ready = all_ready(&reports);
 
     output::data(
-        &reports,
-        reports.is_empty(),
-        format_args!("no readiness services registered"),
+        || &reports,
         || {
+            if reports.is_empty() {
+                output::empty(format_args!("no readiness services registered"));
+                return;
+            }
+
             let scopes = reports.iter().flat_map(|report| report.scopes.iter());
             let width = render::name_width(scopes.map(|scope| scope.name.as_str()));
 

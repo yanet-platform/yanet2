@@ -181,10 +181,13 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
     let total = response.metrics.len();
 
     output::data(
-        &response.metrics,
-        response.metrics.is_empty(),
-        format_args!("no metrics"),
+        || &response.metrics,
         || {
+            if response.metrics.is_empty() {
+                output::empty(format_args!("no metrics"));
+                return;
+            }
+
             let mut scalars: Vec<&Metric> = response
                 .metrics
                 .iter()

@@ -223,10 +223,13 @@ impl RouteMplsService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no route-mpls configs"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no route-mpls configs"));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }
@@ -246,12 +249,15 @@ impl RouteMplsService {
             .map_err(self.service.status("show"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            print!(
-                "{}",
-                serde_yaml::to_string(&response).expect("route-mpls config YAML serialization must not fail")
-            )
-        });
+        output::data(
+            || &response,
+            || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("route-mpls config YAML serialization must not fail")
+                )
+            },
+        );
 
         Ok(())
     }

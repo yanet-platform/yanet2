@@ -46,7 +46,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = InspectService::new(&cmd.connection).await?;
     let response = service.inspect().await?;
 
-    output::data(&response, false, format_args!(""), || render_tree(&response));
+    output::data(|| &response, || render_tree(&response));
 
     Ok(())
 }

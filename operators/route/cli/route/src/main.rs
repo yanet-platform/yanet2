@@ -240,10 +240,13 @@ impl RouteService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no configurations"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no configurations"));
+                    return;
+                }
+
                 for config in &response.configs {
                     println!("{config}");
                 }
@@ -269,10 +272,13 @@ impl RouteService {
             .into_inner();
 
         output::data(
-            &response.routes,
-            response.routes.is_empty(),
-            format_args!("no routes in {}", cmd.name),
+            || &response.routes,
             || {
+                if response.routes.is_empty() {
+                    output::empty(format_args!("no routes in {}", cmd.name));
+                    return;
+                }
+
                 let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
                 entries.sort_by_key(|entry| entry.prefix.0);
                 annotate_ecmp_groups(&mut entries);
@@ -298,10 +304,13 @@ impl RouteService {
             .into_inner();
 
         output::data(
-            &response.routes,
-            response.routes.is_empty(),
-            format_args!("no routes for {}", cmd.addr),
+            || &response.routes,
             || {
+                if response.routes.is_empty() {
+                    output::empty(format_args!("no routes for {}", cmd.addr));
+                    return;
+                }
+
                 let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
                 annotate_ecmp_groups(&mut entries);
                 print_route_table(entries);

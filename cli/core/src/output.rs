@@ -46,22 +46,16 @@ pub trait Output: Send + Sync {
 
     /// Output result data.
     ///
-    /// Backends receive both a structured `payload` (for serialization-
-    /// oriented formats) and a `render` callback (for free-form rendering
-    /// such as tables or trees). Each backend chooses which signal to
-    /// honour and which to ignore.
+    /// An implementation must not call both `payload` and `render`. It may
+    /// call either one, or neither. Passing both sides as closures rather
+    /// than as values, and honouring that exclusivity, is what lets a
+    /// caller hand over two shapes and pay only for the one its backend
+    /// uses.
     ///
-    /// `is_empty` and `empty_message` describe the empty-result case:
-    /// free-form backends may substitute `empty_message` instead of
-    /// invoking `render`; serialization-oriented backends typically
-    /// serialize the empty `payload` as-is.
-    fn data(
-        &self,
-        payload: &dyn ErasedSerialize,
-        is_empty: bool,
-        empty_message: Arguments,
-        render: Box<dyn FnOnce() + '_>,
-    );
+    /// The thunk's return type carries a lifetime, so the payload may
+    /// borrow rather than own — `|| &response.services` and a struct of
+    /// borrowed slices are both valid shapes.
+    fn data<'a>(&self, payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>);
 }
 
 /// Human-readable output backend.
@@ -130,18 +124,8 @@ impl Output for HumanOutput {
         }
     }
 
-    fn data(
-        &self,
-        _payload: &dyn ErasedSerialize,
-        is_empty: bool,
-        empty_message: Arguments,
-        render: Box<dyn FnOnce() + '_>,
-    ) {
-        if is_empty {
-            eprintln!("{empty_message}");
-        } else {
-            render();
-        }
+    fn data<'a>(&self, _payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>) {
+        render();
     }
 }
 
@@ -188,14 +172,9 @@ impl Output for JsonOutput {
         println!("{json}");
     }
 
-    fn data(
-        &self,
-        payload: &dyn ErasedSerialize,
-        _is_empty: bool,
-        _empty_message: Arguments,
-        _render: Box<dyn FnOnce() + '_>,
-    ) {
-        let json = serde_json::to_string(payload).expect("payload serialization must not fail");
+    fn data<'a>(&self, payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, _render: Box<dyn FnOnce() + 'a>) {
+        let payload = payload();
+        let json = serde_json::to_string(&payload).expect("payload serialization must not fail");
 
         println!("{json}");
     }
@@ -255,21 +234,31 @@ pub fn failure(err: &Error) {
 
 /// Output result data.
 ///
-/// Delegates to the installed backend's [`Output::data`]. The backend
-/// chooses whether to serialize `payload` or invoke `render`; when the
-/// result is empty (`is_empty == true`), free-form backends may print
-/// `empty_message` in place of `render`.
-pub fn data<P, F>(payload: &P, is_empty: bool, empty_message: Arguments, render: F)
+/// Delegates to the installed backend's [`Output::data`]. `make_payload`
+/// runs only if the backend serializes, and `render` runs only if the
+/// backend produces free-form output.
+///
+/// Call [`empty`] from inside `render` when the result is empty. A
+/// serializing backend never calls `render`, so that check cannot affect
+/// it, and an empty collection still serializes as-is.
+pub fn data<P, MakePayload, Render>(make_payload: MakePayload, render: Render)
 where
+    MakePayload: Fn() -> P,
     P: Serialize,
-    F: FnOnce(),
+    Render: FnOnce(),
 {
-    current().data(
-        payload as &dyn ErasedSerialize,
-        is_empty,
-        empty_message,
-        Box::new(render),
-    );
+    let payload = move || -> Box<dyn ErasedSerialize + '_> { Box::new(make_payload()) };
+
+    current().data(&payload, Box::new(render));
+}
+
+/// Reports an empty result.
+///
+/// Writes to stderr rather than stdout, so `<cmd> | wc -l` still reads
+/// zero on an empty result — the message would otherwise show up as a
+/// bogus data line on the same channel the real rows print to.
+pub fn empty(message: Arguments) {
+    eprintln!("{message}");
 }
 
 /// Returns `true` if ANSI color and Unicode prefixes should be emitted.

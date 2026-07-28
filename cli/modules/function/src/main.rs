@@ -100,21 +100,32 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_functions().await?;
-            output::data(&ids, ids.is_empty(), format_args!("No functions found."), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&ids).expect("function list YAML serialization must not fail")
-                );
-            });
+            output::data(
+                || &ids,
+                || {
+                    if ids.is_empty() {
+                        output::empty(format_args!("No functions found."));
+                        return;
+                    }
+
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&ids).expect("function list YAML serialization must not fail")
+                    );
+                },
+            );
         }
         ModeCmd::Show(show) => {
             let function = service.get_function(&show.name).await?;
-            output::data(&function, false, format_args!(""), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&function).expect("function YAML serialization must not fail")
-                );
-            });
+            output::data(
+                || &function,
+                || {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&function).expect("function YAML serialization must not fail")
+                    );
+                },
+            );
         }
         ModeCmd::Update(update) => {
             let name = update.name.clone();

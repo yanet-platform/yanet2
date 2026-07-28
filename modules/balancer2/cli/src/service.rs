@@ -102,10 +102,13 @@ impl Balancer2Service {
         log::debug!("list configs response: {response:?}");
 
         output::data(
-            &response.names,
-            response.names.is_empty(),
-            format_args!("no balancer configs"),
+            || &response.names,
             || {
+                if response.names.is_empty() {
+                    output::empty(format_args!("no balancer configs"));
+                    return;
+                }
+
                 let mut tree = TreeBuilder::new("Balancers".to_owned());
                 for name in &response.names {
                     tree.add_empty_child(name.clone());
@@ -130,13 +133,17 @@ impl Balancer2Service {
             .into_inner();
         log::debug!("get config response: {response:?}");
 
-        output::data(&response, false, format_args!(""), || {
-            let mut json_value =
-                serde_json::to_value(&response).expect("balancer config JSON conversion must not fail");
-            display::prettify_json(&mut json_value);
-            let yaml = serde_yaml::to_string(&json_value).expect("balancer config YAML serialization must not fail");
-            print!("{yaml}");
-        });
+        output::data(
+            || &response,
+            || {
+                let mut json_value =
+                    serde_json::to_value(&response).expect("balancer config JSON conversion must not fail");
+                display::prettify_json(&mut json_value);
+                let yaml =
+                    serde_yaml::to_string(&json_value).expect("balancer config YAML serialization must not fail");
+                print!("{yaml}");
+            },
+        );
 
         Ok(())
     }
@@ -179,10 +186,15 @@ impl Balancer2Service {
         log::debug!("get state response: {response:?}");
 
         output::data(
-            &response.states,
-            response.states.is_empty(),
-            format_args!("no balancer state found"),
-            || display::print_table_view(&response.states, &opts),
+            || &response.states,
+            || {
+                if response.states.is_empty() {
+                    output::empty(format_args!("no balancer state found"));
+                    return;
+                }
+
+                display::print_table_view(&response.states, &opts);
+            },
         );
 
         Ok(())
@@ -202,10 +214,13 @@ impl Balancer2Service {
         log::debug!("list sessions states response: {response:?}");
 
         output::data(
-            &response.names,
-            response.names.is_empty(),
-            format_args!("no sessions states"),
+            || &response.names,
             || {
+                if response.names.is_empty() {
+                    output::empty(format_args!("no sessions states"));
+                    return;
+                }
+
                 let mut tree = TreeBuilder::new("Sessions States".to_owned());
                 for name in &response.names {
                     tree.add_empty_child(name.clone());
@@ -294,13 +309,17 @@ impl Balancer2Service {
             .into_inner();
         log::debug!("get metrics response: {response:?}");
 
-        output::data(&response, false, format_args!(""), || {
-            let mut json_value =
-                serde_json::to_value(&response).expect("balancer metrics JSON conversion must not fail");
-            display::prettify_json(&mut json_value);
-            let json = serde_json::to_string(&json_value).expect("balancer metrics JSON serialization must not fail");
-            println!("{json}");
-        });
+        output::data(
+            || &response,
+            || {
+                let mut json_value =
+                    serde_json::to_value(&response).expect("balancer metrics JSON conversion must not fail");
+                display::prettify_json(&mut json_value);
+                let json =
+                    serde_json::to_string(&json_value).expect("balancer metrics JSON serialization must not fail");
+                println!("{json}");
+            },
+        );
 
         Ok(())
     }

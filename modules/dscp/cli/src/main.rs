@@ -153,10 +153,13 @@ impl DscpService {
         log::debug!("list configs response: {response:?}");
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no dscp configs"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no dscp configs"));
+                    return;
+                }
+
                 let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
                 for config in &response.configs {
                     tree.add_empty_child(config.clone());
@@ -180,7 +183,7 @@ impl DscpService {
             .into_inner();
         log::debug!("show config response: {response:?}");
 
-        output::data(&response, false, format_args!(""), || print_tree(&response));
+        output::data(|| &response, || print_tree(&response));
 
         Ok(())
     }

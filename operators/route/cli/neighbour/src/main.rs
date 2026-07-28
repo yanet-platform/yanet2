@@ -220,16 +220,18 @@ impl NeighbourService {
             .map_err(|status| NOT_FOUND.map(status, "show", self.service.endpoint(), resource.as_deref()))?
             .into_inner();
 
-        let empty_message = match &cmd.table {
-            Some(table) => format!("no neighbours in {table}"),
-            None => "no neighbours".to_owned(),
-        };
-
         output::data(
-            &response.neighbours,
-            response.neighbours.is_empty(),
-            format_args!("{empty_message}"),
+            || &response.neighbours,
             || {
+                if response.neighbours.is_empty() {
+                    let empty_message = match &cmd.table {
+                        Some(table) => format!("no neighbours in {table}"),
+                        None => "no neighbours".to_owned(),
+                    };
+                    output::empty(format_args!("{empty_message}"));
+                    return;
+                }
+
                 let mut entries: Vec<NeighbourEntry> =
                     response.neighbours.iter().cloned().map(NeighbourEntry::from).collect();
                 entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
@@ -316,10 +318,13 @@ impl NeighbourService {
             .into_inner();
 
         output::data(
-            &response.tables,
-            response.tables.is_empty(),
-            format_args!("no neighbour tables"),
+            || &response.tables,
             || {
+                if response.tables.is_empty() {
+                    output::empty(format_args!("no neighbour tables"));
+                    return;
+                }
+
                 let entries: Vec<TableEntry> = response.tables.iter().cloned().map(TableEntry::from).collect();
                 print_table_from_entries(entries);
             },

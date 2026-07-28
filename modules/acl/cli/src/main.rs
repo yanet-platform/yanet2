@@ -326,10 +326,13 @@ impl ACLService {
             .into_inner();
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no configurations"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no configurations"));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }
@@ -349,13 +352,16 @@ impl ACLService {
             .map_err(self.service.status("show"))?
             .into_inner();
 
-        output::data(&response, false, format_args!(""), || {
-            let config = ACLConfig { rules: response.rules.clone() };
-            print!(
-                "{}",
-                serde_yaml::to_string(&config).expect("ACL config YAML serialization must not fail")
-            );
-        });
+        output::data(
+            || &response,
+            || {
+                let config = ACLConfig { rules: response.rules.clone() };
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&config).expect("ACL config YAML serialization must not fail")
+                );
+            },
+        );
 
         Ok(())
     }
@@ -427,9 +433,17 @@ impl ACLService {
             .filter(|m| cmd.name.as_ref().is_none_or(|f| m.name.contains(f.as_filter())))
             .collect();
 
-        output::data(&metrics, metrics.is_empty(), format_args!("no metrics"), || {
-            print_metrics_table(&metrics)
-        });
+        output::data(
+            || &metrics,
+            || {
+                if metrics.is_empty() {
+                    output::empty(format_args!("no metrics"));
+                    return;
+                }
+
+                print_metrics_table(&metrics)
+            },
+        );
 
         Ok(())
     }

@@ -93,13 +93,18 @@ impl GatewayService {
             .map_err(self.service.status("gateway"))?
             .into_inner();
 
-        let rows: Vec<ServiceRow> = response.services.iter().map(ServiceRow::from).collect();
-
         output::data(
-            &response.services,
-            rows.is_empty(),
-            format_args!("no services registered"),
-            || render_table(&rows),
+            || &response.services,
+            || {
+                let rows: Vec<ServiceRow> = response.services.iter().map(ServiceRow::from).collect();
+
+                if rows.is_empty() {
+                    output::empty(format_args!("no services registered"));
+                    return;
+                }
+
+                render_table(&rows);
+            },
         );
 
         Ok(())

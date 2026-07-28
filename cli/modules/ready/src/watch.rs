@@ -95,25 +95,28 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
 
     let mut aggregate = Aggregate::seed(&reports);
 
-    output::data(&snapshot_payload, false, format_args!(""), || {
-        if reports.is_empty() {
-            eprintln!("no readiness services registered");
-        } else {
-            for (idx, report) in reports.iter().enumerate() {
-                if idx > 0 {
-                    println!();
+    output::data(
+        || &snapshot_payload,
+        || {
+            if reports.is_empty() {
+                output::empty(format_args!("no readiness services registered"));
+            } else {
+                for (idx, report) in reports.iter().enumerate() {
+                    if idx > 0 {
+                        println!();
+                    }
+
+                    print_report(report, scope_width, cmd.stale_after);
                 }
-
-                print_report(report, scope_width, cmd.stale_after);
             }
-        }
 
-        render::print_watching_line();
+            render::print_watching_line();
 
-        if aggregate.all_ready {
-            render::print_all_ready_line();
-        }
-    });
+            if aggregate.all_ready {
+                render::print_all_ready_line();
+            }
+        },
+    );
 
     let (sender, mut receiver) = mpsc::unbounded_channel::<Event>();
 
@@ -294,8 +297,8 @@ struct EventPayload<'a> {
 #[derive(Serialize)]
 struct MembershipPayload<'a> {
     event: EventKind,
-    discovered: &'a [&'a str],
-    departed: &'a [&'a str],
+    discovered: Vec<&'a str>,
+    departed: Vec<&'a str>,
 }
 
 impl Event {
@@ -818,29 +821,32 @@ fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, ali
                     error: None,
                 };
 
-                output::data(&payload, false, format_args!(""), || {
-                    aggregate.mark_reported(&service);
+                output::data(
+                    || &payload,
+                    || {
+                        aggregate.mark_reported(&service);
 
-                    let mut scopes = scopes.clone();
-                    scopes.sort_by(|a, b| a.name.cmp(&b.name));
+                        let mut scopes = scopes.clone();
+                        scopes.sort_by(|a, b| a.name.cmp(&b.name));
 
-                    for scope in &scopes {
-                        let transition = aggregate.observe(&service, scope);
+                        for scope in &scopes {
+                            let transition = aggregate.observe(&service, scope);
 
-                        if transition != Transition::Unchanged {
-                            render::print_transition_line(
-                                ServiceColumn::Named { alias: &alias, width: alias_width },
-                                scope,
-                                scope_width,
-                                transition,
-                            );
+                            if transition != Transition::Unchanged {
+                                render::print_transition_line(
+                                    ServiceColumn::Named { alias: &alias, width: alias_width },
+                                    scope,
+                                    scope_width,
+                                    transition,
+                                );
+                            }
                         }
-                    }
 
-                    if aggregate.refresh() {
-                        render::print_all_ready_line();
-                    }
-                });
+                        if aggregate.refresh() {
+                            render::print_all_ready_line();
+                        }
+                    },
+                );
             }
             EventData::Reattached => {
                 let payload = EventPayload {
@@ -850,9 +856,12 @@ fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, ali
                     error: None,
                 };
 
-                output::data(&payload, false, format_args!(""), || {
-                    render::print_lifecycle_line(&alias, alias_width, "stream reattached");
-                });
+                output::data(
+                    || &payload,
+                    || {
+                        render::print_lifecycle_line(&alias, alias_width, "stream reattached");
+                    },
+                );
             }
             EventData::Lost { cause, retry_after } => {
                 let payload = EventPayload {
@@ -862,37 +871,38 @@ fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, ali
                     error: Some(&cause),
                 };
 
-                output::data(&payload, false, format_args!(""), || {
-                    aggregate.mark_lost(&service);
-                    render::print_lost_line(&alias, alias_width, &cause, retry_after);
-                });
+                output::data(
+                    || &payload,
+                    || {
+                        aggregate.mark_lost(&service);
+                        render::print_lost_line(&alias, alias_width, &cause, retry_after);
+                    },
+                );
             }
         },
         Event::Membership { discovered, departed } => {
-            let discovered_names: Vec<&str> = discovered.iter().map(|(service, _)| service.as_str()).collect();
-            let departed_names: Vec<&str> = departed.iter().map(|(service, _)| service.as_str()).collect();
+            output::data(
+                || MembershipPayload {
+                    event: EventKind::Membership,
+                    discovered: discovered.iter().map(|(service, _)| service.as_str()).collect(),
+                    departed: departed.iter().map(|(service, _)| service.as_str()).collect(),
+                },
+                || {
+                    let crossed = aggregate.apply_membership(&discovered, &departed);
 
-            let payload = MembershipPayload {
-                event: EventKind::Membership,
-                discovered: &discovered_names,
-                departed: &departed_names,
-            };
+                    for (_, alias) in &discovered {
+                        render::print_membership_line(alias, alias_width, render::Membership::Discovered);
+                    }
 
-            output::data(&payload, false, format_args!(""), || {
-                let crossed = aggregate.apply_membership(&discovered, &departed);
+                    for (_, alias) in &departed {
+                        render::print_membership_line(alias, alias_width, render::Membership::Gone);
+                    }
 
-                for (_, alias) in &discovered {
-                    render::print_membership_line(alias, alias_width, render::Membership::Discovered);
-                }
-
-                for (_, alias) in &departed {
-                    render::print_membership_line(alias, alias_width, render::Membership::Gone);
-                }
-
-                if crossed {
-                    render::print_all_ready_line();
-                }
-            });
+                    if crossed {
+                        render::print_all_ready_line();
+                    }
+                },
+            );
         }
     }
 }

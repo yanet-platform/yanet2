@@ -133,10 +133,13 @@ impl BlackholeService {
         log::debug!("list configs response: {response:?}");
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no configurations"),
+            || &response.configs,
             || {
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no configurations"));
+                    return;
+                }
+
                 for name in &response.configs {
                     println!("{name}");
                 }
@@ -157,9 +160,12 @@ impl BlackholeService {
             .into_inner();
         log::debug!("show config response: {response:?}");
 
-        output::data(&response, false, format_args!(""), || {
-            println!("name: {}", response.name);
-        });
+        output::data(
+            || &response,
+            || {
+                println!("name: {}", response.name);
+            },
+        );
 
         Ok(())
     }
