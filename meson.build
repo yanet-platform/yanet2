@@ -173,47 +173,60 @@ if host_machine.cpu_family() == 'aarch64'
   # config has no mcpu switch would otherwise configure and compile
   # silently with yanet and DPDK at different ISA baselines, so an
   # unlisted platform is rejected here rather than guessed.
+  #
+  # The native platform is exempt from the table and the assert below:
+  # setting the platform to native makes DPDK probe the local CPU's
+  # implementer and part number at configure time, so there is no fixed
+  # flag to tabulate or cross-check, and the resolved flag is adopted
+  # directly instead. In a cross build, DPDK takes the SoC from the cross
+  # file's platform property and requires it to name a supported SoC —
+  # so DPDK itself errors out before this code runs.
   if meson.is_cross_build()
     aarch64_platform = meson.get_external_property('platform', get_option('dpdk_platform'))
   else
     aarch64_platform = get_option('dpdk_platform')
   endif
 
-  aarch64_isa_flags = {
-    'generic': '-march=armv8-a+crc',
-    'altra': '-mcpu=neoverse-n1+crypto+rcpc',
-    'ampereone': '-mcpu=ampere1+crc+crypto',
-  }
-  if not aarch64_isa_flags.has_key(aarch64_platform)
-    if meson.is_cross_build()
+  dpdk_machine_args = libdpdk.get_variable('machine_args')
+  dpdk_aarch64_isa_flag = dpdk_machine_args.length() > 0 ? dpdk_machine_args[0] : ''
+
+  if aarch64_platform == 'native'
+    yanet_aarch64_isa_flag = dpdk_aarch64_isa_flag
+  else
+    aarch64_isa_flags = {
+      'generic': '-march=armv8-a+crc',
+      'altra': '-mcpu=neoverse-n1+crypto+rcpc',
+      'ampereone': '-mcpu=ampere1+crc+crypto',
+    }
+    if not aarch64_isa_flags.has_key(aarch64_platform)
+      if meson.is_cross_build()
+        error(
+          'No aarch64 ISA mapping for platform=@0@, taken from the cross file platform property; add one to meson.build.'.format(
+            aarch64_platform,
+          ),
+        )
+      else
+        error(
+          'No aarch64 ISA mapping for dpdk_platform=@0@; add one to meson.build, or use dpdk_platform=generic.'.format(
+            aarch64_platform,
+          ),
+        )
+      endif
+    endif
+    yanet_aarch64_isa_flag = aarch64_isa_flags[aarch64_platform]
+
+    # DPDK probes the compiler at configure time and can fall back to a
+    # different switch than the table above expects, so confirm the two
+    # actually agree rather than trusting the table blindly.
+    if dpdk_aarch64_isa_flag != yanet_aarch64_isa_flag
       error(
-        'No aarch64 ISA mapping for platform=@0@, taken from the cross file platform property; add one to meson.build.'.format(
+        'aarch64 ISA flag mismatch for dpdk_platform=@0@: yanet computed @1@ but DPDK resolved @2@, likely because the compiler probe fell back to a different switch than the table expects; try a newer toolchain, or update the mapping in meson.build if the divergence is genuine.'.format(
           aarch64_platform,
-        ),
-      )
-    else
-      error(
-        'No aarch64 ISA mapping for dpdk_platform=@0@; add one to meson.build, or use dpdk_platform=generic.'.format(
-          aarch64_platform,
+          yanet_aarch64_isa_flag,
+          dpdk_aarch64_isa_flag,
         ),
       )
     endif
-  endif
-  yanet_aarch64_isa_flag = aarch64_isa_flags[aarch64_platform]
-
-  # DPDK probes the compiler at configure time and can fall back to a
-  # different switch than the table above expects, so confirm the two
-  # actually agree rather than trusting the table blindly.
-  dpdk_machine_args = libdpdk.get_variable('machine_args')
-  dpdk_aarch64_isa_flag = dpdk_machine_args.length() > 0 ? dpdk_machine_args[0] : ''
-  if dpdk_aarch64_isa_flag != yanet_aarch64_isa_flag
-    error(
-      'aarch64 ISA flag mismatch for dpdk_platform=@0@: yanet computed @1@ but DPDK resolved @2@, likely because the compiler probe fell back to a different switch than the table expects; try a newer toolchain, or update the mapping in meson.build if the divergence is genuine.'.format(
-        aarch64_platform,
-        yanet_aarch64_isa_flag,
-        dpdk_aarch64_isa_flag,
-      ),
-    )
   endif
 
   yanet_project_args += yanet_aarch64_isa_flag

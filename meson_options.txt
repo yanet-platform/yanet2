@@ -50,8 +50,10 @@ option(
                 + 'the platform from the cross file instead. "generic" '
                 + 'produces a portable build, while an SoC name such as '
                 + '"altra" or "ampereone" produces a tuned, non-portable '
-                + 'one; an unrecognised value is only diagnosed on '
-                + 'architectures that consult it.',
+                + 'one; "native" probes the build host CPU instead of '
+                + 'naming an SoC, skipping the mapping-table cross-check '
+                + 'the other platforms undergo; an unrecognised value is '
+                + 'only diagnosed on architectures that consult it.',
 )
 
 option(
