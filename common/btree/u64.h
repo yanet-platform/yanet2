@@ -2,22 +2,25 @@
 
 #include "../big_array.h"
 #include <assert.h>
-#include <immintrin.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 /**
  * @file u64.h
  * @brief B-tree implementation for uint64_t values
  *
  * This file provides a cache-optimized B-tree implementation specifically
- * for uint64_t values. It uses 64-byte aligned blocks and AVX2 SIMD
- * instructions for fast binary search operations.
+ * for uint64_t values. It uses 64-byte aligned blocks and, where available,
+ * AVX2 SIMD instructions for fast binary search operations.
  *
  * Key features:
  * - Cache-aligned 64-byte blocks storing 8 uint64_t values
- * - AVX2 SIMD acceleration for parallel comparisons
+ * - AVX2 SIMD acceleration for parallel comparisons, where available
  * - O(log n) search with minimal branching
  * - Function-based API (no macros)
  *
@@ -96,6 +99,30 @@ btree_u64_next(size_t v, size_t i) {
 	return v * (BTREE_U64_BLOCK_SIZE + 1) + i + 1;
 }
 
+// Search target type: an AVX2 broadcast vector when available, otherwise the
+// signed lane type the biased values are compared as.
+#if defined(__AVX2__)
+typedef __m256i btree_u64_target;
+#else
+typedef int64_t btree_u64_target;
+#endif
+
+// Applies the stored-representation bias to a raw value and produces a
+// search target.
+//
+// The bias is part of what btree_u64_build writes, not just a comparison
+// trick, so this must match that XOR exactly.
+static inline btree_u64_target
+btree_u64_make_target(uint64_t value) {
+#if defined(__AVX2__)
+	return _mm256_set1_epi64x(value ^ 0x8000000000000000ULL);
+#else
+	return (int64_t)(value ^ 0x8000000000000000ULL);
+#endif
+}
+
+#if defined(__AVX2__)
+
 /**
  * @brief Get GTE mask using AVX2 for 4 uint64_t elements
  * @param target_signed Target value XORed with sign bit
@@ -145,7 +172,7 @@ btree_u64_get_gt_mask_avx2(__m256i target_signed, const uint64_t *data) {
  */
 static inline size_t
 btree_u64_block_search_gt(
-	const struct btree_u64_block *block, __m256i target_signed
+	const struct btree_u64_block *block, btree_u64_target target_signed
 ) {
 	// Process first 4 elements
 	int mask1 = btree_u64_get_gt_mask_avx2(target_signed, block->values);
@@ -175,7 +202,7 @@ btree_u64_block_search_gt(
  */
 static inline size_t
 btree_u64_block_search(
-	const struct btree_u64_block *block, __m256i target_signed
+	const struct btree_u64_block *block, btree_u64_target target_signed
 ) {
 	// Process first 4 elements
 	int mask1 = btree_u64_get_gte_mask_avx2(target_signed, block->values);
@@ -190,6 +217,41 @@ btree_u64_block_search(
 	// Find first set bit (1-indexed), subtract 1 for 0-indexed result
 	return __builtin_ffs(combined) - 1;
 }
+
+#else
+
+// Scalar fallback: first element strictly greater than target, or
+// BTREE_U64_BLOCK_SIZE if none.
+//
+// Values are compared as the signed lane type, matching the AVX2
+// signed-compare result on the same biased representation.
+static inline size_t
+btree_u64_block_search_gt(
+	const struct btree_u64_block *block, btree_u64_target target_signed
+) {
+	for (size_t i = 0; i < BTREE_U64_BLOCK_SIZE; ++i) {
+		if ((int64_t)block->values[i] > target_signed) {
+			return i;
+		}
+	}
+	return BTREE_U64_BLOCK_SIZE;
+}
+
+// Scalar fallback: first element greater than or equal to target, or
+// BTREE_U64_BLOCK_SIZE if none.
+static inline size_t
+btree_u64_block_search(
+	const struct btree_u64_block *block, btree_u64_target target_signed
+) {
+	for (size_t i = 0; i < BTREE_U64_BLOCK_SIZE; ++i) {
+		if ((int64_t)block->values[i] >= target_signed) {
+			return i;
+		}
+	}
+	return BTREE_U64_BLOCK_SIZE;
+}
+
+#endif
 
 /**
  * @brief Recursive tree building function
@@ -254,8 +316,8 @@ btree_u64_build(
  * @brief Initialize a btree with uint64_t values
  *
  * Creates a cache-optimized search tree from sorted uint64_t data.
- * The tree uses 64-byte aligned blocks for cache efficiency and
- * AVX2 SIMD instructions for fast searching.
+ * The tree uses 64-byte aligned blocks for cache efficiency and,
+ * where available, AVX2 SIMD instructions for fast searching.
  *
  * @param btree Pointer to uninitialized btree structure
  * @param data Pointer to sorted uint64_t array
@@ -443,7 +505,7 @@ btree_u64_upper_bounds(
 	struct context {
 		size_t result;
 		size_t k;
-		__m256i target;
+		btree_u64_target target;
 	} ctx[btree_u64_max_batch_size];
 
 	if (count > btree_u64_max_batch_size) {
@@ -455,9 +517,7 @@ btree_u64_upper_bounds(
 		struct context *c = &ctx[i];
 		c->result = 0;
 		c->k = 0;
-		c->target =
-			_mm256_set1_epi64x(values[i] ^ 0x8000000000000000ULL);
-		;
+		c->target = btree_u64_make_target(values[i]);
 	}
 
 	const size_t nblocks = btree_u64_nblocks(btree);
@@ -484,7 +544,8 @@ btree_u64_upper_bounds(
 					c->k * sizeof(struct btree_u64_block)
 				);
 
-			// Search within block using SIMD (GT comparison)
+			// Search within block using SIMD, where available (GT
+			// comparison)
 			size_t idx =
 				btree_u64_block_search_gt(block, c->target);
 
@@ -517,7 +578,8 @@ btree_u64_upper_bounds(
 					c->k * sizeof(struct btree_u64_block)
 				);
 
-			// Search within block using SIMD (GT comparison)
+			// Search within block using SIMD, where available (GT
+			// comparison)
 			size_t idx =
 				btree_u64_block_search_gt(block, c->target);
 
@@ -543,7 +605,7 @@ btree_u64_lower_bounds(
 	struct context {
 		size_t result;
 		size_t k;
-		__m256i target;
+		btree_u64_target target;
 	} ctx[btree_u64_max_batch_size];
 
 	if (count > btree_u64_max_batch_size) {
@@ -555,9 +617,7 @@ btree_u64_lower_bounds(
 		struct context *c = &ctx[i];
 		c->result = 0;
 		c->k = 0;
-		c->target =
-			_mm256_set1_epi64x(values[i] ^ 0x8000000000000000ULL);
-		;
+		c->target = btree_u64_make_target(values[i]);
 	}
 
 	const size_t nblocks = btree_u64_nblocks(btree);
@@ -584,7 +644,7 @@ btree_u64_lower_bounds(
 					c->k * sizeof(struct btree_u64_block)
 				);
 
-			// Search within block using SIMD
+			// Search within block using SIMD, where available
 			size_t idx = btree_u64_block_search(block, c->target);
 
 			// Update result index
@@ -616,7 +676,7 @@ btree_u64_lower_bounds(
 					c->k * sizeof(struct btree_u64_block)
 				);
 
-			// Search within block using SIMD
+			// Search within block using SIMD, where available
 			size_t idx = btree_u64_block_search(block, c->target);
 
 			// Update result index
