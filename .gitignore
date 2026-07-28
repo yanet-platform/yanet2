@@ -134,6 +134,7 @@ deploy/packages/
 .cursor/
 .claude/agent-memory/
 .claude/settings.*.json
+.claude/skills/loadtest-hw/
 .claude/worktrees/
 .codex/
 
