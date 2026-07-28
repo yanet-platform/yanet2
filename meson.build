@@ -17,15 +17,9 @@ project(
 yanet_project_args = ['-g', '-D_GNU_SOURCE']
 if host_machine.cpu_family() in ['x86', 'x86_64']
   yanet_project_args += '-march=' + get_option('cpu_arch')
-elif host_machine.cpu_family() == 'aarch64'
-  # The CRC32C intrinsics used by common/crc32.h are not part of the
-  # aarch64 baseline instruction set, so the CRC extension must be
-  # requested explicitly.
-  #
-  # Both Ampere Altra and AmpereOne implement it.
-  yanet_project_args += '-march=armv8-a+crc'
 endif
-add_project_arguments(yanet_project_args, language: 'c')
+# aarch64 appends its own ISA flag to yanet_project_args further down,
+# once DPDK's subproject() has resolved its ISA baseline.
 
 yanet_conf = configuration_data()
 yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
@@ -159,6 +153,72 @@ libdpdk_inc_dep = declare_dependency(
   dependencies: libdpdk_dep.partial_dependency(includes: true),
   compile_args: ['-include', 'rte_config.h'],
 )
+
+if host_machine.cpu_family() == 'aarch64'
+  # The yanet -march/-mcpu flag has to match what DPDK resolves for
+  # dpdk_dep, or two conflicting -march/-mcpu switches land on the same
+  # compile command line.
+  #
+  # DPDK derives its own ISA baseline from dpdk_platform (or, in a cross
+  # build, from the cross file's platform property, which overrides the
+  # option) and carries it through dpdk_dep's compile args into every
+  # target that depends on it. The table below mirrors
+  # subprojects/dpdk/config/arm/meson.build's part_number_config tables for
+  # the same platform names. Ampere Altra omits +crc: CRC is mandatory from
+  # armv8.1-a onward and neoverse-n1 (armv8.2-a) implies it, so
+  # common/crc32.h's __crc32c* intrinsics still work without asking for it
+  # explicitly.
+  #
+  # The table lists only these platforms on purpose: a platform whose DPDK
+  # config has no mcpu switch would otherwise configure and compile
+  # silently with yanet and DPDK at different ISA baselines, so an
+  # unlisted platform is rejected here rather than guessed.
+  if meson.is_cross_build()
+    aarch64_platform = meson.get_external_property('platform', get_option('dpdk_platform'))
+  else
+    aarch64_platform = get_option('dpdk_platform')
+  endif
+
+  aarch64_isa_flags = {
+    'generic': '-march=armv8-a+crc',
+    'altra': '-mcpu=neoverse-n1+crypto+rcpc',
+    'ampereone': '-mcpu=ampere1+crc+crypto',
+  }
+  if not aarch64_isa_flags.has_key(aarch64_platform)
+    if meson.is_cross_build()
+      error(
+        'No aarch64 ISA mapping for platform=@0@, taken from the cross file platform property; add one to meson.build.'.format(
+          aarch64_platform,
+        ),
+      )
+    else
+      error(
+        'No aarch64 ISA mapping for dpdk_platform=@0@; add one to meson.build, or use dpdk_platform=generic.'.format(
+          aarch64_platform,
+        ),
+      )
+    endif
+  endif
+  yanet_aarch64_isa_flag = aarch64_isa_flags[aarch64_platform]
+
+  # DPDK probes the compiler at configure time and can fall back to a
+  # different switch than the table above expects, so confirm the two
+  # actually agree rather than trusting the table blindly.
+  dpdk_machine_args = libdpdk.get_variable('machine_args')
+  dpdk_aarch64_isa_flag = dpdk_machine_args.length() > 0 ? dpdk_machine_args[0] : ''
+  if dpdk_aarch64_isa_flag != yanet_aarch64_isa_flag
+    error(
+      'aarch64 ISA flag mismatch for dpdk_platform=@0@: yanet computed @1@ but DPDK resolved @2@, likely because the compiler probe fell back to a different switch than the table expects; try a newer toolchain, or update the mapping in meson.build if the divergence is genuine.'.format(
+        aarch64_platform,
+        yanet_aarch64_isa_flag,
+        dpdk_aarch64_isa_flag,
+      ),
+    )
+  endif
+
+  yanet_project_args += yanet_aarch64_isa_flag
+endif
+add_project_arguments(yanet_project_args, language: 'c')
 
 subdir('common')
 subdir('lib')
