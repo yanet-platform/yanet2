@@ -151,7 +151,14 @@ libdpdk = subproject(
 )
 
 libdpdk_dep = libdpdk.get_variable('dpdk_dep')
-libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
+
+# partial_dependency(includes: true) strips the compile args carried by
+# dpdk_dep, including -include rte_config.h, so it has to be re-added here.
+# DPDK's machine args are deliberately left out.
+libdpdk_inc_dep = declare_dependency(
+  dependencies: libdpdk_dep.partial_dependency(includes: true),
+  compile_args: ['-include', 'rte_config.h'],
+)
 
 subdir('common')
 subdir('lib')
