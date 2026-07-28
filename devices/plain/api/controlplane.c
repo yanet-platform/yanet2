@@ -26,11 +26,6 @@ cp_device_plain_new(
 	}
 
 	memset(cp_device_plain, 0, sizeof(struct cp_device_plain));
-	SET_OFFSET_OF(
-		&cp_device_plain->cp_device.parent_memory_context,
-		&agent->memory_context
-	);
-	cp_device_plain->cp_device.alloc_size = sizeof(struct cp_device_plain);
 
 	if (cp_device_init(
 		    &cp_device_plain->cp_device,
@@ -51,10 +46,13 @@ cp_device_plain_new(
 
 void
 cp_device_plain_free(struct cp_device *cp_device) {
+	struct agent *agent = ADDR_OF(&cp_device->agent);
 	cp_device_fini(cp_device);
-	struct memory_context *mctx =
-		ADDR_OF(&cp_device->parent_memory_context);
-	memory_bfree(mctx, cp_device, cp_device->alloc_size);
+	memory_bfree(
+		&agent->memory_context,
+		cp_device,
+		sizeof(struct cp_device_plain)
+	);
 }
 
 struct cp_device_plain_config *

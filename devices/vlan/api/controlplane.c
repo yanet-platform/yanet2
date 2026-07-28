@@ -26,11 +26,6 @@ cp_device_vlan_new(
 	}
 
 	memset(cp_device_vlan, 0, sizeof(struct cp_device_vlan));
-	SET_OFFSET_OF(
-		&cp_device_vlan->cp_device.parent_memory_context,
-		&agent->memory_context
-	);
-	cp_device_vlan->cp_device.alloc_size = sizeof(struct cp_device_vlan);
 
 	if (cp_device_init(
 		    &cp_device_vlan->cp_device,
@@ -53,10 +48,11 @@ cp_device_vlan_new(
 
 void
 cp_device_vlan_free(struct cp_device *cp_device) {
+	struct agent *agent = ADDR_OF(&cp_device->agent);
 	cp_device_fini(cp_device);
-	struct memory_context *mctx =
-		ADDR_OF(&cp_device->parent_memory_context);
-	memory_bfree(mctx, cp_device, cp_device->alloc_size);
+	memory_bfree(
+		&agent->memory_context, cp_device, sizeof(struct cp_device_vlan)
+	);
 }
 
 struct cp_device_vlan_config *

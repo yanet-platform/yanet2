@@ -30,30 +30,14 @@ struct cp_device_entry {
 };
 
 struct cp_device {
-	// Offset pointer to the memory_context used to allocate this struct.
-	//
-	// Set by cp_device_new, or by a subclass create function before
-	// cp_device_init.
-	//
-	// Consumed by the device's typed free routine to reclaim the
-	// allocation.
-	struct memory_context *parent_memory_context;
-
-	// Number of bytes to pass to memory_bfree when freeing this struct.
-	//
-	// Set by cp_device_new OR by a subclass create function before
-	// cp_device_init.
-	//
-	// Subclasses MUST store sizeof their wrapper struct here so the typed
-	// free routine reclaims the proper full allocation.
-	uint64_t alloc_size;
-
 	struct registry_item config_item;
 	char type[80];
 	char name[CP_DEVICE_NAME_LEN];
 
 	uint64_t dp_device_idx;
 
+	// Agent that owns this device. Set by cp_device_init; used by the
+	// typed free routine to resolve the memory context for reclamation.
 	struct agent *agent;
 
 	struct memory_context memory_context;

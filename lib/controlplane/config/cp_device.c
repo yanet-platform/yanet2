@@ -124,8 +124,6 @@ cp_device_new(struct memory_context *mctx) {
 	}
 
 	memset(self, 0, sizeof(struct cp_device));
-	SET_OFFSET_OF(&self->parent_memory_context, mctx);
-	self->alloc_size = sizeof(struct cp_device);
 
 	return self;
 }
