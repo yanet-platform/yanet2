@@ -1,58 +1,6 @@
-use commonpb::pb::MacAddress;
-use netip::MacAddr;
-use serde::Serialize;
-use tabled::Tabled;
-
 #[allow(clippy::all, non_snake_case)]
 pub mod routepb {
     tonic::include_proto!("modules.route.controlplane.routepb.v1");
 }
 
-fn format_mac(mac: Option<MacAddress>) -> String {
-    let mac = match mac {
-        Some(mac) => match MacAddr::try_from(&mac) {
-            Ok(mac) => return mac.to_string(),
-            Err(..) => "invalid",
-        },
-        None => "00:00:00:00:00:00",
-    };
-    mac.to_string()
-}
-
-/// FIB entry for display in the CLI table.
-#[derive(Clone, Debug, Serialize, Tabled)]
-pub struct FibDisplayEntry {
-    #[tabled(rename = "Prefix")]
-    pub prefix: String,
-    #[tabled(rename = "Dst MAC")]
-    pub dst_mac: String,
-    #[tabled(rename = "Src MAC")]
-    pub src_mac: String,
-    #[tabled(rename = "Device")]
-    pub device: String,
-}
-
-impl FibDisplayEntry {
-    /// Convert a `FibRangeEntry` proto message into display rows.
-    ///
-    /// Emits one row per (CIDR, nexthop) pair. The CIDR list is produced by
-    /// decomposing the `range` field into the minimum set of covering
-    /// networks. Returns an empty `Vec` when `range` is absent or invalid.
-    pub fn from_range_entry(entry: routepb::FibRangeEntry) -> Vec<Self> {
-        let Some(range) = entry.range else {
-            return Vec::new();
-        };
-        let prefixes: Vec<String> = range.cidrs().map(|net| net.to_string()).collect();
-        prefixes
-            .into_iter()
-            .flat_map(|prefix| {
-                entry.nexthops.iter().map(move |nh| FibDisplayEntry {
-                    prefix: prefix.clone(),
-                    dst_mac: format_mac(nh.dst_mac),
-                    src_mac: format_mac(nh.src_mac),
-                    device: nh.device.clone(),
-                })
-            })
-            .collect()
-    }
-}
+pub mod fib;

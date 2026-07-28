@@ -14,18 +14,10 @@ use clap_complete::{
 use commonpb::pb::MacAddress;
 use netip::MacAddr;
 use serde::{Deserialize, Serialize};
-use tabled::{
-    settings::{
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-        Color, Style,
-    },
-    Table, Tabled,
-};
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
+    fib,
     routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
-    FibDisplayEntry,
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
@@ -260,43 +252,20 @@ impl RouteService {
         };
 
         let response = self.client.show_fib(request).await?.into_inner();
-
-        let entries: Vec<FibDisplayEntry> = response
-            .entries
-            .into_iter()
-            .flat_map(FibDisplayEntry::from_range_entry)
-            .collect();
+        let records = fib::build_records(&response.entries);
 
         output::data(
-            || &entries,
+            || records.iter().map(fib::json::FibRecordJson::from).collect::<Vec<_>>(),
             || {
-                if entries.is_empty() {
+                if records.is_empty() {
                     output::empty(format_args!("No FIB entries found for {}.", cmd.config_name));
                     return;
                 }
 
-                print_table(entries.clone());
+                fib::render::print_fib(&records);
             },
         );
 
         Ok(())
     }
-}
-
-fn print_table<I, T>(entries: I)
-where
-    I: IntoIterator<Item = T>,
-    T: Tabled,
-{
-    let mut table = Table::new(entries);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-    table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-    table.modify(Rows::first(), Color::BOLD);
-
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
 }
