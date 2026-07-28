@@ -52,12 +52,9 @@ cp_device_plain_new(
 void
 cp_device_plain_free(struct cp_device *cp_device) {
 	cp_device_fini(cp_device);
-	cp_device_free(cp_device);
-}
-
-void
-cp_device_plain_drain_unused(struct agent *agent) {
-	cp_device_agent_drain_unused(agent, cp_device_plain_free);
+	struct memory_context *mctx =
+		ADDR_OF(&cp_device->parent_memory_context);
+	memory_bfree(mctx, cp_device, cp_device->alloc_size);
 }
 
 struct cp_device_plain_config *

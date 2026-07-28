@@ -45,15 +45,6 @@ struct agent {
 	struct agent_arena *arenas;
 
 	struct agent_storage *storage;
-
-	// Devices unlinked from a config generation but not yet reclaimed.
-	//
-	// A replaced/deleted device is parked here by its creating agent
-	// instead of being freed when it leaves the registry.
-	//
-	// The owning control plane drains this list once the retiring
-	// generation no longer references the device.
-	struct cp_device *unused_device;
 };
 
 struct dp_config *

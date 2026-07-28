@@ -16,13 +16,15 @@ import (
 type DevicePlainService struct {
 	plainpb.UnimplementedDevicePlainServiceServer
 
-	mu    sync.Mutex
-	agent *ffi.Agent
+	mu      sync.Mutex
+	agent   *ffi.Agent
+	configs map[string]DeviceConfig
 }
 
 func NewDevicePlainService(agent *ffi.Agent) *DevicePlainService {
 	return &DevicePlainService{
-		agent: agent,
+		agent:   agent,
+		configs: map[string]DeviceConfig{},
 	}
 }
 
@@ -32,15 +34,6 @@ func (m *DevicePlainService) UpdateDevice(
 ) (*plainpb.UpdateDevicePlainResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// Reclaim devices parked on the agent's unused list, whatever the
-	// outcome of this update.
-	//
-	// The drain is registered before the device config is created on
-	// purpose: once the arena is full, creation fails first, so a drain
-	// registered after that check would never run and the arena could
-	// never recover.
-	defer DrainUnusedDevices(m.agent)
 
 	name := request.GetName()
 	if name == "" {
@@ -53,8 +46,19 @@ func (m *DevicePlainService) UpdateDevice(
 	}
 
 	if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
+		deviceConfig.Free()
 		return nil, fmt.Errorf("failed to update device: %w", err)
 	}
+
+	// UpdateDevices publishes the new generation and waits for the dataplane
+	// to drop the old one, so the superseded device is no longer referenced
+	// and can be freed explicitly. This mirrors how the ACL control plane
+	// reclaims superseded module configs, instead of relying on a type-blind
+	// drain of the agent's unused list.
+	if old, ok := m.configs[name]; ok {
+		old.Free()
+	}
+	m.configs[name] = *deviceConfig
 
 	return &plainpb.UpdateDevicePlainResponse{}, nil
 }

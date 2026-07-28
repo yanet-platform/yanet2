@@ -130,16 +130,6 @@ cp_device_new(struct memory_context *mctx) {
 	return self;
 }
 
-void
-cp_device_free(struct cp_device *self) {
-	if (self == NULL) {
-		return;
-	}
-
-	struct memory_context *mctx = ADDR_OF(&self->parent_memory_context);
-	memory_bfree(mctx, self, self->alloc_size);
-}
-
 int
 cp_device_init(
 	struct cp_device *self,
@@ -435,35 +425,13 @@ cp_device_registry_copy(
 
 static void
 cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
+	(void)item;
 	(void)data;
-	struct cp_device *device =
-		container_of(item, struct cp_device, config_item);
 
-	// Registry membership is not ownership: a device leaving the registry
-	// is not freed here.
-	//
-	// Another control plane may still reference this device through a
-	// shared generation, so freeing now would leave it a dangling pointer.
-	// Park the device on its creating agent's unused_device list instead;
-	// the agent reclaims it once no live generation references it.
-	struct agent *agent = ADDR_OF(&device->agent);
-	EQUATE_OFFSET(&device->prev, &agent->unused_device);
-	SET_OFFSET_OF(&agent->unused_device, device);
-}
-
-void
-cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn) {
-	// Detach the whole list first so a device's own free cannot observe a
-	// half-walked list.
-	struct cp_device *device = ADDR_OF(&agent->unused_device);
-	SET_OFFSET_OF(&agent->unused_device, NULL);
-
-	while (device != NULL) {
-		struct cp_device *prev = ADDR_OF(&device->prev);
-		SET_OFFSET_OF(&device->prev, NULL);
-		free_fn(device);
-		device = prev;
-	}
+	// Registry membership is not ownership: a device whose refcount reaches
+	// zero is not freed here. The Go control plane that created the device
+	// frees it explicitly once the generation it published has superseded
+	// the old one, so the registry has nothing to reclaim at this point.
 }
 
 void

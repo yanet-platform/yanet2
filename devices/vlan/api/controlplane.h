@@ -23,13 +23,6 @@ cp_device_vlan_new(
 void
 cp_device_vlan_free(struct cp_device *cp_device);
 
-// Reclaim vlan devices parked on the agent's unused_device list.
-//
-// Call after a device update, once the retiring generation no longer
-// references the parked devices.
-void
-cp_device_vlan_drain_unused(struct agent *agent);
-
 struct cp_device_vlan_config *
 cp_device_vlan_config_new(
 	const char *name,

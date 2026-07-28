@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
@@ -33,14 +34,14 @@ func (m *recordingBackend) UpdateDevice(
 	frames []byte,
 	lengths []uint32,
 	ratePps uint64,
-) error {
+) (*ctrafgen.DeviceConfig, error) {
 	m.calls++
 	m.frames = frames
 	m.lengths = lengths
 	m.ratePps = ratePps
 	m.input = input
 	m.output = output
-	return nil
+	return nil, nil
 }
 
 // buildPcap encodes the given ethernet frames into an in-memory pcap file.

@@ -29,21 +29,14 @@ struct cp_device_entry {
 	struct cp_device_pipeline pipelines[];
 };
 
-// Teardown for a device subclass, run by the owning agent when it drains its
-// unused_device list.
-//
-// Passed in-process at drain time (never stored in shared memory), so it stays
-// valid across processes and restarts. It must release the subclass's own
-// allocations, then call cp_device_fini and cp_device_free.
-typedef void (*cp_device_free_fn)(struct cp_device *self);
-
 struct cp_device {
 	// Offset pointer to the memory_context used to allocate this struct.
 	//
 	// Set by cp_device_new, or by a subclass create function before
 	// cp_device_init.
 	//
-	// Consumed by cp_device_free to reclaim the allocation.
+	// Consumed by the device's typed free routine to reclaim the
+	// allocation.
 	struct memory_context *parent_memory_context;
 
 	// Number of bytes to pass to memory_bfree when freeing this struct.
@@ -51,8 +44,8 @@ struct cp_device {
 	// Set by cp_device_new OR by a subclass create function before
 	// cp_device_init.
 	//
-	// Subclasses MUST store sizeof their wrapper struct here so that
-	// cp_device_free reclaims the proper full allocation.
+	// Subclasses MUST store sizeof their wrapper struct here so the typed
+	// free routine reclaims the proper full allocation.
 	uint64_t alloc_size;
 
 	struct registry_item config_item;
@@ -69,9 +62,6 @@ struct cp_device {
 
 	struct cp_device_entry *input_pipelines;
 	struct cp_device_entry *output_pipelines;
-
-	// Link to the previous parked device.
-	struct cp_device *prev;
 };
 
 struct dp_config;
@@ -118,14 +108,6 @@ cp_device_config_fini(struct cp_device_config *config);
 struct cp_device *
 cp_device_new(struct memory_context *mctx);
 
-// Release the memory backing self.
-//
-// NULL-safe no-op.
-//
-// Does not call cp_device_fini: caller must do that separately first.
-void
-cp_device_free(struct cp_device *self);
-
 // Initialize device resources: sub-context, pipelines, counter registry.
 //
 // On failure, internally calls cp_device_fini and returns -1.
@@ -139,20 +121,11 @@ cp_device_init(
 
 // Tear down the base resources acquired by cp_device_init.
 //
-// Base only: a subclass frees its own allocations in its cp_device_free_fn
-// before calling this. Safe to call from an init-failure rollback. Idempotent
-// on zero-init.
+// Base only: a subclass frees its own allocations in its own typed free
+// routine before calling this. Safe to call from an init-failure rollback.
+// Idempotent on zero-init.
 void
 cp_device_fini(struct cp_device *self);
-
-// Reclaim every device parked on the agent's unused_device list.
-//
-// Detaches the list and runs free_fn on each device. Call it from the owning
-// control plane after the retiring generation no longer references the parked
-// devices (i.e. after the device-update wait-for-gen), passing the device
-// type's free function.
-void
-cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn);
 
 /*
  * Pipeline registry contains all existing devices.

@@ -91,11 +91,14 @@ func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }
 
-// DrainUnusedDevices reclaims vlan devices retired from the config
-// generation and parked on the agent's unused list.
+// Free releases the underlying shared-memory device allocation.
 //
-// Call it after UpdateDevices, once the retiring generation no longer
-// references the parked devices.
-func DrainUnusedDevices(agent *ffi.Agent) {
-	C.cp_device_vlan_drain_unused((*C.struct_agent)(agent.AsRawPtr()))
+// Safe to call multiple times: subsequent calls are no-ops. Call it only after
+// the device has been superseded by a newer generation installed via
+// UpdateDevices, so no live config generation references it anymore.
+func (m *DeviceConfig) Free() {
+	if ptr := m.asRawPtr(); ptr != nil {
+		C.cp_device_vlan_free(ptr)
+		m.ptr = ffi.ShmDeviceConfig{}
+	}
 }

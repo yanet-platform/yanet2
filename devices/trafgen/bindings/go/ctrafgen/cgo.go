@@ -125,15 +125,6 @@ func (m *DeviceConfig) Free() {
 	}
 }
 
-// DrainUnusedDevices reclaims trafgen devices retired from the config
-// generation and parked on the agent's unused list.
-//
-// Call it after UpdateDevices, once the retiring generation no longer
-// references the parked devices.
-func DrainUnusedDevices(agent *ffi.Agent) {
-	C.cp_device_trafgen_drain_unused((*C.struct_agent)(agent.AsRawPtr()))
-}
-
 // setRate sets the target aggregate packet rate in packets per second.
 func (m *DeviceConfig) setRate(ratePps uint64) error {
 	if rc := C.cp_device_trafgen_set_rate(

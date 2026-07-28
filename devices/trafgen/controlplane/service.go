@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
@@ -36,10 +37,9 @@ type Backend interface {
 	// UpdateDevice publishes a device config with the given pipelines,
 	// frames and rate to the dataplane.
 	//
-	// The published config is owned by the dataplane's config-generation
-	// registry, which reclaims it when the generation is retired; the caller
-	// must not free it.
-	UpdateDevice(name string, input, output []Pipeline, frames []byte, lengths []uint32, ratePps uint64) error
+	// It returns the freshly published handle. The caller owns the handle
+	// and must Free it once a newer generation has superseded it.
+	UpdateDevice(name string, input, output []Pipeline, frames []byte, lengths []uint32, ratePps uint64) (*ctrafgen.DeviceConfig, error)
 }
 
 type config struct {
@@ -49,6 +49,7 @@ type config struct {
 	Packets    [][]byte
 	Input      []Pipeline
 	Output     []Pipeline
+	Handle     *ctrafgen.DeviceConfig
 }
 
 // TrafgenService implements the TrafgenService gRPC server.
@@ -244,8 +245,11 @@ func (m *TrafgenService) SetRate(
 // apply publishes the full device state through the backend and, on success,
 // stores the new config. The caller must hold m.mu.
 //
-// The previously published device is reclaimed by the dataplane's config
-// generation registry, so nothing is freed here.
+// UpdateDevices publishes the new generation and waits for the dataplane to
+// drop the old one, so the superseded handle is safe to free once the new
+// config is stored. This mirrors how the ACL control plane reclaims
+// superseded module configs, instead of relying on a type-blind drain of the
+// agent's unused list.
 func (m *TrafgenService) apply(
 	name string,
 	packets [][]byte,
@@ -254,8 +258,14 @@ func (m *TrafgenService) apply(
 ) error {
 	frames, lengths := flattenFrames(packets)
 
-	if err := m.backend.UpdateDevice(name, input, output, frames, lengths, ratePps); err != nil {
+	handle, err := m.backend.UpdateDevice(name, input, output, frames, lengths, ratePps)
+	if err != nil {
 		return fmt.Errorf("failed to update device config %q: %w", name, err)
+	}
+
+	var oldHandle *ctrafgen.DeviceConfig
+	if old, ok := m.configs[name]; ok {
+		oldHandle = old.Handle
 	}
 
 	m.configs[name] = &config{
@@ -265,6 +275,11 @@ func (m *TrafgenService) apply(
 		Packets:    packets,
 		Input:      input,
 		Output:     output,
+		Handle:     handle,
+	}
+
+	if oldHandle != nil {
+		oldHandle.Free()
 	}
 
 	return nil

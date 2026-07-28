@@ -22,13 +22,6 @@ cp_device_trafgen_new(
 void
 cp_device_trafgen_free(struct cp_device *cp_device);
 
-// Reclaim trafgen devices parked on the agent's unused_device list.
-//
-// Call after a device update, once the retiring generation no longer
-// references the parked devices.
-void
-cp_device_trafgen_drain_unused(struct agent *agent);
-
 struct cp_device_trafgen_config *
 cp_device_trafgen_config_new(
 	const char *name,

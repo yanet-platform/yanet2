@@ -742,7 +742,9 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 			goto error;
 		}
 		if (cp_device_init(cp_device, agent, &device_config, err)) {
-			cp_device_free(cp_device);
+			struct memory_context *mctx =
+				ADDR_OF(&cp_device->parent_memory_context);
+			memory_bfree(mctx, cp_device, cp_device->alloc_size);
 			yanet_error_add(
 				err,
 				"failed to initialize device '%s'",

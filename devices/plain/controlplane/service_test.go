@@ -12,14 +12,14 @@ import (
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 )
 
-// TestUpdateDevice_DrainsUnusedDevices verifies that repeated UpdateDevice
-// calls do not leak shared-memory arena space.
+// TestUpdateDevice_ReclaimsSupersededDevice verifies that repeated
+// UpdateDevice calls do not leak shared-memory arena space.
 //
-// Each update after the first retires the previous generation's device onto
-// the agent's unused list; without draining that list, the arena shrinks by
-// a fixed amount every call and eventually runs out. Free bytes must settle
-// after the first update instead of decreasing indefinitely.
-func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
+// Each update after the first supersedes the previous generation's device;
+// the service frees that handle explicitly once the new generation is
+// installed, so free bytes must settle after the first update instead of
+// decreasing indefinitely.
+func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
 		DPMemory:      uint64(datasize.MB * 4),
@@ -63,14 +63,13 @@ func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 	}
 }
 
-// TestUpdateDevices_ParksTwoPredecessorsBackToBack verifies that a single
-// UpdateDevices call replacing two live devices at once drains cleanly.
+// TestUpdateDevice_ReclaimsAcrossMultipleNames verifies that tracking and
+// reclaiming superseded handles works independently per device name.
 //
-// Replacing two devices in one call parks both predecessors onto the
-// agent's unused list back-to-back, before either is drained. That is the
-// only way to link a second entry onto a non-empty unused list, so it is
-// the case a single-device update (one park per drain) can never exercise.
-func TestUpdateDevices_ParksTwoPredecessorsBackToBack(t *testing.T) {
+// Two names are created and then each is updated again: every superseded
+// handle is freed by the service, so the arena settles back to the size it
+// had right before the second round of updates.
+func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
 		DPMemory:      uint64(datasize.MB * 4),
@@ -95,25 +94,23 @@ func TestUpdateDevices_ParksTwoPredecessorsBackToBack(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	freeBytesBeforeReplace := freeBytesForAgent(t, shm, "plain")
+	freeBytesBeforeSecondRound := freeBytesForAgent(t, shm, "plain")
 
-	deviceConfig0, err := NewDeviceConfig(agent, "d0", &commonpb.Device{})
-	require.NoError(t, err)
-	deviceConfig1, err := NewDeviceConfig(agent, "d1", &commonpb.Device{})
-	require.NoError(t, err)
+	for _, name := range []string{"d0", "d1"} {
+		_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+			Name:   name,
+			Device: &commonpb.Device{},
+		})
+		require.NoError(t, err)
+	}
 
-	err = agent.UpdateDevices([]ffi.ShmDeviceConfig{
-		deviceConfig0.AsFFIDevice(),
-		deviceConfig1.AsFFIDevice(),
-	})
-	require.NoError(t, err)
-
-	DrainUnusedDevices(agent)
-
-	// Both predecessors retired by this replace and both fresh configs
-	// built above are reclaimed, so the arena settles back to the size
-	// it had right before the replace.
-	require.Equal(t, freeBytesBeforeReplace, freeBytesForAgent(t, shm, "plain"))
+	// Both superseded handles from the first round are freed by the second
+	// round of updates, so the arena returns to its pre-second-round size.
+	require.Equal(
+		t,
+		freeBytesBeforeSecondRound,
+		freeBytesForAgent(t, shm, "plain"),
+	)
 }
 
 // freeBytesForAgent returns the free byte count reported for the named
