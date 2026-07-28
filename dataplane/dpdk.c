@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <rte_dev.h>
 #include <rte_eal.h>
