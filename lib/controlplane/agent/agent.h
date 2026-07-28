@@ -46,12 +46,10 @@ struct agent {
 
 	struct agent_storage *storage;
 
-	struct cp_module *unused_module;
-
 	// Devices unlinked from a config generation but not yet reclaimed.
 	//
-	// Like unused_module, a replaced/deleted device is parked here by its
-	// creating agent instead of being freed when it leaves the registry.
+	// A replaced/deleted device is parked here by its creating agent
+	// instead of being freed when it leaves the registry.
 	//
 	// The owning control plane drains this list once the retiring
 	// generation no longer references the device.

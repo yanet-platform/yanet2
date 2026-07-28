@@ -149,96 +149,6 @@ test_device_park_and_drain(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that the module twin of the same park-on-unused-list path links
-// parked modules correctly: the second parked module's prev resolves to the
-// first, and the walk terminates at NULL.
-static int
-test_module_park_chain(struct yanet_shm *shm) {
-	yanet_error *err = NULL;
-
-	struct agent *agent = agent_attach(
-		shm, 0, "unused-park-mod", UNUSED_PARK_TEST_MEMORY_LIMIT, &err
-	);
-	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
-
-	struct cp_module_registry registry;
-	TEST_ASSERT_SUCCESS(
-		cp_module_registry_init(
-			&agent->memory_context, &registry, &err
-		),
-		"module registry init failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	struct cp_module *module0 = (struct cp_module *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_module)
-	);
-	TEST_ASSERT_NOT_NULL(module0, "failed to allocate module0");
-	TEST_ASSERT_SUCCESS(
-		cp_module_init(module0, agent, "route", "mod0", &err),
-		"cp_module_init failed for mod0: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	TEST_ASSERT_SUCCESS(
-		cp_module_registry_upsert(
-			&registry, "route", "mod0", module0, &err
-		),
-		"module registry upsert failed for mod0: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	struct cp_module *module1 = (struct cp_module *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_module)
-	);
-	TEST_ASSERT_NOT_NULL(module1, "failed to allocate module1");
-	TEST_ASSERT_SUCCESS(
-		cp_module_init(module1, agent, "route", "mod1", &err),
-		"cp_module_init failed for mod1: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	TEST_ASSERT_SUCCESS(
-		cp_module_registry_upsert(
-			&registry, "route", "mod1", module1, &err
-		),
-		"module registry upsert failed for mod1: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	// Releasing the registry parks both modules onto agent->unused_module
-	// back-to-back, the same corruption trigger as the device path above.
-	cp_module_registry_fini(&registry);
-
-	struct cp_module *head = ADDR_OF(&agent->unused_module);
-	TEST_ASSERT(
-		head == module1,
-		"unused_module head is not the last parked module"
-	);
-	struct cp_module *second = ADDR_OF(&head->prev);
-	TEST_ASSERT(
-		second == module0,
-		"second parked module's prev does not resolve to the first "
-		"parked module"
-	);
-	TEST_ASSERT_NULL(
-		ADDR_OF(&second->prev), "first parked module's prev is not NULL"
-	);
-
-	// Nothing drains unused_module today, so reclaim the parked chain by
-	// hand instead of leaving it for agent_detach.
-	struct cp_module *module = head;
-	while (module != NULL) {
-		struct cp_module *prev = ADDR_OF(&module->prev);
-		cp_module_fini(module);
-		memory_bfree(
-			&agent->memory_context, module, sizeof(struct cp_module)
-		);
-		module = prev;
-	}
-
-	agent_detach(agent);
-	return TEST_SUCCESS;
-}
-
 int
 main(void) {
 	log_enable_name("debug");
@@ -273,9 +183,6 @@ main(void) {
 	}
 
 	int res = test_device_park_and_drain(shm);
-	if (res == TEST_SUCCESS) {
-		res = test_module_park_chain(shm);
-	}
 
 	dataplane_ut_free(ut);
 
