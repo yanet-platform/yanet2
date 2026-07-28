@@ -102,17 +102,6 @@ agent_attach(
 int
 agent_resize(struct agent *agent, size_t new_size, yanet_error **err);
 
-// Attach a module agent to shared memory,
-// use previous agents memory.
-struct agent *
-agent_reattach(
-	struct yanet_shm *shm,
-	uint32_t instance_idx,
-	const char *agent_name,
-	size_t memory_limit,
-	yanet_error **err
-);
-
 // Returns number of dataplane instances in the specified shared memory segment.
 //
 // @param shm Handle to the shared memory segment.

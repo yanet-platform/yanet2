@@ -381,54 +381,6 @@ unlock:
 	return ret;
 }
 
-// Attach a module agent to shared memory,
-// use previous agents memory.
-struct agent *
-agent_reattach(
-	struct yanet_shm *shm,
-	uint32_t instance_idx,
-	const char *agent_name,
-	size_t memory_limit,
-	yanet_error **err
-) {
-	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
-
-	// Same readiness guard as in agent_attach — see comment there.
-	uint64_t magic =
-		__atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE);
-	if (magic != DP_CONFIG_READY_MAGIC) {
-		yanet_error_add(
-			err,
-			"dataplane shared memory instance %u is not yet "
-			"initialised",
-			instance_idx
-		);
-		return NULL;
-	}
-
-	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-
-	cp_config_lock(cp_config);
-
-	struct cp_agent_registry *registry =
-		ADDR_OF(&cp_config->agent_registry);
-
-	for (uint64_t agent_idx = 0; agent_idx < registry->count; ++agent_idx) {
-		struct agent *agent = ADDR_OF(&registry->agents[agent_idx]);
-		if (!strncmp(agent->name, agent_name, 80)) {
-			cp_config_unlock(cp_config);
-			if (agent_resize(agent, memory_limit, err) != 0) {
-				return NULL;
-			}
-			return agent;
-		}
-	}
-
-	// new agent
-	cp_config_unlock(cp_config);
-	return agent_attach(shm, instance_idx, agent_name, memory_limit, err);
-}
-
 void
 agent_cleanup(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
