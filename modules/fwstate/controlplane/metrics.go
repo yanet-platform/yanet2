@@ -41,22 +41,6 @@ func (m *MetricsService) GetMetrics(
 	return &commonpb.GetMetricsResponse{Metrics: all}, nil
 }
 
-func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Gauge{Gauge: value},
-	}
-}
-
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
-}
-
 // fwstateStructuralCounters lists the fixed fwstate counters whose metrics
 // carry no "counter" label.
 //
@@ -210,13 +194,13 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 	switch counter.Name {
 	case "fwstate_sync":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_sync_packets", packets, baseLabels...),
-			makeCounter("fwstate_sync_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_sync_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_sync_bytes", bytes, baseLabels...),
 		}
 	case "fwstate_passthrough":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_passthrough_packets", packets, baseLabels...),
-			makeCounter("fwstate_passthrough_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_passthrough_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_passthrough_bytes", bytes, baseLabels...),
 		}
 	// The *_inserted / *_insert_failed counters track state-table
 	// entries (sync frames), not packets: a single sync packet
@@ -225,41 +209,41 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 	// under a packet/byte column.
 	case "fwstate_sync_v4_inserted":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_sync_v4_inserted_entries", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_sync_v4_inserted_entries", packets, baseLabels...),
 		}
 	case "fwstate_sync_v6_inserted":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_sync_v6_inserted_entries", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_sync_v6_inserted_entries", packets, baseLabels...),
 		}
 	case "fwstate_sync_v4_insert_failed":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_sync_v4_insert_failed_entries", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_sync_v4_insert_failed_entries", packets, baseLabels...),
 		}
 	case "fwstate_sync_v6_insert_failed":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_sync_v6_insert_failed_entries", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_sync_v6_insert_failed_entries", packets, baseLabels...),
 		}
 	case "fwstate_external_dropped":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_external_dropped_packets", packets, baseLabels...),
-			makeCounter("fwstate_external_dropped_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_external_dropped_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_external_dropped_bytes", bytes, baseLabels...),
 		}
 	case "fwstate_internal_forwarded":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_internal_forwarded_packets", packets, baseLabels...),
-			makeCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_internal_forwarded_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
 		}
 	// Generic per-module counters registered by cp_module_init for every
 	// module.
 	case "rx":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_rx_packets", packets, baseLabels...),
-			makeCounter("fwstate_rx_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_rx_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_rx_bytes", bytes, baseLabels...),
 		}
 	case "tx":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_tx_packets", packets, baseLabels...),
-			makeCounter("fwstate_tx_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_tx_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_tx_bytes", bytes, baseLabels...),
 		}
 	// drop counts packets the module dropped itself. For fwstate this is
 	// meaningful: external sync packets are dropped when they cannot be
@@ -267,18 +251,18 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 	// falling through to the generic arm.
 	case "drop":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_drop_packets", packets, baseLabels...),
-			makeCounter("fwstate_drop_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_drop_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_drop_bytes", bytes, baseLabels...),
 		}
 	case "pending_input":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_pending_input_packets", packets, baseLabels...),
-			makeCounter("fwstate_pending_input_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_pending_input_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_pending_input_bytes", bytes, baseLabels...),
 		}
 	case "pending_output":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_pending_output_packets", packets, baseLabels...),
-			makeCounter("fwstate_pending_output_bytes", bytes, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_pending_output_packets", packets, baseLabels...),
+			commonpb.NewMetricCounter("fwstate_pending_output_bytes", bytes, baseLabels...),
 		}
 	case "hist_0", "hist_1", "hist_2", "hist_3", "hist_4", "hist_5":
 		// TODO: handle
@@ -292,8 +276,8 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 			&commonpb.Label{Name: "counter", Value: counter.Name},
 		)
 		return []*commonpb.Metric{
-			makeCounter("fwstate_counter_packets", packets, counterLabels...),
-			makeCounter("fwstate_counter_bytes", bytes, counterLabels...),
+			commonpb.NewMetricCounter("fwstate_counter_packets", packets, counterLabels...),
+			commonpb.NewMetricCounter("fwstate_counter_bytes", bytes, counterLabels...),
 		}
 	}
 }
@@ -315,13 +299,13 @@ func collectMapStatsForAF(configName, af string, now time.Time, stats mapStats) 
 	}
 
 	return []*commonpb.Metric{
-		makeGauge("fwstate_index_size", float64(stats.IndexSize), labels...),
-		makeGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
-		makeGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
-		makeGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
-		makeGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
-		makeGauge("fwstate_max_deadline_ns", float64(deadlineTTL), labels...),
-		makeGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
+		commonpb.NewMetricGauge("fwstate_index_size", float64(stats.IndexSize), labels...),
+		commonpb.NewMetricGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
+		commonpb.NewMetricGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
+		commonpb.NewMetricGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
+		commonpb.NewMetricGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
+		commonpb.NewMetricGauge("fwstate_max_deadline_ns", float64(deadlineTTL), labels...),
+		commonpb.NewMetricGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
 	}
 }
 

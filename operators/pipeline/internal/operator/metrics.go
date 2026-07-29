@@ -83,31 +83,31 @@ func (m *Metrics) OnStateChanged(state operator.ReconcilerState) {
 func (m *Metrics) Collect() []*commonpb.Metric {
 	out := make([]*commonpb.Metric, 0)
 
-	out = append(out, makeCounter(
+	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_reconcile_total",
 		m.reconcileTotal.Load(),
 	))
-	out = append(out, makeCounter(
+	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_reconcile_errors_total",
 		m.reconcileErrors.Load(),
 	))
-	out = append(out, makeCounter(
+	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_stage_advance_total",
 		m.stageAdvance.Load(),
 	))
 
 	for state, g := range m.states {
-		out = append(out, makeGauge(
+		out = append(out, commonpb.NewMetricGauge(
 			"pipeline_operator_state",
 			g.Load(),
-			makeLabel("state", reconcilerStateNames[state]),
+			commonpb.NewLabel("state", reconcilerStateNames[state]),
 		))
 	}
-	out = append(out, makeGauge(
+	out = append(out, commonpb.NewMetricGauge(
 		"pipeline_operator_queue_depth",
 		m.queueDepth.Load(),
 	))
-	out = append(out, makeGauge(
+	out = append(out, commonpb.NewMetricGauge(
 		"pipeline_operator_backoff_seconds",
 		m.backoffSeconds.Load(),
 	))
@@ -189,68 +189,48 @@ func (m *GatewayMetrics) OnGC(deleted, failed int, err error) {
 // Collect renders the current state of this gateway's metrics as a
 // []*commonpb.Metric.
 func (m *GatewayMetrics) Collect() []*commonpb.Metric {
-	gw := makeLabel("gateway", m.name)
+	gw := commonpb.NewLabel("gateway", m.name)
 	out := make([]*commonpb.Metric, 0)
 
-	out = append(out, makeCounter(
+	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_gateway_apply_total",
 		m.apply.Load(),
 		gw,
 	))
-	out = append(out, makeCounter(
+	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_gateway_apply_errors_total",
 		m.applyErrors.Load(),
 		gw,
 	))
 
 	for kind, c := range m.resourceUpdate {
-		out = append(out, makeCounter(
+		out = append(out, commonpb.NewMetricCounter(
 			"pipeline_operator_resource_update_total",
 			c.Load(),
-			gw, makeLabel("kind", kind),
+			gw, commonpb.NewLabel("kind", kind),
 		))
 	}
 	for kind, c := range m.resourceUpdateErrors {
-		out = append(out, makeCounter(
+		out = append(out, commonpb.NewMetricCounter(
 			"pipeline_operator_resource_update_errors_total",
 			c.Load(),
-			gw, makeLabel("kind", kind),
+			gw, commonpb.NewLabel("kind", kind),
 		))
 	}
 
 	out = append(out,
-		makeCounter("pipeline_operator_gc_runs_total", m.gcRuns.Load(), gw),
-		makeCounter("pipeline_operator_gc_errors_total", m.gcErrors.Load(), gw),
-		makeCounter(
+		commonpb.NewMetricCounter("pipeline_operator_gc_runs_total", m.gcRuns.Load(), gw),
+		commonpb.NewMetricCounter("pipeline_operator_gc_errors_total", m.gcErrors.Load(), gw),
+		commonpb.NewMetricCounter(
 			"pipeline_operator_gc_pipelines_deleted_total",
 			m.gcDeleted.Load(),
 			gw,
 		),
-		makeCounter(
+		commonpb.NewMetricCounter(
 			"pipeline_operator_gc_pipelines_delete_errors_total",
 			m.gcDeleteErrors.Load(),
 			gw,
 		),
 	)
 	return out
-}
-
-func makeLabel(name, value string) *commonpb.Label {
-	return &commonpb.Label{Name: name, Value: value}
-}
-
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
-}
-
-func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Gauge{Gauge: value},
-	}
 }

@@ -37,22 +37,6 @@ func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetric
 	return &commonpb.GetMetricsResponse{Metrics: all}, nil
 }
 
-func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Gauge{Gauge: value},
-	}
-}
-
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
-}
-
 // aclStructuralCounters lists the fixed ACL counters whose metrics carry no
 // "counter" label.
 //
@@ -151,48 +135,48 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 			switch counter.Name {
 			case "acl_no_match":
 				result = append(result,
-					makeCounter("acl_no_match_packets", packets, baseLabels...),
-					makeCounter("acl_no_match_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_no_match_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_no_match_bytes", bytes, baseLabels...),
 				)
 			case "acl_action_allow":
 				result = append(result,
-					makeCounter("acl_action_allow_packets", packets, baseLabels...),
-					makeCounter("acl_action_allow_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_allow_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_allow_bytes", bytes, baseLabels...),
 				)
 			case "acl_action_deny":
 				result = append(result,
-					makeCounter("acl_action_deny_packets", packets, baseLabels...),
-					makeCounter("acl_action_deny_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_deny_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_deny_bytes", bytes, baseLabels...),
 				)
 			case "acl_action_count":
 				result = append(result,
-					makeCounter("acl_action_count_packets", packets, baseLabels...),
-					makeCounter("acl_action_count_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_count_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_count_bytes", bytes, baseLabels...),
 				)
 			case "acl_action_check_state":
 				result = append(result,
-					makeCounter("acl_action_check_state_packets", packets, baseLabels...),
-					makeCounter("acl_action_check_state_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_check_state_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_check_state_bytes", bytes, baseLabels...),
 				)
 			case "acl_action_create_state":
 				result = append(result,
-					makeCounter("acl_action_create_state_packets", packets, baseLabels...),
-					makeCounter("acl_action_create_state_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_create_state_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_create_state_bytes", bytes, baseLabels...),
 				)
 			case "acl_action_unknown":
 				result = append(result,
-					makeCounter("acl_action_unknown_packets", packets, baseLabels...),
-					makeCounter("acl_action_unknown_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_unknown_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_action_unknown_bytes", bytes, baseLabels...),
 				)
 			case "acl_state_miss":
 				result = append(result,
-					makeCounter("acl_state_miss_packets", packets, baseLabels...),
-					makeCounter("acl_state_miss_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_state_miss_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_state_miss_bytes", bytes, baseLabels...),
 				)
 			case "acl_sync_sent":
 				result = append(result,
-					makeCounter("acl_sync_sent_packets", packets, baseLabels...),
-					makeCounter("acl_sync_sent_bytes", bytes, baseLabels...),
+					commonpb.NewMetricCounter("acl_sync_sent_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_sync_sent_bytes", bytes, baseLabels...),
 				)
 			default:
 				ruleLabels := append(
@@ -200,8 +184,8 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 					&commonpb.Label{Name: "counter", Value: counter.Name},
 				)
 				result = append(result,
-					makeCounter("acl_rule_packets", packets, ruleLabels...),
-					makeCounter("acl_rule_bytes", bytes, ruleLabels...),
+					commonpb.NewMetricCounter("acl_rule_packets", packets, ruleLabels...),
+					commonpb.NewMetricCounter("acl_rule_bytes", bytes, ruleLabels...),
 				)
 			}
 		}
@@ -216,31 +200,31 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 			if info, ok := snapshot.configInfo(configName); ok {
 				result = append(
 					result,
-					makeGauge(
+					commonpb.NewMetricGauge(
 						"acl_compilation_time_ns",
 						float64(info.CompilationTimeNs),
 						configLabels...),
-					makeGauge(
+					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_vlan",
 						float64(info.FilterRuleCountVlan),
 						configLabels...),
-					makeGauge(
+					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_ip4",
 						float64(info.FilterRuleCountIp4),
 						configLabels...),
-					makeGauge(
+					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_ip4_port",
 						float64(info.FilterRuleCountIp4Port),
 						configLabels...),
-					makeGauge(
+					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_ip6",
 						float64(info.FilterRuleCountIp6),
 						configLabels...),
-					makeGauge(
+					commonpb.NewMetricGauge(
 						"acl_filter_rule_count_ip6_port",
 						float64(info.FilterRuleCountIp6Port),
 						configLabels...),
-					makeGauge("acl_memory_bytes", float64(m.backend.MemoryBytes()), configLabels...),
+					commonpb.NewMetricGauge("acl_memory_bytes", float64(m.backend.MemoryBytes()), configLabels...),
 				)
 			}
 		}

@@ -330,10 +330,10 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 		}
 
 		result = append(result,
-			makeGauge("route_fib_entries", float64(entry.FIBRangeCountV4), v4Labels...),
-			makeGauge("route_fib_entries", float64(entry.FIBRangeCountV6), v6Labels...),
-			makeGauge("route_nexthops", float64(entry.NexthopCount), configLabels...),
-			makeGauge(
+			commonpb.NewMetricGauge("route_fib_entries", float64(entry.FIBRangeCountV4), v4Labels...),
+			commonpb.NewMetricGauge("route_fib_entries", float64(entry.FIBRangeCountV6), v6Labels...),
+			commonpb.NewMetricGauge("route_nexthops", float64(entry.NexthopCount), configLabels...),
+			commonpb.NewMetricGauge(
 				"route_config_updated_timestamp_seconds",
 				float64(entry.UpdatedAt.Unix()),
 				configLabels...,

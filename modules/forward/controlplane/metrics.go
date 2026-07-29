@@ -36,15 +36,6 @@ func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetric
 	return &commonpb.GetMetricsResponse{Metrics: all}, nil
 }
 
-// makeCounter builds a counter metric with the provided name, value, and labels.
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
-}
-
 // Metrics returns Forward per-rule metrics matching tags, collected from the
 // dataplane.
 func (m *ForwardService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
@@ -97,8 +88,8 @@ func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]
 			}
 
 			result = append(result,
-				makeCounter("forward_rule_packets", packets, labels...),
-				makeCounter("forward_rule_bytes", bytes, labels...),
+				commonpb.NewMetricCounter("forward_rule_packets", packets, labels...),
+				commonpb.NewMetricCounter("forward_rule_bytes", bytes, labels...),
 			)
 		}
 	}

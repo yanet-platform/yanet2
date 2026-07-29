@@ -81,3 +81,29 @@ func MetricRefsToProto[T metrics.Counter | metrics.Gauge | metrics.Histogram](
 	}
 	return res
 }
+
+// NewMetricCounter builds a Metric carrying a Counter value.
+func NewMetricCounter(name string, value uint64, labels ...*Label) *Metric {
+	return &Metric{
+		Name:   name,
+		Labels: labels,
+		Value:  &Metric_Counter{Counter: value},
+	}
+}
+
+// NewMetricGauge builds a Metric carrying a Gauge value.
+func NewMetricGauge(name string, value float64, labels ...*Label) *Metric {
+	return &Metric{
+		Name:   name,
+		Labels: labels,
+		Value:  &Metric_Gauge{Gauge: value},
+	}
+}
+
+// NewLabel builds a Label from a name/value pair.
+func NewLabel(name, value string) *Label {
+	return &Label{
+		Name:  name,
+		Value: value,
+	}
+}

@@ -38,23 +38,6 @@ func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetric
 	return &commonpb.GetMetricsResponse{Metrics: all}, nil
 }
 
-func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Gauge{Gauge: value},
-	}
-}
-
-// makeCounter builds a counter metric with the provided name, value, and labels.
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
-}
-
 // counterMapping projects one route dataplane counter onto the metric family
 // that carries it.
 type counterMapping struct {
@@ -149,8 +132,8 @@ func (m *RouteService) collectDataplaneMetrics(tags []*commonpb.MetricTag) []*co
 			}
 
 			result = append(result,
-				makeCounter(mapping.Metric+"_packets", packets, labels...),
-				makeCounter(mapping.Metric+"_bytes", bytes, labels...),
+				commonpb.NewMetricCounter(mapping.Metric+"_packets", packets, labels...),
+				commonpb.NewMetricCounter(mapping.Metric+"_bytes", bytes, labels...),
 			)
 		}
 	}

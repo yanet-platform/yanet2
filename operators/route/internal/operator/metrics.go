@@ -210,25 +210,25 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 	out := make([]*commonpb.Metric, 0)
 
 	out = append(out,
-		makeCounter("route_operator_reconcile_total", m.reconcileTotal.Load()),
-		makeCounter("route_operator_reconcile_errors_total", m.reconcileErrors.Load()),
-		makeGauge("route_operator_backoff_seconds", m.backoffSeconds.Load()),
+		commonpb.NewMetricCounter("route_operator_reconcile_total", m.reconcileTotal.Load()),
+		commonpb.NewMetricCounter("route_operator_reconcile_errors_total", m.reconcileErrors.Load()),
+		commonpb.NewMetricGauge("route_operator_backoff_seconds", m.backoffSeconds.Load()),
 	)
 	for state, g := range m.states {
-		out = append(out, makeGauge(
+		out = append(out, commonpb.NewMetricGauge(
 			"route_operator_state",
 			g.Load(),
-			makeLabel("state", reconcilerStateNames[state]),
+			commonpb.NewLabel("state", reconcilerStateNames[state]),
 		))
 	}
 
 	for name, ribRef := range m.ribs.Snapshot() {
 		stats := ribRef.Stats()
-		module := makeLabel("module", name)
+		module := commonpb.NewLabel("module", name)
 		out = append(out,
-			makeGauge("route_operator_rib_prefixes", float64(stats.Prefixes), module),
-			makeGauge("route_operator_rib_routes", float64(stats.Routes), module),
-			makeGauge(
+			commonpb.NewMetricGauge("route_operator_rib_prefixes", float64(stats.Prefixes), module),
+			commonpb.NewMetricGauge("route_operator_rib_routes", float64(stats.Routes), module),
+			commonpb.NewMetricGauge(
 				"route_operator_rib_last_change_timestamp_seconds",
 				float64(stats.ChangedAt.Unix()),
 				module,
@@ -237,36 +237,36 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 	}
 
 	for _, src := range m.neighTable.ListSources() {
-		out = append(out, makeGauge(
+		out = append(out, commonpb.NewMetricGauge(
 			"route_operator_neighbour_entries",
 			float64(src.EntryCount),
-			makeLabel("table", src.Name),
+			commonpb.NewLabel("table", src.Name),
 		))
 	}
 	_, nexthops := m.neighTable.View().Entries()
-	out = append(out, makeGauge("route_operator_neighbour_nexthops", float64(nexthops)))
+	out = append(out, commonpb.NewMetricGauge("route_operator_neighbour_nexthops", float64(nexthops)))
 
 	for _, entry := range m.ribSessionStarts.Metrics() {
-		out = append(out, makeCounter(
+		out = append(out, commonpb.NewMetricCounter(
 			"route_operator_rib_session_starts_total",
 			entry.Value.Load(),
-			makeLabel("module", entry.ID.Labels["module"]),
+			commonpb.NewLabel("module", entry.ID.Labels["module"]),
 		))
 	}
 	for _, entry := range m.ribSessionEnds.Metrics() {
-		out = append(out, makeCounter(
+		out = append(out, commonpb.NewMetricCounter(
 			"route_operator_rib_session_ends_total",
 			entry.Value.Load(),
-			makeLabel("module", entry.ID.Labels["module"]),
+			commonpb.NewLabel("module", entry.ID.Labels["module"]),
 		))
 	}
-	out = append(out, makeCounter("route_operator_rib_feed_updates_total", m.ribFeedUpdates.Load()))
+	out = append(out, commonpb.NewMetricCounter("route_operator_rib_feed_updates_total", m.ribFeedUpdates.Load()))
 
 	if m.netlinkMonitorEnabled {
 		out = append(out,
-			makeGauge("route_operator_neighbour_monitor_healthy", m.neighbourHealthy.Load()),
-			makeCounter("route_operator_neighbour_resyncs_total", m.neighbourResyncs.Load()),
-			makeCounter("route_operator_neighbour_syncs_total", m.neighbourSyncs.Load()),
+			commonpb.NewMetricGauge("route_operator_neighbour_monitor_healthy", m.neighbourHealthy.Load()),
+			commonpb.NewMetricCounter("route_operator_neighbour_resyncs_total", m.neighbourResyncs.Load()),
+			commonpb.NewMetricCounter("route_operator_neighbour_syncs_total", m.neighbourSyncs.Load()),
 		)
 	}
 
@@ -359,12 +359,12 @@ func (m *GatewayMetrics) OnFIBBuilt(module string, stats FIBBuildStats) {
 // Collect renders this gateway's metrics as a slice of commonpb.Metric
 // values.
 func (m *GatewayMetrics) Collect() []*commonpb.Metric {
-	gateway := makeLabel("gateway", m.name)
+	gateway := commonpb.NewLabel("gateway", m.name)
 	out := make([]*commonpb.Metric, 0)
 
 	out = append(out,
-		makeCounter("route_operator_gateway_apply_total", m.apply.Load(), gateway),
-		makeCounter("route_operator_gateway_apply_errors_total", m.applyErrors.Load(), gateway),
+		commonpb.NewMetricCounter("route_operator_gateway_apply_total", m.apply.Load(), gateway),
+		commonpb.NewMetricCounter("route_operator_gateway_apply_errors_total", m.applyErrors.Load(), gateway),
 		makeHistogram("route_operator_gateway_apply_duration_seconds", m.applyDuration, gateway),
 	)
 
@@ -372,37 +372,17 @@ func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	defer m.fibMu.Unlock()
 
 	for module, g := range m.fib {
-		labels := []*commonpb.Label{gateway, makeLabel("module", module)}
+		labels := []*commonpb.Label{gateway, commonpb.NewLabel("module", module)}
 		out = append(out,
-			makeGauge("route_operator_fib_entries", g.Entries.Load(), labels...),
-			makeGauge("route_operator_fib_routes", g.Routes.Load(), labels...),
-			makeGauge("route_operator_fib_unresolved_nexthops", g.UnresolvedNexthops.Load(), labels...),
-			makeGauge("route_operator_fib_skipped_prefixes", g.SkippedPrefixes.Load(), labels...),
-			makeGauge("route_operator_fib_filtered_routes", g.FilteredRoutes.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_entries", g.Entries.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_routes", g.Routes.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_unresolved_nexthops", g.UnresolvedNexthops.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_skipped_prefixes", g.SkippedPrefixes.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_filtered_routes", g.FilteredRoutes.Load(), labels...),
 		)
 	}
 
 	return out
-}
-
-func makeLabel(name, value string) *commonpb.Label {
-	return &commonpb.Label{Name: name, Value: value}
-}
-
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
-}
-
-func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Gauge{Gauge: value},
-	}
 }
 
 func makeHistogram(name string, h *metrics.Histogram, labels ...*commonpb.Label) *commonpb.Metric {

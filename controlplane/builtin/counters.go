@@ -281,7 +281,7 @@ func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
 	for _, port := range ports {
 		portID := strconv.FormatUint(uint64(port.PortID), 10)
 		for _, counter := range port.Counters {
-			metrics = append(metrics, makeCounter(
+			metrics = append(metrics, commonpb.NewMetricCounter(
 				"yanet_port_counter_value",
 				counter.Value,
 				&commonpb.Label{Name: "port_id", Value: portID},
@@ -304,16 +304,16 @@ func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
 		}
 
 		metrics = append(metrics,
-			makeCounter("yanet_worker_iterations", worker.Iterations, labels...),
-			makeCounter("yanet_worker_rx_packets", worker.RxPackets, labels...),
-			makeCounter("yanet_worker_rx_bytes", worker.RxBytes, labels...),
-			makeCounter("yanet_worker_tx_packets", worker.TxPackets, labels...),
-			makeCounter("yanet_worker_tx_bytes", worker.TxBytes, labels...),
-			makeCounter("yanet_worker_remote_rx_packets", worker.RemoteRxPackets, labels...),
-			makeCounter("yanet_worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
-			makeCounter("yanet_worker_local_tx_drops", worker.LocalTxDrops, labels...),
-			makeCounter("yanet_worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
-			makeCounter("yanet_worker_drops", worker.Drops, labels...),
+			commonpb.NewMetricCounter("yanet_worker_iterations", worker.Iterations, labels...),
+			commonpb.NewMetricCounter("yanet_worker_rx_packets", worker.RxPackets, labels...),
+			commonpb.NewMetricCounter("yanet_worker_rx_bytes", worker.RxBytes, labels...),
+			commonpb.NewMetricCounter("yanet_worker_tx_packets", worker.TxPackets, labels...),
+			commonpb.NewMetricCounter("yanet_worker_tx_bytes", worker.TxBytes, labels...),
+			commonpb.NewMetricCounter("yanet_worker_remote_rx_packets", worker.RemoteRxPackets, labels...),
+			commonpb.NewMetricCounter("yanet_worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
+			commonpb.NewMetricCounter("yanet_worker_local_tx_drops", worker.LocalTxDrops, labels...),
+			commonpb.NewMetricCounter("yanet_worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
+			commonpb.NewMetricCounter("yanet_worker_drops", worker.Drops, labels...),
 		)
 
 		if len(worker.RxBursts) > 0 {
@@ -325,14 +325,6 @@ func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
 		}
 	}
 	return metrics
-}
-
-func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  &commonpb.Metric_Counter{Counter: value},
-	}
 }
 
 // makeHistogram builds a histogram metric from a slice of raw per-bucket
