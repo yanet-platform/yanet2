@@ -154,6 +154,63 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Regression test for re-inserting the same device instance: the loaded
+// count must track first-reference (0->1) transitions, so upserting an
+// already-referenced instance a second time must not bump the count again.
+// Before the fix the upsert incremented unconditionally, which over-counted
+// and permanently blocked reclamation of the owning agent.
+static int
+run_reinsert_count_test(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "reinsert-count", LOADED_COUNTS_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed for reinsert test");
+
+	struct dp_config *dp_config = agent_dp_config(agent);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	struct cp_device_plain_config *cfg =
+		cp_device_plain_config_new("dev0", 0, 0, &err);
+	TEST_ASSERT_NOT_NULL(
+		cfg,
+		"device config new failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_device *dev = cp_device_plain_new(agent, cfg, &err);
+	cp_device_plain_config_free(cfg);
+	TEST_ASSERT_NOT_NULL(dev, "device new failed");
+
+	// First install: the device gains its first reference (count 0->1).
+	struct cp_device *devs[] = {dev};
+	TEST_ASSERT_SUCCESS(
+		cp_config_update_devices(dp_config, cp_config, 1, devs, &err),
+		"first update_devices failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_device_count,
+		1,
+		"device count should be one after the first install"
+	);
+
+	// Re-insert the SAME pointer: it is already referenced, so the count
+	// must stay one. Before the fix this bumped it to two.
+	TEST_ASSERT_SUCCESS(
+		cp_config_update_devices(dp_config, cp_config, 1, devs, &err),
+		"second update_devices (same pointer) failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_device_count,
+		1,
+		"re-inserting the same device must not double-count"
+	);
+
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -187,6 +244,9 @@ main(void) {
 	}
 
 	int res = run_loaded_counts_test(shm);
+	if (res == TEST_SUCCESS) {
+		res = run_reinsert_count_test(shm);
+	}
 
 	dataplane_ut_free(ut);
 

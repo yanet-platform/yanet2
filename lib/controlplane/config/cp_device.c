@@ -507,6 +507,11 @@ cp_device_registry_upsert(
 		return -1;
 	}
 
+	// Count the device only on its first registry reference, mirroring the
+	// 1->0 transition at which cp_device_registry_item_free_cb decrements;
+	// a re-upsert of an already-referenced instance must not double-count.
+	uint64_t refcnt_before = new_device->config_item.refcnt;
+
 	if (registry_replace(
 		    &device_registry->registry,
 		    cp_device_registry_item_cmp,
@@ -520,7 +525,7 @@ cp_device_registry_upsert(
 	}
 
 	struct agent *agent = ADDR_OF(&new_device->agent);
-	if (agent != NULL) {
+	if (agent != NULL && refcnt_before == 0) {
 		agent->loaded_device_count += 1;
 	}
 

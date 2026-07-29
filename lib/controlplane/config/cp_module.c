@@ -383,6 +383,11 @@ cp_module_registry_upsert(
 		err
 	);
 
+	// Count the module only on its first registry reference, mirroring the
+	// 1->0 transition at which cp_module_registry_item_free_cb decrements;
+	// a re-upsert of an already-referenced instance must not double-count.
+	uint64_t refcnt_before = new_module->config_item.refcnt;
+
 	if (registry_replace(
 		    &module_registry->registry,
 		    cp_module_registry_item_cmp,
@@ -396,7 +401,7 @@ cp_module_registry_upsert(
 	}
 
 	struct agent *agent = ADDR_OF(&new_module->agent);
-	if (agent != NULL) {
+	if (agent != NULL && refcnt_before == 0) {
 		agent->loaded_module_count += 1;
 	}
 
