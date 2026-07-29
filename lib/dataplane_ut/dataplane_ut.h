@@ -38,6 +38,11 @@ struct dataplane_ut_config {
 	const char *const *devices_to_load;
 	size_t devices_to_load_count;
 
+	// Object type names to load via dp_load_object (resolving
+	// new_object_<name> from the main binary). May be empty.
+	const char *const *objects_to_load;
+	size_t objects_to_load_count;
+
 	// Optional per-worker device/queue assignment, one entry per worker.
 	//
 	// NULL reproduces the long-standing default: every worker is assigned

@@ -184,6 +184,32 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 	}
 
+	// Register requested object types directly. The harness owns no
+	// dlsym constructor for them, so fill the dp_objects array in place
+	// rather than going through dp_load_object; cp_object_init only needs
+	// the type name resolvable via dp_config_lookup_object.
+	if (cfg->objects_to_load_count > 0) {
+		struct dp_object *dp_objects =
+			(struct dp_object *)memory_balloc(
+				&ut->dp_config->memory_context,
+				cfg->objects_to_load_count *
+					sizeof(struct dp_object)
+			);
+		if (dp_objects == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to allocate dp_objects");
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		for (size_t idx = 0; idx < cfg->objects_to_load_count; ++idx) {
+			strtcpy(dp_objects[idx].name,
+				cfg->objects_to_load[idx],
+				sizeof(dp_objects[idx].name));
+		}
+		SET_OFFSET_OF(&ut->dp_config->dp_objects, dp_objects);
+		ut->dp_config->object_count = cfg->objects_to_load_count;
+	}
+
 	// Allocate the system agent inside cp_config memory so that its
 	// offset pointers remain valid across all processes that map the
 	// same arena. A stack agent would mix shm-relative offsets with

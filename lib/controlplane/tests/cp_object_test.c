@@ -56,7 +56,7 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(object, agent, "lifecycle", &err),
+		cp_object_init(object, agent, "test", "lifecycle", &err),
 		"cp_object_init failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -132,7 +132,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(foo, "object allocation (foo) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(foo, agent, "foo", &err),
+		cp_object_init(foo, agent, "test", "foo", &err),
 		"cp_object_init(foo) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -148,7 +148,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(bar, "object allocation (bar) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(bar, agent, "bar", &err),
+		cp_object_init(bar, agent, "test", "bar", &err),
 		"cp_object_init(bar) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -233,7 +233,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(foo2, "object allocation (foo2) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(foo2, agent, "foo", &err),
+		cp_object_init(foo2, agent, "test", "foo", &err),
 		"cp_object_init(foo2) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -280,7 +280,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(bar2, "object allocation (bar2) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(bar2, agent, "bar", &err),
+		cp_object_init(bar2, agent, "test", "bar", &err),
 		"cp_object_init(bar2) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -385,7 +385,7 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(object, agent1, "gate", &err),
+		cp_object_init(object, agent1, "test", "gate", &err),
 		"cp_object_init failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -450,12 +450,65 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// cp_object_init must reject an object type that is not loaded into the
+// dataplane's object-type registry, mirroring cp_module_init's "module type
+// not found" path. A lookup miss must surface an error and leave the struct
+// safe to free without further teardown.
+static int
+test_cp_object_init_unknown_type_fails(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-unknown", CP_OBJECT_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_object *object = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
+
+	int ret = cp_object_init(
+		object, agent, "no-such-object-type", "whatever", &err
+	);
+	TEST_ASSERT(
+		ret != 0,
+		"cp_object_init must fail for an unregistered object type"
+	);
+	TEST_ASSERT(
+		err != NULL,
+		"cp_object_init must surface an error on a lookup miss"
+	);
+	yanet_error_free(err);
+	err = NULL;
+
+	// init rolls back via cp_object_fini on the zeroed struct, so the
+	// storage can be freed directly.
+	memory_bfree(&agent->memory_context, object, sizeof(*object));
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline after failed init: "
+		"baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
 
 	const char *port_names[] = {"01:00.0"};
 	const char *devs_to_load[] = {"plain"};
+	const char *objs_to_load[] = {"test"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
@@ -467,6 +520,8 @@ main(void) {
 		.module_count = 0,
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
+		.objects_to_load = objs_to_load,
+		.objects_to_load_count = 1,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
@@ -488,6 +543,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_attach_gate(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_init_unknown_type_fails(shm);
 	}
 
 	dataplane_ut_free(ut);

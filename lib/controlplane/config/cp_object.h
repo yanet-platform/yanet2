@@ -22,7 +22,11 @@ struct agent;
 struct cp_object {
 	struct registry_item config_item;
 
+	char type[CP_OBJECT_TYPE_LEN];
 	char name[CP_OBJECT_NAME_LEN];
+
+	// Reference to the dataplane object type resolved by cp_object_init.
+	uint64_t dp_object_idx;
 
 	struct counter_registry counter_registry;
 
@@ -35,12 +39,15 @@ struct cp_object {
 
 // Initialize object resources: sub-context, identity, and counter registry.
 //
-// Zeroes self first, like cp_module_init. On failure, internally calls
+// Zeroes self first, like cp_module_init. Resolves object_type against the
+// dataplane's object-type registry (failing if it is not loaded), mirroring
+// cp_module_init's module-type lookup. On failure, internally calls
 // cp_object_fini and returns -1.
 int
 cp_object_init(
 	struct cp_object *self,
 	struct agent *agent,
+	const char *object_type,
 	const char *name,
 	yanet_error **err
 );

@@ -6,6 +6,7 @@
 
 #include "dataplane/device/device.h"
 #include "dataplane/module/module.h"
+#include "dataplane/object/object.h"
 
 #include "dataplane/time/clock.h"
 
@@ -25,6 +26,17 @@ struct dp_device {
 	char name[DEVICE_TYPE_LEN];
 	device_handler input_handler;
 	device_handler output_handler;
+};
+
+/*
+ * Inert dataplane-side descriptor for a loaded object type.
+ *
+ * Carries only the type name: objects take no per-packet action, so there
+ * is no handler slot. A handler field can be added here when objects gain
+ * dataplane behaviour.
+ */
+struct dp_object {
+	char name[OBJECT_TYPE_LEN];
 };
 
 // Per-DPDK-port counter registry and storage.
@@ -121,6 +133,9 @@ struct dp_config {
 	uint64_t device_count;
 	struct dp_device *dp_devices;
 
+	uint64_t object_count;
+	struct dp_object *dp_objects;
+
 	struct cp_config *cp_config;
 
 	uint64_t worker_count;
@@ -170,6 +185,11 @@ dp_config_lookup_module(
 
 int
 dp_config_lookup_device(
+	struct dp_config *dp_config, const char *name, uint64_t *index
+);
+
+int
+dp_config_lookup_object(
 	struct dp_config *dp_config, const char *name, uint64_t *index
 );
 

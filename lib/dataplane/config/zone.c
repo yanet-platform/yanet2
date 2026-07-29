@@ -104,6 +104,22 @@ dp_config_lookup_device(
 	return -1;
 }
 
+int
+dp_config_lookup_object(
+	struct dp_config *dp_config, const char *name, uint64_t *index
+) {
+	struct dp_object *objects = ADDR_OF(&dp_config->dp_objects);
+	for (uint64_t idx = 0; idx < dp_config->object_count; ++idx) {
+		if (!strncmp(
+			    objects[idx].name, name, sizeof(objects[idx].name)
+		    )) {
+			*index = idx;
+			return 0;
+		}
+	}
+	return -1;
+}
+
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id) {
 	if (device_id >= dp_config->dp_topology.device_count) {

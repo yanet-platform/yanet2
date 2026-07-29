@@ -36,6 +36,9 @@ dp_storage_init(
 	dp_config->dp_modules = NULL;
 	dp_config->module_count = 0;
 
+	dp_config->dp_objects = NULL;
+	dp_config->object_count = 0;
+
 	dp_config->workers = NULL;
 	dp_config->worker_count = 0;
 

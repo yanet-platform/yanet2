@@ -1,6 +1,7 @@
 #include "cp_object.h"
 
 #include "common/container_of.h"
+#include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
 
@@ -10,18 +11,33 @@ int
 cp_object_init(
 	struct cp_object *self,
 	struct agent *agent,
+	const char *object_type,
 	const char *name,
 	yanet_error **err
 ) {
 	memset(self, 0, sizeof(struct cp_object));
+
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+
+	if (dp_config_lookup_object(
+		    dp_config, object_type, &self->dp_object_idx
+	    )) {
+		yanet_error_add(
+			err,
+			"object type '%s' not found in dataplane config",
+			object_type
+		);
+		goto err_out;
+	}
+
+	strtcpy(self->type, object_type, sizeof(self->type));
+	strtcpy(self->name, name, CP_OBJECT_NAME_LEN);
 
 	memory_context_init_from(
 		&self->memory_context, &agent->memory_context, name
 	);
 
 	registry_item_init(&self->config_item);
-
-	strtcpy(self->name, name, CP_OBJECT_NAME_LEN);
 
 	SET_OFFSET_OF(&self->agent, agent);
 

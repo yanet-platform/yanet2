@@ -51,7 +51,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(obj1, "object allocation (obj1) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(obj1, agent, "lookup-1", &err),
+		cp_object_init(obj1, agent, "test", "lookup-1", &err),
 		"cp_object_init(obj1) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -61,7 +61,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(obj2, "object allocation (obj2) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(obj2, agent, "lookup-2", &err),
+		cp_object_init(obj2, agent, "test", "lookup-2", &err),
 		"cp_object_init(obj2) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -193,7 +193,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(obj1, "object allocation (obj1) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(obj1, agent, "replace-me", &err),
+		cp_object_init(obj1, agent, "test", "replace-me", &err),
 		"cp_object_init(obj1) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -209,7 +209,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(obj2, "object allocation (obj2) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(obj2, agent, "delete-me", &err),
+		cp_object_init(obj2, agent, "test", "delete-me", &err),
 		"cp_object_init(obj2) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -245,7 +245,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(new_obj1, "object allocation (new_obj1) failed");
 	TEST_ASSERT_SUCCESS(
-		cp_object_init(new_obj1, agent, "replace-me", &err),
+		cp_object_init(new_obj1, agent, "test", "replace-me", &err),
 		"cp_object_init(new_obj1) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -344,6 +344,7 @@ main(void) {
 
 	const char *port_names[] = {"01:00.0"};
 	const char *devs_to_load[] = {"plain"};
+	const char *objs_to_load[] = {"test"};
 
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
@@ -355,6 +356,8 @@ main(void) {
 		.module_count = 0,
 		.devices_to_load = devs_to_load,
 		.devices_to_load_count = 1,
+		.objects_to_load = objs_to_load,
+		.objects_to_load_count = 1,
 	};
 
 	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
