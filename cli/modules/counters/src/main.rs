@@ -486,7 +486,7 @@ impl From<&WorkerCounter> for WorkerRow {
 /// histograms.
 fn format_worker_counters(response: &WorkerCountersResponse) {
     if response.workers.is_empty() {
-        println!("no worker counters");
+        output::empty(format_args!("No worker counters found."));
         return;
     }
 

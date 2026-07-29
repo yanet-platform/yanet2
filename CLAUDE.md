@@ -394,6 +394,11 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   too — e.g. if the message declares `nexthop_addrs` (tag 3) before
   `do_flush` (tag 4), the literal must place `nexthop_addrs` before
   `do_flush`, not append it last. `rustfmt`/`clippy` do not catch this.
+- **Empty CLI results**: report through `output::empty`/`empty_with_hint`,
+  never a bare `println!`/`eprintln!`. The primitive owns the `[–]`/`[-]`
+  stderr mark (greyed when colour is on), the `No <subject> found.`
+  (`for <scope>`) register, and suppression on a non-TTY stdout or a
+  serializing format — a call site never adds its own format guard.
 
 ### C
 

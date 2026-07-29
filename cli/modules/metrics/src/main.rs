@@ -184,7 +184,7 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
         || &response.metrics,
         || {
             if response.metrics.is_empty() {
-                output::empty(format_args!("no metrics"));
+                output::empty(format_args!("No metrics found for {name}."));
                 return;
             }
 

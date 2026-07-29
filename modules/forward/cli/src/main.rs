@@ -219,7 +219,10 @@ impl ForwardService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no forward configs"));
+                    output::empty_with_hint(
+                        format_args!("No forward configurations found."),
+                        format_args!("create one with 'yanet-cli-forward update --name <name> --rules <path>'"),
+                    );
                     return;
                 }
 

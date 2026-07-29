@@ -126,7 +126,10 @@ impl DecapService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no decap configs"));
+                    output::empty_with_hint(
+                        format_args!("No decap configurations found."),
+                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefixes <cidr>'"),
+                    );
                     return;
                 }
 

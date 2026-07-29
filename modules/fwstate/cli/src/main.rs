@@ -2,7 +2,7 @@ use core::{fmt, net::Ipv6Addr, time::Duration};
 use std::{collections::HashMap, time::UNIX_EPOCH};
 
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, IpAddress};
 use fwstatepb::{
@@ -104,7 +104,12 @@ impl FWStateService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no fwstate configs"));
+                    output::empty_with_hint(
+                        format_args!("No FWState configurations found."),
+                        format_args!(
+                            "create one with 'yanet-cli-fwstate update --name <name> --src-addr <addr> --dst-ether <mac> --dst-addr-unicast <addr> --port-unicast <port>'"
+                        ),
+                    );
                     return;
                 }
 
@@ -332,13 +337,9 @@ impl FWStateService {
 
         let limit = cmd.count;
         let mut total: u32 = 0;
-
-        if format == CommonFormat::Human {
-            println!(
-                "{:<6} {:<45} {:<45} {:<8} {:<9} {:<7}",
-                "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
-            );
-        }
+        // Deferred until the first entry actually arrives, so a zero-entry
+        // result does not print a header row over an empty table.
+        let mut header_printed = false;
 
         while let Some(resp) = response_stream
             .message()
@@ -351,7 +352,17 @@ impl FWStateService {
                 }
 
                 match format {
-                    CommonFormat::Human => print_entry(entry),
+                    CommonFormat::Human => {
+                        if !header_printed {
+                            println!(
+                                "{:<6} {:<45} {:<45} {:<8} {:<9} {:<7}",
+                                "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
+                            );
+                            header_printed = true;
+                        }
+
+                        print_entry(entry);
+                    }
                     CommonFormat::Json => {
                         let json_entry = JsonEntry::from_entry(entry);
                         println!(
@@ -380,6 +391,13 @@ impl FWStateService {
             tx.send(next_req)
                 .await
                 .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
+        }
+
+        if total == 0 {
+            output::empty(format_args!(
+                "No firewall state entries found for '{}'.",
+                cmd.config_name
+            ));
         }
 
         Ok(())
@@ -423,7 +441,12 @@ impl FWStateService {
             || &metrics,
             || {
                 if metrics.is_empty() {
-                    output::empty(format_args!("no metrics"));
+                    match cmd.name.as_ref().and_then(ValueEnum::to_possible_value) {
+                        Some(name) => {
+                            output::empty(format_args!("No FWState metrics found for '{}'.", name.get_name()))
+                        }
+                        None => output::empty(format_args!("No FWState metrics found.")),
+                    }
                     return;
                 }
 

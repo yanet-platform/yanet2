@@ -219,7 +219,10 @@ impl MirrorService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no mirror configs"));
+                    output::empty_with_hint(
+                        format_args!("No mirror configurations found."),
+                        format_args!("create one with 'yanet-cli-mirror update --name <name> --rules <path>'"),
+                    );
                     return;
                 }
 

@@ -99,7 +99,7 @@ impl GatewayService {
                 let rows: Vec<ServiceRow> = response.services.iter().map(ServiceRow::from).collect();
 
                 if rows.is_empty() {
-                    output::empty(format_args!("no services registered"));
+                    output::empty(format_args!("No services registered."));
                     return;
                 }
 

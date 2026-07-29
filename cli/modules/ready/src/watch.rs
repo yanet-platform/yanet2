@@ -99,7 +99,7 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
         || &snapshot_payload,
         || {
             if reports.is_empty() {
-                output::empty(format_args!("no readiness services registered"));
+                output::empty(format_args!("No readiness services registered."));
             } else {
                 for (idx, report) in reports.iter().enumerate() {
                     if idx > 0 {

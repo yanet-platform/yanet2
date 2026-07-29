@@ -232,7 +232,10 @@ impl RouteService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("No FIB configs found."));
+                    output::empty_with_hint(
+                        format_args!("No FIB configurations found."),
+                        format_args!("create one with 'yanet-cli-route fib update --name <name> --rules <path>'"),
+                    );
                     return;
                 }
 
@@ -258,7 +261,7 @@ impl RouteService {
             || records.iter().map(fib::json::FibRecordJson::from).collect::<Vec<_>>(),
             || {
                 if records.is_empty() {
-                    output::empty(format_args!("No FIB entries found for {}.", cmd.config_name));
+                    output::empty(format_args!("No FIB entries found for '{}'.", cmd.config_name));
                     return;
                 }
 

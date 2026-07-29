@@ -226,7 +226,10 @@ impl RouteMplsService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no route-mpls configs"));
+                    output::empty_with_hint(
+                        format_args!("No route-mpls configurations found."),
+                        format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
+                    );
                     return;
                 }
 

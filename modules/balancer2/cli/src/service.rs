@@ -105,7 +105,12 @@ impl Balancer2Service {
             || &response.names,
             || {
                 if response.names.is_empty() {
-                    output::empty(format_args!("no balancer configs"));
+                    output::empty_with_hint(
+                        format_args!("No balancer configurations found."),
+                        format_args!(
+                            "create one with 'yanet-cli-balancer2 update --name <name> --config <path> --sessions <sessions-name>'"
+                        ),
+                    );
                     return;
                 }
 
@@ -168,6 +173,7 @@ impl Balancer2Service {
                 None
             };
 
+        let name = cmd.name.clone();
         let filter = cmd.filter.to_proto();
         let request = GetStateRequest {
             config_name: cmd.name,
@@ -189,7 +195,7 @@ impl Balancer2Service {
             || &response.states,
             || {
                 if response.states.is_empty() {
-                    output::empty(format_args!("no balancer state found"));
+                    output::empty(format_args!("No balancer state found for '{name}'."));
                     return;
                 }
 
@@ -217,7 +223,12 @@ impl Balancer2Service {
             || &response.names,
             || {
                 if response.names.is_empty() {
-                    output::empty(format_args!("no sessions states"));
+                    output::empty_with_hint(
+                        format_args!("No session states found."),
+                        format_args!(
+                            "create one with 'yanet-cli-balancer2 sessions update --name <name> --capacity <n>'"
+                        ),
+                    );
                     return;
                 }
 
@@ -233,6 +244,7 @@ impl Balancer2Service {
     }
 
     async fn sessions_show(&mut self, cmd: SessionsShowCmd, format: CommonFormat) -> Result<(), Error> {
+        let name = cmd.name.clone();
         let request = ListSessionsRequest {
             sessions_state_name: cmd.name,
             filter: cmd.filter.to_proto(),
@@ -247,19 +259,25 @@ impl Balancer2Service {
             .map_err(self.service.status("sessions show"))?
             .into_inner();
 
-        if format == CommonFormat::Human {
-            display::print_sessions_header();
-        }
-
         let now = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
             .expect("system clock before UNIX epoch")
             .as_secs() as i64;
         let mut printed = 0usize;
+        // Deferred until the first session actually arrives, so a zero-session
+        // result does not print a header row over an empty table.
+        let mut header_printed = false;
 
         while let Some(session) = stream.message().await.map_err(self.service.status("sessions show"))? {
             match format {
-                CommonFormat::Human => display::print_session(&session, now),
+                CommonFormat::Human => {
+                    if !header_printed {
+                        display::print_sessions_header();
+                        header_printed = true;
+                    }
+
+                    display::print_session(&session, now);
+                }
                 CommonFormat::Json => println!(
                     "{}",
                     serde_json::to_string(&session).expect("balancer session JSON serialization must not fail")
@@ -268,8 +286,8 @@ impl Balancer2Service {
             printed += 1;
         }
 
-        if printed == 0 && format == CommonFormat::Human {
-            eprintln!("no sessions");
+        if printed == 0 {
+            output::empty(format_args!("No sessions found for '{name}'."));
         }
 
         Ok(())

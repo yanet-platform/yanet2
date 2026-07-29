@@ -243,7 +243,12 @@ impl RouteService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no configurations"));
+                    output::empty_with_hint(
+                        format_args!("No route configurations found."),
+                        format_args!(
+                            "create one with 'yanet-cli-operator-route insert <prefix> --name <name> --via <addr>'"
+                        ),
+                    );
                     return;
                 }
 
@@ -275,7 +280,7 @@ impl RouteService {
             || &response.routes,
             || {
                 if response.routes.is_empty() {
-                    output::empty(format_args!("no routes in {}", cmd.name));
+                    output::empty(format_args!("No routes found for '{}'.", cmd.name));
                     return;
                 }
 
@@ -307,7 +312,7 @@ impl RouteService {
             || &response.routes,
             || {
                 if response.routes.is_empty() {
-                    output::empty(format_args!("no routes for {}", cmd.addr));
+                    output::empty(format_args!("No routes found for {}.", cmd.addr));
                     return;
                 }
 

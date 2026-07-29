@@ -156,7 +156,10 @@ impl DscpService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no dscp configs"));
+                    output::empty_with_hint(
+                        format_args!("No DSCP configurations found."),
+                        format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
+                    );
                     return;
                 }
 

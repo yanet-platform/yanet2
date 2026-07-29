@@ -5,7 +5,7 @@ use aclpb::{
     acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
 use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
@@ -329,7 +329,10 @@ impl ACLService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no configurations"));
+                    output::empty_with_hint(
+                        format_args!("No ACL configurations found."),
+                        format_args!("create one with 'yanet-cli-acl update --name <name> --rules <path>'"),
+                    );
                     return;
                 }
 
@@ -437,7 +440,10 @@ impl ACLService {
             || &metrics,
             || {
                 if metrics.is_empty() {
-                    output::empty(format_args!("no metrics"));
+                    match cmd.name.as_ref().and_then(ValueEnum::to_possible_value) {
+                        Some(name) => output::empty(format_args!("No ACL metrics found for '{}'.", name.get_name())),
+                        None => output::empty(format_args!("No ACL metrics found.")),
+                    }
                     return;
                 }
 

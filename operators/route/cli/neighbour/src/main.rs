@@ -224,11 +224,10 @@ impl NeighbourService {
             || &response.neighbours,
             || {
                 if response.neighbours.is_empty() {
-                    let empty_message = match &cmd.table {
-                        Some(table) => format!("no neighbours in {table}"),
-                        None => "no neighbours".to_owned(),
-                    };
-                    output::empty(format_args!("{empty_message}"));
+                    match &cmd.table {
+                        Some(table) => output::empty(format_args!("No neighbours found for table '{table}'.")),
+                        None => output::empty(format_args!("No neighbours found.")),
+                    }
                     return;
                 }
 
@@ -321,7 +320,12 @@ impl NeighbourService {
             || &response.tables,
             || {
                 if response.tables.is_empty() {
-                    output::empty(format_args!("no neighbour tables"));
+                    output::empty_with_hint(
+                        format_args!("No neighbour tables found."),
+                        format_args!(
+                            "create one with 'yanet-cli-operator-neighbour table create <name> --default-priority <n>'"
+                        ),
+                    );
                     return;
                 }
 

@@ -89,7 +89,7 @@ impl DeviceService {
 
 fn render(response: &ListDevicesResponse) {
     if response.ids.is_empty() {
-        println!("{}", "No devices configured".yellow());
+        output::empty(format_args!("No devices found."));
         return;
     }
 

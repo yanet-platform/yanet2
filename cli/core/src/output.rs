@@ -56,6 +56,18 @@ pub trait Output: Send + Sync {
     /// borrow rather than own — `|| &response.services` and a struct of
     /// borrowed slices are both valid shapes.
     fn data<'a>(&self, payload: &dyn Fn() -> Box<dyn ErasedSerialize + 'a>, render: Box<dyn FnOnce() + 'a>);
+
+    /// Returns `true` if this backend serializes rather than renders.
+    ///
+    /// [`empty`] and [`empty_with_hint`] consult this on the installed
+    /// backend to skip their report on a serializing backend, so a caller
+    /// outside a `data` render closure — a hand-rolled streaming command —
+    /// gets the same suppression a render-closure caller already gets for
+    /// free from [`JsonOutput::data`] never running `render`. Defaults to
+    /// `false`; [`JsonOutput`] overrides it.
+    fn serializes(&self) -> bool {
+        false
+    }
 }
 
 /// Human-readable output backend.
@@ -178,6 +190,10 @@ impl Output for JsonOutput {
 
         println!("{json}");
     }
+
+    fn serializes(&self) -> bool {
+        true
+    }
 }
 
 /// Common format set (`Human` + `Json`) ready to embed in a `clap::Args`.
@@ -238,9 +254,12 @@ pub fn failure(err: &Error) {
 /// runs only if the backend serializes, and `render` runs only if the
 /// backend produces free-form output.
 ///
-/// Call [`empty`] from inside `render` when the result is empty. A
-/// serializing backend never calls `render`, so that check cannot affect
-/// it, and an empty collection still serializes as-is.
+/// [`empty`] and [`empty_with_hint`] report an empty result and are
+/// ordinary functions, callable from anywhere — including a hand-rolled
+/// streaming command with no `render` closure at all. They consult
+/// [`Output::serializes`] on the installed backend themselves before
+/// printing, so a serializing backend never sees their report regardless of
+/// whether the caller sits inside a `data` render closure.
 pub fn data<P, MakePayload, Render>(make_payload: MakePayload, render: Render)
 where
     MakePayload: Fn() -> P,
@@ -254,11 +273,90 @@ where
 
 /// Reports an empty result.
 ///
-/// Writes to stderr rather than stdout, so `<cmd> | wc -l` still reads
-/// zero on an empty result — the message would otherwise show up as a
-/// bogus data line on the same channel the real rows print to.
+/// Suppressed when the installed backend serializes — see
+/// [`Output::serializes`] for why that check lives here rather than at
+/// each call site. Otherwise printed only when stdout is a terminal: a
+/// redirected or piped stdout signals a script rather than a human reading
+/// along, and a script gets nothing on either channel, matching the
+/// precedent set by `gh`.
+///
+/// Writes to stderr rather than stdout, matching the
+/// [`success`](Output::success)/[`failure`](Output::failure) implementations
+/// on [`HumanOutput`] — the only backend `empty` ever prints under: stdout
+/// stays reserved for the run's actual rows, so `cmd 2>/dev/null` silences
+/// this note along with every other status line instead of leaving a
+/// non-data line on stdout.
+///
+/// The whole line — mark and message alike — is greyed via [`dim`], unlike
+/// [`HumanOutput`]'s [`success`](Output::success)/[`failure`](Output::failure),
+/// which colour only the mark or the `hint:` label: here the whole line is
+/// a note about the absence of payload, not the payload itself.
 pub fn empty(message: Arguments) {
-    eprintln!("{message}");
+    if suppress_empty(current().serializes(), stdout_is_terminal()) {
+        return;
+    }
+
+    print_empty_line(&format!("{} {message}", empty_mark()));
+}
+
+/// Reports an empty result together with the command that would create one.
+///
+/// See [`empty`] for the suppression rules and colour rules. The hint line
+/// is indented four spaces and prefixed `hint:`, matching [`HumanOutput`]'s
+/// [`failure`](Output::failure) detail-line indent (`    endpoint:` /
+/// `    service:` / `    hint:`), but stays grey with the rest of the report
+/// rather than picking up its yellow `hint:` label.
+pub fn empty_with_hint(message: Arguments, hint: Arguments) {
+    if suppress_empty(current().serializes(), stdout_is_terminal()) {
+        return;
+    }
+
+    print_empty_line(&format!("{} {message}", empty_mark()));
+    print_empty_line(&format!("    hint: {hint}"));
+}
+
+/// Returns `true` if an empty-result report should be suppressed.
+///
+/// `serializes` is the installed backend's [`Output::serializes`] and
+/// `stdout_is_terminal` is the caller's [`stdout_is_terminal`] reading. Both
+/// are backed by a `OnceLock` — the installed `OUTPUT` and the memoized TTY
+/// check — so each is fixed for the life of a `cargo test` binary and can't
+/// be flipped per test case. Taking them as plain `bool`s instead lifts the
+/// suppression rule out as a pure predicate, letting every combination below
+/// be exercised directly with no real terminal or installed backend needed.
+fn suppress_empty(serializes: bool, stdout_is_terminal: bool) -> bool {
+    serializes || !stdout_is_terminal
+}
+
+/// Returns the mark prefixing an empty-result line.
+///
+/// The Unicode en dash when colour is enabled, an ASCII hyphen otherwise —
+/// a third mark joining the `[✓]`/`[OK]` and `[✗]`/`[ERR]` fallback pairs
+/// [`HumanOutput`]'s [`success`](Output::success)/[`failure`](Output::failure)
+/// already use.
+fn empty_mark() -> &'static str {
+    if is_colored() {
+        "[–]"
+    } else {
+        "[-]"
+    }
+}
+
+/// Writes one line of an empty-result report to stderr, greyed via
+/// [`dim`] when colour is enabled.
+fn print_empty_line(text: &str) {
+    eprintln!("{}", dim(text));
+}
+
+/// Returns `true` if stdout is a terminal, memoized on first call.
+///
+/// This is the print gate for [`empty`] and [`empty_with_hint`], and is
+/// deliberately independent of [`is_colored`], which reads *stderr* and
+/// also folds in `NO_COLOR` — reusing it here would make `NO_COLOR=1`
+/// suppress the message outright instead of just its colour.
+fn stdout_is_terminal() -> bool {
+    static STDOUT_TTY: OnceLock<bool> = OnceLock::new();
+    *STDOUT_TTY.get_or_init(|| std::io::stdout().is_terminal())
 }
 
 /// Returns `true` if ANSI color and Unicode prefixes should be emitted.
@@ -325,4 +423,78 @@ struct ErrorDetailJson<'a> {
     endpoint: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     service: Option<&'a str>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Set on the re-invoked child process to select the direct-call branch
+    /// below, instead of re-spawning itself again.
+    const REEXEC_ENV: &str = "YANET_CLI_OUTPUT_EMPTY_REEXEC";
+
+    /// `empty`/`empty_with_hint` write nothing to either channel when
+    /// stdout is not a terminal.
+    ///
+    /// `cargo test` intercepts `print!`/`eprint!` above the OS file
+    /// descriptor, so a plain in-process call proves nothing about the
+    /// real bytes. This re-invokes the test binary as a child process: with
+    /// `--nocapture` the child's real stdout/stderr reach the pipes
+    /// `Command::output` captures, and those pipes make stdout a non-TTY by
+    /// construction, exercising exactly the gate under test. The child's
+    /// stdout still carries the test harness's own "running 1 test" /
+    /// "test result: …" banner, unrelated to the function under test, so
+    /// stderr — which the harness never writes to on a passing run — is
+    /// the channel that proves the gate; stdout is checked only for the
+    /// absence of the message text itself.
+    ///
+    /// The `--exact` filter is a literal copy of this test's own path, so a
+    /// rename of the function or of `mod test` would make it match nothing
+    /// and the child would exit successfully having run zero tests — every
+    /// assertion below stays green regardless of the gate. The "running 1
+    /// test" check is the positive control that catches that: it fails
+    /// unless the filter actually selected this one test.
+    #[test]
+    fn empty_writes_nothing_when_stdout_is_not_a_tty() {
+        const MESSAGE: &str = "no widgets found";
+        const HINT: &str = "create one with 'widget create'";
+
+        if std::env::var_os(REEXEC_ENV).is_some() {
+            init(0, CommonFormat::Human);
+            empty(format_args!("{MESSAGE}"));
+            empty_with_hint(format_args!("{MESSAGE}"), format_args!("{HINT}"));
+            return;
+        }
+
+        let exe = std::env::current_exe().expect("test binary path");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "output::test::empty_writes_nothing_when_stdout_is_not_a_tty",
+                "--nocapture",
+            ])
+            .env(REEXEC_ENV, "1")
+            .output()
+            .expect("failed to re-invoke the test binary");
+
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+
+        let stdout = String::from_utf8(output.stdout).expect("child stdout must be UTF-8");
+        assert!(stdout.contains("running 1 test"));
+        assert!(!stdout.contains(MESSAGE));
+        assert!(!stdout.contains(HINT));
+    }
+
+    #[test]
+    fn suppress_empty_is_true_for_a_serializing_backend_even_on_a_terminal() {
+        assert!(suppress_empty(true, true));
+    }
+
+    #[test]
+    fn suppress_empty_is_false_only_for_a_non_serializing_backend_on_a_terminal() {
+        assert!(!suppress_empty(false, true));
+        assert!(suppress_empty(false, false));
+        assert!(suppress_empty(true, false));
+    }
 }

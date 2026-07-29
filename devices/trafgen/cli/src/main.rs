@@ -160,7 +160,10 @@ impl TrafgenService {
             || &response.configs,
             || {
                 if response.configs.is_empty() {
-                    output::empty(format_args!("no configurations"));
+                    output::empty_with_hint(
+                        format_args!("No trafgen configurations found."),
+                        format_args!("create one with 'yanet-cli-device-trafgen update --name <name>'"),
+                    );
                     return;
                 }
 

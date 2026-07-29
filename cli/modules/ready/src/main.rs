@@ -223,7 +223,7 @@ async fn run_once(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool
         || &response.scopes,
         || {
             if response.scopes.is_empty() && missing.is_empty() {
-                output::empty(format_args!("no scopes"));
+                output::empty(format_args!("No scopes found for {name}."));
                 return;
             }
 
@@ -263,7 +263,7 @@ async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
                 || &resp.scopes,
                 || {
                     if resp.scopes.is_empty() {
-                        output::empty(format_args!("no scopes"));
+                        output::empty(format_args!("No scopes found for {name}."));
                         return;
                     }
 
@@ -328,7 +328,7 @@ async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
         || &reports,
         || {
             if reports.is_empty() {
-                output::empty(format_args!("no readiness services registered"));
+                output::empty(format_args!("No readiness services registered."));
                 return;
             }
 
