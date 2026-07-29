@@ -64,8 +64,19 @@ func NewHistogram(bounds []float64) *Histogram {
 }
 
 // Observe records a new value.
+//
+// NaN is treated as invalid input and dropped. No bucket accepts NaN, so an
+// unguarded search would return len(m.buckets) and the following index
+// expression would panic. NaN is deliberately not folded into the +Inf
+// catch-all bucket either, because that bucket feeds percentile estimation,
+// and a NaN counted there would inflate the reported p99.
+//
 // Complexity: O(log N) for search + O(1) for atomic write.
 func (m *Histogram) Observe(value float64) {
+	if math.IsNaN(value) {
+		return
+	}
+
 	idx := sort.Search(len(m.buckets), func(idx int) bool {
 		return m.buckets[idx].Accepts(value)
 	})

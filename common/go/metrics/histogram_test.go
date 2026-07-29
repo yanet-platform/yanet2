@@ -129,6 +129,29 @@ func TestHistogramObserveEmptyBounds(t *testing.T) {
 	}
 }
 
+// TestHistogramObserveNaN verifies that a NaN observation is dropped
+// without panicking.
+//
+// The +Inf and -Inf assertions are a regression fence against a future
+// over-broad guard that rejects the infinities along with NaN.
+func TestHistogramObserveNaN(t *testing.T) {
+	h := metrics.NewHistogram([]float64{1, 5, 10})
+
+	before := h.Snapshot()
+	require.NotPanics(t, func() { h.Observe(math.NaN()) }, "observing NaN should not panic")
+	after := h.Snapshot()
+	assert.Equal(t, before, after, "NaN observation should not change any bucket count")
+
+	h.Observe(math.Inf(1))
+	snapshot := h.Snapshot()
+	assert.Equal(t, after[len(after)-1].Count+1, snapshot[len(snapshot)-1].Count, "+Inf should be recorded in the last bucket")
+
+	beforeNegativeInf := h.Snapshot()
+	h.Observe(math.Inf(-1))
+	snapshot = h.Snapshot()
+	assert.Equal(t, beforeNegativeInf[0].Count+1, snapshot[0].Count, "-Inf should be recorded in the first bucket")
+}
+
 func TestHistogramConcurrent(t *testing.T) {
 	h := metrics.NewHistogram([]float64{10, 50, 100})
 	var wg sync.WaitGroup
