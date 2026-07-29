@@ -1,5 +1,6 @@
 #include "zone.h"
 
+#include <errno.h>
 #include <unistd.h>
 
 #include "controlplane/config/econtext.h"
@@ -661,6 +662,60 @@ cp_config_update_devices(
 			);
 			goto error_free;
 		}
+	}
+
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		goto error_free;
+	}
+	cp_config_unlock(cp_config);
+
+	return 0;
+
+error_free:
+	cp_config_gen_free(cp_config, new_config_gen);
+error_unlock:
+	cp_config_unlock(cp_config);
+	return -1;
+}
+
+int
+cp_config_delete_device(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name,
+	yanet_error **err
+) {
+	// Reject deletion of predefined topology devices.
+	for (uint64_t idx = 0; idx < dp_config->dp_topology.device_count;
+	     ++idx) {
+		struct dp_port *port =
+			&ADDR_OF(&dp_config->dp_topology.devices)[idx];
+		if (strncmp(port->device_name, name, CP_DEVICE_NAME_LEN) == 0) {
+			errno = EBUSY;
+			yanet_error_add(
+				err,
+				"device '%s' is a predefined topology device "
+				"and cannot be deleted",
+				name
+			);
+			return -1;
+		}
+	}
+
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *old_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct cp_config_gen *new_config_gen =
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
+	if (new_config_gen == NULL) {
+		goto error_unlock;
+	}
+
+	if (cp_device_registry_delete(&new_config_gen->device_registry, name)) {
+		yanet_error_add(err, "device '%s' not found", name);
+		goto error_free;
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {

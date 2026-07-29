@@ -196,6 +196,18 @@ cp_config_update_devices(
 	yanet_error **err
 );
 
+// Delete device with specified name.
+//
+// Returns -1 if the device does not exist or is a predefined topology
+// device (created automatically for each dataplane port), 0 on success.
+int
+cp_config_delete_device(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name,
+	yanet_error **err
+);
+
 int
 cp_config_update_objects(
 	struct dp_config *dp_config,

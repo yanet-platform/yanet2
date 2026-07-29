@@ -680,6 +680,25 @@ agent_update_devices(
 }
 
 int
+agent_delete_device(
+	struct agent *agent, const char *device_name, yanet_error **err
+) {
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	int ret =
+		cp_config_delete_device(dp_config, cp_config, device_name, err);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	agent_free_unused_agents(agent);
+
+	return 0;
+}
+
+int
 agent_update_objects(
 	struct agent *agent,
 	uint64_t object_count,

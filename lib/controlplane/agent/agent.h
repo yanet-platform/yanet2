@@ -164,6 +164,15 @@ agent_update_devices(
 	yanet_error **err
 );
 
+// Delete device with specified name.
+//
+// @return -1 if device does not exist or is a predefined topology
+// device, 0 on success.
+int
+agent_delete_device(
+	struct agent *agent, const char *device_name, yanet_error **err
+);
+
 int
 agent_update_objects(
 	struct agent *agent,
