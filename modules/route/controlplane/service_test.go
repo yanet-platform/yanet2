@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
@@ -383,4 +385,26 @@ func TestConfigGaugesFollowConfigLifetime(t *testing.T) {
 	require.NoError(t, err)
 
 	requireConfigGauges(t, service, 2, 3, 1)
+}
+
+// TestShowFIBUnknownConfig verifies that ShowFIB reports NotFound for a
+// config name that was never applied, distinguishing it from a registered
+// config that genuinely holds no FIB entries.
+func TestShowFIBUnknownConfig(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	_, err := service.ShowFIB(t.Context(), &routepb.ShowFIBRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestShowFIBEmptyConfig verifies that a registered config with no FIB
+// entries still returns a normal empty success.
+func TestShowFIBEmptyConfig(t *testing.T) {
+	backend := newFakeBackend()
+	service := newServiceWithConfig(t, backend)
+
+	response, err := service.ShowFIB(t.Context(), &routepb.ShowFIBRequest{Name: "cfg"})
+	require.NoError(t, err)
+	require.Empty(t, response.GetEntries())
 }

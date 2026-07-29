@@ -100,7 +100,7 @@ func (m *RouteService) ShowRoutes(
 
 	holder, ok := m.getRib(name)
 	if !ok {
-		return &operatorpb.ShowRoutesResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	ribDump := holder.DumpRoutes()
 
@@ -145,7 +145,7 @@ func (m *RouteService) LookupRoute(
 
 	holder, ok := m.getRib(name)
 	if !ok {
-		return &operatorpb.LookupRouteResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	prefix, routes, ok := holder.LongestMatch(addr)

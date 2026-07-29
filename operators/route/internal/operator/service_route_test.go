@@ -83,6 +83,64 @@ func TestShowRoutes_BirdDifferentPref_OnlyBetterIsBest(t *testing.T) {
 	require.True(t, bestByNexthop["10.0.0.2"], "static route must be best within its source")
 }
 
+// TestShowRoutes_UnknownConfig_NotFound verifies that ShowRoutes reports
+// NotFound for a config name that was never registered, distinguishing it
+// from a registered config that genuinely holds no routes.
+func TestShowRoutes_UnknownConfig_NotFound(t *testing.T) {
+	svc := NewRouteService(neigh.NewNeighTable())
+
+	_, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestShowRoutes_EmptyConfig_Success verifies that a registered config with
+// no routes still returns a normal empty success.
+func TestShowRoutes_EmptyConfig_Success(t *testing.T) {
+	svc := NewRouteService(neigh.NewNeighTable())
+	svc.getOrCreateRib("route0")
+
+	resp, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+	require.NoError(t, err)
+	require.Empty(t, resp.GetRoutes())
+}
+
+// TestLookupRoute_ThreeWay verifies that LookupRoute distinguishes an
+// unknown config (NotFound) from a registered config with no matching route
+// (empty success) and from a registered config with a match (the route).
+func TestLookupRoute_ThreeWay(t *testing.T) {
+	svc := NewRouteService(neigh.NewNeighTable())
+
+	addr := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1"))
+
+	t.Run("unknown config", func(t *testing.T) {
+		_, err := svc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: "missing", IpAddr: addr})
+		require.Equal(t, codes.NotFound, status.Code(err))
+	})
+
+	t.Run("no matching route", func(t *testing.T) {
+		svc.getOrCreateRib("route0")
+
+		resp, err := svc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: "route0", IpAddr: addr})
+		require.NoError(t, err)
+		require.Empty(t, resp.GetRoutes())
+	})
+
+	t.Run("matching route", func(t *testing.T) {
+		_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
+			Name:         "route0",
+			Prefix:       "10.0.0.0/24",
+			NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1"))},
+			SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
+		})
+		require.NoError(t, err)
+
+		resp, err := svc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: "route0", IpAddr: addr})
+		require.NoError(t, err)
+		require.Equal(t, "10.0.0.0/24", resp.GetPrefix())
+		require.Len(t, resp.GetRoutes(), 1)
+	})
+}
+
 func TestInsertRoute_NonStaticMultipleNexthops_InvalidArgument(t *testing.T) {
 	svc := NewRouteService(neigh.NewNeighTable())
 

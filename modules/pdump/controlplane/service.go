@@ -102,23 +102,23 @@ func (m *PdumpService) ShowConfig(
 		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
 
-	response := &pdumppb.ShowConfigResponse{}
-
 	// Lock configs store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if config, ok := m.configs[name]; ok {
-		response.Config = &pdumppb.Config{
+	config, ok := m.configs[name]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	}
+
+	return &pdumppb.ShowConfigResponse{
+		Config: &pdumppb.Config{
 			Filter:   config.Filter,
 			Mode:     config.DumpMode,
 			Snaplen:  config.Snaplen,
 			RingSize: config.Ring.PerWorkerSize,
-		}
-
-	}
-
-	return response, nil
+		},
+	}, nil
 }
 
 // SetConfig updates or creates packet capture configuration.

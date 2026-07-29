@@ -172,7 +172,7 @@ func (m *RouteService) ShowFIB(
 
 	entry, ok := m.configs[name]
 	if !ok {
-		return &routepb.ShowFIBResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	entries, err := entry.Handle.DumpFIB()
