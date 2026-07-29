@@ -18,6 +18,7 @@ use erased_serde::Serialize as ErasedSerialize;
 use serde::Serialize;
 
 use crate::{
+    display,
     errors::{Error, ErrorKind},
     logging,
 };
@@ -296,7 +297,7 @@ pub fn empty(message: Arguments) {
         return;
     }
 
-    print_empty_line(&format!("{} {message}", empty_mark()));
+    print_empty_line(mark_prefix(), &message.to_string());
 }
 
 /// Reports an empty result together with the command that would create one.
@@ -311,8 +312,26 @@ pub fn empty_with_hint(message: Arguments, hint: Arguments) {
         return;
     }
 
-    print_empty_line(&format!("{} {message}", empty_mark()));
-    print_empty_line(&format!("    hint: {hint}"));
+    print_empty_line(mark_prefix(), &message.to_string());
+    print_empty_line(HINT_PREFIX, &hint.to_string());
+}
+
+/// Prefix of the hint line: the four-space detail indent and the `hint:`
+/// label.
+const HINT_PREFIX: &str = "    hint: ";
+
+/// Returns the mark prefixing an empty-result line.
+///
+/// The Unicode en dash when colour is enabled, an ASCII hyphen otherwise —
+/// a third mark joining the `[✓]`/`[OK]` and `[✗]`/`[ERR]` fallback pairs
+/// [`HumanOutput`]'s [`success`](Output::success)/[`failure`](Output::failure)
+/// already use.
+fn mark_prefix() -> &'static str {
+    if is_colored() {
+        "[–] "
+    } else {
+        "[-] "
+    }
 }
 
 /// Returns `true` if an empty-result report should be suppressed.
@@ -328,24 +347,38 @@ fn suppress_empty(serializes: bool, stdout_is_terminal: bool) -> bool {
     serializes || !stdout_is_terminal
 }
 
-/// Returns the mark prefixing an empty-result line.
+/// Writes one line of an empty-result report to stderr, wrapped to the
+/// current stderr width with a hanging indent, and greyed via [`dim`] when
+/// colour is enabled.
 ///
-/// The Unicode en dash when colour is enabled, an ASCII hyphen otherwise —
-/// a third mark joining the `[✓]`/`[OK]` and `[✗]`/`[ERR]` fallback pairs
-/// [`HumanOutput`]'s [`success`](Output::success)/[`failure`](Output::failure)
-/// already use.
-fn empty_mark() -> &'static str {
-    if is_colored() {
-        "[–]"
-    } else {
-        "[-]"
-    }
-}
+/// `prefix` is the literal lead-in before `text` — [`mark_prefix`] for the
+/// mark line, [`HINT_PREFIX`] for the hint line — and its character count
+/// becomes the indent for any wrapped continuation line, so a continuation
+/// lines up under the first line's own text rather than under the prefix.
+///
+/// `text` is wrapped in its plain, undimmed form and each resulting line is
+/// dimmed afterwards: [`dim`] inserts ANSI escape bytes that must never be
+/// counted as display columns.
+///
+/// When the stderr width is unknown, or too narrow to leave room for the
+/// indent, `text` is printed on one unwrapped line, exactly as before this
+/// function wrapped at all.
+fn print_empty_line(prefix: &str, text: &str) {
+    let indent = prefix.chars().count();
 
-/// Writes one line of an empty-result report to stderr, greyed via
-/// [`dim`] when colour is enabled.
-fn print_empty_line(text: &str) {
-    eprintln!("{}", dim(text));
+    let mut lines = match display::stderr_width() {
+        Some(width) if width > indent => display::wrap_words(text, width - indent),
+        _ => vec![text.to_string()],
+    }
+    .into_iter();
+
+    let first = lines.next().expect("wrap_words returns at least one line");
+    eprintln!("{}", dim(&format!("{prefix}{first}")));
+
+    let indent = " ".repeat(indent);
+    for line in lines {
+        eprintln!("{}", dim(&format!("{indent}{line}")));
+    }
 }
 
 /// Returns `true` if stdout is a terminal, memoized on first call.

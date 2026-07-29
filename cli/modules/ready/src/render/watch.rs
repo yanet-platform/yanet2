@@ -11,10 +11,7 @@ use colored::Colorize;
 use readinesspb::pb::{Scope, State};
 use ync::{display, output};
 
-use super::{
-    StateStyle, Symbols, dim,
-    layout::{normalize_whitespace, wrap_words},
-};
+use super::{StateStyle, Symbols, dim, layout::normalize_whitespace};
 
 /// Gap between the transition line's prefix and the reason text that follows
 /// it on the same line.
@@ -220,7 +217,7 @@ pub fn print_transition_line(service: ServiceColumn, scope: &Scope, name_width: 
         let reason_text = super::format_reason(reason);
 
         let lines = match wrap_width {
-            Some(width) if width > indent => wrap_words(&reason_text, width - indent),
+            Some(width) if width > indent => display::wrap_words(&reason_text, width - indent),
             _ => vec![normalize_whitespace(&reason_text)],
         };
 
@@ -263,7 +260,7 @@ pub fn print_lifecycle_line(alias: &str, alias_width: usize, message: &str) {
     print!("{}", dim(&prefix, colored));
 
     let lines = match wrap_width {
-        Some(width) if width > indent => wrap_words(message, width - indent),
+        Some(width) if width > indent => display::wrap_words(message, width - indent),
         _ => vec![normalize_whitespace(message)],
     };
 
@@ -382,7 +379,7 @@ pub fn print_membership_line(alias: &str, alias_width: usize, membership: Member
     print!("{}  {} {name} ", dim(&timestamp, colored), style.styled_mark());
 
     let lines = match wrap_width {
-        Some(width) if width > indent => wrap_words(message, width - indent),
+        Some(width) if width > indent => display::wrap_words(message, width - indent),
         _ => vec![normalize_whitespace(message)],
     };
 

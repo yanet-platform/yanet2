@@ -16,10 +16,7 @@ use colored::Colorize;
 use readinesspb::pb::{Reason, Scope, State};
 use ync::{display, humanfmt, output};
 
-use self::{
-    age::is_stale,
-    layout::{normalize_whitespace, wrap_words},
-};
+use self::{age::is_stale, layout::normalize_whitespace};
 pub use self::{
     layout::name_width,
     watch::{
@@ -310,7 +307,7 @@ fn print_reason_lines(reasons: &[Reason], colored: bool, wrap_width: Option<usiz
         let text = format_reason(reason);
 
         let lines = match wrap_width {
-            Some(width) if width > reason_indent => wrap_words(&text, width - reason_indent),
+            Some(width) if width > reason_indent => display::wrap_words(&text, width - reason_indent),
             _ => vec![normalize_whitespace(&text)],
         };
 

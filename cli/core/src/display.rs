@@ -43,9 +43,61 @@ pub fn fit_terminal_width(table: &mut Table) {
 /// Returns the current terminal width in columns, detected from stdout.
 ///
 /// Returns `None` when stdout is not a TTY (piped or redirected), matching
-/// the same detection [`fit_terminal_width`] uses.
+/// the same detection [`fit_terminal_width`] uses. See [`stderr_width`] for
+/// the stderr counterpart.
 pub fn terminal_width() -> Option<usize> {
     terminal_size_of(std::io::stdout()).map(|(terminal_size::Width(cols), _)| cols as usize)
+}
+
+/// Returns the current terminal width in columns, detected from stderr.
+///
+/// Counterpart to [`terminal_width`], which reads stdout.
+/// [`crate::output::empty`] and [`crate::output::empty_with_hint`] write their
+/// report to stderr, so their wrapping must be measured against that channel
+/// instead.
+///
+/// Stdout redirected is not a reachable case here: both callers already
+/// return early whenever stdout itself is not a terminal. The case this
+/// function exists for is the opposite one — stderr redirected to a file
+/// while stdout stays a terminal. Measuring stdout there would wrap the
+/// file stderr is writing to against an unrelated terminal's width;
+/// [`crate::output::is_colored`], which already reads stderr for the same
+/// reason, is the existing precedent for measuring this channel instead.
+pub fn stderr_width() -> Option<usize> {
+    terminal_size_of(std::io::stderr()).map(|(terminal_size::Width(cols), _)| cols as usize)
+}
+
+/// Greedily wraps `text` into lines of at most `width` columns, breaking
+/// only at whitespace.
+///
+/// A word longer than `width` is kept whole on its own (overflowing) line
+/// rather than split. Returns `text` unchanged as a single line when
+/// `width` is `0`.
+pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if current.chars().count() + 1 + word.chars().count() <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+
+    lines
 }
 
 /// Apply the standard YANET table style to `table`.
@@ -95,7 +147,7 @@ pub fn bar_len(count: u64, max_count: u64) -> usize {
 
 #[cfg(test)]
 mod test {
-    use super::bar_len;
+    use super::{bar_len, wrap_words};
 
     #[test]
     fn bar_len_scaling() {
@@ -108,5 +160,36 @@ mod test {
     fn bar_len_edge_cases() {
         assert_eq!(1, bar_len(1, 1000));
         assert_eq!(0, bar_len(5, 0));
+    }
+
+    #[test]
+    fn wrap_words_fits_within_width() {
+        assert_eq!(vec!["aa bb".to_string(), "cc".to_string()], wrap_words("aa bb cc", 5));
+    }
+
+    #[test]
+    fn wrap_words_keeps_long_word_whole() {
+        assert_eq!(
+            vec!["superlongword".to_string(), "short".to_string()],
+            wrap_words("superlongword short", 5)
+        );
+    }
+
+    #[test]
+    fn wrap_words_zero_width_returns_single_line() {
+        assert_eq!(vec!["one long line".to_string()], wrap_words("one long line", 0));
+    }
+
+    #[test]
+    fn wrap_words_counts_columns_not_bytes() {
+        // Each em dash is 3 UTF-8 bytes but a single display column, so a
+        // width of 5 must fit both of them plus their surrounding letters
+        // on one line — byte-counting would wrap one column early.
+        assert_eq!(vec!["a — b".to_string()], wrap_words("a — b", 5));
+    }
+
+    #[test]
+    fn wrap_words_empty_text_returns_one_empty_line() {
+        assert_eq!(vec![String::new()], wrap_words("", 10));
     }
 }

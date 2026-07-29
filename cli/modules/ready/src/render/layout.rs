@@ -1,4 +1,6 @@
-//! Text-layout helpers: the scope-name column width and word wrapping.
+//! Text-layout helpers: the scope-name column width and whitespace
+//! normalization. Word wrapping itself lives in `ync::display::wrap_words`,
+//! shared with the core CLI's own output helpers.
 
 const MIN_NAME_WIDTH: usize = 12;
 const MAX_NAME_WIDTH: usize = 40;
@@ -15,39 +17,6 @@ pub fn name_width<'a>(names: impl IntoIterator<Item = &'a str>) -> usize {
         .max()
         .unwrap_or(MIN_NAME_WIDTH)
         .clamp(MIN_NAME_WIDTH, MAX_NAME_WIDTH)
-}
-
-/// Greedily wraps `text` into lines of at most `width` columns, breaking
-/// only at whitespace.
-///
-/// A word longer than `width` is kept whole on its own (overflowing) line
-/// rather than split. Returns `text` unchanged as a single line when
-/// `width` is `0`.
-pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![text.to_string()];
-    }
-
-    let mut lines = Vec::new();
-    let mut current = String::new();
-
-    for word in text.split_whitespace() {
-        if current.is_empty() {
-            current.push_str(word);
-        } else if current.chars().count() + 1 + word.chars().count() <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            lines.push(std::mem::take(&mut current));
-            current.push_str(word);
-        }
-    }
-
-    if !current.is_empty() || lines.is_empty() {
-        lines.push(current);
-    }
-
-    lines
 }
 
 /// Collapses every run of whitespace in `text` — including embedded
@@ -83,37 +52,6 @@ mod test {
     #[test]
     fn name_width_empty_defaults_to_minimum() {
         assert_eq!(MIN_NAME_WIDTH, name_width(std::iter::empty()));
-    }
-
-    #[test]
-    fn wrap_words_fits_within_width() {
-        assert_eq!(vec!["aa bb".to_string(), "cc".to_string()], wrap_words("aa bb cc", 5));
-    }
-
-    #[test]
-    fn wrap_words_keeps_long_word_whole() {
-        assert_eq!(
-            vec!["superlongword".to_string(), "short".to_string()],
-            wrap_words("superlongword short", 5)
-        );
-    }
-
-    #[test]
-    fn wrap_words_zero_width_returns_single_line() {
-        assert_eq!(vec!["one long line".to_string()], wrap_words("one long line", 0));
-    }
-
-    #[test]
-    fn wrap_words_counts_columns_not_bytes() {
-        // Each em dash is 3 UTF-8 bytes but a single display column, so a
-        // width of 5 must fit both of them plus their surrounding letters
-        // on one line — byte-counting would wrap one column early.
-        assert_eq!(vec!["a — b".to_string()], wrap_words("a — b", 5));
-    }
-
-    #[test]
-    fn wrap_words_empty_text_returns_one_empty_line() {
-        assert_eq!(vec![String::new()], wrap_words("", 10));
     }
 
     #[test]
