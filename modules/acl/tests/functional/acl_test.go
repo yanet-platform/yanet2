@@ -65,9 +65,24 @@ func setupACLHarness(
 	devices []string,
 ) (*dataplaneut.Harness, *ffi.Agent, acl.Backend) {
 	tb.Helper()
+	return setupACLHarnessSized(tb, devices, aclCPSize, aclMemSize)
+}
+
+// setupACLHarnessSized is the parametrized form of setupACLHarness for
+// callers that need non-default CP/agent memory, e.g. a differential test
+// compiling a production-scale ruleset.
+//
+// devices is the set of logical port names to register in the harness topology.
+// Cleanup is wired via tb.Cleanup in LIFO order.
+func setupACLHarnessSized(
+	tb testing.TB,
+	devices []string,
+	cpMemory, agentMemory datasize.ByteSize,
+) (*dataplaneut.Harness, *ffi.Agent, acl.Backend) {
+	tb.Helper()
 
 	cfg := dataplaneut.Config{
-		CPMemory:      uint64(aclCPSize),
+		CPMemory:      uint64(cpMemory),
 		DPMemory:      uint64(aclDPSize),
 		WorkerCount:   1,
 		Devices:       devices,
@@ -79,11 +94,11 @@ func setupACLHarness(
 	tb.Cleanup(h.Free)
 
 	shm := h.SharedMemory()
-	agent, err := shm.AgentAttach("acl-test", 0, aclMemSize)
+	agent, err := shm.AgentAttach("acl-test", 0, agentMemory)
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := acl.NewBackend(agent, uint64(aclMemSize))
+	backend := acl.NewBackend(agent, uint64(agentMemory))
 	return h, agent, backend
 }
 

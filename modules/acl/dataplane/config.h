@@ -2,6 +2,7 @@
 
 #include "controlplane/config/cp_module.h"
 
+#include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
 #include "lib/fwstate/config.h"
 
@@ -53,4 +54,14 @@ struct acl_module_config {
 	uint64_t action_invalid_counter_id;
 	uint64_t action_non_term_counter_id;
 	uint64_t sync_sent_counter_id;
+
+	// Shared v6 half-address classification for the two v6 filters.
+	//
+	// Built only when both filter_ip6 and filter_ip6_port compiled
+	// non-empty, so a single union trie walk classifies the address
+	// halves for both of them. Left all-zero, including a NULL
+	// net6_share_src.remap_hi_a, when there is no shared classification
+	// to use.
+	struct net6_share_dir net6_share_src;
+	struct net6_share_dir net6_share_dst;
 };

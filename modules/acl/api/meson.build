@@ -2,6 +2,7 @@ cp_dependencies = [
   lib_common_dep,
   lib_errors_dep,
   lib_filter_compiler_dep,
+  lib_logging_dep,
   lib_packet_dp_dep,
   lib_config_cp_dep,
   lib_counters_dep,

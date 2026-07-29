@@ -8,6 +8,8 @@
 #include "../classifiers/net6.h"
 
 #include "declare.h"
+#include "lib/errors/errors.h"
+#include "net6_share.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -801,4 +803,265 @@ FILTER_ATTR_COMPILER_FREE_FUNC(net6_dst)(
 	void *data, struct memory_context *memory_context
 ) {
 	free_net6(data, memory_context);
+}
+
+// Shared per-direction half-classification.
+struct net6_share_remap_ctx {
+	const struct lpm *local_a;
+	const struct lpm *local_b;
+	uint32_t *remap_a;
+	uint32_t *remap_b;
+	uint32_t class_count;
+};
+
+// Records local half-classes for one walked union range.
+//
+// The union half-partition refines each local one, so the local class is
+// constant across the walked range and looking it up at the range start
+// is enough. A union class may cover several disjoint ranges, and every
+// range must resolve to the same local class — a mismatch means the
+// refinement invariant is broken and filter_net6_share_init reports it as
+// a build failure, which rejects the config apply like any other filter
+// build failure.
+static int
+net6_share_remap_collect(
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value,
+	void *data
+) {
+	(void)to;
+	struct net6_share_remap_ctx *ctx = (struct net6_share_remap_ctx *)data;
+
+	if (value >= ctx->class_count) {
+		return -1;
+	}
+
+	uint32_t class_a = lpm_lookup(ctx->local_a, key_size, from);
+	uint32_t class_b = lpm_lookup(ctx->local_b, key_size, from);
+
+	if (ctx->remap_a[value] != LPM_VALUE_INVALID &&
+	    ctx->remap_a[value] != class_a) {
+		return -1;
+	}
+	if (ctx->remap_b[value] != LPM_VALUE_INVALID &&
+	    ctx->remap_b[value] != class_b) {
+		return -1;
+	}
+
+	ctx->remap_a[value] = class_a;
+	ctx->remap_b[value] = class_b;
+
+	return 0;
+}
+
+// Builds the two remap arrays for one address half.
+//
+// Walks the union trie across the full 8-byte key space and resolves each
+// union half-class into the local half-classes of both classifiers. On
+// success the caller owns the returned arrays, on failure both are freed
+// and err distinguishes an allocation failure from a broken refinement
+// invariant (a local classifier disagreeing with the union classification
+// across a walked range).
+static int
+net6_share_build_remap(
+	struct memory_context *mctx,
+	const struct lpm *uni,
+	uint32_t class_count,
+	const struct lpm *local_a,
+	const struct lpm *local_b,
+	uint32_t **remap_a,
+	uint32_t **remap_b,
+	yanet_error **err
+) {
+	size_t size = sizeof(uint32_t) * class_count;
+
+	uint32_t *a = (uint32_t *)memory_balloc(mctx, size);
+	if (a == NULL) {
+		yanet_error_add(
+			err, "out of memory: failed to allocate remap array"
+		);
+		return -1;
+	}
+	uint32_t *b = (uint32_t *)memory_balloc(mctx, size);
+	if (b == NULL) {
+		memory_bfree(mctx, a, size);
+		yanet_error_add(
+			err, "out of memory: failed to allocate remap array"
+		);
+		return -1;
+	}
+
+	// Mark every slot as not yet written so inconsistent rewrites can
+	// be detected during the walk.
+	memset(a, 0xff, size);
+	memset(b, 0xff, size);
+
+	struct net6_share_remap_ctx ctx = {
+		.local_a = local_a,
+		.local_b = local_b,
+		.remap_a = a,
+		.remap_b = b,
+		.class_count = class_count,
+	};
+
+	uint8_t from[8];
+	uint8_t to[8];
+	memset(from, 0x00, sizeof(from));
+	memset(to, 0xff, sizeof(to));
+
+	if (lpm8_walk(uni, from, to, net6_share_remap_collect, &ctx)) {
+		memory_bfree(mctx, b, size);
+		memory_bfree(mctx, a, size);
+		yanet_error_add(
+			err,
+			"shared net6 remap violates the refinement invariant: "
+			"a local classifier disagrees with the union "
+			"classification"
+		);
+		return -1;
+	}
+
+	*remap_a = a;
+	*remap_b = b;
+
+	return 0;
+}
+
+int
+filter_net6_share_init(
+	struct memory_context *mctx,
+	const struct filter_rule **rules,
+	uint32_t rule_count,
+	int is_src,
+	const struct net6_classifier *local_a,
+	const struct net6_classifier *local_b,
+	struct net6_share_dir *out,
+	yanet_error **err
+) {
+	action_get_net6_func get_net6 =
+		is_src ? action_get_net6_src : action_get_net6_dst;
+
+	// Only the tries are kept. Collector classes are dense, so the
+	// range index maximum value plus one is the class count and the
+	// index itself can be released right away.
+	struct range_index ri;
+	if (collect_net6_range(
+		    mctx,
+		    rules,
+		    rule_count,
+		    get_net6,
+		    net6_get_hi_part,
+		    &out->hi,
+		    &ri
+	    )) {
+		yanet_error_add(
+			err,
+			"out of memory: failed to collect shared net6 hi range"
+		);
+		goto error;
+	}
+	out->hi_count = ri.max_value + 1;
+	range_index_free(&ri);
+
+	if (collect_net6_range(
+		    mctx,
+		    rules,
+		    rule_count,
+		    get_net6,
+		    net6_get_lo_part,
+		    &out->lo,
+		    &ri
+	    )) {
+		yanet_error_add(
+			err,
+			"out of memory: failed to collect shared net6 lo range"
+		);
+		goto error_hi;
+	}
+	out->lo_count = ri.max_value + 1;
+	range_index_free(&ri);
+
+	uint32_t *remap_hi_a;
+	uint32_t *remap_hi_b;
+	if (net6_share_build_remap(
+		    mctx,
+		    &out->hi,
+		    out->hi_count,
+		    &local_a->hi,
+		    &local_b->hi,
+		    &remap_hi_a,
+		    &remap_hi_b,
+		    err
+	    )) {
+		goto error_lo;
+	}
+
+	uint32_t *remap_lo_a;
+	uint32_t *remap_lo_b;
+	if (net6_share_build_remap(
+		    mctx,
+		    &out->lo,
+		    out->lo_count,
+		    &local_a->lo,
+		    &local_b->lo,
+		    &remap_lo_a,
+		    &remap_lo_b,
+		    err
+	    )) {
+		goto error_remap_hi;
+	}
+
+	SET_OFFSET_OF(&out->remap_hi_a, remap_hi_a);
+	SET_OFFSET_OF(&out->remap_hi_b, remap_hi_b);
+	SET_OFFSET_OF(&out->remap_lo_a, remap_lo_a);
+	SET_OFFSET_OF(&out->remap_lo_b, remap_lo_b);
+
+	return 0;
+
+error_remap_hi:
+	memory_bfree(mctx, remap_hi_b, sizeof(uint32_t) * out->hi_count);
+	memory_bfree(mctx, remap_hi_a, sizeof(uint32_t) * out->hi_count);
+
+error_lo:
+	lpm_free(&out->lo);
+
+error_hi:
+	lpm_free(&out->hi);
+
+error:
+	memset(out, 0, sizeof(*out));
+	return -1;
+}
+
+void
+filter_net6_share_dir_free(
+	struct memory_context *mctx, struct net6_share_dir *dir
+) {
+	uint32_t *remap;
+
+	remap = ADDR_OF(&dir->remap_hi_a);
+	if (remap != NULL) {
+		memory_bfree(mctx, remap, sizeof(uint32_t) * dir->hi_count);
+	}
+	remap = ADDR_OF(&dir->remap_hi_b);
+	if (remap != NULL) {
+		memory_bfree(mctx, remap, sizeof(uint32_t) * dir->hi_count);
+	}
+	remap = ADDR_OF(&dir->remap_lo_a);
+	if (remap != NULL) {
+		memory_bfree(mctx, remap, sizeof(uint32_t) * dir->lo_count);
+	}
+	remap = ADDR_OF(&dir->remap_lo_b);
+	if (remap != NULL) {
+		memory_bfree(mctx, remap, sizeof(uint32_t) * dir->lo_count);
+	}
+
+	// lpm_free is safe on a zeroed trie, and zeroing the structure
+	// afterwards keeps the whole free path repeatable.
+	lpm_free(&dir->hi);
+	lpm_free(&dir->lo);
+
+	memset(dir, 0, sizeof(*dir));
 }

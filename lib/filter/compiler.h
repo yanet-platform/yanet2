@@ -3,6 +3,7 @@
 #include "lib/filter/compiler/attribute.h"
 #include "lib/filter/compiler/declare.h"
 #include "lib/filter/compiler/helper.h"
+#include "lib/filter/compiler/net6_share.h"
 #include "lib/filter/filter.h"
 
 #include "common/memory.h"

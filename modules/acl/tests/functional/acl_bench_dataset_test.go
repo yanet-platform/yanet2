@@ -493,7 +493,7 @@ func hostInNet(network filter.IPNet, hostBits int) net.IP {
 // cells the way mixed real traffic does. Uniform sampling over rules is
 // a worst-case-ish cache workload; real traffic is more skewed.
 func synthesizeDatasetPackets(
-	b *testing.B, rules []cacl.AclRule, limit int,
+	tb testing.TB, rules []cacl.AclRule, limit int,
 ) []gopacket.Packet {
 	type flowSeed struct {
 		src filter.IPNet
@@ -527,7 +527,7 @@ func synthesizeDatasetPackets(
 		}
 		seeds = append(seeds, seed)
 	}
-	require.NotEmpty(b, seeds)
+	require.NotEmpty(tb, seeds)
 
 	packets := make([]gopacket.Packet, 0, limit)
 	for idx := 0; len(packets) < limit; idx++ {
@@ -566,7 +566,7 @@ func synthesizeDatasetPackets(
 				DstPort: layers.UDPPort(seed.dstPort),
 			}
 			require.NoError(
-				b, udp.SetNetworkLayerForChecksum(network),
+				tb, udp.SetNetworkLayerForChecksum(network),
 			)
 			transport = udp
 		} else {
@@ -577,7 +577,7 @@ func synthesizeDatasetPackets(
 				Window:  1024,
 			}
 			require.NoError(
-				b, tcp.SetNetworkLayerForChecksum(network),
+				tb, tcp.SetNetworkLayerForChecksum(network),
 			)
 			transport = tcp
 		}
@@ -586,7 +586,7 @@ func synthesizeDatasetPackets(
 			network.(gopacket.SerializableLayer),
 			transport,
 		)
-		require.NoError(b, err)
+		require.NoError(tb, err)
 		packets = append(packets, packet)
 	}
 	return packets

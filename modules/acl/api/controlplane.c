@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 
 #include "controlplane.h"
@@ -7,6 +8,7 @@
 #include "../dataplane/config.h"
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
+#include "logging/log.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 
@@ -60,6 +62,14 @@ FILTER_COMPILER_DECLARE(
 	port_dst
 );
 
+// Position of net6_src/net6_dst within the attribute lists declared above:
+// both ACL_FILTER_IP6_TAG and ACL_FILTER_IP6_PROTO_PORT_TAG put them right
+// after device/vlan, at index 2 and 3. Keep these in sync with the two
+// FILTER_COMPILER_DECLARE calls — reordering either list moves the net6
+// leaf vertices that acl_module_init_net6_share reads.
+#define ACL_FILTER_NET6_SRC_POS 2
+#define ACL_FILTER_NET6_DST_POS 3
+
 struct cp_module *
 acl_module_config_init(
 	struct agent *agent, const char *name, yanet_error **err
@@ -93,6 +103,9 @@ acl_module_config_init(
 
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 	memset(&config->filter_ip6_port, 0, sizeof(config->filter_ip6_port));
+
+	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
+	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
 
 	// Initialize fwstate_cfg with NULL pointers
 	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
@@ -159,6 +172,13 @@ acl_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
 	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
 	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+
+	filter_net6_share_dir_free(
+		&cp_module->memory_context, &config->net6_share_src
+	);
+	filter_net6_share_dir_free(
+		&cp_module->memory_context, &config->net6_share_dst
+	);
 
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
@@ -475,6 +495,124 @@ acl_module_init_ip6_port(
 	return rc;
 }
 
+// Builds the shared net6 half-classification, the sole production path for
+// classifying v6 addresses once both v6 filters compile non-empty.
+//
+// A build failure is an ordinary config-apply error, exactly like a failure
+// to build filter_ip6 or filter_ip6_port: it is logged and propagated to
+// the caller, and net6_share_src / net6_share_dst are left all-zero.
+static int
+acl_module_init_net6_share(
+	struct cp_module *cp_module,
+	struct acl_rule *acl_rules,
+	uint32_t acl_rule_count,
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
+) {
+	struct acl_module_config *config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
+	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
+
+	// Sharing pays off only when both v6 filters are populated.
+	if (config->filter_rule_count_ip6 == 0 ||
+	    config->filter_rule_count_ip6_port == 0) {
+		return 0;
+	}
+
+	// Kill switch, read once per ACL config compile. Flipping it takes a
+	// control-plane process restart plus a full ruleset reapply — it
+	// does nothing to a config already published to shared memory, so
+	// it is not an operational lever an incident responder can pull.
+	// It is one of several ways the dataplane's unshared classification
+	// path gets reached in a running config — the v6-population guard
+	// just above is the far more common one; see the enumeration on the
+	// dataplane side.
+	if (getenv("YANET_ACL_NET6_SHARE_DISABLE") != NULL) {
+		return 0;
+	}
+
+	// The union projection is every v6 rule, which is exactly the two
+	// disjoint per-filter projections taken together.
+	filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_has_ip6
+	);
+
+	// The local half-classifiers live in the leaf vertices of the two
+	// v6 filters, at the slots of their net6 attributes.
+	const size_t ip6_src_leaf =
+		ACL_FILTER_IP6_TAG->lookup_count + ACL_FILTER_NET6_SRC_POS;
+	const size_t ip6_dst_leaf =
+		ACL_FILTER_IP6_TAG->lookup_count + ACL_FILTER_NET6_DST_POS;
+	const size_t ip6_port_src_leaf =
+		ACL_FILTER_IP6_PROTO_PORT_TAG->lookup_count +
+		ACL_FILTER_NET6_SRC_POS;
+	const size_t ip6_port_dst_leaf =
+		ACL_FILTER_IP6_PROTO_PORT_TAG->lookup_count +
+		ACL_FILTER_NET6_DST_POS;
+
+	const struct net6_classifier *ip6_src = (const struct net6_classifier *)
+		ADDR_OF(&config->filter_ip6.v[ip6_src_leaf].data);
+	const struct net6_classifier *ip6_dst = (const struct net6_classifier *)
+		ADDR_OF(&config->filter_ip6.v[ip6_dst_leaf].data);
+	const struct net6_classifier *ip6_port_src =
+		(const struct net6_classifier *)ADDR_OF(
+			&config->filter_ip6_port.v[ip6_port_src_leaf].data
+		);
+	const struct net6_classifier *ip6_port_dst =
+		(const struct net6_classifier *)ADDR_OF(
+			&config->filter_ip6_port.v[ip6_port_dst_leaf].data
+		);
+
+	if (filter_net6_share_init(
+		    &cp_module->memory_context,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    1,
+		    ip6_src,
+		    ip6_port_src,
+		    &config->net6_share_src,
+		    err
+	    )) {
+		LOG(ERROR,
+		    "module '%s': failed to init shared net6 src",
+		    cp_module->name);
+		yanet_error_add(err, "failed to init shared net6 src");
+		return -1;
+	}
+
+	if (filter_net6_share_init(
+		    &cp_module->memory_context,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    0,
+		    ip6_dst,
+		    ip6_port_dst,
+		    &config->net6_share_dst,
+		    err
+	    )) {
+		filter_net6_share_dir_free(
+			&cp_module->memory_context, &config->net6_share_src
+		);
+		memset(&config->net6_share_src,
+		       0,
+		       sizeof(config->net6_share_src));
+		LOG(ERROR,
+		    "module '%s': failed to init shared net6 dst",
+		    cp_module->name);
+		yanet_error_add(err, "failed to init shared net6 dst");
+		return -1;
+	}
+
+	return 0;
+}
+
 int
 acl_module_config_update(
 	struct cp_module *cp_module,
@@ -637,6 +775,16 @@ acl_module_config_update(
 		goto error_rule_ptrs;
 
 	if (acl_module_init_ip6_port(
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs,
+		    err
+	    ))
+		goto error_rule_ptrs;
+
+	if (acl_module_init_net6_share(
 		    cp_module,
 		    acl_rules,
 		    rule_count,
