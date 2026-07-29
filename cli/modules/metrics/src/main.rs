@@ -6,14 +6,7 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
 };
 use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, MetricTag, metric::Value};
-use tabled::{
-    Table, Tabled,
-    settings::{
-        Color, Style,
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-    },
-};
+use tabled::Tabled;
 use ync::{
     client::{Connection, ConnectionArgs},
     completion,
@@ -204,7 +197,7 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
 
             if !scalars.is_empty() {
                 let rows: Vec<MetricRow> = scalars.iter().map(|m| MetricRow::from(*m)).collect();
-                print_metrics_table(rows);
+                ync::display::print_table_from_entries(rows);
             }
 
             if !histograms.is_empty() {
@@ -329,23 +322,6 @@ impl From<&Metric> for MetricRow {
             value,
         }
     }
-}
-
-fn print_metrics_table(rows: Vec<MetricRow>) {
-    let mut table = Table::new(&rows);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-
-    if output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
-    }
-
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
 }
 
 /// Returns the `k=v, k=v` join of `labels`, or an empty string when `labels`

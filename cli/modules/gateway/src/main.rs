@@ -4,14 +4,7 @@ use std::time::SystemTime;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use tabled::{
-    Table, Tabled,
-    settings::{
-        Color, Style,
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-    },
-};
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
@@ -103,7 +96,7 @@ impl GatewayService {
                     return;
                 }
 
-                render_table(&rows);
+                ync::display::print_table_from_entries(&rows);
             },
         );
 
@@ -168,23 +161,6 @@ fn last_seen_cell(kind: BackendKind, ts: Option<&prost_types::Timestamp>) -> Str
             humanfmt::format_age(ts, SystemTime::now()).unwrap_or_else(|| "-".to_string())
         }
     }
-}
-
-fn render_table(rows: &[ServiceRow]) {
-    let mut table = Table::new(rows);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-
-    if output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
-    }
-
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
 }
 
 #[cfg(test)]

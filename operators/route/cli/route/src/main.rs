@@ -17,14 +17,7 @@ use clap_complete::{
 };
 use colored::Colorize;
 use netip::{Contiguous, IpNetwork};
-use tabled::{
-    Table, Tabled,
-    settings::{
-        Color, Style,
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-    },
-};
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
@@ -580,20 +573,7 @@ fn annotate_ecmp_groups(entries: &mut [RouteEntry]) {
 }
 
 fn print_route_table(entries: Vec<RouteEntry>) {
-    let mut table = Table::new(&entries);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-
-    if output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
-    }
-
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
+    ync::display::print_table_from_entries(entries);
 }
 
 /// Returns the lowercase display name for a `RouteSourceId` discriminant.

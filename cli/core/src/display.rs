@@ -49,6 +49,11 @@ pub fn terminal_width() -> Option<usize> {
 }
 
 /// Apply the standard YANET table style to `table`.
+///
+/// Border and header color follow [`crate::output::is_colored`], so a
+/// `NO_COLOR` run, a non-UTF-8 locale, or a redirected stderr gets the same
+/// border layout with no ANSI escapes. The border glyph set itself is
+/// unconditional.
 fn apply_style(table: &mut Table) {
     table.with(
         Style::modern()
@@ -56,8 +61,11 @@ fn apply_style(table: &mut Table) {
             .remove_frame()
             .remove_horizontal(),
     );
-    table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-    table.modify(Rows::first(), Color::BOLD);
+
+    if crate::output::is_colored() {
+        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
+        table.modify(Rows::first(), Color::BOLD);
+    }
 }
 
 /// Returns the bar length for a histogram bucket, scaled to `BAR_MAX`.

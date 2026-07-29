@@ -6,14 +6,7 @@ use bytesize::ByteSize;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use colored::Colorize;
-use tabled::{
-    settings::{
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-        Color, Style,
-    },
-    Table, Tabled,
-};
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
@@ -499,18 +492,7 @@ fn format_worker_counters(response: &WorkerCountersResponse) {
     }
 
     let rows: Vec<WorkerRow> = response.workers.iter().map(WorkerRow::from).collect();
-    let mut table = Table::new(&rows);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-    if output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
-    }
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
+    ync::display::print_table_from_entries(rows);
 
     for worker in &response.workers {
         print_worker_histogram(worker);
