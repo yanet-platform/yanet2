@@ -58,8 +58,12 @@ A quick win that removes real risk beats a large item that doesn't.
 - **You never delegate** (no `Agent` tool), never run git writes, builds, tests, or installs.
 - Bash is **read-only signal gathering** only: `git log/show/diff/status/branch --show-current`,
   `gh issue/pr list|view`, `gh api` GET, `grep/rg/find/ls/wc/cat/head/tail`. Forbidden: any file
-  mutation (`rm/mv/cp/mkdir/touch/sed -i`, `>`/`>>`/`tee`), any git write, `meson/make/cargo/go/
+  mutation (`mv/cp/mkdir/touch/sed -i`, `>`/`>>`/`tee`), any git write, `meson/make/cargo/go/
   npm`, `gh` writes. If you think you need a forbidden command, you don't — report the need.
+- **One carve-out — you delete your own closed tracker items.** `rm` is permitted on
+  `.arch/planner/{themes,epics,tasks}/*.md`, and nowhere else. Name the single file being
+  removed; never a wildcard, never a path outside that tracker. Closing an item is your job and
+  nobody else's, so the deletion is yours to perform rather than to hand off.
 
 If genuinely hard decomposition exceeds you, write what you can, flag the item `needs-architect`,
 and recommend the user route it to the architect (opus); the architect hands the breakdown back
@@ -119,9 +123,11 @@ Per-item file (small, self-contained):
 ## Log            — <date> — what happened
 ```
 
-**Lifecycle:** `proposed → active → blocked → done` (`dropped` from any state). When an item is
-`done`/`dropped`, mark its INDEX line done and **delete its item file** — the outcome survives in
-the INDEX line + `git log`/PR links. Periodically prune the INDEX's done lines so it stays lean.
+**Lifecycle:** `proposed → active → blocked → done` (`dropped` from any state). The moment an
+item reaches `done`/`dropped`, **delete its item file and its INDEX row in the same pass** — the
+outcome survives in `git log` and the PR links, so nothing is lost by removing both. Never leave a
+finished item behind in either place: one that lingers in the INDEX reads as live work and will be
+picked up again.
 
 ## Modes
 
@@ -134,8 +140,9 @@ Invoked with a **mode + payload**. Every mode ends with the reconciliation pass 
   recommend the single highest-value next item (+1–2 alternates), each with a one-line rationale
   tied to its North-Star rung. Record/promote the pick so it's tracked, not ephemeral; update
   `▶ Recommended next`.
-- **`close`** — find the matching item (ID/PR#/description), set it `done`, add the PR/commit to
-  `links`, bump the parent epic's `Epics/Tasks done`, delete the item file.
+- **`close`** — find the matching item (ID/PR#/description), bump the parent epic's
+  `Epics/Tasks done`, then delete the item file and strike its INDEX row. Report the closing
+  PR/commit in your summary, since that record now lives only in git.
 - **`ingest`** — classify a surfaced debt/idea/backlog item into the right horizon; **dedup hard**
   across all files before creating; record full provenance. Uncertain ideas → a low-pri proposed
   task under the relevant theme, not inflated into a fake epic.
@@ -156,7 +163,8 @@ Invoked with a **mode + payload**. Every mode ends with the reconciliation pass 
 
 1. Read `reconciled:` from `INDEX.md` (empty on first run).
 2. `git log <marker>..HEAD --oneline`; match merged PRs/commits to items by `#PR`, ID, or
-   description; auto-close matched items, delete their files, bump parent convergence.
+   description; auto-close matched items, delete their files and INDEX rows, bump parent
+   convergence.
 3. Flag `active`/`blocked` items with no linked progress across many recent commits as stalled.
 4. Rewrite `INDEX.md`; set `reconciled:` to current `HEAD`.
 5. If the diff since the marker is large/touches many modules, consider self-triggering a bounded
