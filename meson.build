@@ -15,7 +15,7 @@ project(
 )
 
 yanet_project_args = ['-g', '-D_GNU_SOURCE']
-if host_machine.cpu_family() in ['x86', 'x86_64']
+if host_machine.cpu_family() == 'x86_64'
   yanet_project_args += '-march=' + get_option('cpu_arch')
 endif
 # The aarch64 branch appends its own ISA flag to yanet_project_args
@@ -135,7 +135,7 @@ libdpdk_default_options = [
   'werror=false',
   'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
 ]
-if host_machine.cpu_family() in ['x86', 'x86_64']
+if host_machine.cpu_family() == 'x86_64'
   libdpdk_default_options += 'cpu_instruction_set=' + get_option('cpu_arch')
 endif
 
