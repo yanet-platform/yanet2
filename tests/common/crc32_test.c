@@ -14,9 +14,11 @@ struct crc32_vector {
 };
 
 // These values were captured by running crc32() on the x86 build, which
-// defines the wire-visible behaviour: packet->hash is computed from them
-// and steers ECMP, MPLS entropy, pipeline and chain demux, and TX queue
-// selection, so any architecture must reproduce these constants exactly.
+// defines the wire-visible behaviour.
+//
+// packet->hash is computed with the same function and steers ECMP, MPLS
+// entropy, pipeline and chain demux, and TX queue selection, so any
+// architecture must reproduce these constants exactly.
 
 static const uint8_t vec_len1[] = {0xab};
 static const uint8_t vec_len2[] = {0x01, 0x02};
@@ -83,10 +85,14 @@ static const struct crc32_vector vectors[] = {
 };
 
 // Verifies that crc32() reproduces the golden values captured from the
-// x86 build across an empty input, every tail length from 1 to 8 bytes
-// (so the 8/4/2/1-byte branches each fire), an input past 8 bytes so the
-// 8-byte loop iterates, an input past 16 bytes so the loop runs two full
-// laps before the tail, and a non-zero seed.
+// x86 build.
+//
+// The vectors cover an empty input under both a zero and a non-zero seed
+// (showing the seed passes through untouched), sizes 1 through 7 exercising
+// all seven combinations of the 4/2/1-byte tail branches, an 8-byte input
+// consumed entirely by the loop with an empty tail, a 13-byte input
+// pairing a loop lap with a tail and a non-zero seed, and a 17-byte input
+// spanning two full loop laps before the tail.
 static int
 test_golden_vectors(void) {
 	LOG(INFO, "Test golden vectors...");
