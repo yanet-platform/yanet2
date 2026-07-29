@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__)
 
 static inline uint32_t
 crc32_u8(uint8_t v, uint32_t hash) {
