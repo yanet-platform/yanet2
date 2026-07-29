@@ -132,7 +132,20 @@ impl PdumpService {
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let response = self.get_config(&cmd.config_name).await?;
 
-        output::data(|| &response, || print_tree(&response));
+        output::data(
+            || &response,
+            || {
+                if response.config.is_none() {
+                    output::empty_with_hint(
+                        format_args!("No pdump configuration found for '{}'.", cmd.config_name),
+                        format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
+                    );
+                    return;
+                }
+
+                print_tree(&response);
+            },
+        );
 
         Ok(())
     }

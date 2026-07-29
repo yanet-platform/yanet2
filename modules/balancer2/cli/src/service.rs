@@ -336,6 +336,10 @@ impl Balancer2Service {
                 let json =
                     serde_json::to_string(&json_value).expect("balancer metrics JSON serialization must not fail");
                 println!("{json}");
+
+                if response.metrics.is_empty() {
+                    output::empty(format_args!("No balancer metrics found."));
+                }
             },
         );
 

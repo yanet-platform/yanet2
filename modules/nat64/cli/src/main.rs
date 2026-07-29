@@ -272,7 +272,20 @@ impl NAT64Service {
             .into_inner();
         log::debug!("show config response: {response:?}");
 
-        output::data(|| &response, || print_tree(&response));
+        output::data(
+            || &response,
+            || {
+                if response.config.is_none() {
+                    output::empty_with_hint(
+                        format_args!("No NAT64 configuration found for '{}'.", cmd.config_name),
+                        format_args!("create one with 'yanet-cli-nat64 prefix add --name <name> --prefix <cidr>'"),
+                    );
+                    return;
+                }
+
+                print_tree(&response);
+            },
+        );
 
         Ok(())
     }
@@ -418,12 +431,20 @@ fn print_tree(resp: &ShowConfigResponse) {
 
     if let Some(config) = &resp.config {
         tree.begin_child("Prefixes".to_owned());
+        if config.prefixes.is_empty() {
+            tree.add_empty_child("(none)".to_owned());
+        }
+
         for (idx, prefix) in config.prefixes.iter().enumerate() {
             tree.add_empty_child(format!("{}: {:?}", idx, prefix.prefix));
         }
         tree.end_child();
 
         tree.begin_child("Mappings".to_owned());
+        if config.mappings.is_empty() {
+            tree.add_empty_child("(none)".to_owned());
+        }
+
         for mapping in &config.mappings {
             let ipv4 = mapping.ipv4.as_ref().map(|a| a.to_string()).unwrap_or_default();
             let ipv6 = mapping.ipv6.as_ref().map(|a| a.to_string()).unwrap_or_default();

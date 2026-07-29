@@ -136,6 +136,15 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                         "{}",
                         serde_yaml::to_string(&pipeline).expect("pipeline YAML serialization must not fail")
                     );
+
+                    if pipeline.functions.is_empty() {
+                        output::empty_with_hint(
+                            format_args!("No functions found for '{}'.", show.name),
+                            format_args!(
+                                "create one with 'yanet-cli pipeline update --name <name> --functions <function>'"
+                            ),
+                        );
+                    }
                 },
             );
         }

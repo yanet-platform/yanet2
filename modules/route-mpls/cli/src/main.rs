@@ -258,7 +258,16 @@ impl RouteMplsService {
                 print!(
                     "{}",
                     serde_yaml::to_string(&response).expect("route-mpls config YAML serialization must not fail")
-                )
+                );
+
+                if response.rules.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No route-mpls rules found for '{}'.", cmd.config_name),
+                        format_args!(
+                            "create one with 'yanet-cli-route-mpls update --name <name> --prefix <cidr> --dst <addr> --label <n> --src <addr> --weight <n> --counter <counter-name>'"
+                        ),
+                    );
+                }
             },
         );
 

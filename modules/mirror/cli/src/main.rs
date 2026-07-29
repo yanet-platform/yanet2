@@ -199,6 +199,13 @@ impl MirrorService {
                     "{}",
                     serde_yaml::to_string(&response).expect("mirror config YAML serialization must not fail")
                 );
+
+                if response.rules.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No mirror rules found for '{}'.", cmd.config_name),
+                        format_args!("create one with 'yanet-cli-mirror update --name <name> --rules <path>'"),
+                    );
+                }
             },
         );
 

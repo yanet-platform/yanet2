@@ -156,7 +156,20 @@ impl DecapService {
             .into_inner();
         log::debug!("show config response: {response:?}");
 
-        output::data(|| &response, || print_tree(&response));
+        output::data(
+            || &response,
+            || {
+                if response.prefixes.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No decap prefixes found for '{}'.", cmd.config_name),
+                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefixes <cidr>'"),
+                    );
+                    return;
+                }
+
+                print_tree(&response);
+            },
+        );
 
         Ok(())
     }

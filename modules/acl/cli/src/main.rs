@@ -363,6 +363,13 @@ impl ACLService {
                     "{}",
                     serde_yaml::to_string(&config).expect("ACL config YAML serialization must not fail")
                 );
+
+                if response.rules.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No ACL rules found for '{}'.", cmd.config_name),
+                        format_args!("create one with 'yanet-cli-acl update --name <name> --rules <path>'"),
+                    );
+                }
             },
         );
 

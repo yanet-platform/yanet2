@@ -199,6 +199,13 @@ impl ForwardService {
                     "{}",
                     serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
                 );
+
+                if response.rules.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No forward rules found for '{}'.", cmd.config_name),
+                        format_args!("create one with 'yanet-cli-forward update --name <name> --rules <path>'"),
+                    );
+                }
             },
         );
 

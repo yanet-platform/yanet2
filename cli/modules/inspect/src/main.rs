@@ -81,92 +81,138 @@ impl InspectService {
 }
 
 fn render_tree(response: &InspectResponse) {
+    let Some(info) = &response.instance_info else {
+        output::empty(format_args!("No instance information found."));
+        return;
+    };
+
     let mut tree = TreeBuilder::new("YANET System".to_string());
 
-    if let Some(info) = &response.instance_info {
-        tree.begin_child(format!("Instance {}", info.instance_idx));
+    tree.begin_child(format!("Instance {}", info.instance_idx));
 
-        tree.begin_child(format!("Attached to NUMA {}", info.numa_idx));
+    tree.begin_child(format!("Attached to NUMA {}", info.numa_idx));
+    tree.end_child();
+
+    tree.begin_child("Dataplane Modules".to_string());
+    if info.dp_modules.is_empty() {
+        tree.add_empty_child("(none)".to_owned());
+    }
+
+    for (idx, module) in info.dp_modules.iter().enumerate() {
+        tree.add_empty_child(format!("{}: {}", idx, module.name));
+    }
+    tree.end_child();
+
+    tree.begin_child("Controlplane Configurations".to_string());
+    if info.cp_configs.is_empty() {
+        tree.add_empty_child("(none)".to_owned());
+    }
+
+    for cfg in &info.cp_configs {
+        tree.add_empty_child(format!("{}:{} (gen: {})", cfg.r#type, cfg.name, cfg.generation));
+    }
+    tree.end_child();
+
+    tree.begin_child("Agents".to_string());
+    if info.agents.is_empty() {
+        tree.add_empty_child("(none)".to_owned());
+    }
+
+    for agent in &info.agents {
+        tree.begin_child(agent.name.to_string());
+        if agent.instances.is_empty() {
+            tree.add_empty_child("(none)".to_owned());
+        }
+
+        for instance in &agent.instances {
+            let used = instance.memory_limit.saturating_sub(instance.free_bytes);
+            tree.begin_child(format!("Instance (PID: {})", instance.pid));
+            tree.add_empty_child(format!("Memory limit: {}", ByteSize::b(instance.memory_limit)));
+            tree.add_empty_child(format!("Used:         {}", ByteSize::b(used)));
+            tree.add_empty_child(format!("Free:         {}", ByteSize::b(instance.free_bytes)));
+            tree.add_empty_child(format!("Generation: {}", instance.generation));
+            tree.end_child();
+        }
+
         tree.end_child();
+    }
+    tree.end_child();
 
-        tree.begin_child("Dataplane Modules".to_string());
-        for (idx, module) in info.dp_modules.iter().enumerate() {
-            tree.add_empty_child(format!("{}: {}", idx, module.name));
+    tree.begin_child("Functions".to_string());
+    if info.functions.is_empty() {
+        tree.add_empty_child("(none)".to_owned());
+    }
+
+    for function in &info.functions {
+        tree.begin_child(format!("Function {}", function.name));
+        if function.chains.is_empty() {
+            tree.add_empty_child("(none)".to_owned());
+        }
+
+        for chain in &function.chains {
+            tree.begin_child(format!("Chain {} (weight {})", chain.name, chain.weight));
+            if chain.modules.is_empty() {
+                tree.add_empty_child("(none)".to_owned());
+            }
+
+            for module in &chain.modules {
+                tree.add_empty_child(format!("Module {}:{}", module.r#type, module.name));
+            }
+            tree.end_child();
+        }
+        tree.end_child();
+    }
+    tree.end_child();
+
+    tree.begin_child("Pipelines".to_string());
+    if info.pipelines.is_empty() {
+        tree.add_empty_child("(none)".to_owned());
+    }
+
+    for pipeline in &info.pipelines {
+        tree.begin_child(format!("Pipeline {}", pipeline.name));
+        tree.add_empty_child("rx".to_string());
+        for function in &pipeline.functions {
+            tree.add_empty_child(function.to_string());
+        }
+        tree.add_empty_child("tx".to_string());
+        tree.end_child();
+    }
+    tree.end_child();
+
+    tree.begin_child("Devices".to_string());
+    if info.devices.is_empty() {
+        tree.add_empty_child("(none)".to_owned());
+    }
+
+    for device in &info.devices {
+        tree.begin_child(format!("Device {}:{}", device.r#type, device.name));
+
+        tree.begin_child("input".to_string());
+        if device.input_pipelines.is_empty() {
+            tree.add_empty_child("(none)".to_owned());
+        }
+
+        for pipeline in &device.input_pipelines {
+            tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline.name, pipeline.weight));
         }
         tree.end_child();
 
-        tree.begin_child("Controlplane Configurations".to_string());
-        for cfg in &info.cp_configs {
-            tree.add_empty_child(format!("{}:{} (gen: {})", cfg.r#type, cfg.name, cfg.generation));
+        tree.begin_child("output".to_string());
+        if device.output_pipelines.is_empty() {
+            tree.add_empty_child("(none)".to_owned());
         }
-        tree.end_child();
 
-        tree.begin_child("Agents".to_string());
-        for agent in &info.agents {
-            tree.begin_child(agent.name.to_string());
-
-            for instance in &agent.instances {
-                let used = instance.memory_limit.saturating_sub(instance.free_bytes);
-                tree.begin_child(format!("Instance (PID: {})", instance.pid));
-                tree.add_empty_child(format!("Memory limit: {}", ByteSize::b(instance.memory_limit)));
-                tree.add_empty_child(format!("Used:         {}", ByteSize::b(used)));
-                tree.add_empty_child(format!("Free:         {}", ByteSize::b(instance.free_bytes)));
-                tree.add_empty_child(format!("Generation: {}", instance.generation));
-                tree.end_child();
-            }
-
-            tree.end_child();
-        }
-        tree.end_child();
-
-        tree.begin_child("Functions".to_string());
-        for function in &info.functions {
-            tree.begin_child(format!("Function {}", function.name));
-            for chain in &function.chains {
-                tree.begin_child(format!("Chain {} (weight {})", chain.name, chain.weight));
-                for module in &chain.modules {
-                    tree.add_empty_child(format!("Module {}:{}", module.r#type, module.name));
-                }
-                tree.end_child();
-            }
-            tree.end_child();
-        }
-        tree.end_child();
-
-        tree.begin_child("Pipelines".to_string());
-        for pipeline in &info.pipelines {
-            tree.begin_child(format!("Pipeline {}", pipeline.name));
-            tree.add_empty_child("rx".to_string());
-            for function in &pipeline.functions {
-                tree.add_empty_child(function.to_string());
-            }
-            tree.add_empty_child("tx".to_string());
-            tree.end_child();
-        }
-        tree.end_child();
-
-        tree.begin_child("Devices".to_string());
-        for device in &info.devices {
-            tree.begin_child(format!("Device {}:{}", device.r#type, device.name));
-
-            tree.begin_child("input".to_string());
-            for pipeline in &device.input_pipelines {
-                tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline.name, pipeline.weight));
-            }
-            tree.end_child();
-
-            tree.begin_child("output".to_string());
-            for pipeline in &device.output_pipelines {
-                tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline.name, pipeline.weight));
-            }
-            tree.end_child();
-
-            tree.end_child();
+        for pipeline in &device.output_pipelines {
+            tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline.name, pipeline.weight));
         }
         tree.end_child();
 
         tree.end_child();
     }
+    tree.end_child();
+
+    tree.end_child();
 
     let tree = tree.build();
     let _ = ptree::print_tree(&tree);

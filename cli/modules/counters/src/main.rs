@@ -279,6 +279,10 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                         "{}",
                         serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
                     );
+
+                    if response.ports.is_empty() {
+                        output::empty(format_args!("No port counters found."));
+                    }
                 },
             );
         }
@@ -292,6 +296,10 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                         "{}",
                         serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
                     );
+
+                    if response.groups.is_empty() {
+                        output::empty(format_args!("No counters found."));
+                    }
                 },
             );
         }

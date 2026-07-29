@@ -124,6 +124,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                         "{}",
                         serde_yaml::to_string(&function).expect("function YAML serialization must not fail")
                     );
+
+                    if function.chains.is_empty() {
+                        output::empty_with_hint(
+                            format_args!("No chains found for '{}'.", show.name),
+                            format_args!("create one with 'yanet-cli function update --name <name> --chains <chain>'"),
+                        );
+                    }
                 },
             );
         }
