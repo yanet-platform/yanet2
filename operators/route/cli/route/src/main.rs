@@ -81,10 +81,10 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteShowCmd {
     /// Show only IPv4 routes.
-    #[arg(long)]
+    #[arg(long, short = '4')]
     pub ipv4: bool,
     /// Show only IPv6 routes.
-    #[arg(long)]
+    #[arg(long, short = '6')]
     pub ipv6: bool,
     /// Configuration name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
@@ -771,5 +771,10 @@ mod test {
 
         assert_eq!(2, entries[0].prefix.2);
         assert_eq!(2, entries[1].prefix.2);
+    }
+
+    #[test]
+    fn cmd_is_valid() {
+        Cmd::command().debug_assert();
     }
 }

@@ -829,3 +829,13 @@ fn config_candidates() -> Vec<CompletionCandidate> {
         async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
     )
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn cmd_is_valid() {
+        Cmd::command().debug_assert();
+    }
+}

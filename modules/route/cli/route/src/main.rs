@@ -137,10 +137,10 @@ pub struct FibUpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct FibShowCmd {
     /// Show only IPv4 FIB entries.
-    #[arg(long)]
+    #[arg(long, short = '4')]
     pub ipv4: bool,
     /// Show only IPv6 FIB entries.
-    #[arg(long)]
+    #[arg(long, short = '6')]
     pub ipv6: bool,
     /// Route config name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
@@ -267,5 +267,15 @@ impl RouteService {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn cmd_is_valid() {
+        Cmd::command().debug_assert();
     }
 }

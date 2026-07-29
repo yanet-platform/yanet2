@@ -138,7 +138,7 @@ pub struct EntriesCmd {
     pub config_name: String,
 
     /// Use IPv6 map instead of IPv4
-    #[arg(long)]
+    #[arg(long, short = '6')]
     pub ipv6: bool,
 
     /// Layer index to iterate (0 = active layer)

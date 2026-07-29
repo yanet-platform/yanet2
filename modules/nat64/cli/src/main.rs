@@ -121,10 +121,10 @@ pub struct AddMappingCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// IPv4 address (4 bytes).
-    #[arg(long)]
+    #[arg(long, short = '4')]
     pub ipv4: Ipv4Addr,
     /// IPv6 address (16 bytes).
-    #[arg(long)]
+    #[arg(long, short = '6')]
     pub ipv6: Ipv6Addr,
     /// Index of the prefix to use.
     #[arg(long)]
@@ -137,7 +137,7 @@ pub struct RemoveMappingCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// IPv4 address (4 bytes).
-    #[arg(long)]
+    #[arg(long, short = '4')]
     pub ipv4: Ipv4Addr,
 }
 
@@ -460,4 +460,14 @@ fn config_candidates() -> Vec<CompletionCandidate> {
         },
         async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
     )
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn cmd_is_valid() {
+        Cmd::command().debug_assert();
+    }
 }
