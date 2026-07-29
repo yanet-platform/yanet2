@@ -80,7 +80,7 @@ func (m *MirrorService) ShowConfig(
 	config, ok := m.configs[req.Name]
 
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	response := &mirrorpb.ShowConfigResponse{
@@ -190,7 +190,7 @@ func (m *MirrorService) DeleteConfig(
 
 	config, ok := m.configs[name]
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	if err := m.backend.DeleteModule(name); err != nil {

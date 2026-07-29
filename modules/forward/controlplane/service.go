@@ -80,7 +80,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 	config, ok := m.configs[req.Name]
 
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	response := &forwardpb.ShowConfigResponse{
@@ -179,7 +179,7 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 
 	config, ok := m.configs[name]
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	if err := m.backend.DeleteModule(name); err != nil {

@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -29,6 +31,37 @@ func (m *mockBackend) DeleteModule(name string) error {
 
 func (m *mockBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {
 	return nil
+}
+
+// TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
+// a config name that was never applied.
+func TestShowConfigUnknownConfig(t *testing.T) {
+	svc := forward.NewForwardService(&mockBackend{})
+
+	_, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestDeleteConfigUnknownConfig verifies that DeleteConfig reports NotFound
+// for a config name that was never applied.
+func TestDeleteConfigUnknownConfig(t *testing.T) {
+	svc := forward.NewForwardService(&mockBackend{})
+
+	_, err := svc.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestShowConfigEmptyRules verifies that ShowConfig succeeds with an empty
+// rule list for a config that was applied without rules.
+func TestShowConfigEmptyRules(t *testing.T) {
+	svc := forward.NewForwardService(&mockBackend{})
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{Name: "empty"})
+	require.NoError(t, err)
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "empty"})
+	require.NoError(t, err)
+	require.Empty(t, response.GetRules())
 }
 
 // Run with: go test -race

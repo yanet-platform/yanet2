@@ -367,7 +367,7 @@ func (m *ACLService) DeleteConfig(
 
 	config, ok := m.configs[name]
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	if config.acl != nil {

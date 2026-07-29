@@ -369,6 +369,15 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
+// TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports
+// codes.NotFound for a config name that was never applied.
+func TestDeleteConfig_UnknownConfig(t *testing.T) {
+	svc := newTestService(newFakeBackend(0))
+
+	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
 // TestUpdateConfig_ConcurrentRace exercises UpdateConfig and ShowConfig under
 // concurrent access to surface data races under go test -race.
 func TestUpdateConfig_ConcurrentRace(t *testing.T) {
