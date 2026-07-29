@@ -55,6 +55,9 @@ pub fn terminal_width() -> Option<usize> {
 /// border layout with no ANSI escapes. The border glyph set itself is
 /// unconditional.
 fn apply_style(table: &mut Table) {
+    /// Colour of a table's cell borders.
+    const TABLE_BORDER_COLOR: (u8, u8, u8) = (0x4e, 0x4e, 0x4e);
+
     table.with(
         Style::modern()
             .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
@@ -63,7 +66,8 @@ fn apply_style(table: &mut Table) {
     );
 
     if crate::output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
+        let (r, g, b) = TABLE_BORDER_COLOR;
+        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(r, g, b)));
         table.modify(Rows::first(), Color::BOLD);
     }
 }

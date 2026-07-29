@@ -469,7 +469,7 @@ impl Display for Prefix {
                     write!(f, "{s}")
                 }
             } else {
-                write!(f, "{}", s.truecolor(127, 127, 127))
+                write!(f, "{}", output::paint_dim(&s))
             }
         } else if *is_best && *ecmp_size > 1 {
             write!(f, "{s} ⇉")

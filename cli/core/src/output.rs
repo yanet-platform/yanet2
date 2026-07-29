@@ -379,10 +379,20 @@ pub fn is_colored() -> bool {
 /// carries no escape codes.
 pub fn dim(text: &str) -> String {
     if is_colored() {
-        text.truecolor(127, 127, 127).to_string()
+        paint_dim(text)
     } else {
         text.to_string()
     }
+}
+
+/// Paints `text` in the secondary grey, without consulting [`is_colored`].
+///
+/// Call this from a site that has already made its own colour decision,
+/// either from an explicit `colored` flag or from an enclosing
+/// [`is_colored`] branch. Everyone else should call [`dim`], which makes
+/// that decision itself.
+pub fn paint_dim(text: &str) -> String {
+    text.truecolor(127, 127, 127).to_string()
 }
 
 /// Returns `true` if the current locale advertises UTF-8 encoding.

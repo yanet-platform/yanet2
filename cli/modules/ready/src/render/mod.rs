@@ -34,6 +34,8 @@ const STATE_WIDTH: usize = 9;
 const REASON_INDENT_COLORED: usize = 3 + 1;
 /// Display width of an ASCII mark (e.g. `[ok]`) plus its separating space.
 const REASON_INDENT_ASCII: usize = 4 + 1;
+/// Colour marking a stale readiness observation's age tag.
+const STALE_TAG_COLOR: (u8, u8, u8) = (180, 140, 0);
 
 /// Leading indent for reason continuation lines.
 ///
@@ -183,7 +185,8 @@ fn print_scope_row(
         let stale_age = humanfmt::format_age(scope.observed_at.as_ref(), now).unwrap_or_default();
         let tag = format!("stale {stale_age}");
         let tag = if colored {
-            tag.truecolor(180, 140, 0).to_string()
+            let (r, g, b) = STALE_TAG_COLOR;
+            tag.truecolor(r, g, b).to_string()
         } else {
             tag
         };
@@ -214,7 +217,7 @@ impl StateStyle {
             State::Ready => ("[✓]", "[ok]", |s| s.green().to_string()),
             State::Degraded => ("[~]", "[!!]", |s| s.yellow().to_string()),
             State::NotReady => ("[✗]", "[xx]", |s| s.red().to_string()),
-            State::Unknown | State::Unspecified => ("[?]", "[??]", |s| s.truecolor(127, 127, 127).to_string()),
+            State::Unknown | State::Unspecified => ("[?]", "[??]", output::paint_dim),
         };
 
         let mark = if colored { unicode_mark } else { ascii_mark };
@@ -258,7 +261,7 @@ fn state_cells(state: State, colored: bool) -> (String, String) {
 /// a transition line.
 fn dim(text: &str, colored: bool) -> String {
     if colored {
-        text.truecolor(127, 127, 127).to_string()
+        output::paint_dim(text)
     } else {
         text.to_string()
     }
