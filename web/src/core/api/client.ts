@@ -3,6 +3,27 @@ export interface CallOptions {
     compress?: boolean;
 }
 
+/** Error thrown for a non-2xx HTTP response from a gRPC-over-JSON call.
+ *
+ * Carries the numeric status alongside the formatted message so callers can
+ * branch on it (e.g. treating a 404 as a missing config rather than a real
+ * failure) instead of parsing the message text.
+ */
+export class ApiError extends Error {
+    readonly status: number;
+    readonly statusText: string;
+    readonly detail: string;
+
+    constructor(status: number, statusText: string, detail: string) {
+        const base = `HTTP ${status} ${statusText}`;
+        super(detail ? `${base}: ${detail}` : base);
+        this.name = 'ApiError';
+        this.status = status;
+        this.statusText = statusText;
+        this.detail = detail;
+    }
+}
+
 let apiBase = '';
 
 /** Set the base URL prefix for all API calls. An empty string means same-origin. */
@@ -65,8 +86,7 @@ const callGRPCServiceWithBody = async <T>(
 
     if (!response.ok) {
         const detail = await readErrorDetail(response);
-        const base = `HTTP ${response.status} ${response.statusText}`;
-        throw new Error(detail ? `${base}: ${detail}` : base);
+        throw new ApiError(response.status, response.statusText, detail);
     }
 
     return await response.json() as T;
@@ -77,6 +97,53 @@ const callGRPCService = async <T>(
     options?: CallOptions
 ): Promise<T> => {
     return callGRPCServiceWithBody<T>(servicePath, {}, options);
+};
+
+export interface LoadKnownConfigsOptions {
+    /** Called when the name list was non-empty and every config was dropped. */
+    onAllDropped?: (count: number) => void;
+}
+
+/** Marker substituted for a per-name load whose 404 means the config is gone. */
+const DROPPED = Symbol('dropped');
+
+/** Load one config per name concurrently, dropping names the backend does not know.
+ *
+ * The name list and the per-name loader can come from two different
+ * registries: the dataplane's shared-memory inventory survives a control-plane
+ * restart, while a module service's in-process map is rebuilt empty. Where
+ * both come from the same service, a name can still be deleted between the two
+ * calls. A 404 therefore means the backend has no such config and it is
+ * skipped. Any other failure, including a rejection that is not an ApiError,
+ * rejects the whole load as soon as it happens, so a hung or slow sibling
+ * request never delays surfacing a real error. The rejection is rethrown
+ * unchanged so the caller still sees the original error.
+ *
+ * When every name was dropped and at least one name was requested, every
+ * request was a 404, since any other rejection would already have rejected
+ * the whole load above. `onAllDropped` fires in exactly that case, so a
+ * caller can warn that none of the requested configs came back instead of
+ * rendering a silent empty state.
+ */
+export const loadKnownConfigs = async <T>(
+    names: string[],
+    loadOne: (name: string) => Promise<T>,
+    options?: LoadKnownConfigsOptions,
+): Promise<T[]> => {
+    const results: (T | typeof DROPPED)[] = await Promise.all(names.map((name): Promise<T | typeof DROPPED> =>
+        loadOne(name).catch((reason: unknown) => {
+            if (reason instanceof ApiError && reason.status === 404) {
+                return DROPPED;
+            }
+            throw reason;
+        })
+    ));
+
+    const values = results.filter((result): result is T => result !== DROPPED);
+    if (names.length > 0 && values.length === 0) {
+        options?.onAllDropped?.(names.length);
+    }
+    return values;
 };
 
 export const createService = (serviceName: string) => {
@@ -150,8 +217,7 @@ const streamGRPCService = async <T>(
 
         if (!response.ok) {
             const detail = await readErrorDetail(response);
-            const base = `HTTP ${response.status} ${response.statusText}`;
-            throw new Error(detail ? `${base}: ${detail}` : base);
+            throw new ApiError(response.status, response.statusText, detail);
         }
 
         if (!response.body) {

@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { API } from '@yanet/core/api';
+import { API, loadKnownConfigs } from '@yanet/core/api';
+import { warnConfigsUnknown } from '@yanet/core/utils';
 import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '@yanet/core/api/routes';
 import { ipRangeToCIDRs } from '@yanet/core/utils/netip';
 import type { FIBRowItem } from './types';
@@ -68,12 +69,10 @@ export const useFIBDraft = (): UseFIBDraftResult => {
     const load = useCallback(async (): Promise<Array<{ name: string; rows: FIBRowItem[] }>> => {
         const configsResp = await API.route.listConfigs();
         const configNames = configsResp.configs ?? [];
-        return Promise.all(
-            configNames.map(async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
-                const fibResp = await API.route.showFIB({ name });
-                return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
-            }),
-        );
+        return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
+            const fibResp = await API.route.showFIB({ name });
+            return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
+        }, { onAllDropped: warnConfigsUnknown('route-configs-unknown', 'route') });
     }, []);
 
     const commit = useCallback(async (configName: string, draftRows: FIBRowItem[]): Promise<void> => {

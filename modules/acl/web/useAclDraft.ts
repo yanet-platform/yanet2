@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
-import { API } from '@yanet/core/api';
+import { API, loadKnownConfigs } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
-import { toaster, compareNatural } from '@yanet/core/utils';
+import { toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import type { Rule } from '@yanet/core/api/acl';
 import {
     aclDraftReducer,
@@ -23,6 +23,8 @@ const aclDeleteConfig = (name: string): Promise<unknown> =>
 export interface UseAclDraftResult {
     draftConfigs: string[];
     loading: boolean;
+    /** True when the initial load failed and no configs were seeded; cleared on a successful reload. */
+    loadFailed: boolean;
     draftRules: (configName: string) => Rule[];
     draftRuleIds: (configName: string) => string[];
     serverRules: (configName: string) => Rule[];
@@ -45,6 +47,7 @@ export interface UseAclDraftResult {
 export const useAclDraft = (): UseAclDraftResult => {
     const [state, rawDispatch] = useReducer(aclDraftReducer, initialAclDraftState);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
     const { write: writeCache } = useConfigListCache('acl');
 
     const dispatchDraft = useCallback((action: AclDraftAction): void => {
@@ -57,24 +60,24 @@ export const useAclDraft = (): UseAclDraftResult => {
             const listResp = await API.acl.listConfigs();
             const names = listResp.configs ?? [];
 
-            const configs = await Promise.all(
-                names.map(async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string }> => {
-                    try {
-                        const resp = await API.acl.showConfig({ name });
-                        return { name, rules: resp.rules ?? [], fwstateName: resp.fwstate_name ?? '' };
-                    } catch {
-                        return { name, rules: [], fwstateName: '' };
-                    }
-                }),
+            const configs = await loadKnownConfigs(
+                names,
+                async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string }> => {
+                    const resp = await API.acl.showConfig({ name });
+                    return { name, rules: resp.rules ?? [], fwstateName: resp.fwstate_name ?? '' };
+                },
+                { onAllDropped: warnConfigsUnknown('acl-configs-unknown', 'ACL') },
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
             writeCache({
-                configs: [...names].sort((a, b) => compareNatural(a, b)),
+                configs: configs.map(cfg => cfg.name).sort((a, b) => compareNatural(a, b)),
                 counts: Object.fromEntries(configs.map(cfg => [cfg.name, cfg.rules.length])),
             });
+            setLoadFailed(false);
         } catch (err) {
             toaster.error('acl-load', 'Failed to load ACL configurations', err);
+            setLoadFailed(true);
         } finally {
             setLoading(false);
         }
@@ -119,6 +122,7 @@ export const useAclDraft = (): UseAclDraftResult => {
     return {
         draftConfigs,
         loading,
+        loadFailed,
         draftRules: draftRulesFor,
         draftRuleIds: draftRuleIdsFor,
         serverRules: serverRulesFor,

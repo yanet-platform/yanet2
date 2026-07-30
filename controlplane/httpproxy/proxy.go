@@ -96,6 +96,20 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	m.handleUnary(w, r, fullMethodName)
 }
 
+// writeRegistryMissError responds to a registry miss with 503, not 404.
+//
+// The proxy cannot distinguish a service name that never existed from a
+// live module whose control plane is currently unreachable, so reserving
+// 404 for a NotFound the backend itself returns is what preserves that
+// distinction.
+func (m *TransparentWebGRPCProxy) writeRegistryMissError(w http.ResponseWriter, service string) {
+	message := fmt.Sprintf(
+		"service %s is not registered with the gateway, its control plane may be unavailable",
+		service,
+	)
+	http.Error(w, message, http.StatusServiceUnavailable)
+}
+
 // handleUnary handles unary gRPC calls.
 func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Request, fullMethodName string) {
 	service, method, err := xgrpc.ParseFullMethod(fullMethodName)
@@ -106,7 +120,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 
 	backend, ok := m.registry.GetBackend(service)
 	if !ok {
-		http.Error(w, fmt.Sprintf("Service not found: %s", service), http.StatusNotFound)
+		m.writeRegistryMissError(w, service)
 		return
 	}
 
@@ -299,7 +313,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 
 	backend, ok := m.registry.GetBackend(service)
 	if !ok {
-		http.Error(w, fmt.Sprintf("Service not found: %s", service), http.StatusNotFound)
+		m.writeRegistryMissError(w, service)
 		return
 	}
 

@@ -1,4 +1,4 @@
-export { type CallOptions, setApiBase } from './client';
+export { type CallOptions, ApiError, loadKnownConfigs, setApiBase } from './client';
 export * from './common';
 export * from './routes';
 export * from './neighbours';

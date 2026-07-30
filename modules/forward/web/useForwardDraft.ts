@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
-import { API } from '@yanet/core/api';
+import { API, loadKnownConfigs } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
-import { toaster } from '@yanet/core/utils';
+import { toaster, warnConfigsUnknown } from '@yanet/core/utils';
 import type { Rule } from '@yanet/core/api/forward';
 import {
     forwardDraftReducer,
@@ -76,11 +76,13 @@ export const useForwardDraft = (): UseForwardDraftResult => {
                 .map(cfg => cfg.name ?? '')
                 .filter(Boolean);
 
-            const configs: Array<{ name: string; rules: Rule[] }> = await Promise.all(
-                forwardNames.map(async (name): Promise<{ name: string; rules: Rule[] }> => {
+            const configs: Array<{ name: string; rules: Rule[] }> = await loadKnownConfigs(
+                forwardNames,
+                async (name): Promise<{ name: string; rules: Rule[] }> => {
                     const resp = await API.forward.showConfig({ name });
                     return { name, rules: resp.rules ?? [] };
-                }),
+                },
+                { onAllDropped: warnConfigsUnknown('forward-configs-unknown', 'forward') },
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });

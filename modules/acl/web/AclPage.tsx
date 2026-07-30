@@ -30,6 +30,7 @@ const AclPage: React.FC = () => {
     const {
         draftConfigs,
         loading,
+        loadFailed,
         draftRules,
         draftRuleIds,
         serverRules,
@@ -41,6 +42,8 @@ const AclPage: React.FC = () => {
         commitDeleteConfig,
         discardConfig,
     } = useAclDraft();
+
+    const canCreate = !loading && !loadFailed;
 
     const { configs: cachedConfigs, counts: cachedCounts } = useConfigListCache('acl');
 
@@ -269,7 +272,7 @@ const AclPage: React.FC = () => {
             addConfigSub: 'Create a new ACL configuration',
             withKeywords: true,
             onAddConfig: () => setAddConfigOpen(true),
-            addConfigDisabled: loading,
+            addConfigDisabled: !canCreate,
             onDeleteConfig: () => handleOpenDeleteConfig(),
             onSwitchConfig: (name) => handleTabSelect(name),
         }));
@@ -301,7 +304,7 @@ const AclPage: React.FC = () => {
         });
         return list;
     }, [
-        loading, currentIsDirty, currentConfig, draftConfigs, dirtySet,
+        canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet,
         enabledCounterNames, paused, currentFwStateName,
         openAdd, handleSavePress, handleDiscard, closeDrawer,
         handleTabSelect, handleOpenDeleteConfig, handleSearchChange, handleOpenLinkedFwstate,
@@ -378,6 +381,7 @@ const AclPage: React.FC = () => {
                         message="No ACL configurations found."
                         actionLabel="Add Config"
                         onAction={() => setAddConfigOpen(true)}
+                        actionDisabled={!canCreate}
                     />
                 ) : (
                     <>
@@ -388,7 +392,7 @@ const AclPage: React.FC = () => {
                             dirtyConfigs={dirtySet}
                             onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
-                            addConfigDisabled={loading}
+                            addConfigDisabled={!canCreate}
                         />
                         {loading ? (
                             <PageLoader loading size="l" />

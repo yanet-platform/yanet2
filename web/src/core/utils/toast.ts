@@ -72,3 +72,19 @@ export const toaster = {
         });
     },
 };
+
+/**
+ * Build an `onAllDropped` callback for `loadKnownConfigs` that warns about unknown configs.
+ *
+ * The helper owns the message and the count, so a caller only needs to supply the
+ * toast dedup key and the subject word used in the message. It fires once per page
+ * load when the control plane knows none of the requested configs; a remount fires
+ * it again, and it is the toast dedup key, not the callback, that collapses the repeat.
+ */
+export const warnConfigsUnknown = (toastKey: string, subject: string) => (count: number): void => {
+    const [noun, pronoun] = count === 1 ? ['configuration', 'It is'] : ['configurations', 'They are'];
+    toaster.warning(
+        toastKey,
+        `The control plane does not know ${count} ${subject} ${noun}. ${pronoun} not shown here.`,
+    );
+};

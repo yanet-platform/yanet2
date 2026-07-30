@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { API } from '@yanet/core/api';
+import { API, loadKnownConfigs } from '@yanet/core/api';
+import { warnConfigsUnknown } from '@yanet/core/utils';
 import type { PrefixRowItem } from './types';
 import { prefixDraftReducer, initialPrefixDraftState } from './prefixDraftReducer';
 import { useDraft } from '@yanet/core/components/draft';
@@ -23,13 +24,11 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
             .filter((c) => c.type === 'decap')
             .map((c) => c.name ?? '')
             .filter(Boolean);
-        return Promise.all(
-            configNames.map(async (name): Promise<{ name: string; rows: PrefixRowItem[] }> => {
-                const resp = await API.decap.showConfig({ name });
-                const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((p) => ({ id: p, prefix: p }));
-                return { name, rows };
-            }),
-        );
+        return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: PrefixRowItem[] }> => {
+            const resp = await API.decap.showConfig({ name });
+            const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((p) => ({ id: p, prefix: p }));
+            return { name, rows };
+        }, { onAllDropped: warnConfigsUnknown('decap-configs-unknown', 'decap') });
     }, []);
 
     const commit = useCallback(async (
