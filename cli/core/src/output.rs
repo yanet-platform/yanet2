@@ -383,11 +383,18 @@ fn print_empty_line(prefix: &str, text: &str) {
 
 /// Returns `true` if stdout is a terminal, memoized on first call.
 ///
-/// This is the print gate for [`empty`] and [`empty_with_hint`], and is
-/// deliberately independent of [`is_colored`], which reads *stderr* and
-/// also folds in `NO_COLOR` — reusing it here would make `NO_COLOR=1`
-/// suppress the message outright instead of just its colour.
-fn stdout_is_terminal() -> bool {
+/// This is the "may I print a line that is not data?" gate for a
+/// human-format renderer — the print gate for [`empty`] and
+/// [`empty_with_hint`], and for any other renderer deciding whether a
+/// reassurance line belongs alongside its data. A caller outside a
+/// [`data`] render closure must also consult [`Output::serializes`], as
+/// [`empty`] does. It is deliberately independent of [`is_colored`], which
+/// reads *stderr* and also folds in `NO_COLOR` — reusing it here would make
+/// `NO_COLOR=1` suppress the message outright instead of just its colour.
+/// It also answers a different question than
+/// [`display::terminal_width`]/[`display::stderr_width`], which assume
+/// output is wanted and only report how wide it may be.
+pub fn stdout_is_terminal() -> bool {
     static STDOUT_TTY: OnceLock<bool> = OnceLock::new();
     *STDOUT_TTY.get_or_init(|| std::io::stdout().is_terminal())
 }

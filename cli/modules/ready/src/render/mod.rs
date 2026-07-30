@@ -124,7 +124,14 @@ pub fn print_status_block(name: &str, scopes: &[Scope], name_width: usize, stale
 /// one blank line on each side. Single-service watch does not use this —
 /// it appends its `watching` suffix straight onto the block's own summary
 /// line via [`print_status_block`]'s `watching` flag instead.
+///
+/// This line is not data, it is a reassurance that the process is alive and
+/// waiting, so it prints only when stdout is a terminal.
 pub fn print_watching_line() {
+    if !output::stdout_is_terminal() {
+        return;
+    }
+
     let colored = output::is_colored();
     let symbols = Symbols::new(colored);
     let text = format!("watching{}", symbols.ellipsis);
@@ -148,9 +155,10 @@ fn all_ready_line(colored: bool) -> String {
 /// Prints the distinct banner aggregate `--watch` shows each time the whole
 /// set of watched subsystems crosses into fully ready.
 ///
-/// No surrounding blank lines: at startup [`print_watching_line`] already
-/// leaves a trailing blank above it, and mid-stream it sits flush under the
-/// transition lines that caused the crossing.
+/// No surrounding blank lines: at startup [`print_watching_line`] leaves a
+/// trailing blank above it whenever it prints at all, and when it does not
+/// print, a pipe wants no separator anyway. Mid-stream it sits flush under
+/// the transition lines that caused the crossing.
 pub fn print_all_ready_line() {
     let colored = output::is_colored();
     println!("{}", all_ready_line(colored));

@@ -57,10 +57,10 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Runs aggregate `--watch`.
 ///
 /// Probes every discovered service once — rendering the same blocks the
-/// one-shot aggregate command does, plus a standalone `watching…` line —
-/// then hands off to one supervisor task per service and a re-discovery
-/// task, rendering every event they produce until the process is
-/// interrupted.
+/// one-shot aggregate command does, plus a standalone `watching…` line
+/// when stdout is a terminal — then hands off to one supervisor task per
+/// service and a re-discovery task, rendering every event they produce
+/// until the process is interrupted.
 ///
 /// Only ends on interruption: every supervisor loops forever and the
 /// re-discovery task never exits, so the `Ok(true)` below is unreachable
@@ -87,7 +87,10 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
 
     // Always renders, even with no services discovered: the re-discovery
     // sweep below will pick services up as they register, so the wait
-    // must stay visible instead of leaving a silent hang.
+    // must stay visible to a human at a terminal instead of leaving a
+    // silent hang. `print_watching_line` is what gates that notice to a
+    // terminal, since a piped or redirected stdout was never the reader
+    // it was for.
     let snapshot_payload = SnapshotPayload {
         event: EventKind::Snapshot,
         services: &reports,
