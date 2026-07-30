@@ -1,0 +1,50 @@
+/**
+ * @file filter.h
+ * @brief Core types and utilities for the header-only filter (classifier) API.
+ *
+ * The filter is a static classification tree built over an explicit, ordered
+ * set of attributes (the “signature”). It is constructed with filter_init()
+ * and queried with FILTER_QUERY() using helpers from compiler.h and query.h.
+ *
+ * Key concepts:
+ * - struct filter:     owns the tree (vertices, registries, tables) and memory
+ * - struct filter_vertex: a node (leaf or inner) of the classification tree
+ *
+ * Usage overview:
+ *  1) Declare attribute signature with FILTER_COMPILER_DECLARE /
+ * FILTER_QUERY_DECLARE 2) Build rules (array of struct filter_rule) 3)
+ * filter_init(...) to build tree into struct filter 4) FILTER_QUERY(...) to
+ * classify a packet and get actions 5) filter_free(...) to release resources
+ *
+ * Thread-safety:
+ *  - Query is read-only and can be called concurrently for the same filter
+ *  - Building/freeing must be exclusive
+ *
+ * Limits:
+ *  - MAX_ATTRIBUTES sets the upper bound on attributes per signature
+ */
+#pragma once
+
+#include "common/memory.h"
+#include "common/registry.h"
+#include "common/value.h"
+
+#include <stdint.h>
+#include <threads.h>
+
+#define FILTER_RULE_INVALID (uint32_t)0xffffffff
+
+struct filter_query_attr {};
+
+struct filter {
+	struct filter_query_attr **attrs;
+	struct value_table *joints;
+	struct memory_context memory_context;
+};
+
+static inline uint64_t
+filter_memory_usage(struct filter *filter) {
+	struct memory_context *mctx = &filter->memory_context;
+	assert(mctx->balloc_size >= mctx->bfree_size);
+	return mctx->balloc_size - mctx->bfree_size;
+}
