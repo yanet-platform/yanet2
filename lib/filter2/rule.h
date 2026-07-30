@@ -107,6 +107,16 @@ struct filter_port_ranges {
 
 #define VLAN_UNSPEC ((uint16_t)-1)
 
+// IP fragmentation constraint for a rule.
+//
+// ANY matches every packet regardless of fragmentation; NONE matches only
+// non-fragmented packets; FRAG matches only fragments (offset > 0).
+enum filter_ip_fragment {
+	FILTER_IP_FRAG_ANY = 0,
+	FILTER_IP_FRAG_NONE = 1,
+	FILTER_IP_FRAG_FRAG = 2,
+};
+
 /**
  * @brief A single classification rule.
  *
@@ -130,6 +140,8 @@ struct filter_rule {
 	struct filter_vlan_range *vlan_ranges;
 
 	uint16_t vlan;
+
+	enum filter_ip_fragment fragment;
 
 	uint32_t action;
 };
