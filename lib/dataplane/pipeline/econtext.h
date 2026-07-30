@@ -17,6 +17,7 @@ struct cp_chain;
 struct cp_function;
 struct cp_pipeline;
 struct cp_device;
+struct cp_object;
 
 struct cp_config_gen;
 struct cp_config_counter_storage_registry;
@@ -119,6 +120,22 @@ struct device_ectx {
 	struct device_entry_ectx *output_pipelines;
 };
 
+// Per-worker execution context for a cp_object.
+//
+// Mirrors device_ectx minus the input/output pipeline entries: objects own a
+// counter registry but have no dataplane handler and no device binding, so an
+// object_ectx only carries the spawned per-worker counter storage.
+struct object_ectx {
+	struct cp_object *cp_object;
+	struct counter_storage *counter_storage;
+};
+
+// Per-worker execution context for one config generation.
+//
+// devices[] is the inline flexible-array tail of the single allocation sized
+// in config_gen_ectx_create. objects cannot also be a flexible array (a struct
+// may have only one), so it is a separately allocated array of offset slots
+// reached through the objects pointer, mirroring function_ectx.chains.
 struct config_gen_ectx {
 	struct cp_config_gen *cp_config_gen;
 	struct phy_device_map *phy_device_maps;
@@ -126,6 +143,8 @@ struct config_gen_ectx {
 	struct cp_config_counter_storage_registry *counter_storage_registry;
 
 	uint64_t device_count;
+	uint64_t object_count;
+	struct object_ectx **objects;
 	struct device_ectx *devices[];
 };
 
