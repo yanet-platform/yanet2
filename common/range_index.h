@@ -5,6 +5,9 @@
 #include "radix.h"
 #include "value.h"
 
+#include "key.h"
+#include "lpm.h"
+
 #include <strings.h>
 
 struct range_index {
@@ -121,4 +124,69 @@ range_index_free(struct range_index *range_index) {
 	SET_OFFSET_OF(&range_index->values, NULL);
 
 	radix_free(&range_index->radix);
+}
+
+/*
+ * Build an LPM from a range_index.
+ *
+ * The range_index stores a contiguous, ascending, non-overlapping partition
+ * of the full keyspace: radix maps each range-start key -> an index into the
+ * values[] array.  This function walks the radix in ascending order, derives
+ * each range's upper bound from the next key, and inserts [from..to] -> value
+ * into the LPM.  The LPM must already be initialised by the caller.
+ */
+struct range_index_lpm_ctx {
+	struct lpm *lpm;
+	const uint32_t *values;
+	uint8_t prev_from[LPM_KEY_SIZE_MAX];
+	uint32_t prev_value;
+};
+
+static inline int
+range_index_lpm_cb(
+	uint8_t key_size, const uint8_t *from, uint32_t index, void *data
+) {
+	struct range_index_lpm_ctx *ctx = (struct range_index_lpm_ctx *)data;
+
+	if (ctx->prev_value != LPM_VALUE_INVALID) {
+		uint8_t to[key_size];
+		memcpy(to, from, key_size);
+		filter_key_dec(key_size, to);
+		if (lpm_insert(
+			    ctx->lpm,
+			    key_size,
+			    ctx->prev_from,
+			    to,
+			    ctx->prev_value
+		    ))
+			return -1;
+	}
+
+	memcpy(ctx->prev_from, from, key_size);
+	ctx->prev_value = ctx->values[index];
+	return 0;
+}
+
+static inline int
+range_index_build_lpm(
+	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+) {
+	struct range_index_lpm_ctx ctx;
+	ctx.lpm = lpm;
+	ctx.values = ADDR_OF(&range_index->values);
+	ctx.prev_value = LPM_VALUE_INVALID;
+
+	if (radix_walk(&range_index->radix, key_size, range_index_lpm_cb, &ctx))
+		return -1;
+
+	if (ctx.prev_value != LPM_VALUE_INVALID) {
+		uint8_t to[key_size];
+		memset(to, 0xff, key_size);
+		if (lpm_insert(
+			    lpm, key_size, ctx.prev_from, to, ctx.prev_value
+		    ))
+			return -1;
+	}
+
+	return 0;
 }

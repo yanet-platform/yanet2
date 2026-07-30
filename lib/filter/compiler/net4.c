@@ -135,7 +135,11 @@ collect_net4_values(
 		goto error_lpm;
 	}
 
-	if (range_collector_collect(&collector, 4, lpm, &range_index)) {
+	if (range_collector_collect(&collector, 4, &range_index)) {
+		goto error_range_collect;
+	}
+
+	if (range_index_build_lpm(&range_index, 4, lpm)) {
 		goto error_range_collect;
 	}
 

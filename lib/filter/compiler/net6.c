@@ -112,7 +112,11 @@ collect_net6_range(
 		goto error_ri_init;
 	}
 
-	if (range_collector_collect(&collector, 8, lpm, ri)) {
+	if (range_collector_collect(&collector, 8, ri)) {
+		goto error_collect;
+	}
+
+	if (range_index_build_lpm(ri, 8, lpm)) {
 		goto error_collect;
 	}
 

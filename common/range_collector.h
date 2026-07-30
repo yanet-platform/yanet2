@@ -6,7 +6,6 @@
 #include "memory.h"
 
 #include "key.h"
-#include "lpm.h"
 #include "radix.h"
 #include "range_index.h"
 
@@ -120,7 +119,6 @@ range_collector_add(
 
 struct range_collector_ctx {
 	struct range_collector *collector;
-	struct lpm *lpm;
 	struct range_index *range_index;
 
 	uint32_t max_value;
@@ -173,9 +171,6 @@ range_collector_stack_emit(
 
 	if (*item.value == LPM_VALUE_INVALID)
 		*item.value = ctx->max_value++;
-
-	if (lpm_insert(ctx->lpm, key_size, ctx->pos, to, *item.value))
-		return -1;
 
 	if (range_index_insert(
 		    ctx->range_index, key_size, ctx->pos, *item.value
@@ -259,14 +254,12 @@ static inline int
 range_collector_collect(
 	struct range_collector *collector,
 	uint8_t key_size,
-	struct lpm *lpm64,
 	struct range_index *range_index
 ) {
 	struct range_collector_ctx ctx;
 	ctx.collector = collector;
 	ctx.max_value = 0;
 
-	ctx.lpm = lpm64;
 	ctx.range_index = range_index;
 
 	uint32_t stack_size = key_size * 8 + 1;
