@@ -280,6 +280,8 @@ chain_ectx_create(
 		goto error;
 	}
 
+	SET_OFFSET_OF(&chain_ectx->counter_storage, counter_storage);
+
 	if (cp_config_counter_storage_registry_insert_chain(
 		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
 		    cp_device->name,
@@ -297,7 +299,6 @@ chain_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(&chain_ectx->counter_storage, counter_storage);
 	SET_OFFSET_OF(
 		&chain_ectx->counter_packet_pending_input,
 		counter_get_value_handle(
@@ -495,6 +496,8 @@ function_ectx_create(
 		goto error;
 	}
 
+	SET_OFFSET_OF(&function_ectx->counter_storage, counter_storage);
+
 	if (cp_config_counter_storage_registry_insert_function(
 		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
 		    cp_device->name,
@@ -511,7 +514,6 @@ function_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(&function_ectx->counter_storage, counter_storage);
 	SET_OFFSET_OF(
 		&function_ectx->counter_packet_in,
 		counter_get_value_handle(
@@ -668,6 +670,8 @@ pipeline_ectx_create(
 		goto error;
 	}
 
+	SET_OFFSET_OF(&pipeline_ectx->counter_storage, counter_storage);
+
 	if (cp_config_counter_storage_registry_insert_pipeline(
 		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
 		    cp_device->name,
@@ -683,7 +687,6 @@ pipeline_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(&pipeline_ectx->counter_storage, counter_storage);
 	SET_OFFSET_OF(
 		&pipeline_ectx->counter_packet_in,
 		counter_get_value_handle(
@@ -1017,6 +1020,8 @@ device_ectx_create(
 		goto error;
 	}
 
+	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
+
 	if (cp_config_counter_storage_registry_insert_device(
 		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
 		    cp_device->name,
@@ -1030,8 +1035,6 @@ device_ectx_create(
 		);
 		goto error;
 	}
-
-	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
 
 	struct dp_device *dp_device =
 		ADDR_OF(&dp_config->dp_devices) + cp_device->dp_device_idx;
