@@ -12,6 +12,15 @@ import (
 	"strings"
 )
 
+// reasonSeparator marks the boundary between a row's key and its mandatory
+// reason, e.g. "loopindex:foo.go:Run:1  # legacy: migrate to idx".
+//
+// It requires two spaces before the "#" rather than treating the first bare
+// "#" as the boundary, so a key that legitimately embeds a "#" — a zapmsg
+// key carries the raw log message, and a message like "Worker #3 failed"
+// has one — is not truncated mid-key.
+const reasonSeparator = "  #"
+
 // Entry is one parsed, well-formed row of the allowlist file.
 type Entry struct {
 	Line   int
@@ -62,7 +71,7 @@ func Load(path string) (*Ledger, error) {
 
 		key := trimmed
 		reason := ""
-		if before, after, found := strings.Cut(trimmed, "#"); found {
+		if before, after, found := strings.Cut(trimmed, reasonSeparator); found {
 			key = strings.TrimSpace(before)
 			reason = strings.TrimSpace(after)
 		}

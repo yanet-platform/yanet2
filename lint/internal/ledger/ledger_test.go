@@ -73,6 +73,25 @@ func TestLoadMissingReasonIsAnIssue(t *testing.T) {
 	require.Contains(t, buf.String(), "is missing a mandatory reason")
 }
 
+// TestSuppressesMatchesKeyContainingHash verifies that a key embedding a
+// bare "#" — as a zapmsg key does, since it carries the raw log message —
+// is not truncated at that "#" as long as the row's reason is introduced by
+// the canonical two-space separator.
+func TestSuppressesMatchesKeyContainingHash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "allowlist.txt")
+	require.NoError(t, os.WriteFile(path, []byte(
+		"zapmsg:foo.go:Run:Info:Worker #3 failed:1  # legacy: lowercase the message\n",
+	), 0o644))
+
+	allowlist, err := ledger.Load(path)
+	require.NoError(t, err)
+	require.True(t, allowlist.Suppresses("zapmsg:foo.go:Run:Info:Worker #3 failed:1"))
+
+	var buf bytes.Buffer
+	require.False(t, allowlist.Report(&buf))
+	require.Empty(t, buf.String())
+}
+
 // TestLoadDuplicateEntryIsAnIssue verifies that a repeated allowlist key is
 // reported as an issue instead of silently overwriting the earlier row, so
 // a duplicated ledger entry cannot hide from review.

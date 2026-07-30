@@ -1,0 +1,378 @@
+# Allowlist for lint/style/cmd/stylelint.
+#
+# Format: one entry per line, "<key>  # <reason>". A blank line or a
+# whole-line "#" comment is ignored. The key identifies one violation of
+# one of the fourteen checks:
+#   <check>:<path>:<name>:<ordinal>
+# where <check> is one of logger, private, testpkg, receiver, loopindex,
+# maplit, grpcdial, sugar, zapmsg, zapkey, testctx, handlerblank, barenew,
+# or loggerlast. <name> is the enclosing function or method
+# ("RecvType.MethodName" or "FuncName"), a struct field
+# ("TypeName.FieldName" for loggerlast), a package-level var/const, or the
+# enclosing name followed by one or more ":"-separated segments identifying
+# the offending site, when several violations of one check can share an
+# enclosing declaration. The private check's key already carries an extra
+# segment of its own ("<path>:<func>:<expr>"), which the leading "private:"
+# prefix does not disturb: parsing only requires a ":" to be present
+# somewhere in the key. <ordinal> is a 1-based count of the violation's
+# position, in source order, among every other violation sharing the same
+# "<check>:<path>:<name>" prefix, so that several structurally identical
+# violations inside one function — three "for i := range" loops in the same
+# test, say — each get their own row instead of collapsing onto one.
+#
+# A reason after "#" is mandatory — an entry without one fails the lint
+# run. The "#" must be preceded by two spaces, since a key can itself embed
+# a bare "#" (a zapmsg key carries the raw log message).
+#
+# This file is a debt ledger, not a permanent exemption list. When a
+# listed site is brought into line with its convention, the violation
+# disappears from the scan and the corresponding row becomes stale. A
+# stale entry is itself a lint failure, so paying down the debt requires
+# deleting the row — the ledger is self-cleaning by construction.
+
+barenew:common/go/grpcmetrics/grpcmetrics.go:New:1  # legacy: rename to a descriptive constructor name
+barenew:common/go/xbackoff/backoff.go:New:1  # legacy: rename to a descriptive constructor name
+logger:controlplane/internal/auth/basic/factory.go:NewFromConfig:1  # legacy: migrate to the options pattern
+logger:controlplane/internal/auth/sshcert/factory.go:NewFromConfig:1  # legacy: migrate to the options pattern
+logger:controlplane/internal/auth/sshkey/factory.go:NewFromConfig:1  # legacy: migrate to the options pattern
+logger:modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing:1  # legacy: migrate to the options pattern
+logger:modules/pdump/controlplane/service.go:NewPdumpService:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/internal/bird/export.go:NewExportReader:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/internal/bird/parser.go:NewParser:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/internal/bird/update.go:NewUpdateDecoder:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/service.go:AdapterService.processBirdImport:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/service.go:AdapterService.reconnectStream:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:1  # legacy: migrate to the options pattern
+logger:operators/bird-adapter/service.go:NewAdapterService:1  # legacy: migrate to the options pattern
+loggerlast:common/go/readiness/readiness.go:options.Log:1  # legacy: move the *zap.Logger field to the end of the struct
+loggerlast:controlplane/gateway/gateway.go:gatewayOptions.Log:1  # legacy: move the *zap.Logger field to the end of the struct
+loggerlast:controlplane/internal/auth/sshkey/authenticator.go:authenticatorOptions.Log:1  # legacy: move the *zap.Logger field to the end of the struct
+loggerlast:controlplane/yncp/director.go:options.Log:1  # legacy: move the *zap.Logger field to the end of the struct
+loggerlast:operators/route/internal/operator/options.go:options.Log:1  # legacy: move the *zap.Logger field to the end of the struct
+loopindex:common/commonpb/v1/metrics.go:MetricValueToProto:i:1  # legacy: rename to idx
+loopindex:common/commonpb/v1/metrics_test.go:TestMetricValueToProto_Histogram:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/histogram_test.go:TestHistogramSnapshot:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/histogram_test.go:TestNewHistogram:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/map_test.go:BenchmarkGetOrCreate:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/map_test.go:BenchmarkGetOrCreateParallel:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/map_test.go:BenchmarkMetrics:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/map_test.go:TestMetricMapConcurrent:i:1  # legacy: rename to idx
+loopindex:common/go/metrics/map_test.go:TestMetricMapMetrics:i:1  # legacy: rename to idx
+loopindex:common/go/xcfg/load.go:validate:i:1  # legacy: rename to idx
+loopindex:common/go/xnetip/netwithmask.go:NetWithMask.ToPrefix:i:1  # legacy: rename to idx
+loopindex:controlplane/builtin/counters.go:makeHistogram:i:1  # legacy: rename to idx
+loopindex:controlplane/ffi/agent.go:Agent.UpdateDevices:i:1  # legacy: rename to idx
+loopindex:controlplane/ffi/agent.go:Agent.UpdateModules:i:1  # legacy: rename to idx
+loopindex:controlplane/ffi/shm.go:DPConfig.ModuleCounters:i:1  # legacy: rename to idx
+loopindex:controlplane/ffi/shm.go:DPConfig.PerformanceCounters:i:1  # legacy: rename to idx
+loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:1  # legacy: rename to idx
+loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:2  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:Balancer.UpdateVSRealStates:i:1  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:Balancer.UpdateVSRealWeights:i:1  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:VSConfig.cBuild:i:1  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:VSConfig.cBuild:i:2  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:cVSConfig.free:i:1  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:cVSConfig.free:i:2  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:createBalancer:i:1  # legacy: rename to idx
+loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:createBalancer:i:2  # legacy: rename to idx
+loopindex:modules/dscp/controlplane/service_test.go:Test_DscpService_ConcurrentAccess:i:1  # legacy: rename to idx
+loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:1  # legacy: rename to idx
+loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:2  # legacy: rename to idx
+loopindex:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:i:3  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorBackwardRead:i:1  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorBackwardRead:i:2  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorForwardRead:i:1  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorForwardRead:i:2  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorPaging:i:1  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test.go:TestCursorPaging:i:2  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test_helper.go:readCursorBackward:i:1  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/cursor_test_helper.go:readCursorForward:i:1  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/fwstate.go:createSyncFrame:i:1  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/fwstate.go:createSyncFrame:i:2  # legacy: rename to idx
+loopindex:modules/fwstate/tests/dataplane/fwstate.go:fwstateModuleConfig:i:1  # legacy: rename to idx
+loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:1  # legacy: rename to idx
+loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:2  # legacy: rename to idx
+loopindex:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:i:3  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:BenchmarkWorkerAreaRead:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferClone:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferConcurrency:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferEdgeCases:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:i:2  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestWorkerAreaHasMore:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:TestWorkerAreaRead:i:1  # legacy: rename to idx
+loopindex:modules/pdump/controlplane/ring_test.go:createTestRingBuffer:i:1  # legacy: rename to idx
+loopindex:modules/route/bindings/go/croute/cgo.go:ModuleConfig.addRouteList:i:1  # legacy: rename to idx
+maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1  # legacy: use T{} instead of make(map...)
+maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
+maplit:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandlesLocked:map[string]ModuleHandle:1  # legacy: use T{} instead of make(map...)
+maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
+maplit:modules/acl/controlplane/metrics_snapshot.go:newACLMetricsState:map[string]cacl.AclConfigInfo:1  # legacy: use T{} instead of make(map...)
+maplit:modules/fwstate/controlplane/service.go:FWStateService.LinkFWState:map[string]bool:1  # legacy: use T{} instead of make(map...)
+maplit:modules/fwstate/controlplane/service.go:NewFWStateService:map[string]*FwStateConfig:1  # legacy: use T{} instead of make(map...)
+maplit:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:map[byte]bool:1  # legacy: use T{} instead of make(map...)
+maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
+maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)
+maplit:operators/route/internal/discovery/neigh/neigh.go:newOptions:map[string]string:1  # legacy: use T{} instead of make(map...)
+private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg:1  # legacy: encapsulate behind an exported method or field
+private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg:2  # legacy: encapsulate behind an exported method or field
+private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.services:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/bundle/bundle.go:buildServices:factory.name:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/bundle/bundle.go:buildServices:factory.new:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:Gateway.Run:runner.module:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.kind:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.kind:2  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.service:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.service:2  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.service:3  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.service:4  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/gateway.go:NewGateway:entry.service:5  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/metrics_service.go:metricsCollectors:entry.service:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.GetBackend:entry.backend:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.ListBackends:entry.service:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.Renew:entry.backend:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.Renew:entry.lastSeenAt:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend:2  # legacy: encapsulate behind an exported method or field
+private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.lastSeenAt:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/authenticator.go:Authenticator.Authenticate:token.canonicalSignedData:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/authenticator.go:Authenticator.Authenticate:token.checkTimestamp:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/authenticator.go:NewAuthenticator:a.refreshLoop:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/ca_store.go:CAStore.VerifyCA:snapshot.entries:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/ca_store.go:NewCAStore:s.snapshot:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/ca_store.go:NewCAStoreFromLoader:s.snapshot:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshcert/token.go:parseToken:token.validate:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshkey/authenticator.go:Authenticator.Authenticate:token.canonicalSignedData:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshkey/authenticator.go:Authenticator.Authenticate:token.checkTimestamp:1  # legacy: encapsulate behind an exported method or field
+private:controlplane/internal/auth/sshkey/token.go:parseToken:token.validate:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.configs:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.configs:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.createLinkedHandlesLocked:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.mu:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.mu:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.publishMetricsSnapshotLocked:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:oldConfig.acl:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:oldConfig.acl:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.linkedConfigNamesLocked:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.mu:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.mu:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.configs:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.configs:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.createLinkedHandlesLocked:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.linkedConfigNamesLocked:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.mu:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.mu:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.publishMetricsSnapshotLocked:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:oldConfig.acl:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:oldConfig.acl:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandlesLocked:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNamesLocked:config.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/aclpb/v1/convert.go:FromActions:result[idx].setFromCAclKind:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/aclpb/v1/convert.go:ToActions:action.toCAclKind:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:m.metricsState.load:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:snapshot.configInfo:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:config.acl:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:config.acl:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:config.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:config.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:existing.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl:3  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.fwstateName:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:cfg.acl:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:cfg.acl:2  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:m.metricsState.publish:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.retention:m.metricsState.load:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.retention:snapshot.containsConfig:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.addressFamily:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.destroy:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.next:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopCount:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopDeviceName:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopDstMAC:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopSrcMAC:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixFrom:1  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixTo:1  # legacy: encapsulate behind an exported method or field
+private:operators/route/internal/operator/operator.go:applyStaticSeed:routeSvc.getOrCreateRib:1  # legacy: encapsulate behind an exported method or field
+receiver:common/go/dataplane/packet.go:Packet.Data:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:Packet.Free:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:Packet.Info:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:Packet.Next:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketFront.DropList:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketFront.Free:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketFront.InputList:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketFront.OutputList:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketFront.Payload:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketList.Add:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketList.Count:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketList.Data:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketList.First:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketList.Free:1  # legacy: rename the receiver to m
+receiver:common/go/dataplane/packet.go:PacketList.Info:1  # legacy: rename the receiver to m
+receiver:common/go/metrics/metric.go:Labels.Clone:1  # legacy: rename the receiver to m
+receiver:common/go/metrics/metric.go:Labels.Equals:1  # legacy: rename the receiver to m
+receiver:common/go/metrics/metric.go:MetricID.Clone:1  # legacy: rename the receiver to m
+receiver:common/go/metrics/metric.go:MetricID.Equals:1  # legacy: rename the receiver to m
+receiver:common/go/xnetip/netwithmask.go:NetWithMask.IsValid:1  # legacy: rename the receiver to m
+receiver:common/go/xnetip/netwithmask.go:NetWithMask.MaskBytes:1  # legacy: rename the receiver to m
+receiver:common/go/xnetip/netwithmask.go:NetWithMask.String:1  # legacy: rename the receiver to m
+receiver:common/go/xnetip/netwithmask.go:NetWithMask.ToPrefix:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:Packet.Data:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:Packet.Info:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketData.asRaw:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketFront.DropList:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketFront.InputList:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketFront.OutputList:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketList.Add:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketList.Free:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketList.Iter:1  # legacy: rename the receiver to m
+receiver:lib/utils/go/packet.go:PacketListIter.Next:1  # legacy: rename the receiver to m
+receiver:lint/protobuf/cmd/protolint/main.go:excludeList.Set:1  # legacy: rename the receiver to m
+receiver:lint/protobuf/cmd/protolint/main.go:excludeList.String:1  # legacy: rename the receiver to m
+receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Close:1  # legacy: rename the receiver to m
+receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Handle:1  # legacy: rename the receiver to m
+receiver:modules/pdump/controlplane/ffi.go:errorCallbackContext.Reason:1  # legacy: rename the receiver to m
+receiver:modules/pdump/controlplane/ring.go:workerArea.hasMore:1  # legacy: rename the receiver to m
+receiver:modules/pdump/controlplane/ring.go:workerArea.read:1  # legacy: rename the receiver to m
+receiver:operators/bird-adapter/cmd/yanet-bird-adapter/client.go:logLevelFlag.Type:1  # legacy: rename the receiver to m
+sugar:modules/pdump/controlplane/ffi.go:pdumpGoControlplaneLog:Sugar():1  # legacy: migrate off zap.SugaredLogger
+sugar:modules/pdump/controlplane/ffi.go:pdumpGoControlplaneLog:Sugar():2  # legacy: migrate off zap.SugaredLogger
+testctx:controlplane/internal/auth/interceptor_test.go:TestExtractToken:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/interceptor_test.go:TestExtractToken:Background:2  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/interceptor_test.go:TestStreamServerInterceptor:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/interceptor_test.go:TestUnaryServerInterceptor:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/manager_test.go:TestManager_Authenticate:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/manager_test.go:TestManager_Authorize:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/none/authenticator_test.go:TestNoneAuthenticator_Authenticate:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_ExpiredCertificate:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_ExpiredTimestamp:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_HappyPath:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_HostCertRejected:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_MethodBindingMismatch:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_NopRevocationChecker:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_RevokedCertificate:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_UntrustedCA:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_ECDSA:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_Ed25519:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_EmptyFullMethod:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_ExpiredTimestamp:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_InvalidTokenFormat:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_MethodBindingMismatch:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_NilRequestInfo:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_RSA:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_UnknownUser:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/auth/sshkey/authenticator_test.go:TestAuthenticate_WrongSignature:Background:1  # legacy: migrate to t.Context()
+testctx:controlplane/internal/xgrpc/interceptor_test.go:TestAccessLogInterceptor_ProtoLogValue:Background:1  # legacy: migrate to t.Context()
+testctx:modules/forward/controlplane/service_test.go:TestForwardServiceConcurrentAccess:Background:1  # legacy: migrate to t.Context()
+testctx:modules/mirror/controlplane/service_test.go:TestMirrorServiceConcurrentAccess:Background:1  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferConcurrency:Background:1  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:1  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:2  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:3  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:4  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:5  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:Background:6  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferSpawnWakers:Background:1  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferSpawnWakers:Background:2  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferStressTest:Background:1  # legacy: migrate to t.Context()
+testctx:modules/pdump/controlplane/ring_test.go:TestRingBufferStressTest:Background:2  # legacy: migrate to t.Context()
+testctx:operators/route/internal/operator/service_route_test.go:TestInsertRoute_NonStaticMultipleNexthops_InvalidArgument:Background:1  # legacy: migrate to t.Context()
+testpkg:bindings/go/dataplane_ut/bench_test.go:dataplaneut:1  # legacy: migrate to the external test package
+testpkg:bindings/go/dataplane_ut/dataplane_ut_test.go:dataplaneut:1  # legacy: migrate to the external test package
+testpkg:bindings/go/filter/types_test.go:filter:1  # legacy: migrate to the external test package
+testpkg:common/commonpb/v1/ipaddr_test.go:commonpb:1  # legacy: migrate to the external test package
+testpkg:common/commonpb/v1/iprange_test.go:commonpb:1  # legacy: migrate to the external test package
+testpkg:common/commonpb/v1/json_test.go:commonpb:1  # legacy: migrate to the external test package
+testpkg:common/commonpb/v1/macaddr_test.go:commonpb:1  # legacy: migrate to the external test package
+testpkg:common/commonpb/v1/metrics_test.go:commonpb:1  # legacy: migrate to the external test package
+testpkg:common/go/bitset/bitset_test.go:bitset:1  # legacy: migrate to the external test package
+testpkg:common/go/dataplane/packet_test.go:dataplane:1  # legacy: migrate to the external test package
+testpkg:common/go/grpcmetrics/grpcmetrics_test.go:grpcmetrics:1  # legacy: migrate to the external test package
+testpkg:common/go/maptrie/map_trie_test.go:maptrie:1  # legacy: migrate to the external test package
+testpkg:common/go/operator/function_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:common/go/operator/server_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:common/go/xcfg/load_test.go:xcfg:1  # legacy: migrate to the external test package
+testpkg:common/go/xcfg/nonempty_test.go:xcfg:1  # legacy: migrate to the external test package
+testpkg:common/go/xcfg/nonzero_test.go:xcfg:1  # legacy: migrate to the external test package
+testpkg:common/go/xgrpc/graceful_test.go:xgrpc:1  # legacy: migrate to the external test package
+testpkg:common/go/xnetip/netip_test.go:xnetip:1  # legacy: migrate to the external test package
+testpkg:controlplane/gateway/gateway_test.go:gateway:1  # legacy: migrate to the external test package
+testpkg:controlplane/gateway/readiness_test.go:gateway:1  # legacy: migrate to the external test package
+testpkg:controlplane/gateway/registry_test.go:gateway:1  # legacy: migrate to the external test package
+testpkg:controlplane/gateway/runner_test.go:gateway:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/interceptor_test.go:auth:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/manager_test.go:auth:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/none/authenticator_test.go:none:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/authenticator_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/ca_store_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/certificate_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/common_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/loader_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/revocation_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/signature_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshcert/token_test.go:sshcert:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshkey/authenticator_test.go:sshkey:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshkey/common_test.go:sshkey:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshkey/key_store_test.go:sshkey:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshkey/signature_test.go:sshkey:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/auth/sshkey/token_test.go:sshkey:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/xgrpc/interceptor_test.go:xgrpc:1  # legacy: migrate to the external test package
+testpkg:controlplane/internal/xgrpc/method_test.go:xgrpc:1  # legacy: migrate to the external test package
+testpkg:devices/plain/controlplane/service_test.go:plain:1  # legacy: migrate to the external test package
+testpkg:devices/trafgen/controlplane/service_test.go:trafgen:1  # legacy: migrate to the external test package
+testpkg:devices/vlan/controlplane/service_test.go:vlan:1  # legacy: migrate to the external test package
+testpkg:modules/acl/controlplane/service_test.go:acl:1  # legacy: migrate to the external test package
+testpkg:modules/blackhole/controlplane/service_test.go:blackhole:1  # legacy: migrate to the external test package
+testpkg:modules/decap/controlplane/service_test.go:decap:1  # legacy: migrate to the external test package
+testpkg:modules/dscp/controlplane/service_test.go:dscp:1  # legacy: migrate to the external test package
+testpkg:modules/fwstate/controlplane/fwstatepb/v1/convert_test.go:fwstatepb:1  # legacy: migrate to the external test package
+testpkg:modules/fwstate/controlplane/fwstatepb/v1/fwstate_test.go:fwstatepb:1  # legacy: migrate to the external test package
+testpkg:modules/fwstate/controlplane/metrics_test.go:fwstate:1  # legacy: migrate to the external test package
+testpkg:modules/fwstate/controlplane/service_test.go:fwstate:1  # legacy: migrate to the external test package
+testpkg:modules/fwstate/tests/dataplane/cursor_test.go:fwstate:1  # legacy: migrate to the external test package
+testpkg:modules/fwstate/tests/dataplane/fwstate_test.go:fwstate:1  # legacy: migrate to the external test package
+testpkg:modules/nat64/controlplane/service_test.go:nat64:1  # legacy: migrate to the external test package
+testpkg:modules/pdump/controlplane/ring_test.go:pdump:1  # white-box unit test of the lock-free ring buffer's internal read/write index state machine and cgo message-header layout; an external test cannot reach the shared-memory position pointers or the C struct fields it must drive
+testpkg:modules/route-mpls/controlplane/service_test.go:route_mpls:1  # legacy: migrate to the external test package
+testpkg:operators/bird-adapter/internal/bird/layout_test.go:bird:1  # white-box guard on unsafe struct layout; an external test cannot observe Sizeof of the private union types
+testpkg:operators/decap/internal/operator/cfg_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/forward/internal/operator/cfg_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/pipeline/internal/operator/stage_source_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/discovery/neigh/table_test.go:neigh:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/operator/fib_build_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/operator/metrics_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/operator/readiness_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/operator/route_source_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/operator/service_route_test.go:operator:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/rib/rib_test.go:rib:1  # legacy: migrate to the external test package
+testpkg:operators/route/internal/rib/routes_test.go:rib:1  # legacy: migrate to the external test package
+zapkey:modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing:ringIdx:1  # legacy: rename the zap field key to snake_case
+zapkey:modules/pdump/controlplane/service.go:PdumpService.SetConfig:defaultSnaplen:1  # legacy: rename the zap field key to snake_case
+zapkey:operators/bird-adapter/internal/bird/export.go:Export.Run:isTimeout:1  # legacy: rename the zap field key to snake_case
+zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:removedCount:1  # legacy: rename the zap field key to snake_case
+zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:removedCount:2  # legacy: rename the zap field key to snake_case
+zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:1  # legacy: rename the zap field key to snake_case
+zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:2  # legacy: rename the zap field key to snake_case
+zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:3  # legacy: rename the zap field key to snake_case
+zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:4  # legacy: rename the zap field key to snake_case
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD export reader stopped cleanly, terminating loop:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop cancelled via context:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop cancelled via context:2  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop cleanup: closing connection and cancelling context:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop stopping due to service quit signal:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop stopping due to service quit signal:2  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Warn:BIRD export reader context cancelled, terminating loop:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Warn:BIRD export reader stopped with error:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/operator/service_route.go:RouteService.FeedRIB:Info:FeedRIB session ended; scheduling cleanup:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/operator/service_route.go:RouteService.FeedRIB:Warn:FeedRIB session terminated by a newer session:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.AddUnicastRoute:Info:RIB: added unicast route:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task cancelled before timeout:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task completed:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task interrupted during cleanup:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task timeout reached, starting cleanup:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.RemoveUnicastRoute:Info:RIB: removed unicast route:1  # legacy: lowercase the first letter of the log message
+zapmsg:operators/route/internal/rib/rib.go:RIB.RemoveUnicastRoute:Warn:RIB: route not found for removal:1  # legacy: lowercase the first letter of the log message

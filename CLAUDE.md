@@ -45,7 +45,7 @@ clang-format -i <file>        # C
 cargo +nightly fmt            # Rust (uses nightly-only options in .rustfmt.toml)
 cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
-make lint-go                  # loglint + enclint + golangci-lint modernize (lint/logger/, lint/encapsulation/, .golangci.yml)
+make lint-go                  # stylelint + golangci-lint modernize (lint/style/, .golangci.yml)
 make lint-commit              # commit-subject convention check (lint/commit/)
 make proto-go                 # generate *.pb.go via protoc (needed before go lint locally)
 make hooks                    # install the git hooks (run once per clone)
@@ -297,9 +297,8 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   pattern**: `NewFoo(cfg, WithLog(log))`. Inside the constructor:
   `opts := newOptions(); for _, o := range options { o(opts) }`.
   Parameter is `options ...Option`, never renamed to `opt`/`optsList`.
-  `WithLog()` is defined per constructor. Enforced mechanically by
-  `lint/logger/` (`make lint-go`); known violations are ledgered in
-  `lint/logger/allowlist.txt` — do not add new rows.
+  `WithLog()` is defined per constructor. Enforced mechanically by the
+  `logger` check in `lint/style/` (`make lint-go`).
 - **Encapsulation**: mutex and the fields it guards stay private. A
   private field or method may only be reached through a base spelled
   `m` — the receiver, or the value under construction in a
@@ -309,26 +308,32 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   unexported: only an exported surface makes decomposition
   reviewable. The check keys on the identifier `m` rather than on
   true receiver identity, so it is a convention aid, not a proof.
-  Enforced mechanically by `lint/encapsulation/` (pre-commit hook via
-  `make hooks`, `make lint-go`, and CI via the `enclint` job in
-  `go-lint.yml`); known violations are ledgered in
-  `lint/encapsulation/allowlist-private.txt` — do not add new rows.
+  Enforced mechanically by the `private` check in `lint/style/`
+  (pre-commit hook via `make hooks`, `make lint-go`, and CI via the
+  `stylelint` job in `go-lint.yml`).
   Files that `import "C"` are exempt, because C struct fields cannot
   be distinguished from Go private fields without type information.
   A method may also reach into the private fields or methods of a
   parameter declared with the same type as its receiver, because an
   operation on another value of one's own type crosses no
   encapsulation boundary.
-- **Ledgered linters (`loglint`, `enclint`) are self-cleaning**: a row with
-  no live violation fails as STALE, so the code fix and the row deletion land
-  in one change. Pay by shape — data the owner only reads → exported field
-  (never a bolted-on `GetX()`); behaviour duplicated across call sites → a
-  real method owning the guard; a carrier holding what its wrapped object
-  already has → delete it. A rule WRONG on a whole class (`package main`
-  tests are unimportable) needs a code exemption, not a permanently unpayable
-  row; RIGHT but justified for one instance stays a row WITH a reason.
-  Silence never proves payment — a file outside the scan is silent too, so
-  positive-control it: `-allowlist-private <(git show HEAD:<file>)`.
+- **`stylelint` (`lint/style/`) gates fourteen of the rules above** in one
+  pass: `logger`, `private`, `testpkg`, `receiver`, `loopindex`, `maplit`,
+  `grpcdial`, `sugar`, `zapmsg`, `zapkey`, `testctx`, `handlerblank`,
+  `barenew`, `loggerlast`. Every known violation is one row of
+  `lint/style/allowlist.txt`, keyed `<check>:<path>:<name>` with a mandatory
+  reason — do not add new rows. Each check carries its own file scope
+  (production / test / cgo), documented at its declaration.
+- **The ledger is self-cleaning**: a row with no live violation fails as
+  STALE, so the code fix and the row deletion land in one change. Pay by
+  shape — data the owner only reads → exported field (never a bolted-on
+  `GetX()`); behaviour duplicated across call sites → a real method owning
+  the guard; a carrier holding what its wrapped object already has → delete
+  it. A rule WRONG on a whole class (`package main` tests are unimportable)
+  needs a code exemption, not a permanently unpayable row; RIGHT but
+  justified for one instance stays a row WITH a reason. Silence never proves
+  payment — a file outside the scan is silent too, so positive-control it:
+  `-allowlist <(git show HEAD:lint/style/allowlist.txt)`.
 - **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
 - **No log-only RPC stubs**: when a brief names an RPC, actually invoke
   the client. `m.log.Debug("would call …")` is a bug, not a stub.
@@ -341,9 +346,8 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Tests**: table-driven, use `require.NoError(t, err)`. Do not
   reference tests inside production-code comments. Every `_test.go`
   file declares `package <pkg>_test`, so the compiler — not a
-  linter — forbids reaching into private fields and functions; known
-  violations are ledgered in
-  `lint/encapsulation/allowlist-testpkg.txt` — do not add new rows.
+  linter — forbids reaching into private fields and functions; the
+  `testpkg` check in `lint/style/` gates it too.
   A `package main` command is exempt, because main packages are
   unimportable, so an external test could never reach anything.
 

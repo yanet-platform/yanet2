@@ -4,23 +4,21 @@ on:
   push:
     paths:
       - '**/*.go'
-      - 'lint/logger/**'
-      - 'lint/encapsulation/**'
+      - 'lint/style/**'
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
   pull_request:
     paths:
       - '**/*.go'
-      - 'lint/logger/**'
-      - 'lint/encapsulation/**'
+      - 'lint/style/**'
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
 
 jobs:
-  loglint:
-    name: Custom loglint linter
+  stylelint:
+    name: Custom stylelint linter
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,26 +28,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test ./lint/logger/cmd/loglint/
+        run: go test ./lint/style/cmd/stylelint/
 
       - name: Run linter
-        run: go run ./lint/logger/cmd/loglint/
-
-  enclint:
-    name: Custom enclint linter
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Run tests
-        run: go test ./lint/encapsulation/cmd/enclint/
-
-      - name: Run linter
-        run: go run ./lint/encapsulation/cmd/enclint/
+        run: go run ./lint/style/cmd/stylelint/
 
   modernize:
     name: golangci-lint modernize

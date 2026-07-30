@@ -1,24 +1,18 @@
 #!/bin/sh
 
-# Rejects commits that introduce a logger parameter on a constructor or
-# method, per the options-pattern rule in CLAUDE.md.
+# Rejects commits that violate one of this repository's Go style
+# conventions in CLAUDE.md: the options-pattern rule for loggers,
+# call-site encapsulation (reaching into a private field or method
+# outside the receiver m, or an internal _test.go package), receiver
+# naming, loop index naming, map literal construction, gRPC dialing,
+# zap sugared-logger usage, zap message and field-key casing, test
+# context usage, blank handler parameters, bare constructor naming, and
+# logger field placement.
 #
 # Runs a full-repo scan rather than a staged-files-only check, since the
 # linter's stale-allowlist check needs to see every violation to know which
 # rows are still live.
-if ! go run ./lint/logger/cmd/loglint/; then
-	echo "loglint failed; fix the violation above, or bypass with 'git commit --no-verify'" >&2
-	exit 1
-fi
-
-# Rejects commits that reach into a private field or method from outside
-# the receiver m, or that add an internal _test.go package, per the
-# encapsulation rule in CLAUDE.md.
-#
-# Runs a full-repo scan rather than a staged-files-only check, since the
-# linter's stale-allowlist check needs to see every violation to know which
-# rows are still live.
-if ! go run ./lint/encapsulation/cmd/enclint/; then
-	echo "enclint failed; fix the violation above, or bypass with 'git commit --no-verify'" >&2
+if ! go run ./lint/style/cmd/stylelint/; then
+	echo "stylelint failed; fix the violation above, or bypass with 'git commit --no-verify'" >&2
 	exit 1
 fi

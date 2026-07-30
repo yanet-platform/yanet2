@@ -164,10 +164,8 @@ proto-go:
 			$$protos
 
 lint-go:
-	go test ./lint/logger/cmd/loglint/
-	go run ./lint/logger/cmd/loglint/
-	go test ./lint/encapsulation/cmd/enclint/
-	go run ./lint/encapsulation/cmd/enclint/
+	go test ./lint/style/cmd/stylelint/
+	go run ./lint/style/cmd/stylelint/
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		$(MAKE) proto-go; \
 		golangci-lint run ./...; \
