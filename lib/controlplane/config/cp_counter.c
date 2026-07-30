@@ -346,6 +346,28 @@ cp_config_counter_storage_registry_insert_device(
 }
 
 struct counter_storage *
+cp_config_counter_storage_registry_lookup_object(
+	struct cp_config_counter_storage_registry *registry,
+	const char *object_name
+) {
+	struct counter_tag tags[] = {{.key = "object", .value = object_name}};
+	return get_one(registry, tags, 1);
+}
+
+int
+cp_config_counter_storage_registry_insert_object(
+	struct cp_config_counter_storage_registry *registry,
+	const char *object_name,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+) {
+	struct counter_tag tag = {.key = "object", .value = object_name};
+	return cp_config_counter_storage_registry_insert(
+		registry, &tag, 1, counter_storage, err
+	);
+}
+
+struct counter_storage *
 cp_config_counter_storage_registry_lookup_pipeline(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
