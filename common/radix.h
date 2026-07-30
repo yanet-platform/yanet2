@@ -164,7 +164,7 @@ typedef int (*radix_iterate_func)(
 	uint8_t key_size, const uint8_t *key, uint32_t value, void *data
 );
 
-static inline void
+static inline int
 radix_walk_rec(
 	const struct radix *radix,
 	uint8_t key_size,
@@ -181,24 +181,28 @@ radix_walk_rec(
 		}
 		key[depth] = next;
 		if (depth + 1 < key_size) {
-			radix_walk_rec(
-				radix,
-				key_size,
-				key,
-				radix_page(radix, value),
-				depth + 1,
-				cb,
-				cb_data
-			);
+			if (radix_walk_rec(
+				    radix,
+				    key_size,
+				    key,
+				    radix_page(radix, value),
+				    depth + 1,
+				    cb,
+				    cb_data
+			    ))
+				return -1;
 		} else {
-			cb(key_size, key, value, cb_data);
+			if (cb(key_size, key, value, cb_data))
+				return -1;
 		}
 	}
+	return 0;
 }
 
 /*
  * The routine iterates through whole RADIX and invokes a callback for
- * each valid key/value pair.
+ * each valid key/value pair. Returns -1 if the callback returns non-zero
+ * for any key, 0 otherwise.
  */
 static inline int
 radix_walk(
@@ -208,7 +212,7 @@ radix_walk(
 	void *iterate_func_data
 ) {
 	uint8_t key[key_size];
-	radix_walk_rec(
+	return radix_walk_rec(
 		radix,
 		key_size,
 		key,
@@ -217,7 +221,6 @@ radix_walk(
 		iterate_func,
 		iterate_func_data
 	);
-	return 0;
 }
 
 static inline int
