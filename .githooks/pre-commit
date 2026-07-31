@@ -17,7 +17,7 @@ if ! go run ./lint/style/cmd/stylelint/; then
 	exit 1
 fi
 
-if ! make lint/comments; then
+if ! go run ./lint/comment/cmd/commentlint/; then
 	echo "commentlint failed; fix the violation above, or bypass with 'git commit --no-verify'" >&2
 	exit 1
 fi

@@ -37,6 +37,8 @@ type trackedFile struct {
 	Hash string
 }
 
+type gitCommand func(root string, arguments ...string) *exec.Cmd
+
 type shellHeredoc struct {
 	Marker    string
 	StripTabs bool
@@ -70,11 +72,15 @@ func main() {
 }
 
 func scan(root string) ([]finding, error) {
-	files, err := trackedFiles(root)
+	return scanWithGitCommand(root, newGitCommand)
+}
+
+func scanWithGitCommand(root string, command gitCommand) ([]finding, error) {
+	files, err := trackedFiles(root, command)
 	if err != nil {
 		return nil, err
 	}
-	contents, err := stagedContents(root, files)
+	contents, err := stagedContents(root, files, command)
 	if err != nil {
 		return nil, err
 	}
@@ -104,9 +110,8 @@ func scan(root string) ([]finding, error) {
 	return findings, nil
 }
 
-func trackedFiles(root string) ([]trackedFile, error) {
-	command := exec.Command("git", "-C", root, "ls-files", "--cached", "--stage", "-z")
-	output, err := command.Output()
+func trackedFiles(root string, command gitCommand) ([]trackedFile, error) {
+	output, err := command(root, "ls-files", "--cached", "--stage", "-z").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list tracked files: %w", err)
 	}
@@ -130,16 +135,16 @@ func parseTrackedFiles(output []byte) []trackedFile {
 	return files
 }
 
-func stagedContents(root string, files []trackedFile) (map[string][]byte, error) {
+func stagedContents(root string, files []trackedFile, command gitCommand) (map[string][]byte, error) {
 	var request strings.Builder
 	for _, file := range files {
 		if file.Mode == "100644" || file.Mode == "100755" {
 			fmt.Fprintln(&request, file.Hash)
 		}
 	}
-	command := exec.Command("git", "-C", root, "cat-file", "--batch")
-	command.Stdin = strings.NewReader(request.String())
-	output, err := command.Output()
+	gitCommand := command(root, "cat-file", "--batch")
+	gitCommand.Stdin = strings.NewReader(request.String())
+	output, err := gitCommand.Output()
 	if err != nil {
 		return nil, fmt.Errorf("read staged files: %w", err)
 	}
@@ -172,6 +177,10 @@ func stagedContents(root string, files []trackedFile) (map[string][]byte, error)
 		contents[file.Path] = content
 	}
 	return contents, nil
+}
+
+func newGitCommand(root string, arguments ...string) *exec.Cmd {
+	return exec.Command("git", append([]string{"-C", root}, arguments...)...)
 }
 
 func profileFor(path string) (profile, bool) {

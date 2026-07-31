@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -716,6 +717,70 @@ func TestScanSkipsGitlinksAndSymlinks(t *testing.T) {
 	}
 }
 
+// TestGitCommandsIgnoreCallerRepositoryEnvironment verifies fixtures and scans
+// use their explicit repository root.
+func TestGitCommandsIgnoreCallerRepositoryEnvironment(t *testing.T) {
+	cleanEnvironment := sanitizedGitEnvironment(t)
+	callerRoot := t.TempDir()
+	runGit(t, callerRoot, "init")
+	writeTestFile(t, callerRoot, "caller.go", "// ordinary comment\n")
+	runGit(t, callerRoot, "add", "caller.go")
+	callerIndex := runGitOutputWithEnvironment(t, cleanEnvironment, callerRoot, "ls-files", "--cached", "--stage")
+	callerBare := runGitOutputWithEnvironment(t, cleanEnvironment, callerRoot, "config", "--bool", "core.bare")
+
+	fixtureRoot := t.TempDir()
+	t.Setenv("GIT_DIR", filepath.Join(callerRoot, ".git"))
+	t.Setenv("GIT_WORK_TREE", fixtureRoot)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(callerRoot, ".git", "index"))
+	t.Setenv("GIT_COMMON_DIR", filepath.Join(callerRoot, ".git"))
+	runGit(t, fixtureRoot, "init")
+	writeTestFile(t, fixtureRoot, "fixture.go", "// =====\n")
+	runGit(t, fixtureRoot, "add", "fixture.go")
+
+	findings, err := scanWithGitCommand(fixtureRoot, sanitizedGitCommand(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Path != "fixture.go" || findings[0].Line != 1 {
+		t.Fatalf("unexpected findings: %#v", findings)
+	}
+	if actual := runGitOutputWithEnvironment(t, cleanEnvironment, callerRoot, "config", "--bool", "core.bare"); actual != callerBare {
+		t.Fatalf("caller core.bare changed: expected %q, got %q", callerBare, actual)
+	}
+	if actual := runGitOutputWithEnvironment(t, cleanEnvironment, callerRoot, "ls-files", "--cached", "--stage"); actual != callerIndex {
+		t.Fatalf("caller index changed: expected %q, got %q", callerIndex, actual)
+	}
+}
+
+// TestScanUsesAlternateIndex verifies production scans the index selected by
+// its Git environment.
+func TestScanUsesAlternateIndex(t *testing.T) {
+	clearGitLocalEnvironment(t)
+	cleanEnvironment := sanitizedGitEnvironment(t)
+	root := t.TempDir()
+	runGit(t, root, "init")
+	writeTestFile(t, root, "source.go", "// ordinary comment\n")
+	runGit(t, root, "add", "source.go")
+
+	alternateIndex := filepath.Join(t.TempDir(), "index")
+	writeTestFile(t, root, "source.go", "// =====\n")
+	gitEnvironment := append(cleanEnvironment, "GIT_INDEX_FILE="+alternateIndex)
+	runGitWithEnvironment(t, gitEnvironment, root, "read-tree", "--empty")
+	runGitWithEnvironment(t, gitEnvironment, root, "add", "source.go")
+	if persistentContent := runGitOutputWithEnvironment(t, cleanEnvironment, root, "show", ":source.go"); persistentContent != "// ordinary comment" {
+		t.Fatalf("unexpected persistent index content: %q", persistentContent)
+	}
+	t.Setenv("GIT_INDEX_FILE", alternateIndex)
+
+	findings, err := scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Path != "source.go" || findings[0].Line != 1 {
+		t.Fatalf("unexpected findings: %#v", findings)
+	}
+}
+
 func writeTestFile(t *testing.T, root, path, content string) {
 	t.Helper()
 	fullPath := filepath.Join(root, path)
@@ -726,7 +791,7 @@ func writeTestFile(t *testing.T, root, path, content string) {
 
 func runGit(t *testing.T, root string, arguments ...string) {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	command := sanitizedGitCommand(t)(root, arguments...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", arguments, err, output)
 	}
@@ -734,10 +799,108 @@ func runGit(t *testing.T, root string, arguments ...string) {
 
 func runGitOutput(t *testing.T, root string, arguments ...string) string {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	command := sanitizedGitCommand(t)(root, arguments...)
 	output, err := command.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", arguments, err)
 	}
 	return string(output[:len(output)-1])
+}
+
+func runGitWithEnvironment(t *testing.T, environment []string, root string, arguments ...string) {
+	t.Helper()
+	command := newGitCommand(root, arguments...)
+	command.Env = environment
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", arguments, err, output)
+	}
+}
+
+func runGitOutputWithEnvironment(t *testing.T, environment []string, root string, arguments ...string) string {
+	t.Helper()
+	command := newGitCommand(root, arguments...)
+	command.Env = environment
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", arguments, err)
+	}
+	return string(output[:len(output)-1])
+}
+
+func sanitizedGitCommand(t *testing.T) gitCommand {
+	t.Helper()
+	environment := sanitizedGitEnvironment(t)
+	return func(root string, arguments ...string) *exec.Cmd {
+		command := newGitCommand(root, arguments...)
+		command.Env = environment
+		return command
+	}
+}
+
+func sanitizedGitEnvironment(t *testing.T) []string {
+	t.Helper()
+	localVariables := gitLocalEnvironmentVariables(t)
+	environment := make([]string, 0, len(os.Environ()))
+	for _, variable := range os.Environ() {
+		name, _, found := strings.Cut(variable, "=")
+		if found && !isGitLocalEnvironmentVariable(name, localVariables) {
+			environment = append(environment, variable)
+		}
+	}
+	return environment
+}
+
+func clearGitLocalEnvironment(t *testing.T) {
+	t.Helper()
+	localVariables := gitLocalEnvironmentVariables(t)
+	type environmentValue struct {
+		value   string
+		present bool
+	}
+	previous := map[string]environmentValue{}
+	for _, variable := range os.Environ() {
+		name, _, found := strings.Cut(variable, "=")
+		if !found || !isGitLocalEnvironmentVariable(name, localVariables) {
+			continue
+		}
+		value, present := os.LookupEnv(name)
+		previous[name] = environmentValue{value: value, present: present}
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for name, previousValue := range previous {
+			var err error
+			if previousValue.present {
+				err = os.Setenv(name, previousValue.value)
+			} else {
+				err = os.Unsetenv(name)
+			}
+			if err != nil {
+				t.Error(err)
+			}
+		}
+	})
+}
+
+func gitLocalEnvironmentVariables(t *testing.T) map[string]struct{} {
+	t.Helper()
+	command := exec.Command("git", "rev-parse", "--local-env-vars")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	localVariables := map[string]struct{}{}
+	for name := range strings.FieldsSeq(string(output)) {
+		localVariables[name] = struct{}{}
+	}
+	return localVariables
+}
+
+func isGitLocalEnvironmentVariable(name string, localVariables map[string]struct{}) bool {
+	if _, found := localVariables[name]; found {
+		return true
+	}
+	return strings.HasPrefix(name, "GIT_CONFIG_KEY_") || strings.HasPrefix(name, "GIT_CONFIG_VALUE_")
 }
