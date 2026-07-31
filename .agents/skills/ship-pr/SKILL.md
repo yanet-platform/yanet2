@@ -2,7 +2,7 @@
 name: ship-pr
 description: >-
   The canonical publish/merge runbook for landing a verified change on main:
-  branch from confirmed origin/main, stage ONLY the intended files, open a
+  branch from confirmed origin/main, stage ONLY the approved publish manifest, open a
   scoped PR (no AI attribution footers), drive CI to green, address EVERY review/Codex
   finding, and merge with the correct squash/rebase strategy — then clean up the
   branch and worktree. Use this skill WHENEVER the user asks to ship, land,
@@ -16,7 +16,7 @@ description: >-
 
 # ship-pr
 
-Take a verified, reviewer-approved change and land it on `main` cleanly: branch from confirmed `origin/main`, stage exactly the intended files, open a scoped PR, drive CI green, address every review finding, and merge with the right strategy — then tear down the branch and worktree.
+Take a verified, reviewer-approved change and land it on `main` cleanly: branch from confirmed `origin/main`, stage exactly the approved publish manifest, open a scoped PR, drive CI green, address every review finding, and merge with the right strategy — then tear down the branch and worktree.
 
 You (the architect) drive this. You never write the code — that was already delegated to the coders and verified. This skill is purely the **publish workflow**: local git plus GitHub MCP, and the discipline that keeps a parallel, worktree-heavy repo from corrupting itself.
 
@@ -24,9 +24,10 @@ You (the architect) drive this. You never write the code — that was already de
 
 ## Non-negotiables
 
-- **Don't publish unverified work.** Before branching, the change must have passed its verification gates AND a `reviewer` APPROVED pass (Phase 0). If either is missing, do that first — never ship unreviewed code.
+- **Don't publish unverified work.** Before branching, the change must have passed its verification gates AND a `reviewer` APPROVED pass using `review-change` on the complete current candidate (Phase 0). If either is missing, do that first — never ship unreviewed code.
+- **Carry approval only by fingerprint equivalence.** The fingerprint is the exact reviewed base, review/publish manifests, file modes/types, and bytes. After transfer, staging, commit, amend, or push, verify the packaged side matches it exactly; a new commit SHA alone is harmless, but any fingerprint difference requires a fresh full-candidate review.
 - **Branch from CONFIRMED `origin/main`**, never the session-start branch line and never a bare `git switch -c` (HEAD may be on a parallel WIP branch and drag its commits in).
-- **Stage ONLY this change's files.** Never `git add -A`. Never stage pre-existing/unrelated dirty files. `git diff --cached -- <file>` each one, and cross-check every new untracked (`??`) file the change created is included.
+- **Stage ONLY the approved publish manifest.** The complete review manifest may also contain local-only ignored configuration; preserve it in its source worktree but never transfer or stage it. Never `git add -A`. Never stage pre-existing/unrelated dirty files. `git diff --cached -- <file>` each publish entry, and cross-check every publish-class untracked (`??`) file is included.
 - **No destructive git with a dirty tree or without explicit permission** — no `reset --hard`/`checkout`/`restore`/`stash`/index ops that could wipe unrelated uncommitted work. Recovery recipes are in `references/branching-and-recovery.md`.
 - **Verify `git branch --show-current` before EVERY commit/amend/push** — a parallel actor can switch branches under you and land your amend on `main`.
 - **Discover GitHub MCP before choosing a client.** Lazy `mcp__github__*` tools may be absent from the initial tool list, so actively search the available tool metadata first. If found, call `mcp__github__get_me` before any other GitHub operation; use GitHub MCP for PR list/search/create/read/update, changed files, reviews, review threads/comments, check runs/status, replies, review actions, and merge.
@@ -42,14 +43,14 @@ You (the architect) drive this. You never write the code — that was already de
 
 ### Phase 0 — Precondition: is it ready to ship?
 
-1. **Gates green, run from repo ROOT** (each catches what the narrower command misses):
+1. **Materialize the complete candidate before gates or review.** If the change touched any `Cargo.toml` dependency, regenerate the root `Cargo.lock` with `cargo build`, inspect `git diff -- Cargo.lock`, and include it in the publish manifest — CI can pass while its omission remains silent.
+2. **Gates green, run from repo ROOT** (each catches what the narrower command misses):
    - Go → `go build ./...` AND `make test` (per-module CGO test pkgs under `modules/*/tests/...` are missed from `controlplane/`; use `make test-functional` only when the functional/QEMU scope requires it).
    - C → `meson compile -C build` AND `meson test -C build` AND `make fuzz`.
    - Rust → `cargo test --workspace`.
    - Web, only when the PR touches `web/**`, `modules/*/web/**`, `operators/*/web/**`, or `devices/*/web/**` → `npm ci`, `npm run test -w web`, AND `npm run build -w web`. For browser-visible changes, also run Playwright on the real path and inspect its screenshot after asserting the relevant row count.
    - For C changes reachable across the CGO boundary (`lib/controlplane`, `api/`, anything called from `controlplane/ffi` or `bindings/go`) → also `make test-asan` (meson-only ASan never crosses into the Go cgo tests).
-2. **A `reviewer` APPROVED pass exists** for this change. If the work is uncommitted, the reviewer inspects the exact on-disk paths in the worktree that contains it, without creating a clean isolation fork; never in the same batch as the coder. If not yet done, run it now.
-3. If the change touched any `Cargo.toml` dependency, regenerate and stage the root `Cargo.lock` in THIS PR (`cargo build`, then `git diff -- Cargo.lock`) — CI passes without it, so the omission is silent.
+3. **A `reviewer` APPROVED pass using `review-change` exists** for the complete current candidate. Give the reviewer the task brief, exact base, candidate worktree or PR, and full review manifest, with every entry classified as publish or local-only and an exact publish manifest. If the work is uncommitted, the reviewer inspects the exact on-disk paths in the worktree that contains it, without creating a clean isolation fork; never in the same batch as the coder. Any approval-fingerprint change invalidates the approval, so after a rebase or fix re-review the whole candidate, not only the new diff. If approval is missing or stale, run the review now.
 
 ### Phase 1 — Branch from confirmed origin/main
 
@@ -57,12 +58,12 @@ You (the architect) drive this. You never write the code — that was already de
 2. Create the branch off confirmed `origin/main`. Use a **shell-safe** name — `<type>/<scope>-<what>` (e.g. `chore/ai-ship-pr`): no `(`/`)` (bash mis-parses them unquoted in git commands), and avoid a name that is also a path prefix of another branch (see stacked-PR ref):
    - Worktree (preferred for isolation): `git worktree add .agent-state/worktrees/<name> -b <branch> origin/main` (root-local gitignored runtime state, never sibling dirs).
    - Main checkout (only when clean and unshared): `git switch main && git fetch origin main && git switch -c <branch> origin/main`.
-3. If reviewed work is uncommitted in ANY source worktree (primary or coder), transfer ONLY its exact reviewed diff/file set to the fresh worktree with verified temporary patches, never a direct pipe between producer and applier. Run this separately for staged tracked changes (with `--cached`) and unstaged tracked changes (without it); either may be empty.
+3. If reviewed publish work is uncommitted in ANY source worktree (primary or coder), transfer ONLY the exact publish manifest to the fresh worktree with verified temporary patches, never a direct pipe between producer and applier. Leave every reviewed local-only entry untouched in its source worktree. Run transfer separately for staged tracked changes (with `--cached`) and unstaged tracked changes (without it); either may be empty.
 
    ```bash
    patch_path=$(mktemp) || exit 1
    trap 'rm -f -- "$patch_path"' EXIT
-   if ! git -C <source-worktree> diff --cached --binary -- <reviewed-files> >"$patch_path"; then
+   if ! git -C <source-worktree> diff --cached --binary -- <publish-files> >"$patch_path"; then
      exit 1
    fi
    if [ -s "$patch_path" ]; then
@@ -73,7 +74,7 @@ You (the architect) drive this. You never write the code — that was already de
    trap - EXIT
    ```
 
-   For each reviewed untracked file, use a fresh temporary patch and handle `git diff --no-index` explicitly:
+   For each publish-class untracked file, use a fresh temporary patch and handle `git diff --no-index` explicitly:
 
    ```bash
    patch_path=$(mktemp) || exit 1
@@ -92,8 +93,8 @@ You (the architect) drive this. You never write the code — that was already de
    trap - EXIT
    ```
 
-   Here `1` with a non-empty patch is success, `0` means no difference, and any other status is an error. Apply only after this check. Track every non-empty category and fail if none transferred; then inspect `git -C <fresh-worktree> diff -- <reviewed-files>` and `git -C <fresh-worktree> status --short -- <reviewed-files>` before rerunning the affected Phase 0 gates. Do not copy the tree or touch unrelated dirty state.
-4. Only for clean, committed work on a coder's worktree branch, confirm that branch was forked from current `origin/main`; rebase it if stale (`git rebase origin/main`, never `git merge origin/main`). After rebase, rerun the affected gates; if conflict resolution changed content, obtain a fresh reviewer pass before publishing. Never rebase a dirty coder worktree.
+   Here `1` with a non-empty patch is success, `0` means no difference, and any other status is an error. Apply only after this check. Track every non-empty category and fail if none transferred; then inspect `git -C <fresh-worktree> diff -- <publish-files>` and `git -C <fresh-worktree> status --short -- <publish-files>`, and prove the transferred publish fingerprint equals the approved one before rerunning the affected Phase 0 gates. Do not copy the tree or touch unrelated dirty state.
+4. Only for clean, committed work on a coder's worktree branch, confirm that branch was forked from current `origin/main`; rebase it if stale (`git rebase origin/main`, never `git merge origin/main`). Any rebase changes the reviewed base, even without conflicts: rerun the affected gates and obtain a fresh full-candidate `review-change` approval before publishing. Never rebase a dirty coder worktree.
 5. To run Go commands in a fresh worktree, set `$source_worktree` and `$fresh_worktree` to verified absolute paths, then seed only generated protobufs and the verified build directory. Do not overwrite any existing destination:
 
    ```bash
@@ -136,30 +137,32 @@ You (the architect) drive this. You never write the code — that was already de
 
 ### Phase 2 — Stage exactly this change
 
-`git add` the explicit file list (never `-A`). `git diff --cached -- <file>` EACH staged file — an index entry can pick up unrelated hunks from a concurrent dirty file. Cross-check every new untracked (`??`) file is staged: omitting one ships a dangling import, and web CI is vitest-only (no build/tsc gate) so it stays green on a broken module graph.
+`git add` the explicit publish manifest (never `-A`). `git diff --cached -- <file>` EACH staged file — an index entry can pick up unrelated hunks from a concurrent dirty file. Cross-check every publish-class untracked (`??`) file is staged and no local-only entry is staged, then prove the staged modes/types/bytes equal the approved publish fingerprint. Omitting a publish entry can ship a dangling import, while including local state leaks it into the PR.
 
 ### Phase 3 — Commit
 
-Verify the branch first. Commit with a conventional scoped subject, high-level body, no footers. (Authorized only because invoking this skill is the publish ask.)
+Verify the branch first. Commit with a conventional scoped subject, high-level body, no footers. Then prove the committed diff against the recorded base has the approved publish manifest, modes/types, and bytes; a mismatch invalidates approval and must not be pushed. (Authorized only because invoking this skill is the publish ask.)
 
 ### Phase 4 — Push & open the PR
 
 1. `git push -u origin <branch>` (from inside the worktree if used).
 2. Create the PR through GitHub MCP with explicit head `<branch>` and base `main`. Scoped title; body per the non-negotiables; **check the body for footers before creating**. Use MCP PR search/list/read to find an existing PR rather than creating a duplicate.
-3. Read its changed files through GitHub MCP and confirm ONLY this change's files are present. Extras (inherited WIP) → `git rebase --onto origin/main <wip-tip> <branch>`, force-push-with-lease, re-verify.
+3. Read its changed files and diff through GitHub MCP and confirm the PR base plus publish manifest, modes/types, and bytes match the approval fingerprint exactly. Extras (inherited WIP or local-only state) → `git rebase --onto origin/main <wip-tip> <branch>`, rerun the affected gates, obtain a fresh full-candidate `review-change` approval, force-push-with-lease, and re-verify the fingerprint.
 4. **Workflow-file PRs**: pushing a commit touching `.github/workflows/` needs the git token to have `workflow` OAuth scope — you can't self-grant. If GitHub MCP cannot repair credentials, ask the user to run `gh auth refresh -h github.com -s workflow` as a recorded fallback. A path-filtered workflow won't run when only its own YAML changes — its file must be in its own `paths:` filter to self-trigger.
 
 ### Phase 5 — CI & review
 
 1. Inspect PR status and check runs through GitHub MCP. Poll MCP status without an upfront `sleep`; use `gh pr checks <pr> --watch` only when MCP lacks continuous watch, and record that fallback. One short retry is justified only when the watch exits immediately with "no checks" right after a push.
 2. **Flaky/infra failure** not attributable to the change: read the run details through MCP and compare the SAME workflow on the LATEST `origin/main` runs (a flake window can span several consecutive main runs and mimic determinism). Re-run through MCP when supported; otherwise use `gh run rerun <run-id> --failed` and record why. The standalone `funtests` pull_request workflow is chronically broken — distinct from the build-matrix `Run Functional Tests` job.
-3. **Review findings**: use GitHub MCP to read BOTH PR-level reviews and inline review threads/comments. The `chatgpt-codex-connector` reviewer's inline P1/P2/P3 findings are often REAL. For each: FIX (amend pre-merge or follow-up) or REPLY through MCP why it's wrong. Main's ruleset requires thread resolution — after a fix, resolve the thread through MCP if supported; otherwise use `gh api graphql` and record why. Re-summon with a `@codex review` comment through MCP (force-push alone doesn't retrigger). After one addressed round per PR, merge only when authorized; otherwise leave CI green and report it ready to merge.
-4. After addressing a finding, rerun the affected local verification gates before amend, push, or merge.
+3. **Review findings**: use GitHub MCP to read BOTH PR-level reviews and inline review threads/comments. The `chatgpt-codex-connector` reviewer's inline P1/P2/P3 findings are often REAL. Reproduce each finding, then FIX it or REPLY through MCP with evidence that it is wrong.
+4. If a finding changes any candidate file, rerun the affected local verification gates AND obtain a fresh `reviewer` APPROVED pass using `review-change` on the whole current candidate before amend. After amend, prove the committed fingerprint equals the approved one; push only when equivalent.
+5. After pushing a fix, reply to and resolve the addressed thread through MCP when supported; otherwise use `gh api graphql` and record why. Re-summon with a `@codex review` comment through MCP because force-push alone does not retrigger review.
+6. Return to step 1 for the new head and reread both PR-level reviews and inline threads. After at least one addressed round with green checks and no unresolved findings, proceed to Phase 6 only when merge was authorized; otherwise leave the PR ready to merge and report it.
 
 ### Phase 6 — Merge (only if "merge" was authorized)
 
 - Merge through GitHub MCP. **Single-commit PR** → squash. **Multi-commit, deliberately structured history** → rebase (preserve it). **Multi-commit where extras are review fixups** → squash with an explicit clean `<type>(<scope>): <title> (#N)` title and high-level or empty body. Never let GitHub's default squash body (a bullet list of every intermediate commit) land — the user calls that "каша" and it is a convention violation.
-- Updating the branch with newer main before merge → REBASE + force-with-lease, never `git merge origin/main`.
+- Updating the branch with newer main before merge → REBASE, rerun the affected gates, obtain a fresh full-candidate `review-change` approval, then force-with-lease and return to Phase 5 for the new head; never `git merge origin/main`.
 
 ### Phase 7 — Cleanup without touching an unsafe main checkout
 
@@ -192,10 +195,10 @@ Run from a separate cwd, never the worktree being removed:
 
 Detailed recipes live in `references/branching-and-recovery.md`:
 
-- **Parallel PRs touching a shared barrel** (`web/src/components/index.ts`, `hooks/index.ts`) — merge one at a time, rebase the rest first; never tear down a branch before MERGED.
-- **Stacked PRs** — child off parent branch, restack after a parent rebase with the OLD parent tip SHA.
-- **Prerequisite refactor** — split out-of-scope cleanup into its own PR first, merge, rebase the feature.
-- **Iterating an open PR's design** — amend + force-push, never close-and-reopen.
+- **Parallel PRs touching a shared barrel** (`web/src/components/index.ts`, `hooks/index.ts`) — merge one at a time; after rebasing each survivor, gates + fresh review precede push.
+- **Stacked PRs** — child off parent branch; restack after a parent rebase with the OLD parent tip SHA, then gates + fresh review precede push.
+- **Prerequisite refactor** — split out-of-scope cleanup into its own PR first; after merging it and rebasing the feature, gates + fresh review precede push.
+- **Iterating an open PR's design** — gates + fresh review precede amend, fingerprint equivalence precedes force-push, and the PR is never closed and reopened.
 - **Recovery** — amend landed on the wrong branch; wrong hunks staged; branch deleted before merge; never `reset --hard` with unrelated dirty files present.
 
 ## End of run

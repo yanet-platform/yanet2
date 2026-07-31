@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Change"
+  short_description: "Adversarial, evidence-backed change review"
+  default_prompt: "Use $review-change to independently review the complete candidate change."

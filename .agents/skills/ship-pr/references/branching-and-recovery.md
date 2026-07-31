@@ -11,7 +11,9 @@ Multiple in-flight PRs that ALL append to the same barrel file
 `mod.rs`) will CONFLICT on merge once the first lands.
 
 - Merge them **one at a time**. Before each subsequent merge, REBASE that
-  branch onto `origin/main` (never `git merge origin/main`) and force-push-with-lease.
+  branch onto `origin/main` (never `git merge origin/main`), rerun the affected
+  gates, obtain a fresh full-candidate `review-change` approval, then
+  force-push-with-lease and return to Phase 5.
 - **Never `git worktree remove` or delete a branch (local OR remote) until
   GitHub MCP `merge_pull_request` reports the PR MERGED.** A squash that hits a barrel
   conflict fails mid-command; if you already tore down, you may delete an
@@ -19,9 +21,11 @@ Multiple in-flight PRs that ALL append to the same barrel file
 - Recovery if that happened: the commit survives in the object store —
   create a safety ref with `git branch recovery/<b> <sha>`, then a dedicated
   worktree, rebase onto `origin/main`, resolve the barrel conflict (delegate the
-  edit — it's code), re-push, and create a fresh PR through MCP.
-- After `merge_pull_request` succeeds, always `git ls-remote --heads origin
-  '<pattern>'` after cleanup and `git push origin --delete` any survivor.
+  edit — it's code), rerun the affected gates, obtain a fresh full-candidate
+  `review-change` approval, re-push, and create a fresh PR through MCP.
+- After `merge_pull_request` succeeds, clean up only through Phase 7's exact-ref
+  procedure: compare the recorded PR head, delete with its expected-old-SHA
+  lease, and verify the exact ref is absent. Never pattern-delete survivors.
 
 ## Stacked PRs (child depends on parent's unmerged change)
 
@@ -36,12 +40,14 @@ When PR-B's files depend on PR-A's not-yet-merged change:
    base when creating it) so its diff shows only B's slice.
 3. After A MERGES, restack B with the OLD parent tip SHA B was forked from,
    not the branch name: `git rebase --onto origin/main <old-A-tip-sha>
-   <b-branch>`, then `git push --force-with-lease` and MCP
-   `update_pull_request` with base `main`.
+   <b-branch>`, then rerun the affected gates, obtain a fresh full-candidate
+   `review-change` approval, `git push --force-with-lease`, and use MCP
+   `update_pull_request` with base `main`; return to Phase 5.
 4. After A is force-pushed but remains unmerged, restack B onto the rewritten
    parent: `git rebase --onto <new-A-tip-sha> <old-A-tip-sha> <b-branch>`, then
-   `git push --force-with-lease`. Keep B's PR base on A's branch; do not update
-   it to `main`.
+   rerun the affected gates, obtain a fresh full-candidate `review-change`
+   approval, and `git push --force-with-lease`. Keep B's PR base on A's branch,
+   do not update it to `main`, and return to Phase 5.
 5. **Branch names use dashes, not a name that is also a path prefix**: a branch
    `bird-adapter/x` is rejected by the remote when a branch `bird-adapter`
    exists (ref-directory conflict). Use `bird-adapter-x`.
@@ -53,11 +59,16 @@ removal, a shared-infra rename, an enum collision), land the cleanup as its OWN
 scoped `refactor`/`chore` PR first, merge it, then rebase the feature on top.
 Do NOT bundle the cleanup into the feature PR — the user explicitly prefers this
 decomposition ("that's out of scope") so each diff is independently justified.
+After rebasing the feature, rerun its affected gates and obtain a fresh
+full-candidate `review-change` approval before pushing.
 
 ## Iterating an open PR's design
 
-Refining a design on an already-open PR → amend that branch + force-push-with-lease.
-Never close-and-reopen (churns PR numbers and loses the review thread).
+Refining a design on an already-open PR → rerun the affected gates, obtain a
+fresh full-candidate `review-change` approval, amend that branch, prove the
+committed fingerprint equals the approved one, and force-push-with-lease. Never
+close-and-reopen (churns PR numbers and loses the review thread); return to
+Phase 5 for the new head.
 
 ## Recovery recipes
 
@@ -90,7 +101,19 @@ git -C .agent-state/worktrees/recover-<name> apply --check "$patch_path" || exit
 git -C .agent-state/worktrees/recover-<name> apply --index "$patch_path" || exit 1
 rm -f -- "$patch_path" || exit 1
 trap - EXIT
+```
+
+Inspect the staged recovery diff, rerun the affected gates, and obtain a fresh
+full-candidate `review-change` approval. Only then amend:
+
+```
 git -C .agent-state/worktrees/recover-<name> commit --amend --no-edit
+```
+
+Prove the committed fingerprint equals the approved one. Stop instead of
+pushing if it differs, otherwise continue:
+
+```
 git -C .agent-state/worktrees/recover-<name> push --force-with-lease origin HEAD:<intended-branch>
 ```
 
@@ -105,13 +128,17 @@ checkout.
 Leave the shared index untouched. Create a recovery branch and dedicated
 worktree from the last good commit, derive the exact intended hunks with
 read-only `git diff --cached` or `git diff`, then apply them there with
-`git apply --index`. Inspect and commit from that recovery worktree.
+`git apply --index`. Inspect the result, rerun the affected gates, obtain a
+fresh full-candidate `review-change` approval, and only then commit. Prove the
+committed fingerprint equals the approved one before pushing from that recovery
+worktree; return to Phase 5 for the new head.
 
 ### Branch deleted before merge / PR auto-closed
 
 The commit is still in the object store: find its SHA in the reflog,
 MCP `pull_request_read`, or check-run details; create `git branch recovery/<b>
-<sha>`, then a dedicated worktree, rebase onto `origin/main`, re-push, and open
+<sha>`, then a dedicated worktree, rebase onto `origin/main`, rerun the affected
+gates, obtain a fresh full-candidate `review-change` approval, re-push, and open
 a fresh PR through MCP.
 
 ### A file was wrongly reverted
@@ -119,3 +146,6 @@ a fresh PR through MCP.
 In a dedicated recovery worktree, derive the exact pre-revert change with
 read-only `git show` or `git diff`, then use `git apply` to restore it. Regenerate
 `go.sum` via `go` tooling (not by hand) and `Cargo.lock` via `cargo build`.
+Rerun the affected gates and obtain a fresh full-candidate `review-change`
+approval before committing the recovery. Prove the committed fingerprint equals
+the approved one before pushing.
