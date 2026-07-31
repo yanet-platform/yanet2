@@ -136,7 +136,8 @@ deploy/packages/
 .claude/settings.*.json
 .claude/skills/loadtest-hw/
 .claude/worktrees/
-.codex/
+/.codex/
+/.agent-state/
 
 ### Uncategorized ###
 .arch/
