@@ -46,6 +46,7 @@ cargo +nightly fmt            # Rust (uses nightly-only options in .rustfmt.toml
 cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
 make lint-go                  # stylelint + golangci-lint modernize (lint/style/, .golangci.yml)
+make lint/comments            # pure-run comment separator lint
 make lint-commit              # commit-subject convention check (lint/commit/)
 make proto-go                 # generate *.pb.go via protoc (needed before go lint locally)
 make hooks                    # install the git hooks (run once per clone)
@@ -219,15 +220,15 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 
 ### General (every language — C, Go, Rust, TypeScript, shell, Makefiles, proto, YAML)
 
-- **No banner / section-separator comments. Anywhere. In any language.**
-  Lines like `// --- foo ---`, `# === foo ===`, `# --- validation ---`,
-  `// ----------`, `/* ===== */`, ASCII box-art, or any horizontal divider
-  used to label a block are forbidden — in source, scripts, configs, and
-  tests alike. This explicitly includes shell scripts, Makefiles, and proto
-  files, not just C/Go/Rust/TS. If a file feels long enough to want visual
-  dividers, split it into smaller files or functions instead. This is a hard
-  rule the user has repeated many times across C, Rust, Go, and shell; treat
-  any occurrence as a blocking review finding, never a non-blocking nit.
+- **No unlabeled pure-run comment separators. Anywhere. In any language.**
+  A comment whose payload, after delimiters and surrounding whitespace, is a
+  run of at least three identical separator glyphs is forbidden, for example
+  `/////////////////` or `// ================`. Labeled comments such as
+  `// --- foo ---`, `### something`, Markdown/hashed headings, ASCII or bit
+  diagrams, and table underlines are allowed. A pure `=` or `-` run may form
+  a Setext underline only when it immediately follows a nonempty comment-text
+  line. Multiline block comments are assessed as one payload. Enforce this
+  rule with `make lint/comments`.
 
 - **Doc-comment shape (fields, structs, functions) — every language.** A short
   one-line brief (what/why), then a blank comment line, then the detail
