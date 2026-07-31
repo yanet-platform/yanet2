@@ -58,8 +58,6 @@ packet_dst_port(const struct packet *packet) {
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static inline void
 FILTER_ATTR_QUERY_FUNC(port_src)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count

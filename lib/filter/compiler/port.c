@@ -134,8 +134,6 @@ get_port_range_dst(
 	*count = action->transport.dst_count;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 	struct value_registry *registry,

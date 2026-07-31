@@ -40,8 +40,6 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	free_packet(&packet);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 test_proto_1(void *memory) {
 	// init memory

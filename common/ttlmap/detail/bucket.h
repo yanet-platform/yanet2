@@ -6,8 +6,6 @@
 
 #include "../../container_of.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define TTLMAP_FOUND (0b01)
 #define TTLMAP_INSERTED (0b10)
 #define TTLMAP_REPLACED (0b11)
@@ -15,12 +13,8 @@
 #define TTLMAP_STATUS_MASK (0b11)
 #define TTLMAP_STATUS_BITS (2)
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define TTLMAP_STATUS(op_result) ((op_result) & TTLMAP_STATUS_MASK)
 #define TTLMAP_META(op_result) ((uint32_t)((op_result) >> TTLMAP_STATUS_BITS))
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_BUCKET_ENTRIES_EXP 4
 #define __TTLMAP_BUCKET_ENTRIES (1 << __TTLMAP_BUCKET_ENTRIES_EXP)
@@ -48,8 +42,6 @@
 		}                                                              \
 		__ttlmap_lock_init(&__bucket->lock);                           \
 	})
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_BUCKET_LOOKUP(bucket_ptr, key_ptr, value_ptr, now, idx)       \
 	;                                                                      \
@@ -126,8 +118,6 @@
 		__ret;                                                         \
 	})
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define __TTLMAP_INVALIDATE_INTERNAL(key_type, value_ptr)                      \
 	__extension__({                                                        \
 		typedef typeof(*value_ptr) __value_type;                       \
@@ -136,8 +126,6 @@
 			container_of((value_ptr), __bucket_entry_t, value);    \
 		__entry->deadline = 0;                                         \
 	});
-
-////////////////////////////////////////////////////////////////////////////////
 
 static inline size_t
 __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
@@ -150,8 +138,6 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 	size_t res = 1ull << max_bit;
 	return res;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_BUCKET_FIND_WITH_ID(map_ptr, bucket_id, key_type, value_type) \
 	__extension__({                                                        \
@@ -177,8 +163,6 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 			map_ptr, __bucket_id, typeof(*(key_ptr)), value_type   \
 		);                                                             \
 	})
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_BUCKET_ELEMENTS_TOUCHED(                                      \
 	map_ptr, bucket_id, key_type, value_type                               \

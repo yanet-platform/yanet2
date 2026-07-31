@@ -19,8 +19,6 @@
 #include "lib/dataplane/packet/packet.h"
 #include "yanet_build_config.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 static struct rte_mbuf *
 make_mbuf4(
 	const uint8_t src_ip[NET4_LEN],
@@ -88,8 +86,6 @@ make_mbuf4(
 
 	return mbuf;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 // IPv6 in host byte order
 static struct rte_mbuf *
@@ -238,8 +234,6 @@ free_packet(struct packet *packet) {
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 struct rte_mbuf *
 alloc_mbuf(uint16_t headroom, uint16_t pkt_len, uint16_t tailroom) {
 	size_t buf_len = (size_t)headroom + pkt_len;
@@ -304,15 +298,11 @@ init_packet_with_mbuf(
 	return parse_packet(packet);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 uint8_t *
 malloc_alloc(void *alloc, size_t align, size_t size) {
 	(void)alloc;
 	return aligned_alloc(align, size);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 fill_packet_list(
@@ -351,8 +341,6 @@ packet_info(const struct packet *p) {
 	return (struct packet_info){data, size, p->tx_device_id, p->rx_device_id
 	};
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 fill_packet_from_data(struct packet *packet, struct packet_info *data) {

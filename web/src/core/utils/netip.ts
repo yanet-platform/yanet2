@@ -418,10 +418,6 @@ export function getPrefixLength(prefix: string): number | null {
     return null;
 }
 
-// ============================================================================
-// Bytes-based IP address utilities
-// ============================================================================
-
 /**
  * Format IPv4 address from bytes array to string
  * @param bytes - Array of 4 bytes representing IPv4 address
@@ -582,10 +578,6 @@ export const parseIPToBytes = (ipStr: string): number[] | undefined => {
     }
     return parseIPv4ToBytes(ipStr);
 };
-
-// ============================================================================
-// Network mask utilities
-// ============================================================================
 
 /**
  * Check if mask is contiguous (all 1s followed by all 0s)

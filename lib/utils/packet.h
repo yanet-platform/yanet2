@@ -8,8 +8,6 @@
 #include <lib/dataplane/module/module.h>
 #include <lib/dataplane/packet/packet.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 fill_packet_net4(
 	struct packet *packet,
@@ -47,8 +45,6 @@ fill_packet(
 void
 free_packet(struct packet *packet);
 
-////////////////////////////////////////////////////////////////////////////////
-
 struct packet_info {
 	const uint8_t *data;
 	uint16_t size;
@@ -58,8 +54,6 @@ struct packet_info {
 
 struct packet_info
 packet_info(const struct packet *p);
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 fill_packet_list(
@@ -97,8 +91,6 @@ free_packet_list_custom_alloc(
 	free_func free
 );
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 fill_packet_from_data(struct packet *packet, struct packet_info *data);
 
@@ -123,14 +115,10 @@ fill_packet_from_segments(
 void
 init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len);
 
-////////////////////////////////////////////////////////////////////////////////
-
 /// Allocate an mbuf using the default C allocator (aligned_alloc).
-///
 /// The buffer is laid out as `headroom + pkt_len + tailroom`; the data area is
 /// zeroed and refcount is initialised to 1. The caller owns the returned mbuf
 /// and must release it with free().
-///
 /// Returns NULL on allocation failure.
 struct rte_mbuf *
 alloc_mbuf(uint16_t headroom, uint16_t pkt_len, uint16_t tailroom);

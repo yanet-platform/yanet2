@@ -43,8 +43,6 @@ func PacketsData(txDeviceId uint16, rxDeviceId uint16, packets ...gopacket.Packe
 	return payload
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 type Packet C.struct_packet
 
 // NewPacketFromSegments builds a chained (multi-segment) packet from the given
@@ -152,8 +150,6 @@ func (packet *Packet) Free() {
 	C.free_packet((*C.struct_packet)(packet))
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 type PacketList C.struct_packet_list
 
 func (packetList *PacketList) First() *Packet {
@@ -235,8 +231,6 @@ func NewPacketListFromData(pinner *runtime.Pinner, data ...PacketData) (*PacketL
 func (packetList *PacketList) Free() {
 	C.free_packet_list((*C.struct_packet_list)(packetList))
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 type PacketFront C.struct_packet_front
 

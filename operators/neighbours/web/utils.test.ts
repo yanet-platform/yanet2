@@ -3,10 +3,6 @@ import { resolveSubmitTable, validateMAC, validateNextHop, sortComparators } fro
 import { MERGED_TAB } from './types';
 import type { Neighbour } from '@yanet/core/api/neighbours';
 
-// ---------------------------------------------------------------------------
-// resolveSubmitTable
-// ---------------------------------------------------------------------------
-
 describe('resolveSubmitTable', () => {
     const makeNeighbour = (source?: string): Neighbour => ({ source });
 
@@ -40,10 +36,6 @@ describe('resolveSubmitTable', () => {
         expect(result).toBe('ndp');
     });
 });
-
-// ---------------------------------------------------------------------------
-// validateMAC
-// ---------------------------------------------------------------------------
 
 describe('validateMAC', () => {
     it('returns undefined for a valid lowercase MAC', () => {
@@ -88,10 +80,6 @@ describe('validateMAC', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// validateNextHop
-// ---------------------------------------------------------------------------
-
 describe('validateNextHop', () => {
     it('returns undefined for a valid IPv4 address', () => {
         expect(validateNextHop('192.168.1.1')).toBeUndefined();
@@ -109,10 +97,6 @@ describe('validateNextHop', () => {
         expect(validateNextHop('not-an-ip')).toBeTruthy();
     });
 });
-
-// ---------------------------------------------------------------------------
-// sortComparators
-// ---------------------------------------------------------------------------
 
 describe('sortComparators', () => {
     const makeNeighbour = (overrides: Partial<Neighbour>): Neighbour => ({ ...overrides });

@@ -21,16 +21,12 @@
 #include <string.h>
 #include <time.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(
 	combo_net4_port_proto_dst_compile, net4_fast_dst, port_fast_dst, proto
 );
 FILTER_QUERY_DECLARE(
 	combo_net4_port_proto_dst, net4_fast_dst, port_fast_dst, proto
 );
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum { arena_size = 1 << 28 };
 
@@ -463,8 +459,6 @@ test_tcp_flags(void *arena) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

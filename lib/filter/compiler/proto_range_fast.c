@@ -9,8 +9,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 static int
 validate_proto_ranges(struct filter_proto_ranges ranges) {
 	for (size_t i = 0; i < ranges.count; ++i) {
@@ -38,8 +36,6 @@ validate_and_count(const struct filter_rule **rules, size_t rules_count) {
 	}
 	return cnt;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 FILTER_ATTR_COMPILER_INIT_FUNC(proto_range_fast)(
@@ -105,5 +101,3 @@ FILTER_ATTR_COMPILER_FREE_FUNC(proto_range_fast)(
 	segments_classifier_u16_fini(&c->classifier, memory_context);
 	memory_bfree(memory_context, c, sizeof(*c));
 }
-
-////////////////////////////////////////////////////////////////////////////////

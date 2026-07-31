@@ -104,8 +104,6 @@ test(void *memory) {
 	memory_context_fini(&memory_context);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static int
 next_permutation(uint32_t *a, size_t n) {
 	if (n <= 1) {
@@ -136,8 +134,6 @@ next_permutation(uint32_t *a, size_t n) {
 	}
 	return 0;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

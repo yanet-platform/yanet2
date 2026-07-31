@@ -12,8 +12,6 @@
 FILTER_COMPILER_DECLARE(sign_proto_compile, proto);
 FILTER_QUERY_DECLARE(sign_proto, proto);
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 	struct packet packet = {0};
@@ -41,8 +39,6 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	assert(actions == expected);
 	free_packet(&packet);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static void
 test_proto_1(void *memory) {

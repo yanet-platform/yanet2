@@ -20,8 +20,6 @@
 #include "query/attribute.h"
 #include "rule.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 typedef void (*filter_lookup_query_func)(
 	void *data,
 	struct packet **packets,

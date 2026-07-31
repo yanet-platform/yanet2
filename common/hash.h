@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 static inline uint64_t
 wyhash64(uint64_t wyhash64_x) {
 	wyhash64_x += 0x60bee2bee120fc15;

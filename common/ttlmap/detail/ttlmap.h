@@ -10,8 +10,6 @@
 
 #include "bucket.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 typedef struct ttlmap {
 	struct memory_context mctx;
 	void *chunks[__TTLMAP_MAX_CHUNKS]; // relative pointers
@@ -21,8 +19,6 @@ typedef struct ttlmap {
 				      // 2**buckets_per_chunk_exp
 	size_t buckets_exp;	      // buckets = 2**buckets_exp
 } __attribute__((__aligned__(64))) ttlmap_t;
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_LOOKUP_INTERNAL(map_ptr, key_ptr, value_ptr, now)             \
 	__extension__({                                                        \
@@ -49,8 +45,6 @@ typedef struct ttlmap {
 			__b, (key_ptr), (value_ptr), (now), __idx              \
 		);                                                             \
 	})
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_GET_INTERNAL(                                                 \
 	map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout            \
@@ -85,8 +79,6 @@ typedef struct ttlmap {
 			__idx                                                  \
 		);                                                             \
 	})
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define __TTLMAP_FREE_INTERNAL(map_ptr)                                        \
 	__extension__({                                                        \
@@ -174,8 +166,6 @@ __ttlmap_init_internal( // NOLINT
 	return 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define __TTLMAP_INIT_INTERNAL(                                                \
 	map_ptr, mctx_ptr, key_type, value_type, entries                       \
 )                                                                              \
@@ -229,8 +219,6 @@ __ttlmap_init_internal( // NOLINT
 			##__VA_ARGS__                                          \
 		);                                                             \
 	} while (0)
-
-////////////////////////////////////////////////////////////////////////////////
 
 #include <stdio.h>
 

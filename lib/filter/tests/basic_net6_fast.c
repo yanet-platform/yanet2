@@ -22,8 +22,6 @@
 #include <string.h>
 #include <time.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(
 	sign_fast_src_dst_compile, net6_fast_src, net6_fast_dst
 );
@@ -34,8 +32,6 @@ FILTER_QUERY_DECLARE(sign_fast_src, net6_fast_src);
 
 FILTER_COMPILER_DECLARE(sign_fast_dst_compile, net6_fast_dst);
 FILTER_QUERY_DECLARE(sign_fast_dst, net6_fast_dst);
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum filter_sign { src = 0, dst = 1, src_dst = 2 };
 
@@ -52,8 +48,6 @@ filter_sign_to_string(enum filter_sign sign) {
 	assert(false);
 	return "";
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 query_and_expect_actions(
@@ -107,8 +101,6 @@ prefix_mask(uint8_t mask[NET6_LEN], uint32_t prefix) {
 		mask[prefix / 8] = (uint8_t)(0xff << (8 - (prefix % 8)));
 	}
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 struct test_net {
 	uint8_t addr[NET6_LEN];
@@ -266,8 +258,6 @@ test_basic(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
@@ -580,8 +570,6 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 is_ip_from_net(struct net6 *net, uint8_t *ip) {
@@ -1704,8 +1692,6 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

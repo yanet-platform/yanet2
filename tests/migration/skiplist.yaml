@@ -3718,9 +3718,7 @@
     # 
     # - echo: "1 rib_insert() test: new nexthop_stuff, new prefix, new \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 2 rib_insert new nexthop_stuff, existing prefix, existing peer-proto-table_name
-    # #################################################################################################################
     # - echo: "2 rib_insert() test: new nexthop_stuff, existing prefix, existing \"peer-proto-table_name\" - START"
     # 
     1: disabled
@@ -3758,9 +3756,7 @@
     # 
     # - echo: "2 rib_insert() test: new nexthop_stuff, existing prefix, existing \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 3 rib_insert new nexthop_stuff, existing prefix, new peer-proto-table_name
-    # #################################################################################################################
     # - echo: "3 rib_insert() test: new nexthop_stuff, existing prefix, new \"peer-proto-table_name\" - START"
     # 
     2: disabled
@@ -3800,9 +3796,7 @@
     # 
     # - echo: "3 rib_insert() test: new nexthop_stuff, existing prefix, new \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 4 rib_insert new nexthop_stuff, new prefix, existing peer-proto-table_name
-    # #################################################################################################################
     # - echo: "4 rib_insert() test: new nexthop_stuff, new prefix, existing \"peer-proto-table_name\" - START"
     # 
     # - cli_check: |
@@ -3854,9 +3848,7 @@
     # 
     # - echo: "4 rib_insert() test: new nexthop_stuff, new prefix, existing \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 5 rib_insert existing nexthop_stuff, new prefix, new peer-proto-table_name
-    # #################################################################################################################
     # - echo: "5 rib_insert() test: existing nexthop_stuff, new prefix, new \"peer-proto-table_name\" - START"
     # 
     # - cli_check: |
@@ -3910,9 +3902,7 @@
     # 
     # - echo: "5 rib_insert() test: existing nexthop_stuff, new prefix, new \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 6 rib_insert existing nexthop_stuff, existing prefix, new peer-proto-table_name
-    # #################################################################################################################
     # - echo: "6 rib_insert() test: existing nexthop_stuff, existing prefix, new \"peer-proto-table_name\" - START"
     # 
     5: disabled
@@ -3957,9 +3947,7 @@
     # 
     # - echo: "6 rib_insert() test: existing nexthop_stuff, existing prefix, new \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 7 rib_insert existing nexthop_stuff, new prefix, existing peer-proto-table_name
-    # #################################################################################################################
     # - echo: "7 rib_insert() test: existing nexthop_stuff, new prefix, existing \"peer-proto-table_name\" - START"
     # 
     # - cli_check: |
@@ -4016,9 +4004,7 @@
     # 
     # - echo: "7 rib_insert() test: existing nexthop_stuff, new prefix, existing \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 8 rib_insert existing nexthop_stuff, existing prefix, existing peer-proto-table_name
-    # #################################################################################################################
     # - echo: "8 rib_insert() test: existing nexthop_stuff, existing prefix, existing \"peer-proto-table_name\" - START"
     # 
     7: disabled
@@ -4064,9 +4050,7 @@
     # 
     # - echo: "8 rib_insert() test: existing nexthop_stuff, existing prefix, existing \"peer-proto-table_name\" - DONE"
     # 
-    # #################################################################################################################
     # # 9 rib_insert existing nexthop_stuff, existing prefix, existing peer-proto-table_name - new vrf-priority
-    # #################################################################################################################
     # - echo: "9 rib_insert() test: existing nexthop_stuff, existing prefix, existing \"peer-proto-table_name\" - new vrf_priority - START"
     # 
     8: disabled
@@ -4116,9 +4100,7 @@
     # 
     # - echo: "9 rib_insert() test: existing nexthop_stuff, existing prefix, existing \"peer-proto-table_name\" - new vrf_priority - DONE"
     # 
-    # #################################################################################################################
     # # 10 rib_remove prefix for unexisting vrf-priority
-    # #################################################################################################################
     # - echo: "10 rib_remove() test: trying to remove prefix for unexisting vrf-priority - START"
     # 
     # - cli_check: |
@@ -4177,9 +4159,7 @@
     # 
     # - echo: "10 rib_remove() test: trying to remove prefix for unexisting vrf-priority - DONE"
     # 
-    # #################################################################################################################
     # # 11 rib_remove prefix for existing vrf-priority but unexisting protocol-peer-table_name
-    # #################################################################################################################
     # - echo: "11 rib_remove() test: trying to remove prefix for existing vrf-priority but unexisting protocol-peer-table_name - START"
     # 
     # - cli_check: |
@@ -4236,9 +4216,7 @@
     # 
     # - echo: "11 rib_remove() test: trying to remove prefix for existing vrf-priority but unexisting protocol-peer-table_name - DONE"
     # 
-    # #################################################################################################################
     # # 12 rib_remove unexisting prefix
-    # #################################################################################################################
     # - echo: "12 rib_remove() test: trying to remove unexisting prefix - START"
     # 
     # - cli_check: |
@@ -4305,9 +4283,7 @@
     # 
     # - echo: "12 rib_remove() test: trying to remove unexisting prefix - DONE"
     # 
-    # #################################################################################################################
     # # 13 rib_remove prefix which has multiple path_info related to it 
-    # #################################################################################################################
     # - echo: "13 rib_remove() test: trying to remove prefix which has multiple path_info related to it - START"
     # 
     # - cli_check: |
@@ -4368,9 +4344,7 @@
     # 
     # - echo: "13 rib_remove() test: trying to remove prefix which has multiple path_info related to it - DONE"
     # 
-    # #################################################################################################################
     # # 14 rib_remove prefix of peer, which has other prefixes
-    # #################################################################################################################
     # - echo: "14 rib_remove() test: trying to remove prefix for peer, which has some other prefixes - START"
     # 
     # - cli_check: |
@@ -4429,9 +4403,7 @@
     # 
     # - echo: "14 rib_remove() test: trying to remove prefix for peer, which has some other prefixes - DONE"
     # 
-    # #################################################################################################################
     # # 15 rib_remove the last (for this peer) prefix which has the last path_info related to it 
-    # #################################################################################################################
     # - echo: "15 rib_remove() test: trying to remove the last (for this peer) prefix which has the last path_info related to it - START"
     # 
     # - cli_check: |
@@ -4492,9 +4464,7 @@
     # 
     # - echo: "15 rib_remove() test: trying to remove the last (for this peer) prefix which has the last path_info related to it - DONE"
     # 
-    # #################################################################################################################
     # # 16 rib_insert multiple prefixes insertion
-    # #################################################################################################################
     # - echo: "16 rib_insert() test: multiple prefixes insertion - START"
     # 
     15: disabled
@@ -4564,9 +4534,7 @@
     # 
     # - echo: "16 rib_insert() test: multiple prefixes insertion - DONE"
     # 
-    # #################################################################################################################
     # # 17 rib_remove multiple prefixes removal
-    # #################################################################################################################
     # - echo: "17 rib_remove() test: multiple prefixes removal - START"
     # 
     16: disabled
@@ -4624,9 +4592,7 @@
     # 
     # - echo: "17 rib_remove() test: multiple prefixes removal - DONE"
     # 
-    # #################################################################################################################
     # # 18 rib_remove all parts of request exist separately, however the whole combination does not - no remove
-    # #################################################################################################################
     # - echo: "18 rib_remove() test: all parts of request exist separately, however the whole combination does not - START"
     # 
     # - cli_check: |
@@ -4704,9 +4670,7 @@
     # 
     # - echo: "18 rib_remove() test: all parts of request exist separately, however the whole combination does not - DONE"
     # 
-    # #################################################################################################################
     # # 19 rib_clear request contains only protocol
-    # #################################################################################################################
     # - echo: "19 rib_clear() test: request contains only protocol - START"
     # 
     # ## add some prefixes for new protocol
@@ -4835,9 +4799,7 @@
     # 
     # - echo: "19 rib_clear() test: request contains only protocol - DONE"
     # 
-    # #################################################################################################################
     # # 20 rib_clear request contains protocol, peer, vrf, priority
-    # #################################################################################################################
     # - echo: "20 rib_clear() test: request contains protocol, peer, vrf, priority - START"
     # 
     # - cli_check: |
@@ -4932,9 +4894,7 @@
     # 
     # - echo: "20 rib_clear() test: request contains protocol, peer, vrf, priority - DONE"
     # 
-    # #################################################################################################################
     # # 21 rib_clear combination of protocol, peer, vrf, priority from request does not exist - nothing to clear
-    # #################################################################################################################
     # - echo: "21 rib_clear() test: combination of protocol, peer, vrf, priority from request does not exist (though they exist separately) - nothing to clear - START"
     # 
     # - cli_check: |
@@ -4989,9 +4949,7 @@
     # 
     # - echo: "21 rib_clear() test: combination of protocol, peer, vrf, priority from request does not exist (though they exist separately) - nothing to clear - DONE"
     # 
-    # #################################################################################################################
     # # 22 rib_clear - nothing to clear
-    # #################################################################################################################
     # - echo: "22 rib_clear() test: protocol/peer/vrf/priority from request do not exist - nothing to clear - START"
     # 
     # - cli_check: |
@@ -5161,14 +5119,11 @@
     # 
     # - echo: "22 rib_clear() test: protocol/peer/vrf/priority from request do not exist - nothing to clear - DONE"
     # 
-    # #################################################################################################################
     # # won't need it anymore, no more 'route tunnel' checks
     # - cli: |
     #     rib static remove default 0.0.0.0/0 200.0.0.1
     # 
-    # #################################################################################################################
     # # 23 rib_lookup existing prefix for existing vrf
-    # #################################################################################################################
     # - echo: "23 rib_lookup() test: existing prefix for existing vrf - START"
     # 
     # - cli_check: |
@@ -5250,9 +5205,7 @@
     # 
     # - echo: "23 rib_lookup() test: existing prefix for existing vrf - DONE"
     # 
-    # #################################################################################################################
     # # 24 rib_lookup unexisting prefix for existing vrf
-    # #################################################################################################################
     # - echo: "24 rib_lookup() test: unexisting prefix for existing vrf - START"
     # 
     # - cli_check: |
@@ -5267,9 +5220,7 @@
     # 
     # - echo: "24 rib_lookup() test: unexisting prefix for existing vrf - DONE"
     # 
-    # #################################################################################################################
     # # 25 rib_lookup unexisting vrf
-    # #################################################################################################################
     # - echo: "25 rib_lookup() test: unexisting vrf - START"
     # 
     # - cli_check: |
@@ -5284,9 +5235,7 @@
     # 
     # - echo: "25 rib_lookup() test: unexisting vrf - DONE"
     # 
-    # #################################################################################################################
     # # 26 rib_get unexisting prefix for existing vrf
-    # #################################################################################################################
     # - echo: "26 rib_get() test: unexisting prefix for existing vrf - START"
     # 
     # - cli_check: |
@@ -5301,9 +5250,7 @@
     # 
     # - echo: "26 rib_get() test: unexisting prefix for existing vrf - DONE"
     # 
-    # #################################################################################################################
     # # 27 rib_get unexisting vrf
-    # #################################################################################################################
     # - echo: "27 rib_get() test: unexisting vrf - START"
     # 
     # - cli_check: |
@@ -5318,9 +5265,7 @@
     # 
     # - echo: "27 rib_get() test: unexisting vrf - DONE"
     # 
-    # #################################################################################################################
     # # 28 rib_get existing prefix for existing vrf
-    # #################################################################################################################
     # - echo: "28 rib_get() test: existing prefix for existing vrf - START"
     # 
     # - cli_check: |
@@ -5338,9 +5283,7 @@
     # 
     # - echo: "28 rib_get() test: existing prefix for existing vrf - DONE"
     # 
-    # #################################################################################################################
     # # 29 rib_save/rib_load test
-    # #################################################################################################################
     # - echo: "29 rib_save()/rib_load() test: rib tables are restored after they were saved to file, cleared and loaded from file - START"
     # 
     # ## remove ALL prefixes, we will fill tables from scratch
@@ -5561,9 +5504,7 @@
     # 
     # - echo: "29 rib_save()/rib_load() test: rib tables are restored after they were saved to file, cleared and loaded from file - DONE"
     # 
-    # #################################################################################################################
     # # 30 rib_insert() -> rib_save() -> rib_clear() -> rib_insert() SOME OTHER_PREFIXES!! -> rib_load() - only loaded prefixes are present
-    # #################################################################################################################
     # - echo: "30 rib_insert() -> rib_save() -> rib_clear() -> rib_insert() SOME OTHER_PREFIXES!! -> rib_load() - only loaded prefixes are present - START"
     # 
     # ## remove ALL prefixes, we will fill tables from scratch
@@ -5813,9 +5754,7 @@
     # 
     # - echo: "30 rib_insert() -> rib_save() -> rib_clear() -> rib_insert() SOME OTHER_PREFIXES!! -> rib_load() - only loaded prefixes are present - DONE"
     # 
-    # #################################################################################################################
     # # 31 fib rebuild
-    # #################################################################################################################
     # - echo: "31 fib rebuild - START"
     # 
     # ## remove ALL prefixes, we will fill tables from scratch
@@ -6808,9 +6747,7 @@
     #     ----------------------  ---------  -----  ----------------  ----  ----------
     #     kni0                    200.0.3.1  1100   kni0.200                100.00
     # 
-    # #################################################################################################################
     # # 2 send packets and check route counters
-    # #################################################################################################################
     # 
     1: disabled
     # - sendPackets:

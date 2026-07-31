@@ -16,8 +16,6 @@ FILTER_QUERY_DECLARE(sign_net6_dst, net6_dst);
 FILTER_COMPILER_DECLARE(sign_net6_compile, net6_src, net6_dst);
 FILTER_QUERY_DECLARE(sign_net6, net6_src, net6_dst);
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 query_packet_and_expect_action(
 	struct filter *filter,
@@ -75,8 +73,6 @@ query_packet_and_expect_no_actions(
 	free_packet(&packet);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 // Here big and low is in [0, 15], c1 and c2 is in [0, 16]
 // This function makes IPv6 address like
 // 0xBB 0xBB .. 0xB0 00 .. 00 0xAA .. 0xA0 00 .. 00,
@@ -101,8 +97,6 @@ make_addr(
 		}
 	}
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static void
 test1(void *memory) {
@@ -254,8 +248,6 @@ test1(void *memory) {
 	memory_context_fini(&mctx);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 test2(void *memory) {
 	// init memory
@@ -380,8 +372,6 @@ test2(void *memory) {
 	filter_free(&filter, sign_net6_dst_compile);
 	memory_context_fini(&mctx);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static void
 test3(void *memory) {
@@ -573,8 +563,6 @@ test3(void *memory) {
 	filter_free(&filter, sign_net6_compile);
 	memory_context_fini(&mctx);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 // Shared per-direction half-classification (filter_net6_share_init).
 

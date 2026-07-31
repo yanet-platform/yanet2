@@ -21,14 +21,10 @@
 #include <string.h>
 #include <time.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(
 	combo_net6_port_src_compile, net6_fast_src, port_fast_src
 );
 FILTER_QUERY_DECLARE(combo_net6_port_src, net6_fast_src, port_fast_src);
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 query_and_expect_actions(
@@ -63,8 +59,6 @@ prefix_mask(uint8_t mask[NET6_LEN], uint32_t prefix) {
 		mask[prefix / 8] = (uint8_t)(0xff << (8 - (prefix % 8)));
 	}
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum { arena_size = 1 << 28 };
 
@@ -383,8 +377,6 @@ test_both_match(void *arena) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

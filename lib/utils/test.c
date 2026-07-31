@@ -5,8 +5,6 @@
 #include "logging/log.h"
 #include "packet.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 static int
 test_convert_packet() {
 	struct packet packet;

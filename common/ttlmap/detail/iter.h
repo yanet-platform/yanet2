@@ -3,8 +3,6 @@
 #include "bucket.h"
 #include "ttlmap.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define __TTLMAP_ITER_INTERNAL(map_ptr, key_type, value_type, now, cb, data)   \
 	__extension__({                                                        \
 		int __ret = 0;                                                 \
@@ -31,8 +29,6 @@
 		}                                                              \
 		__ret;                                                         \
 	})
-
-////////////////////////////////////////////////////////////////////////////////
 
 /*
  * Weakly consistent, bucket-at-a-time iteration.

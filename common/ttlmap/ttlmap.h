@@ -9,8 +9,6 @@
 #include "detail/lock.h"
 #include "detail/ttlmap.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 typedef struct ttlmap ttlmap_t;
 
 struct ttlmap_bucket_iter {
@@ -18,8 +16,6 @@ struct ttlmap_bucket_iter {
 	size_t bucket_idx;
 	size_t bucket_count;
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 #define TTLMAP_INIT(map_ptr, mctx_ptr, key_type, value_type, kv_entries)       \
 	__TTLMAP_INIT_INTERNAL(                                                \
@@ -54,8 +50,6 @@ struct ttlmap_bucket_iter {
 
 #define TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ...)                     \
 	__TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ##__VA_ARGS__)
-
-////////////////////////////////////////////////////////////////////////////////
 
 static inline void
 ttlmap_release_lock(ttlmap_lock_t *lock) {

@@ -36,7 +36,6 @@ static struct fwstate_timeouts test_timeouts = {
 	.default_ = 16e9,     /* 16s */
 };
 
-/* ====================================================================== */
 /* Test environment: context + config + map lifecycle                       */
 /* ====================================================================== */
 
@@ -170,7 +169,6 @@ test_env_insert_udp(
 	}
 }
 
-/* ====================================================================== */
 /* Test 1: TTL selection                                                   */
 /* ====================================================================== */
 
@@ -223,7 +221,6 @@ test_ttl_selection(void) {
 	printf("  TTL selection test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 2: Empty map                                                       */
 /* ====================================================================== */
 
@@ -252,7 +249,6 @@ test_empty_map(void *arena) {
 	printf("  Empty map test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 3: Forward iteration                                               */
 /* ====================================================================== */
 
@@ -291,7 +287,6 @@ test_forward_iteration(void *arena) {
 	printf("  Forward iteration test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 4: Backward iteration                                              */
 /* ====================================================================== */
 
@@ -332,7 +327,6 @@ test_backward_iteration(void *arena) {
 	printf("  Backward iteration test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 5: Expired entries skipped                                         */
 /* ====================================================================== */
 
@@ -374,7 +368,6 @@ test_expired_skipped(void *arena) {
 	printf("  Expired entries skipped test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 6: include_expired=true                                            */
 /* ====================================================================== */
 
@@ -408,7 +401,6 @@ test_include_expired(void *arena) {
 	printf("  Include expired test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 7: Uninitialized entries skipped                                   */
 /* ====================================================================== */
 
@@ -445,7 +437,6 @@ test_uninitialized_skipped(void *arena) {
 	printf("  Uninitialized entries skipped test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 8: Paging                                                          */
 /* ====================================================================== */
 
@@ -507,7 +498,6 @@ test_paging(void *arena) {
 	printf("  Paging test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 9: Forward bounds safety                                           */
 /* ====================================================================== */
 
@@ -539,7 +529,6 @@ test_forward_bounds(void *arena) {
 	printf("  Forward bounds safety test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 10: Backward clamping                                              */
 /* ====================================================================== */
 
@@ -579,7 +568,6 @@ test_backward_clamping(void *arena) {
 	printf("  Backward clamping test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 11: Single entry backward                                          */
 /* ====================================================================== */
 
@@ -613,7 +601,6 @@ test_single_entry_backward(void *arena) {
 	printf("  Single entry backward test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 12: Backward paging                                                */
 /* ====================================================================== */
 
@@ -675,7 +662,6 @@ test_backward_paging(void *arena) {
 	printf("  Backward paging test passed\n");
 }
 
-/* ====================================================================== */
 /* Test 13: Expired entry at index 0 in backward with include_expired      */
 /* ====================================================================== */
 
@@ -719,7 +705,6 @@ test_backward_expired_at_zero(void *arena) {
 	printf("  Backward expired at index 0 test passed\n");
 }
 
-/* ====================================================================== */
 /* Main                                                                    */
 /* ====================================================================== */
 

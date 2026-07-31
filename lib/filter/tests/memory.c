@@ -17,8 +17,6 @@ FILTER_QUERY_DECLARE(sign_ports, port_src, port_dst);
 FILTER_COMPILER_DECLARE(sign_port_src_compile, port_src);
 FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 query_and_expect_action(
 	struct filter *filter,
@@ -79,8 +77,6 @@ query_and_expect_no_action(
 	assert(actions == FILTER_RULE_INVALID);
 	free_packet(&packet);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static void
 test_src_dst_ports(void *memory) {

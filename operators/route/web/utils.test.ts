@@ -3,10 +3,6 @@ import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, pref
 import { stringToIPAddress } from '@yanet/core/utils/netip';
 import type { Route } from '@yanet/core/api/routes';
 
-// ---------------------------------------------------------------------------
-// planRouteSubmit
-// ---------------------------------------------------------------------------
-
 describe('planRouteSubmit', () => {
     const ip = (s: string) => stringToIPAddress(s)!;
 
@@ -133,10 +129,6 @@ describe('planRouteSubmit', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// validatePrefix
-// ---------------------------------------------------------------------------
-
 describe('validatePrefix', () => {
     it('returns undefined for a valid IPv4 CIDR', () => {
         expect(validatePrefix('192.168.1.0/24')).toBeUndefined();
@@ -159,10 +151,6 @@ describe('validatePrefix', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// validateNexthop
-// ---------------------------------------------------------------------------
-
 describe('validateNexthop', () => {
     it('returns undefined for a valid IPv4 address', () => {
         expect(validateNexthop('192.168.1.1')).toBeUndefined();
@@ -180,10 +168,6 @@ describe('validateNexthop', () => {
         expect(validateNexthop('not-an-ip')).toBeTruthy();
     });
 });
-
-// ---------------------------------------------------------------------------
-// sortComparators
-// ---------------------------------------------------------------------------
 
 describe('sortComparators', () => {
     const makeRoute = (overrides: Partial<Route>): Route => ({ ...overrides });
@@ -216,10 +200,6 @@ describe('sortComparators', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// prefixIPFamily
-// ---------------------------------------------------------------------------
-
 describe('prefixIPFamily', () => {
     it('returns v6 for IPv6 prefix', () => {
         expect(prefixIPFamily('::/0')).toBe('v6');
@@ -231,10 +211,6 @@ describe('prefixIPFamily', () => {
         expect(prefixIPFamily('192.168.1.0/24')).toBe('v4');
     });
 });
-
-// ---------------------------------------------------------------------------
-// groupByPrefix
-// ---------------------------------------------------------------------------
 
 describe('groupByPrefix', () => {
     it('groups routes with the same prefix together', () => {
@@ -252,10 +228,6 @@ describe('groupByPrefix', () => {
         expect(groupByPrefix([])).toEqual(new Map());
     });
 });
-
-// ---------------------------------------------------------------------------
-// filterByFamily
-// ---------------------------------------------------------------------------
 
 describe('filterByFamily', () => {
     const routes: Route[] = [
@@ -280,10 +252,6 @@ describe('filterByFamily', () => {
         expect(v4[0].prefix).toBe('0.0.0.0/0');
     });
 });
-
-// ---------------------------------------------------------------------------
-// bestPathReason
-// ---------------------------------------------------------------------------
 
 describe('bestPathReason', () => {
     it('returns empty string for fewer than two candidates', () => {
@@ -310,10 +278,6 @@ describe('bestPathReason', () => {
         expect(bestPathReason([best, other])).toMatch(/MED/);
     });
 });
-
-// ---------------------------------------------------------------------------
-// getRouteId
-// ---------------------------------------------------------------------------
 
 describe('getRouteId', () => {
     const base: Route = {

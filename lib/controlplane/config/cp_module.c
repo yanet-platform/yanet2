@@ -434,8 +434,6 @@ cp_module_registry_size(struct cp_module_registry *module_registry) {
 	return module_registry->registry.capacity;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 cp_module_parse_performance_counter(
 	struct counter_handle *counter_handle,

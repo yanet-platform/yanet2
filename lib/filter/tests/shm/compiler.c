@@ -59,8 +59,6 @@ build_filter(struct common *common, struct memory_context *mctx) {
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 main(int argc, char **argv) {
 	if (argc < 3) {

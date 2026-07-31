@@ -20,14 +20,10 @@
 #include <stdlib.h>
 #include <time.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(
 	combo_net4_port_src_compile, net4_fast_src, port_fast_src
 );
 FILTER_QUERY_DECLARE(combo_net4_port_src, net4_fast_src, port_fast_src);
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 query_and_expect_actions(
@@ -57,8 +53,6 @@ prefix_mask(uint32_t prefix) {
 	uint32_t mask = (uint32_t)(-1) ^ ((1 << (32 - prefix)) - 1);
 	return rte_cpu_to_be_32(mask);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum { arena_size = 1 << 28 };
 
@@ -412,8 +406,6 @@ test_overlapping(void *arena) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

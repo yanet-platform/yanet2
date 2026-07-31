@@ -15,8 +15,6 @@
 #include <string.h>
 #include <unistd.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 void
 bucket_basic() {
 	alignas(64) uint8_t bucket[4096];
@@ -141,8 +139,6 @@ bucket_basic() {
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void *
 thread_func(void *bucket) {
 	for (size_t i = 0; i < 100000; ++i) {
@@ -202,8 +198,6 @@ bucket_multithread() {
 	__ttlmap_unlock(lock);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 void
 bucket_big_alignment() {
 	typedef struct key {
@@ -246,15 +240,11 @@ bucket_big_alignment() {
 	__ttlmap_unlock(lock);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 void
 bucket_alignment() {
 	__TTLMAP_BUCKET_DECLARE(uint8_t, uint8_t);
 	static_assert(alignof(__bucket_t) == 64, "not cache aligned");
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 typedef struct test_key {
 	size_t ip_src;
@@ -349,8 +339,6 @@ ttlmap_init_and_get_buckets(
 	memory_context_fini(&mctx);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 void
 ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 	int res;
@@ -435,21 +423,15 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 	memory_context_fini(&mctx);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 void
 ttlmap_init_and_get_buckets_many_entries(void *memory, size_t memory_size) {
 	ttlmap_init_and_get_buckets(memory, memory_size, 1000000);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 void
 ttlmap_strike_many_entries(void *memory, size_t memory_size) {
 	ttlmap_strike_entries(memory, memory_size, 1000000);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 iter_callback(test_key_t *key, test_value_t *value, size_t *cnt) {
@@ -462,8 +444,6 @@ iter_callback(test_key_t *key, test_value_t *value, size_t *cnt) {
 	++*cnt;
 	return 0;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 void
 ttlmap_iter(void *memory, size_t memory_size) {
@@ -512,8 +492,6 @@ ttlmap_iter(void *memory, size_t memory_size) {
 	TTLMAP_FREE(&map);
 	memory_context_fini(&mctx);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 struct bucket_iter_ctx {
 	ttlmap_t *map;

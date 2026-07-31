@@ -12,8 +12,6 @@
 FILTER_COMPILER_DECLARE(sign_vlan_compile, vlan);
 FILTER_QUERY_DECLARE(sign_vlan, vlan);
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
 	struct packet packet = {0};
@@ -29,8 +27,6 @@ query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
 	assert(actions == expected);
 	free_packet(&packet);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static void
 test_proto_1(void *memory) {
@@ -73,8 +69,6 @@ test_proto_1(void *memory) {
 	filter_free(&filter, sign_vlan_compile);
 	memory_context_fini(&memory_context);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

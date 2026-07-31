@@ -31,8 +31,6 @@ func (data *PacketData) asRaw() C.struct_packet_info {
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 type Packet C.struct_packet
 
 func NewPacketFromData(
@@ -74,8 +72,6 @@ func (packet *Packet) Info() *framework.PacketInfo {
 	}
 	return info
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 type PacketList C.struct_packet_list
 
@@ -168,8 +164,6 @@ func FillPacketListFromDataWithCustomAlloc(
 func (packetList *PacketList) Free() {
 	C.free_packet_list((*C.struct_packet_list)(packetList))
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 type PacketFront C.struct_packet_front
 

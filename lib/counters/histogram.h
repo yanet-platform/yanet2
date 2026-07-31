@@ -6,8 +6,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 /*
  * The function return bucket index of exponential histogram counter
  */
@@ -50,8 +48,6 @@ counter_hist_exp2_inc(
 
 	counter_handle_get_value(counter)[bucket] += value;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 /**
  * Configuration structure for a hybrid histogram counter.

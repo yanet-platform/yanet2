@@ -47,7 +47,6 @@
 #include <time.h>
 #include <unistd.h>
 
-////////////////////////////////////////////////////////////////////////////////
 // Filter signature declarations
 
 FILTER_COMPILER_DECLARE(bench_dst_compile, net6_dst);
@@ -61,7 +60,6 @@ FILTER_COMPILER_DECLARE(
 );
 FILTER_QUERY_DECLARE(bench_dst_port_proto, net6_dst, port_dst, proto_range);
 
-////////////////////////////////////////////////////////////////////////////////
 // Configuration and types
 
 enum signature_type {
@@ -82,7 +80,6 @@ struct bench_stats {
 	uint64_t total_time_ns;
 };
 
-////////////////////////////////////////////////////////////////////////////////
 // Hugepage allocator (similar to balancer bench)
 
 struct hugepage_allocator {
@@ -119,7 +116,6 @@ hugepage_alloc(void *alloc_ptr, size_t align, size_t size) {
 	return ptr + shift;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Helper functions
 
 /**
@@ -175,7 +171,6 @@ ipv6_prefix_mask(uint8_t prefix_len, uint8_t mask[16]) {
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Rule generation with high match probability
 
 static void
@@ -251,7 +246,6 @@ generate_rules(
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Packet generation with high match probability
 
 static void
@@ -366,7 +360,6 @@ generate_packet_info(
 	}
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Benchmark execution
 
 static int
@@ -440,7 +433,6 @@ run_benchmark(
 	return 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Results reporting
 
 static void
@@ -465,7 +457,6 @@ print_results(const struct bench_config *config, struct bench_stats *stats) {
 	printf("\n");
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Main
 
 static void

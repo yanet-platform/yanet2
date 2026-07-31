@@ -3,8 +3,6 @@
 #include "common/spinlock.h"
 #include <stdatomic.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 typedef struct spinlock ttlmap_lock_t;
 
 static inline void

@@ -609,9 +609,12 @@ func (c *Converter) UpdateSkiplist() error {
 `, name))
 		for i, st := range tests[name].steps {
 			// Emit original step YAML as comments, indented with 4 spaces
-			for _, ln := range st.original {
+			for lineIndex, line := range st.original {
+				if shouldOmitGeneratedCommentLine(st.original, lineIndex) {
+					continue
+				}
 				sb.WriteString("    # ")
-				sb.WriteString(ln)
+				sb.WriteString(line)
 				sb.WriteString("\n")
 			}
 			sb.WriteString(fmt.Sprintf("    %d: disabled\n", i+1))
@@ -624,6 +627,30 @@ func (c *Converter) UpdateSkiplist() error {
 		return fmt.Errorf("failed to write skiplist: %w", err)
 	}
 	return nil
+}
+
+func shouldOmitGeneratedCommentLine(lines []string, lineIndex int) bool {
+	text := strings.TrimSpace(lines[lineIndex])
+	if !isPureSeparatorRun(text) {
+		return false
+	}
+	if lineIndex == 0 || (text[0] != '=' && text[0] != '-') {
+		return true
+	}
+	previous := strings.TrimSpace(lines[lineIndex-1])
+	return previous == "" || isPureSeparatorRun(previous)
+}
+
+func isPureSeparatorRun(text string) bool {
+	if len(text) < 3 || !strings.ContainsRune("+-=*_~/#", rune(text[0])) {
+		return false
+	}
+	for idx := 1; idx < len(text); idx++ {
+		if text[idx] != text[0] {
+			return false
+		}
+	}
+	return true
 }
 
 // parseAutotestOriginalBlocks returns a slice of original YAML blocks for each

@@ -7,8 +7,6 @@
 #include "declare.h"
 #include "helper.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 typedef void (*rule_get_net4_func)(
 	const struct filter_rule *rule, struct net4 **net, uint32_t *count
 );
@@ -220,8 +218,6 @@ error_collector:
 error:
 	return -1;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 // Allows to initialize attribute for IPv4 source address.
 int

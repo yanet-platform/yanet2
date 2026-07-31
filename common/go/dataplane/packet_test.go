@@ -12,8 +12,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
 
-////////////////////////////////////////////////////////////////////////////////
-
 func TestPacket(t *testing.T) {
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
@@ -72,8 +70,6 @@ func TestPacket(t *testing.T) {
 	assert.Equal(t, packetInfo.DstMAC, eth.DstMAC)
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {
 	packets := make([]*Packet, 0, count)
 
@@ -130,8 +126,6 @@ func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {
 	return packets
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 func TestPacketList(t *testing.T) {
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
@@ -147,8 +141,6 @@ func TestPacketList(t *testing.T) {
 		packet = packet.Next()
 	}
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 func TestPacketFront(t *testing.T) {
 	pinner := runtime.Pinner{}

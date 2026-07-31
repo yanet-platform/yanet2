@@ -14,8 +14,6 @@
 FILTER_COMPILER_DECLARE(sign_proto_range_fast_compile, proto_range_fast);
 FILTER_QUERY_DECLARE(sign_proto_range_fast, proto_range_fast);
 
-////////////////////////////////////////////////////////////////////////////////
-
 static void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 	struct packet packet = {0};
@@ -43,8 +41,6 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	assert(actions == expected);
 	free_packet(&packet);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 test_basic_tcp_udp(void *memory) {
@@ -285,8 +281,6 @@ test_boundary_values(void *memory) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

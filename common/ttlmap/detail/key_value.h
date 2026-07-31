@@ -2,8 +2,6 @@
 
 #include "city.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define __TTLMAP_KEYS_EQUAL(key1_ptr, key2_ptr)                                \
 	(memcmp(key1_ptr, key2_ptr, sizeof(typeof(*(key1_ptr)))) == 0)
 

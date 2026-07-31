@@ -21,8 +21,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(
 	sign_fast_src_dst_compile, port_fast_src, port_fast_dst
 );
@@ -33,8 +31,6 @@ FILTER_QUERY_DECLARE(sign_fast_src, port_fast_src);
 
 FILTER_COMPILER_DECLARE(sign_fast_dst_compile, port_fast_dst);
 FILTER_QUERY_DECLARE(sign_fast_dst, port_fast_dst);
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum filter_sign { src = 0, dst = 1, src_dst = 2 };
 
@@ -51,8 +47,6 @@ filter_sign_to_string(enum filter_sign sign) {
 	assert(false);
 	return "";
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 query_and_expect_actions(
@@ -95,8 +89,6 @@ query_and_expect_actions(
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum { arena_size = 1 << 28 };
 
@@ -249,8 +241,6 @@ test_basic(void *arena, enum filter_sign sign) {
 	return TEST_SUCCESS;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static int
 test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 	assert(sign == src || sign == dst);
@@ -398,8 +388,6 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 is_port_in_range(uint16_t port, struct filter_port_range *range) {
@@ -1453,8 +1441,6 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

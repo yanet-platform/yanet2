@@ -22,8 +22,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(
 	sign_fast_src_dst_compile, net4_fast_src, net4_fast_dst
 );
@@ -34,8 +32,6 @@ FILTER_QUERY_DECLARE(sign_fast_src, net4_fast_src);
 
 FILTER_COMPILER_DECLARE(sign_fast_dst_compile, net4_fast_dst);
 FILTER_QUERY_DECLARE(sign_fast_dst, net4_fast_dst);
-
-////////////////////////////////////////////////////////////////////////////////
 
 enum filter_sign { src = 0, dst = 1, src_dst = 2 };
 
@@ -102,8 +98,6 @@ prefix_mask(uint32_t prefix) {
 	uint32_t mask = (uint32_t)(-1) ^ ((1 << (32 - prefix)) - 1);
 	return rte_cpu_to_be_32(mask);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 struct test_net {
 	uint8_t addr[4];
@@ -249,7 +243,6 @@ test_basic(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
@@ -447,8 +440,6 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 is_ip_from_net(struct net4 *net, uint8_t *ip) {
@@ -653,7 +644,6 @@ stress(void *arena,
 	return TEST_SUCCESS;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Corner case tests
 
 static int
@@ -1294,8 +1284,6 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {

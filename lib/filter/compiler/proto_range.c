@@ -7,8 +7,6 @@
 
 #include <stdint.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 #define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 16))
 
 static int
@@ -109,8 +107,6 @@ error_remap_table:
 	return -1;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 	struct value_registry *registry,
@@ -147,7 +143,5 @@ FILTER_ATTR_COMPILER_FREE_FUNC(proto_range)(
 	value_table_free(&c->table);
 	memory_bfree(memory_context, c, sizeof(*c));
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 #undef PROTO_RANGE_CLASSIFIER_MAX_VALUE

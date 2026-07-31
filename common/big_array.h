@@ -6,7 +6,6 @@
 #include <stddef.h>
 #include <string.h>
 
-////////////////////////////////////////////////////////////////////////////////
 /**
  * @file big_array.h
  * @brief Large array implementation that exceeds single memory block limits
@@ -78,7 +77,6 @@
  * @see memory.h for memory context management
  * @see memory_block.h for block allocator details
  */
-////////////////////////////////////////////////////////////////////////////////
 
 /**
  * @struct big_array

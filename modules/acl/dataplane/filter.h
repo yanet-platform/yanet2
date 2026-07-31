@@ -3,8 +3,6 @@
 #include <filter/filter.h>
 #include <filter/query.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 // Declare filter for IPv4 nets
 
 #define ACL_FILTER_NET4_TAG __ACL_FILTER_NET4_TAG
@@ -24,8 +22,6 @@ net4_filter_query(
 		filter, ACL_FILTER_NET4_TAG, packet, actions, actions_count
 	);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 // Declare filter for IPv6 nets
 

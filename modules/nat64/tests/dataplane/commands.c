@@ -39,8 +39,6 @@
 
 #include "test.h"
 
-/****************/
-
 static struct test_commands_list commands_list =
 	TAILQ_HEAD_INITIALIZER(commands_list);
 
@@ -92,8 +90,6 @@ cmdline_parse_inst_t cmd_autotest = {
 			NULL,
 		},
 };
-
-/****************/
 
 struct cmd_dump_result {
 	cmdline_fixed_string_t dump;
@@ -164,8 +160,6 @@ cmdline_parse_inst_t cmd_dump = {
 };
 /* >8 End of add the dump_* tests cases */
 
-/****************/
-
 struct cmd_dump_one_result {
 	cmdline_fixed_string_t dump;
 	cmdline_fixed_string_t name;
@@ -215,8 +209,6 @@ cmdline_parse_inst_t cmd_dump_one = {
 			NULL,
 		},
 };
-
-/****************/
 
 struct cmd_quit_result {
 	cmdline_fixed_string_t quit;
