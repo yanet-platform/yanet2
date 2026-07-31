@@ -63,7 +63,6 @@ crc32_u64(uint64_t v, uint32_t hash) {
 
 static inline uint32_t
 crc32(const void *data, uint64_t size, uint32_t hash) {
-
 	for (uint64_t idx = 0; idx < size / 8; ++idx) {
 		uint64_t value;
 		memcpy(&value, data, 8);
