@@ -217,10 +217,29 @@ impl Error {
     }
 }
 
+/// Marker the gateway director opens a `NotFound` `Status` with when the
+/// requested gRPC service has no backend registered.
+///
+/// `controlplane/gateway/gateway.go` produces exactly this message
+/// (`status.Errorf(codes.NotFound, "unknown service")`), with no suffix.
+const UNKNOWN_SERVICE_MARKER: &str = "unknown service";
+
+/// Reports whether `message` is the gateway's unregistered-service `NotFound`.
+///
+/// The check is anchored at the start of `message` (`starts_with`) rather
+/// than searched anywhere in it (`contains`): a resource `NotFound` that
+/// merely quotes [`UNKNOWN_SERVICE_MARKER`] inside a config name (e.g.
+/// `config "unknown service" not found`) carries the marker mid-message and
+/// must stay a plain `NotFound`, not be misclassified as an unregistered
+/// service.
+fn is_unknown_service_message(message: &str) -> bool {
+    message.starts_with(UNKNOWN_SERVICE_MARKER)
+}
+
 /// Map a `tonic::Code` (and optional message text) to a [`ErrorKind`].
 fn map_code(code: Code, message: &str) -> ErrorKind {
     match code {
-        Code::NotFound if message.contains("unknown service") => ErrorKind::ServiceUnregistered,
+        Code::NotFound if is_unknown_service_message(message) => ErrorKind::ServiceUnregistered,
         Code::NotFound => ErrorKind::NotFound,
         Code::InvalidArgument => ErrorKind::InvalidArgument,
         Code::Unauthenticated | Code::PermissionDenied => ErrorKind::Auth,
@@ -265,7 +284,7 @@ impl NotFoundMapper {
         endpoint: impl Into<String>,
         resource: Option<&str>,
     ) -> Error {
-        if status.code() == Code::NotFound && !status.message().contains("unknown service") {
+        if status.code() == Code::NotFound && !is_unknown_service_message(status.message()) {
             let resource = resource.unwrap_or(self.default_resource);
 
             return Error::from_status(
@@ -333,6 +352,31 @@ mod test {
         let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
 
         assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+    }
+
+    #[test]
+    fn bare_unknown_service_message_is_service_unregistered() {
+        let status = Status::not_found("unknown service");
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+
+        assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+    }
+
+    #[test]
+    fn config_name_containing_the_marker_is_not_service_unregistered() {
+        let status = Status::not_found(r#"config "unknown service" not found"#);
+        let err = Error::from_status(status, "show", "grpc://[::1]:8080", "test.Service");
+
+        assert_eq!(ErrorKind::NotFound, err.kind());
+    }
+
+    #[test]
+    fn config_name_containing_the_marker_is_rewritten_by_the_mapper() {
+        let status = Status::not_found(r#"config "unknown service" not found"#);
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+
+        assert_eq!(ErrorKind::NotFound, err.kind);
+        assert_eq!("item 'x' not found", err.message);
     }
 
     #[test]
