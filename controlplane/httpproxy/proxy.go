@@ -110,6 +110,25 @@ func (m *TransparentWebGRPCProxy) writeRegistryMissError(w http.ResponseWriter, 
 	http.Error(w, message, http.StatusServiceUnavailable)
 }
 
+// writeBackendUnreachableError responds to a GetConnection failure with 503,
+// not 500.
+//
+// The only proxy.Backend the gateway builds (controlplane/gateway/backend.go)
+// returns a nil error unconditionally, so this branch is unreachable in
+// production. 503 is what keeps it consistent with the outage that does
+// happen: that backend's grpc.NewClient dials lazily, so a down control
+// plane surfaces later at conn.Invoke as codes.Unavailable, which
+// grpcCodeToHTTPStatus turns into 503 on the unary path.
+func (m *TransparentWebGRPCProxy) writeBackendUnreachableError(w http.ResponseWriter, service, method string, err error) {
+	m.log.Error("failed to get connection to backend",
+		zap.String("service", service),
+		zap.String("method", method),
+		zap.Error(err),
+	)
+	message := fmt.Sprintf("service %s is unreachable: %v", service, err)
+	http.Error(w, message, http.StatusServiceUnavailable)
+}
+
 // handleUnary handles unary gRPC calls.
 func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Request, fullMethodName string) {
 	service, method, err := xgrpc.ParseFullMethod(fullMethodName)
@@ -153,12 +172,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 
 	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
-		m.log.Error("failed to get connection to backend",
-			zap.String("service", service),
-			zap.String("method", method),
-			zap.Error(err),
-		)
-		http.Error(w, fmt.Sprintf("Failed to connect to backend: %v", err), http.StatusInternalServerError)
+		m.writeBackendUnreachableError(w, service, method, err)
 		return
 	}
 
@@ -346,12 +360,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 
 	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
-		m.log.Error("failed to get connection to backend",
-			zap.String("service", service),
-			zap.String("method", method),
-			zap.Error(err),
-		)
-		http.Error(w, fmt.Sprintf("Failed to connect to backend: %v", err), http.StatusInternalServerError)
+		m.writeBackendUnreachableError(w, service, method, err)
 		return
 	}
 

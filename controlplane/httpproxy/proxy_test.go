@@ -1,6 +1,8 @@
 package httpproxy_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -59,6 +62,84 @@ func TestServeHTTP_UnknownService(t *testing.T) {
 			handler.ServeHTTP(recorder, req)
 
 			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, testCase.rationale)
+		})
+	}
+}
+
+// unreachableBackend is a proxy.Backend whose GetConnection always fails,
+// simulating a registered service whose upstream connection cannot be
+// established.
+type unreachableBackend struct {
+	err error
+	// called records whether GetConnection was actually invoked, so the
+	// test can distinguish this branch from the registry-miss branch,
+	// which also answers 503 without ever calling GetConnection.
+	called *bool
+}
+
+func (m unreachableBackend) String() string {
+	return "unreachable-backend"
+}
+
+func (m unreachableBackend) GetConnection(_ context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
+	*m.called = true
+	return nil, nil, m.err
+}
+
+func (m unreachableBackend) AppendInfo(_ bool, resp []byte) ([]byte, error) {
+	return resp, nil
+}
+
+func (m unreachableBackend) BuildError(_ bool, _ error) ([]byte, error) {
+	return nil, nil
+}
+
+// unreachableRegistry is a BackendRegistry that always resolves to an
+// unreachableBackend, simulating a service that is registered but whose
+// control plane connection is currently down.
+type unreachableRegistry struct {
+	backend unreachableBackend
+}
+
+func (m unreachableRegistry) GetBackend(_ string) (proxy.Backend, bool) {
+	return m.backend, true
+}
+
+// TestServeHTTP_BackendUnreachable verifies that a GetConnection failure is
+// answered with 503, not 500, on both the unary and server-streaming
+// request paths, and that the failing backend was actually reached.
+func TestServeHTTP_BackendUnreachable(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "unary",
+			path: "/api" + ynpb.ReadinessService_Ready_FullMethodName,
+		},
+		{
+			name: "streaming",
+			path: "/api" + ynpb.ReadinessService_Watch_FullMethodName,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			called := false
+			backend := unreachableBackend{err: errors.New("connection refused"), called: &called}
+			handler := httpproxy.NewHTTPHandler(unreachableRegistry{backend: backend})
+
+			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader("{}"))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			require.True(t, called, "GetConnection was never invoked")
 		})
 	}
 }
