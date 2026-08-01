@@ -243,6 +243,14 @@ export const usePdumpCapture = (paused: boolean) => {
                         ? { ...record, data: undefined }
                         : record;
 
+                    // record.meta.timestamp is typed number | string, like the other
+                    // 64-bit wire fields in web/src/core/api/; the current gateway sends
+                    // a bare JSON number, and Number() normalises either branch. new Date
+                    // truncates the result to whole milliseconds, which is all this
+                    // Date's consumers need (e.g. PacketDrawer renders
+                    // fractionalSecondDigits: 3, PacketTable sorts by time). Code that
+                    // needs the sub-millisecond digits reads meta.timestamp directly, as
+                    // pcap.ts does.
                     const capturedPacket: CapturedPacket = {
                         id: packetIdRef.current++,
                         timestamp: record.meta?.timestamp

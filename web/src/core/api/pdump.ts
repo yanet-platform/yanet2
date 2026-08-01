@@ -22,7 +22,7 @@ export interface ShowConfigResponse {
 }
 
 export interface RecordMeta {
-    timestamp?: string;
+    timestamp?: number | string;
     data_size?: number;
     packet_len?: number;
     worker_idx?: number;

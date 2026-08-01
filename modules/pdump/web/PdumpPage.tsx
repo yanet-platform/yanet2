@@ -16,6 +16,7 @@ import FilterRow from './FilterRow';
 import ConfigStrip from './ConfigStrip';
 import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
+import { createPcapBuffer } from './pcap';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
 import type { Command, PagePaletteContribution } from '@yanet/core/components/command-palette';
 import '@yanet/core/styles/chrome.scss';
@@ -26,53 +27,10 @@ const EMPTY_DIRTY_SET = new Set<string>();
 const QP_CONFIG = 'config';
 const QP_SEARCH = 'search';
 const EMPTY_PPS_HISTORY: number[] = [];
-const PCAP_GLOBAL_HEADER_BYTES = 24;
-const PCAP_PACKET_HEADER_BYTES = 16;
-const PCAP_LINKTYPE_ETHERNET = 1;
 
 const sanitizeFilenamePart = (value: string): string => {
     const sanitized = value.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     return sanitized || 'capture';
-};
-
-const createPcapBuffer = (records: CapturedPacket[]): ArrayBuffer => {
-    let totalSize = PCAP_GLOBAL_HEADER_BYTES;
-    for (const packet of records) {
-        totalSize += PCAP_PACKET_HEADER_BYTES + packet.parsed.raw.length;
-    }
-
-    const buffer = new ArrayBuffer(totalSize);
-    const view = new DataView(buffer);
-    const bytes = new Uint8Array(buffer);
-
-    view.setUint32(0, 0xa1b2c3d4, true);
-    view.setUint16(4, 2, true);
-    view.setUint16(6, 4, true);
-    view.setInt32(8, 0, true);
-    view.setUint32(12, 0, true);
-    view.setUint32(16, 65535, true);
-    view.setUint32(20, PCAP_LINKTYPE_ETHERNET, true);
-
-    let offset = PCAP_GLOBAL_HEADER_BYTES;
-    for (const packet of records) {
-        const payload = packet.parsed.raw;
-        const capturedLength = payload.length;
-        const originalLength = packet.record.meta?.packet_len ?? capturedLength;
-        const timestampMs = packet.timestamp.getTime();
-        const tsSec = Math.floor(timestampMs / 1000);
-        const tsUsec = Math.floor((timestampMs % 1000) * 1000);
-
-        view.setUint32(offset, tsSec, true);
-        view.setUint32(offset + 4, tsUsec, true);
-        view.setUint32(offset + 8, capturedLength, true);
-        view.setUint32(offset + 12, originalLength, true);
-        offset += PCAP_PACKET_HEADER_BYTES;
-
-        bytes.set(payload, offset);
-        offset += capturedLength;
-    }
-
-    return buffer;
 };
 
 const PdumpPage: React.FC = () => {
