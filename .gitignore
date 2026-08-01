@@ -132,15 +132,21 @@ deploy/packages/
 ### AI ###
 .ai
 .cursor/
-.claude/agent-memory/
+
+# Worktree symlinks: a worktree may symlink these trees into the main
+# checkout, and a directory-only pattern does not match a symlink.
+.claude/agent-memory
 .claude/settings.*.json
-.claude/skills/loadtest-hw/
-.claude/worktrees/
+.claude/skills/loadtest-hw
+.agents/skills/loadtest-hw
+.claude/worktrees
 /.codex/
-/.agent-state/
+/.agent-state
 
 ### Uncategorized ###
-.arch/
+# Worktree symlinks: a worktree may symlink this tree into the main
+# checkout, and a directory-only pattern does not match a symlink.
+.arch
 .assets/
 .docs/
 .secrets/
