@@ -258,7 +258,10 @@ func TestGRE(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkNewPacket_Simple(b *testing.B) {
-	for b.Loop() {
+	// b.Loop() blocks inlining of the option constructors, charging a heap
+	// allocation per option that real callers avoid. Discarding the result is
+	// safe: NewPacket is too complex to inline, so the call cannot be elided.
+	for range b.N {
 		_, _ = NewPacket(nil,
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 			IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
@@ -268,7 +271,10 @@ func BenchmarkNewPacket_Simple(b *testing.B) {
 }
 
 func BenchmarkNewPacket_Complex(b *testing.B) {
-	for b.Loop() {
+	// b.Loop() blocks inlining of the option constructors, charging a heap
+	// allocation per option that real callers avoid. Discarding the result is
+	// safe: NewPacket is too complex to inline, so the call cannot be elided.
+	for range b.N {
 		_, _ = NewPacket(nil,
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 			Dot1Q(VLANId(100)),
