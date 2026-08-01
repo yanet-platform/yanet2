@@ -17,7 +17,6 @@ export interface ModuleCardsChrome {
     countStyle?: React.CSSProperties;
     legendClass?: string;
     gridClass: string;
-    gridTemplateColumns: (moduleCount: number) => string;
     cardClass: string;
     dotClass: string;
     memUsedStyle: (used: number) => React.CSSProperties;
@@ -30,6 +29,16 @@ export interface ModuleCardsGridProps {
     usage: Map<string, AgentUsage>;
     chrome: ModuleCardsChrome;
 }
+
+/**
+ * One equal-width grid column per module, capped at eight.
+ *
+ * The count is also floored at one because `repeat(0, ...)` is invalid CSS;
+ * the browser drops the whole declaration and the grid silently collapses
+ * to a single implicit column.
+ */
+const gridTemplateColumns = (moduleCount: number): string =>
+    `repeat(${Math.min(8, Math.max(1, moduleCount))}, minmax(0, 1fr))`;
 
 /** Shared module-card grid renderer used by ModuleStrip and DataplaneModules. */
 export const ModuleCardsGrid: React.FC<ModuleCardsGridProps> = ({ instance, usage, chrome }) => {
@@ -55,7 +64,7 @@ export const ModuleCardsGrid: React.FC<ModuleCardsGridProps> = ({ instance, usag
             </div>
             <div
                 className={chrome.gridClass}
-                style={{ gridTemplateColumns: chrome.gridTemplateColumns(modules.length) }}
+                style={{ gridTemplateColumns: gridTemplateColumns(modules.length) }}
             >
                 {moduleData.map((m) => {
                     const href = getModuleRoute(m.name);
