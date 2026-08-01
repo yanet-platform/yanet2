@@ -25,6 +25,7 @@ You (the architect) drive this. You never write the code — that was already de
 ## Non-negotiables
 
 - **Don't publish unverified work.** Before branching, the change must have passed its verification gates AND a `reviewer` APPROVED pass (Phase 0). If either is missing, do that first — never ship unreviewed code.
+- **Publish from a dedicated worktree.** The primary checkout stays on `main` as a synchronization anchor; only an explicit instruction for the current task allows branching there.
 - **Branch from CONFIRMED `origin/main`**, never the session-start branch line and never a bare `git checkout -b` (HEAD may be on a parallel WIP branch and drag its commits in).
 - **Stage ONLY this change's files.** Never `git add -A`. Never stage pre-existing/unrelated dirty files. `git diff --cached -- <file>` each one, and cross-check every new untracked (`??`) file the change created is included.
 - **No destructive git with a dirty tree or without explicit permission** — no `reset --hard`/`checkout`/`restore`/`stash`/index ops that could wipe unrelated uncommitted work. Recovery recipes are in `references/branching-and-recovery.md`.
@@ -49,17 +50,18 @@ The `github` MCP server's file-write tools (`create_or_update_file`, `push_files
    - C → `meson compile -C build` AND `meson test -C build` AND `make fuzz`.
    - Rust → `cargo test --workspace`.
    - For C changes reachable across the CGO boundary (`lib/controlplane`, `api/`, anything called from `controlplane/ffi` or `bindings/go`) → also `make test-asan` (meson-only ASan never crosses into the Go cgo tests).
-2. **A `reviewer` APPROVED pass exists** for this change. If the work is uncommitted, the reviewer ran WITHOUT isolation at main-tree paths; never in the same batch as the coder. If not yet done, run it now.
+2. **A `reviewer` APPROVED pass exists** for this change. If the work is uncommitted, the reviewer inspected the exact on-disk paths in the worktree that holds it, without creating a clean isolation fork; never in the same batch as the coder. If not yet done, run it now.
 3. If the change touched any `Cargo.toml` dependency, regenerate and stage the root `Cargo.lock` in THIS PR (`cargo build`, then `git diff -- Cargo.lock`) — CI passes without it, so the omission is silent.
 
 ### Phase 1 — Branch from confirmed origin/main
 
 1. `git fetch origin main`.
 2. Create the branch off confirmed `origin/main`. Use a **shell-safe** name — `<type>/<scope>-<what>` (e.g. `chore/claude-ship-pr`): no `(`/`)` (bash mis-parses them unquoted in the `git`/`gh` commands below), and avoid a name that is also a path prefix of another branch (see stacked-PR ref):
-   - Worktree (preferred for isolation): `git worktree add .claude/worktrees/<name> -b <branch> origin/main` (gitignored location, never sibling dirs).
-   - Main checkout: `git checkout main && git fetch origin main && git checkout -b <branch> origin/main`.
+   - Worktree (the default, and mandatory unless the user waived isolation for this task): `git worktree add .claude/worktrees/<name> -b <branch> origin/main` (gitignored location, never sibling dirs). Put a task that needs its own full C/DPDK build on a volume with room for it instead.
+   - Primary checkout, only under that explicit waiver and only when it is clean, unshared, and on `main`: `git checkout main && git fetch origin main && git checkout -b <branch> origin/main`.
 3. If the work already lives on a coder's worktree branch, just confirm that branch was forked from current `origin/main`; rebase it if stale (`git rebase origin/main`, never `git merge origin/main`).
-4. To run `go build`/`go test` inside a fresh worktree you must seed gitignored generated files — see `worktree-pb-seeding` (architect memory): rsync the `*.pb.go` and symlink `build/`.
+4. When no gate produces or consumes `build` — it only links against the archives already there, or ignores it, as `go build`, `go test`, `cargo`, `npm` and a lint-only `make lint/comments` do — seed the gitignored generated files, see `worktree-isolation-and-seeding` (architect memory): rsync the `*.pb.go` and symlink `build/`. NEVER run `make` or `meson` against that symlink: `meson compile -C build` does not reconfigure, it compiles the PRIMARY checkout's sources into the shared directory, so the gate goes green on stale archives, and `--reconfigure`/`--wipe` retargets the developer's shared directory at the worktree.
+5. When a gate produces or consumes `build` — `make test` expands to `meson compile -C build` plus `meson test -C build`, and `make test-functional` mounts the directory into the VM — the worktree needs its own real `build` instead of the symlink, and the usual `meson compile -C build` recipes then stay correct: `meson setup build` initialises the empty `subprojects/dpdk` and `subprojects/libpcap` itself, but a linked worktree does not share the superproject's submodule objects, so git clones them from the remote (network required) into `.git/worktrees/<name>/modules/` — roughly 255 MB before the build itself. Once `meson compile -C build` has run there it does not also need step 4's protobuf copy, because that compile generates the `*.pb.go` into the worktree as custom targets; before it, a bare `go build ./...` still sees them missing.
 
 ### Phase 2 — Stage exactly this change
 

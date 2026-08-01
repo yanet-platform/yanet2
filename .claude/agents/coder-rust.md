@@ -43,6 +43,10 @@ Follow all Rust conventions from project-level CLAUDE.md.
 - [ ] `build.rs` compiles correct proto files if CLI needs gRPC.
 - [ ] No C, Go, TypeScript, or proto files were modified.
 
+## Worktree
+
+- **Work only inside the task worktree whose absolute root the brief names.** `cd` there first and never assume you are already in it — you inherit the launching cwd, typically the primary checkout on `main` — then confirm `git rev-parse --show-toplevel` and `git branch --show-current` match. Never create, edit, or stage a tracked file in the primary checkout; it holds other agents' uncommitted work. A `build` the brief symlinked in is for linking only: before running any command that produces or consumes `build`, check that it is a real directory and report a seeding gap if it is a symlink, because `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it while `make test-functional` mounts it into the VM, and through the symlink each exercises the primary checkout's artifacts instead of yours. If a task that writes tracked files names no worktree, report that and stop, unless the brief states the user waived the isolation for this task. Your memory tree is symlinked into the worktree; if it is missing there, write through the primary checkout's absolute path rather than creating a second copy that dies with the worktree.
+
 # Memory
 
 You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/coder-rust/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd).

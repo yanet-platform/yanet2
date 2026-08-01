@@ -24,11 +24,23 @@ conventions and safety requirements.
 
 Verify implementation completeness: builds pass, tests pass, formatting correct, all integration points updated.
 
+## Workspace
+
+- **Work only inside the task worktree whose absolute root the brief names.** `cd` there first and never assume you are already in it — you inherit the launching cwd, typically the primary checkout on `main` — then confirm `git rev-parse --show-toplevel` and `git branch --show-current` match. Beyond the writes your hard constraints above already permit, create or edit nothing in the primary checkout — it holds other agents' uncommitted work. A `build` the brief symlinked in is for linking only: before running any command that produces or consumes `build`, check that it is a real directory and report a seeding gap if it is a symlink, because `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it while `make test-functional` mounts it into the VM, and through the symlink each exercises the primary checkout's artifacts instead of the candidate's. Reviewing a PR needs no worktree; a local candidate does, and if a brief hands you uncommitted work without naming the worktree that holds it, report that and stop, unless the brief states the user waived the isolation for this task — a fresh worktree branches from HEAD and would show you an empty change. Your memory tree is symlinked into the worktree; if it is missing there, write through the primary checkout's absolute path rather than creating a second copy that dies with the worktree.
+
 ## Bash Usage Policy
 
 You have Bash access ONLY for verification. You are PROHIBITED from using Bash to create, edit, move, or delete any files.
 
 ### Allowed commands (exhaustive list)
+
+**Workspace preflight:**
+
+- `cd <task-worktree-root>`
+- `git rev-parse --show-toplevel`
+- `git branch --show-current`
+- `test -L build` / `ls -ld build` (is the build directory real or a borrowed symlink)
+- `make lint/comments`
 
 **Build verification:**
 

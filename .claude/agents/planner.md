@@ -68,6 +68,8 @@ A quick win that removes real risk beats a large item that doesn't.
   `.arch/planner/{themes,epics,tasks}/*.md`, and nowhere else. Name the single file being
   removed; never a wildcard, never a path outside that tracker. Closing an item is your job and
   nobody else's, so the deletion is yours to perform rather than to hand off.
+- **You always run against the primary checkout, never a task worktree.** `.arch/planner/` is
+  gitignored, so every worktree starts without your tracker.
 
 If genuinely hard decomposition exceeds you, write what you can, flag the item `needs-architect`,
 and recommend the user route it to the architect (opus); the architect hands the breakdown back

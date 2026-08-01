@@ -25,6 +25,7 @@ You (the architect) drive this. You never write the code — that was already de
 ## Non-negotiables
 
 - **Don't publish unverified work.** Before branching, the change must have passed its verification gates AND a `reviewer` APPROVED pass using `review-change` on the complete current candidate (Phase 0). If either is missing, do that first — never ship unreviewed code.
+- **Publish from a dedicated worktree.** The primary checkout stays on `main` as a synchronization anchor; only an explicit instruction for the current task allows branching there.
 - **Carry approval only by fingerprint equivalence.** The fingerprint is the exact reviewed base, review/publish manifests, file modes/types, and bytes. After transfer, staging, commit, amend, or push, verify the packaged side matches it exactly; a new commit SHA alone is harmless, but any fingerprint difference requires a fresh full-candidate review.
 - **Branch from CONFIRMED `origin/main`**, never the session-start branch line and never a bare `git switch -c` (HEAD may be on a parallel WIP branch and drag its commits in).
 - **Stage ONLY the approved publish manifest.** The complete review manifest may also contain local-only ignored configuration; preserve it in its source worktree but never transfer or stage it. Never `git add -A`. Never stage pre-existing/unrelated dirty files. `git diff --cached -- <file>` each publish entry, and cross-check every publish-class untracked (`??`) file is included.
@@ -56,8 +57,8 @@ You (the architect) drive this. You never write the code — that was already de
 
 1. `git fetch origin main`.
 2. Create the branch off confirmed `origin/main`. Use a **shell-safe** name — `<type>/<scope>-<what>` (e.g. `chore/ai-ship-pr`): no `(`/`)` (bash mis-parses them unquoted in git commands), and avoid a name that is also a path prefix of another branch (see stacked-PR ref):
-   - Worktree (preferred for isolation): `git worktree add .agent-state/worktrees/<name> -b <branch> origin/main` (root-local gitignored runtime state, never sibling dirs).
-   - Main checkout (only when clean and unshared): `git switch main && git fetch origin main && git switch -c <branch> origin/main`.
+   - Worktree (the default, and mandatory unless the user waived isolation for this task): `git worktree add .agent-state/worktrees/<name> -b <branch> origin/main` (root-local gitignored runtime state, never sibling dirs). Put a task that needs its own full C/DPDK build on a volume with room for it instead.
+   - Primary checkout, only under that explicit waiver and only when it is clean, unshared, and on `main`: `git switch main && git fetch origin main && git switch -c <branch> origin/main`.
 3. If reviewed publish work is uncommitted in ANY source worktree (primary or coder), transfer ONLY the exact publish manifest to the fresh worktree with verified temporary patches, never a direct pipe between producer and applier. Leave every reviewed local-only entry untouched in its source worktree. Run transfer separately for staged tracked changes (with `--cached`) and unstaged tracked changes (without it); either may be empty.
 
    ```bash
@@ -133,7 +134,8 @@ You (the architect) drive this. You never write the code — that was already de
    trap - EXIT
    ```
 
-   Inspect the listed destinations before building; the Git manifest selects only ignored `*.pb.go` at matching relative paths and creates no replacement symlink.
+   Inspect the listed destinations before building; the Git manifest selects only ignored `*.pb.go` at matching relative paths and creates no replacement symlink. This seeding is legal only when no gate produces or consumes `build` — it only links against the archives already there, or ignores it, as `go build`, `go test`, `cargo`, `npm` and a lint-only `make lint/comments` do. NEVER run `make` or `meson` against the symlink: `make test` alone expands to `meson compile -C build` plus `meson test -C build`, which compiles the PRIMARY checkout's sources into the developer's shared directory and reports its results as this candidate's gate.
+6. When a gate produces or consumes `build` — `make test` drives meson at it, `make test-functional` mounts it into the VM — skip the symlink in item 5 and give the worktree its own real `build`, so the usual `meson compile -C build` recipes stay correct: `meson setup build` initialises the empty `subprojects/dpdk` and `subprojects/libpcap` itself, but a linked worktree does not share the superproject's submodule objects, so git clones them from the remote (network required) into `.git/worktrees/<name>/modules/` — roughly 255 MB before the build itself. Phase 0's Go gate is `make test`, so a Go-only candidate needs this too — and it does not also need item 5's protobuf copy, because `meson compile -C build` generates the `*.pb.go` into the worktree as custom targets.
 
 ### Phase 2 — Stage exactly this change
 

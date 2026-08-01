@@ -179,10 +179,10 @@ Skills are architect-driven runbooks for recurring, multi-phase workflows
 (scan → triage → delegate → verify → publish). They are auto-surfaced via their
 `SKILL.md` frontmatter. Current skills:
 
-- **`ship-pr`** — the canonical publish/merge runbook: branch from confirmed
-  `origin/main`, stage only intended files, open a scoped PR, drive CI to green,
-  address every review/Codex finding, and merge with the right squash/rebase
-  strategy. Use whenever work is ready to land.
+- **`ship-pr`** — the canonical publish/merge runbook: branch a dedicated
+  worktree from confirmed `origin/main`, stage only intended files, open a
+  scoped PR, drive CI to green, address every review/Codex finding, and merge
+  with the right squash/rebase strategy. Use whenever work is ready to land.
 - **`raii-sweep`** — periodic C lifecycle-symmetry sweep (new/init/fini/free),
   one prefix family per PR.
 - **`web-dedup`** — de-duplicate `web/` behind a mandatory zero-visual-diff
@@ -308,8 +308,9 @@ For every task, structure your response as:
 - **Be specific in delegations.** Don't say "update the proto file" — say "add field `uint32 ttl = 5` to `ForwardConfig` message in `modules/forward/controlplane/forwardpb/forward.proto`".
 - **Respect the canonical patterns.** When in doubt, look at `decap` or `forward` modules as references.
 - **Flag shared memory changes prominently.** Any change to `config.h` structures affects the C/Go boundary and requires careful coordination.
+- **Open a dedicated worktree before any writing task; no tracked-file changes in the primary checkout.** Branch from confirmed `origin/main` into the client's root-local gitignored worktree directory, on a roomier volume when the task needs its own multi-gigabyte C build, seed it to match the gate the task must pass (symlink `.claude/agent-memory` and `.claude/settings.local.json` always; add `build/`, `*.pb.go`, submodules or `npm ci` as the gate requires), then name its absolute root in EVERY brief and tell the agent to `cd` there before its first command. You stay at the primary checkout so memory and `.arch/` resolve; specialists write inside the worktree, except the gitignored trees that cannot live there. Only an explicit instruction for the current task waives this — "fix X", "build it", "commit" do not. When the user does waive it, say so in the brief in those words — the specialists gate their own escape hatch on the brief stating the waiver.
 - **Always end a multi-file or multi-round task with a `reviewer` pass — RUN it, never merely offer it and wait for permission.** Build + vet are necessary but not sufficient; intermediate user signals ("git add", "create a branch", "поправь X") do NOT mean done — the reviewer pass still owes, and runs before staging.
-- **When delegating with uncommitted dirty files in the shared worktree, the brief MUST ban destructive git ops** (no `git stash`/`checkout`/`restore`/`reset`, no index ops); for "what does HEAD have" allow only read-only `git show HEAD:<path>` / `git diff HEAD -- <path>`. Positively redirect the common need: "if you suspect a build/test failure is pre-existing, STOP and report it as suspected pre-existing — do NOT verify via stash/checkout; the architect will A/B-test from a safer position."
+- **When delegating with uncommitted dirty files in the task worktree, the brief MUST ban destructive git ops** (no `git stash`/`checkout`/`restore`/`reset`, no index ops); for "what does HEAD have" allow only read-only `git show HEAD:<path>` / `git diff HEAD -- <path>`. Positively redirect the common need: "if you suspect a build/test failure is pre-existing, STOP and report it as suspected pre-existing — do NOT verify via stash/checkout; the architect will A/B-test from a safer position."
 
 ## Coding Conventions
 
