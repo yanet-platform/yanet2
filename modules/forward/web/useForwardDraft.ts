@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
-import { API, loadKnownConfigs } from '@yanet/core/api';
+import { API, inventoryConfigNames, loadKnownConfigs } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
 import { toaster, warnConfigsUnknown } from '@yanet/core/utils';
 import type { Rule } from '@yanet/core/api/forward';
@@ -69,12 +69,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
     const load = useCallback(async (): Promise<void> => {
         setLoading(true);
         try {
-            const inspectResp = await API.inspect.inspect();
-            const cpConfigs = inspectResp.instance_info?.cp_configs ?? [];
-            const forwardNames = cpConfigs
-                .filter(cfg => cfg.type === 'forward')
-                .map(cfg => cfg.name ?? '')
-                .filter(Boolean);
+            const forwardNames = await inventoryConfigNames('forward');
 
             const configs: Array<{ name: string; rules: Rule[] }> = await loadKnownConfigs(
                 forwardNames,

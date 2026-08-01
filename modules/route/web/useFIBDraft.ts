@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { API, loadKnownConfigs } from '@yanet/core/api';
+import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { warnConfigsUnknown } from '@yanet/core/utils';
 import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '@yanet/core/api/routes';
 import { ipRangeToCIDRs } from '@yanet/core/utils/netip';
@@ -60,15 +60,18 @@ export type UseFIBDraftResult = UseDraftResult<FIBRowItem>;
 /**
  * Wraps FIB config data with a local-draft layer.
  *
- * Server state is fetched once on mount via the route.showFIB and route.listConfigs APIs.
+ * Server state is fetched once on mount via the route.listConfigs, inspect and route.showFIB APIs.
  * All UI mutations go through dispatchDraft and update only local state until the user
  * explicitly calls commitConfig. On commit the full draft rows are sent via API.route.updateFIB
  * and the local server snapshot is updated so dirty clears.
  */
 export const useFIBDraft = (): UseFIBDraftResult => {
     const load = useCallback(async (): Promise<Array<{ name: string; rows: FIBRowItem[] }>> => {
-        const configsResp = await API.route.listConfigs();
-        const configNames = configsResp.configs ?? [];
+        const [configsResp, inventoryNames] = await Promise.all([
+            API.route.listConfigs(),
+            inventoryConfigNames('route'),
+        ]);
+        const configNames = unionConfigNames(configsResp.configs ?? [], inventoryNames);
         return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
             const fibResp = await API.route.showFIB({ name });
             return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };

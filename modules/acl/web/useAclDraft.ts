@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
-import { API, loadKnownConfigs } from '@yanet/core/api';
+import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
 import { toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import type { Rule } from '@yanet/core/api/acl';
@@ -40,7 +40,8 @@ export interface UseAclDraftResult {
 /**
  * Wraps ACL config data with a local-draft layer.
  *
- * Server state is fetched once on mount via listConfigs + showConfig per name.
+ * Server state is fetched once on mount via listConfigs and the shared-memory
+ * inventory, then showConfig per name.
  * All UI mutations go through dispatchDraft and update only local state until
  * the user explicitly calls saveConfig.
  */
@@ -57,8 +58,11 @@ export const useAclDraft = (): UseAclDraftResult => {
     const load = useCallback(async (): Promise<void> => {
         setLoading(true);
         try {
-            const listResp = await API.acl.listConfigs();
-            const names = listResp.configs ?? [];
+            const [listResp, inventoryNames] = await Promise.all([
+                API.acl.listConfigs(),
+                inventoryConfigNames('acl'),
+            ]);
+            const names = unionConfigNames(listResp.configs ?? [], inventoryNames);
 
             const configs = await loadKnownConfigs(
                 names,

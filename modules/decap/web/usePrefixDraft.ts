@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { API, loadKnownConfigs } from '@yanet/core/api';
+import { API, inventoryConfigNames, loadKnownConfigs } from '@yanet/core/api';
 import { warnConfigsUnknown } from '@yanet/core/utils';
 import type { PrefixRowItem } from './types';
 import { prefixDraftReducer, initialPrefixDraftState } from './prefixDraftReducer';
@@ -18,12 +18,7 @@ export type UsePrefixDraftResult = UseDraftResult<PrefixRowItem>;
  */
 export const usePrefixDraft = (): UsePrefixDraftResult => {
     const load = useCallback(async (): Promise<Array<{ name: string; rows: PrefixRowItem[] }>> => {
-        const inspectResp = await API.inspect.inspect();
-        const cpConfigs = inspectResp.instance_info?.cp_configs ?? [];
-        const configNames = cpConfigs
-            .filter((c) => c.type === 'decap')
-            .map((c) => c.name ?? '')
-            .filter(Boolean);
+        const configNames = await inventoryConfigNames('decap');
         return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: PrefixRowItem[] }> => {
             const resp = await API.decap.showConfig({ name });
             const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((p) => ({ id: p, prefix: p }));
