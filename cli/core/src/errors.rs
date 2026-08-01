@@ -105,7 +105,7 @@ impl Error {
         let message = status.message().to_owned();
         let code = status.code();
 
-        let kind = map_code(code, &message);
+        let kind = map_code(&status);
         let hint = default_hint(kind);
 
         Self {
@@ -217,29 +217,50 @@ impl Error {
     }
 }
 
-/// Marker the gateway director opens a `NotFound` `Status` with when the
+/// Trailer metadata key the gateway sets on a `NotFound` `Status` when the
 /// requested gRPC service has no backend registered.
 ///
-/// `controlplane/gateway/gateway.go` produces exactly this message
-/// (`status.Errorf(codes.NotFound, "unknown service")`), with no suffix.
+/// This is a wire contract with the gateway rather than a local constant:
+/// changing it stops registry misses being recognised, silently.
+const ERROR_REASON_METADATA_KEY: &str = "x-yanet-error-reason";
+
+/// Value of [`ERROR_REASON_METADATA_KEY`] that marks a registry miss.
+const SERVICE_UNREGISTERED_REASON: &str = "service-unregistered";
+
+/// Prefix a registry-miss `NotFound` message opens with, on a gateway that
+/// predates [`ERROR_REASON_METADATA_KEY`].
+///
+/// During a rolling upgrade a CLI built after the trailer landed can still
+/// talk to a gateway peer built before it, and that older peer never attaches
+/// the trailer. [`is_unknown_service_status`] falls back to this marker so
+/// the miss is still recognised in that window. Drop the constant and its use
+/// once no supported gateway predates the trailer.
 const UNKNOWN_SERVICE_MARKER: &str = "unknown service";
 
-/// Reports whether `message` is the gateway's unregistered-service `NotFound`.
+/// Reports whether `status` is the gateway's unregistered-service `NotFound`.
 ///
-/// The check is anchored at the start of `message` (`starts_with`) rather
-/// than searched anywhere in it (`contains`): a resource `NotFound` that
-/// merely quotes [`UNKNOWN_SERVICE_MARKER`] inside a config name (e.g.
-/// `config "unknown service" not found`) carries the marker mid-message and
-/// must stay a plain `NotFound`, not be misclassified as an unregistered
-/// service.
-fn is_unknown_service_message(message: &str) -> bool {
-    message.starts_with(UNKNOWN_SERVICE_MARKER)
+/// The trailer set by [`ERROR_REASON_METADATA_KEY`] is the primary signal, so
+/// the gateway's human-readable message stays free to change without
+/// silently reverting the classification client-side. A status without the
+/// trailer is still recognised when its message starts with
+/// [`UNKNOWN_SERVICE_MARKER`] — the compatibility fallback described there.
+/// That check is anchored at the start of the message (`starts_with`, not
+/// `contains`): a resource `NotFound` that merely quotes the marker inside a
+/// config name (e.g. `config "unknown service" not found`) carries it
+/// mid-message and must stay a plain `NotFound`.
+fn is_unknown_service_status(status: &Status) -> bool {
+    let has_trailer = status
+        .metadata()
+        .get(ERROR_REASON_METADATA_KEY)
+        .is_some_and(|value| value == SERVICE_UNREGISTERED_REASON);
+
+    has_trailer || status.message().starts_with(UNKNOWN_SERVICE_MARKER)
 }
 
-/// Map a `tonic::Code` (and optional message text) to a [`ErrorKind`].
-fn map_code(code: Code, message: &str) -> ErrorKind {
-    match code {
-        Code::NotFound if is_unknown_service_message(message) => ErrorKind::ServiceUnregistered,
+/// Map a `tonic::Status` to an [`ErrorKind`].
+fn map_code(status: &Status) -> ErrorKind {
+    match status.code() {
+        Code::NotFound if is_unknown_service_status(status) => ErrorKind::ServiceUnregistered,
         Code::NotFound => ErrorKind::NotFound,
         Code::InvalidArgument => ErrorKind::InvalidArgument,
         Code::Unauthenticated | Code::PermissionDenied => ErrorKind::Auth,
@@ -275,8 +296,8 @@ impl NotFoundMapper {
 
     /// Maps `status` to an [`Error`], rewriting a genuine resource `NotFound`
     /// into a friendly `"<resource> not found"` message and passing everything
-    /// else (including the gateway's "unknown service" `NotFound`) through
-    /// unchanged.
+    /// else (including a registry-miss `NotFound`, whether recognised by
+    /// trailer or by the compatibility fallback) through unchanged.
     pub fn map(
         &self,
         status: Status,
@@ -284,7 +305,7 @@ impl NotFoundMapper {
         endpoint: impl Into<String>,
         resource: Option<&str>,
     ) -> Error {
-        if status.code() == Code::NotFound && !is_unknown_service_message(status.message()) {
+        if status.code() == Code::NotFound && !is_unknown_service_status(&status) {
             let resource = resource.unwrap_or(self.default_resource);
 
             return Error::from_status(
@@ -301,11 +322,21 @@ impl NotFoundMapper {
 
 #[cfg(test)]
 mod test {
-    use tonic::Status;
+    use tonic::{metadata::MetadataMap, Code, Status};
 
     use super::{Error, ErrorKind, NotFoundMapper};
 
     const MAPPER: NotFoundMapper = NotFoundMapper::new("test.Service", "requested item");
+
+    /// Builds a `NotFound` `Status` carrying the gateway's registry-miss
+    /// trailer, pinned to the literal wire values rather than the
+    /// production constants so the test exercises the actual contract.
+    fn unregistered_status(message: &str) -> Status {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("x-yanet-error-reason", "service-unregistered".parse().unwrap());
+
+        Status::with_metadata(Code::NotFound, message, metadata)
+    }
 
     #[test]
     fn new_carries_the_requested_kind() {
@@ -348,16 +379,24 @@ mod test {
 
     #[test]
     fn unknown_service_not_found_passes_through_as_service_unregistered() {
-        let status = Status::not_found("unknown service test.Service");
+        let status = unregistered_status("unknown service test.Service");
         let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
 
         assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
     }
 
     #[test]
-    fn bare_unknown_service_message_is_service_unregistered() {
+    fn unknown_service_message_without_the_trailer_is_the_compatibility_fallback() {
         let status = Status::not_found("unknown service");
         let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+
+        assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+    }
+
+    #[test]
+    fn trailer_is_service_unregistered_even_with_a_config_name_message() {
+        let status = unregistered_status(r#"config "unknown service" not found"#);
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
 
         assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
     }

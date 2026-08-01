@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
@@ -62,6 +63,20 @@ type serviceEntry struct {
 // defaultPerServiceMethodLimit caps the number of distinct grpc_method label
 // values the default metrics factory tracks per grpc_service.
 const defaultPerServiceMethodLimit = 64
+
+// errorReasonMetadataKey is the trailer metadata key that classifies a
+// NotFound status without relying on its message text.
+//
+// It is part of the wire contract with clients that classify on it, so
+// renaming it breaks them.
+const errorReasonMetadataKey = "x-yanet-error-reason"
+
+// errorReasonServiceUnregistered marks a NotFound raised because the
+// requested gRPC service has no backend registered.
+//
+// It is part of the wire contract with clients that classify on it, so
+// renaming it breaks them.
+const errorReasonServiceUnregistered = "service-unregistered"
 
 // MetricsFactory constructs the gateway's gRPC server metrics from the
 // gateway-owned per-call bounds.
@@ -182,6 +197,24 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 
 		backend, ok := registry.GetBackend(service)
 		if !ok {
+			// The HTTP surface answers 503 for this same condition,
+			// because it cannot tell an HTTP client "this service never
+			// existed" from "its control plane is unreachable" and so
+			// separates the two by status code, reserving 404 for a
+			// NotFound a backend itself returns. gRPC keeps both as
+			// NotFound and separates them by trailer instead: Unavailable
+			// is not free to reuse, since clients already give it a
+			// different exit code and a different remedy, retrying the
+			// connection, than a registry miss, which needs the operator
+			// started or registered first.
+			//
+			// The trailer is what lets a client classify this NotFound
+			// structurally. The message text stays unchanged because
+			// clients released before the trailer still match on it, and
+			// stays that way until those are gone. SetTrailer only fails
+			// without a live server stream, which the proxying handler
+			// always supplies; losing it would cost only the marker.
+			_ = grpc.SetTrailer(ctx, metadata.Pairs(errorReasonMetadataKey, errorReasonServiceUnregistered))
 			return proxy.One2One, nil, status.Errorf(codes.NotFound, "unknown service")
 		}
 

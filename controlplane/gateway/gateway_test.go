@@ -11,7 +11,11 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
@@ -167,6 +171,68 @@ func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 	// CloseSend or cancels its context, matching the reproduction where an
 	// open readiness watch wedges GracefulStop forever.
 	watchUntilOpen(t, ynpb.NewReadinessServiceClient(conn))
+
+	cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- group.Wait() }()
+
+	select {
+	case err := <-runErr:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Gateway.Run did not return within the shutdown grace period")
+	}
+}
+
+// TestGateway_Director_RegistryMissCarriesReasonTrailer verifies that a
+// NotFound for a service the registry has no backend for keeps the exact
+// "unknown service" message and also carries the errorReasonMetadataKey
+// trailer, so a client can classify the miss without parsing the message.
+// The message assertion is deliberate, not incidental: CLIs released
+// before the trailer existed classify on that exact text, so changing it
+// would break them.
+func TestGateway_Director_RegistryMissCarriesReasonTrailer(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.Server.Endpoint = freeTCPAddr(t)
+
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	var group errgroup.Group
+	group.Go(func() error {
+		return gw.Run(ctx)
+	})
+
+	conn, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	var invokeErr error
+	var trailer metadata.MD
+	require.Eventually(t, func() bool {
+		trailer = metadata.MD{}
+		invokeErr = conn.Invoke(t.Context(), "/some.unknown.Service/Method", &emptypb.Empty{}, &emptypb.Empty{}, grpc.Trailer(&trailer))
+		// A fresh gRPC server is not immediately reachable after Run
+		// starts (see watchUntilOpen), so retry past a transient
+		// Unavailable from the listener not being up yet instead of
+		// requiring a fixed sleep.
+		statusErr, ok := status.FromError(invokeErr)
+		return ok && statusErr.Code() != codes.Unavailable
+	}, 5*time.Second, 50*time.Millisecond, "failed to reach the gateway's director")
+
+	require.Error(t, invokeErr)
+	statusErr, ok := status.FromError(invokeErr)
+	require.True(t, ok)
+	require.Equal(t, codes.NotFound, statusErr.Code())
+	require.Equal(t, "unknown service", statusErr.Message())
+
+	require.Equal(t, []string{"service-unregistered"}, trailer.Get("x-yanet-error-reason"))
 
 	cancel()
 
