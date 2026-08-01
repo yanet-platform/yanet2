@@ -3,7 +3,6 @@ package sshkey
 import (
 	"fmt"
 
-	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
@@ -12,7 +11,7 @@ import (
 // NewFromConfig creates an SSH key Authenticator from a raw YAML config node.
 func NewFromConfig(
 	rawCfg *yaml.Node,
-	log *zap.Logger,
+	options ...Option,
 ) (core.Authenticator, error) {
 	var cfg Config
 	if err := rawCfg.Decode(&cfg); err != nil {
@@ -28,9 +27,8 @@ func NewFromConfig(
 		return nil, fmt.Errorf("create SSH key store: %w", err)
 	}
 
-	opts := []Option{
-		WithLog(log),
-	}
+	opts := make([]Option, 0, len(options)+1)
+	opts = append(opts, options...)
 	if cfg.TimeWindow > 0 {
 		opts = append(opts, WithTimeWindow(cfg.TimeWindow))
 	}

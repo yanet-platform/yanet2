@@ -21,17 +21,7 @@ import (
 )
 
 // AuthenticatorFactory creates an Authenticator from a raw YAML config node.
-type AuthenticatorFactory func(
-	rawCfg *yaml.Node,
-	log *zap.Logger,
-) (core.Authenticator, error)
-
-// factories maps authenticator type names to their factory functions.
-var factories = map[string]AuthenticatorFactory{
-	"basic":   basic.NewFromConfig,
-	"sshkey":  sshkey.NewFromConfig,
-	"sshcert": sshcert.NewFromConfig,
-}
+type AuthenticatorFactory func(rawCfg *yaml.Node) (core.Authenticator, error)
 
 // Authorizer is the interface for authorization decisions.
 type Authorizer interface {
@@ -150,13 +140,23 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	)
 
 	// Create authenticators from config entries.
+	factories := map[string]AuthenticatorFactory{
+		"basic": basic.NewFromConfig,
+		"sshkey": func(rawCfg *yaml.Node) (core.Authenticator, error) {
+			return sshkey.NewFromConfig(rawCfg, sshkey.WithLog(log))
+		},
+		"sshcert": func(rawCfg *yaml.Node) (core.Authenticator, error) {
+			return sshcert.NewFromConfig(rawCfg, sshcert.WithLog(log))
+		},
+	}
+
 	for _, entry := range cfg.Authenticators {
 		factory, ok := factories[entry.Type]
 		if !ok {
 			return nil, fmt.Errorf("unknown authenticator type: %q", entry.Type)
 		}
 
-		auth, err := factory(&entry.Config, log)
+		auth, err := factory(&entry.Config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to init %q authenticator: %w", entry.Type, err)
 		}

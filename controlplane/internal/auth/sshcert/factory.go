@@ -3,7 +3,6 @@ package sshcert
 import (
 	"fmt"
 
-	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
@@ -12,7 +11,7 @@ import (
 // NewFromConfig creates an SSH certificate Authenticator from a raw YAML.
 func NewFromConfig(
 	rawCfg *yaml.Node,
-	log *zap.Logger,
+	options ...Option,
 ) (core.Authenticator, error) {
 	var cfg Config
 	if err := rawCfg.Decode(&cfg); err != nil {
@@ -49,9 +48,8 @@ func NewFromConfig(
 		}
 	}
 
-	opts := []Option{
-		WithLog(log),
-	}
+	opts := make([]Option, 0, len(options)+2)
+	opts = append(opts, options...)
 	if cfg.TimeWindow > 0 {
 		opts = append(opts, WithTimeWindow(cfg.TimeWindow))
 	}

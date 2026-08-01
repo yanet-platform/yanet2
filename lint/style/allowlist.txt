@@ -32,9 +32,6 @@
 
 barenew:common/go/grpcmetrics/grpcmetrics.go:New:1  # legacy: rename to a descriptive constructor name
 barenew:common/go/xbackoff/backoff.go:New:1  # legacy: rename to a descriptive constructor name
-logger:controlplane/internal/auth/basic/factory.go:NewFromConfig:1  # legacy: migrate to the options pattern
-logger:controlplane/internal/auth/sshcert/factory.go:NewFromConfig:1  # legacy: migrate to the options pattern
-logger:controlplane/internal/auth/sshkey/factory.go:NewFromConfig:1  # legacy: migrate to the options pattern
 logger:modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing:1  # legacy: migrate to the options pattern
 logger:modules/pdump/controlplane/service.go:NewPdumpService:1  # legacy: migrate to the options pattern
 logger:operators/bird-adapter/internal/bird/export.go:NewExportReader:1  # legacy: migrate to the options pattern
