@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/bird"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
@@ -519,15 +520,17 @@ func TestDecodeUpdate(t *testing.T) {
 
 }
 
-// cpu: 13th Gen Intel(R) Core(TM) i7-13700H
-// Benchmark_update_Decode-20      30660841                39.61 ns/op            0 B/op          0 allocs/op
 func Benchmark_update_Decode(b *testing.B) {
 	route := &rib.Route{} // memset(0)
 	result := 0
 
+	// The production caller always supplies a logger option, so a bare call
+	// here would benchmark a path nothing runs.
+	log := zap.NewNop()
+
 	b.ResetTimer()
-	for b.Loop() {
-		decoder, err := bird.NewUpdateDecoder(dataIPv6WithLargeCommunities)
+	for range b.N {
+		decoder, err := bird.NewUpdateDecoder(dataIPv6WithLargeCommunities, bird.WithUpdateDecoderLog(log))
 		if err != nil {
 			b.Logf("unexpected error: %v", err)
 			b.FailNow()
