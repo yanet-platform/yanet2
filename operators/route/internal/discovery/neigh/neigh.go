@@ -125,6 +125,16 @@ func WithOnHealthy(fn func()) Option {
 	}
 }
 
+// WithKernelTable configures the neighbour monitor with the source of the
+// kernel's link and neighbour tables.
+//
+// The default reads them from a live netlink socket.
+func WithKernelTable(kernelTable KernelTable) Option {
+	return func(o *options) {
+		o.KernelTable = kernelTable
+	}
+}
+
 type options struct {
 	UpdateInterval time.Duration
 	LinkMap        map[string]string
@@ -132,6 +142,7 @@ type options struct {
 	OnError        func(error)
 	OnResynced     func()
 	OnHealthy      func()
+	KernelTable    KernelTable
 	Log            *zap.Logger
 }
 
@@ -143,8 +154,31 @@ func newOptions() *options {
 		OnError:        func(error) {},
 		OnResynced:     func() {},
 		OnHealthy:      func() {},
+		KernelTable:    netlinkKernelTable{},
 		Log:            zap.NewNop(),
 	}
+}
+
+// KernelTable supplies the kernel's link and neighbour tables.
+//
+// The default implementation reads them from a live netlink socket.
+type KernelTable interface {
+	LinkList() ([]netlink.Link, error)
+	NeighList() ([]netlink.Neigh, error)
+}
+
+// netlinkKernelTable is the default KernelTable backed by the live netlink
+// socket.
+type netlinkKernelTable struct{}
+
+// LinkList lists the links known to the kernel.
+func (m netlinkKernelTable) LinkList() ([]netlink.Link, error) {
+	return netlink.LinkList()
+}
+
+// NeighList lists the neighbour entries known to the kernel.
+func (m netlinkKernelTable) NeighList() ([]netlink.Neigh, error) {
+	return netlink.NeighList(0, 0)
 }
 
 // NeighMonitor is a monitor of neighbour events.
@@ -156,6 +190,7 @@ func newOptions() *options {
 type NeighMonitor struct {
 	neighTable     *NeighTable
 	source         *NeighSource
+	kernelTable    KernelTable
 	updateInterval time.Duration
 	linkMap        map[string]string
 	onSynced       sync.Once
@@ -185,6 +220,7 @@ func NewNeighMonitor(neighTable *NeighTable, source *NeighSource, options ...Opt
 	m := &NeighMonitor{
 		neighTable:     neighTable,
 		source:         source,
+		kernelTable:    opts.KernelTable,
 		linkMap:        opts.LinkMap,
 		updateInterval: opts.UpdateInterval,
 		onSyncedFn:     opts.OnSynced,
@@ -316,13 +352,35 @@ func (m *NeighMonitor) notifyResynced() {
 	m.onResyncedFn()
 }
 
+// isUsableSourceMAC reports whether a link's hardware address can serve as
+// the source MAC of a forwarded frame.
+//
+// An all-zero source MAC is not learnable and is dropped by many switches,
+// so it must be rejected rather than emitted. Links without an Ethernet
+// address of their own — tunnels and other point-to-point devices — report
+// a nil or short HardwareAddr, and the loopback device reports six genuine
+// zero bytes; both fail this check. A true result also guarantees exactly
+// six bytes, which the caller relies on: its [6]byte(hardwareAddr) array
+// conversion panics on any other length.
+func isUsableSourceMAC(hardwareAddr net.HardwareAddr) bool {
+	if len(hardwareAddr) != 6 {
+		return false
+	}
+	for _, octet := range hardwareAddr {
+		if octet != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *NeighMonitor) updateNeighbours() error {
-	neighs, err := netlink.NeighList(0, 0)
+	neighs, err := m.kernelTable.NeighList()
 	if err != nil {
 		return fmt.Errorf("failed to list neighbours: %w", err)
 	}
 
-	links, err := netlink.LinkList()
+	links, err := m.kernelTable.LinkList()
 	if err != nil {
 		return fmt.Errorf("failed to list links: %w", err)
 	}
@@ -336,12 +394,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 
 		// TODO: should we filter out loopback links?
 
-		hardwareAddr := attrs.HardwareAddr
-		if hardwareAddr == nil {
-			hardwareAddr = make(net.HardwareAddr, 6)
-		}
-
-		linkIndexToHardwareAddr[attrs.Index] = hardwareAddr
+		linkIndexToHardwareAddr[attrs.Index] = attrs.HardwareAddr
 		linkIndexToName[attrs.Index] = attrs.Name
 	}
 
@@ -369,14 +422,17 @@ func (m *NeighMonitor) updateNeighbours() error {
 		// Get the hardware address of the interface.
 		hardwareAddr, ok := linkIndexToHardwareAddr[neigh.LinkIndex]
 		if !ok {
-			m.log.Warn("no hardware address for link index",
+			m.log.Warn("link index not found in link table",
 				zap.Int("link_index", neigh.LinkIndex),
 			)
 			continue
 		}
-		if len(hardwareAddr) != 6 {
-			m.log.Warn("skipping entry with unsupported interface MAC address: must be EUI-48",
-				zap.Stringer("mac", hardwareAddr),
+		if !isUsableSourceMAC(hardwareAddr) {
+			m.log.Warn("skipping entry with unusable source MAC address",
+				zap.String("link_name", linkIndexToName[neigh.LinkIndex]),
+				zap.Int("link_index", neigh.LinkIndex),
+				zap.Stringer("source_mac", hardwareAddr),
+				zap.Stringer("nexthop_addr", nexthopAddr),
 			)
 			continue
 		}
