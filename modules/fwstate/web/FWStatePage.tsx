@@ -15,12 +15,12 @@ import {
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useConfigListCache, useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '@yanet/core/hooks';
-import { API } from '@yanet/core/api';
+import { API, ApiError, loadKnownConfigs } from '@yanet/core/api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '@yanet/core/utils/netip';
 import { parseMACToBytes } from '@yanet/core/utils/mac';
-import { formatBytes, toaster, compareNatural } from '@yanet/core/utils';
+import { formatBytes, toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
 import { SaveIcon, TrashIcon } from '@yanet/core/components/draft';
 import type { Command, PagePaletteContribution } from '@yanet/core/components/command-palette';
@@ -1152,7 +1152,11 @@ const FWStatePage: React.FC = () => {
         try {
             const fwConfigsResp = await API.fwstate.listConfigs();
             const fwNames = fwConfigsResp.configs ?? [];
-            const fwFull = await Promise.all(fwNames.map(async (name) => ({ name, config: await API.fwstate.showConfig({ name }) })));
+            const fwFull = await loadKnownConfigs(
+                fwNames,
+                async (name) => ({ name, config: await API.fwstate.showConfig({ name }) }),
+                { onAllDropped: warnConfigsUnknown('fwstate-configs-unknown', 'fwstate') },
+            );
             const nextConfigs: Record<string, DraftConfig> = {};
             fwFull.forEach(({ name, config }) => {
                 nextConfigs[name] = toDraftConfig(config, false);
@@ -1198,7 +1202,7 @@ const FWStatePage: React.FC = () => {
             setAclMeta(baseRows);
 
             const nextAclMeta = await Promise.all(
-                aclNames.map(async (name) => {
+                aclNames.map(async (name): Promise<AclMeta | null> => {
                     try {
                         const config = await API.acl.showConfig({ name });
                         const rules = config.rules ?? [];
@@ -1209,7 +1213,10 @@ const FWStatePage: React.FC = () => {
                             isLoaded: true,
                             loadFailed: false,
                         };
-                    } catch {
+                    } catch (err) {
+                        if (err instanceof ApiError && err.status === 404) {
+                            return null;
+                        }
                         return {
                             name,
                             fwstateName: '',
@@ -1220,7 +1227,7 @@ const FWStatePage: React.FC = () => {
                     }
                 })
             );
-            setAclMeta(nextAclMeta);
+            setAclMeta(nextAclMeta.filter((row): row is AclMeta => row !== null));
         } catch (err) {
             toaster.error('fwstate-acl-load', 'Failed to load ACL metadata', err);
             setAclMeta([]);
