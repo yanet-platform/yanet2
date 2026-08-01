@@ -19,7 +19,7 @@ Build-Depends: debhelper (>= 12)
  , python3-pyelftools
 
 Package: yanet2-dataplane
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
  , libnuma1
@@ -33,7 +33,7 @@ Description: Yanet2 dataplane component
  packet processing, routing, NAT64, and other network functions.
 
 Package: yanet2-controlplane
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
  , libyaml-0-2
@@ -44,7 +44,7 @@ Description: Yanet2 controlplane component
  dataplane configuration, routing tables, and network policies.
 
 Package: yanet2-cli
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
 Recommends: bash-completion
@@ -59,7 +59,7 @@ Description: Yanet2 CLI utilities
 
 
 Package: yanet2
-Architecture: all
+Architecture: amd64 arm64
 Depends: yanet2-dataplane (= ${binary:Version}),
  yanet2-controlplane (= ${binary:Version}),
  yanet2-cli (= ${binary:Version})
@@ -70,7 +70,7 @@ Description: Yanet2 meta-package
  including dataplane, controlplane and CLI utilities.
 
 Package: yanet2-bird-adapter
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
  , libyaml-0-2
@@ -80,7 +80,7 @@ Description: Yanet2 BIRD adapter component
  This package contains the control-plane services that manage the BIRD import configurations that enable the BIRD import feed to push routes into route-instance configurations.
 
 Package: yanet2-pipeline-operator
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
 Description: YANET2 pipeline operator
@@ -90,7 +90,7 @@ Description: YANET2 pipeline operator
  and device-to-pipeline bindings.
 
 Package: yanet2-route-operator
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
 Description: YANET2 route operator
@@ -100,7 +100,7 @@ Description: YANET2 route operator
  and neighbour discovery.
 
 Package: yanet2-forward-operator
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
 Description: YANET2 forward operator
@@ -108,7 +108,7 @@ Description: YANET2 forward operator
  more YANET2 gateways via FunctionService.
 
 Package: yanet2-decap-operator
-Architecture: any
+Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
 Description: YANET2 decap operator
