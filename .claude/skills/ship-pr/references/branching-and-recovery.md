@@ -13,14 +13,17 @@ Multiple in-flight PRs that ALL append to the same barrel file
 - Merge them **one at a time**. Before each subsequent merge, REBASE that
   branch onto `origin/main` (never `git merge origin/main`) and force-push-with-lease.
 - **Never `git worktree remove` or delete a branch (local OR remote) until
-  `gh pr merge` reports the PR MERGED.** A `--squash` that hits a barrel
-  conflict fails mid-command; if you already tore down, you may delete an
-  UNMERGED branch and auto-close its PR.
+  `merge_pull_request` (or `gh pr merge`, for the admin-bypass case) reports
+  the PR MERGED.** A squash that hits a barrel conflict fails mid-command;
+  if you already tore down, you may delete an UNMERGED branch and auto-close
+  its PR.
 - Recovery if that happened: the commit survives in the object store —
   `git branch <b> <sha>`, rebase onto `origin/main`, resolve the barrel
   conflict (delegate the edit — it's code), re-push, open a fresh PR.
-- `gh pr merge --delete-branch` skips the REMOTE delete when the LOCAL delete
-  errors on a worktree-held branch — always `git ls-remote --heads origin
+- `merge_pull_request` has no branch-delete parameter, so an MCP merge always
+  leaves both branches for Phase 7. On the `gh` path, `gh pr merge
+  --delete-branch` skips the REMOTE delete when the LOCAL delete errors on a
+  worktree-held branch. Either way, always `git ls-remote --heads origin
   '<pattern>'` after cleanup and `git push origin --delete` any survivor.
 
 ## Stacked PRs (child depends on parent's unmerged change)
@@ -32,13 +35,13 @@ When PR-B's files depend on PR-A's not-yet-merged change:
    populate B's worktree by copying the FINAL intended files so B's
    diff-vs-base is exactly its own slice. Only the first PR usually needs a
    trimmed-file edit via a coder.
-2. Open B with `gh pr edit --base <a-branch>` (or `--base` on create) so its
-   diff shows only B's slice.
+2. Open B with `update_pull_request` (`base: <a-branch>`), or `base` on
+   `create_pull_request`, so its diff shows only B's slice.
 3. After A merges OR is rewritten (force-pushed): restack B with the OLD parent
    tip SHA B was forked from, not the branch name —
    `git rebase --onto origin/main <old-A-tip-sha> <b-branch>`, then
-   `git push --force-with-lease` and `gh pr edit --base main`. Passing the
-   branch name breaks once A itself has been rebased.
+   `git push --force-with-lease` and `update_pull_request` (`base: main`).
+   Passing the branch name breaks once A itself has been rebased.
 4. **Branch names use dashes, not a name that is also a path prefix**: a branch
    `bird-adapter/x` is rejected by the remote when a branch `bird-adapter`
    exists (ref-directory conflict). Use `bird-adapter-x`.
@@ -74,8 +77,9 @@ git checkout <bad-commit> -- <path>     # pull your files off the stray commit
 # re-amend the correct branch
 git branch -f main origin/main          # restore main
 git push --force-with-lease
-gh pr view <pr> --json files            # verify the PR file list
 ```
+
+Then verify the PR file list with `pull_request_read` method `get_files`.
 
 ### Wrong hunks got staged
 
@@ -85,7 +89,8 @@ just the intended hunks. Preserves any parallel dirty work in the same file.
 ### Branch deleted before merge / PR auto-closed
 
 The commit is still in the object store: `git branch <b> <sha>` (find the SHA in
-the reflog or `gh`/CI logs), rebase onto `origin/main`, re-push, open a fresh PR.
+the reflog, or via `pull_request_read` method `get_commits`/CI logs), rebase
+onto `origin/main`, re-push, open a fresh PR.
 
 ### A file was wrongly reverted
 

@@ -52,7 +52,7 @@ Allowed:
 - `clang`/`clang++`/`gcc` to compile a standalone microbench under `.arch/perfeng/` against built libs + module headers (link the `build-perf` `.so`/`.a`).
 - `go test -bench=. -benchmem -run=^$` (and `-cpu`, `-count`), `cargo bench`, `cargo +nightly miri test` only where relevant.
 - `perf`/`taskset`/`nproc` **if present** — degrade gracefully and fall back to `rte_rdtsc` timing + `-count` repetition when they are not.
-- Read-only `git` (`log/show/diff/status/blame/branch --show-current`), read-only `gh` (`pr view/list`, `gh api` GET).
+- Read-only `git` (`log/show/diff/status/blame/branch --show-current`), read-only `gh` (`pr view/list`, `gh api` GET) — this agent has no GitHub MCP access.
 - `grep`/`rg`/`find`/`ls`/`wc`/`cat`/`head`/`tail`.
 
 Forbidden:

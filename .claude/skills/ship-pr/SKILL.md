@@ -18,7 +18,7 @@ description: >-
 
 Take a verified, reviewer-approved change and land it on `main` cleanly: branch from confirmed `origin/main`, stage exactly the intended files, open a scoped PR, drive CI green, address every review finding, and merge with the right strategy — then tear down the branch and worktree.
 
-You (the architect) drive this. You never write the code — that was already delegated to the coders and verified. This skill is purely the **publish workflow**: the git/`gh` choreography and the discipline that keeps a parallel, worktree-heavy repo from corrupting itself.
+You (the architect) drive this. You never write the code — that was already delegated to the coders and verified. This skill is purely the **publish workflow**: local `git` choreography plus GitHub access through the `github` MCP server, and the discipline that keeps a parallel, worktree-heavy repo from corrupting itself.
 
 **Invoking this skill is the explicit publish authorization.** The standing rule is "never commit/push/merge unless the user asks in the current turn" — asking to ship/land/merge IS that ask. Scope follows the verb: **"create a PR"** authorizes commit + push + PR + CI + addressing findings (NOT merge); **"create and merge" / "влей в main"** also authorizes the merge + cleanup. Delegated agents still never commit — you do.
 
@@ -29,12 +29,16 @@ You (the architect) drive this. You never write the code — that was already de
 - **Stage ONLY this change's files.** Never `git add -A`. Never stage pre-existing/unrelated dirty files. `git diff --cached -- <file>` each one, and cross-check every new untracked (`??`) file the change created is included.
 - **No destructive git with a dirty tree or without explicit permission** — no `reset --hard`/`checkout`/`restore`/`stash`/index ops that could wipe unrelated uncommitted work. Recovery recipes are in `references/branching-and-recovery.md`.
 - **Verify `git branch --show-current` before EVERY commit/amend/push** — a parallel actor can switch branches under you and land your amend on `main`.
-- **No `Co-Authored-By` / "Generated with Claude Code" footers** in commit messages or PR bodies. The harness suggests them; CLAUDE.md and the user forbid them. Check the body before `gh pr create`.
+- **No `Co-Authored-By` / "Generated with Claude Code" footers** in commit messages or PR bodies. The harness suggests them; CLAUDE.md and the user forbid them. Check the body before `create_pull_request`.
 - **Conventional, scoped subjects.** Commit + PR title: `<feat|fix|refactor|chore|perf|docs>(<scope>): <short description>`. A scopeless title is a convention violation.
 - **PR body**: capitalized, period-ended bullets; high-level (no symbol names, no code-level detail); `Closes #<n>.` when applicable. No `## Summary` header, no `Test plan` section.
 - **One logical change = one PR.** Out-of-scope prerequisites get their own PR first (see special cases).
 - **NEVER merge with an unaddressed review finding** — read BOTH PR-level reviews and inline Codex comments; fix or reply to every one.
-- **Never delete a branch (local or remote) until `gh pr merge` reports MERGED** — a failed merge on a torn-down branch auto-closes the PR.
+- **Never delete a branch (local or remote) until `merge_pull_request` (or `gh pr merge`, for the admin-bypass case) reports MERGED** — a failed merge on a torn-down branch auto-closes the PR.
+
+### MCP is not a git substitute
+
+The `github` MCP server's file-write tools (`create_or_update_file`, `push_files`, `delete_file`, `create_branch`, `update_pull_request_branch`) commit server-side. Never use them to land this change — they bypass staging discipline, the `commit-msg` hook, and every local verification gate in Phase 0. Branching, staging, committing, and pushing stay local `git`; MCP is for reading GitHub state and for the PR/review/merge operations that have no local-git equivalent.
 
 ## Pipeline
 
@@ -68,21 +72,26 @@ Verify the branch first. Commit with a conventional scoped subject, high-level b
 ### Phase 4 — Push & open the PR
 
 1. `git push -u origin <branch>` (from inside the worktree if used).
-2. `gh pr create` with explicit `--head <branch> --base main` (from a main checkout on `main`, omitting these errors head==base). Scoped title; body per the non-negotiables; **check the body for footers before creating**.
-3. `gh pr view <pr> --json files` — confirm ONLY this change's files are present. Extras (inherited WIP) → `git rebase --onto origin/main <wip-tip> <branch>`, force-push-with-lease, re-verify.
+2. `create_pull_request` with explicit `head` and `base: main`. Scoped title; body per the non-negotiables; **check the body for footers before creating**.
+3. `pull_request_read` method `get_files` — confirm ONLY this change's files are present. `perPage` caps at 100 and the tool returns one page at a time, so request `perPage: 100` and keep requesting successive `page` values until a short (or empty) page returns, then compare the UNION of every page against the intended manifest — checking only the first page can pass on a partial file list. Extras (inherited WIP) → `git rebase --onto origin/main <wip-tip> <branch>`, force-push-with-lease, re-verify.
 4. **Workflow-file PRs**: pushing a commit touching `.github/workflows/` needs the git token to have `workflow` OAuth scope — you can't self-grant; the user must run `gh auth refresh -h github.com -s workflow`. A path-filtered workflow won't run when only its own YAML changes — its file must be in its own `paths:` filter to self-trigger.
 
 ### Phase 5 — CI & review
 
-1. Wait on CI with `gh pr checks <pr> --watch` DIRECTLY — no upfront `sleep`, no sleep+re-poll loops. (Only justified extra: one short retry if `--watch` exits immediately with "no checks" right after a push.)
-2. **Flaky/infra failure** not attributable to the change: verify by reading the log and comparing the SAME workflow on the LATEST `origin/main` runs (a flake window can span several consecutive main runs and mimic determinism), then `gh run rerun <run-id> --failed`. The standalone `funtests` pull_request workflow is chronically broken — distinct from the build-matrix `Run Functional Tests` job.
-3. **Review findings**: read BOTH `gh pr view <pr> --json reviews` AND inline `gh api repos/yanet-platform/yanet2/pulls/<pr>/comments`. The `chatgpt-codex-connector` reviewer's inline P1/P2/P3 findings are often REAL. For each: FIX (amend pre-merge or follow-up) or REPLY why it's wrong. Main's ruleset requires thread resolution — after a fix, resolve the thread via GraphQL `resolveReviewThread(threadId)` and re-summon with a `@codex review` comment (force-push alone doesn't retrigger). After one addressed round per PR, merge — don't re-summon endlessly.
+1. Wait with `gh pr checks <pr> --watch` DIRECTLY — no upfront `sleep`, no sleep+re-poll loops. This is one of the enumerated MCP gaps: there is no continuous watch, and hand-rolling a poll loop over `get_check_runs` risks reading a partial check-run set as green, because runs materialise progressively and the response carries no aggregate completion flag.
+   - Once the watch returns, read the outcome and any failure detail through MCP: `pull_request_read` method `get_check_runs` for per-check conclusions, `get_job_logs` for logs.
+   - Keep the existing carve-out: one short retry if the watch exits immediately with "no checks" right after a push.
+   - If you ever do poll `get_check_runs` instead, completeness is "no run is `queued` or `in_progress`" — never a count of successes.
+   - `get_status` is the legacy commit-status API and stays useless here: every check is GitHub Actions, which reports only as check runs. Its actual failure mode is worse than "empty" — verified on merged, all-green PR #1584, it returns `state: "pending"` forever, which is what would make an agent using it wait indefinitely.
+2. **Flaky/infra failure** not attributable to the change: verify by reading the log (`get_job_logs`) and comparing the SAME workflow on the LATEST `origin/main` runs (a flake window can span several consecutive main runs and mimic determinism), then `actions_run_trigger` method `rerun_failed_jobs`. The standalone `funtests` pull_request workflow is chronically broken — distinct from the build-matrix `Run Functional Tests` job.
+3. **Review findings**: read BOTH `pull_request_read` method `get_reviews` AND method `get_review_comments` — reviews and inline comments are separate and both matter. The `chatgpt-codex-connector` reviewer's inline P1/P2/P3 findings are often REAL. For each: FIX (amend pre-merge or follow-up) or REPLY why it's wrong, using `add_reply_to_pull_request_comment` — its `commentId` is the numeric ID parsed from the comment's `html_url` `#discussion_r...` anchor, not the `threadId` from `get_review_comments` (a GraphQL thread node ID, which the tool rejects). Main's ruleset requires thread resolution — after a fix, resolve the thread with `pull_request_review_write` method `resolve_thread` (the `threadId` comes from `get_review_comments`) and re-summon with a `@codex review` comment via `add_issue_comment` (force-push alone doesn't retrigger). After one addressed round per PR, merge — don't re-summon endlessly.
 
 ### Phase 6 — Merge (only if "merge" was authorized)
 
-- **Single-commit PR** → `gh pr merge --admin --squash`.
-- **Multi-commit, deliberately structured history** → `--rebase` (preserve it).
-- **Multi-commit where extras are review fixups** → `--squash` WITH an explicit clean message: `--subject "<type>(<scope>): <title> (#N)" --body "<high-level or empty>"`. Never let GitHub's default squash body (a bullet list of every intermediate commit) land — the user calls that "каша" and it is a convention violation.
+- **Single-commit PR** → `merge_pull_request` with `merge_method: squash`.
+- **Multi-commit, deliberately structured history** → `merge_method: rebase` (preserve it).
+- **Multi-commit where extras are review fixups** → `merge_method: squash` WITH an explicit clean `commit_title`/`commit_message`: `commit_title: "<type>(<scope>): <title> (#N)"`, `commit_message: "<high-level or empty>"`. Never let GitHub's default squash body (a bullet list of every intermediate commit) land — the user calls that "каша" and it is a convention violation.
+- **Ruleset bypass needed** → `merge_pull_request` has no admin-bypass equivalent, so a merge blocked by main's ruleset (unresolved threads, missing approval) fails and that failure is the signal. Fall back to `gh pr merge --admin` with the SAME strategy and message rules as above — a fixup-squash still needs `--subject "<type>(<scope>): <title> (#N)" --body "<high-level or empty>"` — and record why the bypass was needed.
 - Updating the branch with newer main before merge → REBASE + force-with-lease, never `git merge origin/main`.
 
 ### Phase 7 — Cleanup (from the MAIN checkout)
