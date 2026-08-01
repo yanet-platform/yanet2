@@ -19,6 +19,12 @@ struct dataplane_device_worker_config {
 	uint16_t rx_queue_len;
 	uint16_t tx_queue_len;
 	uint32_t num_mbufs;
+
+	// Per-worker thread stack size in bytes, or 0 for the OS default.
+	//
+	// When non-zero, the stack is allocated from the worker instance's
+	// NUMA-local dataplane memory zone instead of an anonymous mapping.
+	uint64_t stack_size;
 };
 
 struct dataplane_device_config {

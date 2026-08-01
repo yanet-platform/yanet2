@@ -21,6 +21,7 @@ dataplane:
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 512
+          stack_size: 2097152
     - port_name: virtio_user_kni0
       mac_addr: 52:54:00:6b:ff:a5
       mtu: 7000
