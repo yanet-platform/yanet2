@@ -499,7 +499,7 @@ func TestDecodeUpdate(t *testing.T) {
 
 	for idx, c := range cases {
 		t.Run(fmt.Sprintf("case #%d %s", idx, c.name), func(t *testing.T) {
-			decoder, err := bird.NewUpdateDecoder(c.data, nil)
+			decoder, err := bird.NewUpdateDecoder(c.data)
 			if c.errNew != nil {
 				require.Error(t, err)
 				require.ErrorIs(t, err, c.errNew, "err from NewUpdateDecoder")
@@ -527,7 +527,7 @@ func Benchmark_update_Decode(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		decoder, err := bird.NewUpdateDecoder(dataIPv6WithLargeCommunities, nil)
+		decoder, err := bird.NewUpdateDecoder(dataIPv6WithLargeCommunities)
 		if err != nil {
 			b.Logf("unexpected error: %v", err)
 			b.FailNow()
@@ -567,7 +567,7 @@ func Fuzz_update_Decode(f *testing.F) {
 	f.Add(([]byte)(nil))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		decoder, err := bird.NewUpdateDecoder(data, nil)
+		decoder, err := bird.NewUpdateDecoder(data)
 		if decoder != nil {
 			route := &rib.Route{}
 			err = decoder.Decode(route)

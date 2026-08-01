@@ -22,11 +22,36 @@ type Parser struct {
 	log    *zap.Logger
 }
 
-func NewParser(r io.Reader, bufSize int, log *zap.Logger) *Parser {
+// ParserOption configures the Parser constructor.
+type ParserOption func(*parserOptions)
+
+type parserOptions struct {
+	Log *zap.Logger
+}
+
+func newParserOptions() *parserOptions {
+	return &parserOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithParserLog sets the logger for the parser.
+func WithParserLog(log *zap.Logger) ParserOption {
+	return func(o *parserOptions) {
+		o.Log = log
+	}
+}
+
+func NewParser(r io.Reader, bufSize int, options ...ParserOption) *Parser {
+	opts := newParserOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &Parser{
 		reader: r,
 		buf:    make([]byte, bufSize),
-		log:    log,
+		log:    opts.Log,
 	}
 }
 
@@ -65,5 +90,5 @@ func (m *Parser) Next() (*updateDecoder, error) {
 		return nil, fmt.Errorf("m.readChunk(%d): %w", readSize, err)
 	}
 
-	return NewUpdateDecoder(m.buf[:int(readSize)], m.log)
+	return NewUpdateDecoder(m.buf[:int(readSize)], WithUpdateDecoderLog(m.log))
 }

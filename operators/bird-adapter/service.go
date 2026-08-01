@@ -54,15 +54,40 @@ type AdapterService struct {
 	log                   *zap.Logger
 }
 
+// AdapterServiceOption configures the AdapterService constructor.
+type AdapterServiceOption func(*adapterServiceOptions)
+
+type adapterServiceOptions struct {
+	Log *zap.Logger
+}
+
+func newAdapterServiceOptions() *adapterServiceOptions {
+	return &adapterServiceOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithAdapterServiceLog sets the logger for the adapter service.
+func WithAdapterServiceLog(log *zap.Logger) AdapterServiceOption {
+	return func(o *adapterServiceOptions) {
+		o.Log = log
+	}
+}
+
 func NewAdapterService(
 	routeOperatorEndpoint string,
-	log *zap.Logger,
+	options ...AdapterServiceOption,
 ) *AdapterService {
+	opts := newAdapterServiceOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &AdapterService{
 		imports:               make(map[string]*importHolder),
 		routeOperatorEndpoint: routeOperatorEndpoint,
 		quitCh:                make(chan bool),
-		log:                   log,
+		log:                   opts.Log,
 	}
 }
 
@@ -388,7 +413,7 @@ func (m *AdapterService) processBirdImport(
 		return nil
 	}
 
-	export := bird.NewExportReader(cfg, onUpdate, onFlush, clientLog)
+	export := bird.NewExportReader(cfg, onUpdate, onFlush, bird.WithExportReaderLog(clientLog))
 
 	holder := newImportHolder(export, cancel, conn, currentStream, cfg.Sockets)
 

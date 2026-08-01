@@ -29,7 +29,32 @@ type Export struct {
 	log      *zap.Logger
 }
 
-func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, log *zap.Logger) *Export {
+// ExportReaderOption configures the Export constructor.
+type ExportReaderOption func(*exportReaderOptions)
+
+type exportReaderOptions struct {
+	Log *zap.Logger
+}
+
+func newExportReaderOptions() *exportReaderOptions {
+	return &exportReaderOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithExportReaderLog sets the logger for the export reader.
+func WithExportReaderLog(log *zap.Logger) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.Log = log
+	}
+}
+
+func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, options ...ExportReaderOption) *Export {
+	opts := newExportReaderOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	sockets := make([]exportSocket, 0, len(cfg.Sockets))
 	for _, s := range cfg.Sockets {
 		sockets = append(sockets, exportSocket{
@@ -42,7 +67,7 @@ func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, log *zap.L
 		cfg:      cfg,
 		updater:  onUpdate,
 		notifier: onFlush,
-		log:      log,
+		log:      opts.Log,
 	}
 }
 
@@ -81,7 +106,7 @@ func (m *Export) Run(ctx context.Context) error {
 				}
 			}()
 			reader := bufio.NewReader(c)
-			parser := NewParser(reader, socket.BufSize, m.log)
+			parser := NewParser(reader, socket.BufSize, WithParserLog(m.log))
 			for {
 				update, err := parser.Next()
 				if err != nil {

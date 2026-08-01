@@ -222,21 +222,49 @@ func newUpdate(data []byte) (*update, error) {
 	return u, nil
 }
 
-// NewUpdateDecoder creates a new updateDecoder from raw data with the provided logger.
-// If logger is nil, a nop logger will be used.
-func NewUpdateDecoder(data []byte, log *zap.Logger) (*updateDecoder, error) {
+// UpdateDecoderOption configures the updateDecoder constructor.
+type UpdateDecoderOption func(*updateDecoderOptions)
+
+type updateDecoderOptions struct {
+	Log *zap.Logger
+}
+
+// nopLog is the default logger for the update decoder.
+//
+// The decoder is constructed once per route update, so building a fresh
+// no-op logger on every call would allocate a logger that is discarded as
+// soon as the caller supplies its own logger. A shared instance is safe
+// because zap loggers are immutable.
+var nopLog = zap.NewNop()
+
+func newUpdateDecoderOptions() *updateDecoderOptions {
+	return &updateDecoderOptions{
+		Log: nopLog,
+	}
+}
+
+// WithUpdateDecoderLog sets the logger for the update decoder.
+func WithUpdateDecoderLog(log *zap.Logger) UpdateDecoderOption {
+	return func(o *updateDecoderOptions) {
+		o.Log = log
+	}
+}
+
+// NewUpdateDecoder creates a new updateDecoder from raw data.
+func NewUpdateDecoder(data []byte, options ...UpdateDecoderOption) (*updateDecoder, error) {
+	opts := newUpdateDecoderOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	u, err := newUpdate(data)
 	if err != nil {
 		return nil, err
 	}
 
-	if log == nil {
-		log = zap.NewNop()
-	}
-
 	return &updateDecoder{
 		update: u,
-		log:    log,
+		log:    opts.Log,
 	}, nil
 }
 

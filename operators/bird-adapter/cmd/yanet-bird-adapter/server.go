@@ -91,7 +91,7 @@ func runServer() error {
 	)
 
 	// Create the adapter service
-	adapterService := birdAdapter.NewAdapterService(cfg.RouteOperatorEndpoint, log)
+	adapterService := birdAdapter.NewAdapterService(cfg.RouteOperatorEndpoint, birdAdapter.WithAdapterServiceLog(log))
 
 	// Create gRPC server
 	grpcServer := grpc.NewServer()

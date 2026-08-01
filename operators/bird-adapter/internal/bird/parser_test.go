@@ -45,7 +45,7 @@ func TestParserNext(t *testing.T) {
 	buf.Write(updateData)
 
 	reader := bytes.NewReader(buf.Bytes())
-	parser := bird.NewParser(reader, 4096, zaptest.NewLogger(t))
+	parser := bird.NewParser(reader, 4096, bird.WithParserLog(zaptest.NewLogger(t)))
 
 	// With the fix, this should work correctly
 	decoder, err := parser.Next()
