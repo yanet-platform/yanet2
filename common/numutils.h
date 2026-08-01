@@ -24,8 +24,8 @@ uint64_log_down(uint64_t value) {
 }
 
 /**
- * @brief Align number up to next power of 2hhhhhhhhhhhdff
- * @param n Input number
+ * @brief Align number up to next power of 2
+ * @param x Input number
  * @return Next power of 2, or 0 if overflow
  */
 static inline uint64_t
