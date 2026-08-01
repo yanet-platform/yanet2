@@ -1,0 +1,18 @@
+$schema: ../../yanet2-lab.schema.json
+version: 1
+name: nat64
+description: Configure a stateless NAT64 prefix and mapping, then inspect live state.
+steps:
+  - name: add-prefix
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, prefix, add, --name, nat64_0, --prefix, "2001:db8::/96"]
+  - name: add-mapping
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, mapping, add, --name, nat64_0, --ipv4, 198.51.100.2, --ipv6, "2001:db8::3", --prefix-index, "0"]
+  - name: attach-nat64
+    argv:
+      - /tmp/yanet/cli/yanet-cli-function
+      - update
+      - --name=test
+      - --chains
+      - chain0:1=forward:forward0,nat64:nat64_0,route:route0
+  - name: inspect-nat64
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, show, --name, nat64_0]

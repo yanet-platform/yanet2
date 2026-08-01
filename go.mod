@@ -9,6 +9,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // Somehow, it's used in the package build process for ubuntu 22.04
 	github.com/google/go-cmp v0.7.0
 	github.com/gopacket/gopacket v1.6.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/siderolabs/grpc-proxy v0.5.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
