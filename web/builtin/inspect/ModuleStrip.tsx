@@ -15,7 +15,7 @@ const chrome: ModuleCardsChrome = {
     labelClass: 'iv-label',
     countClass: 'iv-label__count',
     legendClass: 'iv-module-strip__legend',
-    gridClass: 'iv-module-strip__grid',
+    gridClass: 'iv-module-strip__grid iv-scroll',
     cardClass: 'iv-module-card',
     dotClass: 'iv-dot',
     memUsedStyle: (used) => ({

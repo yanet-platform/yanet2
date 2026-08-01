@@ -320,6 +320,9 @@
         .iv-module-strip__grid {
             display: grid;
             gap: 8px;
+            max-height: 373px;
+            overflow-y: auto;
+            padding-right: 4px;
         }
     }
 
