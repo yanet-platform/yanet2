@@ -16,7 +16,7 @@ const chrome: ModuleCardsChrome = {
     countClass: 'iv-label__count',
     legendClass: 'iv-module-strip__legend',
     gridClass: 'iv-module-strip__grid',
-    gridTemplateColumns: (n) => `repeat(${n || 1}, minmax(0, 1fr))`,
+    gridTemplateColumns: (n) => `repeat(${Math.min(8, Math.max(1, n))}, minmax(0, 1fr))`,
     cardClass: 'iv-module-card',
     dotClass: 'iv-dot',
     memUsedStyle: (used) => ({
