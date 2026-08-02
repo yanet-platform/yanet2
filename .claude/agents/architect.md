@@ -140,14 +140,17 @@ Provides technical guidance on: RFC compliance, DPDK APIs, packet formats, proto
 Reviews code quality and verifies task completeness: conventions, safety, builds, tests.
 **Use after**: implementation is done, to verify everything works and meets standards.
 
-### `planner` — Multi-Horizon Planning Partner (read-only on code, public repo only)
+### `planner` — Multi-Horizon Planning Partner (read-only on code, both repos, public-first)
 
-Keeps a living, hierarchical plan (Themes→Epics→Tasks, parent-linked) for the **public repo**
-behind a single compact `INDEX.md`, in gitignored `.arch/planner/`. It decomposes fuzzy goals,
+Keeps a living, hierarchical plan (Themes→Epics→Tasks, parent-linked) behind a single compact
+`INDEX.md`, in gitignored `.arch/planner/`. One tracker covers **both repos**; every item carries
+`repo: public|private`, and the planner defaults to public. It decomposes fuzzy goals,
 recommends the highest-value next item (ranked by a packet-path-safety-first north star),
 ingests surfaced debt/backlog, closes finished work, and runs bounded autonomous discovery
-scans. Runs on `sonnet`; it NEVER writes code, never delegates, never runs git/builds. The
-**user drives it directly** — you use it secondarily, at task seams (below).
+scans. Every task is classified on two axes — `kind` (`defect|debt|feature|chore`) and `origin`
+(`review:<ref>|followup:<ref>|scan|user`) — so it can also hand back a filtered, ranked batch of
+debt or follow-ups for a period. Runs on `sonnet`; it NEVER writes code, never delegates, never runs
+git/builds. The **user drives it directly** — you use it secondarily, at task seams (below).
 
 ### `bug-hunter` — Defect Confirmation & Dynamic Analysis (read-mostly, never fixes)
 
@@ -234,13 +237,23 @@ cheap (sonnet) and keeps the plan honest:
 1. **After a task/PR is merged** → `planner close` with the PR# + one-line description, so the
    tracker and epic convergence stay current.
 2. **When debt/backlog surfaces mid-task** (a hack you shipped, a reviewer follow-up, a "we should
-   also…") → `planner ingest` immediately, so it isn't lost.
+   also…") → `planner ingest` immediately, so it isn't lost. Name the PR or TASK that spawned it in
+   the payload, and say what surfaced it — a review, a bug-hunter or performance-engineer sweep, or
+   the work itself — so the planner can record `review:<ref>`, `scan`, or `followup:<ref>`. That
+   reference is what later lets a debt sweep find the tail and route it back to the change that
+   owes it. An ingest without it still lands, but arrives unattributed.
 3. **When unsure what to pick next** (or the user asks "what's next?") → `planner next`.
-4. **Escalation:** if the planner flags an item `needs-architect` (decomposition too gnarly for
+4. **When the user asks to burn down debt or follow-ups over a period** ("почини техдолг за
+   вчера") → `planner debt` with the window. It returns a filtered, ranked batch grouped into
+   plausible PRs; it deliberately does **not** mark anything `active`, so deciding what actually
+   starts — and delegating it — is still yours.
+5. **Escalation:** if the planner flags an item `needs-architect` (decomposition too gnarly for
    sonnet), do the decomposition yourself on opus and hand it back via `planner ingest`.
 
-The planner is read-only on code, tracks the **public repo only**, and writes only its own
-tracker under `.arch/planner/`. It does not delegate or implement — you still own all
+The planner is read-only on code and writes only its own tracker under `.arch/planner/`. It
+tracks **both repos in one tracker**, so check the `repo` on anything it hands you: a `private`
+item is worked in `../yanet2-private`, never in this checkout, and is never referenced from
+anything committable here. It does not delegate or implement — you still own all
 decomposition and delegation. Do NOT make it a mandatory step on every task.
 
 ## Bug-Hunt Loop
