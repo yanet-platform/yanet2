@@ -723,11 +723,18 @@ agent_update_objects(
 }
 
 int
-agent_delete_object(struct agent *agent, const char *name, yanet_error **err) {
+agent_delete_object(
+	struct agent *agent,
+	const char *object_type,
+	const char *object_name,
+	yanet_error **err
+) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	int ret = cp_config_delete_object(dp_config, cp_config, name, err);
+	int ret = cp_config_delete_object(
+		dp_config, cp_config, object_type, object_name, err
+	);
 
 	if (ret != 0) {
 		return -1;

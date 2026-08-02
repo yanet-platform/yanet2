@@ -64,6 +64,13 @@ struct cp_object_registry {
 	struct registry registry;
 };
 
+// Lookup key for a registry slot: the object identity is the (type, name)
+// pair, mirroring the cp_module (type, name) key.
+struct cp_object_cmp_data {
+	char type[CP_OBJECT_TYPE_LEN];
+	char name[CP_OBJECT_NAME_LEN];
+};
+
 int
 cp_object_registry_init(
 	struct memory_context *memory_context,
@@ -87,25 +94,33 @@ cp_object_registry_get(struct cp_object_registry *registry, uint64_t index);
 
 struct cp_object *
 cp_object_registry_lookup(
-	struct cp_object_registry *registry, const char *name
+	struct cp_object_registry *registry,
+	const char *object_type,
+	const char *object_name
 );
 
 int
 cp_object_registry_lookup_index(
-	struct cp_object_registry *registry, const char *name, uint64_t *index
+	struct cp_object_registry *registry,
+	const char *object_type,
+	const char *object_name,
+	uint64_t *index
 );
 
 int
 cp_object_registry_upsert(
 	struct cp_object_registry *registry,
-	const char *name,
+	const char *object_type,
+	const char *object_name,
 	struct cp_object *new_object,
 	yanet_error **err
 );
 
 int
 cp_object_registry_delete(
-	struct cp_object_registry *registry, const char *name
+	struct cp_object_registry *registry,
+	const char *object_type,
+	const char *object_name
 );
 
 static inline uint64_t

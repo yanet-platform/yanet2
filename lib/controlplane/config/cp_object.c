@@ -146,24 +146,46 @@ cp_object_registry_item_cmp(
 	const struct cp_object *object =
 		container_of(item, struct cp_object, config_item);
 
-	return strncmp(object->name, (const char *)data, CP_OBJECT_NAME_LEN);
+	const struct cp_object_cmp_data *cmp_data =
+		(const struct cp_object_cmp_data *)data;
+
+	int cmp = strncmp(object->name, cmp_data->name, sizeof(object->name));
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(object->type, cmp_data->type, sizeof(object->type));
 }
 
 int
 cp_object_registry_lookup_index(
-	struct cp_object_registry *registry, const char *name, uint64_t *index
+	struct cp_object_registry *registry,
+	const char *object_type,
+	const char *object_name,
+	uint64_t *index
 ) {
+	struct cp_object_cmp_data cmp_data;
+	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
+
 	return registry_lookup(
-		&registry->registry, cp_object_registry_item_cmp, name, index
+		&registry->registry,
+		cp_object_registry_item_cmp,
+		&cmp_data,
+		index
 	);
 }
 
 struct cp_object *
 cp_object_registry_lookup(
-	struct cp_object_registry *registry, const char *name
+	struct cp_object_registry *registry,
+	const char *object_type,
+	const char *object_name
 ) {
 	uint64_t index;
-	if (cp_object_registry_lookup_index(registry, name, &index)) {
+	if (cp_object_registry_lookup_index(
+		    registry, object_type, object_name, &index
+	    )) {
 		return NULL;
 	}
 
@@ -177,12 +199,13 @@ cp_object_registry_lookup(
 int
 cp_object_registry_upsert(
 	struct cp_object_registry *registry,
-	const char *name,
+	const char *object_type,
+	const char *object_name,
 	struct cp_object *new_object,
 	yanet_error **err
 ) {
 	struct cp_object *old_object =
-		cp_object_registry_lookup(registry, name);
+		cp_object_registry_lookup(registry, object_type, object_name);
 
 	if (counter_registry_link(
 		    &new_object->counter_registry,
@@ -191,8 +214,9 @@ cp_object_registry_upsert(
 	    )) {
 		yanet_error_add(
 			err,
-			"failed to link counter registry for object '%s'",
-			name
+			"failed to link counter registry for object '%s:%s'",
+			object_type,
+			object_name
 		);
 		return -1;
 	}
@@ -202,10 +226,14 @@ cp_object_registry_upsert(
 	// a re-upsert of an already-referenced instance must not double-count.
 	uint64_t refcnt_before = new_object->config_item.refcnt;
 
+	struct cp_object_cmp_data cmp_data;
+	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
+
 	if (registry_replace(
 		    &registry->registry,
 		    cp_object_registry_item_cmp,
-		    name,
+		    &cmp_data,
 		    &new_object->config_item,
 		    cp_object_registry_item_free_cb,
 		    NULL
@@ -224,12 +252,18 @@ cp_object_registry_upsert(
 
 int
 cp_object_registry_delete(
-	struct cp_object_registry *registry, const char *name
+	struct cp_object_registry *registry,
+	const char *object_type,
+	const char *object_name
 ) {
+	struct cp_object_cmp_data cmp_data;
+	strtcpy(cmp_data.type, object_type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, object_name, sizeof(cmp_data.name));
+
 	return registry_replace(
 		&registry->registry,
 		cp_object_registry_item_cmp,
-		name,
+		&cmp_data,
 		NULL,
 		cp_object_registry_item_free_cb,
 		NULL

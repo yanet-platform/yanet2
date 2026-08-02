@@ -182,7 +182,12 @@ agent_update_objects(
 );
 
 int
-agent_delete_object(struct agent *agent, const char *name, yanet_error **err);
+agent_delete_object(
+	struct agent *agent,
+	const char *object_type,
+	const char *object_name,
+	yanet_error **err
+);
 
 struct cp_device_config;
 

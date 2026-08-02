@@ -228,11 +228,16 @@ agent_update_objects(
 	yanet_error **err
 );
 
-// Delete the shared object with the specified name.
+// Delete the shared object with the specified type and name.
 //
 // @return -1 if the object does not exist, 0 on success.
 int
-agent_delete_object(struct agent *agent, const char *name, yanet_error **err);
+agent_delete_object(
+	struct agent *agent,
+	const char *object_type,
+	const char *object_name,
+	yanet_error **err
+);
 
 void *
 agent_storage_read(struct agent *agent, const char *name);

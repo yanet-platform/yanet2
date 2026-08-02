@@ -615,17 +615,24 @@ cp_config_gen_lookup_pipeline_index(
 
 struct cp_object *
 cp_config_gen_lookup_object(
-	struct cp_config_gen *config_gen, const char *name
+	struct cp_config_gen *config_gen,
+	const char *object_type,
+	const char *object_name
 ) {
-	return cp_object_registry_lookup(&config_gen->object_registry, name);
+	return cp_object_registry_lookup(
+		&config_gen->object_registry, object_type, object_name
+	);
 }
 
 int
 cp_config_gen_lookup_object_index(
-	struct cp_config_gen *config_gen, const char *name, uint64_t *index
+	struct cp_config_gen *config_gen,
+	const char *object_type,
+	const char *object_name,
+	uint64_t *index
 ) {
 	return cp_object_registry_lookup_index(
-		&config_gen->object_registry, name, index
+		&config_gen->object_registry, object_type, object_name, index
 	);
 }
 
@@ -753,13 +760,15 @@ cp_config_update_objects(
 	for (uint64_t idx = 0; idx < object_count; ++idx) {
 		if (cp_object_registry_upsert(
 			    &new_config_gen->object_registry,
+			    objects[idx]->type,
 			    objects[idx]->name,
 			    objects[idx],
 			    err
 		    )) {
 			yanet_error_add(
 				err,
-				"failed to upsert object '%s'",
+				"failed to upsert object '%s:%s'",
+				objects[idx]->type,
 				objects[idx]->name
 			);
 			goto error_free;
@@ -784,7 +793,8 @@ int
 cp_config_delete_object(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name,
+	const char *object_type,
+	const char *object_name,
 	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
@@ -793,8 +803,15 @@ cp_config_delete_object(
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	uint64_t index;
-	if (cp_config_gen_lookup_object_index(old_config_gen, name, &index)) {
-		yanet_error_add(err, "object '%s' not found", name);
+	if (cp_config_gen_lookup_object_index(
+		    old_config_gen, object_type, object_name, &index
+	    )) {
+		yanet_error_add(
+			err,
+			"object '%s:%s' not found",
+			object_type,
+			object_name
+		);
 		goto error_unlock;
 	}
 
@@ -804,7 +821,9 @@ cp_config_delete_object(
 		goto error_unlock;
 	}
 
-	if (cp_object_registry_delete(&new_config_gen->object_registry, name)) {
+	if (cp_object_registry_delete(
+		    &new_config_gen->object_registry, object_type, object_name
+	    )) {
 		yanet_error_add(err, "failed to delete object");
 		goto error_free;
 	}

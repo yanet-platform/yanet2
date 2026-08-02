@@ -221,7 +221,8 @@ int
 cp_config_delete_object(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name,
+	const char *object_type,
+	const char *object_name,
 	yanet_error **err
 );
 
@@ -288,11 +289,18 @@ cp_config_gen_lookup_pipeline_index(
 );
 
 struct cp_object *
-cp_config_gen_lookup_object(struct cp_config_gen *config_gen, const char *name);
+cp_config_gen_lookup_object(
+	struct cp_config_gen *config_gen,
+	const char *object_type,
+	const char *object_name
+);
 
 int
 cp_config_gen_lookup_object_index(
-	struct cp_config_gen *config_gen, const char *name, uint64_t *index
+	struct cp_config_gen *config_gen,
+	const char *object_type,
+	const char *object_name,
+	uint64_t *index
 );
 
 /*

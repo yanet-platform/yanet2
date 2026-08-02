@@ -83,22 +83,26 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
 
 	TEST_ASSERT(
-		cp_config_gen_lookup_object(gen, "lookup-1") == obj1,
+		cp_config_gen_lookup_object(gen, "test", "lookup-1") == obj1,
 		"lookup_object(lookup-1) must return obj1"
 	);
 	TEST_ASSERT(
-		cp_config_gen_lookup_object(gen, "lookup-2") == obj2,
+		cp_config_gen_lookup_object(gen, "test", "lookup-2") == obj2,
 		"lookup_object(lookup-2) must return obj2"
 	);
 
 	uint64_t idx1;
 	uint64_t idx2;
 	TEST_ASSERT_SUCCESS(
-		cp_config_gen_lookup_object_index(gen, "lookup-1", &idx1),
+		cp_config_gen_lookup_object_index(
+			gen, "test", "lookup-1", &idx1
+		),
 		"lookup_object_index(lookup-1) failed"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_config_gen_lookup_object_index(gen, "lookup-2", &idx2),
+		cp_config_gen_lookup_object_index(
+			gen, "test", "lookup-2", &idx2
+		),
 		"lookup_object_index(lookup-2) failed"
 	);
 	TEST_ASSERT(idx1 != idx2, "indices for distinct objects collide");
@@ -113,13 +117,13 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	);
 
 	TEST_ASSERT_NULL(
-		cp_config_gen_lookup_object(gen, "no-such-object"),
+		cp_config_gen_lookup_object(gen, "test", "no-such-object"),
 		"lookup of missing object must return NULL"
 	);
 	uint64_t unused_index;
 	TEST_ASSERT(
 		cp_config_gen_lookup_object_index(
-			gen, "no-such-object", &unused_index
+			gen, "test", "no-such-object", &unused_index
 		) != 0,
 		"lookup_index of missing object must fail"
 	);
@@ -128,12 +132,12 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	// reference (the prior generation is freed by the install), so the
 	// free callback decrements loaded_object_count for each.
 	TEST_ASSERT_SUCCESS(
-		agent_delete_object(agent, "lookup-1", &err),
+		agent_delete_object(agent, "test", "lookup-1", &err),
 		"delete_object(lookup-1) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_SUCCESS(
-		agent_delete_object(agent, "lookup-2", &err),
+		agent_delete_object(agent, "test", "lookup-2", &err),
 		"delete_object(lookup-2) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -231,7 +235,9 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 
 	uint64_t idx1;
 	TEST_ASSERT_SUCCESS(
-		cp_config_gen_lookup_object_index(gen, "replace-me", &idx1),
+		cp_config_gen_lookup_object_index(
+			gen, "test", "replace-me", &idx1
+		),
 		"lookup_object_index(replace-me) failed before replace"
 	);
 
@@ -266,7 +272,9 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	gen = ADDR_OF(&cp_config->cp_config_gen);
 	uint64_t new_idx1;
 	TEST_ASSERT_SUCCESS(
-		cp_config_gen_lookup_object_index(gen, "replace-me", &new_idx1),
+		cp_config_gen_lookup_object_index(
+			gen, "test", "replace-me", &new_idx1
+		),
 		"lookup_object_index(replace-me) failed after replace"
 	);
 	TEST_ASSERT_EQUAL(
@@ -287,7 +295,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	// Delete obj2: it leaves the live generation, and its last reference
 	// drops when the prior generation is freed by the install.
 	TEST_ASSERT_SUCCESS(
-		agent_delete_object(agent, "delete-me", &err),
+		agent_delete_object(agent, "test", "delete-me", &err),
 		"delete_object(delete-me) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -299,13 +307,13 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 
 	gen = ADDR_OF(&cp_config->cp_config_gen);
 	TEST_ASSERT_NULL(
-		cp_config_gen_lookup_object(gen, "delete-me"),
+		cp_config_gen_lookup_object(gen, "test", "delete-me"),
 		"deleted object must not be findable in the live generation"
 	);
 
 	// Delete new_obj1 so every object's last reference has dropped.
 	TEST_ASSERT_SUCCESS(
-		agent_delete_object(agent, "replace-me", &err),
+		agent_delete_object(agent, "test", "replace-me", &err),
 		"delete_object(replace-me) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);

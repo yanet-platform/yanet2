@@ -154,7 +154,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_upsert(&registry, "foo", foo, &err),
+		cp_object_registry_upsert(&registry, "test", "foo", foo, &err),
 		"upsert(foo) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -164,7 +164,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"loaded_object_count must be 1 after upsert(foo)"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_upsert(&registry, "bar", bar, &err),
+		cp_object_registry_upsert(&registry, "test", "bar", bar, &err),
 		"upsert(bar) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -177,11 +177,15 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	uint64_t foo_index;
 	uint64_t bar_index;
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(&registry, "foo", &foo_index),
+		cp_object_registry_lookup_index(
+			&registry, "test", "foo", &foo_index
+		),
 		"lookup(foo) failed"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(&registry, "bar", &bar_index),
+		cp_object_registry_lookup_index(
+			&registry, "test", "bar", &bar_index
+		),
 		"lookup(bar) failed"
 	);
 
@@ -204,7 +208,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 
 	uint64_t index;
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(&copied, "foo", &index),
+		cp_object_registry_lookup_index(&copied, "test", "foo", &index),
 		"lookup(foo) in copy failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -213,7 +217,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"foo index must be stable across copy"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(&copied, "bar", &index),
+		cp_object_registry_lookup_index(&copied, "test", "bar", &index),
 		"lookup(bar) in copy failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -238,7 +242,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_upsert(&copied, "foo", foo2, &err),
+		cp_object_registry_upsert(&copied, "test", "foo", foo2, &err),
 		"upsert-replace(foo) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -249,7 +253,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"foo in one of two registries"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(&copied, "foo", &index),
+		cp_object_registry_lookup_index(&copied, "test", "foo", &index),
 		"lookup(foo) after replace failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -267,7 +271,8 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// the original registry, so the delete drops only the copy's
 	// reference (no free callback). The reinserted bar2 bumps the count.
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_delete(&copied, "bar"), "delete(bar) failed"
+		cp_object_registry_delete(&copied, "test", "bar"),
+		"delete(bar) failed"
 	);
 	TEST_ASSERT_EQUAL(
 		agent->loaded_object_count,
@@ -285,7 +290,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_upsert(&copied, "bar", bar2, &err),
+		cp_object_registry_upsert(&copied, "test", "bar", bar2, &err),
 		"upsert(bar2) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -295,7 +300,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"loaded_object_count must be 4 after upsert(bar2)"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_lookup_index(&copied, "bar", &index),
+		cp_object_registry_lookup_index(&copied, "test", "bar", &index),
 		"lookup(bar) after reinsert failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -313,7 +318,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"registry_get(bar) must return the reinserted object"
 	);
 	TEST_ASSERT(
-		cp_object_registry_lookup(&copied, "foo") == foo2,
+		cp_object_registry_lookup(&copied, "test", "foo") == foo2,
 		"registry_lookup(foo) must return the replacement"
 	);
 
@@ -399,7 +404,9 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_upsert(&registry, "gate", object, &err),
+		cp_object_registry_upsert(
+			&registry, "test", "gate", object, &err
+		),
 		"upsert(gate) failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
