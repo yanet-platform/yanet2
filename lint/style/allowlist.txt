@@ -238,8 +238,6 @@ testctx:controlplane/internal/auth/interceptor_test.go:TestExtractToken:Backgrou
 testctx:controlplane/internal/auth/interceptor_test.go:TestExtractToken:Background:2  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/interceptor_test.go:TestStreamServerInterceptor:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/interceptor_test.go:TestUnaryServerInterceptor:Background:1  # legacy: migrate to t.Context()
-testctx:controlplane/internal/auth/manager_test.go:TestManager_Authenticate:Background:1  # legacy: migrate to t.Context()
-testctx:controlplane/internal/auth/manager_test.go:TestManager_Authorize:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/none/authenticator_test.go:TestNoneAuthenticator_Authenticate:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_ExpiredCertificate:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/sshcert/authenticator_test.go:TestAuthenticator_ExpiredTimestamp:Background:1  # legacy: migrate to t.Context()
@@ -298,7 +296,6 @@ testpkg:controlplane/gateway/readiness_test.go:gateway:1  # legacy: migrate to t
 testpkg:controlplane/gateway/registry_test.go:gateway:1  # legacy: migrate to the external test package
 testpkg:controlplane/gateway/runner_test.go:gateway:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/auth/interceptor_test.go:auth:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/manager_test.go:auth:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/auth/none/authenticator_test.go:none:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/auth/sshcert/authenticator_test.go:sshcert:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/auth/sshcert/ca_store_test.go:sshcert:1  # legacy: migrate to the external test package
