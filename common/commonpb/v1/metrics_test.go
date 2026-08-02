@@ -232,3 +232,54 @@ func TestMetricRefsToProto_LiveUpdates(t *testing.T) {
 
 	assert.Equal(t, uint64(15), result2[0].GetCounter(), "updated counter value should be 15")
 }
+
+// TestNewMetricCounter verifies that NewMetricCounter attaches the counter
+// value under the Metric_Counter oneof variant, carries through labels, and
+// preserves the given label order without sorting.
+func TestNewMetricCounter(t *testing.T) {
+	first := NewLabel("method", "GET")
+	second := NewLabel("code", "200")
+
+	metric := NewMetricCounter("requests", 42, first, second)
+
+	assert.Equal(t, "requests", metric.Name, "name should match")
+	assert.Equal(t, uint64(42), metric.GetCounter(), "counter value should match")
+	require.IsType(t, &Metric_Counter{}, metric.Value, "value should be carried as the counter oneof variant")
+	require.Len(t, metric.Labels, 2, "should have 2 labels")
+	assert.Equal(t, "method", metric.Labels[0].Name, "first label should stay in argument order")
+	assert.Equal(t, "GET", metric.Labels[0].Value, "first label value should match")
+	assert.Equal(t, "code", metric.Labels[1].Name, "second label should stay in argument order")
+	assert.Equal(t, "200", metric.Labels[1].Value, "second label value should match")
+
+	noLabels := NewMetricCounter("requests", 1)
+	assert.Empty(t, noLabels.Labels, "labels should be empty when none are given")
+}
+
+// TestNewMetricGauge verifies that NewMetricGauge attaches the gauge value
+// under the Metric_Gauge oneof variant and preserves the given label order
+// without sorting, unlike MetricLabelsToProto.
+func TestNewMetricGauge(t *testing.T) {
+	first := NewLabel("region", "us-east")
+	second := NewLabel("env", "prod")
+
+	metric := NewMetricGauge("temperature", 12.5, first, second)
+
+	assert.Equal(t, "temperature", metric.Name, "name should match")
+	assert.Equal(t, 12.5, metric.GetGauge(), "gauge value should match")
+	require.IsType(t, &Metric_Gauge{}, metric.Value, "value should be carried as the gauge oneof variant")
+
+	require.Len(t, metric.Labels, 2, "should have 2 labels")
+	assert.Equal(t, "region", metric.Labels[0].Name, "first label should stay in argument order")
+	assert.Equal(t, "us-east", metric.Labels[0].Value, "first label value should match")
+	assert.Equal(t, "env", metric.Labels[1].Name, "second label should stay in argument order")
+	assert.Equal(t, "prod", metric.Labels[1].Value, "second label value should match")
+}
+
+// TestNewLabel verifies that NewLabel maps its name and value arguments to
+// the Label fields without swapping them.
+func TestNewLabel(t *testing.T) {
+	label := NewLabel("region", "us-east")
+
+	assert.Equal(t, "region", label.Name, "name should match the first argument")
+	assert.Equal(t, "us-east", label.Value, "value should match the second argument")
+}
