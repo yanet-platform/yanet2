@@ -82,6 +82,13 @@ struct counter_storage {
 	struct counter_value_handle **counter_value_handles;
 	struct counter_registry *registry;
 	struct counter_storage_pool pools[COUNTER_POOL_SIZE];
+
+	// Reference count for cross-generation sharing.
+	//
+	// When a config update does not change a module's counter layout, the
+	// old generation's counter_storage is reused by bumping this count
+	// instead of rebuilding the wrapper, handle array, and pool blocks.
+	uint64_t refcnt;
 };
 
 struct counter_storage *

@@ -331,6 +331,17 @@ counter_storage_spawn(
 	struct counter_storage *old_counter_storage,
 	struct counter_registry *counter_registry
 ) {
+	// Fast path: if the old generation's storage was built for the same
+	// counter_registry (same pointer — the registry item was shared by
+	// refcounting across generations), the counter layout is identical.
+	// Bump the refcount and return the old storage directly, skipping the
+	// wrapper rebuild, pool copy, and handle resolution.
+	if (old_counter_storage != NULL &&
+	    ADDR_OF(&old_counter_storage->registry) == counter_registry) {
+		old_counter_storage->refcnt += 1;
+		return old_counter_storage;
+	}
+
 	struct counter_storage *new_counter_storage = (struct counter_storage *)
 		memory_balloc(memory_context, sizeof(struct counter_storage));
 	if (new_counter_storage == NULL)
@@ -339,6 +350,8 @@ counter_storage_spawn(
 	counter_storage_init(
 		memory_context, new_counter_storage, counter_registry
 	);
+
+	new_counter_storage->refcnt = 1;
 
 	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
 
@@ -496,6 +509,9 @@ counter_storage_pool_fini(
 void
 counter_storage_free(struct counter_storage *storage) {
 	if (storage == NULL)
+		return;
+
+	if (--storage->refcnt > 0)
 		return;
 
 	struct memory_context *memory_context =
