@@ -8,6 +8,9 @@ import (
 // checkTestContext reports a violation when call is context.Background()
 // or context.TODO(), inside a _test.go file.
 //
+// t.Context() is canceled automatically when the test finishes, whereas
+// context.Background() and context.TODO() never cancel, so a value built
+// from either can leak a goroutine or resource past its owning test.
 // Scope: _test.go files only, gated by its caller inspectBody, since
 // t.Context() — the replacement this check demands — does not exist
 // outside of test code.
@@ -38,10 +41,14 @@ func checkTestContext(call *ast.CallExpr, enclosing string, fileCtx *fileContext
 // name, whose type is context.Context or a "pb"-suffixed package type and
 // whose name is the blank identifier.
 //
-// Scope: production methods only, gated by its caller lintFuncDecl on
-// decl.Recv != nil and !fileCtx.IsTest — a free function is never checked.
-// A test double implementing an interface routinely blanks out every
-// parameter it does not need, so this check does not apply to test code.
+// A named ctx or request parameter documents the handler's signature and
+// stays available for a later change to start reading it. The blank
+// identifier discards that name and forces a signature edit before the
+// value can be used. Scope: production methods only, gated by its caller
+// lintFuncDecl on decl.Recv != nil and !fileCtx.IsTest — a free function is
+// never checked. A test double implementing an interface routinely blanks
+// out every parameter it does not need, so this check does not apply to
+// test code.
 func checkHandlerBlank(decl *ast.FuncDecl, name string, fileCtx *fileContext) []violation {
 	if decl.Type.Params == nil {
 		return nil

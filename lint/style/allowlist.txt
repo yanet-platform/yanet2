@@ -7,15 +7,18 @@
 # where <check> is one of logger, private, testpkg, receiver, loopindex,
 # maplit, grpcdial, sugar, zapmsg, zapkey, testctx, handlerblank, barenew,
 # or loggerlast. <name> is the enclosing function or method
-# ("RecvType.MethodName" or "FuncName"), a struct field
-# ("TypeName.FieldName" for loggerlast), a package-level var/const, or the
-# enclosing name followed by one or more ":"-separated segments identifying
-# the offending site, when several violations of one check can share an
-# enclosing declaration. The private check's key already carries an extra
-# segment of its own ("<path>:<func>:<expr>"), which the leading "private:"
-# prefix does not disturb: parsing only requires a ":" to be present
-# somewhere in the key. <ordinal> is a 1-based count of the violation's
-# position, in source order, among every other violation sharing the same
+# ("RecvType.MethodName" or "FuncName" — an interface method takes the same
+# "TypeName.MethodName" shape with no receiver involved), a struct field
+# ("TypeName.FieldName" for loggerlast), a bare type name when the
+# enclosing declaration is a type, a package-level var/const, a file's own
+# package clause name (testpkg), or the enclosing name followed by one or
+# more ":"-separated segments identifying the offending site, when several
+# violations of one check can share an enclosing declaration. The private
+# check's key already carries an extra segment of its own
+# ("<path>:<func>:<expr>"), which the leading "private:" prefix does not
+# disturb: parsing only requires a ":" to be present somewhere in the key.
+# <ordinal> is a 1-based count of the violation's position, in source
+# order, among every other violation sharing the same
 # "<check>:<path>:<name>" prefix, so that several structurally identical
 # violations inside one function — three "for i := range" loops in the same
 # test, say — each get their own row instead of collapsing onto one.

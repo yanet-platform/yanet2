@@ -14,13 +14,16 @@
 //     what each one enforces.
 //
 // <name> is the enclosing function or method ("RecvType.MethodName" or
-// "FuncName"), a struct field ("TypeName.FieldName"), a package-level
-// var/const, or the enclosing name followed by additional ":"-separated
-// segments identifying the offending site, when several violations of one
-// check can share an enclosing declaration. The private check's key already
-// carries an extra segment of its own ("<path>:<func>:<expr>"), which the
-// leading "private:" prefix does not disturb: the allowlist only requires a
-// ":" to be present somewhere in the key.
+// "FuncName" — an interface method takes the same "TypeName.MethodName"
+// shape with no receiver involved), a struct field ("TypeName.FieldName"),
+// a bare type name when the enclosing declaration is a type, a
+// package-level var/const, a file's own package clause name, or the
+// enclosing name followed by additional ":"-separated segments identifying
+// the offending site, when several violations of one check can share an
+// enclosing declaration. The private check's key already carries an extra
+// segment of its own ("<path>:<func>:<expr>"), which the leading "private:"
+// prefix does not disturb: the allowlist only requires a ":" to be present
+// somewhere in the key.
 //
 // <ordinal> is a 1-based count of the violation's position, in source
 // order, among every other violation sharing the same

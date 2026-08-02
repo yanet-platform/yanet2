@@ -14,11 +14,14 @@ var constructorNameRe = regexp.MustCompile(`^[Nn]ew([A-Z_]|$)`)
 // checkLoggerParam reports a violation when decl is a constructor or a
 // method and one of its parameters carries a zap logger.
 //
-// Scope: production code only. A _test.go file is skipped entirely by its
-// caller, lintFuncDecl, since the options pattern this check enforces has
-// no test-code exemption to preserve — the check simply never fires there
-// in practice, so scoping it out keeps a hand-rolled test double from
-// needing an allowlist row.
+// A logger accepted positionally ties every call site to that exact
+// parameter list; the options pattern (WithLog) lets a constructor or
+// method gain further optional dependencies later without breaking
+// existing callers. Scope: production code only. A _test.go file is
+// skipped entirely by its caller, lintFuncDecl, since the options pattern
+// this check enforces has no test-code exemption to preserve — the check
+// simply never fires there in practice, so scoping it out keeps a
+// hand-rolled test double from needing an allowlist row.
 func checkLoggerParam(decl *ast.FuncDecl, name string, fileCtx *fileContext) []violation {
 	if !fileCtx.HasZap {
 		return nil
@@ -46,9 +49,13 @@ func checkLoggerParam(decl *ast.FuncDecl, name string, fileCtx *fileContext) []v
 // checkLoggerInterface reports a violation for every interface method
 // declaration in typeSpec whose parameter list carries a zap logger.
 //
+// It flags the same anti-pattern as checkLoggerParam, for the reason given
+// there.
+//
 // Scope: production code only, gated by its caller lintGenDecl on
-// !fileCtx.IsTest, for the same reason as checkLoggerParam. Non-interface type
-// declarations produce no violations.
+// !fileCtx.IsTest, on the same scoping grounds as checkLoggerParam's own
+// test-file exemption. Non-interface type declarations produce no
+// violations.
 func checkLoggerInterface(typeSpec *ast.TypeSpec, fileCtx *fileContext) []violation {
 	if !fileCtx.HasZap {
 		return nil

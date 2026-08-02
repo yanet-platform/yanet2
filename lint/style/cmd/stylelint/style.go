@@ -29,7 +29,10 @@ var snakeCaseRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // checkMapLiteral reports a violation when call is a single-argument
 // make(map[K]V), which a capacity-hinted two-argument make is not.
 //
-// Scope: every call expression, in production and test code alike.
+// This is house style: map[K]V{} reads the same as a struct or slice
+// composite literal, instead of reaching for make when no capacity hint is
+// being given. Scope: every call expression, in production and test code
+// alike.
 func checkMapLiteral(call *ast.CallExpr, enclosing string, fileCtx *fileContext) []violation {
 	ident, ok := call.Fun.(*ast.Ident)
 	if !ok || ident.Name != "make" || len(call.Args) != 1 {
@@ -54,7 +57,9 @@ func checkMapLiteral(call *ast.CallExpr, enclosing string, fileCtx *fileContext)
 // checkGRPCDial reports a violation when call is grpc.Dial or
 // grpc.DialContext.
 //
-// Scope: every call expression, in production and test code alike.
+// grpc.Dial and grpc.DialContext are deprecated upstream in favor of
+// grpc.NewClient. Scope: every call expression, in production and test
+// code alike.
 func checkGRPCDial(call *ast.CallExpr, enclosing string, fileCtx *fileContext) []violation {
 	if !fileCtx.HasGRPC {
 		return nil
@@ -84,8 +89,11 @@ func checkGRPCDial(call *ast.CallExpr, enclosing string, fileCtx *fileContext) [
 // checkSugarType reports a violation when sel denotes the zap.SugaredLogger
 // type.
 //
-// Scope: every selector expression, in production and test code alike, in
-// any file whose package (not necessarily that file itself) imports zap. In
+// zap.SugaredLogger accepts untyped key-value pairs checked only at
+// runtime; *zap.Logger's typed field constructors (zap.String, zap.Int,
+// ...) catch a mismatched argument at compile time instead. Scope: every
+// selector expression, in production and test code alike, in any file
+// whose package (not necessarily that file itself) imports zap. In
 // practice this only ever fires in a file that itself imports zap, since
 // the zap.SugaredLogger reference this check matches requires that file's
 // own zap import to compile.
@@ -106,6 +114,9 @@ func checkSugarType(sel *ast.SelectorExpr, enclosing string, fileCtx *fileContex
 }
 
 // checkSugarCall reports a violation when call is a niladic .Sugar() call.
+//
+// It flags the same anti-pattern as checkSugarType, for the reason given
+// there.
 //
 // Scope: every call expression, in production and test code alike, in any
 // file whose package (not necessarily that file itself) imports zap.
@@ -128,12 +139,14 @@ func checkSugarCall(call *ast.CallExpr, enclosing string, fileCtx *fileContext) 
 // checkZapMsg reports a violation when call is a logger call whose first
 // argument is a string literal starting with an uppercase letter.
 //
-// Scope: every call expression, in production and test code alike, in any
-// file whose package (not necessarily that file itself) imports zap. A call
-// on the bare identifier t or b is skipped: testing.T and testing.B expose
-// Error and Fatal under the same names as the zap logger API, and their
-// arguments are failure messages read by a human running the test, not
-// structured log messages.
+// A lowercase message follows the same convention as a Go error string, so
+// it composes predictably when embedded inside a larger line. Scope: every
+// call expression, in production and test code alike, in any file whose
+// package (not necessarily that file itself) imports zap. A call on the
+// bare identifier t or b is skipped: testing.T and testing.B expose Error
+// and Fatal under the same names as the zap logger API, and their arguments
+// are failure messages read by a human running the test, not structured log
+// messages.
 func checkZapMsg(call *ast.CallExpr, enclosing string, fileCtx *fileContext) []violation {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || !loggerMethodNames[sel.Sel.Name] || len(call.Args) == 0 {
@@ -169,11 +182,14 @@ func checkZapMsg(call *ast.CallExpr, enclosing string, fileCtx *fileContext) []v
 // constructor whose first argument is a string literal that is not
 // snake_case.
 //
-// Scope: every call expression, in production and test code alike, in any
-// file whose package (not necessarily that file itself) imports zap. In
-// practice this only ever fires in a file that itself imports zap, since
-// the zap.<Type>(...) syntax this check matches requires that file's own
-// zap import to compile.
+// This is house style: a uniform snake_case key vocabulary keeps every
+// structured log field queryable the same way, instead of mixing
+// camelCase and snake_case across call sites. Scope: every call
+// expression, in production and test code alike, in any file whose
+// package (not necessarily that file itself) imports zap. In practice
+// this only ever fires in a file that itself imports zap, since the
+// zap.<Type>(...) syntax this check matches requires that file's own zap
+// import to compile.
 func checkZapKey(call *ast.CallExpr, enclosing string, fileCtx *fileContext) []violation {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {

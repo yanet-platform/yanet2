@@ -9,10 +9,12 @@ import (
 // checkReceiver reports a violation when decl's method receiver has an
 // explicit name other than m, including the blank identifier.
 //
-// Scope: every method, in production and test code alike. An unnamed
-// receiver, such as the stateless "noop" observer pattern
-// (func (noopObserver) OnEvent()), is not flagged: it deliberately has no
-// identifier to rename, unlike a receiver given some other name.
+// A fixed receiver name lets the private check treat the bare identifier m
+// as a method's own access path without per-type configuration. Scope:
+// every method, in production and test code alike. An unnamed receiver,
+// such as the stateless "noop" observer pattern (func (noopObserver)
+// OnEvent()), is not flagged: it deliberately has no identifier to
+// rename, unlike a receiver given some other name.
 func checkReceiver(decl *ast.FuncDecl, fileCtx *fileContext) []violation {
 	if len(decl.Recv.List[0].Names) == 0 {
 		return nil
@@ -36,9 +38,11 @@ func checkReceiver(decl *ast.FuncDecl, fileCtx *fileContext) []violation {
 // checkBareNew reports a violation when decl is a top-level function
 // literally named New.
 //
-// Scope: package-level functions only, in production and test code alike. A
-// method literally named New is not a package's discoverable constructor,
-// so it is out of scope.
+// A constructor literally named New stops naming the type it builds once
+// a package needs a second constructible type. Scope: package-level
+// functions only, in production and test code alike. A method literally
+// named New is not a package's discoverable constructor, so it is out of
+// scope.
 func checkBareNew(decl *ast.FuncDecl, fileCtx *fileContext) []violation {
 	if decl.Recv != nil || decl.Name.Name != "New" {
 		return nil
@@ -57,8 +61,10 @@ func checkBareNew(decl *ast.FuncDecl, fileCtx *fileContext) []violation {
 // typeSpec that is not the last field in its struct, whether named or
 // anonymously embedded.
 //
-// Scope: every struct type declaration, in production and test code alike,
-// in any file whose package (not necessarily that file itself) imports zap.
+// This is house style: keeping the logger last groups a struct's domain
+// fields together ahead of its infrastructure plumbing. Scope: every
+// struct type declaration, in production and test code alike, in any file
+// whose package (not necessarily that file itself) imports zap.
 func checkLoggerLast(typeSpec *ast.TypeSpec, fileCtx *fileContext) []violation {
 	if !fileCtx.ZapEligible {
 		return nil
@@ -119,7 +125,10 @@ func isZapLoggerType(expr ast.Expr, zapAlias string) bool {
 // checkLoopIndexFor reports a violation when stmt's Init clause declares or
 // assigns a loop variable named i.
 //
-// Scope: every for-loop, in production and test code alike. Both a
+// The repository's no-abbreviated-identifiers rule carves out idx, not i,
+// as its one allowed loop-counter abbreviation, so a lone i reads as an
+// unexplained shorthand next to every other spelled-out name. Scope:
+// every for-loop, in production and test code alike. Both a
 // short-variable-declaration Init clause (for i := 0; ...) and a plain
 // assignment to a variable declared earlier (var i int; for i = 0; ...) are
 // in scope, since the loop reads as an "i" index either way.
@@ -138,6 +147,9 @@ func checkLoopIndexFor(stmt *ast.ForStmt, enclosing string, fileCtx *fileContext
 }
 
 // checkLoopIndexRange reports a violation when stmt's range key is named i.
+//
+// It flags the same abbreviated-identifier smell as checkLoopIndexFor, for
+// the reason given there.
 //
 // Scope: every range loop, in production and test code alike.
 func checkLoopIndexRange(stmt *ast.RangeStmt, enclosing string, fileCtx *fileContext) []violation {
