@@ -142,10 +142,10 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 // WithGRPCMetricsFactory overrides the factory used to build the gateway's
 // gRPC server metrics collector.
 //
-// Primarily useful in tests to inject a factory with a deterministic clock
-// or custom buckets. The retention and service-filter arguments the factory
-// receives still come from NewGateway, since they depend on the registry and
-// gRPC server that only exist once NewGateway starts running.
+// Useful when a caller needs a factory with a deterministic clock or custom
+// buckets. The retention and service-filter arguments the factory receives
+// still come from NewGateway, since they depend on the registry and gRPC
+// server that only exist once NewGateway starts running.
 func WithGRPCMetricsFactory(factory MetricsFactory) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.MetricsFactory = factory
@@ -465,10 +465,16 @@ func (m *Gateway) Run(ctx context.Context) error {
 		}
 	}
 
-	// Emit a single deterministic readiness marker once every out-of-process
-	// service runner has finished its initial service registration. Functional
-	// tests grep for this exact line to know the gateway is ready to accept
-	// module RPCs.
+	// The readiness marker is published once every out-of-process service
+	// runner has finished its initial service registration, and
+	// immediately when there are none. Both branches emit the identical
+	// "all built-in modules ready" message, so a run publishes at most
+	// one readiness marker: the waiting branch publishes none if the
+	// context is canceled before every runner has registered.
+	//
+	// That message text is matched verbatim by an external observer to
+	// decide the gateway is ready to accept module RPCs, so its wording is a
+	// contract and must stay identical between the branches.
 	if len(m.serviceRunners) > 0 {
 		wg.Go(func() error {
 			for _, runner := range m.serviceRunners {
