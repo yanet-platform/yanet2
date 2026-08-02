@@ -60,6 +60,17 @@ pub struct ReadCmd {
     ///
     /// Distinct from the global `--format`, which controls how CLI messages
     /// (errors, success, structured data) are rendered.
+    ///
+    /// Timestamp origin differs by encoding. `text` and `pretty` render an
+    /// offset from the first record received, so that record itself reads
+    /// zero, and the offset is displayed in a clock-shaped form despite
+    /// being relative. `pcap` and `pcap-ng` carry the absolute dataplane
+    /// clock value instead.
+    ///
+    /// Timestamps resolve to a worker's polling round rather than to an
+    /// individual packet, so every record captured in one round shares a
+    /// single value. Repeated identical timestamps, including several
+    /// leading zeros in the relative forms, are expected.
     #[clap(long, short = 'f', value_enum, default_value_t = DumpOutputFormat::Text)]
     pub dump_format: DumpOutputFormat,
 
