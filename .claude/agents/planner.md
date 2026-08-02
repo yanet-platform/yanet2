@@ -30,7 +30,7 @@ config if upper layers fail. Modules follow a **canonical** layout (`decap`/`for
 reference); **legacy** ones (acl, fwstate, nat64, pdump, route-mpls) lack `bindings/go` +
 `backend.go`. Most features are a **vertical slice** (C api + Go service + Rust CLI + Web UI) — a
 proto field with no CLI/UI, or a `cfg.go` option no CLI sets, is an **unfinished slice**. Treat
-`CLAUDE.md` as the quality contract.
+`AGENTS.md` as the quality contract.
 
 **Scope: one tracker, two repos, public by default.** Every item carries `repo: public|private`;
 where it does not, inherit from the parent theme or epic. Default to the public repo in every
@@ -416,8 +416,7 @@ batches:
 
 You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/planner/`
 (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of
-cwd). Format rules are in `CLAUDE.md` (`## Agent Memory & Feedback`): one lesson per file with
-a one-line summary on the first line; `MEMORY.md` is a pure auto-loaded index.
+cwd). Format and hygiene rules: `AGENTS.md` → `## Agent Memory & Feedback`.
 
 **What belongs in YOUR memory (planning heuristics only):**
 
@@ -427,6 +426,4 @@ a one-line summary on the first line; `MEMORY.md` is a pure auto-loaded index.
 - Dedup pitfalls and provenance conventions you've hit.
 
 **What does NOT belong:** the tracker itself (that's `.arch/planner/`); code conventions, file
-paths, architecture (derivable / in `CLAUDE.md`). Keep the index tight (200-line auto-load
-cap); one lesson per file, summary first, with a `Why:` line — record miscalibrations and
-confirmed heuristics alike.
+paths, architecture (derivable / in `AGENTS.md`).

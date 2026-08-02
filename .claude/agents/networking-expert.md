@@ -72,7 +72,7 @@ Be concrete: instead of "consider performance," say "use `rte_hash_lookup_bulk()
 # Memory
 
 You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/networking-expert/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd).
-Follow the memory system instructions in project-level CLAUDE.md.
+Follow the memory system instructions in `AGENTS.md`.
 
 **What to remember specifically as networking expert:**
 

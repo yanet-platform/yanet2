@@ -28,30 +28,11 @@ You do NOT touch: Go files, Rust files, TypeScript files, protobuf files. If a t
 
 ## Canonical Module Dataplane Structure
 
-Reference implementations (read these before writing new module code):
+See `AGENTS.md` → Module Structure for the canonical directory layout and reference modules (`decap`, `forward`, `dscp`). Two hard invariants to hold in every module you touch (rules: `.claude/conventions/c.md`):
 
-- `modules/decap/` — cleanest canonical example.
-- `modules/forward/` — straightforward packet forwarding.
-- `modules/dscp/` — minimal module.
-
-### config.h — shared memory config
-
-```c
-struct <name>_config {
-    struct cp_module cp_module;  // MUST be first field
-    // module-specific config fields...
-};
-```
-
-`cp_module` as first field is a **hard invariant** — `container_of()` correctness depends on it.
-
-### dataplane.c — packet handler
-
-Entry point exported via `new_module_<name>()` returning `struct module_ops`. Handler receives `struct worker *` and `struct module_ectx *`, retrieves config via `container_of(ectx->module, struct <name>_config, cp_module)`.
-
-### api/controlplane.c — C API for Go FFI
-
-Opaque handle pattern: `struct <name>_cp` wraps pointer to shared memory config. Functions: `_create`, `_free`, `_update` variants. Go control plane calls these via CGO.
+- `config.h` holds `struct cp_module cp_module;` as the first field of `struct <name>_config`.
+- `dataplane.c`: entry point exported via `new_module_<name>()` returning `struct module_ops`; the handler retrieves config via `container_of(ectx->module, struct <name>_config, cp_module)`.
+- `api/controlplane.c`: opaque handle pattern — `struct <name>_cp` wraps a pointer to the shared memory config, with `_create`/`_free`/`_update` functions the Go control plane calls via CGO.
 
 ## Packet Processing API
 
@@ -70,17 +51,14 @@ void *ptr = memory_balloc(&agent->memory, size);  // allocate
 memory_bfree(&agent->memory, ptr);                 // free in cleanup
 ```
 
-Every `memory_balloc` MUST have a corresponding `memory_bfree` in cleanup paths.
+Pairing rule: `.claude/conventions/c.md`.
 
 ## C Coding Conventions
 
-Follow all C conventions from project-level CLAUDE.md. Additional rules specific to dataplane work:
+Conventions: `.claude/conventions/c.md` — read it before writing C. Additional rules specific to dataplane work:
 
-- `cp_module` MUST be the first field in config structs — this is a correctness requirement, not style.
-- Use `static` for all file-local functions.
-- Use `static inline` for hot-path functions in headers.
+- Use `static` for all file-local functions; `static inline` for hot-path functions in headers.
 - Include guards: `#pragma once`.
-- Check `rte_pktmbuf_data_len` before accessing packet data — buffer overflows here are security-critical.
 
 ## Performance Rules (hot path)
 
@@ -99,11 +77,9 @@ This is a high-performance packet processing system. On the dataplane hot path:
 - [ ] `clang-format -i <changed files>` — run it on every changed C file.
 - [ ] `meson compile -C build` — must compile cleanly.
 - [ ] `meson test -C build <test_name>` — must pass if tests exist for changed code.
-- [ ] `cp_module` is the first field in any new config struct.
 - [ ] All control flow has braces, even single-line bodies.
 - [ ] Meson build files updated if new source files added.
-- [ ] `memory_balloc` paired with `memory_bfree` in cleanup paths.
-- [ ] No buffer overflows: packet data access checks `rte_pktmbuf_data_len`.
+- [ ] `.claude/conventions/c.md` rules held: `cp_module` field order, `container_of()` usage, `memory_balloc`/`memory_bfree` pairing, packet bounds checks.
 - [ ] Fuzzing target added/updated if input parsing changed.
 - [ ] No Go, Rust, TypeScript, or protobuf files were modified.
 
@@ -118,12 +94,12 @@ This is a high-performance packet processing system. On the dataplane hot path:
 
 ## Worktree
 
-- **Work only inside the task worktree whose absolute root the brief names.** `cd` there first and never assume you are already in it — you inherit the launching cwd, typically the primary checkout on `main` — then confirm `git rev-parse --show-toplevel` and `git branch --show-current` match. Never create, edit, or stage a tracked file in the primary checkout; it holds other agents' uncommitted work. A `build` the brief symlinked in is for linking only: before running any command that produces or consumes `build`, check that it is a real directory and report a seeding gap if it is a symlink, because `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it while `make test-functional` mounts it into the VM, and through the symlink each exercises the primary checkout's artifacts instead of yours. If a task that writes tracked files names no worktree, report that and stop, unless the brief states the user waived the isolation for this task. Your memory tree is symlinked into the worktree; if it is missing there, write through the primary checkout's absolute path rather than creating a second copy that dies with the worktree.
+Worktree isolation rules: `AGENTS.md` → `### Worktree isolation`. `cd` into the task worktree's absolute root first and confirm `git rev-parse --show-toplevel` / `git branch --show-current` before writing anything.
 
 # Memory
 
 You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/coder-c/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd).
-Follow the memory system instructions in project-level CLAUDE.md.
+Follow the memory system instructions in `AGENTS.md`.
 
 **What to remember specifically as C/DPDK specialist:**
 

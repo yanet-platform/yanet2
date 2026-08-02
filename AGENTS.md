@@ -110,11 +110,11 @@ modules/<name>/
   bindings/go/       # CGO wrapper crate consumed by controlplane
   controlplane/      # Go control plane
     <name>pb/        # Protobuf definitions + generated code
-    mod.go           # Module initialization
+    mod.go           # Module struct implementing BuiltInModule; New() constructor takes options
     backend.go       # Shared-memory write path (uses bindings)
     service.go       # gRPC service implementation
     service_test.go  # Service-level tests
-    cfg.go           # Module config struct
+    cfg.go           # Module config struct + DefaultConfig()
   dataplane/         # C packet processing (header-only hot paths as static inline)
     config.h         # Shared memory config structure
     dataplane.c/h    # Module entry point
@@ -191,71 +191,30 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 
 ### Go
 
-- **Receiver names**: always `m`. No type-letter mnemonics.
-- **No abbreviated identifiers**: spell out names in production and tests (`labels`, `metrics`, `durationSeconds`); only `ok`, `err`, `ctx`, `idx`, and short-scope type-assert temporaries are exceptions.
-- **Naming**: `*Config`, never `*Cfg`; constructors are `NewStore`/`NewClient`, never bare `New`.
-- **Loop index**: use `idx`, not `i`; prefer `for idx := range n` to C-style loops (Go 1.22+, enforced by `modernize`).
-- **Maps**: `map[K]V{}` not `make(map[K]V)`.
-- **gRPC**: `grpc.NewClient` not `grpc.Dial`.
-- **Concurrency**: prefer `errgroup.Group` over `sync.WaitGroup`, including in tests.
-- **Mutex discipline**: write `defer m.mu.Unlock()` immediately after `m.mu.Lock()`; split helpers when observers/RPCs must run unlocked. Holding it across a self-locking non-reentrant collaborator is correct when snapshot+`Set` must be atomic.
-- **Logging (zap)**: structured lowercase messages, snake_case keys, typed fields, and `*zap.Logger`, never Sugared. `log *zap.Logger` is the last struct field; use `zap.With` for per-instance context, avoid count/elapsed noise, and use past-tense `Info` for completed changes.
-- **Logger options**: constructors/methods accepting `*zap.Logger` use `NewFoo(cfg, WithLog(log))`, `options ...Option`, `opts := newOptions(); for _, o := range options { o(opts) }`, and a per-constructor `WithLog()`. The `logger` stylelint check enforces this.
-- **Encapsulation**: mutexes and guarded fields stay private. Reach private fields/methods only through `m` (receiver or constructor value), never another object or chains such as `m.opts.log` (write `m.opts.Log`); expose a method/field instead. Same-type parameters are allowed. `private` is an identifier-based convention, enforced by `lint/style/` via hooks, `make lint-go`, and CI; `import "C"` files are exempt.
-- **`stylelint`** gates `logger`, `private`, `testpkg`, `receiver`, `loopindex`, `maplit`, `grpcdial`, `sugar`, `zapmsg`, `zapkey`, `testctx`, `handlerblank`, `barenew`, and `loggerlast`. Each live violation has one reasoned `<check>:<path>:<name>` row in `lint/style/allowlist.txt`; do not add rows. Check scopes are declared with the checks.
-- **The allowlist is self-cleaning**: stale rows fail, so delete them with the code fix. Fix by shape: read-only owner data → exported field, repeated behaviour → method, duplicate carrier → delete. A wrong whole-class rule needs an exemption; a justified instance needs a reasoned row. Positive-control with `-allowlist <(git show HEAD:lint/style/allowlist.txt)`.
-- **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
-- **No log-only RPC stubs**: when a brief names an RPC, actually invoke the client. `m.log.Debug("would call …")` is a bug, not a stub.
-- **Comments**: English, period-terminated, about 80 columns, and list production callers only. Doc comments begin with a one-sentence period-terminated brief and separate detail with a blank `//` line.
-- **Tests**: table-driven with `require.NoError(t, err)`; production comments never mention tests. `_test.go` uses `package <pkg>_test` and `testpkg` gates it; `package main` is exempt because it is unimportable.
+See `.claude/conventions/go.md` — loaded on demand by the agent writing or reviewing Go.
 
 ### Rust
 
-- `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly fmt`.
-- Run `cargo +nightly fmt -- --check` and `cargo clippy` before committing.
-- Proto compilation needs `protobuf-compiler` in CI.
-- **Proto crates**: tonic-include crates expose `pub mod pb`, never `pub mod <crate>`; consume shared `common/rust/` crates through `extern_path`.
-- **Orphan rule**: never implement a foreign trait for a foreign type. Give the CLI a local enum/wrapper, implement the foreign trait there, then `From<Local> for Foreign`; free functions are not a substitute.
-- **Visibility**: avoid `pub(crate)`; items are `pub` or private. Conceptual type API methods are `pub`, even in binaries.
-- **Wire vs domain types**: parse and check invariants in the domain type; wire types get `From<Domain>` and use `TryFrom` only when fallible. Confirm module-specific validation (ACL permits non-contiguous masks, forward/decap do not) before generalising.
-- **`Display`/`Serialize`**: own types implement `Display`; `Serialize` uses `serializer.collect_str(self)`. Never blanket-derive `Serialize` for a proto module with a manual implementation.
-- **`fmt` imports**: `use std::fmt::{self, Display, Formatter};` with explicit `Result<(), fmt::Error>` (not `fmt::Result` alias).
-- **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/ `Default`/`FromStr` impls — the trait name is the doc.
-- **Doc comments**: `///`/`//!` begin with a one-sentence period-terminated brief and separate detail with a blank `///` line.
-- **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.
-- **`assert_eq!` order**: expected first, actual second: `assert_eq!(expected, actual)`.
-- **Style**: prefer shadowing to `_str`, destructure `self` rather than `self.0`, put bounds in `where`, and import types directly.
-- **Struct literals**: follow declaration order, including generated protos; rustfmt/clippy do not check this.
-- **Empty CLI results**: use `output::empty`/`empty_with_hint`, never bare printing or call-site format guards. The primitive owns the stderr marker, `No <subject> found.` register, and non-TTY/serializing suppression.
+See `.claude/conventions/rust.md` — loaded on demand by the agent writing or reviewing Rust.
 
 ### C
 
-- Always use braces for `if`/`else`/`for`/`while`, even single-line bodies.
-- Format with `clang-format`.
-- **Functions with more than six parameters are a code smell.** Split them or use a designated-initializer config struct; omnibus initialisers are untestable.
-- **Multi-segment mbufs**: `rte_pktmbuf_data_len()` is head-only. Whole-packet work walks `mbuf->next`/uses `rte_pktmbuf_pkt_len()`, or rejects chained packets.
-- **Zero config limits mean unset/no clamp.** Never use the sentinel in min/subtraction arithmetic; clamp accepted degenerate values below internal header deltas.
-- **Write recycled wire fields at their declared width.** A partial write retains stale bytes.
-- **`memory_balloc` does not zero.** `memset` allocations whenever a sentinel, CGO-visible field, or index depends on zero/NULL.
-- **cgo-boundary headers stay DPDK-free.** `<rte_*.h>` in `packet.h`, `packet_front.h`, `lib/utils/packet.h`, or another cgo-path header is blocking.
+See `.claude/conventions/c.md` — loaded on demand by the agent writing or reviewing C.
 
 ### Tests & Benchmarks
 
-- **Benchmarks must exercise their claimed path**: traffic matches rules (protocol, device, address family), sampling covers the dataset (no `stride == 1` prefix bias), and every documented input mode works end-to-end.
+- **Benchmarks must exercise their claimed path**: traffic matches rules (protocol, device, address family), every device named in a dump is registered, sampling covers the dataset (no `stride == 1` prefix bias), and every documented input mode works end-to-end.
 - **`for b.Loop()` suppresses inlining and devirtualization inside its body.** A closure, variadic option, or interface-boxed argument can therefore heap-allocate in the benchmark although the real call site stacks it. The distortion needs an optimization the real call site gets and the loop body does not: an inlined helper that produces the argument, such as an option constructor returning a closure, or a devirtualized interface call whose arguments then stop escaping. A closure written inline at the call site and passed by a direct call to a concrete type is unaffected. Cross-check `-gcflags=-m` against a real caller before trusting the number. `b.Loop()` stays the default, since its keep-alive is what stops the measured work being eliminated, but leave a benchmark that has deliberately switched to `for range b.N`: the `bloop` analyzer flags that form in editors and the pinned `golangci-lint` does not, so a quick-fix reverting it will not be caught by CI.
 - **dataplane_ut `Bench`/`run_rounds` recycles fixed packets**: reject or neutralise allocating/emitting actions (for example ACL `CREATE_STATE` sync) so mbufs do not leak or distort results.
 - **Exported Go APIs whose arguments cross CGO into C-side array indexing** (device IDs, queue/worker indices) validate the range on the Go side before the call.
 - **C-only changes require `go test -count=1` and a clean `meson compile`.** Go can link a stale C archive after cached tests or a failed compile; inspect compile output first. Mutation tests must corrupt behaviour, not delete calls. Shared-memory layout or `YANET_MODULE_ABI_VERSION` changes require `go clean -cache`, `rm -f <binary>` for standalone CGO binaries, and removal of `/dev/hugepages/yanet*` plus cached VM baselines.
 - **Race tests need targeted `-run` repetition (about 10–20 runs).** One `go test -race -count=1` can miss or misattribute a race through `t.Parallel()` siblings.
 - **Do not pin human-readable CLI formatting in tests.** Test logic/invariants (state, staleness, rounding, widths, wrapping), not literal output. ASCII-only paths and canonical MAC/hex rendering are contracts and may be tested.
+- **`modules/*/tests/vm` suites require manual binary staging.** An exit code of 127 or 3 from them is a staging gap, not a product defect — stage the binaries and re-run before filing anything.
 
 ### TypeScript/React
 
-Web UI lives in `web/` (the shell), but per-module pages are **co-located with their owner** as sibling roots: `modules|operators|devices/<name>/web/`.
-
-- Prefer arrow function expressions.
-- **A co-located spec only runs because `web/vite.config.ts` lists those sibling roots** — vitest's default `include` is web-relative, so a `*.test.ts` added or moved there silently stops running in CI. Diff the collected test-file count on any such move.
-- **Browser-visible changes need a real Playwright run on the real path plus an inspected screenshot**; `--list` is not verification. A pixel-diff of two empty states reports a false 0 — assert row counts first.
+Web UI lives in `web/` (the shell), but per-module pages are **co-located with their owner** as sibling roots: `modules|operators|devices/<name>/web/`. That ownership decides routing, so it stays here; the style and test rules are in `.claude/conventions/ts.md`, loaded on demand by the agent writing or reviewing TypeScript/React.
 
 ### Worktree isolation
 
@@ -264,6 +223,8 @@ Web UI lives in `web/` (the shell), but per-module pages are **co-located with t
 - **Only an explicit instruction for the current task waives the isolation.** A generic request to fix, change, build, test, commit, pull, or continue is not that waiver. Before the first writing command, `cd` into the worktree or address it as `git -C <worktree-root>`, and confirm that `git rev-parse --show-toplevel` and `git branch --show-current` name it and a non-`main` branch: an agent inherits the launching cwd, typically the primary checkout on `main`.
 - **Default location is the client's root-local gitignored worktree directory** — `.claude/worktrees/<name>` for Claude Code, `.agent-state/worktrees/<name>` for Codex — never a sibling of the repository. A bare tree is about 16 MB, but a task that compiles C needs its own multi-gigabyte `build/`: put that one on a volume with room for it rather than on a tight repository volume.
 - **Seed a fresh worktree before launching anyone into it**, because it holds only tracked files. Symlink the client memory tree and local settings. The build directory is always called `build`, so every existing `meson compile -C build` recipe stays correct, but which of two things it is depends on what the task's gates do with it. A gate that only links against the archives already in it, or ignores it entirely, may borrow the primary `build` by symlink, seeding the generated `*.pb.go` beside it — `go build`, `go test`, `cargo`, `npm` and a lint-only target such as `make lint/comments` all qualify. A gate that PRODUCES or CONSUMES `build` needs the worktree's own real one instead: `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it, and `make test-functional` mounts it into the VM without meson at all. Through the symlink each of those exercises the primary checkout's artifacts rather than yours, so the gate goes green on stale ones while ninja rewrites the archives every other worktree links against, and `meson setup --reconfigure`/`--wipe` retargets the developer's shared directory at your worktree. Building its own costs more than the tree: `meson setup build` initialises the empty `subprojects/dpdk` and `subprojects/libpcap` itself, but a linked worktree does not share the superproject's submodule objects, so git clones them from the remote (network required) into `.git/worktrees/<name>/modules/` — budget roughly 255 MB on top of the build, and put such a worktree on a volume with room. A web gate needs `npm ci` from the worktree root. A gitignored tree, such as a private module, cannot be worktree-isolated at all — work it at the primary checkout with absolute paths.
+- **Before a command that produces or consumes `build`, check whether it is a real directory and report a seeding gap if it is a symlink** — a borrowed link makes the gate exercise the primary checkout's artifacts instead of yours.
+- **If your memory tree is missing from the worktree, write through the primary checkout's absolute path** rather than creating a second copy that dies with the worktree.
 
 ### Commits & PRs
 
@@ -285,8 +246,8 @@ Client memory is root-local and client-specific: Codex uses `<repo>/.agent-state
 
 ### Structure
 
-- **One lesson per `kebab-case-slug.md` file.** Its first line is a summary of at most 150 characters (imperative for rules, excluding index wrapper), byte-identical to its `MEMORY.md` index line. After a blank line, include the rule/fact, `Why:`, and when needed `How to apply:`. No YAML frontmatter; keep lessons under about 20 lines.
-- **`MEMORY.md` is only an index.** It is auto-loaded and has `# <agent> memory`, then one `- [<summary>](<slug>.md)` line per lesson, grouped under optional `## Rules`, `## Project context`, and `## References` headings with optional `###` subheadings. Keep it at most 200 lines; never put lesson bodies there.
+- **One lesson per `kebab-case-slug.md` file.** Its first line is a summary of at most 150 characters (imperative for rules, excluding index wrapper), byte-identical to its `MEMORY.md` index line. After a blank line, include the rule/fact, `Why:`, and when needed `How to apply:`. No YAML frontmatter — the client harness's generic memory instructions describe wrapping each file in a `name:`/`description:`/`metadata:` frontmatter block, but this repository's bare-summary format overrides that guidance and wins. Keep the lesson body, including its summary line, to at most 12 lines. Lessons also carry `Last applied: YYYY-MM`, bumped when the lesson is actually applied; a lesson older than six months with no `(seen: N)` marker is deleted at the next sweep.
+- **`MEMORY.md` is only an index.** It is auto-loaded and has `# <agent> memory`, then one `- [<summary>](<slug>.md)` line per lesson, grouped under optional `## Rules`, `## Project context`, and `## References` headings with optional `###` subheadings. Keep it to at most 60 lesson entries — count the `- [` rows, not headings or blanks; never put lesson bodies there. At this cap you may not add a new entry until you have merged or deleted one — treat it as a failing lint, not advice. 200 lines is where the auto-load hard-truncates; 60 entries is the far tighter budget for what every run pays to read, so being under 200 is not the test.
 - User-profile facts are lesson files too, summary prefixed `User: …`, indexed under `## Rules`.
 
 ### What to record
@@ -300,9 +261,9 @@ Client memory is root-local and client-specific: Codex uses `<repo>/.agent-state
 
 ### Hygiene
 
-- **Update, do not duplicate.** Scan first; update a matching lesson and append `(seen: N)` to both identical summaries, beginning at `(seen: 2)`. At `(seen: 3)`, add the rule to the relevant AGENTS section and delete the lesson and index row.
+- **Update, do not duplicate.** Scan first, grepping 2-3 key phrases of the new lesson across every agent tree (all of `<client-tree>/agent-memory/*/`, indexes and lesson files, not just the target agent's) — a duplicate often landed under a different agent. Update the matching lesson and append `(seen: N)` to both identical summaries, beginning at `(seen: 2)`. At `(seen: 5)`, promote the rule and delete the lesson and index row — a language-specific rule goes to `.claude/conventions/<lang>.md`, and only a rule every agent needs goes to `AGENTS.md`. Promoting to `AGENTS.md` grows what all ten agents read on every run, so that bar is deliberately high.
 - **Verify notes against code.** Delete or correct stale/wrong notes.
-- **Compact by merging, never dropping facts.** Fold related lessons into one digest while keeping live bug classes and recipes separately discoverable; merged digests may be longer. Keep index summaries as retrieval hooks, not findings. Promote only terse, broadly applicable rules; agent-specific rules stay in that agent's section.
+- **Compact by merging, never dropping facts.** A merge rewrites two lessons into one shorter rule; concatenating them under provenance headers is not a merge. Keep live bug classes and recipes separately discoverable. Keep index summaries as retrieval hooks, not findings. Promote only terse, broadly applicable rules; agent-specific rules stay in that agent's section.
 
 ### Delegation & verification (architect)
 
@@ -310,7 +271,7 @@ These rules bind the delegating agent, not the implementer.
 
 - **Verify specialist claims yourself.** Run real builds/tests; reproduce mechanism claims, pre-existing failures, flakes, and new diagnostics before acting.
 - **Brief only verified details.** Read and cite code, and falsify exclusionary premises with a probe. Trace transitive callers/pointers before accepting reachability claims; preconditions describe state, not reachability.
-- **Require whole-class audits.** A `file:line` sample is not the population: pair it with the defining grep. Map all sites and callers before modifying shared primitives, return values, or a named data-flow site.
+- **Require whole-class audits.** A `file:line` sample is not the population: pair it with the defining grep. Map all sites and callers before modifying shared primitives, return values, or a named data-flow site. The repo-search tooling is gitignore-aware, so a plain repo-wide grep silently returns nothing for generated files and for gitignored private trees; any "no callers left", "nothing else uses this", or whole-population conclusion is therefore false until re-run with the private and generated paths named explicitly.
 - **Review the complete candidate with `review-change`.** Give the reviewer the task brief, exact base, candidate worktree or PR, and full intended manifest, including explicit untracked or ignored paths. Classify every entry as publish or local-only and stage only the publish manifest. Keep the first pass independent of existing review comments. Record the approval fingerprint (base, manifests, modes/types, content) and, for a PR, its head SHA; recheck immediately before the verdict. Any fingerprint change requires a whole-candidate restart. Stage/commit/amend/push may carry approval only after the publish fingerprint is identical on the packaged side and local-only entries remain unchanged; a new commit SHA alone is not a content change.
 - **Name the task worktree's absolute root in every brief, and tell the agent to `cd` there first.** Agents inherit cwd, and a worktree lacks gitignored state such as `.arch/`, `.agent-state/agent-memory/`, and `.claude/agent-memory/`, so seed or symlink whatever the agent's gate needs before launching it. Before removing a worktree, salvage both memory trees and establish each participant's tree before disputing file existence.
 - **Check open PRs before briefing and inspect their diffs.** If one owns the zone, drive or review it rather than competing.

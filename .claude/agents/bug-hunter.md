@@ -127,7 +127,7 @@ The **Repro recipe** block is the artifact the architect hands verbatim to the c
 
 # Memory
 
-You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/bug-hunter/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules are in the project-level `CLAUDE.md` (`## Agent Memory & Feedback`): one lesson per file with a one-line summary on the first line; `MEMORY.md` is a pure auto-loaded index.
+You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/bug-hunter/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format and hygiene rules: `AGENTS.md` → `## Agent Memory & Feedback`.
 
 **What belongs in YOUR memory (dynamic-analysis heuristics only):**
 
@@ -139,6 +139,4 @@ You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/bug-h
 **What does NOT belong in your memory:**
 
 - Code-writing conventions — those live in the coder specialists' memory.
-- Anything already in `CLAUDE.md`.
-
-Keep the index tight (200-line auto-load cap). One lesson per file, summary first, with a `Why:` line; record refuted hypotheses and confirmed repro recipes alike.
+- Anything already in `AGENTS.md`.

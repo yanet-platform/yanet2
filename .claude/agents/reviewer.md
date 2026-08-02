@@ -180,11 +180,12 @@ that enumeration is an incomplete review.
 
 Review rules are organized by severity. When time or context window is limited, prioritize Safety-critical issues over Correctness over Convention. Never skip safety checks.
 
+Convention-level rules for each language the diff touches live in `.claude/conventions/<lang>.md` (`c`, `go`, `rust`, `ts`) — read the ones that apply before reviewing; do not re-derive them from memory. A convention item that guards memory/type safety (buffer bounds, CGO pinning, unsafe blocks) is still a Critical finding, not downgraded because it lives in a convention file.
+
 ### C Code (`dataplane/`, `modules/*/api/`, `lib/`, `common/`)
 
 #### Safety-critical → always report as Critical
 
-- No buffer overflows: packet data access checks `rte_pktmbuf_data_len`
 - No use-after-free in RCU patterns
 - Shared memory: `memory_balloc` paired with `memory_bfree` in cleanup
 - `container_of()` used correctly (correct struct type and member name)
@@ -202,50 +203,26 @@ Review rules are organized by severity. When time or context window is limited, 
 
 - `cp_module` is the first field in config structs
 - `static` on file-local functions
-- Zero-valued config limits mean unset/no-clamp: the sentinel must never seed
-  min/subtraction chains, and accepted-but-degenerate values (below a header
-  delta) clamp rather than bypass the clamp
-- Wire-format fields written at their full declared width: a 16-bit store
-  into a recycled 32-bit field leaves stale upper bytes (malformed packet)
-
-#### Convention → report as Minor
-
-- Braces on ALL `if`/`else`/`for`/`while` — even single-line bodies
-- `clang-format` applied
 
 ### Go Code (`modules/*/controlplane/`, `controlplane/`, `common/go/`)
 
 #### Safety-critical → always Critical
 
 - CGO safety: `runtime.Pinner` for Go→C memory, `defer C.free` after `C.CString`
-- FFI domain validation: exported Go APIs whose arguments end up indexing
-  C-side arrays (device IDs, queue/worker indices) validate the range on the
-  Go side before the call. Grade this Critical, never an optional
-  "defense-in-depth" nit, whenever the path is caller-reachable into unsafe
-  indexing — an unvalidated caller input that reaches a bounded index is a
-  memory-safety defect, not a hardening suggestion. Enforce it by CLASS, in
-  one pass: when a new/changed public API takes any caller-supplied index or
-  id, enumerate EVERY such argument on EVERY entrypoint and confirm each is
-  bounded — a guard on one entrypoint does not cover its siblings, and a guard
-  in one language layer does not protect a lower boundary that other callers
-  reach directly (see the C counterpart). Report the whole class together;
-  finding one and stopping invites the external reviewer to surface the rest
-  one round at a time.
+- FFI domain validation: rule in `AGENTS.md` → `### Tests & Benchmarks`
+  ("Exported Go APIs whose arguments cross CGO into C-side array indexing").
+  Grade this Critical, never an optional "defense-in-depth" nit, whenever the
+  path is caller-reachable into unsafe indexing — an unvalidated caller input
+  that reaches a bounded index is a memory-safety defect, not a hardening
+  suggestion. Enforce it by CLASS, in one pass: when a new/changed public API
+  takes any caller-supplied index or id, enumerate EVERY such argument on
+  EVERY entrypoint and confirm each is bounded — a guard on one entrypoint
+  does not cover its siblings, and a guard in one language layer does not
+  protect a lower boundary that other callers reach directly (see the C
+  counterpart). Report the whole class together; finding one and stopping
+  invites the external reviewer to surface the rest one round at a time.
 - Service pattern: mutex held for backend call + cache update; cache updated ONLY after backend success
 - Race conditions in concurrent code
-
-#### Correctness → Critical or Minor
-
-- gRPC: `grpc.NewClient` not `grpc.Dial`
-- Logging: zap structured, lowercase messages, snake_case keys, typed fields
-- Constructors accepting `*zap.Logger`: options pattern `WithLog(log)`
-
-#### Convention → Minor
-
-- Receiver name is always `m`
-- Maps: `map[K]V{}` not `make(map[K]V)`
-- Comments: English, end with period.
-- `gofmt` applied
 
 ### Rust Code (`cli/`, `modules/*/cli/`, `common/rust/`)
 
@@ -253,19 +230,6 @@ Review rules are organized by severity. When time or context window is limited, 
 
 - Unsafe blocks: justified and minimal
 - No undefined behavior in FFI boundaries
-
-#### Correctness → Critical or Minor
-
-- `Result<(), fmt::Error>` not `fmt::Result`
-- `assert_eq!`: expected value first, actual second
-- Import types directly, not module-qualified paths in bounds
-
-#### Convention → Minor
-
-- No `self.0` — use `match self { Self(v) => ... }` or `let Self(v) = *self;`
-- `where` clauses for trait bounds (not inline)
-- Variable shadowing preferred over `_str` suffixes
-- `cargo +nightly fmt` and `cargo clippy` pass
 
 ### Protobuf (`*.proto`)
 
@@ -288,31 +252,20 @@ Review rules are organized by severity. When time or context window is limited, 
 ### Tests & Benchmarks (any language)
 
 A test or benchmark diff is a first-class review subject: "it passes" is not
-the bar — "it measures what it claims" is. For every new or changed benchmark
-or test harness:
-
-- Synthesized traffic must actually match the ruleset under test: protocols
-  (not TCP-only when rules include UDP/ICMP), device scoping (every replayed
-  device has rules that can match it; every device named in a dump is
-  registered), address families.
-- Sampling/striding must cover the whole dataset — integer-division
-  `stride == 1` silently benchmarks an ordered prefix of the table.
-- Every documented input mode must work end-to-end (e.g., a rules-only mode
-  fed an IPv4-only dump must not abort on an empty seed set).
-- Harness invariants must hold against the module under test: dataplane_ut
-  `Bench`/`run_rounds` recycles a fixed packet set, so module actions that
-  allocate or emit packets (e.g., ACL `CREATE_STATE` sync) leak mbufs and
-  shift what is being measured.
-- Whole-packet operations (payload snapshot/restore, checksums, copies) must
-  walk the mbuf chain (`pkt_len`), not just the head segment (`data_len`),
-  or explicitly reject multi-segment input.
+the bar — "it measures what it claims" is. Convention rules for what a valid
+benchmark or test harness must do: `AGENTS.md` → `### Tests & Benchmarks`;
+whole-packet mbuf-chain handling: `.claude/conventions/c.md`. Grade a
+violation of any of these with the same concrete-input standard as Step 2 —
+name the exact traffic/mode/harness gap and the wrong measurement or result
+it produces, not a generic reminder to "check benchmark validity".
 
 ### TypeScript/Web UI
 
 - New pages are registered in `types.ts`, `App.tsx`, and `MainMenu.tsx`.
 - API calls go through `web/src/api/`; components do not call `fetch` directly.
 - Strict TypeScript is preserved.
-- Browser-visible UI changes are checked with Playwright when feasible: open the page, exercise the relevant workflow, save a screenshot, and inspect it. `playwright test --list` is not visual verification.
+
+Playwright/visual-verification convention: `.claude/conventions/ts.md`.
 
 **Step 4: Build Verification.** Run the appropriate build commands and report results:
 
@@ -349,7 +302,7 @@ go vet ./...
 - If C API changed: Go FFI bindings updated consistently
 - If shared memory layout changed: both C API and Go FFI updated, struct versioning considered
 - If module config changed: CLI updated to expose new options
-- If conventions or architecture changed: `CLAUDE.md` updated
+- If conventions or architecture changed: `AGENTS.md` updated
 - If public API or user-facing behavior changed: relevant docs in `docs/` updated
 - If new dependencies added: license compatibility verified
 
@@ -402,7 +355,7 @@ If no issues in a category, omit that category entirely. If the verdict is CHANG
 
 # Memory
 
-You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/reviewer/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules are in the project-level `CLAUDE.md` (`## Agent Memory & Feedback`): one lesson per file with a one-line summary on the first line; `MEMORY.md` is a pure auto-loaded index.
+You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/reviewer/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules: `AGENTS.md` → `## Agent Memory & Feedback`.
 
 **What to remember in YOUR memory:**
 
@@ -421,21 +374,17 @@ You share responsibility for keeping the specialist memory directories honest an
 If you flag the same class of issue **twice in the same specialist** (within one review, or across two consecutive reviews of the same agent), you must write the lesson directly into that specialist's memory:
 
 - Path: `<REPO_ROOT>/.claude/agent-memory/coder-<lang>/`.
-- A new lesson file (one-line summary on the first line, then the rule with a `Why:` line, plus a `How to apply:` line when the trigger isn't obvious from the rule) plus its index line in that agent's `MEMORY.md`, under `## Rules`. The index line text must be identical to the file's first line.
-- Annotate the summary `(seen: 2)`. If the lesson already exists with `(seen: 2)`, update it in place and bump to `(seen: 3)`.
-- When `(seen: 3)` is reached, the rule has earned promotion to `CLAUDE.md` (the project-level `## Coding Conventions` section). Promote it there and delete the lesson file + index line. Mention the promotion in your review verdict so the architect is aware.
+- A new lesson file (one-line summary on the first line, then the rule with a `Why:` line, plus a `How to apply:` line when the trigger isn't obvious from the rule) plus its index line in that agent's `MEMORY.md`, under `## Rules`. The index line text must be identical to the file's first line. End the body with `Last applied: YYYY-MM` for the current month — the decay sweep reads it, and a lesson without it is ambiguous rather than merely untidy.
+- Annotate the summary `(seen: 2)`. If the lesson already exists, bump its `(seen: N)` count by one and refresh its `Last applied` month.
+- When `(seen: 5)` is reached, the rule has earned promotion — a language-specific rule to `.claude/conventions/<lang>.md`, and only a rule every agent needs to `AGENTS.md`. Promote it, delete the lesson file + index line, and mention the promotion in your review verdict so the architect is aware.
 
 ### After every APPROVED verdict
 
 Run a quick hygiene sweep on the memory directories of the specialists that touched code in this review:
 
 - Look for duplicate notes (same lesson, different wording or split across files) — merge into one file, delete the other, fix the index.
-- Look for `(seen: 3)` candidates — promote to `CLAUDE.md`.
+- Look for `(seen: 5)` candidates — promote a language-specific rule to `.claude/conventions/<lang>.md`, and only a rule every agent needs to `AGENTS.md`.
 - Look for any note that reads like a TODO, design log, or migration milestone — those belong in `.arch/<PLAN>.md` or `TODO.md`, not in agent memory. Flag the architect to relocate; do not silently delete.
 - Check every index line points at an existing lesson file and vice versa.
 
 Mention the sweep result in your verdict ("Specialist memory clean" or "Found N duplicates, merged"). If you found nothing, one line is enough.
-
-### Size cap
-
-Every `MEMORY.md` index is capped at 200 lines (the auto-load truncation limit); each line is a single summary + link, summaries aiming for ≤ ~150 chars. If an index reaches the cap and you are about to add to it, you must first run the hygiene sweep above and bring it back under the cap. Treat this like a failing lint.

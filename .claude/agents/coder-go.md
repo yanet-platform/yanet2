@@ -27,23 +27,7 @@ You do NOT touch: C files, Rust files, TypeScript files, `meson.build` files (ex
 
 ## Canonical Module Structure
 
-Reference implementations (read these before writing new module code):
-
-- `modules/decap/controlplane/` — cleanest canonical example.
-- `modules/forward/controlplane/` — has backend.go pattern.
-- `modules/dscp/controlplane/` — minimal module.
-
-Canonical file set:
-
-- `cfg.go` — Config struct + DefaultConfig().
-- `mod.go` — Module struct implementing BuiltInModule, New() constructor with options.
-- `backend.go` — Backend interface isolating FFI from service logic.
-- `service.go` — gRPC service: mutex, in-memory cache, atomic updates (lock → validate → backend call → update cache on success → unlock).
-- `service_test.go` — Table-driven unit tests + concurrent race tests.
-- `<name>pb/<name>.proto` — gRPC service + message definitions.
-- `<name>pb/meson.build` — protoc generation targets.
-
-Key invariant: cache is ONLY updated AFTER backend call succeeds. Never optimistically update cache before the C FFI call returns.
+See `AGENTS.md` → Module Structure for the canonical file set and reference modules (`decap`, `forward`, `dscp`). Key invariant to hold everywhere you touch `service.go`: cache is ONLY updated AFTER backend call succeeds. Never optimistically update cache before the C FFI call returns.
 
 ## CGO/FFI Patterns
 
@@ -89,7 +73,7 @@ Proto `meson.build` generates Go code via `protoc-gen-go` and `protoc-gen-go-grp
 
 ## Go Coding Conventions
 
-Follow all Go conventions from project-level CLAUDE.md. Additional rules specific to control plane work:
+Conventions: `.claude/conventions/go.md` — read it before writing Go. Additional rules specific to control plane work:
 
 - When creating `backend.go`, define the interface BEFORE writing `service.go` — the service depends on the backend interface.
 - When writing `service_test.go`, always include both table-driven unit tests AND concurrent race tests with goroutines calling the service under `go test -race`.
@@ -122,12 +106,12 @@ Follow all Go conventions from project-level CLAUDE.md. Additional rules specifi
 
 ## Worktree
 
-- **Work only inside the task worktree whose absolute root the brief names.** `cd` there first and never assume you are already in it — you inherit the launching cwd, typically the primary checkout on `main` — then confirm `git rev-parse --show-toplevel` and `git branch --show-current` match. Never create, edit, or stage a tracked file in the primary checkout; it holds other agents' uncommitted work. A `build` the brief symlinked in is for linking only: before running any command that produces or consumes `build`, check that it is a real directory and report a seeding gap if it is a symlink, because `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it while `make test-functional` mounts it into the VM, and through the symlink each exercises the primary checkout's artifacts instead of yours. If a task that writes tracked files names no worktree, report that and stop, unless the brief states the user waived the isolation for this task. Your memory tree is symlinked into the worktree; if it is missing there, write through the primary checkout's absolute path rather than creating a second copy that dies with the worktree.
+Worktree isolation rules: `AGENTS.md` → `### Worktree isolation`. `cd` into the task worktree's absolute root first and confirm `git rev-parse --show-toplevel` / `git branch --show-current` before writing anything.
 
 # Memory
 
 You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/coder-go/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd).
-Follow the memory system instructions in project-level CLAUDE.md.
+Follow the memory system instructions in `AGENTS.md`.
 
 **What to remember specifically as Go specialist:**
 

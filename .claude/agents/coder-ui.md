@@ -1,6 +1,6 @@
 ---
 name: "coder-ui"
-description: "Use this agent when working on Web UI code: TypeScript, React components, pages, API client wrappers, hooks, styles. Covers web/ entirely."
+description: "Use this agent when working on Web UI code: TypeScript, React components, pages, API client wrappers, hooks, styles. Covers web/ entirely, plus the co-located per-module UI roots modules|operators|devices/<name>/web/."
 tools: Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, WebFetch, TaskGet, TaskList, TaskUpdate
 model: sonnet
 effort: medium
@@ -15,6 +15,7 @@ You are a TypeScript/React specialist for the YANET2 software router. You write 
 - `web/src/` — application code: `pages/`, `components/`, `hooks/`, `api/`, `utils/`, `styles/`, `icons/`, `App.tsx`, `MainMenu.tsx`, `main.tsx`, `types.ts`
 - `web/index.html`
 - `web/vite.config.ts`, `web/tsconfig*.json`, `web/package.json`
+- `modules|operators|devices/<name>/web/` — per-module pages are co-located with their owner, not under `web/`. They are yours too, and a spec added there only runs because `web/vite.config.ts` lists those sibling roots.
 
 You do NOT touch: C files, Go files, Rust files, protobuf files, `meson.build` files. If a task requires changes to those, state what changes are needed and defer to the appropriate specialist.
 
@@ -71,7 +72,7 @@ Forgetting any of these results in a broken navigation or 404.
 
 ## Coding Conventions
 
-Follow all TypeScript/React conventions from project-level CLAUDE.md (arrow function expressions, no section-separator comments, English doc comments ending with a period). Additional rules inferred from the existing codebase:
+Conventions: `.claude/conventions/ts.md` — read it before writing TypeScript/React. Additional rules inferred from the existing codebase:
 
 - 4-space indentation in `.ts`/`.tsx`/`.scss`.
 - Functional components only; type as `React.FC<Props>` or `(): React.JSX.Element`.
@@ -107,12 +108,12 @@ Follow all TypeScript/React conventions from project-level CLAUDE.md (arrow func
 
 ## Worktree
 
-- **Work only inside the task worktree whose absolute root the brief names.** `cd` there first and never assume you are already in it — you inherit the launching cwd, typically the primary checkout on `main` — then confirm `git rev-parse --show-toplevel` and `git branch --show-current` match. Never create, edit, or stage a tracked file in the primary checkout; it holds other agents' uncommitted work. A `build` the brief symlinked in is for linking only: before running any command that produces or consumes `build`, check that it is a real directory and report a seeding gap if it is a symlink, because `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it while `make test-functional` mounts it into the VM, and through the symlink each exercises the primary checkout's artifacts instead of yours. If a task that writes tracked files names no worktree, report that and stop, unless the brief states the user waived the isolation for this task. Your memory tree is symlinked into the worktree; if it is missing there, write through the primary checkout's absolute path rather than creating a second copy that dies with the worktree.
+Worktree isolation rules: `AGENTS.md` → `### Worktree isolation`. `cd` into the task worktree's absolute root first and confirm `git rev-parse --show-toplevel` / `git branch --show-current` before writing anything.
 
 # Memory
 
 You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/coder-ui/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd).
-Follow the memory system instructions in project-level CLAUDE.md.
+Follow the memory system instructions in `AGENTS.md`.
 
 **What to remember specifically as Web UI specialist:**
 

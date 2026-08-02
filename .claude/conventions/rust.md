@@ -1,0 +1,21 @@
+# Rust conventions
+
+Loaded on demand by the agent writing or reviewing Rust; this is the single source for these rules.
+
+- `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly fmt`.
+- Run `cargo +nightly fmt -- --check` and `cargo clippy` before committing.
+- **`cargo fmt --all` also formats local path dependencies**, so it reaches outside the crate you think you are formatting. Scope it deliberately when the workspace pulls in path deps from another tree.
+- Proto compilation needs `protobuf-compiler` in CI.
+- **Proto crates**: tonic-include crates expose `pub mod pb`, never `pub mod <crate>`; consume shared `common/rust/` crates through `extern_path`.
+- **Orphan rule**: never implement a foreign trait for a foreign type. Give the CLI a local enum/wrapper, implement the foreign trait there, then `From<Local> for Foreign`; free functions are not a substitute.
+- **Visibility**: avoid `pub(crate)`; items are `pub` or private. Conceptual type API methods are `pub`, even in binaries.
+- **Wire vs domain types**: parse and check invariants in the domain type; wire types get `From<Domain>` and use `TryFrom` only when fallible. Confirm module-specific validation (ACL permits non-contiguous masks, forward/decap do not) before generalising.
+- **`Display`/`Serialize`**: own types implement `Display`; `Serialize` uses `serializer.collect_str(self)`. Never blanket-derive `Serialize` for a proto module with a manual implementation.
+- **`fmt` imports**: `use std::fmt::{self, Display, Formatter};` with explicit `Result<(), fmt::Error>` (not `fmt::Result` alias).
+- **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/ `Default`/`FromStr` impls — the trait name is the doc.
+- **Doc comments**: `///`/`//!` begin with a one-sentence period-terminated brief and separate detail with a blank `///` line.
+- **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.
+- **`assert_eq!` order**: expected first, actual second: `assert_eq!(expected, actual)`.
+- **Style**: prefer shadowing to `_str`, destructure `self` rather than `self.0`, put bounds in `where`, and import types directly.
+- **Struct literals**: follow declaration order, including generated protos; rustfmt/clippy do not check this.
+- **Empty CLI results**: use `output::empty`/`empty_with_hint`, never bare printing or call-site format guards. The primitive owns the stderr marker, `No <subject> found.` register, and non-TTY/serializing suppression.
