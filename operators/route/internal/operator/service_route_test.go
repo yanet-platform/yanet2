@@ -221,6 +221,35 @@ func TestShowRoutesAndLookupRoute_UndeclaredConfig_NotFound(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// TestNewOperator_ConfiguredModuleNoRIBYet_ReadsSucceedWithoutCreatingRIB
+// verifies that an Operator built by NewOperator answers ShowRoutes and
+// LookupRoute for its configured module with an empty success before any
+// RIB exists for it, and that neither read creates one.
+func TestNewOperator_ConfiguredModuleNoRIBYet_ReadsSucceedWithoutCreatingRIB(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.NetlinkMonitor.Disabled = true
+
+	op, err := NewOperator(cfg)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, op.Close())
+	}()
+
+	moduleName := cfg.Function.Module.Unwrap()
+
+	showResp, err := op.routeSvc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: moduleName})
+	require.NoError(t, err)
+	require.Empty(t, showResp.GetRoutes())
+
+	addr := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1"))
+	lookupResp, err := op.routeSvc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: moduleName, IpAddr: addr})
+	require.NoError(t, err)
+	require.Empty(t, lookupResp.GetRoutes())
+
+	_, ok := op.routeSvc.ribs.Get(moduleName)
+	require.False(t, ok, "answering reads for the configured module must not create a RIB")
+}
+
 // TestListConfigs_ConfiguredModule_ReportedOnceBeforeAndAfterRIB verifies
 // that a configured module name appears in ListConfigs before its RIB is
 // created, still appears exactly once after the RIB is created, and that
