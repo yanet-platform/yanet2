@@ -22,9 +22,21 @@ type yamlVlanRange struct {
 type yamlModeKind string
 
 const (
-	modeNone yamlModeKind = "None"
-	modeIn   yamlModeKind = "In"
-	modeOut  yamlModeKind = "Out"
+	modeNone yamlModeKind = "NONE"
+	modeIn   yamlModeKind = "IN"
+	modeOut  yamlModeKind = "OUT"
+)
+
+// legacyModeNone, legacyModeIn, and legacyModeOut are the PascalCase
+// spellings of the same three modes.
+//
+// Rule files written before the CLI adopted the proto enum spellings use
+// these forms, and those files must keep loading alongside the canonical
+// uppercase ones.
+const (
+	legacyModeNone yamlModeKind = "None"
+	legacyModeIn   yamlModeKind = "In"
+	legacyModeOut  yamlModeKind = "Out"
 )
 
 // yamlForwardRule mirrors a single rule entry in the YAML forward config.
@@ -110,14 +122,14 @@ func convertRule(r yamlForwardRule) (*forwardpb.Rule, error) {
 // convertMode maps a yamlModeKind to the proto enum value.
 func convertMode(m yamlModeKind) (forwardpb.ForwardMode, error) {
 	switch m {
-	case modeNone:
+	case modeNone, legacyModeNone:
 		return forwardpb.ForwardMode_NONE, nil
-	case modeIn:
+	case modeIn, legacyModeIn:
 		return forwardpb.ForwardMode_IN, nil
-	case modeOut:
+	case modeOut, legacyModeOut:
 		return forwardpb.ForwardMode_OUT, nil
 	default:
-		return 0, fmt.Errorf("unknown mode %q: must be None, In, or Out", m)
+		return 0, fmt.Errorf("unknown mode %q: must be NONE, IN, or OUT", m)
 	}
 }
 

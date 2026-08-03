@@ -145,7 +145,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport, disabled }
             exportYaml={() => rulesToDiffYaml(rules)}
             onImport={handleImport}
             toastPrefix="yn-yaml"
-            importPlaceholder={'rules:\n  - target: eth0\n    mode: Out\n    srcs:\n      - 10.0.0.0/8'}
+            importPlaceholder={'rules:\n  - target: eth0\n    mode: OUT\n    srcs:\n      - 10.0.0.0/8'}
             exportFooterHint="Exports current draft rules (unsaved changes included)."
             importFooterHint="Importing replaces all rules in the target config locally. Use Save to push to the server."
             importButtonLabel="Import"

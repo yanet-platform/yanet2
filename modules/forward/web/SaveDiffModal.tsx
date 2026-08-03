@@ -1,18 +1,12 @@
 import React, { useMemo } from 'react';
 import type { Rule } from '@yanet/core/api/forward';
-import { ForwardMode } from '@yanet/core/api/forward';
+import { ForwardMode, FORWARD_MODE_LABELS } from '@yanet/core/api/forward';
 import { formatIPNetItem, dumpYamlDoc } from '@yanet/core/utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '@yanet/core/components';
 
 /** Serialize a rules array into the canonical YAML schema for diff display. */
 export const rulesToDiffYaml = (rules: Rule[]): string => {
     const yamlRules = rules.map((r) => {
-        const modeMap: Record<number, string> = {
-            [ForwardMode.NONE]: 'None',
-            [ForwardMode.IN]: 'In',
-            [ForwardMode.OUT]: 'Out',
-        };
-
         const devices = (r.devices ?? []).map(d => d.name ?? '').filter(Boolean);
         const srcs = (r.srcs ?? []).map(formatIPNetItem).filter(Boolean);
         const dsts = (r.dsts ?? []).map(formatIPNetItem).filter(Boolean);
@@ -39,7 +33,7 @@ export const rulesToDiffYaml = (rules: Rule[]): string => {
         if (devices.length > 0) {
             entry['devices'] = devices;
         }
-        entry['mode'] = modeMap[r.action?.mode ?? ForwardMode.NONE] ?? 'None';
+        entry['mode'] = FORWARD_MODE_LABELS[r.action?.mode ?? ForwardMode.NONE] ?? 'NONE';
 
         return entry;
     });
