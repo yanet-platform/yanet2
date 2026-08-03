@@ -60,7 +60,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
 		// A value range should be created even for empty rules
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			goto error_collect;
+		}
 		if (*r_ptr == NULL)
 			continue;
 		const struct filter_rule *r = *r_ptr;

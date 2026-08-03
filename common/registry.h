@@ -265,7 +265,12 @@ value_range_append(
 
 static inline int
 value_registry_collect(struct value_registry *registry, uint32_t value) {
-	if (value_collector_collect(&registry->collector, value) == 1) {
+	int rc = value_collector_collect(&registry->collector, value);
+	if (rc < 0) {
+		return -1;
+	}
+
+	if (rc == 1) {
 		struct value_range *range =
 			ADDR_OF(&registry->ranges) + registry->range_count - 1;
 		if (value_range_append(registry->memory_context, range, value))
@@ -317,6 +322,8 @@ value_registry_capacity(struct value_registry *registry) {
 /*
  * Registry join callback called for each value pair combined from
  * two registry values.
+ *
+ * Returns 0 on success, negative on error.
  */
 typedef int (*value_registry_join_func)(
 	uint32_t first, uint32_t second, uint32_t idx, void *data
@@ -345,7 +352,9 @@ value_registry_join_range(
 			uint32_t v1 = values1[idx1];
 			uint32_t v2 = values2[idx2];
 
-			join_func(v1, v2, range_idx, join_func_data);
+			if (join_func(v1, v2, range_idx, join_func_data) < 0) {
+				return -1;
+			}
 		}
 	}
 	return 0;

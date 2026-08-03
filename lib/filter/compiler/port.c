@@ -68,7 +68,9 @@ collect_port_values(
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			goto error_collect;
+		}
 		if (*action_ptr == NULL)
 			continue;
 		const struct filter_rule *action = *action_ptr;

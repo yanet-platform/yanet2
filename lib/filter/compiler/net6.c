@@ -289,7 +289,9 @@ collect_network_values(
 	for (uint32_t net_idx = 0; net_idx < all_net_count; ++net_idx) {
 		struct net6 net6 = all_nets[net_idx];
 
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			return -1;
+		}
 
 		uint32_t start_hi;
 		uint32_t stop_hi;
@@ -352,7 +354,9 @@ build_net6_info(
 	*net_ranges = NULL;
 	*net_range_count = 0;
 
-	radix_init(net_radix, memory_context);
+	if (radix_init(net_radix, memory_context)) {
+		return -1;
+	}
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + action_count;
@@ -376,7 +380,11 @@ build_net6_info(
 			    RADIX_VALUE_INVALID)
 				continue;
 
-			radix_insert(net_radix, 32, net6.addr, *net_count);
+			if (radix_insert(
+				    net_radix, 32, net6.addr, *net_count
+			    )) {
+				goto error_nets;
+			}
 			if (mem_array_expand_exp(
 				    memory_context,
 				    (void **)nets,
@@ -555,7 +563,9 @@ merge_net6_range(
 	}
 
 	struct value_registry net_registry;
-	value_registry_init(&net_registry, memory_context);
+	if (value_registry_init(&net_registry, memory_context)) {
+		goto error_table;
+	}
 
 	if (collect_network_values(
 		    nets, net_cnt, ri_hi, ri_lo, table, &net_registry
@@ -563,7 +573,9 @@ merge_net6_range(
 		goto error_net_registry;
 	}
 
-	value_registry_init(registry, memory_context);
+	if (value_registry_init(registry, memory_context)) {
+		goto error_net_registry;
+	}
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;

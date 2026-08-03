@@ -74,7 +74,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	for (const struct filter_rule **r_ptr = rules;
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			goto error_collect;
+		}
 
 		if (*r_ptr == NULL)
 			continue;

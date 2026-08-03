@@ -64,7 +64,7 @@ net4_collect_values(
 	return 0;
 }
 
-static inline void
+static inline int
 net4_collect_registry(
 	struct net4 *start,
 	uint32_t count,
@@ -75,14 +75,18 @@ net4_collect_registry(
 		uint32_t addr = *(uint32_t *)net4->addr;
 		uint32_t mask = *(uint32_t *)net4->mask;
 		uint32_t to = addr | ~mask;
-		lpm4_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_registry_iterator,
-			registry
-		);
+		if (lpm4_collect_values(
+			    lpm,
+			    (uint8_t *)&addr,
+			    (uint8_t *)&to,
+			    lpm_collect_registry_iterator,
+			    registry
+		    )) {
+			return -1;
+		}
 	}
+
+	return 0;
 }
 
 static inline int
@@ -179,7 +183,9 @@ collect_net4_values(
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			goto error_net_collect;
+		}
 
 		if (*action_ptr == NULL)
 			continue;
@@ -189,7 +195,9 @@ collect_net4_values(
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
-		net4_collect_registry(nets, net_count, lpm, registry);
+		if (net4_collect_registry(nets, net_count, lpm, registry)) {
+			goto error_net_collect;
+		}
 	}
 
 	remap_table_free(&remap_table);

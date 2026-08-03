@@ -131,8 +131,9 @@ value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct collect_ctx *collect_ctx = (struct collect_ctx *)data;
 
 	uint32_t *value = value_table_get_ptr(collect_ctx->value_table, v1, v2);
-	if (remap_table_touch(&collect_ctx->remap_table, *value, value))
+	if (remap_table_touch(&collect_ctx->remap_table, *value, value) < 0) {
 		return -1;
+	}
 	return 0;
 }
 
@@ -166,13 +167,15 @@ merge_registry_values(
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
 		remap_table_new_gen(&collect_ctx.remap_table);
-		value_registry_join_range(
-			registry1,
-			registry2,
-			range_idx,
-			value_table_touch_action,
-			&collect_ctx
-		);
+		if (value_registry_join_range(
+			    registry1,
+			    registry2,
+			    range_idx,
+			    value_table_touch_action,
+			    &collect_ctx
+		    )) {
+			goto error_join;
+		}
 	}
 
 	remap_table_compact(&collect_ctx.remap_table);
@@ -180,6 +183,9 @@ merge_registry_values(
 	remap_table_free(&collect_ctx.remap_table);
 
 	return 0;
+
+error_join:
+	remap_table_free(&collect_ctx.remap_table);
 
 error_remap_table:
 	value_table_free(table);
@@ -223,17 +229,26 @@ collect_registry_values(
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		value_registry_start(registry);
-		value_registry_join_range(
-			registry1,
-			registry2,
-			range_idx,
-			value_table_collect_action,
-			&collect_ctx
-		);
+		if (value_registry_start(registry)) {
+			goto error_registry;
+		}
+		if (value_registry_join_range(
+			    registry1,
+			    registry2,
+			    range_idx,
+			    value_table_collect_action,
+			    &collect_ctx
+		    )) {
+			goto error_registry;
+		}
 	}
 
 	return 0;
+
+error_registry:
+	value_registry_fini(registry);
+
+	return -1;
 }
 
 int

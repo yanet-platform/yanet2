@@ -69,7 +69,9 @@ collect_proto_values(
 	     rule_ptr < rules + count;
 	     ++rule_ptr) {
 		// A value range should be created even for empty rules
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			goto error_collect;
+		}
 		if (*rule_ptr == NULL)
 			continue;
 

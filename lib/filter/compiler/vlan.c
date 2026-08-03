@@ -64,16 +64,21 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
 		// A value range should be created even for empty rules
-		value_registry_start(registry);
+		if (value_registry_start(registry)) {
+			goto error_collect;
+		}
 		if (*r_ptr == NULL)
 			continue;
 		const struct filter_rule *r = *r_ptr;
 
 		if (r->vlan_range_count == 0) {
 			for (uint16_t vlan = 0; vlan <= 4095; ++vlan) {
-				value_registry_collect(
-					registry, value_table_get(t, 0, vlan)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(t, 0, vlan)
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 		for (uint32_t idx = 0; idx < r->vlan_range_count; ++idx) {

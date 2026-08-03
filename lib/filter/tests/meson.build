@@ -226,3 +226,47 @@ executable('bench_net6_fast',
   dependencies: test_deps,
   link_language: 'c'
 )
+
+# Allocation-failure injection sweep. The compiler sources are recompiled
+# with oom_shim.h force-included so every memory_balloc call on the compile
+# path can be forced to fail one at a time.
+oom_shim_c_args = yanet_test_c_args + [
+  '-include', meson.current_source_dir() / 'oom_shim.h',
+]
+
+filter_compiler_oom_shim = static_library(
+  'filter_compiler_oom_shim',
+  compiler_sources,
+  c_args: oom_shim_c_args,
+  link_args: yanet_link_args,
+  include_directories: include_directories('..'),
+  dependencies: [lib_common_dep, lib_errors_dep],
+  install: false,
+)
+
+filter_compiler_oom_shim_dep = declare_dependency(
+  link_with: filter_compiler_oom_shim,
+  include_directories: include_directories('..'),
+  dependencies: [lib_errors_dep],
+)
+
+oom_sweep_deps = [
+  lib_common_dep,
+  lib_packet_dp_dep,
+  filter_compiler_oom_shim_dep,
+  lib_filter_query_dep,
+  lib_lib_utils_dep,
+  libdpdk_inc_dep,
+  libdpdk_dep,
+]
+
+# The sweep test itself inlines part of the compile path (filter_init is a
+# static inline in compiler.h), so it needs the same shim.
+test_filter_oom_sweep = executable('oom_sweep',
+  ['oom_sweep.c'],
+  c_args: oom_shim_c_args,
+  link_args: yanet_link_args,
+  dependencies: oom_sweep_deps,
+  link_language: 'c'
+)
+test('oom_sweep', test_filter_oom_sweep, suite: ['filter'])
