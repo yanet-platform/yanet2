@@ -61,7 +61,7 @@ type serviceEntry struct {
 }
 
 // defaultPerServiceMethodLimit caps the number of distinct grpc_method label
-// values the default metrics factory tracks per grpc_service.
+// values the gateway's gRPC server metrics track per grpc_service.
 const defaultPerServiceMethodLimit = 64
 
 // errorReasonMetadataKey is the trailer metadata key that classifies a
@@ -78,32 +78,14 @@ const errorReasonMetadataKey = "x-yanet-error-reason"
 // renaming it breaks them.
 const errorReasonServiceUnregistered = "service-unregistered"
 
-// MetricsFactory constructs the gateway's gRPC server metrics from the
-// gateway-owned per-call bounds.
-//
-// NewGateway invokes the factory once the backend registry and the gRPC
-// server exist, so a custom factory receives the same retention and
-// service-filter hooks as the default one.
-type MetricsFactory func(retention grpcmetrics.Retention, serviceFilter func(service string) bool) *grpcmetrics.ServerMetrics
-
 type gatewayOptions struct {
-	Services       []serviceEntry
-	Log            *zap.Logger
-	LogLevel       *zap.AtomicLevel
-	MetricsFactory MetricsFactory
+	Services []serviceEntry
+	Log      *zap.Logger
+	LogLevel *zap.AtomicLevel
 }
 
 func newGatewayOptions() *gatewayOptions {
-	return &gatewayOptions{
-		Log: zap.NewNop(),
-		MetricsFactory: func(retention grpcmetrics.Retention, serviceFilter func(service string) bool) *grpcmetrics.ServerMetrics {
-			return grpcmetrics.New(
-				grpcmetrics.WithPerServiceMethodLimit(defaultPerServiceMethodLimit),
-				grpcmetrics.WithRetention(retention),
-				grpcmetrics.WithServiceFilter(serviceFilter),
-			)
-		},
-	}
+	return &gatewayOptions{Log: zap.NewNop()}
 }
 
 // GatewayOption is a function that configures the Gateway.
@@ -136,19 +118,6 @@ func WithLog(log *zap.Logger) GatewayOption {
 func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.LogLevel = level
-	}
-}
-
-// WithGRPCMetricsFactory overrides the factory used to build the gateway's
-// gRPC server metrics collector.
-//
-// Useful when a caller needs a factory with a deterministic clock or custom
-// buckets. The retention and service-filter arguments the factory receives
-// still come from NewGateway, since they depend on the registry and gRPC
-// server that only exist once NewGateway starts running.
-func WithGRPCMetricsFactory(factory MetricsFactory) GatewayOption {
-	return func(o *gatewayOptions) {
-		o.MetricsFactory = factory
 	}
 }
 
@@ -289,7 +258,11 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		}
 	}
 
-	serverMetrics := opts.MetricsFactory(retention, serviceFilter)
+	serverMetrics := grpcmetrics.New(
+		grpcmetrics.WithPerServiceMethodLimit(defaultPerServiceMethodLimit),
+		grpcmetrics.WithRetention(retention),
+		grpcmetrics.WithServiceFilter(serviceFilter),
+	)
 
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
