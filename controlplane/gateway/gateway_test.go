@@ -126,13 +126,20 @@ func (m *blockingReadinessService) Watch(
 // A fresh gRPC server is not immediately reachable after Run starts, since
 // the listener and the client registration both happen asynchronously, so
 // the retry absorbs that startup race instead of requiring a fixed sleep.
-func watchUntilOpen(t *testing.T, client ynpb.ReadinessServiceClient) {
+// The caller's ctx selects the stream's lifetime: pass t.Context() to leave
+// the stream open across shutdown, or a derived cancelable context to close
+// the watch before the caller waits on shutdown to complete.
+func watchUntilOpen(
+	t *testing.T,
+	ctx context.Context,
+	client ynpb.ReadinessServiceClient,
+) ynpb.ReadinessService_WatchClient {
 	t.Helper()
 
 	var stream ynpb.ReadinessService_WatchClient
 	require.Eventually(t, func() bool {
 		var watchErr error
-		stream, watchErr = client.Watch(t.Context(), &readinesspb.ReadyRequest{})
+		stream, watchErr = client.Watch(ctx, &readinesspb.ReadyRequest{})
 		if watchErr != nil {
 			return false
 		}
@@ -140,6 +147,8 @@ func watchUntilOpen(t *testing.T, client ynpb.ReadinessServiceClient) {
 		_, watchErr = stream.Recv()
 		return watchErr == nil
 	}, 5*time.Second, 50*time.Millisecond, "failed to open readiness watch stream")
+
+	return stream
 }
 
 // TestGateway_Run_ShutsDownWithOpenStream verifies that Gateway.Run returns
@@ -170,7 +179,7 @@ func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 	// The stream is deliberately left open: the client never calls
 	// CloseSend or cancels its context, matching the reproduction where an
 	// open readiness watch wedges GracefulStop forever.
-	watchUntilOpen(t, ynpb.NewReadinessServiceClient(conn))
+	_ = watchUntilOpen(t, t.Context(), ynpb.NewReadinessServiceClient(conn))
 
 	cancel()
 
@@ -183,6 +192,90 @@ func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Gateway.Run did not return within the shutdown grace period")
 	}
+}
+
+// TestGateway_Run_DrainsReadinessOnShutdown verifies that Run drains the
+// gateway's readiness tracker after its context is canceled, so an open
+// readiness watch observes a shutting-down state before the server stops
+// rather than only a dropped connection.
+func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.Server.Endpoint = freeTCPAddr(t)
+
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	var group errgroup.Group
+	group.Go(func() error {
+		return gw.Run(ctx)
+	})
+
+	require.Eventually(t, func() bool {
+		resp := gw.readinessTracker.Ready(&readinesspb.ReadyRequest{})
+		if len(resp.GetScopes()) != 1 {
+			return false
+		}
+		return resp.GetScopes()[0].GetState() == readinesspb.State_STATE_READY
+	}, 5*time.Second, 50*time.Millisecond, "gateway did not become ready")
+
+	conn, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	watchCtx, watchCancel := context.WithCancel(t.Context())
+	t.Cleanup(watchCancel)
+
+	stream := watchUntilOpen(t, watchCtx, ynpb.NewReadinessServiceClient(conn))
+
+	cancel()
+
+	// A live watch client, not just the tracker's own state, proves the
+	// drain reached subscribers while the server was still serving: with
+	// the drain moved past the stop, this stream would instead only see
+	// the connection drop once GracefulStop's grace period expires.
+	drained := make(chan *readinesspb.ReadyResponse, 1)
+	go func() {
+		resp, recvErr := stream.Recv()
+		if recvErr == nil {
+			drained <- resp
+		}
+	}()
+
+	select {
+	case resp := <-drained:
+		require.Len(t, resp.GetScopes(), 1)
+		scope := resp.GetScopes()[0]
+		require.Equal(t, readinesspb.State_STATE_NOT_READY, scope.GetState())
+		require.Len(t, scope.GetReasons(), 1)
+		require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
+	case <-time.After(5 * time.Second):
+		t.Fatal("readiness watch did not observe a shutting-down state before the server stopped")
+	}
+
+	watchCancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- group.Wait() }()
+
+	select {
+	case err := <-runErr:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Gateway.Run did not return within the shutdown grace period")
+	}
+
+	resp := gw.readinessTracker.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.GetScopes(), 1)
+
+	scope := resp.GetScopes()[0]
+	require.Equal(t, readinesspb.State_STATE_NOT_READY, scope.GetState())
+	require.Len(t, scope.GetReasons(), 1)
+	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
 }
 
 // TestGateway_Director_RegistryMissCarriesReasonTrailer verifies that a
@@ -299,7 +392,7 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	// As above, the stream is deliberately left open across shutdown.
-	watchUntilOpen(t, ynpb.NewReadinessServiceClient(conn))
+	_ = watchUntilOpen(t, t.Context(), ynpb.NewReadinessServiceClient(conn))
 
 	cancel()
 

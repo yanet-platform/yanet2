@@ -117,6 +117,30 @@ func TestReadinessTracker_ReadyAfterDrainIsNoop(t *testing.T) {
 	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
 }
 
+// TestNewGateway_ReadinessTrackerLatchesDrain verifies that the gateway
+// wires its readiness tracker with the drain latch, so a late Set to ready
+// after Drain cannot undo the shutdown state, and not just that the
+// underlying tracker library supports the latch.
+func TestNewGateway_ReadinessTrackerLatchesDrain(t *testing.T) {
+	cfg := DefaultConfig()
+
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	gw.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+	gw.readinessTracker.Drain()
+	gw.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+
+	resp := gw.readinessTracker.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.GetScopes(), 1)
+
+	scope := resp.GetScopes()[0]
+	require.Equal(t, readinesspb.State_STATE_NOT_READY, scope.GetState())
+	require.Len(t, scope.GetReasons(), 1)
+	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
+}
+
 func TestReadinessService_Ready(t *testing.T) {
 	tracker := newTestTracker()
 	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
