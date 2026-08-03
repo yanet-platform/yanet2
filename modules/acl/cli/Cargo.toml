@@ -12,7 +12,7 @@ commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = 
 filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
 netip = "0.3"
 log = "0.4"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 prost = "0.13"

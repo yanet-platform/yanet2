@@ -9,7 +9,7 @@ rust-version = "1.85"
 [dependencies]
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost = "0.13"
 log = "0.4"
