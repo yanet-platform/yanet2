@@ -108,9 +108,12 @@ func (m *Pipeline) Get(
 	ctx context.Context,
 	request *ynpb.GetPipelineRequest,
 ) (*ynpb.GetPipelineResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
+	reqId := request.GetId()
+	if reqId == nil {
+		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
+	}
 
-	reqId := request.Id
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	pipelines := dpConfig.Pipelines()
 	for _, pipeline := range pipelines {
@@ -143,22 +146,30 @@ func (m *Pipeline) Update(
 	ctx context.Context,
 	request *ynpb.UpdatePipelineRequest,
 ) (*ynpb.UpdatePipelineResponse, error) {
-	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
-	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+	reqPipeline := request.GetPipeline()
+	if reqPipeline == nil {
+		return nil, status.Error(codes.InvalidArgument, "pipeline is required")
 	}
-	defer agent.Close()
 
-	reqPipeline := request.Pipeline
+	reqPipelineId := reqPipeline.GetId()
+	if reqPipelineId == nil {
+		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
+	}
 
 	pipeline := ffi.PipelineConfig{
-		Name:      reqPipeline.Id.Name,
+		Name:      reqPipelineId.Name,
 		Functions: make([]string, len(reqPipeline.Functions)),
 	}
 
 	for idx, reqFunctionId := range reqPipeline.Functions {
 		pipeline.Functions[idx] = reqFunctionId.Name
 	}
+
+	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+	}
+	defer agent.Close()
 
 	if err := agent.UpdatePipeline(pipeline); err != nil {
 		return nil, fmt.Errorf("failed to update function: %w", err)
@@ -172,7 +183,11 @@ func (m *Pipeline) Delete(
 	ctx context.Context,
 	request *ynpb.DeletePipelineRequest,
 ) (*ynpb.DeletePipelineResponse, error) {
-	pipelineName := request.GetId().GetName()
+	reqId := request.GetId()
+	if reqId == nil {
+		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
+	}
+	pipelineName := reqId.Name
 
 	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {

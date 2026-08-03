@@ -108,9 +108,12 @@ func (m *Function) Get(
 	ctx context.Context,
 	request *ynpb.GetFunctionRequest,
 ) (*ynpb.GetFunctionResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
+	reqId := request.GetId()
+	if reqId == nil {
+		return nil, status.Error(codes.InvalidArgument, "function id is required")
+	}
 
-	reqId := request.Id
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	functions := dpConfig.Functions()
 	for _, function := range functions {
@@ -157,19 +160,25 @@ func (m *Function) Update(
 	ctx context.Context,
 	request *ynpb.UpdateFunctionRequest,
 ) (*ynpb.UpdateFunctionResponse, error) {
-	reqFunction := request.Function
-
-	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
-	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
+	reqFunction := request.GetFunction()
+	if reqFunction == nil {
+		return nil, status.Error(codes.InvalidArgument, "function is required")
 	}
-	defer agent.Close()
+
+	reqFunctionId := reqFunction.GetId()
+	if reqFunctionId == nil {
+		return nil, status.Error(codes.InvalidArgument, "function id is required")
+	}
 
 	function := ffi.FunctionConfig{
-		Name: reqFunction.Id.Name,
+		Name: reqFunctionId.Name,
 	}
 	for _, reqFunctionChain := range reqFunction.Chains {
-		reqChain := reqFunctionChain.Chain
+		reqChain := reqFunctionChain.GetChain()
+		if reqChain == nil {
+			return nil, status.Error(codes.InvalidArgument, "function chain is required")
+		}
+
 		modules := make([]ffi.ChainModuleConfig, 0, len(reqChain.Modules))
 		for _, reqChainModule := range reqChain.Modules {
 			modules = append(modules, ffi.ChainModuleConfig{
@@ -189,6 +198,12 @@ func (m *Function) Update(
 		function.Chains = append(function.Chains, functionChain)
 	}
 
+	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
+	}
+	defer agent.Close()
+
 	if err := agent.UpdateFunction(function); err != nil {
 		return nil, fmt.Errorf("failed to update function: %w", err)
 	}
@@ -201,7 +216,11 @@ func (m *Function) Delete(
 	ctx context.Context,
 	request *ynpb.DeleteFunctionRequest,
 ) (*ynpb.DeleteFunctionResponse, error) {
-	functionName := request.Id.Name
+	reqId := request.GetId()
+	if reqId == nil {
+		return nil, status.Error(codes.InvalidArgument, "function id is required")
+	}
+	functionName := reqId.Name
 
 	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
