@@ -48,6 +48,7 @@ type routeServiceOptions struct {
 	OnRIBSessionStart func(name string, sessionID uint64)
 	OnRIBUpdate       func(n int)
 	OnRIBSessionEnd   func(name string, sessionID uint64)
+	ConfiguredModules []string
 	Log               *zap.Logger
 }
 
@@ -124,6 +125,21 @@ func WithRouteServiceOnRIBUpdate(fn func(n int)) RouteServiceOption {
 func WithRouteServiceOnRIBSessionEnd(fn func(name string, sessionID uint64)) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.OnRIBSessionEnd = fn
+	}
+}
+
+// WithRouteServiceConfiguredModules declares the module config names the
+// operator itself manages.
+//
+// A declared name with no RIB yet is the normal state between process
+// start and the first upstream feed, so read RPCs answer it with an empty
+// success instead of NotFound: its data has simply not arrived. A name
+// outside this set stays NotFound, because nothing has created a RIB for
+// it yet — neither the operator's own config nor any write that has
+// arrived.
+func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.ConfiguredModules = names
 	}
 }
 

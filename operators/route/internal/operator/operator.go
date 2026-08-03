@@ -137,6 +137,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		WithRouteServiceRIBTTL(ribTTL(cfg)),
 		WithRouteServiceOnChanged(wake),
 		WithRouteServiceLog(log),
+		WithRouteServiceConfiguredModules(moduleName),
 		WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
 			ribHelper.OnSessionStart(name, sessionID)
 			metrics.OnRIBSessionStart(name, sessionID)

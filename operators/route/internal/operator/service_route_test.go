@@ -160,3 +160,87 @@ func TestInsertRoute_NonStaticMultipleNexthops_InvalidArgument(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, codes.InvalidArgument, st.Code())
 }
+
+// TestShowRoutes_ConfiguredModule_NoRIBYet_Success verifies that ShowRoutes
+// returns an empty success for a module the operator declares as its own
+// even before any RIB exists for it, and that answering the read does not
+// create a RIB or wake the reconcile loop.
+func TestShowRoutes_ConfiguredModule_NoRIBYet_Success(t *testing.T) {
+	var onChangedCount int
+	svc := NewRouteService(
+		neigh.NewNeighTable(),
+		WithRouteServiceConfiguredModules("route0"),
+		WithRouteServiceOnChanged(func() { onChangedCount++ }),
+	)
+
+	resp, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+	require.NoError(t, err)
+	require.Empty(t, resp.GetRoutes())
+
+	_, ok := svc.ribs.Get("route0")
+	require.False(t, ok, "answering a read for a configured module must not create a RIB")
+	require.Zero(t, onChangedCount, "answering a read must not wake the reconcile loop")
+}
+
+// TestLookupRoute_ConfiguredModule_NoRIBYet_Success verifies that
+// LookupRoute returns an empty success for a module the operator declares
+// as its own even before any RIB exists for it, and that answering the
+// read does not create a RIB or wake the reconcile loop.
+func TestLookupRoute_ConfiguredModule_NoRIBYet_Success(t *testing.T) {
+	var onChangedCount int
+	svc := NewRouteService(
+		neigh.NewNeighTable(),
+		WithRouteServiceConfiguredModules("route0"),
+		WithRouteServiceOnChanged(func() { onChangedCount++ }),
+	)
+
+	addr := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1"))
+	resp, err := svc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: "route0", IpAddr: addr})
+	require.NoError(t, err)
+	require.Empty(t, resp.GetRoutes())
+
+	_, ok := svc.ribs.Get("route0")
+	require.False(t, ok, "answering a read for a configured module must not create a RIB")
+	require.Zero(t, onChangedCount, "answering a read must not wake the reconcile loop")
+}
+
+// TestShowRoutesAndLookupRoute_UndeclaredConfig_NotFound verifies that a
+// name outside the configured-modules set stays NotFound even when the
+// set is non-empty, distinguishing it from a declared-but-unpopulated name.
+func TestShowRoutesAndLookupRoute_UndeclaredConfig_NotFound(t *testing.T) {
+	svc := NewRouteService(
+		neigh.NewNeighTable(),
+		WithRouteServiceConfiguredModules("route0"),
+	)
+
+	_, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "other"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	addr := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1"))
+	_, err = svc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: "other", IpAddr: addr})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestListConfigs_ConfiguredModule_ReportedOnceBeforeAndAfterRIB verifies
+// that a configured module name appears in ListConfigs before its RIB is
+// created, still appears exactly once after the RIB is created, and that
+// the full result is always lexicographically sorted regardless of the
+// order configs and RIBs were added in.
+func TestListConfigs_ConfiguredModule_ReportedOnceBeforeAndAfterRIB(t *testing.T) {
+	svc := NewRouteService(
+		neigh.NewNeighTable(),
+		WithRouteServiceConfiguredModules("route0"),
+	)
+
+	resp, err := svc.ListConfigs(t.Context(), &operatorpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"route0"}, resp.GetConfigs())
+
+	svc.getOrCreateRib("route0")
+	svc.getOrCreateRib("route2")
+	svc.getOrCreateRib("route1")
+
+	resp, err = svc.ListConfigs(t.Context(), &operatorpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"route0", "route1", "route2"}, resp.GetConfigs())
+}

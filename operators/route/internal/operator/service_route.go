@@ -3,7 +3,9 @@ package operator
 import (
 	"context"
 	"io"
+	"maps"
 	"net/netip"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +36,13 @@ type RouteService struct {
 	onRIBUpdate       func(n int)
 	onRIBSessionEnd   func(name string, sessionID uint64)
 
+	// configuredModules holds the module config names the operator itself
+	// manages.
+	//
+	// It is built once in NewRouteService and never mutated afterwards, so
+	// reads need no lock.
+	configuredModules map[string]struct{}
+
 	log *zap.Logger
 }
 
@@ -48,6 +57,11 @@ func NewRouteService(
 		o(opts)
 	}
 
+	configuredModules := make(map[string]struct{}, len(opts.ConfiguredModules))
+	for _, name := range opts.ConfiguredModules {
+		configuredModules[name] = struct{}{}
+	}
+
 	return &RouteService{
 		ribs:              opts.RIBs,
 		neighTable:        neighTable,
@@ -57,6 +71,7 @@ func NewRouteService(
 		onRIBSessionStart: opts.OnRIBSessionStart,
 		onRIBUpdate:       opts.OnRIBUpdate,
 		onRIBSessionEnd:   opts.OnRIBSessionEnd,
+		configuredModules: configuredModules,
 		log:               opts.Log,
 	}
 }
@@ -68,13 +83,30 @@ func (m *RouteService) Close() error {
 	return nil
 }
 
-// Configs returns a snapshot of all known RIB config names.
+// Configs returns the config names the operator can answer reads for.
+//
+// The result is the union of RIB-backed config names and configured
+// module names, deduplicated and sorted for a deterministic listing.
 func (m *RouteService) Configs() []string {
-	return m.ribs.Configs()
+	seen := map[string]struct{}{}
+	for _, name := range m.ribs.Configs() {
+		seen[name] = struct{}{}
+	}
+	maps.Copy(seen, m.configuredModules)
+
+	return slices.Sorted(maps.Keys(seen))
 }
 
-// ListConfigs returns the names of all RIB configs known to the
-// operator.
+// isConfigured reports whether name is a module config the operator itself
+// manages, regardless of whether a RIB has been created for it yet.
+func (m *RouteService) isConfigured(name string) bool {
+	_, ok := m.configuredModules[name]
+	return ok
+}
+
+// ListConfigs returns the config names the operator can answer reads for.
+//
+// See Configs for what that set contains.
 func (m *RouteService) ListConfigs(
 	ctx context.Context,
 	req *operatorpb.ListConfigsRequest,
@@ -100,6 +132,9 @@ func (m *RouteService) ShowRoutes(
 
 	holder, ok := m.getRib(name)
 	if !ok {
+		if m.isConfigured(name) {
+			return &operatorpb.ShowRoutesResponse{}, nil
+		}
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	ribDump := holder.DumpRoutes()
@@ -145,6 +180,9 @@ func (m *RouteService) LookupRoute(
 
 	holder, ok := m.getRib(name)
 	if !ok {
+		if m.isConfigured(name) {
+			return &operatorpb.LookupRouteResponse{}, nil
+		}
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
