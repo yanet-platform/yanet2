@@ -24,7 +24,8 @@ Multiple in-flight PRs that ALL append to the same barrel file
   leaves both branches for Phase 7. On the `gh` path, `gh pr merge
   --delete-branch` skips the REMOTE delete when the LOCAL delete errors on a
   worktree-held branch. Either way, always `git ls-remote --heads origin
-  '<pattern>'` after cleanup and `git push origin --delete` any survivor.
+  '<pattern>'` after cleanup; if a survivor remains, `git push origin
+  :refs/heads/<branch>` clears it.
 
 ## Stacked PRs (child depends on parent's unmerged change)
 
