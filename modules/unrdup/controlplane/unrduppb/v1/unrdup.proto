@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package modules.unrdup.controlplane.unrduppb.v1;
+
+import "common/commonpb/v1/ipaddr.proto";
+import "common/filterpb/v1/filter.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1;unrduppb";
+
+// UnrdupService redistributes ICMP errors to peer balancers.
+service UnrdupService {
+  // ListConfigs returns the configs held by the backend serving the call.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  // ShowConfig returns the current configuration for the unrdup module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+  // UpdateConfig replaces the whole configuration.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+}
+
+// Protocol of a served transport endpoint.
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+}
+
+// Endpoint is a served transport endpoint; its port is in host byte order.
+message Endpoint {
+  uint32 port = 1;
+  Protocol protocol = 2;
+}
+
+// An error is redistributed only when its flow names one of the endpoints.
+message Service {
+  common.commonpb.v1.IPAddress vip = 1;
+  repeated common.commonpb.v1.IPAddress peers = 2;
+  repeated Endpoint endpoints = 3;
+}
+
+// A peer's family selects its source, so each family in use needs one.
+message Config {
+  common.filterpb.v1.IPNet source_v4 = 1;
+  common.filterpb.v1.IPNet source_v6 = 2;
+  repeated Service services = 3;
+}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse { repeated string configs = 1; }
+
+message ShowConfigRequest { string name = 1; }
+
+// ShowConfigResponse contains the configuration details of the unrdup module.
+message ShowConfigResponse {
+  string name = 1;
+  Config config = 2;
+}
+
+message UpdateConfigRequest {
+  string name = 1;
+  Config config = 2;
+}
+
+message UpdateConfigResponse {}

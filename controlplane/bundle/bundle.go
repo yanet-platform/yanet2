@@ -23,6 +23,7 @@ import (
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
 	_ "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -166,6 +167,13 @@ func buildServices(
 			Configured: modulesCfg.Blackhole.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
 				return blackhole.NewBlackholeModule(modulesCfg.Blackhole.Unwrap(), blackhole.WithLog(log))
+			},
+		},
+		{
+			Name:       "unrdup module",
+			Configured: modulesCfg.Unrdup.Unwrap() != nil,
+			New: func() (gateway.Service, error) {
+				return unrdup.NewUnrdupModule(modulesCfg.Unrdup.Unwrap(), unrdup.WithLog(log))
 			},
 		},
 		{

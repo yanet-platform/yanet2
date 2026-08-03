@@ -21,7 +21,7 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 }
 
 // Test_ShippedDefaultConfig_LoadsIntendedEnabledSet asserts that the shipped
-// default config starts all ten bundled modules plus the plain and vlan
+// default config starts all eleven bundled modules plus the plain and vlan
 // devices, leaves trafgen disabled, and sets an explicit gateway instance.
 func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet/controlplane.d/default.yaml")
@@ -37,6 +37,7 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	require.NotNil(t, cfg.Modules.Pdump.Unwrap())
 	require.NotNil(t, cfg.Modules.ACL.Unwrap())
 	require.NotNil(t, cfg.Modules.Blackhole.Unwrap())
+	require.NotNil(t, cfg.Modules.Unrdup.Unwrap())
 
 	require.NotNil(t, cfg.Devices.Plain.Unwrap())
 	require.NotNil(t, cfg.Devices.Vlan.Unwrap())

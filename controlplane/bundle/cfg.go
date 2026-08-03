@@ -16,6 +16,7 @@ import (
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
 )
 
 // ModulesConfig describes built-in modules in the standard YANET bundle.
@@ -42,6 +43,8 @@ type ModulesConfig struct {
 	FWState xcfg.Optional[fwstate.Config] `yaml:"fwstate"`
 	// Blackhole is the configuration for the blackhole module.
 	Blackhole xcfg.Optional[blackhole.Config] `yaml:"blackhole"`
+	// Unrdup is the configuration for the unrdup module.
+	Unrdup xcfg.Optional[unrdup.Config] `yaml:"unrdup"`
 }
 
 // DevicesConfig describes built-in devices in the standard YANET bundle.

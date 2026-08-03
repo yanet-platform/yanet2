@@ -12,7 +12,7 @@ import (
 )
 
 // Test_Decode_OnlyListedModulesArePresent asserts that decoding a document
-// listing only two modules leaves the other eight nil, that the listed ones
+// listing only two modules leaves the other nine nil, that the listed ones
 // carry the instance_id given in the document, and that a listed module
 // omitting an optional field keeps its DefaultConfig value.
 func Test_Decode_OnlyListedModulesArePresent(t *testing.T) {
@@ -35,11 +35,27 @@ acl:
 	require.Nil(t, cfg.NAT64.Unwrap())
 	require.Nil(t, cfg.Pdump.Unwrap())
 	require.Nil(t, cfg.Blackhole.Unwrap())
+	require.Nil(t, cfg.Unrdup.Unwrap())
 
 	require.Equal(t, uint32(2), cfg.Route.Unwrap().InstanceID.Unwrap())
 	require.Equal(t, uint32(3), cfg.ACL.Unwrap().InstanceID.Unwrap())
 
 	require.Equal(t, "/dev/hugepages/yanet", cfg.Route.Unwrap().MemoryPath.Unwrap())
+}
+
+func Test_Decode_UnrdupKeepsDefaults(t *testing.T) {
+	var cfg bundle.ModulesConfig
+	err := xcfg.Decode([]byte(`
+unrdup:
+  instance_id: 0
+  memory_requirements: 8MB
+`), &cfg)
+	require.NoError(t, err)
+
+	unrdup := cfg.Unrdup.Unwrap()
+	require.NotNil(t, unrdup)
+	require.Equal(t, "/dev/hugepages/yanet", unrdup.MemoryPath.Unwrap())
+	require.Equal(t, "[::1]:0", unrdup.Endpoint.Unwrap())
 }
 
 // Test_NewBundle_EmptyConfig_NoServicesNoAgents asserts that a bundle built

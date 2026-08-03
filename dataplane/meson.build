@@ -51,6 +51,7 @@ dependencies = lib_dependencies + [
   lib_pdump_dp_dep,
   lib_fwstate_dp_dep,
   lib_blackhole_dp_dep,
+  lib_unrdup_dp_dep,
 
   # objects
   # Startup resolves these constructors by dlsym on this executable, so they must be linked in and exported.

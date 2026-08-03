@@ -47,6 +47,7 @@ CLI_MODULES := \
 	forward \
 	nat64 \
 	pdump \
+	unrdup \
 	operator-neighbour \
 	operator-pipeline \
 	operator-route
@@ -67,7 +68,8 @@ PUBLIC_MODULES := \
 	nat64 \
 	pdump \
 	route \
-	route-mpls
+	route-mpls \
+	unrdup
 
 # All directories under modules/, public and private alike.
 MODULE_DIRS := $(notdir $(patsubst %/,%,$(wildcard modules/*/)))

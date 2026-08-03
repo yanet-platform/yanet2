@@ -35,6 +35,7 @@ members = [
     "modules/pdump/cli",
     "modules/route-mpls/cli",
     "modules/route/cli/route",
+    "modules/unrdup/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
     "devices/trafgen/cli",

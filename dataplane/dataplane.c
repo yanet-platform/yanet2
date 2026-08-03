@@ -558,6 +558,7 @@ dataplane_init(
 			"route_mpls",
 			"blackhole",
 			"mirror",
+			"unrdup",
 		};
 
 		for (size_t i = 0;

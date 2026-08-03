@@ -18,6 +18,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/modules/route-mpls/dataplane
 #cgo LDFLAGS: -L../../../build/modules/nat64/dataplane
 #cgo LDFLAGS: -L../../../build/modules/pdump/dataplane
+#cgo LDFLAGS: -L../../../build/modules/unrdup/dataplane
 #cgo LDFLAGS: -L../../../build/devices/plain/dataplane
 #cgo LDFLAGS: -L../../../build/devices/vlan/dataplane
 #cgo LDFLAGS: -L../../../build/lib/dataplane_ut
@@ -39,7 +40,7 @@ package dataplaneut
 // references between them (fwstate->acl, worker->pipeline, etc.).
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp
+#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -L../../../build/subprojects/regex
@@ -126,6 +127,7 @@ keep_refs(void **ptrs) {
 	extern struct module *new_module_route_mpls(void);
 	extern struct module *new_module_nat64(void);
 	extern struct module *new_module_pdump(void);
+	extern struct module *new_module_unrdup(void);
 
 	extern struct device *new_device_plain(void);
 	extern struct device *new_device_vlan(void);
@@ -142,6 +144,7 @@ keep_refs(void **ptrs) {
 		new_module_route_mpls,
 		new_module_nat64,
 		new_module_pdump,
+		new_module_unrdup,
 
 		new_device_plain,
 		new_device_vlan,

@@ -106,6 +106,10 @@ modules:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 4MB
+  unrdup:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 32MB
 devices:
   plain:
     instance_id: 0
