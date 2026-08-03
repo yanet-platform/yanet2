@@ -18,16 +18,35 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
 
 const metricsConcurrencyTestTimeout = 5 * time.Second
+
+// concurrencyWaitTimeout bounds the wait for a channel signal in a
+// concurrency test. Reaching it means the operation under test stalled
+// where it must not, so the test fails instead of hanging forever.
+const concurrencyWaitTimeout = 5 * time.Second
+
+// waitOnChan waits for ch to fire, failing the test if concurrencyWaitTimeout
+// elapses first.
+func waitOnChan(t *testing.T, ch <-chan struct{}, msg string) {
+	t.Helper()
+
+	select {
+	case <-ch:
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal(msg)
+	}
+}
 
 // fakeHandle is an in-memory implementation of ModuleHandle for tests.
 type fakeHandle struct {
 	mu          sync.Mutex
 	name        string
 	rules       []cacl.AclRule
-	freed       bool
+	freeCount   int
 	transferred bool
 }
 
@@ -35,7 +54,16 @@ func (m *fakeHandle) Free() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.freed = true
+	m.freeCount++
+}
+
+// FreeCount returns how many times Free has been called, so a test can
+// assert a handle was freed exactly once and never left dangling.
+func (m *fakeHandle) FreeCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.freeCount
 }
 
 func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
@@ -70,6 +98,7 @@ func (m *fakeHandle) GetInfo() *cacl.AclConfigInfo {
 type fakeBackend struct {
 	mu           sync.Mutex
 	modules      map[string]*fakeHandle
+	created      []*fakeHandle
 	publishCalls int
 	newModuleErr error
 	deleteErr    error
@@ -140,7 +169,17 @@ func (m *fakeBackend) NewModule(name string) (ModuleHandle, error) {
 
 	h := &fakeHandle{name: name}
 	m.modules[name] = h
+	m.created = append(m.created, h)
 	return h, nil
+}
+
+// CreatedHandles returns every handle NewModule has ever produced, in
+// creation order, so a test can audit that each was freed exactly once.
+func (m *fakeBackend) CreatedHandles() []*fakeHandle {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return append([]*fakeHandle(nil), m.created...)
 }
 
 func (m *fakeBackend) UpdateModule(_ ModuleHandle) error {
@@ -185,6 +224,100 @@ func (m *fakeBackend) SetNewModuleErr(err error) {
 	defer m.mu.Unlock()
 
 	m.newModuleErr = err
+}
+
+// compileBlock synchronizes one blocked compile with the test: entered
+// signals that UpdateRules has started, release lets it return.
+type compileBlock struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+// compileBlockingBackend wraps fakeBackend so a test can arm a specific
+// config name's next UpdateRules call to block until released, proving
+// overlap or ordering between compiles via channel synchronization instead
+// of timing. Every UpdateRules call, blocked or not, is recorded in
+// entryOrder for tests that only need to assert relative ordering.
+type compileBlockingBackend struct {
+	*fakeBackend
+
+	mu      sync.Mutex
+	entries []string
+	blocks  map[string]*compileBlock
+}
+
+func newCompileBlockingBackend(memoryBytes uint64) *compileBlockingBackend {
+	return &compileBlockingBackend{
+		fakeBackend: newFakeBackend(memoryBytes),
+		blocks:      map[string]*compileBlock{},
+	}
+}
+
+// blockCompile arms the next UpdateRules call for name to block until the
+// returned release function is called. The returned channel closes once
+// that call has entered UpdateRules.
+func (m *compileBlockingBackend) blockCompile(name string) (<-chan struct{}, func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	block := &compileBlock{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m.blocks[name] = block
+
+	return block.entered, sync.OnceFunc(func() {
+		close(block.release)
+	})
+}
+
+// recordEntry logs that UpdateRules for name has started and returns and
+// consumes any block armed for name.
+func (m *compileBlockingBackend) recordEntry(name string) *compileBlock {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.entries = append(m.entries, name)
+	block := m.blocks[name]
+	delete(m.blocks, name)
+
+	return block
+}
+
+// entryOrder returns the config names in the order their UpdateRules calls
+// started.
+func (m *compileBlockingBackend) entryOrder() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return append([]string(nil), m.entries...)
+}
+
+func (m *compileBlockingBackend) NewModule(name string) (ModuleHandle, error) {
+	handle, err := m.fakeBackend.NewModule(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &compileBlockingHandle{ModuleHandle: handle, backend: m, name: name}, nil
+}
+
+// compileBlockingHandle records and optionally blocks its UpdateRules call
+// before delegating to the wrapped fakeHandle.
+type compileBlockingHandle struct {
+	ModuleHandle
+	backend *compileBlockingBackend
+	name    string
+}
+
+func (m *compileBlockingHandle) UpdateRules(rules []cacl.AclRule) error {
+	block := m.backend.recordEntry(m.name)
+	if block != nil {
+		close(block.entered)
+		<-block.release
+	}
+
+	return m.ModuleHandle.UpdateRules(rules)
 }
 
 func newTestService(b Backend) *ACLService {
@@ -370,12 +503,169 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 }
 
 // TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports
-// codes.NotFound for a config name that was never applied.
+// codes.NotFound for a config name that was never applied, and that the
+// rejected name is not interned into svc.configs: a client that misspells a
+// delete repeatedly must not grow the map.
 func TestDeleteConfig_UnknownConfig(t *testing.T) {
 	svc := newTestService(newFakeBackend(0))
 
 	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
+
+	svc.mu.RLock()
+	_, ok := svc.configs["missing"]
+	svc.mu.RUnlock()
+	assert.False(t, ok, "an unknown delete target must not create an entry")
+}
+
+// TestDeleteConfig_LiveNameTombstones verifies that deleting a name with a
+// live published config still succeeds and leaves the entry in svc.configs
+// with published set to nil, rather than removing the entry outright. That
+// tombstone is what lets a later UpdateConfig of the same name reuse the
+// entry instead of racing a fresh one into existence. It also verifies that
+// a second delete of the now-tombstoned name reports codes.NotFound: the
+// existence-only fast-path pre-check lets the tombstoned name through since
+// its entry is still present, and the locked path's own check of published
+// is what actually rejects it.
+func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
+	svc := newTestService(newFakeBackend(0))
+
+	name := "acl0"
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  name,
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+	require.NoError(t, err)
+
+	svc.mu.RLock()
+	entry, ok := svc.configs[name]
+	svc.mu.RUnlock()
+	require.True(t, ok, "the entry for a deleted live name must be retained as a tombstone")
+	assert.Nil(t, entry.published, "a tombstoned entry must have published set to nil")
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+	require.Equal(t, codes.NotFound, status.Code(err), "deleting an already-tombstoned name must report NotFound")
+}
+
+// TestDeleteConfig_WaitsBehindInFlightCreate verifies that a DeleteConfig
+// racing an UpdateConfig that is creating a brand-new name waits behind the
+// name's lock instead of returning NotFound while the create's compile is
+// still in flight. In that window the entry already exists but published is
+// still nil, so a pre-check keyed on liveness rather than existence would
+// return NotFound immediately instead of serializing behind the create and
+// then acting on its result. This test forces exactly that window with
+// compileBlockingBackend and asserts the delete only resolves after the
+// create publishes, then removes the config the create just published.
+func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
+	backend := newCompileBlockingBackend(0)
+	svc := newTestService(backend)
+
+	name := "new-config"
+	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
+
+	entered, release := backend.blockCompile(name)
+	t.Cleanup(release)
+
+	updateDone := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: name, Rules: rules})
+		updateDone <- err
+	}()
+
+	waitOnChan(t, entered, "create did not reach UpdateRules")
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+		deleteDone <- err
+	}()
+
+	// deleteDone firing here would mean DeleteConfig resolved without
+	// waiting for the create's compile to release the name's lock, which is
+	// only possible through the liveness-keyed pre-check this test guards
+	// against.
+	select {
+	case err := <-deleteDone:
+		t.Fatalf("DeleteConfig returned (err=%v) before the racing create released its compile", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+
+	select {
+	case err := <-updateDone:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("UpdateConfig did not finish after release")
+	}
+
+	select {
+	case err := <-deleteDone:
+		require.NoError(t, err, "the delete must succeed once it can see the create's published config")
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("DeleteConfig did not finish after the racing create released its compile")
+	}
+
+	svc.mu.RLock()
+	entry, ok := svc.configs[name]
+	svc.mu.RUnlock()
+	require.True(t, ok, "the entry created by the racing update must survive the delete as a tombstone")
+	assert.Nil(t, entry.published, "the delete must have tombstoned the config the racing create just published")
+
+	assert.Equal(t, 1, backend.PublishCalls(), "the create must have published its module before the delete could act on it")
+
+	created := backend.CreatedHandles()
+	require.Len(t, created, 1, "the racing create must have produced exactly one handle")
+	assert.Equal(t, 1, created[0].FreeCount(), "the delete must free the just-published handle exactly once")
+}
+
+// TestUpdateConfig_ResurrectsThroughTombstone verifies that Update, Delete,
+// then Update of the same name reuses the entry DeleteConfig tombstoned
+// instead of racing a fresh one into existence: Show returns the
+// resurrected rules, List reports the name exactly once, and every handle
+// the fakeBackend produced along the way is freed exactly once, except the
+// one still live at the end.
+func TestUpdateConfig_ResurrectsThroughTombstone(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+
+	name := "acl0"
+	firstRules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: name, Rules: firstRules})
+	require.NoError(t, err)
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+	require.NoError(t, err)
+
+	_, err = svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: name})
+	require.Equal(t, codes.NotFound, status.Code(err), "a deleted name must read back as not found")
+
+	newRules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}}
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: name, Rules: newRules})
+	require.NoError(t, err)
+
+	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: name})
+	require.NoError(t, err)
+	assert.True(t, rulesEqual(newRules, resp.Rules), "Show must return the resurrected config's rules")
+
+	listResp, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{name}, listResp.Configs, "List must report the resurrected name exactly once")
+
+	svc.mu.RLock()
+	liveHandle := svc.configs[name].published.acl
+	svc.mu.RUnlock()
+
+	for _, h := range backend.CreatedHandles() {
+		if h == liveHandle {
+			assert.Equal(t, 0, h.FreeCount(), "the live handle must not have been freed")
+			continue
+		}
+		assert.Equal(t, 1, h.FreeCount(), "every superseded or deleted handle must be freed exactly once")
+	}
 }
 
 // TestUpdateConfig_ConcurrentRace exercises UpdateConfig and ShowConfig under
@@ -498,4 +788,404 @@ func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 	afterDelete := svc.metricsState.load()
 	assert.False(t, afterDelete.containsConfig("acl0"))
 	assert.True(t, beforeDelete.containsConfig("acl0"), "published snapshots must remain immutable")
+}
+
+// TestMetricsSnapshotOrderingSurvivesConcurrentBarrage verifies that once a
+// concurrent barrage of UpdateConfig and DeleteConfig calls across several
+// config names has fully joined, the metrics snapshot's config-name set
+// equals the configs map's key set exactly. Because publishMetricsSnapshotLocked
+// only ever runs inside the same mu.Lock section that installs the map
+// mutation it reflects, every publish is totally ordered with the mutations:
+// the snapshot published by the last critical section to run is necessarily
+// the last one published, so it must match the final map state. Before that
+// fix, a snapshot computed from an earlier map state (for example a delete
+// of one name) could publish after a snapshot computed from a later state
+// (an update of a different name), overwriting the newer one and leaving
+// the equality checked here false — the exact interleaving this test guards
+// against, without pinning any particular schedule.
+func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+
+	names := []string{"a", "b", "c", "d"}
+	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
+
+	var wg errgroup.Group
+	for round := range 60 {
+		name := names[round%len(names)]
+		wg.Go(func() error {
+			if round%3 == 0 {
+				_, _ = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+			} else {
+				_, _ = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: name, Rules: rules})
+			}
+			return nil
+		})
+	}
+	require.NoError(t, wg.Wait())
+
+	svc.mu.RLock()
+	wantNames := make(map[string]struct{}, len(svc.configs))
+	for name, entry := range svc.configs {
+		if entry.published == nil {
+			continue
+		}
+		wantNames[name] = struct{}{}
+	}
+	svc.mu.RUnlock()
+
+	snapshot := svc.metricsState.load()
+	gotNames := make(map[string]struct{}, len(snapshot.configInfos))
+	for name := range snapshot.configInfos {
+		gotNames[name] = struct{}{}
+	}
+
+	assert.Equal(t, wantNames, gotNames,
+		"metrics snapshot config set must match the configs map exactly after the barrage settles")
+}
+
+// TestUpdateConfig_CompilesInParallel verifies that UpdateConfig calls for
+// different names compile concurrently: both are proven to be inside
+// UpdateRules at the same time via channel synchronization, not timing.
+func TestUpdateConfig_CompilesInParallel(t *testing.T) {
+	backend := newCompileBlockingBackend(0)
+	svc := newTestService(backend)
+
+	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
+
+	enteredA, releaseA := backend.blockCompile("a")
+	enteredB, releaseB := backend.blockCompile("b")
+	t.Cleanup(releaseA)
+	t.Cleanup(releaseB)
+
+	doneA := make(chan error, 1)
+	doneB := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "a", Rules: rules})
+		doneA <- err
+	}()
+	go func() {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "b", Rules: rules})
+		doneB <- err
+	}()
+
+	// Neither release fires until both signal that they are inside
+	// UpdateRules, so a pass here proves the two compiles overlapped.
+	waitOnChan(t, enteredA, "config \"a\" did not reach UpdateRules")
+	waitOnChan(t, enteredB, "config \"b\" did not reach UpdateRules")
+
+	releaseA()
+	releaseB()
+
+	select {
+	case err := <-doneA:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("UpdateConfig for \"a\" did not finish after release")
+	}
+	select {
+	case err := <-doneB:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("UpdateConfig for \"b\" did not finish after release")
+	}
+}
+
+// TestShowAndListConfigs_DoNotWaitForCompile verifies that ShowConfig
+// returns the old published state, and ListConfigs completes, while another
+// UpdateConfig call is parked inside a compile. Under a single global mutex
+// both would hang until the compile released it.
+func TestShowAndListConfigs_DoNotWaitForCompile(t *testing.T) {
+	backend := newCompileBlockingBackend(0)
+	svc := newTestService(backend)
+
+	initialRules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "a", Rules: initialRules})
+	require.NoError(t, err)
+
+	newRules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}}
+	entered, release := backend.blockCompile("a")
+	t.Cleanup(release)
+
+	updateDone := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "a", Rules: newRules})
+		updateDone <- err
+	}()
+
+	waitOnChan(t, entered, "update did not reach UpdateRules")
+
+	type showResult struct {
+		resp *aclpb.ShowConfigResponse
+		err  error
+	}
+	showDone := make(chan showResult, 1)
+	go func() {
+		resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "a"})
+		showDone <- showResult{resp, err}
+	}()
+
+	select {
+	case result := <-showDone:
+		require.NoError(t, result.err)
+		assert.True(t, rulesEqual(initialRules, result.resp.Rules),
+			"ShowConfig must return the old published state while a compile is in flight")
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("ShowConfig waited for the in-flight compile")
+	}
+
+	listDone := make(chan error, 1)
+	go func() {
+		_, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+		listDone <- err
+	}()
+
+	select {
+	case err := <-listDone:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("ListConfigs waited for the in-flight compile")
+	}
+
+	release()
+
+	select {
+	case err := <-updateDone:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("UpdateConfig did not finish after release")
+	}
+}
+
+// TestUpdateConfig_SameNameSerializes verifies that two UpdateConfig calls
+// for the same name serialize: the second cannot reach UpdateRules until the
+// first has released the per-name lock, which is proven by lock acquisition
+// order rather than a sleep-based race check.
+func TestUpdateConfig_SameNameSerializes(t *testing.T) {
+	backend := newCompileBlockingBackend(0)
+	svc := newTestService(backend)
+
+	rulesA := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
+	rulesB := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}}
+
+	enteredFirst, releaseFirst := backend.blockCompile("a")
+
+	doneFirst := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "a", Rules: rulesA})
+		doneFirst <- err
+	}()
+
+	waitOnChan(t, enteredFirst, "first update did not reach UpdateRules")
+
+	// Arm a second block before starting the second call: since the first
+	// block was already consumed, this block will only fire once the second
+	// call reaches UpdateRules on its own turn.
+	enteredSecond, releaseSecond := backend.blockCompile("a")
+	t.Cleanup(releaseSecond)
+
+	doneSecond := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "a", Rules: rulesB})
+		doneSecond <- err
+	}()
+
+	releaseFirst()
+
+	select {
+	case err := <-doneFirst:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("first UpdateConfig did not finish after release")
+	}
+
+	// The second call can only reach UpdateRules by acquiring the per-name
+	// lock, which the first call releases only when it returns above — so
+	// this signal firing at all proves the ordering, not merely its timing.
+	waitOnChan(t, enteredSecond, "second update did not reach UpdateRules after the first finished")
+
+	releaseSecond()
+
+	select {
+	case err := <-doneSecond:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("second UpdateConfig did not finish after release")
+	}
+
+	assert.Equal(t, []string{"a", "a"}, backend.entryOrder())
+
+	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "a"})
+	require.NoError(t, err)
+	assert.True(t, rulesEqual(rulesB, resp.Rules))
+}
+
+// TestUpdateAndDeleteConfig_NoDoubleFree verifies that concurrent
+// UpdateConfig and DeleteConfig calls racing on the same name never free a
+// handle twice and never leave a handle still referenced from configs freed.
+func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+
+	name := "a"
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  name,
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+	})
+	require.NoError(t, err)
+
+	var wg errgroup.Group
+	for idx := range 20 {
+		wg.Go(func() error {
+			if idx%2 == 0 {
+				_, _ = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+					Name:  name,
+					Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}},
+				})
+			} else {
+				_, _ = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+			}
+			return nil
+		})
+	}
+	require.NoError(t, wg.Wait())
+
+	svc.mu.RLock()
+	entry := svc.configs[name]
+	svc.mu.RUnlock()
+
+	hasLive := entry.published != nil
+	var liveHandle ModuleHandle
+	if hasLive {
+		liveHandle = entry.published.acl
+	}
+
+	for _, h := range backend.CreatedHandles() {
+		if hasLive && h == liveHandle {
+			assert.Equal(t, 0, h.FreeCount(), "the live handle must not have been freed")
+			continue
+		}
+		assert.Equal(t, 1, h.FreeCount(), "every replaced or deleted handle must be freed exactly once")
+	}
+}
+
+// TestRelinkConfigs_ConcurrentWithUpdateOfSharedName verifies that
+// ACLAdapter.RelinkConfigs racing an UpdateConfig call on one of its linked
+// names completes without deadlock and leaves both configs present with a
+// handle from one of the two racing operations, never a freed-but-still-
+// referenced handle.
+func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+	adapter := NewACLAdapter(svc)
+
+	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
+	publish := func(_ []ffi.ModuleConfig) error { return nil }
+
+	for _, name := range []string{"a", "b"} {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+			Name:  name,
+			Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+		})
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, adapter.LinkConfigs([]string{"a", "b"}, fwstateConfig, publish))
+
+	svc.mu.RLock()
+	handleB0 := svc.configs["b"].published.acl
+	svc.mu.RUnlock()
+
+	var wg errgroup.Group
+	wg.Go(func() error {
+		return adapter.RelinkConfigs(fwstateConfig, publish)
+	})
+	wg.Go(func() error {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+			Name:  "a",
+			Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}},
+		})
+		return err
+	})
+
+	raceDone := make(chan error, 1)
+	go func() { raceDone <- wg.Wait() }()
+
+	select {
+	case err := <-raceDone:
+		require.NoError(t, err)
+	case <-time.After(concurrencyWaitTimeout):
+		t.Fatal("RelinkConfigs racing an UpdateConfig on a shared name deadlocked")
+	}
+
+	svc.mu.RLock()
+	entryA := svc.configs["a"]
+	entryB := svc.configs["b"]
+	svc.mu.RUnlock()
+
+	require.NotNil(t, entryA.published, "config \"a\" must survive the race")
+	require.NotNil(t, entryB.published, "config \"b\" must survive the race")
+	assert.NotNil(t, entryA.published.acl)
+	assert.True(t, entryB.published.acl != handleB0, "RelinkConfigs must have installed a fresh handle for \"b\"")
+
+	for _, h := range backend.CreatedHandles() {
+		if h == entryA.published.acl || h == entryB.published.acl {
+			assert.Equal(t, 0, h.FreeCount(), "a still-referenced handle must not be freed")
+			continue
+		}
+		assert.Equal(t, 1, h.FreeCount(), "every replaced handle must be freed exactly once")
+	}
+}
+
+// TestACLAdapterLinkConfigs_UnknownName verifies that LinkConfigs with an
+// unknown name in the list fails without interning an entry for it, and
+// without disturbing an already-live name also present in the list.
+func TestACLAdapterLinkConfigs_UnknownName(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+	adapter := NewACLAdapter(svc)
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  "a",
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+	})
+	require.NoError(t, err)
+
+	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
+	publish := func(_ []ffi.ModuleConfig) error { return nil }
+
+	err = adapter.LinkConfigs([]string{"a", "missing"}, fwstateConfig, publish)
+	require.Error(t, err)
+
+	svc.mu.RLock()
+	_, ok := svc.configs["missing"]
+	svc.mu.RUnlock()
+	assert.False(t, ok, "an unknown name in a LinkConfigs request must not create an entry")
+}
+
+// TestACLAdapterLinkConfigs_TombstonedName verifies that LinkConfigs with a
+// tombstoned name in the list — one whose entry exists but whose published
+// config was deleted — reports a not-found error. checkLinkable's
+// existence-only pre-check lets the tombstoned name through since its entry
+// is still present, and createLinkedHandles' own check of published, under
+// the name's lock, is what actually rejects it.
+func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+	adapter := NewACLAdapter(svc)
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  "a",
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
+	require.NoError(t, err)
+
+	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
+	publish := func(_ []ffi.ModuleConfig) error { return nil }
+
+	err = adapter.LinkConfigs([]string{"a"}, fwstateConfig, publish)
+	require.ErrorContains(t, err, "not found")
 }

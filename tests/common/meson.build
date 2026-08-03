@@ -1,4 +1,5 @@
 dependencies = [lib_common_dep, lib_logging_dep]
+thread_dep = dependency('threads')
 
 lpm_test = executable(
   'lpm_test',
@@ -81,6 +82,15 @@ memory_context_tree_test = executable(
 )
 test('memory_context_tree', memory_context_tree_test, suite: ['common'])
 
+balloc_thread_stress_test = executable(
+  'balloc_thread_stress_test',
+  ['balloc_thread_stress_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies + [thread_dep],
+)
+test('balloc_thread_stress', balloc_thread_stress_test, suite: ['common'])
+
 executable(
   'balloc_bench',
   ['balloc_bench.c'],
@@ -139,8 +149,6 @@ hash_index_test = executable(
   dependencies: dependencies,
 )
 test('hash_index', hash_index_test, suite: ['common'])
-
-thread_dep = dependency('threads')
 
 data_pipe_test = executable(
   'data_pipe_test',

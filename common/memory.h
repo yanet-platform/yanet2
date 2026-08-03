@@ -62,20 +62,29 @@ memory_context_init_from(
 	context->balloc_size = 0;
 	context->bfree_size = 0;
 
-	SET_OFFSET_OF(
-		&context->block_allocator, ADDR_OF(&parent->block_allocator)
-	);
+	// No NULL guard here, unlike fini: by contract parent is always a live,
+	// already-initialised context, so its block_allocator is never NULL. A
+	// zeroed (finalised) parent has no valid allocator for us to inherit,
+	// and no caller constructs a child from a finalised parent.
+	struct block_allocator *allocator = ADDR_OF(&parent->block_allocator);
+	SET_OFFSET_OF(&context->block_allocator, allocator);
 	(void)strtcpy(context->name, name, sizeof(context->name));
 
 	// Remember which context contains us, needed to unlink on teardown.
 	SET_OFFSET_OF(&context->parent, parent);
 	SET_OFFSET_OF(&context->first_child, NULL);
 
+	// Parent and child share the same block_allocator by construction, so
+	// its spinlock also guards this splice against concurrent siblings.
+	spinlock_lock(&allocator->lock);
+
 	// Insert at the head of the parent's child list. Capture the current
 	// head into next_sibling before overwriting first_child so the ordering
 	// is correct.
 	EQUATE_OFFSET(&context->next_sibling, &parent->first_child);
 	SET_OFFSET_OF(&parent->first_child, context);
+
+	spinlock_unlock(&allocator->lock);
 
 	return 0;
 }
@@ -87,6 +96,19 @@ memory_context_init_from(
 // leave a child pointing at freed memory. Idempotent and order-independent.
 static inline void
 memory_context_fini(struct memory_context *self) {
+	// A zeroed offset reads back as NULL through ADDR_OF. A context that
+	// was already fini'd has no tree links left to touch. Return before
+	// taking a lock on a garbage allocator.
+	struct block_allocator *allocator = ADDR_OF(&self->block_allocator);
+	if (allocator == NULL) {
+		return;
+	}
+
+	// Parent and child share the same block_allocator by construction, so
+	// its spinlock also guards the unlink and child-detach below against
+	// concurrent siblings.
+	spinlock_lock(&allocator->lock);
+
 	struct memory_context *parent = ADDR_OF(&self->parent);
 	if (parent != NULL) {
 		// Walk the sibling chain and bridge over ourselves.
@@ -114,6 +136,8 @@ memory_context_fini(struct memory_context *self) {
 		child = next;
 	}
 
+	spinlock_unlock(&allocator->lock);
+
 	memset(self, 0, sizeof(*self));
 }
 
@@ -124,8 +148,10 @@ memory_balloc(struct memory_context *context, size_t size) {
 	);
 	if (result == NULL)
 		return NULL;
-	++context->balloc_count;
-	context->balloc_size += size;
+	// A single memory_context (e.g. an agent's own context) can now be
+	// ballocked from by several controlplane threads at once.
+	__atomic_fetch_add(&context->balloc_count, 1, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&context->balloc_size, size, __ATOMIC_RELAXED);
 	return result;
 }
 
@@ -133,8 +159,25 @@ static inline void
 memory_bfree(struct memory_context *context, void *block, size_t size) {
 	if (block == NULL || !size)
 		return;
-	++context->bfree_count;
-	context->bfree_size += size;
+// Verified reproducing: gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, release
+// build flags (-O2 -g -Wall -Wextra -Werror -march=haswell -fPIC), e.g.
+// modules/acl/api/controlplane.c inlining memory_bfree into
+// acl_module_config_free. context is derived from a relative offset
+// pointer (ADDR_OF) at every caller. GCC compiles the theoretical,
+// architecturally-unreachable branch where the stored offset is exactly 0
+// (ADDR_OF's own NULL case), folds it into a literal near-null address,
+// and then misreports the atomic RMW below as an overflowing write to a
+// size-0 object at that address. Clang does not know -Wstringop-overflow,
+// so the pragma is gcc-only.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+	__atomic_fetch_add(&context->bfree_count, 1, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&context->bfree_size, size, __ATOMIC_RELAXED);
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 	return block_allocator_bfree(
 		ADDR_OF(&context->block_allocator), block, size
 	);

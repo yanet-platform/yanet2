@@ -285,7 +285,8 @@ func (m *FWStateService) UpdateConfig(
 	// Rebuild all linked ACL configs against the new fwstate config and publish
 	// both atomically.
 	//
-	// RelinkConfigs holds the ACL lock for the entire window.
+	// RelinkConfigs holds each linked ACL config name's lock for the entire
+	// window, so it never blocks a read or a compile on an unrelated name.
 	if err := m.aclProvider.RelinkConfigs(newConfig, func(linkedFFI []ffi.ModuleConfig) error {
 		return m.agent.UpdateModules(append(linkedFFI, newConfig.AsFFIModule()))
 	}); err != nil {
@@ -347,7 +348,8 @@ func (m *FWStateService) LinkFWState(
 	}
 
 	// Link the given ACL configs to this fwstate and publish both atomically.
-	// LinkConfigs holds the ACL lock for the entire window.
+	// LinkConfigs holds each named ACL config's lock for the entire window,
+	// so it never blocks a read or a compile on an unrelated name.
 	if err := m.aclProvider.LinkConfigs(aclConfigNames, fwstateConfig, func(linkedFFI []ffi.ModuleConfig) error {
 		return m.agent.UpdateModules(append(linkedFFI, fwstateConfig.AsFFIModule()))
 	}); err != nil {
@@ -382,7 +384,8 @@ func (m *FWStateService) ShowConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	// LinkedConfigNames is self-locking.
+	// LinkedConfigNames is self-locking: a brief RLock, never blocked behind
+	// an in-flight ACL compile.
 	linkedACLs := m.aclProvider.LinkedConfigNames(name)
 
 	response := &fwstatepb.ShowConfigResponse{

@@ -6,6 +6,7 @@
 
 #include "asan.h"
 #include "likely.h"
+#include "spinlock.h"
 
 #include "memory_address.h"
 
@@ -52,6 +53,11 @@ struct block_allocator {
 
 	// bitwise mask of not empty pools
 	uint32_t not_empty_mask;
+
+	// Guards the free lists above and, since every memory_context in a
+	// tree shares its root's block_allocator, the context tree splices in
+	// memory_context_init_from / memory_context_fini as well.
+	struct spinlock lock;
 };
 
 // FIXME: the routine must accept block sizes
@@ -66,6 +72,8 @@ block_allocator_init(struct block_allocator *allocator) {
 	}
 
 	allocator->not_empty_mask = 0;
+
+	spinlock_init(&allocator->lock);
 
 	return 0;
 }
@@ -165,10 +173,13 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	size += 2 * ASAN_RED_ZONE;
 
 	size_t pool_index = block_allocator_pool_index(allocator, size);
-
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
+
+	spinlock_lock(&allocator->lock);
+
 	uint32_t mask = allocator->not_empty_mask >> pool_index;
 	if (unlikely(mask == 0)) {
+		spinlock_unlock(&allocator->lock);
 		return NULL;
 	}
 	size_t parent_pool_index = pool_index + __builtin_ctz(mask);
@@ -181,6 +192,8 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	asan_unpoison_memory_region(
 		memory + ASAN_RED_ZONE, size - 2 * ASAN_RED_ZONE
 	);
+
+	spinlock_unlock(&allocator->lock);
 
 	return memory + ASAN_RED_ZONE;
 }
@@ -214,7 +227,9 @@ block_allocator_bfree(
 	size += 2 * ASAN_RED_ZONE;
 	block -= ASAN_RED_ZONE;
 
+	spinlock_lock(&allocator->lock);
 	block_allocator_bfree_internal(allocator, block, size);
+	spinlock_unlock(&allocator->lock);
 }
 
 static inline void
@@ -225,6 +240,8 @@ block_allocator_put_arena(
 	pos = (pos + 7) & ~(uintptr_t)0x07; // round up to 8 byte boundary
 	uintptr_t end = (uintptr_t)arena + size;
 	end = end & ~(uintptr_t)0x07; // round down to 8 byte boundary
+
+	spinlock_lock(&allocator->lock);
 
 	while (pos < end) {
 		size_t align = (size_t)1 << __builtin_ctzll(pos);
@@ -251,14 +268,18 @@ block_allocator_put_arena(
 		);
 		pos += block_size;
 	}
+
+	spinlock_unlock(&allocator->lock);
 }
 
 static inline size_t
 block_allocator_free_size(struct block_allocator *alloc) {
 	size_t size = 0;
+	spinlock_lock(&alloc->lock);
 	for (size_t i = 0; i < MEMORY_BLOCK_ALLOCATOR_EXP; ++i) {
 		struct block_allocator_pool *pool = &alloc->pools[i];
 		size += pool->free * block_allocator_pool_size(alloc, i);
 	}
+	spinlock_unlock(&alloc->lock);
 	return size;
 }

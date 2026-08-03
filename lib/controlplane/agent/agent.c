@@ -103,6 +103,11 @@ dataplane_instance_worker_count(struct dp_config *dp_config) {
 	return (uint32_t)dp_config->worker_count;
 }
 
+// Body of agent_free_unused_agents for a caller that already holds
+// cp_config_lock. See the definition further down for details.
+static void
+agent_free_unused_agents_locked(struct agent *agent);
+
 struct agent *
 agent_attach(
 	struct yanet_shm *shm,
@@ -268,7 +273,7 @@ agent_attach(
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
 
-	agent_free_unused_agents(new_agent);
+	agent_free_unused_agents_locked(new_agent);
 
 unlock:
 	cp_config_unlock(cp_config);
@@ -1981,8 +1986,10 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	free(counters);
 }
 
-void
-agent_free_unused_agents(struct agent *agent) {
+// Unlocked body shared by agent_free_unused_agents and the agent_attach call
+// site, which already holds cp_config_lock itself.
+static void
+agent_free_unused_agents_locked(struct agent *agent) {
 	if (agent == NULL) {
 		return;
 	}
@@ -2000,6 +2007,22 @@ agent_free_unused_agents(struct agent *agent) {
 
 		agent = ADDR_OF(&agent->prev);
 	}
+}
+
+void
+agent_free_unused_agents(struct agent *agent) {
+	if (agent == NULL) {
+		return;
+	}
+
+	// This walks and splices the agent->prev chain and calls agent_cleanup,
+	// which frees the superseded agent into cp_config->memory_context. It
+	// must run under cp_config_lock now that Go-side callers are no longer
+	// serialized by a global mutex.
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+	agent_free_unused_agents_locked(agent);
+	cp_config_unlock(cp_config);
 }
 
 struct dp_config *

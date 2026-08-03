@@ -101,7 +101,6 @@ loopindex:modules/pdump/controlplane/ring_test.go:createTestRingBuffer:i:1  # le
 loopindex:modules/route/bindings/go/croute/cgo.go:ModuleConfig.addRouteList:i:1  # legacy: rename to idx
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1  # legacy: use T{} instead of make(map...)
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
-maplit:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandlesLocked:map[string]ModuleHandle:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics_snapshot.go:newACLMetricsState:map[string]cacl.AclConfigInfo:1  # legacy: use T{} instead of make(map...)
 maplit:modules/fwstate/controlplane/service.go:FWStateService.LinkFWState:map[string]bool:1  # legacy: use T{} instead of make(map...)
@@ -141,49 +140,65 @@ private:controlplane/internal/auth/sshcert/token.go:parseToken:token.validate:1 
 private:controlplane/internal/auth/sshkey/authenticator.go:Authenticator.Authenticate:token.canonicalSignedData:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/internal/auth/sshkey/authenticator.go:Authenticator.Authenticate:token.checkTimestamp:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/internal/auth/sshkey/token.go:parseToken:token.validate:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.configs:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.configs:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.createLinkedHandlesLocked:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.mu:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.mu:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.publishMetricsSnapshotLocked:1  # acl metrics snapshot: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:oldConfig.acl:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:oldConfig.acl:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.linkedConfigNamesLocked:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.mu:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.mu:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.configs:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.configs:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.createLinkedHandlesLocked:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.linkedConfigNamesLocked:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.mu:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.mu:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.publishMetricsSnapshotLocked:1  # acl metrics snapshot: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:oldConfig.acl:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:oldConfig.acl:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandlesLocked:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNamesLocked:config.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.checkLinkable:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.createLinkedHandles:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.swapLinkedHandles:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.withEntries:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.linkedConfigNames:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.createLinkedHandles:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.linkedConfigNames:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.stillLinked:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.swapLinkedHandles:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.withEntries:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandles:entry.published.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandles:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandles:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNames:entry.published.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNames:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNames:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.stillLinked:entry.published.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.stillLinked:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.stillLinked:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published.acl:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:3  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:4  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/aclpb/v1/convert.go:FromActions:result[idx].setFromCAclKind:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/aclpb/v1/convert.go:ToActions:action.toCAclKind:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:m.metricsState.load:1  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:snapshot.configInfo:1  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:config.acl:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:config.acl:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.ShowConfig:config.fwstateName:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.ShowConfig:config.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:existing.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.acl:3  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.fwstateName:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfigs.fwstateName:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:cfg.acl:1  # acl metrics snapshot: encapsulate behind an exported method or field
-private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:cfg.acl:2  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:config.acl:3  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.DeleteConfig:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ListConfigs:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:entry.published.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:entry.published.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.ShowConfig:entry.published:3  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:entry.published:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:entry.published:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfig.acl:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfig.acl:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfig.acl:3  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfig.fwstateName:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.UpdateConfig:oldConfig.rules:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:entry.published.acl:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:entry.published.acl:2  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:entry.published:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:entry.published:2  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:entry.published:3  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:m.metricsState.publish:1  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.retention:m.metricsState.load:1  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.retention:snapshot.containsConfig:1  # acl metrics snapshot: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.withEntries:e.updateMu:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.withEntries:e.updateMu:2  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.withEntry:entry.updateMu:1  # legacy: encapsulate behind an exported method or field
+private:modules/acl/controlplane/service.go:ACLService.withEntry:entry.updateMu:2  # legacy: encapsulate behind an exported method or field
 private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.addressFamily:1  # legacy: encapsulate behind an exported method or field
 private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.destroy:1  # legacy: encapsulate behind an exported method or field
 private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.next:1  # legacy: encapsulate behind an exported method or field
