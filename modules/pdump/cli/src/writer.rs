@@ -1,8 +1,7 @@
+use core::{error::Error, time::Duration};
 use std::{
-    error::Error,
     fs,
     io::{self, Write},
-    time::Duration,
 };
 
 use pcap_file::{

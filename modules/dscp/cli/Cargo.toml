@@ -3,6 +3,9 @@ name = "yanet-cli-dscp"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 netip = "0.3"

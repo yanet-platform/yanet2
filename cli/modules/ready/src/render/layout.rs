@@ -51,7 +51,7 @@ mod test {
 
     #[test]
     fn name_width_empty_defaults_to_minimum() {
-        assert_eq!(MIN_NAME_WIDTH, name_width(std::iter::empty()));
+        assert_eq!(MIN_NAME_WIDTH, name_width(core::iter::empty()));
     }
 
     #[test]

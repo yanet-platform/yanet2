@@ -15,7 +15,7 @@ use ync::{
     output::{self, CommonFormat},
 };
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod blackholepb {
     use serde::Serialize;
 

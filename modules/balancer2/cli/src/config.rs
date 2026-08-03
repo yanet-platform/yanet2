@@ -1,10 +1,10 @@
-use std::{
+use core::{
     error::Error,
     fmt::Display,
-    fs::File,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
+use std::fs::File;
 
 use filterpb::pb::{IpNet, PortRange};
 use netip::IpNetwork;

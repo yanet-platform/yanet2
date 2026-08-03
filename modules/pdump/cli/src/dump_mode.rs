@@ -3,7 +3,7 @@
 //! This module provides types and functions for configuring packet capture
 //! modes, including input packets and dropped packets
 
-use std::ops::BitOrAssign;
+use core::ops::BitOrAssign;
 
 use clap::Args;
 

@@ -1,6 +1,6 @@
 //! CLI for YANET "counters" module.
 
-use std::str::FromStr;
+use core::str::FromStr;
 
 use bytesize::ByteSize;
 use clap::{ArgAction, CommandFactory, Parser};

@@ -2,14 +2,14 @@
 
 use core::{net::IpAddr, ops::Deref};
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod filterpb {
     use serde::Serialize;
 
     tonic::include_proto!("common.filterpb.v1");
 }
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod routemplspb {
     use serde::Serialize;
 
@@ -130,7 +130,7 @@ pub struct RouteWithdrawCmd {
 }
 
 impl TryFrom<Contiguous<IpNetwork>> for filterpb::IpPrefix {
-    type Error = Box<dyn std::error::Error>;
+    type Error = Box<dyn core::error::Error>;
 
     fn try_from(net: Contiguous<IpNetwork>) -> Result<Self, Self::Error> {
         let length = net.prefix() as u32;

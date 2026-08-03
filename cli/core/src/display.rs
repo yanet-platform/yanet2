@@ -88,7 +88,7 @@ pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
             current.push(' ');
             current.push_str(word);
         } else {
-            lines.push(std::mem::take(&mut current));
+            lines.push(core::mem::take(&mut current));
             current.push_str(word);
         }
     }

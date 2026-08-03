@@ -45,5 +45,8 @@ members = [
 
 exclude = ["modules/route/cli"]
 
+[workspace.lints.clippy]
+std_instead_of_core = "deny"
+
 [profile.release]
 panic = "abort"

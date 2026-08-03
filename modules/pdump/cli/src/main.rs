@@ -26,7 +26,7 @@ mod dump_mode;
 mod printer;
 mod writer;
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod pdumppb {
     use serde::Serialize;
 

@@ -12,7 +12,7 @@ use ync::{
 
 use crate::operatorpb::metrics_service_client::MetricsServiceClient;
 
-#[allow(clippy::all, non_snake_case)]
+#[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
 pub mod operatorpb {
     tonic::include_proto!("operators.pipeline.operatorpb.v1");
 }

@@ -6,6 +6,9 @@ publish = false
 
 rust-version = "1.85"
 
+[lints]
+workspace = true
+
 [dependencies]
 clap = { version = "4.5", features = ["cargo", "derive", "env", "string", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

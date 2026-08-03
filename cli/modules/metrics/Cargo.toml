@@ -6,6 +6,9 @@ publish = false
 
 rust-version = "1.85"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "yanet-cli-metrics"
 path = "src/main.rs"

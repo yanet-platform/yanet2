@@ -1,9 +1,7 @@
+use core::error::Error;
 use std::{
     collections::HashSet,
-    env,
-    error::Error,
-    fs,
-    io::ErrorKind,
+    env, fs,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
     process::{self, Stdio},
@@ -310,6 +308,11 @@ pub fn dispatch(name: &str, prefix: &str, behavior: &impl Dispatch) -> ! {
     exec_sub_binary(&prefix, cmd, collect_args(sub_matches), &modules, behavior);
 }
 
+// `core::io::ErrorKind` is behind the unstable `core_io` feature, so this
+// function keeps `std::io::ErrorKind`; the allow sits here rather than on a
+// `use` because clippy's `useless_attribute` rejects it directly on a `use`
+// item.
+#[allow(clippy::std_instead_of_core)]
 fn exec_sub_binary(
     prefix: &str,
     cmd: &str,
@@ -317,6 +320,8 @@ fn exec_sub_binary(
     modules: &HashSet<String>,
     behavior: &impl Dispatch,
 ) -> ! {
+    use std::io::ErrorKind;
+
     let subcommand = format!("{prefix}{cmd}");
     let Some(path) = locate_sub_binary(prefix, cmd) else {
         behavior.on_sub_binary_not_found(&subcommand, modules);

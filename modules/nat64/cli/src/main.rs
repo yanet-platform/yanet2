@@ -21,7 +21,7 @@ use ync::{
     output::{self, CommonFormat},
 };
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod nat64pb {
     use serde::Serialize;
     tonic::include_proto!("modules.nat64.controlplane.nat64pb.v1");

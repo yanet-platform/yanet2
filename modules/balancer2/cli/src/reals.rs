@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use core::net::IpAddr;
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;

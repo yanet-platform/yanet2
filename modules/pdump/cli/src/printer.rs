@@ -1,7 +1,5 @@
-use std::{
-    io::{self, Write},
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use core::net::{Ipv4Addr, Ipv6Addr};
+use std::io::{self, Write};
 
 use pnet_packet::{
     Packet,
@@ -874,7 +872,11 @@ fn format_duration_ns(ts: u64) -> String {
     format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}.{micro:03}")
 }
 
+// `core::io::Cursor` is behind the unstable `core_io` feature, so this module
+// keeps `std::io::Cursor`; the allow sits on the module rather than the `use`
+// because clippy's `useless_attribute` rejects it directly on a `use` item.
 #[cfg(test)]
+#[allow(clippy::std_instead_of_core)]
 mod tests {
     use std::io::Cursor;
 

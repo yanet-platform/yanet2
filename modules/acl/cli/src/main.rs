@@ -24,7 +24,7 @@ mod args;
 use ::commonpb::pb as commonpb;
 use commonpb::{GetMetricsRequest, MetricTag};
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod aclpb {
     tonic::include_proto!("modules.acl.controlplane.aclpb.v1");
 }

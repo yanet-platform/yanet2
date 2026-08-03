@@ -11,7 +11,9 @@ Loaded on demand by the agent writing or reviewing Rust; this is the single sour
 - **Visibility**: avoid `pub(crate)`; items are `pub` or private. Conceptual type API methods are `pub`, even in binaries.
 - **Wire vs domain types**: parse and check invariants in the domain type; wire types get `From<Domain>` and use `TryFrom` only when fallible. Confirm module-specific validation (ACL permits non-contiguous masks, forward/decap do not) before generalising.
 - **`Display`/`Serialize`**: own types implement `Display`; `Serialize` uses `serializer.collect_str(self)`. Never blanket-derive `Serialize` for a proto module with a manual implementation.
-- **`fmt` imports**: `use std::fmt::{self, Display, Formatter};` with explicit `Result<(), fmt::Error>` (not `fmt::Result` alias).
+- **`fmt` imports**: `use core::fmt::{self, Display, Formatter};` with explicit `Result<(), fmt::Error>` (not `fmt::Result` alias).
+- **`clippy::std_instead_of_core`** is deny-level via `[workspace.lints.clippy]` + per-crate `[lints] workspace = true`; prefer `core::` for anything `core` provides (`error::Error`, `fmt`, `net`, `str::FromStr`, `time::Duration`, `mem`, `iter`, `ops`).
+- **Escape hatches** are `#[allow(clippy::std_instead_of_core)]` on an enclosing item (function or module), never the `use` itself — clippy's `useless_attribute` rejects that: tonic's client codegen emits `std::` paths we do not control, and `core_io`-gated items (`io::ErrorKind`, `io::Cursor`) are still unstable in `core`.
 - **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/ `Default`/`FromStr` impls — the trait name is the doc.
 - **Doc comments**: `///`/`//!` begin with a one-sentence period-terminated brief and separate detail with a blank `///` line.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.

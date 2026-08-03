@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use core::fmt::{self, Display, Formatter};
 
 use netip::{Contiguous, IpNetwork, Ipv4Network, Ipv6Network};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};

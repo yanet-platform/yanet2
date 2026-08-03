@@ -1,4 +1,5 @@
-use std::{net::IpAddr, time};
+use core::net::IpAddr;
+use std::time;
 
 use commonpb::pb::GetMetricsRequest;
 use ptree::TreeBuilder;
@@ -65,7 +66,7 @@ impl Balancer2Service {
             .map_err(|err| self.service.invalid("update", err.to_string()))?;
         let parts: ConfigParts = yaml_config
             .try_into()
-            .map_err(|err: Box<dyn std::error::Error>| self.service.invalid("update", err.to_string()))?;
+            .map_err(|err: Box<dyn core::error::Error>| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateConfigRequest {
             config_name: cmd.name.clone(),

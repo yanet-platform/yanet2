@@ -5,6 +5,9 @@ edition = "2024"
 publish = false
 rust-version = "1.85"
 
+[lints]
+workspace = true
+
 [dependencies]
 netip = "0.3"
 prost = "0.13"

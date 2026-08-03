@@ -1,4 +1,4 @@
-#[allow(clippy::all, non_snake_case)]
+#[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
 pub mod balancerpb {
     tonic::include_proto!("modules.balancer2.controlplane.balancerpb.v1");
 }

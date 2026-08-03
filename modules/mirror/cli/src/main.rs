@@ -22,7 +22,7 @@ use ync::{
     output::{self, CommonFormat},
 };
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod mirrorpb {
     use serde::Serialize;
 
@@ -109,7 +109,7 @@ struct MirrorRule {
 }
 
 impl TryFrom<MirrorRule> for mirrorpb::Rule {
-    type Error = Box<dyn std::error::Error>;
+    type Error = Box<dyn core::error::Error>;
 
     fn try_from(mirror_rule: MirrorRule) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -144,7 +144,7 @@ pub struct MirrorConfig {
 }
 
 impl TryFrom<MirrorConfig> for Vec<mirrorpb::Rule> {
-    type Error = Box<dyn std::error::Error>;
+    type Error = Box<dyn core::error::Error>;
 
     fn try_from(config: MirrorConfig) -> Result<Self, Self::Error> {
         config.rules.into_iter().map(mirrorpb::Rule::try_from).collect()
@@ -152,7 +152,7 @@ impl TryFrom<MirrorConfig> for Vec<mirrorpb::Rule> {
 }
 
 impl MirrorConfig {
-    pub fn load<P>(path: P) -> Result<Self, Box<dyn std::error::Error>>
+    pub fn load<P>(path: P) -> Result<Self, Box<dyn core::error::Error>>
     where
         P: AsRef<Path>,
     {
@@ -259,7 +259,7 @@ impl MirrorService {
         let config = MirrorConfig::load(&cmd.rules).map_err(|e| self.service.invalid("update", e.to_string()))?;
         let rules: Vec<mirrorpb::Rule> = config
             .try_into()
-            .map_err(|e: Box<dyn std::error::Error>| self.service.invalid("update", e.to_string()))?;
+            .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("update", e.to_string()))?;
         let request = UpdateConfigRequest { name: cmd.config.clone(), rules };
         self.service
             .client()

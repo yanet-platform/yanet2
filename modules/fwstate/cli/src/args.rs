@@ -1,4 +1,4 @@
-use std::time::Duration;
+use core::time::Duration;
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;

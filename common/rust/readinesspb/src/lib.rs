@@ -4,7 +4,7 @@
 //! `pb::State`, and `pb::Reason` generated from
 //! `common/readinesspb/v1/readiness.proto`.
 
-#[allow(clippy::all, non_snake_case)]
+#[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
 pub mod pb {
     tonic::include_proto!("common.readinesspb.v1");
 }

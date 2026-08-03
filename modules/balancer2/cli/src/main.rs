@@ -4,7 +4,7 @@ mod reals;
 mod service;
 mod sessions;
 
-use std::{
+use core::{
     fmt::{self, Display, Formatter},
     net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::FromStr,
@@ -180,8 +180,8 @@ impl Display for VsIdParseError {
     }
 }
 
-impl std::error::Error for VsIdParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for VsIdParseError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::InvalidSocket(e) => Some(e),
             _ => None,
@@ -253,7 +253,7 @@ impl Display for BytesToIpError {
     }
 }
 
-impl std::error::Error for BytesToIpError {}
+impl core::error::Error for BytesToIpError {}
 
 pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, BytesToIpError> {
     match bytes.len() {
