@@ -411,6 +411,8 @@ func (m *Harness) WithBootedVM(t *testing.T, fn func(fw *TestFramework)) {
 func (m *Harness) RestoreBooted(t *testing.T, fw *TestFramework) {
 	t.Helper()
 
+	fw.AdoptRunningConfig(m.dataplane, m.controlplane)
+
 	err := fw.RestoreAndReconnect("baseline")
 	if err == nil {
 		return

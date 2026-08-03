@@ -236,8 +236,8 @@ type TestFramework struct {
 
 	socketClients *socketClientsCache
 
-	lastDataplaneConfig    string // Last dataplane config used by StartYANET (for RestartYANET)
-	lastControlplaneConfig string // Last controlplane config used by StartYANET (for RestartYANET)
+	lastDataplaneConfig    string // Last dataplane config recorded by StartYANET or AdoptRunningConfig (for RestartYANET)
+	lastControlplaneConfig string // Last controlplane config recorded by StartYANET or AdoptRunningConfig (for RestartYANET)
 
 	testName string
 	t        *testing.T
@@ -523,13 +523,15 @@ func (f *TestFramework) withTestName(testName string) *TestFramework {
 	}
 
 	fWithName := &TestFramework{
-		qemu:          f.qemu,
-		cli:           f.cli.WithLog(namedLog),
-		PacketParser:  f.PacketParser,
-		log:           namedLog,
-		Paths:         f.Paths,
-		socketClients: f.socketClients, // shared cache with mutex
-		testName:      testName,
+		qemu:                   f.qemu,
+		cli:                    f.cli.WithLog(namedLog),
+		PacketParser:           f.PacketParser,
+		log:                    namedLog,
+		Paths:                  f.Paths,
+		socketClients:          f.socketClients, // shared cache with mutex
+		lastDataplaneConfig:    f.lastDataplaneConfig,
+		lastControlplaneConfig: f.lastControlplaneConfig,
+		testName:               testName,
 	}
 
 	if testName == globalName {
@@ -1073,6 +1075,10 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 }
 
 func (f *TestFramework) RestartYANET() error {
+	if f.lastDataplaneConfig == "" {
+		return fmt.Errorf("no recorded configuration to restart from: neither StartYANET nor AdoptRunningConfig recorded one")
+	}
+
 	f.log.Info("Restarting YANET (kill + fresh start)...")
 
 	killCmd := "kill $(pidof yanet-dataplane) $(pidof yanet-controlplane) 2>/dev/null; sleep 1; kill -9 $(pidof yanet-dataplane) $(pidof yanet-controlplane) 2>/dev/null; true"
@@ -1094,6 +1100,19 @@ func (f *TestFramework) RestartYANET() error {
 
 	f.log.Info("YANET restarted and reconfigured successfully")
 	return nil
+}
+
+// AdoptRunningConfig records the configuration to restart the guest with.
+//
+// It starts nothing. A VM restored from a baseline snapshot boots with
+// YANET already running, so the framework driving it never called
+// StartYANET and therefore holds no configuration for RestartYANET to
+// restart from. Call this once the caller knows what configuration the
+// running guest was baked with, so a later in-place restart has something
+// to fall back to.
+func (f *TestFramework) AdoptRunningConfig(dataplaneConfig string, controlplaneConfig string) {
+	f.lastDataplaneConfig = dataplaneConfig
+	f.lastControlplaneConfig = controlplaneConfig
 }
 
 // WaitOutputPresent repeatedly executes a command until the output satisfies the
