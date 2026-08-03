@@ -80,6 +80,10 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 		WithLog(log),
 		WithMetrics(grpcmetrics.NewFactory(
 			grpcmetrics.WithLabeler(labeler),
+			grpcmetrics.WithServiceFilter(func(service string) bool {
+				return service == aclpb.ACLService_ServiceDesc.ServiceName ||
+					service == aclpb.MetricsService_ServiceDesc.ServiceName
+			}),
 		)),
 	)
 
