@@ -15,7 +15,7 @@ import {
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useConfigListCache, useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '@yanet/core/hooks';
-import { API, ApiError, loadKnownConfigs } from '@yanet/core/api';
+import { API, ApiError, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '@yanet/core/utils/netip';
@@ -1150,8 +1150,11 @@ const FWStatePage: React.FC = () => {
     const loadAll = useCallback(async (options?: { preserveDirty?: boolean; skipDirtyNames?: Set<string> }): Promise<void> => {
         setLoading(true);
         try {
-            const fwConfigsResp = await API.fwstate.listConfigs();
-            const fwNames = fwConfigsResp.configs ?? [];
+            const [fwConfigsResp, inventoryNames] = await Promise.all([
+                API.fwstate.listConfigs(),
+                inventoryConfigNames('fwstate'),
+            ]);
+            const fwNames = unionConfigNames(fwConfigsResp.configs ?? [], inventoryNames);
             const fwFull = await loadKnownConfigs(
                 fwNames,
                 async (name) => ({ name, config: await API.fwstate.showConfig({ name }) }),
