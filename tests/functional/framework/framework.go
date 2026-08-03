@@ -1641,13 +1641,13 @@ func (f *TestFramework) RestoreAndReconnect(snapshot string) error {
 
 		f.log.Info("Restarting YANET to reinitialize DPDK device state...")
 		if restartErr := f.RestartYANET(); restartErr != nil {
-			return fmt.Errorf("heartbeat failed, restart also failed: %w", restartErr)
+			return fmt.Errorf("failed to restart YANET after heartbeat failure (pre-restart: %v): %w", err, restartErr)
 		}
 
 		f.ResetConnections()
 
-		if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
-			return fmt.Errorf("heartbeat failed after YANET restart: %w", err)
+		if retryErr := f.WaitForDatapathReady(heartbeatTimeout); retryErr != nil {
+			return fmt.Errorf("failed to reach dataplane readiness after YANET restart (pre-restart: %v): %w", err, retryErr)
 		}
 	}
 

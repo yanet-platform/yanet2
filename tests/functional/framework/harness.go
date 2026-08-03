@@ -411,11 +411,12 @@ func (m *Harness) WithBootedVM(t *testing.T, fn func(fw *TestFramework)) {
 func (m *Harness) RestoreBooted(t *testing.T, fw *TestFramework) {
 	t.Helper()
 
-	if err := fw.RestoreAndReconnect("baseline"); err == nil {
+	err := fw.RestoreAndReconnect("baseline")
+	if err == nil {
 		return
 	}
 
-	t.Logf("baseline restore failed, falling back to preyanet + fresh StartYANET")
+	t.Logf("baseline restore failed, falling back to preyanet + fresh StartYANET: %v", err)
 
 	if err := fw.RestoreClean("preyanet"); err != nil {
 		t.Fatalf("failed to restore VM to preyanet: %v", err)
