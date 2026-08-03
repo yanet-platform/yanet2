@@ -80,37 +80,46 @@ describe('loadKnownConfigs', () => {
         await expect(loadKnownConfigs(['a', 'b'], loadOne)).rejects.toBe(networkError);
     });
 
-    it('calls onAllDropped with the name count when every name 404s', async () => {
+    it('calls onDropped with all names when every name 404s', async () => {
         const loadOne = async (): Promise<string> => {
             throw new ApiError(404, 'Not Found', '');
         };
-        const onAllDropped = vi.fn();
-        const results = await loadKnownConfigs(['a', 'b', 'c'], loadOne, { onAllDropped });
+        const onDropped = vi.fn();
+        const results = await loadKnownConfigs(['a', 'b', 'c'], loadOne, { onDropped });
         expect(results).toEqual([]);
-        expect(onAllDropped).toHaveBeenCalledTimes(1);
-        expect(onAllDropped).toHaveBeenCalledWith(3);
+        expect(onDropped).toHaveBeenCalledTimes(1);
+        expect(onDropped).toHaveBeenCalledWith(['a', 'b', 'c']);
     });
 
-    it('does not call onAllDropped when at least one name succeeds', async () => {
+    it('calls onDropped with exactly the dropped name when at least one name succeeds', async () => {
         const loadOne = async (name: string): Promise<string> => {
             if (name === 'b') {
                 throw new ApiError(404, 'Not Found', '');
             }
             return `loaded-${name}`;
         };
-        const onAllDropped = vi.fn();
-        await loadKnownConfigs(['a', 'b'], loadOne, { onAllDropped });
-        expect(onAllDropped).not.toHaveBeenCalled();
+        const onDropped = vi.fn();
+        await loadKnownConfigs(['a', 'b'], loadOne, { onDropped });
+        expect(onDropped).toHaveBeenCalledTimes(1);
+        expect(onDropped).toHaveBeenCalledWith(['b']);
     });
 
-    it('does not call onAllDropped when names is empty', async () => {
+    it('does not call onDropped when names is empty', async () => {
         const loadOne = async (name: string): Promise<string> => `loaded-${name}`;
-        const onAllDropped = vi.fn();
-        await loadKnownConfigs([], loadOne, { onAllDropped });
-        expect(onAllDropped).not.toHaveBeenCalled();
+        const onDropped = vi.fn();
+        await loadKnownConfigs([], loadOne, { onDropped });
+        expect(onDropped).not.toHaveBeenCalled();
     });
 
-    it('does not call onAllDropped when a non-404 rejection is rethrown', async () => {
+    it('does not call onDropped when every name loads successfully', async () => {
+        const loadOne = async (name: string): Promise<string> => `loaded-${name}`;
+        const onDropped = vi.fn();
+        const results = await loadKnownConfigs(['a', 'b', 'c'], loadOne, { onDropped });
+        expect(results).toEqual(['loaded-a', 'loaded-b', 'loaded-c']);
+        expect(onDropped).not.toHaveBeenCalled();
+    });
+
+    it('does not call onDropped when a non-404 rejection is rethrown', async () => {
         const serverError = new ApiError(500, 'Internal Server Error', '');
         const loadOne = async (name: string): Promise<string> => {
             if (name === 'a') {
@@ -118,9 +127,28 @@ describe('loadKnownConfigs', () => {
             }
             throw new ApiError(404, 'Not Found', '');
         };
-        const onAllDropped = vi.fn();
-        await expect(loadKnownConfigs(['a', 'b'], loadOne, { onAllDropped })).rejects.toBe(serverError);
-        expect(onAllDropped).not.toHaveBeenCalled();
+        const onDropped = vi.fn();
+        await expect(loadKnownConfigs(['a', 'b'], loadOne, { onDropped })).rejects.toBe(serverError);
+        expect(onDropped).not.toHaveBeenCalled();
+    });
+
+    it('preserves original name order even when a later name settles before an earlier one', async () => {
+        const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+        const loadOne = async (name: string): Promise<string> => {
+            if (name === 'a') {
+                throw new ApiError(404, 'Not Found', '');
+            }
+            if (name === 'b') {
+                await delay(20);
+                return `loaded-${name}`;
+            }
+            await delay(10);
+            return `loaded-${name}`;
+        };
+        const onDropped = vi.fn();
+        const results = await loadKnownConfigs(['a', 'b', 'c'], loadOne, { onDropped });
+        expect(results).toEqual(['loaded-b', 'loaded-c']);
+        expect(onDropped).toHaveBeenCalledWith(['a']);
     });
 
     it('rejects as soon as one name fails, without waiting for a sibling that never settles', async () => {

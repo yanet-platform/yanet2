@@ -73,18 +73,28 @@ export const toaster = {
     },
 };
 
-/**
- * Build an `onAllDropped` callback for `loadKnownConfigs` that warns about unknown configs.
- *
- * The helper owns the message and the count, so a caller only needs to supply the
- * toast dedup key and the subject word used in the message. It fires once per page
- * load when the control plane knows none of the requested configs; a remount fires
- * it again, and it is the toast dedup key, not the callback, that collapses the repeat.
+/** Names beyond this count are summarised instead of listed, so a control plane
+ * that lost a dozen configurations cannot produce an unbounded toast string.
  */
-export const warnConfigsUnknown = (toastKey: string, subject: string) => (count: number): void => {
-    const [noun, pronoun] = count === 1 ? ['configuration', 'It is'] : ['configurations', 'They are'];
+const MAX_LISTED_NAMES = 5;
+
+/**
+ * Build an `onDropped` callback for `loadKnownConfigs` that warns about unknown configs.
+ *
+ * The helper owns the message and the name list, so a caller only needs to supply the
+ * toast dedup key and the subject word used in the message. It fires when the control
+ * plane does not know at least one of the requested configs; a remount fires it again,
+ * and it is the toast dedup key, not the callback, that collapses the repeat.
+ */
+export const warnConfigsUnknown = (toastKey: string, subject: string) => (names: string[]): void => {
+    const [noun, pronoun] = names.length === 1 ? ['configuration', 'It is'] : ['configurations', 'They are'];
+    const listed = names.slice(0, MAX_LISTED_NAMES);
+    const rest = names.length - listed.length;
+    const list = rest > 0
+        ? `${listed.join(', ')}, and ${rest} more`
+        : listed.join(', ');
     toaster.warning(
         toastKey,
-        `The control plane does not know ${count} ${subject} ${noun}. ${pronoun} not shown here.`,
+        `The control plane does not know ${names.length} ${subject} ${noun} (${list}). ${pronoun} not shown here.`,
     );
 };

@@ -77,7 +77,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
                     const resp = await API.forward.showConfig({ name });
                     return { name, rules: resp.rules ?? [] };
                 },
-                { onAllDropped: warnConfigsUnknown('forward-configs-unknown', 'forward') },
+                { onDropped: warnConfigsUnknown('forward-configs-unknown', 'forward') },
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });

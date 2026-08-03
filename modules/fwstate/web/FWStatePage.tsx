@@ -1158,7 +1158,7 @@ const FWStatePage: React.FC = () => {
             const fwFull = await loadKnownConfigs(
                 fwNames,
                 async (name) => ({ name, config: await API.fwstate.showConfig({ name }) }),
-                { onAllDropped: warnConfigsUnknown('fwstate-configs-unknown', 'fwstate') },
+                { onDropped: warnConfigsUnknown('fwstate-configs-unknown', 'fwstate') },
             );
             const nextConfigs: Record<string, DraftConfig> = {};
             fwFull.forEach(({ name, config }) => {

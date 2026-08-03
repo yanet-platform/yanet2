@@ -100,8 +100,8 @@ const callGRPCService = async <T>(
 };
 
 export interface LoadKnownConfigsOptions {
-    /** Called when the name list was non-empty and every config was dropped. */
-    onAllDropped?: (count: number) => void;
+    /** Called with the dropped names whenever at least one name was dropped. */
+    onDropped?: (names: string[]) => void;
 }
 
 /** Marker substituted for a per-name load whose 404 means the config is gone. */
@@ -119,11 +119,11 @@ const DROPPED = Symbol('dropped');
  * request never delays surfacing a real error. The rejection is rethrown
  * unchanged so the caller still sees the original error.
  *
- * When every name was dropped and at least one name was requested, every
- * request was a 404, since any other rejection would already have rejected
- * the whole load above. `onAllDropped` fires in exactly that case, so a
- * caller can warn that none of the requested configs came back instead of
- * rendering a silent empty state.
+ * A dropped name means its request was a 404, since any other rejection
+ * would already have rejected the whole load above. `onDropped` fires
+ * whenever at least one name was dropped, passing the dropped names, so a
+ * caller can warn about a partial or total loss instead of rendering a
+ * silently incomplete or empty state.
  */
 export const loadKnownConfigs = async <T>(
     names: string[],
@@ -139,9 +139,17 @@ export const loadKnownConfigs = async <T>(
         })
     ));
 
-    const values = results.filter((result): result is T => result !== DROPPED);
-    if (names.length > 0 && values.length === 0) {
-        options?.onAllDropped?.(names.length);
+    const values: T[] = [];
+    const dropped: string[] = [];
+    results.forEach((result, idx) => {
+        if (result === DROPPED) {
+            dropped.push(names[idx]);
+        } else {
+            values.push(result);
+        }
+    });
+    if (dropped.length > 0) {
+        options?.onDropped?.(dropped);
     }
     return values;
 };

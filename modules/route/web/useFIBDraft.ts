@@ -75,7 +75,7 @@ export const useFIBDraft = (): UseFIBDraftResult => {
         return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
             const fibResp = await API.route.showFIB({ name });
             return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
-        }, { onAllDropped: warnConfigsUnknown('route-configs-unknown', 'route') });
+        }, { onDropped: warnConfigsUnknown('route-configs-unknown', 'route') });
     }, []);
 
     const commit = useCallback(async (configName: string, draftRows: FIBRowItem[]): Promise<void> => {

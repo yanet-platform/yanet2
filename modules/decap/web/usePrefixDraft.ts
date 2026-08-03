@@ -23,7 +23,7 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
             const resp = await API.decap.showConfig({ name });
             const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((p) => ({ id: p, prefix: p }));
             return { name, rows };
-        }, { onAllDropped: warnConfigsUnknown('decap-configs-unknown', 'decap') });
+        }, { onDropped: warnConfigsUnknown('decap-configs-unknown', 'decap') });
     }, []);
 
     const commit = useCallback(async (

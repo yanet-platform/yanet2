@@ -70,7 +70,7 @@ export const useAclDraft = (): UseAclDraftResult => {
                     const resp = await API.acl.showConfig({ name });
                     return { name, rules: resp.rules ?? [], fwstateName: resp.fwstate_name ?? '' };
                 },
-                { onAllDropped: warnConfigsUnknown('acl-configs-unknown', 'ACL') },
+                { onDropped: warnConfigsUnknown('acl-configs-unknown', 'ACL') },
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });

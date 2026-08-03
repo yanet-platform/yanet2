@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { inventoryConfigNames, unionConfigNames } from './inspect';
 
 describe('unionConfigNames', () => {
-    it('regression: an empty service list plus a non-empty inventory yields the inventory names, so onAllDropped can fire after a restart', () => {
+    it('regression: an empty service list plus a non-empty inventory yields the inventory names, so onDropped can fire after a restart', () => {
         expect(unionConfigNames([], ['acl0'])).toEqual(['acl0']);
     });
 
