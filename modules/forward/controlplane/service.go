@@ -101,6 +101,11 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 
 	rules := make([]cforward.ForwardRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
+		action := reqRule.GetAction()
+		if action == nil {
+			return nil, status.Error(codes.InvalidArgument, "rule action is required")
+		}
+
 		devices, err := filterpb.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
@@ -127,9 +132,9 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		}
 
 		rule := cforward.ForwardRule{
-			Target:     reqRule.Action.Target,
+			Target:     action.Target,
 			Mode:       cforward.ModeNone,
-			Counter:    reqRule.Action.Counter,
+			Counter:    action.Counter,
 			Devices:    devices,
 			VlanRanges: vlanRanges,
 			Src4s:      src4s,
@@ -138,10 +143,10 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 			Dst6s:      dst6s,
 		}
 
-		if reqRule.Action.Mode == forwardpb.ForwardMode_IN {
+		if action.Mode == forwardpb.ForwardMode_IN {
 			rule.Mode = cforward.ModeIn
 		}
-		if reqRule.Action.Mode == forwardpb.ForwardMode_OUT {
+		if action.Mode == forwardpb.ForwardMode_OUT {
 			rule.Mode = cforward.ModeOut
 		}
 

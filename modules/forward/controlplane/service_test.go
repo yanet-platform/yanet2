@@ -64,6 +64,20 @@ func TestShowConfigEmptyRules(t *testing.T) {
 	require.Empty(t, response.GetRules())
 }
 
+// TestUpdateConfigNilAction verifies that UpdateConfig rejects a rule with a
+// nil action instead of dereferencing it.
+func TestUpdateConfigNilAction(t *testing.T) {
+	svc := forward.NewForwardService(&mockBackend{})
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{},
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 // Run with: go test -race
 func TestForwardServiceConcurrentAccess(t *testing.T) {
 	svc := forward.NewForwardService(&mockBackend{})
