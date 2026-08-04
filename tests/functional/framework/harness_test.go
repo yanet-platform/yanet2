@@ -1,6 +1,9 @@
 package framework
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBaselineTemplatePath(t *testing.T) {
 	testCases := []struct {
@@ -33,5 +36,27 @@ func TestBaselineTemplatePath(t *testing.T) {
 
 	if baselineSnapshotName != "baseline" {
 		t.Errorf("baseline snapshot name = %q, want %q", baselineSnapshotName, "baseline")
+	}
+}
+
+// TestDefaultRouteConfig verifies that the baseline route0.yaml uses the
+// wire's range-native "range: {start, end}" shape, not the retired "prefix"
+// key, and that the IPv6 default route's "::" start is quoted -- an
+// unquoted bare colon parses as a YAML mapping indicator, not string
+// content.
+func TestDefaultRouteConfig(t *testing.T) {
+	config := DefaultRouteConfig()
+
+	if strings.Contains(config, "prefix:") {
+		t.Errorf("DefaultRouteConfig() must not use the retired prefix key: %s", config)
+	}
+	if !strings.Contains(config, `start: "0.0.0.0"`) || !strings.Contains(config, `end: "255.255.255.255"`) {
+		t.Errorf("DefaultRouteConfig() missing IPv4 default range: %s", config)
+	}
+	if !strings.Contains(config, `start: "::"`) {
+		t.Errorf("DefaultRouteConfig() must quote the IPv6 :: start: %s", config)
+	}
+	if !strings.Contains(config, `end: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"`) {
+		t.Errorf("DefaultRouteConfig() missing IPv6 default range end: %s", config)
 	}
 }

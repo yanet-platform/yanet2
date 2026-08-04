@@ -48,61 +48,14 @@ func TestTest_009_nat64stateless(t *testing.T) {
 			// Original autotest.yaml step:
 			// ipv4Update:
 			//   - "102.102.102.102/31 -> 200.0.0.1"
-			fibYAML := `
-entries:
-  - prefix: "0.0.0.0/0"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-  - prefix: "::/0"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-  - prefix: "102.102.102.102/31"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-`
-			err := fw.CreateConfigFile("route0-step001.yaml", fibYAML)
-			require.NoError(t, err, "Failed to create FIB config for IPv4 routes")
-			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --name=route0 --rules /mnt/config/route0-step001.yaml")
-			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
+			applyFIB(t, fw, "route0", "step001", "0.0.0.0/0", "::/0", "102.102.102.102/31")
 		})
 		fw.Run("Step_002_Configure_Routes", func(fw *framework.TestFramework, t *testing.T) {
 			// IPv6 routes configuration
 			// Original autotest.yaml step:
 			// ipv6Update:
 			//   - "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128 -> aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:1"
-			fibYAML := `
-entries:
-  - prefix: "0.0.0.0/0"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-  - prefix: "::/0"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-  - prefix: "102.102.102.102/31"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-  - prefix: "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128"
-    nexthops:
-      - dst_mac: "52:54:00:6b:ff:a1"
-        src_mac: "52:54:00:6b:ff:a5"
-        device: "01:00.0"
-`
-			err := fw.CreateConfigFile("route0-step002.yaml", fibYAML)
-			require.NoError(t, err, "Failed to create FIB config for IPv6 routes")
-			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --name=route0 --rules /mnt/config/route0-step002.yaml")
-			require.NoError(t, err, "Failed to update FIB for IPv6 routes")
+			applyFIB(t, fw, "route0", "step002", "0.0.0.0/0", "::/0", "102.102.102.102/31", "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128")
 		})
 
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)

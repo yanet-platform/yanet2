@@ -598,21 +598,32 @@ where
     serializer.serialize_str(&route_source_name(*value))
 }
 
-/// Serializes an optional `IpAddress` field as a string (e.g. `"10.0.0.1"`)
-/// or JSON `null` when absent.
-pub fn serialize_ip_addr<S>(value: &Option<commonpb::pb::IpAddress>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match value {
-        Some(addr) => serializer.serialize_str(&addr.to_string()),
-        None => serializer.serialize_none(),
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// `next_hop`/`peer` need no `serialize_with` override: a plain
+    /// `Option<commonpb::pb::IpAddress>` field already serializes as the
+    /// plain address string, or `null` when absent, through that type's
+    /// own `Serialize` impl. This pins that output byte-for-byte.
+    #[test]
+    fn route_next_hop_and_peer_serialize_without_a_field_override() {
+        let route = operatorpb::Route {
+            prefix: "10.0.0.0/8".to_owned(),
+            next_hop: Some(commonpb::pb::IpAddress::from(IpAddr::V4(core::net::Ipv4Addr::new(
+                192, 0, 2, 1,
+            )))),
+            peer: None,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&route).unwrap();
+
+        assert_eq!(
+            r#"{"prefix":"10.0.0.0/8","next_hop":"192.0.2.1","peer":null,"route_distinguisher":0,"peer_as":0,"origin_as":0,"med":0,"pref":0,"as_path_len":0,"source":"unknown","large_communities":[],"is_best":false,"global_id":0,"ifindex":0}"#,
+            json
+        );
+    }
 
     /// `--via ADDR PREFIX` must not consume the positional prefix as a second
     /// nexthop.

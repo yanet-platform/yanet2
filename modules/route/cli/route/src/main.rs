@@ -11,12 +11,9 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
     CompleteEnv,
 };
-use commonpb::pb::{IpRange, MacAddress};
-use netip::{Contiguous, IpNetwork, MacAddr};
-use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
-    fib::{json::FibEntryJson, render::print_fib},
+    fib::render::print_fib,
     routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
 };
 use ync::{
@@ -25,28 +22,27 @@ use ync::{
     output::{self, CommonFormat},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
-struct FibNexthop {
-    dst_mac: String,
-    src_mac: String,
-    device: String,
-}
-
-/// A FIB entry as written in the YAML config.
+/// The FIB rules file, deserialized straight into the wire's
+/// [`routepb::FibEntry`] -- `range` is range-native, matching the wire, so
+/// there is no CIDR-to-range conversion here either.
 ///
-/// Named `Config` rather than `Entry` to stay visually distinct from the
-/// wire's [`routepb::FibEntry`], which this type converts into.
-#[derive(Debug, Serialize, Deserialize)]
-struct FibEntryConfig {
-    prefix: String,
-    #[serde(default)]
-    nexthops: Vec<FibNexthop>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+/// A minimal wrapper around `entries` rather than [`routepb::UpdateFibRequest`]
+/// itself: `module_name` comes from `--name`, not the file. Deserializing
+/// straight into `UpdateFibRequest` would leave a `module_name` key written
+/// into the file either silently discarded (if overwritten after loading)
+/// or silently conflicting with `--name` (if kept) -- neither reports
+/// anything to the caller. `#[serde(deny_unknown_fields)]` instead turns
+/// that key, or any other stray one at this level, into a load error.
+/// `FIBEntry`/`FIBNexthop` carry the same attribute (see `build.rs`), so a
+/// stray or retired key inside an entry fails to load the same way. A
+/// required key simply missing (rather than stray) is a different
+/// failure mode `deny_unknown_fields` does not cover -- see
+/// [`FibConfig::validate`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FibConfig {
     #[serde(default)]
-    entries: Vec<FibEntryConfig>,
+    entries: Vec<routepb::FibEntry>,
 }
 
 impl FibConfig {
@@ -55,43 +51,49 @@ impl FibConfig {
         P: AsRef<Path>,
     {
         let file = File::open(path)?;
-        let config = serde_yaml::from_reader(file)?;
+        let config: Self = serde_yaml::from_reader(file)?;
+        config.validate()?;
         Ok(config)
     }
-}
 
-fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
-    let mac: MacAddr = s.parse()?;
-    Ok(mac.into())
-}
+    /// Rejects an entry the server would otherwise bounce back as an
+    /// opaque `Internal` RPC error with no file, line, or entry index.
+    ///
+    /// Every message field `FibEntry`/`FibNexthop` carry deserializes as
+    /// an `Option` (`nexthops` defaults to empty instead -- see
+    /// `build.rs`), so `deny_unknown_fields` alone does not catch a
+    /// required one simply missing from the file; this fills that gap.
+    /// It mirrors exactly what `modules/route/controlplane/service.go`'s
+    /// `UpdateFIB` and `backend.go`'s `newHardwareRoute` already reject on
+    /// the server -- range presence, and nexthop MAC/device presence --
+    /// and leaves the range semantics the server owns (address family
+    /// match, `start <= end` ordering) to the server's own error.
+    fn validate(&self) -> Result<(), Box<dyn Error>> {
+        for (idx, entry) in self.entries.iter().enumerate() {
+            let range = entry
+                .range
+                .as_ref()
+                .ok_or_else(|| format!("entry {idx}: missing range"))?;
+            if range.start.is_none() {
+                return Err(format!("entry {idx}: range missing start address").into());
+            }
+            if range.end.is_none() {
+                return Err(format!("entry {idx}: range missing end address").into());
+            }
 
-impl TryFrom<FibNexthop> for routepb::FibNexthop {
-    type Error = Box<dyn Error>;
-
-    fn try_from(nh: FibNexthop) -> Result<Self, Self::Error> {
-        Ok(Self {
-            dst_mac: Some(parse_mac(&nh.dst_mac)?),
-            src_mac: Some(parse_mac(&nh.src_mac)?),
-            device: nh.device,
-        })
-    }
-}
-
-impl TryFrom<FibEntryConfig> for routepb::FibEntry {
-    type Error = Box<dyn Error>;
-
-    fn try_from(entry: FibEntryConfig) -> Result<Self, Self::Error> {
-        let network = Contiguous::<IpNetwork>::parse(&entry.prefix)?;
-        // `addr()` is this network's base address rather than the address as
-        // typed: `IpNetwork` always normalizes to the mask on construction, so
-        // the range below denotes the whole network the prefix names.
-        let range = IpRange::from((network.addr(), network.last_addr()));
-        let nexthops = entry
-            .nexthops
-            .into_iter()
-            .map(routepb::FibNexthop::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { range: Some(range), nexthops })
+            for (nidx, nexthop) in entry.nexthops.iter().enumerate() {
+                if nexthop.dst_mac.is_none() {
+                    return Err(format!("entry {idx}: nexthop {nidx}: missing dst_mac").into());
+                }
+                if nexthop.src_mac.is_none() {
+                    return Err(format!("entry {idx}: nexthop {nidx}: missing src_mac").into());
+                }
+                if nexthop.device.is_empty() {
+                    return Err(format!("entry {idx}: nexthop {nidx}: empty device").into());
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -215,15 +217,10 @@ impl RouteService {
 
     pub async fn update_fib(&mut self, cmd: FibUpdateCmd) -> Result<(), Box<dyn Error>> {
         let config = FibConfig::load(&cmd.rules)?;
-        let entries = config
-            .entries
-            .into_iter()
-            .map(routepb::FibEntry::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        let entry_count = entries.len();
+        let entry_count = config.entries.len();
         let request = UpdateFibRequest {
             module_name: cmd.config_name.clone(),
-            entries,
+            entries: config.entries,
         };
         self.client.update_fib(request).await?;
 
@@ -267,7 +264,7 @@ impl RouteService {
         let entries = response.entries;
 
         output::data(
-            || entries.iter().map(FibEntryJson::from).collect::<Vec<_>>(),
+            || &entries,
             || {
                 if entries.is_empty() {
                     output::empty(format_args!("No FIB entries found for '{}'.", cmd.config_name));
@@ -286,6 +283,9 @@ impl RouteService {
 mod test {
     use core::net::IpAddr;
 
+    use commonpb::pb::{IpRange, MacAddress};
+    use netip::MacAddr;
+
     use super::*;
 
     #[test]
@@ -297,36 +297,309 @@ mod test {
         IpRange::from((start.parse::<IpAddr>().unwrap(), end.parse::<IpAddr>().unwrap()))
     }
 
-    fn entry_range(prefix: &str) -> IpRange {
-        let entry = FibEntryConfig {
-            prefix: prefix.to_string(),
-            nexthops: Vec::new(),
+    fn mac(s: &str) -> MacAddress {
+        MacAddress::from(s.parse::<MacAddr>().unwrap())
+    }
+
+    /// Pins `--format json`'s wire shape byte-for-byte: `range` and
+    /// `nexthops` come straight from the derived `routepb::FibEntry`/
+    /// `FibNexthop` impls (see `build.rs`), nested rather than flattened.
+    #[test]
+    fn fib_entry_json_matches_wire_shape() {
+        let entry = routepb::FibEntry {
+            range: Some(ip_range("10.0.0.0", "10.0.0.255")),
+            nexthops: vec![routepb::FibNexthop {
+                dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
+                src_mac: Some(mac("11:22:33:44:55:66")),
+                device: "vlan100".to_owned(),
+            }],
         };
-        routepb::FibEntry::try_from(entry).unwrap().range.unwrap()
+
+        let json = serde_json::to_string(&entry).unwrap();
+
+        assert_eq!(
+            r#"{"range":{"start":"10.0.0.0","end":"10.0.0.255"},"nexthops":[{"dst_mac":"aa:bb:cc:dd:ee:ff","src_mac":"11:22:33:44:55:66","device":"vlan100"}]}"#,
+            json
+        );
+    }
+
+    /// An absent `range` serializes as JSON `null`: there is no view left
+    /// to substitute a fallback string for it.
+    #[test]
+    fn fib_entry_json_absent_range_is_null() {
+        let entry = routepb::FibEntry { range: None, nexthops: Vec::new() };
+
+        let json = serde_json::to_string(&entry).unwrap();
+
+        assert_eq!(r#"{"range":null,"nexthops":[]}"#, json);
+    }
+
+    /// An absent MAC serializes as JSON `null`.
+    #[test]
+    fn fib_nexthop_json_absent_mac_is_null() {
+        let nexthop = routepb::FibNexthop {
+            dst_mac: None,
+            src_mac: None,
+            device: "vlan100".to_owned(),
+        };
+
+        let json = serde_json::to_string(&nexthop).unwrap();
+
+        assert_eq!(r#"{"dst_mac":null,"src_mac":null,"device":"vlan100"}"#, json);
+    }
+
+    /// A malformed MAC (upper 16 bits set) serializes as the literal
+    /// `"invalid"` -- `commonpb::pb::MacAddress`'s own `Serialize` impl
+    /// falls back to that string for a value `MacAddr` itself rejects, the
+    /// same fallback it gives everywhere else this type appears.
+    #[test]
+    fn fib_nexthop_json_malformed_mac_is_invalid_literal() {
+        let nexthop = routepb::FibNexthop {
+            dst_mac: Some(MacAddress { addr: 0x1_0000_0000_0000 }),
+            src_mac: None,
+            device: "vlan100".to_owned(),
+        };
+
+        let json = serde_json::to_string(&nexthop).unwrap();
+
+        assert_eq!(r#"{"dst_mac":"invalid","src_mac":null,"device":"vlan100"}"#, json);
     }
 
     #[test]
-    fn fib_entry_config_prefix_converts_to_expected_range() {
-        assert_eq!(ip_range("10.0.0.0", "10.0.0.255"), entry_range("10.0.0.0/24"));
+    fn fib_config_yaml_round_trips_v4() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+    nexthops:
+      - dst_mac: aa:bb:cc:dd:ee:ff
+        src_mac: 11:22:33:44:55:66
+        device: eth0
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(
+            vec![routepb::FibEntry {
+                range: Some(ip_range("10.0.0.0", "10.0.0.255")),
+                nexthops: vec![routepb::FibNexthop {
+                    dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
+                    src_mac: Some(mac("11:22:33:44:55:66")),
+                    device: "eth0".to_owned(),
+                }],
+            }],
+            config.entries
+        );
+    }
+
+    /// Only `start` needs quoting here: it is a plain YAML scalar ending in
+    /// a bare `::` (as any IPv6 address abbreviated down to its `::` form
+    /// is), which YAML parses as a nested mapping-value indicator, not
+    /// string content -- a plain YAML quirk, not something this loader can
+    /// special-case away. `end` doesn't end in `::`, so it would parse
+    /// unquoted too; it's quoted here only to match.
+    #[test]
+    fn fib_config_yaml_round_trips_v6() {
+        let yaml = r#"
+entries:
+  - range:
+      start: "2001:db8::"
+      end: "2001:db8::ff"
+    nexthops:
+      - dst_mac: aa:bb:cc:dd:ee:ff
+        src_mac: 11:22:33:44:55:66
+        device: eth0
+"#;
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(
+            vec![routepb::FibEntry {
+                range: Some(ip_range("2001:db8::", "2001:db8::ff")),
+                nexthops: vec![routepb::FibNexthop {
+                    dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
+                    src_mac: Some(mac("11:22:33:44:55:66")),
+                    device: "eth0".to_owned(),
+                }],
+            }],
+            config.entries
+        );
+    }
+
+    /// An entry can omit `nexthops` entirely -- `UpdateFibRequest`'s proto
+    /// doc comment calls that a legitimate way to skip a range without
+    /// displacing an earlier entry -- and still load, thanks to
+    /// `build.rs`'s `#[serde(default)]` on that field.
+    #[test]
+    fn fib_config_yaml_entry_without_nexthops_defaults_to_empty() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(1, config.entries.len());
+        assert!(config.entries[0].nexthops.is_empty());
+    }
+
+    /// A malformed address in the file fails to load rather than silently
+    /// producing a garbage `IpAddress` -- `commonpb`'s hand-written
+    /// `Deserialize` impl rejects anything `FromStr` rejects.
+    #[test]
+    fn fib_config_yaml_malformed_address_fails_loudly() {
+        let yaml = "
+entries:
+  - range:
+      start: not-an-ip
+      end: 10.0.0.255
+";
+        assert!(serde_yaml::from_str::<FibConfig>(yaml).is_err());
+    }
+
+    /// `module_name` belongs to `--name`, not the file: writing it into the
+    /// file is a load error, not a silently ignored or silently
+    /// overridden key -- see [`FibConfig`]'s doc.
+    #[test]
+    fn fib_config_yaml_rejects_module_name_field() {
+        let yaml = "
+module_name: foo
+entries: []
+";
+        assert!(serde_yaml::from_str::<FibConfig>(yaml).is_err());
+    }
+
+    /// The old CIDR-keyed rules format's `prefix` key is retired, not
+    /// renamed: `FIBEntry` has no such field, so loading a file still
+    /// written in that shape fails to load here rather than silently
+    /// deserializing with `range: None` -- see `build.rs`'s
+    /// `deny_unknown_fields` on `FIBEntry`.
+    #[test]
+    fn fib_config_yaml_rejects_retired_prefix_field() {
+        let yaml = r#"
+entries:
+  - prefix: "10.0.0.0/24"
+    nexthops: []
+"#;
+        let err = serde_yaml::from_str::<FibConfig>(yaml).unwrap_err();
+        assert!(err.to_string().contains("prefix"), "unexpected error: {err}");
+    }
+
+    /// A rules file omitting `range` entirely still deserializes -- `range`
+    /// is `Option<routepb::IpRange>`, and serde treats a missing key for an
+    /// `Option` field as `None` rather than a load error -- so catching
+    /// this is `FibConfig::validate`'s job, not `deny_unknown_fields`'s.
+    #[test]
+    fn fib_config_validate_rejects_missing_range() {
+        let yaml = "
+entries:
+  - nexthops: []
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert_eq!("entry 0: missing range", err.to_string());
     }
 
     #[test]
-    fn fib_entry_config_prefix_masks_host_bits_v4() {
-        assert_eq!(ip_range("10.0.0.0", "10.0.0.255"), entry_range("10.0.0.5/24"));
+    fn fib_config_validate_rejects_range_missing_start() {
+        let yaml = "
+entries:
+  - range:
+      end: 10.0.0.255
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert_eq!("entry 0: range missing start address", err.to_string());
     }
 
     #[test]
-    fn fib_entry_config_prefix_masks_host_bits_v6() {
-        assert_eq!(ip_range("2001:db8::", "2001:db8::ff"), entry_range("2001:db8::5/120"));
+    fn fib_config_validate_rejects_range_missing_end() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert_eq!("entry 0: range missing end address", err.to_string());
     }
 
     #[test]
-    fn fib_entry_config_prefix_slash_32_is_noop() {
-        assert_eq!(ip_range("10.0.0.5", "10.0.0.5"), entry_range("10.0.0.5/32"));
+    fn fib_config_validate_rejects_nexthop_missing_dst_mac() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+    nexthops:
+      - src_mac: 11:22:33:44:55:66
+        device: eth0
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert_eq!("entry 0: nexthop 0: missing dst_mac", err.to_string());
     }
 
     #[test]
-    fn fib_entry_config_prefix_slash_128_is_noop() {
-        assert_eq!(ip_range("2001:db8::5", "2001:db8::5"), entry_range("2001:db8::5/128"));
+    fn fib_config_validate_rejects_nexthop_missing_src_mac() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+    nexthops:
+      - dst_mac: aa:bb:cc:dd:ee:ff
+        device: eth0
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert_eq!("entry 0: nexthop 0: missing src_mac", err.to_string());
+    }
+
+    #[test]
+    fn fib_config_validate_rejects_nexthop_empty_device() {
+        let yaml = r#"
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+    nexthops:
+      - dst_mac: aa:bb:cc:dd:ee:ff
+        src_mac: 11:22:33:44:55:66
+        device: ""
+"#;
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert_eq!("entry 0: nexthop 0: empty device", err.to_string());
+    }
+
+    /// A fully-specified entry passes validation untouched.
+    #[test]
+    fn fib_config_validate_accepts_fully_specified_entry() {
+        let config = FibConfig {
+            entries: vec![routepb::FibEntry {
+                range: Some(ip_range("10.0.0.0", "10.0.0.255")),
+                nexthops: vec![routepb::FibNexthop {
+                    dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
+                    src_mac: Some(mac("11:22:33:44:55:66")),
+                    device: "eth0".to_owned(),
+                }],
+            }],
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    /// An entry with no nexthops at all is a legitimate no-op entry -- see
+    /// `UpdateFibRequest`'s proto doc comment -- and still passes
+    /// validation.
+    #[test]
+    fn fib_config_validate_accepts_entry_without_nexthops() {
+        let config = FibConfig {
+            entries: vec![routepb::FibEntry {
+                range: Some(ip_range("10.0.0.0", "10.0.0.255")),
+                nexthops: Vec::new(),
+            }],
+        };
+        assert!(config.validate().is_ok());
     }
 }

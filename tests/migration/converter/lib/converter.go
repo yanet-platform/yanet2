@@ -286,7 +286,12 @@ func (c *Converter) removeFIBEntries(prefixes []string) {
 
 // generateFIBUpdateGoCode generates Go code that writes a FIB YAML file
 // and runs yanet-cli-route fib update.
-func (c *Converter) generateFIBUpdateGoCode(description string) string {
+//
+// It returns an error if any entry in the current FIB state fails to parse
+// as a CIDR prefix, rather than silently dropping that entry: a partial
+// failure must be as visible as convertRouteUpdate's existing "no valid
+// routes found" skip is for a total one.
+func (c *Converter) generateFIBUpdateGoCode(description string) (string, error) {
 	c.fibStepCounter++
 	fileName := fmt.Sprintf("route0-step%03d.yaml", c.fibStepCounter)
 
@@ -294,12 +299,19 @@ func (c *Converter) generateFIBUpdateGoCode(description string) string {
 	var yamlEntries strings.Builder
 	yamlEntries.WriteString("entries:\n")
 	for _, e := range c.fibState {
-		yamlEntries.WriteString(fmt.Sprintf(`  - prefix: "%s"
+		start, end, err := framework.PrefixRange(e.Prefix)
+		if err != nil {
+			return "", fmt.Errorf("FIB entry %q: %w", e.Prefix, err)
+		}
+
+		yamlEntries.WriteString(fmt.Sprintf(`  - range:
+      start: %q
+      end: %q
     nexthops:
       - dst_mac: "%s"
         src_mac: "%s"
         device: "01:00.0"
-`, e.Prefix, framework.SrcMAC, framework.DstMAC))
+`, start, end, framework.SrcMAC, framework.DstMAC))
 	}
 
 	// Use backtick for multi-line string in generated Go code
@@ -312,7 +324,7 @@ func (c *Converter) generateFIBUpdateGoCode(description string) string {
 		"`", yamlEntries.String(), "`",
 		fileName, description,
 		fmt.Sprintf("%s fib update --cfg=route0 --rules /mnt/config/%s", framework.CLIRoute, fileName),
-		description)
+		description), nil
 }
 
 type moduleInventory struct {

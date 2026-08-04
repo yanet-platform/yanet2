@@ -2,6 +2,7 @@ package lib
 
 import (
 	"fmt"
+	"strconv"
 )
 
 // ConversionError represents an error that occurred during test conversion.
@@ -59,18 +60,28 @@ func NewConversionErrorWrap(testName, stepType string, err error, message string
 // NewSkipStep creates a ConvertedStep that skips the step with a clear message.
 // This is used for non-critical errors like invalid format that don't prevent
 // the rest of the test from being converted.
+//
+// reason is embedded as a quoted Go string literal and passed as a Skipf
+// argument rather than as its format string, so a quote, backslash, newline
+// or literal '%' inside reason cannot break compilation of the generated
+// test or be misread as a format verb.
 func NewSkipStep(stepType, reason string) ConvertedStep {
 	return ConvertedStep{
 		Type:   stepType,
-		GoCode: fmt.Sprintf("t.Skipf(\"Step skipped: %s\")", reason),
+		GoCode: fmt.Sprintf("t.Skipf(\"%%s\", %s)", strconv.Quote("Step skipped: "+reason)),
 	}
 }
 
 // NewErrorStep creates a ConvertedStep that fails the test with an error message.
 // This is used for critical errors that should cause the test to fail.
+//
+// reason is embedded as a quoted Go string literal and passed as a Fatalf
+// argument rather than as its format string, so a quote, backslash, newline
+// or literal '%' inside reason cannot break compilation of the generated
+// test or be misread as a format verb.
 func NewErrorStep(stepType, reason string) ConvertedStep {
 	return ConvertedStep{
 		Type:   stepType,
-		GoCode: fmt.Sprintf("t.Fatalf(\"Step failed: %s\")", reason),
+		GoCode: fmt.Sprintf("t.Fatalf(\"%%s\", %s)", strconv.Quote("Step failed: "+reason)),
 	}
 }

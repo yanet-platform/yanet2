@@ -54,6 +54,41 @@ impl TryFrom<&pb::MacAddress> for MacAddr {
     }
 }
 
+impl serde::Serialize for pb::MacAddress {
+    /// Serializes as `aa:bb:cc:dd:ee:ff`, via `MacAddr`'s own `Display`.
+    ///
+    /// A message with the upper 16 bits set is not a valid MAC address --
+    /// `TryFrom<&pb::MacAddress> for MacAddr` rejects it -- and renders as
+    /// the literal `"invalid"` instead.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match MacAddr::try_from(self) {
+            Ok(mac) => serializer.collect_str(&mac),
+            Err(..) => serializer.serialize_str("invalid"),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for pb::MacAddress {
+    /// Parses `aa:bb:cc:dd:ee:ff` via `MacAddr`'s own `FromStr`.
+    ///
+    /// The literal `"invalid"` a set upper 16 bits serializes to is not
+    /// itself a parseable MAC address, so it fails here with a
+    /// deserialization error instead of reconstructing one -- the same
+    /// deliberately lossy treatment `pb::IpAddress` gives its own
+    /// malformed case.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let mac = s.parse::<MacAddr>().map_err(serde::de::Error::custom)?;
+        Ok(Self::from(mac))
+    }
+}
+
 impl TryFrom<&pb::IpAddress> for IpAddr {
     type Error = Box<dyn Error>;
 
@@ -91,6 +126,38 @@ impl FromStr for pb::IpAddress {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let addr = IpAddr::from_str(s)?;
         Ok(Self::from(addr))
+    }
+}
+
+impl serde::Serialize for pb::IpAddress {
+    /// Serializes as the plain address string `Display` renders.
+    ///
+    /// A malformed byte length renders as the literal `"invalid"`, since
+    /// that is what `Display` already falls back to. An IPv4-mapped IPv6
+    /// address renders as its unmapped 4-byte form too, so the round trip
+    /// through this string is lossy for that one input shape as well.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for pb::IpAddress {
+    /// Parses the string `Serialize` produces, via `FromStr`.
+    ///
+    /// The literal `"invalid"` a malformed byte length serializes to is
+    /// not itself a parseable address, so it fails here with a
+    /// deserialization error instead of reconstructing some address for
+    /// it. A malformed `IpAddress` is therefore lossy across this string
+    /// encoding, deliberately, rather than round-tripping.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(serde::de::Error::custom)
     }
 }
 
@@ -295,6 +362,91 @@ mod test {
     fn mac_try_from_rejects_upper_bits() {
         let proto = pb::MacAddress { addr: 0x1_0000_0000_0000 };
         assert!(MacAddr::try_from(&proto).is_err());
+    }
+
+    #[test]
+    fn serde_ip_address_v4() {
+        let ip = pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        let json = serde_json::to_string(&ip).unwrap();
+        assert_eq!(r#""10.0.0.1""#, json);
+        let got: pb::IpAddress = serde_json::from_str(&json).unwrap();
+        assert_eq!(ip, got);
+    }
+
+    #[test]
+    fn serde_ip_address_v6() {
+        let ip = pb::IpAddress::from(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)));
+        let json = serde_json::to_string(&ip).unwrap();
+        assert_eq!(r#""2001:db8::1""#, json);
+        let got: pb::IpAddress = serde_json::from_str(&json).unwrap();
+        assert_eq!(ip, got);
+    }
+
+    /// An IPv4-mapped IPv6 address's `Display` unmaps it, so its string
+    /// form serializes and deserializes as a plain 4-byte IPv4 address --
+    /// not the original 16-byte mapped wire form. The round trip is
+    /// therefore family-normalizing, not byte-preserving, for this one
+    /// input shape.
+    #[test]
+    fn serde_ip_address_v4_mapped_does_not_round_trip_bytes() {
+        let mapped = pb::IpAddress::from(IpAddr::V6(Ipv4Addr::new(141, 8, 128, 254).to_ipv6_mapped()));
+        assert_eq!(16, mapped.addr.len());
+
+        let json = serde_json::to_string(&mapped).unwrap();
+        assert_eq!(r#""141.8.128.254""#, json);
+
+        let got: pb::IpAddress = serde_json::from_str(&json).unwrap();
+        assert_eq!(4, got.addr.len());
+        assert_ne!(mapped, got);
+        assert_eq!(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(141, 8, 128, 254))), got);
+    }
+
+    /// A malformed byte length serializes to the same `"invalid"` literal
+    /// `Display` already falls back to, but that literal is not itself a
+    /// parseable address -- deserializing it back is a deliberate error,
+    /// not a silently reconstructed address.
+    #[test]
+    fn serde_ip_address_malformed_length_serializes_but_does_not_deserialize() {
+        let malformed = pb::IpAddress { addr: vec![0u8; 5] };
+        let json = serde_json::to_string(&malformed).unwrap();
+        assert_eq!(r#""invalid""#, json);
+        assert!(serde_json::from_str::<pb::IpAddress>(&json).is_err());
+    }
+
+    #[test]
+    fn serde_mac_address() {
+        let mac = pb::MacAddress::from("aa:bb:cc:dd:ee:ff".parse::<MacAddr>().unwrap());
+        let json = serde_json::to_string(&mac).unwrap();
+        assert_eq!(r#""aa:bb:cc:dd:ee:ff""#, json);
+        let got: pb::MacAddress = serde_json::from_str(&json).unwrap();
+        assert_eq!(mac, got);
+    }
+
+    /// A message with the upper 16 bits set serializes to `"invalid"`, the
+    /// same fallback [`mac_try_from_rejects_upper_bits`] proves `MacAddr`
+    /// itself rejects, and that literal does not deserialize back.
+    #[test]
+    fn serde_mac_address_upper_bits_serializes_but_does_not_deserialize() {
+        let malformed = pb::MacAddress { addr: 0x1_0000_0000_0000 };
+        let json = serde_json::to_string(&malformed).unwrap();
+        assert_eq!(r#""invalid""#, json);
+        assert!(serde_json::from_str::<pb::MacAddress>(&json).is_err());
+    }
+
+    /// `IpRange`'s derive needs no hand-written impl of its own: once its
+    /// two `IPAddress` fields serialize as strings, the derived shape is
+    /// already the nested `{"start": "...", "end": "..."}` form.
+    #[test]
+    fn serde_ip_range_nested_shape() {
+        let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
+        let end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 255));
+        let range = pb::IpRange::from((start, end));
+
+        let json = serde_json::to_string(&range).unwrap();
+        assert_eq!(r#"{"start":"10.0.0.0","end":"10.0.0.255"}"#, json);
+
+        let got: pb::IpRange = serde_json::from_str(&json).unwrap();
+        assert_eq!(range, got);
     }
 
     #[test]

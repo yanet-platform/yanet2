@@ -3,8 +3,24 @@ package lib
 import (
 	"encoding/hex"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+// requireGoCodeParses fails the test unless code parses as valid Go
+// statements. It wraps code in a minimal function body, since a
+// ConvertedStep.GoCode fragment is only ever embedded inside a generated
+// test's function body and is never a complete source file on its own.
+func requireGoCodeParses(t *testing.T, code string) {
+	t.Helper()
+
+	src := "package generated\n\nfunc f() {\n" + code + "\n}\n"
+	_, err := parser.ParseFile(token.NewFileSet(), "generated.go", src, 0)
+	require.NoError(t, err, "generated code must be valid Go:\n%s", code)
+}
 
 // asInt converts common numeric JSON types to int.
 func asInt(v any) (int, bool) {

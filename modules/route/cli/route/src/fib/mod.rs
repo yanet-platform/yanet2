@@ -1,17 +1,17 @@
 //! Support code for `fib show`.
 //!
-//! [`render`] and [`json`] each turn the wire's `FibEntry` rows -- see
-//! [`crate::routepb::FibEntry`] -- straight into their output, in wire
-//! order: [`json`] emits one record per entry, [`render`] emits one row
-//! per entry or one row per nexthop for an ECMP group. The server
-//! validates every range before ShowFIB's response can carry it, and the
-//! data itself comes from an LPM dump that cannot produce a malformed or
-//! inverted pair, so neither view reclassifies or decodes a range here.
-//! This module only holds the two formatting helpers they share:
-//! [`format_mac`] for a nexthop's MAC address, and [`range_endpoints`]
-//! for a range's two endpoints.
+//! [`render`] turns the wire's `FibEntry` rows -- see
+//! [`crate::routepb::FibEntry`] -- into the human table, one row per entry
+//! or one row per nexthop for an ECMP group, in wire order. `--format
+//! json` serializes `FibEntry` directly instead: `build.rs` derives
+//! `Serialize` on it, so there is no view of its own here for that format.
+//! The server validates every range before ShowFIB's response can carry
+//! it, and the data itself comes from an LPM dump that cannot produce a
+//! malformed or inverted pair, so [`render`] does not reclassify or decode
+//! a range either. This module only holds the two formatting helpers
+//! [`render`] uses: [`format_mac`] for a nexthop's MAC address, and
+//! [`range_endpoints`] for a range's two endpoints.
 
-pub mod json;
 pub mod render;
 
 use commonpb::pb::{IpAddress, IpRange, MacAddress};

@@ -409,7 +409,10 @@ func (c *Converter) convertRouteUpdate(content any, stepType string, isIPv6 bool
 	}
 
 	c.addFIBEntries(prefixes)
-	fibCode := c.generateFIBUpdateGoCode(fmt.Sprintf("%s routes", protocol))
+	fibCode, err := c.generateFIBUpdateGoCode(fmt.Sprintf("%s routes", protocol))
+	if err != nil {
+		return NewErrorStep(stepType, fmt.Sprintf("failed to generate FIB update: %v", err))
+	}
 
 	goCode := fmt.Sprintf(`%s%s`, yamlComment, fibCode)
 
@@ -463,7 +466,10 @@ func (c *Converter) convertIPv4LabelledUpdate(content any, stepType string) Conv
 	}
 
 	c.addFIBEntries(prefixes)
-	fibCode := c.generateFIBUpdateGoCode("IPv4 labelled routes")
+	fibCode, err := c.generateFIBUpdateGoCode("IPv4 labelled routes")
+	if err != nil {
+		return NewErrorStep(stepType, fmt.Sprintf("failed to generate FIB update: %v", err))
+	}
 
 	goCode := fmt.Sprintf(`%s%s`, yamlComment, fibCode)
 
@@ -525,7 +531,10 @@ func (c *Converter) convertRouteRemove(content any, stepType string, isLabelled 
 	}
 
 	c.removeFIBEntries(prefixes)
-	fibCode := c.generateFIBUpdateGoCode(description)
+	fibCode, err := c.generateFIBUpdateGoCode(description)
+	if err != nil {
+		return NewErrorStep(stepType, fmt.Sprintf("failed to generate FIB update: %v", err))
+	}
 
 	goCode := fmt.Sprintf(`%s%s`, yamlComment, fibCode)
 

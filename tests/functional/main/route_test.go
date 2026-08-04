@@ -31,13 +31,17 @@ const routeEgressDevice = "01:00.0"
 func applyFIB(t *testing.T, fw *framework.TestFramework, cfgName, suffix string, prefixes ...string) {
 	t.Helper()
 
+	type fibRangeYAML struct {
+		Start string `yaml:"start"`
+		End   string `yaml:"end"`
+	}
 	type fibNexthopYAML struct {
 		DstMAC string `yaml:"dst_mac"`
 		SrcMAC string `yaml:"src_mac"`
 		Device string `yaml:"device"`
 	}
 	type fibEntryYAML struct {
-		Prefix   string           `yaml:"prefix"`
+		Range    fibRangeYAML     `yaml:"range"`
 		Nexthops []fibNexthopYAML `yaml:"nexthops"`
 	}
 	type fibConfigYAML struct {
@@ -46,8 +50,11 @@ func applyFIB(t *testing.T, fw *framework.TestFramework, cfgName, suffix string,
 
 	cfg := fibConfigYAML{Entries: make([]fibEntryYAML, 0, len(prefixes))}
 	for _, prefix := range prefixes {
+		start, end, err := framework.PrefixRange(prefix)
+		require.NoError(t, err, "failed to parse prefix %q", prefix)
+
 		cfg.Entries = append(cfg.Entries, fibEntryYAML{
-			Prefix: prefix,
+			Range: fibRangeYAML{Start: start, End: end},
 			Nexthops: []fibNexthopYAML{{
 				DstMAC: framework.SrcMAC,
 				SrcMAC: framework.DstMAC,

@@ -199,19 +199,26 @@ rules:
 // DefaultRouteConfig returns the baseline route0.yaml used by functional
 // tests.
 func DefaultRouteConfig() string {
-	return `
+	v4Start, v4End := MustPrefixRange("0.0.0.0/0")
+	v6Start, v6End := MustPrefixRange("::/0")
+
+	return fmt.Sprintf(`
 entries:
-  - prefix: "0.0.0.0/0"
+  - range:
+      start: %q
+      end: %q
     nexthops:
-      - dst_mac: "` + SrcMAC + `"
-        src_mac: "` + DstMAC + `"
+      - dst_mac: %q
+        src_mac: %q
         device: "01:00.0"
-  - prefix: "::/0"
+  - range:
+      start: %q
+      end: %q
     nexthops:
-      - dst_mac: "` + SrcMAC + `"
-        src_mac: "` + DstMAC + `"
+      - dst_mac: %q
+        src_mac: %q
         device: "01:00.0"
-`
+`, v4Start, v4End, SrcMAC, DstMAC, v6Start, v6End, SrcMAC, DstMAC)
 }
 
 // HarnessConfig describes the VM pool a functional-test package boots.

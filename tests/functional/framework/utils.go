@@ -2,9 +2,12 @@ package framework
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
 // findProjectRoot locates the YANET project root directory by traversing up the
@@ -91,6 +94,34 @@ func IsDebugEnabled() bool {
 func ShouldKeepVMAlive() bool {
 	_, ok := os.LookupEnv("YANET_KEEP_VM_ALIVE")
 	return ok
+}
+
+// PrefixRange converts a CIDR prefix into its masked start and end address
+// strings, matching the FIB YAML's range-native "start"/"end" keys.
+//
+// It masks host bits before taking the start address, so an unmasked prefix
+// such as "10.0.0.5/24" yields "10.0.0.0" rather than "10.0.0.5" as the
+// range start. xnetip.LastAddr ORs in the wildcard bits regardless of
+// masking, so the end address ("10.0.0.255") is the same either way.
+func PrefixRange(prefix string) (start, end string, err error) {
+	parsed, err := netip.ParsePrefix(prefix)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse prefix %q: %w", prefix, err)
+	}
+	masked := parsed.Masked()
+	return masked.Addr().String(), xnetip.LastAddr(masked).String(), nil
+}
+
+// MustPrefixRange is PrefixRange, panicking on a malformed prefix.
+//
+// For call sites converting a compile-time-known CIDR literal, matching this
+// package's existing MustParseMAC panic-on-literal convention.
+func MustPrefixRange(prefix string) (start, end string) {
+	start, end, err := PrefixRange(prefix)
+	if err != nil {
+		panic(err)
+	}
+	return start, end
 }
 
 // VMReadyTimeout returns how long to wait for a VM to reach the shell prompt.

@@ -182,3 +182,47 @@ func TestConvertRouteRemove_PreservesOriginalBehavior(t *testing.T) {
 	// Results should be different because step types are different
 	require.NotEqual(t, regularResult.Type, labelledResult.Type, "Regular and labelled types should differ")
 }
+
+// TestConvertRouteUpdate_FailsOnUnparseablePrefix verifies that a route whose
+// prefix is not valid CIDR surfaces as a failing generated step instead of
+// being silently dropped from the FIB YAML. parseRouteString does not
+// validate the prefix, so a malformed one (unlike a malformed "prefix ->
+// nexthop" line) reaches generateFIBUpdateGoCode.
+func TestConvertRouteUpdate_FailsOnUnparseablePrefix(t *testing.T) {
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
+	converter.resetFIBState()
+
+	content := []any{
+		"10.0.0.0/24 -> 192.168.1.1",
+		"not-a-cidr -> 192.168.1.2",
+	}
+
+	result := converter.convertIPv4Update(content, "ipv4Update")
+
+	require.Contains(t, result.GoCode, "t.Fatalf", "an unparseable prefix must fail the generated step, not skip it")
+	require.Contains(t, result.GoCode, "not-a-cidr", "the failure must name the offending prefix")
+	require.NotContains(t, result.GoCode, "range:", "no partial FIB YAML should be emitted on failure")
+	requireGoCodeParses(t, result.GoCode)
+}
+
+// TestConvertRouteUpdate_EmitsRangeNativeFIBYAML verifies the generated FIB
+// YAML uses the wire's range-native "range: {start, end}" shape rather than
+// the retired "prefix" key, with an IPv6 "::" endpoint quoted so it doesn't
+// parse as a YAML mapping indicator.
+func TestConvertRouteUpdate_EmitsRangeNativeFIBYAML(t *testing.T) {
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
+	converter.resetFIBState()
+
+	result := converter.convertIPv4Update([]any{"10.0.0.0/24 -> 192.168.1.1"}, "ipv4Update")
+
+	require.NotContains(t, result.GoCode, "prefix:", "generated FIB YAML must not use the retired prefix key")
+	require.Contains(t, result.GoCode, "range:")
+	require.Contains(t, result.GoCode, `start: "10.0.0.0"`)
+	require.Contains(t, result.GoCode, `end: "10.0.0.255"`)
+
+	ipv6Result := converter.convertIPv6Update([]any{"::/0 -> fe80::1"}, "ipv6Update")
+
+	require.Contains(t, ipv6Result.GoCode, `start: "::"`, "an IPv6 :: endpoint must be quoted")
+}
