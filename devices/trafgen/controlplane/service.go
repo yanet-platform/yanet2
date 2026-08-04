@@ -23,7 +23,7 @@ var errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is 
 // maxFrameLen is the largest replay frame the dataplane can emit.
 //
 // The dataplane reserves mbuf tailroom with a 16-bit length, so a frame above
-// this bound would wrap and corrupt the mbuf; reject such frames at upload.
+// this bound would wrap and corrupt the mbuf. Reject such frames at upload.
 const maxFrameLen = 65535
 
 // Pipeline is a weighted input/output pipeline assignment for the generator.
@@ -71,7 +71,7 @@ func NewTrafgenService(backend Backend) *TrafgenService {
 
 // UpdateDevice binds the input/output pipelines of the named generator.
 //
-// The loaded frames and the target rate are preserved; generated traffic is
+// The loaded frames and the target rate are preserved. Generated traffic is
 // demultiplexed into the configured input pipelines by the dataplane.
 func (m *TrafgenService) UpdateDevice(
 	ctx context.Context,

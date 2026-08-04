@@ -38,7 +38,7 @@ func TestRouteComparator(t *testing.T) {
 
 	b.ASPathLen = 2
 	a.Med = 1
-	// a has Med=1, b has Med=0; lower MED is better, so b beats a
+	// a has Med=1, b has Med=0 — lower MED is better, so b beats a
 	require.True(t, routeCompare(a, b) < 0)
 	// c has ASPathLen=0 which beats both a and b (ASPathLen=2)
 	require.True(t, routeCompare(c, a) > 0)
@@ -46,7 +46,7 @@ func TestRouteComparator(t *testing.T) {
 
 	routes := []Route{a, b, c}
 	slices.SortFunc(routes, routeCompareRev)
-	// c has ASPathLen=0 so it is the best; among equal ASPathLen, b (Med=0) beats a (Med=1)
+	// c has ASPathLen=0 so it is the best — among equal ASPathLen, b (Med=0) beats a (Med=1)
 	require.Equal(t, s(c, b, a), s(routes...))
 
 	b.Pref = 100

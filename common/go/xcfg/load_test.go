@@ -152,7 +152,7 @@ func Test_Load_SliceElement_ExplicitEmptyField(t *testing.T) {
 		Items []Item `yaml:"items"`
 	}
 
-	// An explicit empty string is rejected at UnmarshalYAML; Decode must still
+	// An explicit empty string is rejected at UnmarshalYAML. Decode must still
 	// surface an error.
 	yaml := "items:\n  - name: \"\"\n"
 	var cfg Config

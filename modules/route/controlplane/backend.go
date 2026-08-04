@@ -30,7 +30,7 @@ type ModuleHandle interface {
 }
 
 // Compile-time assertion that *croute.ModuleConfig satisfies the
-// ModuleHandle interface; catches drift in the bindings layer.
+// ModuleHandle interface. Catches drift in the bindings layer.
 var _ ModuleHandle = (*croute.ModuleConfig)(nil)
 
 // CounterView is a single dataplane counter read back from one position at

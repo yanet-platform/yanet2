@@ -64,7 +64,7 @@ func (m *MemoryContext) AsRawPtr() unsafe.Pointer {
 //
 // The overhead consists of:
 // - Block allocator alignment overhead: 2MB (may be smaller but never larger in some cases)
-// - Sanitizer RED ZONES overhead: ~4MB (if sanitizers are enabled; empirical value that depends on allocation count)
+// - Sanitizer RED ZONES overhead: ~4MB (if sanitizers are enabled — empirical value that depends on allocation count)
 func CPAlignmentOverhead() datasize.ByteSize {
 	// Block allocator alignment overhead on max block size
 	// This value can be smaller but not bigger in some circumstances.

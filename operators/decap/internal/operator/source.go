@@ -28,7 +28,7 @@ type staticSource struct {
 }
 
 // NewStaticSource constructs a staticSource holding the supplied module
-// configs. The slice is not copied; callers must not modify it after
+// configs. The slice is not copied — callers must not modify it after
 // passing it in.
 func NewStaticSource(modules []ModuleConfig, options ...StaticSourceOption) operator.StateSource[State] {
 	opts := newStaticSourceOptions()
@@ -49,7 +49,7 @@ func (m *staticSource) Snapshot() (State, bool) {
 
 // Wake returns the channel the Reconciler monitors for eager wakeups.
 //
-// staticSource never signals it; the reconcile interval is the sole
+// staticSource never signals it — the reconcile interval is the sole
 // pacing mechanism.
 func (m *staticSource) Wake() <-chan struct{} { return m.wake }
 

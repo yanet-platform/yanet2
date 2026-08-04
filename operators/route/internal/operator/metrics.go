@@ -153,7 +153,7 @@ func (m *Metrics) OnRIBSessionEnd(name string, sessionID uint64) {
 // through a FeedRIB stream session.
 //
 // Unary route mutations (InsertRoute/DeleteRoute) and static-config
-// seeding also change RIB contents but are not counted here; they are
+// seeding also change RIB contents but are not counted here — they are
 // visible through the RIB gauges instead.
 func (m *Metrics) OnRIBUpdate(n int) {
 	m.ribFeedUpdates.Add(uint64(n))

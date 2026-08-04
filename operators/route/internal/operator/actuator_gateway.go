@@ -90,7 +90,7 @@ func (m *GatewayActuator) Close() error {
 // then republishes the operator's network function.
 //
 // Every FIB is attempted and the function is published even on a partial
-// failure; the joined errors let the reconcile loop retry under backoff.
+// failure — the joined errors let the reconcile loop retry under backoff.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
 	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
 

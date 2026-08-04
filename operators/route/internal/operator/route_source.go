@@ -30,7 +30,7 @@ type RouteSnapshot struct {
 // turns into its own FIB.
 //
 // Wake is signalled by the wake callbacks wired into RouteService and
-// NeighbourService whenever their state mutates; it preempts the
+// NeighbourService whenever their state mutates — it preempts the
 // reconcile loop's sleep so the next pass picks up the change without
 // waiting for the steady-state interval.
 type RouteSource struct {

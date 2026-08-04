@@ -251,7 +251,7 @@ func (m *RouteService) InsertRoute(
 	}
 
 	// Wake the reconcile loop only when the caller explicitly asks for a
-	// flush; otherwise the RIB mutation is buffered until a later flush.
+	// flush — otherwise the RIB mutation is buffered until a later flush.
 	if req.GetDoFlush() {
 		m.onChanged()
 	}
@@ -300,7 +300,7 @@ func (m *RouteService) DeleteRoute(
 	}
 
 	// Wake the reconcile loop only when the caller explicitly asks for a
-	// flush; otherwise the RIB mutation is buffered until a later flush.
+	// flush — otherwise the RIB mutation is buffered until a later flush.
 	if req.GetDoFlush() {
 		m.onChanged()
 	}

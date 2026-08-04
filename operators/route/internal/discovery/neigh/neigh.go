@@ -359,7 +359,7 @@ func (m *NeighMonitor) notifyResynced() {
 // so it must be rejected rather than emitted. Links without an Ethernet
 // address of their own — tunnels and other point-to-point devices — report
 // a nil or short HardwareAddr, and the loopback device reports six genuine
-// zero bytes; both fail this check. A true result also guarantees exactly
+// zero bytes. Both fail this check. A true result also guarantees exactly
 // six bytes, which the caller relies on: its [6]byte(hardwareAddr) array
 // conversion panics on any other length.
 func isUsableSourceMAC(hardwareAddr net.HardwareAddr) bool {

@@ -87,10 +87,10 @@ func NewServiceRunner(
 	}
 }
 
-// Ready returns a channel that is closed when the runner has finished
-// the initial service registration phase against the gateway. The
-// channel is closed exactly once; consumers can use it to detect that
-// the module is reachable through the gateway.
+// Ready returns a channel that is closed when the runner has finished the
+// initial service registration phase against the gateway. The channel is
+// closed exactly once. Consumers can use it to detect that the module is
+// reachable through the gateway.
 func (m *ServiceRunner) Ready() <-chan struct{} {
 	return m.ready
 }

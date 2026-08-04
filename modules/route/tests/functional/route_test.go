@@ -125,7 +125,7 @@ func wirePipeline(
 
 // applyFIB pushes entries via backend.UpdateModule and registers cleanup.
 //
-// Returns the route.ModuleHandle; the caller may inspect it. The handle is
+// Returns the route.ModuleHandle. The caller may inspect it. The handle is
 // freed via tb.Cleanup.
 func applyFIB(
 	tb testing.TB,
@@ -699,7 +699,7 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, uint64(0), byDevName["output_pending_output"][0], "device output_pending_output must equal 0")
 
 		// The route module drops an unmatched packet itself, so its own
-		// drop counter records it (rx in, drop out; tx stays zero).
+		// drop counter records it (rx in, drop out, tx stays zero).
 		routeModulePath := dataplaneut.CounterPath{
 			Device: "port0", Pipeline: "test", Function: "test",
 			Chain: "test_chain", ModuleType: "route", ModuleName: "test",
@@ -850,7 +850,7 @@ func TestRoute_PerOutcomeCounters(t *testing.T) {
 		Device: "phantom",
 	}
 
-	// FIB installed so matching packets reach a nexthop; a TTL check fires
+	// FIB installed so matching packets reach a nexthop. A TTL check fires
 	// before the lookup, so ttl-expired cases still target a real prefix.
 	fib := []FIBEntry{
 		{Prefix: netip.MustParsePrefix("10.0.0.0/24"), Nexthops: []FIBNexthop{routeNextHop}},

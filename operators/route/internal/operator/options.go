@@ -32,7 +32,7 @@ func WithLog(log *zap.Logger) Option {
 
 // WithMetrics overrides the factory used to construct the metrics sink.
 //
-// The default factory is NewMetrics; use this to wrap or extend the
+// The default factory is NewMetrics. Use this to wrap or extend the
 // default sink, for example to share it with an externally owned
 // metrics-service registration.
 func WithMetrics(factory MetricsFactory) Option {

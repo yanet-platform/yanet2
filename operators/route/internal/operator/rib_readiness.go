@@ -66,7 +66,7 @@ type birdRIBReadiness struct {
 	tracker    *readiness.Tracker
 
 	// counter is the total number of route updates applied in the current
-	// session. Written by OnUpdate on the FeedRIB hot path; read by Run.
+	// session. Written by OnUpdate on the FeedRIB hot path, read by Run.
 	counter atomic.Int64
 
 	// mu guards session/settle fields and the consistency of rib/bird-session
@@ -172,7 +172,7 @@ func (m *birdRIBReadiness) ribSyncingState() readinesspb.State {
 //
 // sessionID is the id returned by ribRef.NewSession and is stored so that a
 // stale OnSessionEnd from a superseded stream can be ignored. The bird-session
-// scope transitions to READY; the rib scope resets the bulk-settle gate and
+// scope transitions to READY. The rib scope resets the bulk-settle gate and
 // enters the syncing state.
 func (m *birdRIBReadiness) OnSessionStart(name string, sessionID uint64) {
 	if name != m.configName {
@@ -204,7 +204,7 @@ func (m *birdRIBReadiness) OnUpdate(n int) {
 // OnSessionEnd is called by FeedRIB when the stream ends for the given config.
 //
 // sessionID must match the id passed to the most recent OnSessionStart for
-// name; if it does not, the call is from a superseded stream and is silently
+// name. If it does not, the call is from a superseded stream and is silently
 // ignored to prevent a stale end from clobbering the active session state.
 // When the session id matches, bird-session transitions to
 // DEGRADED(RECONNECTING) and rib to DEGRADED(SESSION_ENDED) — routes remain
@@ -265,7 +265,8 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Re-stamp bird-session freshness each tick; tick re-confirms session liveness.
+	// Re-stamp bird-session freshness each tick — the tick re-confirms
+	// session liveness.
 	m.tracker.Touch("bird-session")
 
 	if !m.bulkSettled {
@@ -276,7 +277,7 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 				m.bulkSettled = true
 			}
 		} else {
-			// Rate spiked above threshold; reset the continuous window.
+			// Rate spiked above threshold — reset the continuous window.
 			m.belowSince = time.Time{}
 		}
 	}

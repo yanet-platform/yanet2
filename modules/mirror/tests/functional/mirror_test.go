@@ -404,7 +404,7 @@ func TestMirror_UnmappedDevice(t *testing.T) {
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
 
-	// "phantom" is never registered via UpdatePlainDevices; its mc_index
+	// "phantom" is never registered via UpdatePlainDevices. Its mc_index
 	// entry stays at the initial sentinel value of -1.
 	rule := cmirror.MirrorRule{
 		Target:  "phantom",
@@ -416,7 +416,7 @@ func TestMirror_UnmappedDevice(t *testing.T) {
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
 	applyRules(t, backend, "test", []cmirror.MirrorRule{rule})
-	// Only port0 is wired; "phantom" has no cp_device entry.
+	// Only port0 is wired. "phantom" has no cp_device entry.
 	wireMirrorPipeline(t, agent, "port0", "test", nil)
 
 	result, err := h.HandlePackets(pkt)
@@ -585,7 +585,7 @@ func TestMirror_MinAction(t *testing.T) {
 	require.Len(t, result.Output, 1, "passthrough packet has no mirror copy")
 	require.Empty(t, result.Drop, "packet must not be dropped")
 
-	// Rule 0 counter must be 1; rule 1 counter must be 0 (never selected).
+	// Rule 0 counter must be 1 — rule 1 counter must be 0 (never selected).
 	path := dataplaneut.CounterPath{
 		Device:     "port0",
 		Pipeline:   "test",

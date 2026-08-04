@@ -14,7 +14,7 @@ type ModuleHandle interface {
 }
 
 // Compile-time assertion that *croutempls.ModuleConfig satisfies the
-// ModuleHandle interface; catches drift in the bindings layer.
+// ModuleHandle interface. Catches drift in the bindings layer.
 var _ ModuleHandle = (*croutempls.ModuleConfig)(nil)
 
 // Backend abstracts shared memory write-path operations for the route-mpls

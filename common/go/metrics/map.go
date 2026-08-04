@@ -99,8 +99,8 @@ func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
 // DeleteWhere removes every stored metric whose (ID, metric) satisfies pred.
 //
 // The predicate receives a cloned MetricID so it cannot mutate stored map
-// state. Buckets are compacted in place; hash buckets that become empty
-// are deleted so the map does not accumulate empty slots.
+// state. Buckets are compacted in place. Hash buckets that become empty are
+// deleted so the map does not accumulate empty slots.
 //
 // Returns the number of metrics removed.
 func (m *MetricMap[T]) DeleteWhere(pred func(MetricID, T) bool) int {

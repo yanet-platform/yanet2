@@ -24,7 +24,7 @@ type SessionTimeouts struct {
 // traffic to.
 //
 // Dst is the real's destination address. Src is the source network used as
-// the encapsulation source (for the IPIP/GRE tunnel); its mask may be any
+// the encapsulation source (for the IPIP/GRE tunnel). Its mask may be any
 // (possibly non-contiguous) bitmask, and its address family must match Dst.
 type RealConfig struct {
 	Dst         netip.Addr
@@ -35,7 +35,7 @@ type RealConfig struct {
 // AllowedSources describes one entry in a virtual service's source allow
 // list. A packet is admitted only if its source address matches one of the
 // listed networks AND its source port matches one of the listed ranges. An
-// empty set of networks disallows all networks; an empty set of ports allows
+// empty set of networks disallows all networks. An empty set of ports allows
 // all ports.
 type AllowedSources struct {
 	Net4s       filter.IPNets

@@ -38,7 +38,7 @@ func WithLog(log *zap.Logger) Option {
 // RouteModule is the slim route-module shim that owns shared memory and
 // exposes the routepb.RouteService gRPC surface.
 //
-// The module no longer owns a RIB or a neighbour table; the
+// The module no longer owns a RIB or a neighbour table. The
 // yanet-route-operator agent rebuilds the FIB and pushes it via
 // UpdateFIB.
 type RouteModule struct {

@@ -491,7 +491,7 @@ func hostInNet(network filter.IPNet, hostBits int) net.IP {
 //
 // This way a batch lands in many distinct classifier classes and table
 // cells the way mixed real traffic does. Uniform sampling over rules is
-// a worst-case-ish cache workload; real traffic is more skewed.
+// a worst-case-ish cache workload — real traffic is more skewed.
 func synthesizeDatasetPackets(
 	tb testing.TB, rules []cacl.AclRule, limit int,
 ) []gopacket.Packet {
@@ -752,7 +752,7 @@ var datasetTopoDevices = []string{
 }
 
 // datasetTopoACLDevices lists positions in datasetTopoDevices whose
-// input pipeline runs ACL; the .2000 device carries the fwstate path in
+// input pipeline runs ACL. The .2000 device carries the fwstate path in
 // production and bypasses ACL.
 var datasetTopoACLDevices = []uint16{0, 1, 2, 3, 5, 6}
 
@@ -768,7 +768,7 @@ var (
 // Production dumps scope every rule explicitly, so real rulesets pass
 // through untouched. Synthesized rules carry no device scopes, which
 // would collapse the device classifier column to a single class and
-// reduce the topology benchmark to batch splitting; the catch-all rule
+// reduce the topology benchmark to batch splitting. The catch-all rule
 // spans every rule-bearing device the way per-device catch-alls do in
 // production. The remaining replayed devices deliberately stay
 // rule-free: in the production dump they carry traffic but no rules,

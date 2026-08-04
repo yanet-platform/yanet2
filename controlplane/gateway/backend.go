@@ -72,7 +72,8 @@ func (m *backend) AppendInfo(_ bool, resp []byte) ([]byte, error) {
 	return resp, nil
 }
 
-// BuildError satisfies proxy.Backend; the gateway never synthesises error frames.
+// BuildError satisfies proxy.Backend. The gateway never synthesises error
+// frames.
 func (m *backend) BuildError(bool, error) ([]byte, error) {
 	return nil, nil
 }

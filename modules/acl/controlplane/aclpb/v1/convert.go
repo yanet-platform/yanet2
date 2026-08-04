@@ -113,7 +113,7 @@ func FromRules(rules []cacl.AclRule) []*Rule {
 // to the given cacl action kind.
 //
 // Unrecognized cacl kinds map to ActionKind_ACTION_KIND_PASS (the proto
-// zero value); FromActions does not surface an error in this direction
+// zero value). FromActions does not surface an error in this direction
 // because input comes from a typed Go value, not the wire.
 func (m *Action) setFromCAclKind(kind uint32) {
 	switch kind {

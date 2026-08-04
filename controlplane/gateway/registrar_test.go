@@ -23,7 +23,7 @@ import (
 // status before succeeding.
 //
 // A negative failures rejects every call, which is what the permanent-error
-// test needs; a non-negative value rejects exactly that many leading calls
+// test needs. A non-negative value rejects exactly that many leading calls
 // and then succeeds, letting the transient-error test observe a successful
 // retry without depending on wall-clock timing.
 type stubGatewayServer struct {
@@ -67,7 +67,7 @@ func startGRPCStub(t *testing.T, server ynpb.GatewayServer) string {
 // startStubGateway starts a stubGatewayServer on a real 127.0.0.1 listener
 // and returns its endpoint alongside the server for call-count inspection.
 //
-// The stub rejects the first failures calls with code, then succeeds; pass a
+// The stub rejects the first failures calls with code, then succeeds. Pass a
 // negative failures to reject every call.
 func startStubGateway(t *testing.T, code codes.Code, failures int64) (string, *stubGatewayServer) {
 	t.Helper()

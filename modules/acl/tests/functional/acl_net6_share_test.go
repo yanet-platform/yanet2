@@ -60,7 +60,7 @@ func setNet6ShareDisabled(t *testing.T, disabled bool) {
 // classification mechanism rather than the ACL action logic: the specific
 // actions only need to be distinguishable, not meaningful.
 func net6ShareEdgeCaseRules() []cacl.AclRule {
-	// divergeBroad has no port constraint (filter_ip6); divergeNested is
+	// divergeBroad has no port constraint (filter_ip6). divergeNested is
 	// a narrower network scoped to a destination port (filter_ip6_port).
 	// An address inside the nested network lands in a partition that
 	// filter_ip6's own classifier never has to distinguish, exactly the
@@ -316,7 +316,7 @@ func collectNet6ShareVerdicts(
 // acl_module_init_net6_share returns without building the shared trie in
 // three cases: the kill switch, filter_rule_count_ip6 == 0, and
 // filter_rule_count_ip6_port == 0. The kill switch is closed off by the
-// ambient-environment check below; the other two are closed off by
+// ambient-environment check below. The other two are closed off by
 // asserting both rule counts are non-zero on the shared side, since
 // net6ShareEdgeCaseRules always supplies both port-scoped and
 // non-port-scoped v6 rules. Without that assertion, a ruleset lacking
@@ -389,7 +389,7 @@ func runNet6ShareVerdictParity(
 // allocator overhead pushes the default 64/16 MB harness out of memory
 // while compiling filter_ip6_port, even for the unshared baseline subtest,
 // so the failure tracks the sanitizer build, not the sharing change. 128/32
-// MB was the smallest size found to pass under ASan; 192/48 MB adds
+// MB was the smallest size found to pass under ASan. 192/48 MB adds
 // headroom for allocator-layout and runner-to-runner variance while still
 // measuring well under 512 MiB peak RSS in either build mode.
 func TestACL_Net6Share_VerdictParity(t *testing.T) {
@@ -417,7 +417,7 @@ func TestACL_Net6Share_VerdictParity(t *testing.T) {
 // ~1.74 GiB peak RSS under ASan, still comfortably under the 2 GiB a
 // standard CI runner can spare. This tier runs in the default `make test`
 // and `make test-asan` paths, so it must stay well inside that budget in
-// both build modes; TestACL_Net6Share_VerdictParity_ScaleHeavy carries the
+// both build modes. TestACL_Net6Share_VerdictParity_ScaleHeavy carries the
 // production-scale rule count instead.
 func TestACL_Net6Share_VerdictParity_Scale(t *testing.T) {
 	const (

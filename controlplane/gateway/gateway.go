@@ -182,7 +182,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			// clients released before the trailer still match on it, and
 			// stays that way until those are gone. SetTrailer only fails
 			// without a live server stream, which the proxying handler
-			// always supplies; losing it would cost only the marker.
+			// always supplies. Losing it would cost only the marker.
 			_ = grpc.SetTrailer(ctx, metadata.Pairs(errorReasonMetadataKey, errorReasonServiceUnregistered))
 			return proxy.One2One, nil, status.Errorf(codes.NotFound, "unknown service")
 		}
@@ -222,7 +222,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	// serviceFilter rejects any service the gateway does not know about,
 	// stopping metric series and per-service method bookkeeping allocation
 	// at the source for unauthenticated scans against random service names.
-	// A registry backend lookup is mutex-guarded and cheap; the gateway's
+	// A registry backend lookup is mutex-guarded and cheap. The gateway's
 	// own registered services are read from the cached serviceKnown snapshot.
 	serviceFilter := func(service string) bool {
 		if _, ok := registry.GetBackend(service); ok {

@@ -181,7 +181,7 @@ func lintFile(pf protoFile) bool {
 	ok := true
 	line := pf.GoPkgLine
 
-	// Rule 1: go_package must be on a single line ending with ";".
+	// Rule 1: go_package must appear on one line and end with a semicolon.
 	if !strings.HasSuffix(line, ";") {
 		fmt.Printf("%s: option go_package must be written on a single line ending with \";\"\n", pf.Path)
 		return false
@@ -198,8 +198,9 @@ func lintFile(pf protoFile) bool {
 		fmt.Printf("%s: option go_package must contain an alias (e.g. \"path;alias\")\n", pf.Path)
 		ok = false
 	} else {
-		// Rule 3: alias must equal the penultimate directory in the import
-		// path. For "github.com/.../aclpb/v1;aclpb", penultimate is "aclpb".
+		// Rule 3: alias must equal the penultimate directory in the import path.
+		// In "github.com/org/repo/aclpb/v1" with alias "aclpb" the penultimate
+		// segment is "aclpb", so the two match.
 		penult := penultimateSegment(importPath)
 		if penult != "" && alias != penult {
 			fmt.Printf("%s: option go_package alias %q does not match penultimate path segment %q\n", pf.Path, alias, penult)

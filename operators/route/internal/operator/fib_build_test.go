@@ -236,7 +236,7 @@ func Test_BuildFIB_DeviceFilterStarvesPrefix(t *testing.T) {
 // filter, so the device set is left empty here.
 func Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable(t *testing.T) {
 	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	// Only the worse route's nexthop is resolvable; the best route's
+	// Only the worse route's nexthop is resolvable — the best route's
 	// nexthop has no neighbour entry.
 	cache.Set(netip.MustParseAddr("10.0.0.1"), neigh.NeighbourEntry{
 		HardwareRoute: neigh.HardwareRoute{
@@ -346,7 +346,7 @@ func Test_BuildFIB_MultiPrefix(t *testing.T) {
 	p4 := netip.MustParseAddr("192.0.2.4")
 
 	ribDump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](2)
-	// Wider prefix: three equal-cost bird routes; one egresses through the
+	// Wider prefix: three equal-cost bird routes — one egresses through the
 	// excluded eth2, leaving two ECMP nexthops on eth1.
 	ribDump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
 		Routes: []rib.Route{

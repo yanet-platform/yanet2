@@ -636,7 +636,7 @@ type CounterGroup struct {
 
 // CountersByTags returns counters matching every predicate in tags and at
 // least one name in query. A nil or empty tags slice imposes no per-tag
-// constraint; a nil or empty query matches any counter name.
+// constraint. A nil or empty query matches any counter name.
 func (m *DPConfig) CountersByTags(
 	tags []CounterTag,
 	query []string,

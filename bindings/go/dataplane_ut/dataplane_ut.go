@@ -216,11 +216,11 @@ type RawResult struct {
 // struct holds self-referential pointers.
 type Harness struct {
 	ptr *C.struct_dataplane_ut
-	// Registered topology device count; device ids passed to bench runs
+	// Registered topology device count. Device ids passed to bench runs
 	// must stay below it. An empty Devices config still exposes the
 	// implicit device slot zero.
 	deviceCount int
-	// Registered worker count; worker indices passed to run calls must
+	// Registered worker count. Worker indices passed to run calls must
 	// stay below it.
 	workerCount int
 }
@@ -256,7 +256,7 @@ func NewHarness(cfg Config) (*Harness, error) {
 	}
 
 	// Convert Go string slices to C string arrays. The *C.char values are
-	// C-heap strings; toCStringArray returns Go-backed pointer slices, so
+	// C-heap strings. toCStringArray returns Go-backed pointer slices, so
 	// we copy the pointers into C-heap arrays to satisfy the CGO rule that
 	// no Go pointer may appear inside a value passed to C.
 	cDevices, freeDevices := toCStringArray(cfg.Devices)
@@ -367,7 +367,7 @@ func (m *Harness) HandlePacketsOnWorker(worker int, packets ...gopacket.Packet) 
 //
 // hashes[i] is written into packets[i].hash before the round, giving
 // modules that select outputs via hash (e.g. route ECMP) deterministic
-// test-controlled values. hashes may be shorter than packets; entries
+// test-controlled values. hashes may be shorter than packets — entries
 // past len(hashes) keep their original hash. Returns an error if
 // len(hashes) > len(packets).
 func (m *Harness) HandlePacketsWithHashes(
@@ -574,7 +574,7 @@ type BenchOption func(*benchOptions)
 // between rounds.
 //
 // Required for modules that rewrite packet contents in place, such as
-// route decrementing TTL; costs one payload copy per packet per round.
+// route decrementing TTL — costs one payload copy per packet per round.
 // Only the bytes are restored, so geometry-changing modules stay out of
 // scope.
 func WithPayloadReset() BenchOption {
@@ -585,7 +585,7 @@ func WithPayloadReset() BenchOption {
 
 // WithDeviceIDs assigns per-packet rx/tx device ids before the run.
 //
-// ids[i] is written into packets[i]; packets past len(ids) keep device 0.
+// ids[i] is written into packets[i]. Packets past len(ids) keep device 0.
 // The round dispatch then splits the burst into per-device fronts the way
 // a real multi-device worker round does. Ids persist across bench rounds
 // via the harness packet snapshot.

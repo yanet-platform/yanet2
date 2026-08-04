@@ -76,7 +76,7 @@ func WithClock(fn func() time.Time) Option {
 //
 // Once a service reaches the limit, calls for a method not already seen are
 // recorded under the overflow label grpc_method="other" instead of the
-// client-supplied name; methods already tracked keep recording under their
+// client-supplied name. Methods already tracked keep recording under their
 // own name. A server that only exposes registered services rejects unknown
 // methods before any interceptor runs, so the cap is chiefly useful for
 // transparent proxies, which forward any client-supplied method name under a

@@ -42,7 +42,7 @@ func WithLog(log *zap.Logger) Option {
 // WithMetrics enables collection of gRPC call metrics using the supplied
 // factory.
 //
-// The factory owns label extraction and bucketing; the service injects its own
+// The factory owns label extraction and bucketing. The service injects its own
 // retention provider at construction time. Use [NewMetricsFactory] to build a
 // factory scoped to this module's services.
 func WithMetrics(factory grpcmetrics.Factory) Option {

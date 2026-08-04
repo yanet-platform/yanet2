@@ -38,7 +38,7 @@ type ReconcileConfig struct {
 	// Interval is the steady-state period between successful reconcile
 	// passes.
 	Interval xcfg.NonZero[time.Duration] `yaml:"interval"`
-	// InitialBackoff is the first sleep after a failed pass; grows
+	// InitialBackoff is the first sleep after a failed pass. It grows
 	// exponentially.
 	InitialBackoff xcfg.NonZero[time.Duration] `yaml:"initial_backoff"`
 	// MaxBackoff caps the exponential backoff sleep.

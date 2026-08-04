@@ -26,7 +26,7 @@ type GatewayActuator struct {
 
 // NewGatewayActuator dials the gateway endpoint and returns a
 // ready-to-use actuator for all configured functions. The connection is
-// kept open for the lifetime of the actuator; call Close to release it.
+// kept open for the lifetime of the actuator — call Close to release it.
 func NewGatewayActuator(
 	cfg operator.GatewayConfig,
 	functions []FunctionConfig,
@@ -77,7 +77,7 @@ func NewGatewayActuator(
 // Apply pushes every module config and then ensures all function
 // definitions are correct on the gateway.
 //
-// Errors from individual modules or functions are joined; the reconcile
+// Errors from individual modules or functions are joined — the reconcile
 // loop applies backoff, so each Apply pass tries everything regardless
 // of partial failures.
 func (m *GatewayActuator) Apply(ctx context.Context, state State) error {

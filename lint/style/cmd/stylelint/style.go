@@ -89,14 +89,14 @@ func checkGRPCDial(call *ast.CallExpr, enclosing string, fileCtx *fileContext) [
 // checkSugarType reports a violation when sel denotes the zap.SugaredLogger
 // type.
 //
-// zap.SugaredLogger accepts untyped key-value pairs checked only at
-// runtime; *zap.Logger's typed field constructors (zap.String, zap.Int,
-// ...) catch a mismatched argument at compile time instead. Scope: every
-// selector expression, in production and test code alike, in any file
-// whose package (not necessarily that file itself) imports zap. In
-// practice this only ever fires in a file that itself imports zap, since
-// the zap.SugaredLogger reference this check matches requires that file's
-// own zap import to compile.
+// zap.SugaredLogger accepts untyped key-value pairs checked only at runtime.
+// *zap.Logger's typed field constructors (zap.String, zap.Int, ...) catch a
+// mismatched argument at compile time instead. Scope: every selector
+// expression, in production and test code alike, in any file whose package
+// (not necessarily that file itself) imports zap. In practice this only ever
+// fires in a file that itself imports zap, since the zap.SugaredLogger
+// reference this check matches requires that file's own zap import to
+// compile.
 func checkSugarType(sel *ast.SelectorExpr, enclosing string, fileCtx *fileContext) []violation {
 	ident, ok := sel.X.(*ast.Ident)
 	if !ok || ident.Name != fileCtx.ZapAlias || sel.Sel.Name != "SugaredLogger" {

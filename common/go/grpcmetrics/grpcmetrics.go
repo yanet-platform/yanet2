@@ -77,7 +77,7 @@ var DefaultBuckets = []float64{
 //
 // It is called once per RPC before the handler runs. A nil return means no
 // extra labels are attached. Stream calls have no single request message, so
-// StreamServerInterceptor invokes the Labeler with a nil req; a Labeler that
+// StreamServerInterceptor invokes the Labeler with a nil req. A Labeler that
 // only type-switches on req (the common case) naturally yields no extra
 // labels for streams.
 type Labeler func(fullMethod string, req any) metrics.Labels
@@ -209,7 +209,7 @@ func New(options ...Option) *ServerMetrics {
 // The decision is made once per call and reused for the started, handled,
 // and handling series alike. A method already tracked for the service keeps
 // its own name. A new method is admitted while the service is under the
-// limit; once the limit is reached, further new methods are folded into the
+// limit. Once the limit is reached, further new methods are folded into the
 // methodOverflow label instead. A limit of 0 disables the cap.
 func (m *ServerMetrics) resolveMethod(service, method string) string {
 	if m.perServiceMethodLimit <= 0 {
@@ -284,7 +284,7 @@ func (m *ServerMetrics) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 // records started, handled, and handling-latency metrics for every call.
 //
 // The grpc_type label is derived from the direction flags on
-// grpc.StreamServerInfo; see the package doc for the transparent-proxy
+// grpc.StreamServerInfo. See the package doc for the transparent-proxy
 // caveat.
 func (m *ServerMetrics) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(

@@ -74,9 +74,9 @@ type ReconcilerMetricsObserver interface {
 //
 // The loop has three states observable through ReconcilerMetricsObserver:
 //   - Idle (source returned ok=false: block on ctx and Wake).
-//   - Applying (Apply runs to completion; retried with backoff on
+//   - Applying (Apply runs to completion — retried with backoff on
 //     failure, preemptable by Wake between retries).
-//   - Sleeping (interval after success, backoff delay after failure;
+//   - Sleeping (interval after success, backoff delay after failure —
 //     preemptable by Wake or ctx).
 //
 // Apply is never cancelled mid-flight by a concurrent Wake —

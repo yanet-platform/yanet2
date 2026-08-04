@@ -95,7 +95,7 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 		OriginAS:         route.GetOriginAs(),
 		Med:              route.GetMed(),
 		Pref:             route.GetPref(),
-		// Wire field is uint32; saturate so absurdly long paths stay worst
+		// Wire field is uint32 — saturate so absurdly long paths stay worst
 		// instead of wrapping to best.
 		ASPathLen: uint8(min(route.GetAsPathLen(), uint32(math.MaxUint8))),
 		SourceID:  sourceID,

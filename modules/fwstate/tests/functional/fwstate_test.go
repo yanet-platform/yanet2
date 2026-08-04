@@ -149,7 +149,7 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 // Ethernet (VLAN) -> 802.1Q (IPv6) -> IPv6 (UDP) -> UDP -> syncFrame payload.
 //
 // srcIP6 is the IPv6 source address. An all-zero source marks an internal
-// originator; any non-zero source is external.
+// originator. Any non-zero source is external.
 func buildSyncPacketLayers(srcIP6 net.IP, syncFrame []byte) []gopacket.SerializableLayer {
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},

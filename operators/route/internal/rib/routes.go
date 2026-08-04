@@ -40,7 +40,7 @@ type Route struct {
 	// GlobalID is the route identifier reported by BIRD, used together with
 	// the peer to identify a BGP path within a prefix.
 	//
-	// BIRD emits it on the wire immediately after the peer address; a peer
+	// BIRD emits it on the wire immediately after the peer address. A peer
 	// re-announcing a prefix reuses the same GlobalID, so it drives the BGP
 	// implicit-replace decision.
 	GlobalID uint32
@@ -149,7 +149,7 @@ func (m *RoutesList) Insert(route Route) bool {
 // source's best-cost group.
 //
 // The list is assumed to be sorted best-first by routeCompareRev. For each
-// source, the first route seen establishes the best cost; every subsequent
+// source, the first route seen establishes the best cost. Every subsequent
 // route of the same source with equal cost is also marked true. Routes
 // strictly worse than their source's best are false.
 func (m *RoutesList) BestPerSourceMask() []bool {

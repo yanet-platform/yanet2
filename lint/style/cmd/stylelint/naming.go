@@ -125,13 +125,13 @@ func isZapLoggerType(expr ast.Expr, zapAlias string) bool {
 // checkLoopIndexFor reports a violation when stmt's Init clause declares or
 // assigns a loop variable named i.
 //
-// The repository's no-abbreviated-identifiers rule carves out idx, not i,
-// as its one allowed loop-counter abbreviation, so a lone i reads as an
-// unexplained shorthand next to every other spelled-out name. Scope:
-// every for-loop, in production and test code alike. Both a
-// short-variable-declaration Init clause (for i := 0; ...) and a plain
-// assignment to a variable declared earlier (var i int; for i = 0; ...) are
-// in scope, since the loop reads as an "i" index either way.
+// The repository's no-abbreviated-identifiers rule carves out idx, not i, as
+// its one allowed loop-counter abbreviation, so a lone i reads as an
+// unexplained shorthand next to every other spelled-out name. Scope: every
+// for-loop, in production and test code alike. Both a
+// short-variable-declaration Init clause (i := 0) and a plain assignment
+// to a variable declared earlier (i = 0) are in scope, since the loop
+// reads as an "i" index either way.
 func checkLoopIndexFor(stmt *ast.ForStmt, enclosing string, fileCtx *fileContext) []violation {
 	assign, ok := stmt.Init.(*ast.AssignStmt)
 	if !ok || (assign.Tok != token.DEFINE && assign.Tok != token.ASSIGN) {

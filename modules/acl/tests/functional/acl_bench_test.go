@@ -162,7 +162,7 @@ func benchDiversePacket(b *testing.B, idx int) gopacket.Packet {
 // regions for benchmarks that compile a large number of rules.
 //
 // The shared package constants (aclCPSize/aclDPSize/aclMemSize) are sized for
-// functional tests; 10 000 compiled ACL rules require a significantly larger
+// functional tests. 10 000 compiled ACL rules require a significantly larger
 // agent arena and CP region.
 func setupACLHarnessLarge(b *testing.B, devices []string) (*dataplaneut.Harness, *ffi.Agent, acl.Backend) {
 	b.Helper()

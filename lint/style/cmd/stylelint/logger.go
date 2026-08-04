@@ -15,13 +15,13 @@ var constructorNameRe = regexp.MustCompile(`^[Nn]ew([A-Z_]|$)`)
 // method and one of its parameters carries a zap logger.
 //
 // A logger accepted positionally ties every call site to that exact
-// parameter list; the options pattern (WithLog) lets a constructor or
-// method gain further optional dependencies later without breaking
-// existing callers. Scope: production code only. A _test.go file is
-// skipped entirely by its caller, lintFuncDecl, since the options pattern
-// this check enforces has no test-code exemption to preserve — the check
-// simply never fires there in practice, so scoping it out keeps a
-// hand-rolled test double from needing an allowlist row.
+// parameter list. The options pattern (WithLog) lets a constructor or method
+// gain further optional dependencies later without breaking existing
+// callers. Scope: production code only. A _test.go file is skipped entirely
+// by its caller, lintFuncDecl, since the options pattern this check enforces
+// has no test-code exemption to preserve — the check simply never fires
+// there in practice, so scoping it out keeps a hand-rolled test double from
+// needing an allowlist row.
 func checkLoggerParam(decl *ast.FuncDecl, name string, fileCtx *fileContext) []violation {
 	if !fileCtx.HasZap {
 		return nil

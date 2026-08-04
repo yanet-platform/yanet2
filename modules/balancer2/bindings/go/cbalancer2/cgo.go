@@ -62,7 +62,7 @@ type SessionTable struct {
 }
 
 // SessionTableChain is an opaque handle to a session table chain in shared
-// memory. A chain references session tables but does not own them; the
+// memory. A chain references session tables but does not own them. The
 // referenced tables must outlive the chain.
 type SessionTableChain struct {
 	ptr *C.struct_balancer_session_table_chain
@@ -70,7 +70,7 @@ type SessionTableChain struct {
 
 // Install installs the balancer handle in the dataplane. If a balancer with
 // the same name is already installed, it is replaced and the previous handle
-// becomes unused; the caller is responsible for freeing it.
+// becomes unused. The caller is responsible for freeing it.
 func (m *Balancer) Install(agent *ffi.Agent) error {
 	var cErr *C.yanet_error
 	if rc := C.balancer_install((*C.struct_agent)(agent.AsRawPtr()), m.ptr, &cErr); rc != 0 {
@@ -161,7 +161,7 @@ func (m *SessionTableChain) Free(agent *ffi.Agent) {
 
 // PushFront pushes the given table as the new front (primary) session table.
 // Workers look up sessions in the front table first and fall back to the
-// previous (back) table; new sessions are always created in the front table.
+// previous (back) table. New sessions are always created in the front table.
 // Returns an error if two tables are already attached.
 func (m *SessionTableChain) PushFront(table *SessionTable) error {
 	var cErr *C.yanet_error

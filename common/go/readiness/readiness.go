@@ -86,7 +86,7 @@ func (m *scopeState) Apply(
 
 // subscriber holds state for one active Watch call.
 type subscriber struct {
-	// filter is the set of scope names this subscriber wants; empty means all.
+	// filter is the set of scope names this subscriber wants. Empty means all.
 	filter  map[string]struct{}
 	ch      chan *readinesspb.ReadyResponse
 	dropped chan struct{}
@@ -105,7 +105,7 @@ func (m *subscriber) Matches(name string) bool {
 
 // Send delivers resp to the subscriber without blocking.
 //
-// It reports false when the subscriber's buffer is full; the caller is
+// It reports false when the subscriber's buffer is full. The caller is
 // responsible for dropping the subscriber in that case.
 func (m *subscriber) Send(resp *readinesspb.ReadyResponse) bool {
 	select {
@@ -344,7 +344,7 @@ func observeOutcome(current readinesspb.State, err error) (readinesspb.State, *r
 //
 // A failed apply holds the scope at DEGRADED when it was previously applied,
 // and drops to NOT_READY only when it was never applied. observed_at always
-// advances; last_transition_time changes only on a state transition.
+// advances. last_transition_time changes only on a state transition.
 func (m *Tracker) Observe(gatewayID string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

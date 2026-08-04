@@ -924,7 +924,7 @@ func TestStaticRIBReadiness_PostPreRunReady(t *testing.T) {
 		return helper.Run(ctx)
 	})
 
-	// 50ms is far shorter than the 500ms sample_interval; any readiness change
+	// 50ms is far shorter than the 500ms sample_interval — any readiness change
 	// here can only come from the entry evaluate, not a ticker tick.
 	require.Eventually(t, func() bool {
 		s := requireScope(t, tracker, "rib")

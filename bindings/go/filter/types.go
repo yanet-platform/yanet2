@@ -32,7 +32,7 @@ var UnspecifiedIPv6 = IPNet{
 // MustParseIPNet parses a CIDR prefix string into an IPNet.
 //
 // The IPv4/IPv6 family is inferred from the parsed address. Panics on
-// malformed input; intended for static test data and other contexts
+// malformed input — intended for static test data and other contexts
 // where a parse failure is a programmer error.
 func MustParseIPNet(s string) IPNet {
 	p := netip.MustParsePrefix(s)

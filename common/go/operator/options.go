@@ -82,7 +82,7 @@ func WithGateways(register RegisterConfig, gateways ...GatewayConfig) Option {
 // WithGRPCServer enables an embedded gRPC server bound to cfg.Endpoint
 // that exposes the supplied service set.
 //
-// Gateway registration via WithGateways is optional; use gRPC alone for
+// Gateway registration via WithGateways is optional. Use gRPC alone for
 // metrics or operator APIs without director registration.
 //
 // When this option is not supplied, the operator does not bind a listener.

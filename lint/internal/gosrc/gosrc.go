@@ -29,7 +29,7 @@ const nodeModulesName = "node_modules"
 // "tests" is the top-level QEMU functional-test harness, out of scope for
 // this repository's Go linters per an explicit project decision.
 // "subprojects" holds the DPDK meson subproject. The "build*" entries are
-// the meson build directories created by "meson setup"; they are matched
+// the meson build directories created by "meson setup". They are matched
 // exactly, not by prefix, so that a future Go package such as "builder/" or
 // "buildinfo/" is not silently exempted.
 var rootRelativeExcludes = map[string]bool{
@@ -139,8 +139,8 @@ func Walk(root string, excludes ExcludeList, visit func(path string) error) erro
 // the subset that git ignores.
 //
 // It reports an error only when git is unavailable or the invocation
-// genuinely fails; callers should treat that as "nothing is ignored"
-// rather than failing the whole scan.
+// genuinely fails. Callers should treat that as "nothing is ignored" rather
+// than failing the whole scan.
 func gitIgnored(paths []string) (map[string]bool, error) {
 	if len(paths) == 0 {
 		return nil, nil

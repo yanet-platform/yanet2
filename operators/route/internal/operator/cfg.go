@@ -42,7 +42,7 @@ type Config struct {
 	Reconcile operator.ReconcileConfig   `yaml:"reconcile"`
 	Static    StaticConfig               `yaml:"static"`
 	// Function is the single gateway-side network function published by
-	// this operator. Re-applied every reconcile pass; idempotent updates.
+	// this operator. Re-applied every reconcile pass — idempotent updates.
 	Function       FunctionConfig       `yaml:"function"`
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`

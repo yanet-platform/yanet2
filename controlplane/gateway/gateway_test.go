@@ -501,7 +501,7 @@ func TestGateway_RunRegistrySweeper_EvictsStaleExternal(t *testing.T) {
 // programmatic RegistryConfig with a zero SweepInterval falls back to the
 // default instead of panicking.
 //
-// A zero interval reaches time.NewTicker directly, which panics; the
+// A zero interval reaches time.NewTicker directly, which panics. The
 // fallback is the guard against that.
 func TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack(t *testing.T) {
 	t.Parallel()
@@ -544,7 +544,7 @@ func TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack(t *testing.T) {
 // instead of evicting a live entry on the first sweep.
 //
 // The sweep interval is small and positive so a sweep genuinely runs before
-// the test's deadline; the fallback TTL must still land far enough in the
+// the test's deadline. The fallback TTL must still land far enough in the
 // past to spare an entry seen moments ago, or the cutoff would land at or
 // after time.Now and wipe every live backend on the first sweep.
 func TestGateway_RunRegistrySweeper_ZeroTTLFallsBack(t *testing.T) {

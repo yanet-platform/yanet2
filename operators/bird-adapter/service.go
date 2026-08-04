@@ -197,7 +197,7 @@ type importHolder struct {
 	export        *bird.Export                                                       // Reads/parses routes from BIRD
 	cancel        context.CancelFunc                                                 // Stops this import's goroutines (runBirdImportLoop, RunExport)
 	conn          *grpc.ClientConn                                                   // gRPC connection to the route operator's RouteService
-	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates; replaced on reconnect
+	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates, replaced on reconnect
 	sockets       []string                                                           // Unix socket paths being read from
 	createdAt     time.Time                                                          // Timestamp when the session was created
 }
@@ -249,7 +249,7 @@ func (m *importHolder) RunExport(ctx context.Context) error {
 
 // CloseStream closes the active gRPC stream to the route operator.
 //
-// The summary the route operator returns on close is discarded; callers
+// The summary the route operator returns on close is discarded — callers
 // only care whether the close itself failed.
 func (m *importHolder) CloseStream() error {
 	_, err := (*m.currentStream).CloseAndRecv()

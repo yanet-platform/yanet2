@@ -217,7 +217,7 @@ func Test_RouteMPLSService_CreateConfig_BackendFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Second call fails; old config must be preserved.
+	// Second call fails. Old config must be preserved.
 	_, err = svc.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
 		Name:  "mpls0",
 		Rules: []*routemplspb.Rule{makeRule(t, "10.0.1.0/24", "203.0.113.2", 200)},

@@ -32,7 +32,7 @@ func routesForPrefix(t *testing.T, r *RIB, prefix netip.Prefix) []Route {
 // with a Bird source does not remove BGP routes from distinct peers even when
 // the nexthop matches.
 //
-// BGP route identity is peer-scoped; the unary API carries no peer, so the
+// BGP route identity is peer-scoped. The unary API carries no peer, so the
 // candidate Peer is IPv6Unspecified. A real BGP route has a non-unspecified
 // Peer, so IsSameIdentity must return false and neither route may be removed.
 func TestRemoveUnicastRoute_BGPPeerIsolation(t *testing.T) {

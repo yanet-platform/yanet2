@@ -42,7 +42,7 @@ var dataIPv6WithLargeCommunities = []byte{
 	64: 0x76, 0, 0, 0,
 
 	// attributes
-	// AttrOrigin 0x01 - first byte;  69: PROTOCOL_BGP = 0x4, 0, 0 - packed LE int
+	// AttrOrigin 0x01 - first byte, 69: PROTOCOL_BGP = 0x4, 0, 0 - packed LE int
 	68: 0x1, 69: 0x4, 0, 0,
 	// value of the AttrOrigin - LE u32
 	72: 0x2, 0, 0, 0,
@@ -51,7 +51,7 @@ var dataIPv6WithLargeCommunities = []byte{
 	76: 0x2, 0x4, 0, 0,
 	//  Complex attribute length LE u32 0xe == 14
 	80: 0xe, 0, 0, 0,
-	// Segment Type 0x2 = ASPathSequence; 85: Segment Size 0x3 = 3 AS
+	// Segment Type 0x2 = ASPathSequence, 85: Segment Size 0x3 = 3 AS
 	84: 0x2, 85: 0x3,
 	// AS#3 - PeerAS LE u32 - 0x0000c7fa = 51194 - nearest to us
 	86: 0, 0, 0xc7, 0xf1,
@@ -60,24 +60,24 @@ var dataIPv6WithLargeCommunities = []byte{
 	// AS#1 - OriginAS = 0x00005c52 = 23634
 	94: 0, 0, 0x5c, 0x52,
 
-	// AttrNextHop 0x3; PROTOCOL_BGP
+	// AttrNextHop 0x3, PROTOCOL_BGP
 	98: 0x3, 0x4, 0, 0,
 	// Complex attribute length LE u32 0x10 == 16 - one ipv6 addr
 	102: 0x10, 0, 0, 0,
 	//  NextHop addr 16 bytes as 4 LE u32 == "2a02:2891:9:200::13"
 	106: 0x91, 0x28, 0x2, 0x2a, 0, 0x2, 0x9, 0, 0, 0, 0, 0, 0x13, 0, 0, 0,
 
-	// AttrLocalPref 0x5; PROTOCOL_BGP - simple u32 attributes
+	// AttrLocalPref 0x5, PROTOCOL_BGP - simple u32 attributes
 	122: 0x5, 0x4, 0, 0,
 	// LocalPref 0x64 == 100
 	126: 0x64, 0, 0, 0,
-	// AttrCommunity 0x8; PROTOCOL_BGP
+	// AttrCommunity 0x8, PROTOCOL_BGP
 	130: 0x8, 0x4, 0, 0,
 	// AttrCommunity length - 16
 	134: 0x10, 0, 0, 0,
 	138: 0x2, 0, 0xf1, 0xc7, 0xf6, 0x1, 0xf1, 0xc7, 0x9a, 0x2, 0xf1, 0xc7, 0x12, 0x8, 0xf1, 0xc7,
 
-	// AttrLargeCommunity 0x20; PROTOCOL_BGP
+	// AttrLargeCommunity 0x20, PROTOCOL_BGP
 	154: 0x20, 0x4, 0, 0,
 	// Complex attribute length 0x18 = 24
 	158: 0x18, 0, 0, 0,
@@ -196,7 +196,7 @@ func TestDecodeUpdate(t *testing.T) {
 				// ASPath
 				76: 0x2, 0x4, 0, 0,
 				80: 0x1e, 0, 0, 0, // ASPath area size = 30 bytes
-				84: 0x2, 85: 0x7, // 84: ASPathSequence; 85: ASPathLen == 0x7
+				84: 0x2, 85: 0x7, // 84: ASPathSequence, 85: ASPathLen == 0x7
 				0, 0, 0xbb, 0xc6, // 1
 				0, 0, 0x5, 0x13, // 2
 				0, 0, 0x1d, 0x79, // 3
@@ -204,16 +204,16 @@ func TestDecodeUpdate(t *testing.T) {
 				0, 0, 0x97, 0x93, // 5
 				0, 0, 0x97, 0x93, // 6
 				0, 0, 0x97, 0x93, // 7
-				114: 0x3, 0x4, 0, 0, // 0x3 = AttrNextHop; PROTOCOL_BGP
+				114: 0x3, 0x4, 0, 0, // 0x3 = AttrNextHop, PROTOCOL_BGP
 				118: 0x10, 0, 0, 0, // NextHop size LE u32 = 16 bytes
 				// nextHop ::ffff:c342:e2fe == ::ffff:195.66.226.254
 				122: 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0xfe, 0xe2, 0x42, 0xc3,
-				138: 0x5, 0x4, 0, 0, // AttrLocalPref = 0x5; PROTOCOL_BGP
+				138: 0x5, 0x4, 0, 0, // AttrLocalPref = 0x5, PROTOCOL_BGP
 				142: 0x64, 0, 0, 0, // LE u32 == 100
-				146: 0x8, 0x4, 0, 0, // AttrCommunity; PROTOCOL_BGP
+				146: 0x8, 0x4, 0, 0, // AttrCommunity, PROTOCOL_BGP
 				0x4, 0, 0, 0, // 4 bytes
 				0x64, 0, 0xc6, 0xbb,
-				0x20, 0x4, 0, 0, // AttrLargeCommunity; PROTOCOL_BGP
+				0x20, 0x4, 0, 0, // AttrLargeCommunity, PROTOCOL_BGP
 				0xc, 0, 0, 0, // 12 bytes == 3 u32
 				0xc6, 0xbb, 0, 0,
 				0x64, 0, 0, 0,
@@ -246,7 +246,7 @@ func TestDecodeUpdate(t *testing.T) {
 			data: []byte{
 				1, 0x18, 8, 5: 7, 7: 1, 24: 0x10, 0x92, 0x53, 9, 0x1c, 0x5b, 32: 1,
 				0x11, 8, 0, 0, 0x80, 0, 1, 2, 56: 1,
-				// global_id at 60 (zero); attrsAreaSize=0x4e=78 at 64
+				// global_id at 60 (zero), attrsAreaSize=0x4e=78 at 64
 				64: 0x4e, 0, 0, 0, 1, 4,
 				76: 2, 4, 0, 0, 0x12, 0, 0, 0, 2, 4, 0, 6, 0x14, 0x81, 0, 0, 5,
 				93: 0x13, 0, 0, 0x1d, 0x79, 0, 0, 0x97, 0x93, 3, 4, 0, 0, 0x10,
@@ -444,7 +444,7 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
-				// global_id at 60 (zero); attrsAreaSize at 64
+				// global_id at 60 (zero), attrsAreaSize at 64
 				64: 2,    // ERROR attrsAreaSize=2 but only 2 bytes available (need at least 4 for attr type)
 				68: 0, 0, // truncated attrs data
 			},

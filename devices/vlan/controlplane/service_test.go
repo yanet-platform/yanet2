@@ -16,7 +16,7 @@ import (
 // calls do not leak shared-memory arena space.
 //
 // Each update after the first retires the previous generation's device onto
-// the agent's unused list; without draining that list, the arena shrinks by
+// the agent's unused list. Without draining that list, the arena shrinks by
 // a fixed amount every call and eventually runs out. Free bytes must settle
 // after the first update instead of decreasing indefinitely.
 func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
