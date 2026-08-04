@@ -63,9 +63,9 @@ func (m *ACLAdapter) RelinkConfigs(
 			return err
 		}
 
-		ffiCfgs := make([]ffi.ModuleConfig, 0, len(linked))
-		for _, name := range linked {
-			ffiCfgs = append(ffiCfgs, newHandles[name].AsFFIModule())
+		ffiCfgs := make([]ffi.ModuleConfig, 0, len(newHandles))
+		for _, h := range newHandles {
+			ffiCfgs = append(ffiCfgs, h.AsFFIModule())
 		}
 
 		if err := publish(ffiCfgs); err != nil {
@@ -101,9 +101,9 @@ func (m *ACLAdapter) LinkConfigs(
 			return err
 		}
 
-		ffiCfgs := make([]ffi.ModuleConfig, 0, len(names))
-		for _, name := range names {
-			ffiCfgs = append(ffiCfgs, newHandles[name].AsFFIModule())
+		ffiCfgs := make([]ffi.ModuleConfig, 0, len(newHandles))
+		for _, h := range newHandles {
+			ffiCfgs = append(ffiCfgs, h.AsFFIModule())
 		}
 
 		if err := publish(ffiCfgs); err != nil {
@@ -214,9 +214,12 @@ func (m *ACLService) swapLinkedHandles(newHandles map[string]ModuleHandle, entri
 	}
 }
 
-// createLinkedHandles creates new ACL module handles for every name in
-// names, linked to fwstateConfig. On any failure every handle created so far
-// is freed before returning the error.
+// createLinkedHandles creates one new ACL module handle per distinct name in
+// names, linked to fwstateConfig.
+//
+// names may repeat a name, in which case the returned map still holds one
+// handle for it. On any failure every handle created so far is freed before
+// returning the error.
 //
 // Caller must hold the name lock for every name in names, and entries must
 // carry that name's entry.
@@ -228,6 +231,10 @@ func (m *ACLService) createLinkedHandles(
 	newHandles := map[string]ModuleHandle{}
 
 	for _, name := range names {
+		if _, ok := newHandles[name]; ok {
+			continue
+		}
+
 		entry, ok := entries[name]
 		if !ok || entry.published == nil {
 			for _, h := range newHandles {

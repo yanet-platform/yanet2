@@ -1189,3 +1189,47 @@ func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
 	err = adapter.LinkConfigs([]string{"a"}, fwstateConfig, publish)
 	require.ErrorContains(t, err, "not found")
 }
+
+// TestACLAdapterLinkConfigs_DuplicateName verifies that a name repeated in
+// the LinkConfigs list creates and publishes exactly one handle for it,
+// instead of leaking the handle a naive per-occurrence loop would create
+// and then drop.
+func TestACLAdapterLinkConfigs_DuplicateName(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+	adapter := NewACLAdapter(svc)
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  "a",
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+	})
+	require.NoError(t, err)
+
+	createdBefore := len(backend.CreatedHandles())
+
+	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
+
+	var publishedCount int
+	publish := func(linkedFFI []ffi.ModuleConfig) error {
+		publishedCount = len(linkedFFI)
+		return nil
+	}
+
+	err = adapter.LinkConfigs([]string{"a", "a"}, fwstateConfig, publish)
+	require.NoError(t, err)
+
+	assert.Equal(t, createdBefore+1, len(backend.CreatedHandles()), "a duplicated name must create exactly one handle")
+	assert.Equal(t, 1, publishedCount, "a duplicated name must publish exactly one module config")
+
+	svc.mu.RLock()
+	liveHandle := svc.configs["a"].published.acl
+	svc.mu.RUnlock()
+
+	for _, h := range backend.CreatedHandles() {
+		if h == liveHandle {
+			assert.Equal(t, 0, h.FreeCount(), "the live handle must not have been freed")
+			continue
+		}
+		assert.Equal(t, 1, h.FreeCount(), "every superseded handle must be freed exactly once")
+	}
+}
