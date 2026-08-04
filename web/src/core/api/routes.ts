@@ -81,18 +81,13 @@ export interface ShowFIBRequest {
     ipv6_only?: boolean;
 }
 
-export interface FIBRangeEntry {
+export interface FIBEntry {
     range?: IPRangeWire;
     nexthops?: FIBNexthop[];
 }
 
 export interface ShowFIBResponse {
-    entries?: FIBRangeEntry[];
-}
-
-export interface FIBEntry {
-    prefix?: string;
-    nexthops?: FIBNexthop[];
+    entries?: FIBEntry[];
 }
 
 export interface FIBNexthop {

@@ -101,6 +101,28 @@ export function isValidIPv4Address(ip: string): boolean {
 }
 
 /**
+ * Rewrite an RFC 4291 trailing dotted-quad IPv4 tail (the last 32 bits of an
+ * IPv6 address written as e.g. the "10.0.0.0" in "64:ff9b::10.0.0.0" or
+ * "::ffff:192.168.1.1") into two hex groups, so downstream group-counting
+ * and parsing logic only ever has to handle plain hex-group IPv6 syntax.
+ *
+ * Returns the input unchanged when the last colon-separated group has no
+ * dot, and undefined when it has a dot but isn't a valid IPv4 address.
+ */
+const expandIPv6EmbeddedIPv4 = (ip: string): string | undefined => {
+    const lastColon = ip.lastIndexOf(':');
+    const tail = lastColon === -1 ? ip : ip.slice(lastColon + 1);
+    if (!tail.includes('.')) return ip;
+
+    const v4Bytes = parseIPv4ToBytes(tail);
+    if (!v4Bytes) return undefined;
+
+    const hi = ((v4Bytes[0] << 8) | v4Bytes[1]).toString(16);
+    const lo = ((v4Bytes[2] << 8) | v4Bytes[3]).toString(16);
+    return `${ip.slice(0, lastColon + 1)}${hi}:${lo}`;
+};
+
+/**
  * IPv6 Address class with validation
  */
 export class IPv6Address {
@@ -118,8 +140,13 @@ export class IPv6Address {
             // Use URL constructor to validate - it throws for invalid IPs
             new URL(`http://[${ip}]`);
 
-            const parts = ip.split(':');
-            const doubleColonCount = (ip.match(/::/g) || []).length;
+            const normalized = expandIPv6EmbeddedIPv4(ip);
+            if (normalized === undefined) {
+                return err(IPv6ParseError.InvalidFormat);
+            }
+
+            const parts = normalized.split(':');
+            const doubleColonCount = (normalized.match(/::/g) || []).length;
 
             // Can't have more than one ::
             if (doubleColonCount > 1) {
@@ -143,7 +170,7 @@ export class IPv6Address {
             }
 
             // Parse groups (expand :: to zeros)
-            const expanded = ip.replace('::', ':0000'.repeat(9 - parts.length)).split(':');
+            const expanded = normalized.replace('::', ':0000'.repeat(9 - parts.length)).split(':');
             const groups: number[] = [];
             for (const group of expanded) {
                 const num = parseInt(group || '0', 16);
@@ -231,6 +258,58 @@ export function isValidIPv6Address(ip: string): boolean {
     return result.ok;
 }
 
+/**
+ * Parse a string as a strict unsigned integer within [0, maxValue].
+ *
+ * Require the whole string to be pure digits of the given radix (no sign,
+ * no leading/trailing junk): parseInt alone would accept "24abc" or "1abcg"
+ * by stopping at the first character outside the radix's digit set.
+ */
+const parseStrictUint = (str: string, maxValue: number, radix: 10 | 16 = 10): number | undefined => {
+    const pattern = radix === 16 ? /^[0-9a-fA-F]+$/ : /^\d+$/;
+    if (!pattern.test(str)) {
+        return undefined;
+    }
+    const num = parseInt(str, radix);
+    if (isNaN(num) || num < 0 || num > maxValue) {
+        return undefined;
+    }
+    return num;
+};
+
+/** Parse a prefix-length string as a strict base-10 integer within [0, maxMask]. */
+const parseStrictPrefixLength = (maskStr: string, maxMask: number): number | undefined => {
+    return parseStrictUint(maskStr, maxMask);
+};
+
+/**
+ * Parse an IPv4 octet string as a strict base-10 integer within [0, 255].
+ *
+ * Rejects leading zeros (e.g. "010"), matching the strictness IPv4Address.parse
+ * already applies, so a single octet can't be mistaken for octal and different
+ * IPv4 parsers in this file don't disagree on the same input.
+ */
+const parseStrictOctet = (str: string): number | undefined => {
+    if (str.length > 1 && str.startsWith('0')) {
+        return undefined;
+    }
+    return parseStrictUint(str, 255);
+};
+
+/**
+ * Parse an IPv6 hex group string as a strict integer within [0, 0xffff].
+ *
+ * Bounds the group to at most four hex digits, matching RFC 4291: a fifth
+ * digit can't occur in a well-formed group even though parseStrictUint's
+ * decimal counterpart has no analogous width limit.
+ */
+const parseStrictHexGroup = (str: string): number | undefined => {
+    if (str.length > 4) {
+        return undefined;
+    }
+    return parseStrictUint(str, 0xffff, 16);
+};
+
 /** Parse the common fields of a CIDR prefix string before address parsing. */
 const parsePrefixFields = (
     prefix: string,
@@ -246,8 +325,8 @@ const parsePrefixFields = (
     }
 
     const [ip, maskStr] = parts;
-    const mask = parseInt(maskStr, 10);
-    if (isNaN(mask) || mask < 0 || mask > maxMask) {
+    const mask = parseStrictPrefixLength(maskStr, maxMask);
+    if (mask === undefined) {
         return err(CIDRParseError.InvalidPrefixLength);
     }
 
@@ -524,8 +603,8 @@ export const parseIPv4ToBytes = (ipStr: string): number[] | undefined => {
     }
     const bytes: number[] = [];
     for (const part of parts) {
-        const num = parseInt(part, 10);
-        if (isNaN(num) || num < 0 || num > 255) {
+        const num = parseStrictOctet(part);
+        if (num === undefined) {
             return undefined;
         }
         bytes.push(num);
@@ -542,10 +621,14 @@ export const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
     const trimmed = ipStr.trim();
     if (!trimmed) return undefined;
 
+    const withEmbeddedIPv4Expanded = expandIPv6EmbeddedIPv4(trimmed);
+    if (withEmbeddedIPv4Expanded === undefined) return undefined;
+    const normalized = withEmbeddedIPv4Expanded;
+
     // Handle :: expansion
-    let fullAddr = trimmed;
-    if (trimmed.includes('::')) {
-        const parts = trimmed.split('::');
+    let fullAddr = normalized;
+    if (normalized.includes('::')) {
+        const parts = normalized.split('::');
         const left = parts[0] ? parts[0].split(':') : [];
         const right = parts[1] ? parts[1].split(':') : [];
         const missing = 8 - left.length - right.length;
@@ -559,8 +642,11 @@ export const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
 
     const bytes: number[] = [];
     for (const part of parts) {
-        const num = parseInt(part || '0', 16);
-        if (isNaN(num) || num < 0 || num > 0xffff) return undefined;
+        // The `::` expansion above always substitutes an explicit '0' for a
+        // compressed group, so an empty part here only comes from that path -
+        // keep it as zero rather than routing it through the strict parser.
+        const num = part === '' ? 0 : parseStrictHexGroup(part);
+        if (num === undefined) return undefined;
         bytes.push((num >> 8) & 0xff);
         bytes.push(num & 0xff);
     }
@@ -804,6 +890,39 @@ export const ipRangeToString = (range: IPRangeWire | undefined): string => {
     return `[${start}, ${end}]`;
 };
 
+// Convert a single CIDR prefix string into a wire IPRange. The address is
+// masked to its network base (e.g. "10.0.0.5/24" yields start "10.0.0.0"),
+// not passed through verbatim, so the emitted range always spans exactly
+// the prefix's address block. Returns undefined for unparseable input.
+export const cidrToIPRange = (cidr: string): IPRangeWire | undefined => {
+    const parsed = parseCIDRPrefix(cidr);
+    if (!parsed.ok) return undefined;
+
+    const prefixLen = getPrefixLength(cidr);
+    if (prefixLen === null) return undefined;
+
+    // Parse bytes from the address substring directly rather than round-tripping
+    // through address.toString(), whose IPv6 :: compression drops the trailing
+    // colon when the compressed run reaches the end of the address.
+    const addrPart = cidr.slice(0, cidr.lastIndexOf('/'));
+    const addrBytes = parseIPToBytes(addrPart);
+    if (!addrBytes) return undefined;
+
+    const totalBytes = addrBytes.length;
+    const totalBits = totalBytes * 8;
+    const hostBits = totalBits - prefixLen;
+
+    const addrBits = bytesToBigInt(addrBytes);
+    const hostMask = hostBits === 0 ? 0n : (1n << BigInt(hostBits)) - 1n;
+    const start = addrBits & ~hostMask;
+    const end = lastAddrOfPrefix(start, prefixLen, totalBits);
+
+    return {
+        start: formatIPFromBytes(bigIntToBytes(start, totalBytes)),
+        end: formatIPFromBytes(bigIntToBytes(end, totalBytes)),
+    };
+};
+
 /** Parse CIDR strings to IPNet array with base64-encoded bytes. */
 export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask: string }> => {
     const results: Array<{ addr: string; mask: string }> = [];
@@ -811,13 +930,12 @@ export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask:
         const parts = cidr.trim().split('/');
         if (parts.length !== 2) continue;
         const [ipPart, maskStr] = parts;
-        const prefixLength = parseInt(maskStr, 10);
-        if (isNaN(prefixLength)) continue;
         const addrBytes = parseIPToBytes(ipPart);
         if (!addrBytes) continue;
         const isIPv4 = addrBytes.length === 4;
         const maxPrefix = isIPv4 ? 32 : 128;
-        if (prefixLength < 0 || prefixLength > maxPrefix) continue;
+        const prefixLength = parseStrictPrefixLength(maskStr, maxPrefix);
+        if (prefixLength === undefined) continue;
         const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
         results.push({
             addr: bytesToBase64(addrBytes),

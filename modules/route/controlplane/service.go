@@ -190,7 +190,7 @@ func (m *RouteService) ShowFIB(
 	}
 
 	response := &routepb.ShowFIBResponse{
-		Entries: make([]*routepb.FIBRangeEntry, 0, len(entries)),
+		Entries: make([]*routepb.FIBEntry, 0, len(entries)),
 	}
 	for _, e := range entries {
 		if req.GetIpv4Only() && e.AddressFamily != croute.AddressFamilyIPv4 {
@@ -214,7 +214,7 @@ func (m *RouteService) ShowFIB(
 			return nil, status.Errorf(codes.Internal, "failed to build IP range from FIB entry: %v", err)
 		}
 
-		response.Entries = append(response.Entries, &routepb.FIBRangeEntry{
+		response.Entries = append(response.Entries, &routepb.FIBEntry{
 			Range:    ipRange,
 			Nexthops: nexthops,
 		})
@@ -259,10 +259,21 @@ func (m *RouteService) UpdateFIB(
 		return nil, status.Error(codes.InvalidArgument, "module_name is required")
 	}
 
+	entries := req.GetEntries()
+	for _, entry := range entries {
+		start, end, err := entry.GetRange().ToRange()
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "failed to parse range: %v", err)
+		}
+		if start.Compare(end) > 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid range: start %s is after end %s", start, end)
+		}
+	}
+
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
-	module, err := m.backend.UpdateModule(name, req.GetEntries())
+	module, err := m.backend.UpdateModule(name, entries)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to apply FIB for %q: %v", name, err)
 	}

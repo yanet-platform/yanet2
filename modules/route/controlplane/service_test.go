@@ -49,6 +49,9 @@ type fakeBackend struct {
 	counters []route.CounterView
 	// queried records the counter names the service asked for.
 	queried []string
+	// updateCalls records the range entries passed to UpdateModule on
+	// every call, in call order.
+	updateCalls [][]*routepb.FIBEntry
 }
 
 func newFakeBackend() *fakeBackend {
@@ -59,6 +62,7 @@ func (m *fakeBackend) UpdateModule(name string, entries []*routepb.FIBEntry) (ro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.updateCalls = append(m.updateCalls, entries)
 	return m.handle, nil
 }
 

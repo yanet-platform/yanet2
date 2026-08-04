@@ -56,15 +56,7 @@ message ShowFIBRequest {
 // ShowFIBResponse contains the list of FIB entries.
 message ShowFIBResponse {
   // List of FIB rows; each carries one range with its nexthops.
-  repeated FIBRangeEntry entries = 1;
-}
-
-// FIBEntry represents a single prefix in the FIB with its nexthops.
-message FIBEntry {
-  // Network prefix in CIDR notation (e.g. "10.0.0.0/24").
-  string prefix = 1;
-  // Nexthops associated with this prefix (ECMP).
-  repeated FIBNexthop nexthops = 2;
+  repeated FIBEntry entries = 1;
 }
 
 // FIBNexthop represents a hardware-level nexthop in the FIB.
@@ -77,17 +69,22 @@ message FIBNexthop {
   string device = 3;
 }
 
-// FIBRangeEntry represents a single dataplane FIB row.
+// FIBEntry represents a single dataplane FIB row.
 //
 // Carries the contiguous address range covered by one set of nexthops.
-// Used in ShowFIBResponse. UpdateFIBRequest still uses FIBEntry with a
-// CIDR string until a typed common.commonpb.v1.IPPrefix lands.
-message FIBRangeEntry {
+message FIBEntry {
   common.commonpb.v1.IPRange range = 1;
   repeated FIBNexthop nexthops = 2;
 }
 
 // UpdateFIBRequest carries the full FIB to be applied atomically.
+//
+// Entries are applied in list order, and each entry that carries at least
+// one nexthop overwrites every address it covers, so where two such ranges
+// overlap the later one wins regardless of how narrow it is. This is not
+// longest-prefix-match: a client that wants LPM semantics must send
+// narrower ranges last. An entry with no nexthops is skipped entirely and
+// does not displace an earlier overlapping entry.
 message UpdateFIBRequest {
   // ModuleName is the route module config name.
   string module_name = 1;

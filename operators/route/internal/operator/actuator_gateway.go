@@ -11,6 +11,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
@@ -133,7 +134,11 @@ func (m *GatewayActuator) applyFunction(ctx context.Context) error {
 func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
 	entries := make([]*routepb.FIBEntry, len(fib.Entries))
 	for idx, entry := range fib.Entries {
-		entries[idx] = fibEntryToProto(entry)
+		e, err := fibEntryToProto(entry)
+		if err != nil {
+			return fmt.Errorf("failed to convert FIB entry for prefix %q: %w", entry.Prefix, err)
+		}
+		entries[idx] = e
 	}
 
 	req := &routepb.UpdateFIBRequest{
@@ -149,8 +154,8 @@ func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
 	return nil
 }
 
-// fibEntryToProto converts an internal FIBEntry to the wire format.
-func fibEntryToProto(entry FIBEntry) *routepb.FIBEntry {
+// fibEntryToProto converts an internal FIBEntry to the wire range format.
+func fibEntryToProto(entry FIBEntry) (*routepb.FIBEntry, error) {
 	nexthops := make([]*routepb.FIBNexthop, len(entry.Nexthops))
 	for idx, nh := range entry.Nexthops {
 		nexthops[idx] = &routepb.FIBNexthop{
@@ -159,8 +164,14 @@ func fibEntryToProto(entry FIBEntry) *routepb.FIBEntry {
 			Device: nh.Device,
 		}
 	}
-	return &routepb.FIBEntry{
-		Prefix:   entry.Prefix.String(),
-		Nexthops: nexthops,
+
+	ipRange, err := commonpb.NewIPRange(entry.Prefix.Addr(), xnetip.LastAddr(entry.Prefix))
+	if err != nil {
+		return nil, err
 	}
+
+	return &routepb.FIBEntry{
+		Range:    ipRange,
+		Nexthops: nexthops,
+	}, nil
 }

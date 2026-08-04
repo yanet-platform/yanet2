@@ -5,7 +5,8 @@
  * 4-byte unsigned one. The tree organized into variable-length page tree
  * where values marked with the special flag.
  *
- * The tree does not allow to rewrite key-ranges or delete them.
+ * Inserted ranges cannot be deleted. Inserting a range overwrites the values
+ * of every key it covers, so on overlap the last insert wins.
  */
 
 #include <errno.h>

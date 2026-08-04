@@ -55,6 +55,8 @@ func BuildFIB(
 
 	entries := make([]FIBEntry, 0)
 
+	// The wire applies entries in list order, each overwriting the addresses
+	// it covers, so emitting least-specific first reproduces longest-prefix-match.
 	for prefixLen := range ribDump {
 		for prefix, routesList := range ribDump[prefixLen] {
 			stats.TotalPrefixes++

@@ -11,12 +11,12 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
     CompleteEnv,
 };
-use commonpb::pb::MacAddress;
-use netip::MacAddr;
+use commonpb::pb::{IpRange, MacAddress};
+use netip::{Contiguous, IpNetwork, MacAddr};
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
-    fib,
+    fib::{json::FibEntryJson, render::print_fib},
     routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
 };
 use ync::{
@@ -32,8 +32,12 @@ struct FibNexthop {
     device: String,
 }
 
+/// A FIB entry as written in the YAML config.
+///
+/// Named `Config` rather than `Entry` to stay visually distinct from the
+/// wire's [`routepb::FibEntry`], which this type converts into.
 #[derive(Debug, Serialize, Deserialize)]
-struct FibEntry {
+struct FibEntryConfig {
     prefix: String,
     #[serde(default)]
     nexthops: Vec<FibNexthop>,
@@ -42,7 +46,7 @@ struct FibEntry {
 #[derive(Debug, Serialize, Deserialize)]
 struct FibConfig {
     #[serde(default)]
-    entries: Vec<FibEntry>,
+    entries: Vec<FibEntryConfig>,
 }
 
 impl FibConfig {
@@ -73,16 +77,21 @@ impl TryFrom<FibNexthop> for routepb::FibNexthop {
     }
 }
 
-impl TryFrom<FibEntry> for routepb::FibEntry {
+impl TryFrom<FibEntryConfig> for routepb::FibEntry {
     type Error = Box<dyn Error>;
 
-    fn try_from(entry: FibEntry) -> Result<Self, Self::Error> {
+    fn try_from(entry: FibEntryConfig) -> Result<Self, Self::Error> {
+        let network = Contiguous::<IpNetwork>::parse(&entry.prefix)?;
+        // `addr()` is this network's base address rather than the address as
+        // typed: `IpNetwork` always normalizes to the mask on construction, so
+        // the range below denotes the whole network the prefix names.
+        let range = IpRange::from((network.addr(), network.last_addr()));
         let nexthops = entry
             .nexthops
             .into_iter()
             .map(routepb::FibNexthop::try_from)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { prefix: entry.prefix, nexthops })
+        Ok(Self { range: Some(range), nexthops })
     }
 }
 
@@ -255,17 +264,17 @@ impl RouteService {
         };
 
         let response = self.client.show_fib(request).await?.into_inner();
-        let records = fib::build_records(&response.entries);
+        let entries = response.entries;
 
         output::data(
-            || records.iter().map(fib::json::FibRecordJson::from).collect::<Vec<_>>(),
+            || entries.iter().map(FibEntryJson::from).collect::<Vec<_>>(),
             || {
-                if records.is_empty() {
+                if entries.is_empty() {
                     output::empty(format_args!("No FIB entries found for '{}'.", cmd.config_name));
                     return;
                 }
 
-                fib::render::print_fib(&records);
+                print_fib(&entries);
             },
         );
 
@@ -275,10 +284,49 @@ impl RouteService {
 
 #[cfg(test)]
 mod test {
+    use core::net::IpAddr;
+
     use super::*;
 
     #[test]
     fn cmd_is_valid() {
         Cmd::command().debug_assert();
+    }
+
+    fn ip_range(start: &str, end: &str) -> IpRange {
+        IpRange::from((start.parse::<IpAddr>().unwrap(), end.parse::<IpAddr>().unwrap()))
+    }
+
+    fn entry_range(prefix: &str) -> IpRange {
+        let entry = FibEntryConfig {
+            prefix: prefix.to_string(),
+            nexthops: Vec::new(),
+        };
+        routepb::FibEntry::try_from(entry).unwrap().range.unwrap()
+    }
+
+    #[test]
+    fn fib_entry_config_prefix_converts_to_expected_range() {
+        assert_eq!(ip_range("10.0.0.0", "10.0.0.255"), entry_range("10.0.0.0/24"));
+    }
+
+    #[test]
+    fn fib_entry_config_prefix_masks_host_bits_v4() {
+        assert_eq!(ip_range("10.0.0.0", "10.0.0.255"), entry_range("10.0.0.5/24"));
+    }
+
+    #[test]
+    fn fib_entry_config_prefix_masks_host_bits_v6() {
+        assert_eq!(ip_range("2001:db8::", "2001:db8::ff"), entry_range("2001:db8::5/120"));
+    }
+
+    #[test]
+    fn fib_entry_config_prefix_slash_32_is_noop() {
+        assert_eq!(ip_range("10.0.0.5", "10.0.0.5"), entry_range("10.0.0.5/32"));
+    }
+
+    #[test]
+    fn fib_entry_config_prefix_slash_128_is_noop() {
+        assert_eq!(ip_range("2001:db8::5", "2001:db8::5"), entry_range("2001:db8::5/128"));
     }
 }

@@ -15,6 +15,7 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
@@ -145,8 +146,10 @@ func applyFIB(
 				Device: nh.Device,
 			})
 		}
+		ipRange, err := commonpb.NewIPRange(e.Prefix.Addr(), xnetip.LastAddr(e.Prefix))
+		require.NoError(tb, err)
 		pbEntries = append(pbEntries, &routepb.FIBEntry{
-			Prefix:   e.Prefix.String(),
+			Range:    ipRange,
 			Nexthops: nexthops,
 		})
 	}
@@ -954,4 +957,33 @@ func TestRoute_PerOutcomeCounters(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry verifies the
+// UpdateFIBRequest doc comment's claim that an entry with no nexthops is
+// skipped rather than overwriting an earlier overlapping entry.
+//
+// It exercises the real backend.UpdateModule against shared memory, since
+// the fake backend used by the unit tests in modules/route/controlplane
+// only records the entries handed to it and cannot observe the
+// dataplane-visible skip.
+func TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry(t *testing.T) {
+	prefix := netip.MustParsePrefix("10.0.0.0/24")
+
+	_, _, backend := setupRouteHarness(t, "port0")
+
+	handle := applyFIB(t, backend, "cfg", []FIBEntry{
+		{Prefix: prefix, Nexthops: []FIBNexthop{routeNextHop}},
+		// Later entry covers the same range but carries no nexthops, so
+		// it must be skipped rather than blackholing or removing the
+		// earlier entry's route.
+		{Prefix: prefix},
+	})
+
+	fib, err := handle.DumpFIB()
+	require.NoError(t, err)
+
+	require.Len(t, fib, 1, "expected the earlier nexthop-bearing entry to survive alone")
+	require.Len(t, fib[0].Nexthops, 1)
+	require.Equal(t, "port0", fib[0].Nexthops[0].Device)
 }

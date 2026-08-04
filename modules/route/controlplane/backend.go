@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"fmt"
 	"net"
-	"net/netip"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -50,7 +49,7 @@ type CounterView struct {
 // module.
 type Backend interface {
 	// UpdateModule builds a fresh ModuleConfig from the supplied FIB
-	// entries and publishes it to the dataplane atomically.
+	// ranges and publishes it to the dataplane atomically.
 	UpdateModule(name string, entries []*routepb.FIBEntry) (ModuleHandle, error)
 	// DeleteModule removes a module config from the dataplane.
 	DeleteModule(name string) error
@@ -77,18 +76,22 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	// Defensively dedup hardware routes per-prefix using TinyBitset:
+	// Defensively dedup hardware routes per-range using TinyBitset:
 	// the operator already feeds deduplicated entries, but the wire
-	// format encodes a list-of-nexthops per prefix and we keep the
+	// format encodes a list-of-nexthops per range and we keep the
 	// route module robust to mistakes upstream.
 	hardwareIndex := map[HardwareRoute]uint32{}
 	routeListIndex := map[bitset.TinyBitset]uint32{}
 
 	for _, entry := range entries {
-		prefix, err := netip.ParsePrefix(entry.GetPrefix())
+		start, end, err := entry.GetRange().ToRange()
 		if err != nil {
 			module.Free()
-			return nil, fmt.Errorf("failed to parse prefix %q: %w", entry.GetPrefix(), err)
+			return nil, fmt.Errorf("failed to parse range: %w", err)
+		}
+		if start.Compare(end) > 0 {
+			module.Free()
+			return nil, fmt.Errorf("range start %q is greater than end %q", start, end)
 		}
 
 		key := bitset.TinyBitset{}
@@ -127,9 +130,9 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 			routeListIndex[key] = listIdx
 		}
 
-		if err := module.AddPrefix(prefix, listIdx); err != nil {
+		if err := module.AddRange(start, end, listIdx); err != nil {
 			module.Free()
-			return nil, fmt.Errorf("failed to add prefix %q: %w", prefix, err)
+			return nil, fmt.Errorf("failed to add range [%s, %s]: %w", start, end, err)
 		}
 	}
 

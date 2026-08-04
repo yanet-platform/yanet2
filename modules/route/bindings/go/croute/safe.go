@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
 const (
@@ -52,19 +50,26 @@ func (m *ModuleConfig) AddRouteList(routeIndices []uint32) (int, error) {
 	return m.addRouteList(routeIndices)
 }
 
-// AddPrefix adds a prefix to the LPM table, pointing at the given route list.
-func (m *ModuleConfig) AddPrefix(prefix netip.Prefix, routeListIdx uint32) error {
-	addrStart := prefix.Addr()
-	addrEnd := xnetip.LastAddr(prefix)
-
-	if addrStart.Is4() {
-		return m.addPrefixV4(addrStart.As4(), addrEnd.As4(), routeListIdx)
+// AddRange adds a contiguous address range to the LPM table, pointing at
+// the given route list.
+//
+// start and end must both be valid, belong to the same address family, and
+// satisfy start <= end. An IPv4-mapped IPv6 address is treated as IPv6,
+// since Is4 returns false for it.
+func (m *ModuleConfig) AddRange(start, end netip.Addr, routeListIdx uint32) error {
+	if !start.IsValid() || !end.IsValid() {
+		return fmt.Errorf("start and end must both be valid addresses")
 	}
-	if addrStart.Is6() {
-		return m.addPrefixV6(addrStart.As16(), addrEnd.As16(), routeListIdx)
+	if start.Is4() != end.Is4() {
+		return fmt.Errorf("address family mismatch: start and end must be the same address family")
 	}
-
-	return fmt.Errorf("unsupported prefix: must be either IPv4 or IPv6")
+	if start.Compare(end) > 0 {
+		return fmt.Errorf("invalid range: start %s is after end %s", start, end)
+	}
+	if start.Is4() {
+		return m.addPrefixV4(start.As4(), end.As4(), routeListIdx)
+	}
+	return m.addPrefixV6(start.As16(), end.As16(), routeListIdx)
 }
 
 // DumpFIB reads the Forwarding Information Base from shared memory using a

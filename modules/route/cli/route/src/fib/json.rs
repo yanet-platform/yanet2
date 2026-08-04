@@ -1,16 +1,16 @@
 //! JSON payload for `fib show --format json`.
 //!
-//! Each record carries `start`/`end`, or an `invalid` marker for a range
-//! that failed to parse, plus `nexthops` -- always an array mirroring the
-//! wire entry regardless of whether the range parsed, empty rather than
-//! absent for a record with none.
+//! Each entry carries `start`/`end` -- an absent or malformed endpoint
+//! renders as the literal `"invalid"`, matching the human view -- plus
+//! `nexthops`, always an array mirroring the wire entry, empty rather
+//! than absent for an entry with none.
 
 use serde::Serialize;
 
-use super::{format_mac, FibRecord, RangeUnit};
-use crate::routepb::FibNexthop;
+use super::{format_mac, range_endpoints};
+use crate::routepb::{FibEntry, FibNexthop};
 
-/// One nexthop, as serialized in a [`FibRecordJson`].
+/// One nexthop, as serialized in a [`FibEntryJson`].
 #[derive(Debug, Serialize)]
 pub struct FibNexthopJson {
     pub dst_mac: String,
@@ -28,49 +28,54 @@ impl From<&FibNexthop> for FibNexthopJson {
     }
 }
 
-/// JSON range representation for one FIB record.
-///
-/// A well-formed range carries `start`/`end`; an invalid one carries
-/// neither, just an honest `invalid` marker, rather than fabricating
-/// endpoints for a range that failed to parse.
+/// One FIB entry, as serialized for `--format json`.
 #[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum FibRangeJson {
-    Range { start: String, end: String },
-    Invalid { invalid: bool },
+pub struct FibEntryJson {
+    pub start: String,
+    pub end: String,
+    pub nexthops: Vec<FibNexthopJson>,
 }
 
-impl From<RangeUnit> for FibRangeJson {
-    fn from(unit: RangeUnit) -> Self {
-        match unit {
-            RangeUnit::Range { start, end } => Self::Range {
-                start: start.to_string(),
-                end: end.to_string(),
-            },
-            RangeUnit::Invalid => Self::Invalid { invalid: true },
+impl From<&FibEntry> for FibEntryJson {
+    fn from(entry: &FibEntry) -> Self {
+        let (start, end) = range_endpoints(entry.range.as_ref());
+        Self {
+            start,
+            end,
+            nexthops: entry.nexthops.iter().map(FibNexthopJson::from).collect(),
         }
     }
 }
 
-/// One FIB record, as serialized for `--format json`.
-///
-/// `nexthops` mirrors the wire entry regardless of whether `range`
-/// serializes as `start`/`end` or as `invalid: true` -- a malformed,
-/// absent, or inverted range still carries whatever nexthops the server
-/// attached to it. A record with no nexthops still serializes with
-/// `nexthops: []` rather than disappearing.
-#[derive(Debug, Serialize)]
-pub struct FibRecordJson {
-    #[serde(flatten)]
-    pub range: FibRangeJson,
-    pub nexthops: Vec<FibNexthopJson>,
-}
+#[cfg(test)]
+mod test {
+    use commonpb::pb::IpRange;
 
-impl From<&FibRecord> for FibRecordJson {
-    fn from(record: &FibRecord) -> Self {
-        Self {
-            range: FibRangeJson::from(record.range),
-            nexthops: record.nexthops.iter().map(FibNexthopJson::from).collect(),
-        }
+    use super::*;
+
+    /// Pins the serialized shape byte-for-byte: `--format json` is a
+    /// contract, and this is what a caller downstream of it parses
+    /// against. Renaming, reordering, or nesting a field would change this
+    /// string and must fail this test.
+    #[test]
+    fn entry_json_matches_expected_shape() {
+        let entry = FibEntry {
+            range: Some(IpRange::from((
+                "10.0.0.0".parse().unwrap(),
+                "10.0.0.255".parse().unwrap(),
+            ))),
+            nexthops: vec![FibNexthop {
+                dst_mac: None,
+                src_mac: None,
+                device: "vlan100".to_owned(),
+            }],
+        };
+
+        let json = serde_json::to_string(&FibEntryJson::from(&entry)).unwrap();
+
+        assert_eq!(
+            r#"{"start":"10.0.0.0","end":"10.0.0.255","nexthops":[{"dst_mac":"00:00:00:00:00:00","src_mac":"00:00:00:00:00:00","device":"vlan100"}]}"#,
+            json
+        );
     }
 }
