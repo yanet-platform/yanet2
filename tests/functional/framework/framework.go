@@ -2,6 +2,8 @@ package framework
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +18,10 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"go.uber.org/zap"
 )
+
+// ErrCaptureTimeout indicates that packet transmission succeeded but no packet
+// was captured before the receive deadline.
+var ErrCaptureTimeout = errors.New("packet capture timed out")
 
 const (
 	// MAC addresses used in test framework

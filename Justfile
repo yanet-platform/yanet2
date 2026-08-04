@@ -1,5 +1,7 @@
 #!/usr/bin/env just --justfile
 
+set positional-arguments := true
+
 # Project configuration
 TAG := "yanet2-dev"
 ROOT_DIR := justfile_directory()
@@ -41,6 +43,11 @@ test-functional: build
 
 # Run all tests (unit + functional)
 test-all: test test-functional
+
+# Operate the reusable local QEMU lab.
+# Examples: just lab doctor; just lab up; just lab scenario run forward-route
+lab *ARGS:
+    @go run ./cmd/yanet-lab "$@"
 
 # Build fuzzing targets and optionally run a fuzzer
 # Usage: just fuzz [MODULE]

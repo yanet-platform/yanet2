@@ -1,0 +1,24 @@
+$schema: ../../yanet2-lab.schema.json
+version: 1
+name: decap
+description: Configure an IPv4/IPv6 decapsulation module and inspect its live state.
+steps:
+  - name: configure-decap
+    argv:
+      - /tmp/yanet/cli/yanet-cli-decap
+      - update
+      - --name
+      - decap0
+      - -p
+      - 4.5.6.7/32
+      - -p
+      - 1:2:3:4::abcd/128
+  - name: attach-decap
+    argv:
+      - /tmp/yanet/cli/yanet-cli-function
+      - update
+      - --name=test
+      - --chains
+      - c0:3=forward:forward0,decap:decap0,route:route0
+  - name: inspect-decap
+    argv: [/tmp/yanet/cli/yanet-cli-decap, show, --name, decap0]
