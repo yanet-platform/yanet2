@@ -58,6 +58,15 @@ type configEntry struct {
 	UpdatedAt time.Time
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *configEntry) Free() {
+	if m.Handle != nil {
+		m.Handle.Free()
+	}
+}
+
 // RouteService is the gRPC service implementation backing the slim
 // route-module shim.
 type RouteService struct {
@@ -234,7 +243,7 @@ func (m *RouteService) DeleteConfig(
 	if err := m.backend.DeleteModule(name); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
-	entry.Handle.Free()
+	entry.Free()
 	delete(m.configs, name)
 
 	return &routepb.DeleteConfigResponse{}, nil
@@ -259,7 +268,7 @@ func (m *RouteService) UpdateFIB(
 	}
 
 	if old, ok := m.configs[name]; ok {
-		old.Handle.Free()
+		old.Free()
 	}
 
 	// The counts are read once, here, off the handle just published: the

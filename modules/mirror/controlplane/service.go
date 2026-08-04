@@ -32,6 +32,15 @@ type mirrorConfig struct {
 	Module ModuleHandle
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *mirrorConfig) Free() {
+	if m.Module != nil {
+		m.Module.Free()
+	}
+}
+
 type MirrorService struct {
 	mirrorpb.UnimplementedMirrorServiceServer
 
@@ -165,7 +174,7 @@ func (m *MirrorService) UpdateConfig(
 	}
 
 	if oldModule, ok := m.configs[name]; ok {
-		oldModule.Module.Free()
+		oldModule.Free()
 	}
 
 	m.configs[name] = mirrorConfig{
@@ -197,9 +206,7 @@ func (m *MirrorService) DeleteConfig(
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 
-	if config.Module != nil {
-		config.Module.Free()
-	}
+	config.Free()
 
 	delete(m.configs, name)
 

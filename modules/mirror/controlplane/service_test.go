@@ -32,6 +32,22 @@ func (m *mockBackend) DeleteModule(name string) error {
 	return nil
 }
 
+// nilHandleBackend is a Backend whose UpdateModule publishes a config
+// carrying no module handle.
+//
+// It models a Backend that reports success without producing a handle,
+// which is the case the config's own nil guard exists to survive.
+type nilHandleBackend struct {
+	mockBackend
+}
+
+func (m *nilHandleBackend) UpdateModule(
+	name string,
+	rules []cmirror.MirrorRule,
+) (mirror.ModuleHandle, error) {
+	return nil, nil
+}
+
 // TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
 // a config name that was never applied.
 func TestShowConfigUnknownConfig(t *testing.T) {
@@ -61,6 +77,18 @@ func TestShowConfigEmptyRules(t *testing.T) {
 	response, err := svc.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "empty"})
 	require.NoError(t, err)
 	require.Empty(t, response.GetRules())
+}
+
+// TestUpdateConfigReplacesConfigWithoutHandle verifies that replacing a
+// config that holds no module handle releases it without panicking.
+func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {
+	svc := mirror.NewMirrorService(&nilHandleBackend{})
+
+	_, err := svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{Name: "config"})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{Name: "config"})
+	require.NoError(t, err)
 }
 
 // Run with: go test -race

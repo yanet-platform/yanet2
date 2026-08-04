@@ -49,6 +49,15 @@ type pdumpConfig struct {
 	FFIModule *ModuleConfig // FFI module configuration that needs to be freed when replaced
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *pdumpConfig) Free() {
+	if m.FFIModule != nil {
+		m.FFIModule.Free()
+	}
+}
+
 type ringReader struct {
 	Name   string
 	Ring   *ringBuffer
@@ -243,7 +252,7 @@ func (m *PdumpService) DeleteConfig(
 		if err := m.agent.DeleteModuleConfig(name); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 		}
-		config.FFIModule.Free()
+		config.Free()
 	}
 
 	delete(m.configs, name)
@@ -339,8 +348,8 @@ func (m *PdumpService) updateModuleConfig(
 	}
 
 	// Free old FFI module after successful update
-	if modConfig != nil && modConfig.FFIModule != nil {
-		modConfig.FFIModule.Free()
+	if modConfig != nil {
+		modConfig.Free()
 	}
 
 	// Update the stored FFI module reference

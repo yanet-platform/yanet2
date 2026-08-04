@@ -35,6 +35,15 @@ type config struct {
 	Module   ModuleHandle
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *config) Free() {
+	if m.Module != nil {
+		m.Module.Free()
+	}
+}
+
 // DecapService implements the DecapService gRPC server.
 type DecapService struct {
 	decappb.UnimplementedDecapServiceServer
@@ -145,8 +154,8 @@ func (m *DecapService) updateConfig(name string, cfg *config) error {
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
 
-	if old, ok := m.configs[name]; ok && old.Module != nil {
-		old.Module.Free()
+	if old, ok := m.configs[name]; ok {
+		old.Free()
 	}
 
 	m.configs[name] = &config{

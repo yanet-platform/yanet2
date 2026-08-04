@@ -39,6 +39,15 @@ type config struct {
 	Module   ModuleHandle
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *config) Free() {
+	if m.Module != nil {
+		m.Module.Free()
+	}
+}
+
 func (m *config) Clone() *config {
 	return &config{
 		Prefixes: slices.Clone(m.Prefixes),
@@ -237,9 +246,7 @@ func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 		return err
 	}
 
-	if cfg.Module != nil {
-		cfg.Module.Free()
-	}
+	cfg.Free()
 
 	m.configs[name] = &config{
 		Prefixes: cfg.Prefixes,

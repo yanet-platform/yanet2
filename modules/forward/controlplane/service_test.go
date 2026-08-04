@@ -33,6 +33,19 @@ func (m *mockBackend) ModuleCounters(name string, counterNames []string) []forwa
 	return nil
 }
 
+// nilHandleBackend is a Backend whose UpdateModule publishes a config
+// carrying no module handle.
+//
+// It models a Backend that reports success without producing a handle,
+// which is the case the config's own nil guard exists to survive.
+type nilHandleBackend struct {
+	mockBackend
+}
+
+func (m *nilHandleBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+	return nil, nil
+}
+
 // TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
 // a config name that was never applied.
 func TestShowConfigUnknownConfig(t *testing.T) {
@@ -76,6 +89,18 @@ func TestUpdateConfigNilAction(t *testing.T) {
 		},
 	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// TestUpdateConfigReplacesConfigWithoutHandle verifies that replacing a
+// config that holds no module handle releases it without panicking.
+func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {
+	svc := forward.NewForwardService(&nilHandleBackend{})
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{Name: "config"})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{Name: "config"})
+	require.NoError(t, err)
 }
 
 // Run with: go test -race

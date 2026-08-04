@@ -35,6 +35,15 @@ type forwardConfig struct {
 	Module ModuleHandle
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *forwardConfig) Free() {
+	if m.Module != nil {
+		m.Module.Free()
+	}
+}
+
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
@@ -162,7 +171,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 	}
 
 	if oldModule, ok := m.configs[name]; ok {
-		oldModule.Module.Free()
+		oldModule.Free()
 	}
 
 	m.configs[name] = forwardConfig{
@@ -191,9 +200,7 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 
-	if config.Module != nil {
-		config.Module.Free()
-	}
+	config.Free()
 
 	delete(m.configs, name)
 

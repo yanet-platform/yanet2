@@ -30,6 +30,15 @@ type config struct {
 	Module ModuleHandle
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *config) Free() {
+	if m.Module != nil {
+		m.Module.Free()
+	}
+}
+
 // BlackholeService implements the BlackholeService gRPC server.
 type BlackholeService struct {
 	blackholepb.UnimplementedBlackholeServiceServer
@@ -117,8 +126,8 @@ func (m *BlackholeService) updateConfig(name string) error {
 		return err
 	}
 
-	if old, ok := m.configs[name]; ok && old.Module != nil {
-		old.Module.Free()
+	if old, ok := m.configs[name]; ok {
+		old.Free()
 	}
 
 	m.configs[name] = &config{Module: mod}
@@ -152,9 +161,7 @@ func (m *BlackholeService) DeleteConfig(
 		)
 	}
 
-	if entry.Module != nil {
-		entry.Module.Free()
-	}
+	entry.Free()
 
 	delete(m.configs, name)
 

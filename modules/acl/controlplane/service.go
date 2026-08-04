@@ -87,6 +87,15 @@ type aclConfig struct {
 	fwstateName string
 }
 
+// Free releases the module handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *aclConfig) Free() {
+	if m.acl != nil {
+		m.acl.Free()
+	}
+}
+
 // configEntry holds the per-name state that lives outside m.mu: the lock
 // serializing mutations of one config name, and the currently published
 // config for that name.
@@ -489,8 +498,8 @@ func (m *ACLService) UpdateConfig(
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
 
-		if oldConfig != nil && oldConfig.acl != nil {
-			oldConfig.acl.Free()
+		if oldConfig != nil {
+			oldConfig.Free()
 		}
 
 		resp = &aclpb.UpdateConfigResponse{}
@@ -591,9 +600,7 @@ func (m *ACLService) DeleteConfig(
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
 
-		if config.acl != nil {
-			config.acl.Free()
-		}
+		config.Free()
 
 		return nil
 	})
