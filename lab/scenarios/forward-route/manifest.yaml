@@ -1,0 +1,17 @@
+$schema: ../../yanet2-lab.schema.json
+version: 1
+name: forward-route
+description: Verify the baseline forward and route pipeline with one UDP packet.
+steps:
+  - name: inspect-pipelines
+    argv: [/tmp/yanet/cli/yanet-cli-inspect]
+    timeout: 10s
+probes:
+  - name: route-ipv4
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send:
+      pcap: input.pcap
+    expect:
+      pcap: expected.pcap

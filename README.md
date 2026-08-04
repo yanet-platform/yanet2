@@ -105,6 +105,18 @@ meson test -C build
 
 ### Running in a Virtual Environment
 
+For repeatable local experiments, use the reusable QEMU lab:
+
+```bash
+just lab doctor
+just lab up
+just lab scenario run forward-route
+just lab down
+```
+
+See the [YANET2 Lab guide](docs/lab.md) for manifests, packet probes,
+troubleshooting, and the built-in forward/route, decap, and NAT64 scenarios.
+
 YANET includes QEMU virtualization support for development and testing without physical hardware:
 
 1. Configure QEMU VM with virtual network interfaces.

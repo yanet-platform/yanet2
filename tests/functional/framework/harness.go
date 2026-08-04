@@ -410,39 +410,46 @@ func (m *Harness) WithBootedVM(t *testing.T, fn func(fw *TestFramework)) {
 // StartYANET) only when the baseline restore fails.
 func (m *Harness) RestoreBooted(t *testing.T, fw *TestFramework) {
 	t.Helper()
+	if err := m.Restore(fw); err != nil {
+		t.Fatalf("failed to restore VM to a working YANET baseline: %v", err)
+	}
+}
 
+// Restore restores fw to a working YANET baseline without depending on the
+// testing package. Lab tools use this method to get the same fast-path and
+// fallback behavior as functional tests.
+func (m *Harness) Restore(fw *TestFramework) error {
 	fw.AdoptRunningConfig(m.dataplane, m.controlplane)
 
 	err := fw.RestoreAndReconnect("baseline")
 	if err == nil {
-		return
+		return nil
 	}
-
-	t.Logf("baseline restore failed, falling back to preyanet + fresh StartYANET: %v", err)
+	fw.log.Infof("baseline restore failed, falling back to preyanet + fresh StartYANET: %v", err)
 
 	if err := fw.RestoreClean("preyanet"); err != nil {
-		t.Fatalf("failed to restore VM to preyanet: %v", err)
+		return fmt.Errorf("restore VM to preyanet: %w", err)
 	}
 	if err := fw.StartYANET(m.dataplane, m.controlplane); err != nil {
-		t.Fatalf("failed to start YANET: %v", err)
+		return fmt.Errorf("start YANET: %w", err)
 	}
 	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
-		t.Fatalf("failed to configure YANET: %v", err)
+		return fmt.Errorf("configure YANET: %w", err)
 	}
 
 	fw.ResetConnections()
 
 	const dpTimeout = 15 * time.Second
 	if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-		t.Logf("dataplane not ready after %v, restarting YANET...", dpTimeout)
 		if restartErr := fw.RestartYANET(); restartErr != nil {
-			t.Fatalf("YANET restart failed: %v", restartErr)
+			return fmt.Errorf("restart YANET: %w", restartErr)
 		}
 		fw.ResetConnections()
 		if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-			t.Fatalf("dataplane not ready after preyanet restore + restart: %v", err)
+			return fmt.Errorf("wait for dataplane after restart: %w", err)
 		}
 	}
+	return nil
 }
 
 // baselineSetup captures the YANET configuration used while baking a baseline

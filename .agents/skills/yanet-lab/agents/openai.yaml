@@ -1,0 +1,4 @@
+interface:
+  display_name: "YANET2 Lab"
+  short_description: "Operate and troubleshoot the local YANET2 QEMU lab"
+  default_prompt: "Use $yanet-lab to validate manifests, run guided scenarios, and troubleshoot the local YANET2 QEMU lab."
