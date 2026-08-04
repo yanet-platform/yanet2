@@ -83,10 +83,6 @@ Skills are architect-driven runbooks for recurring, multi-phase workflows
   worktree from confirmed `origin/main`, stage only intended files, open a
   scoped PR, drive CI to green, address every review/Codex finding, and merge
   with the right squash/rebase strategy. Use whenever work is ready to land.
-- **`raii-sweep`** — periodic C lifecycle-symmetry sweep (new/init/fini/free),
-  one prefix family per PR.
-- **`web-dedup`** — de-duplicate `web/` behind a mandatory zero-visual-diff
-  gate, one extraction per PR.
 
 ## Decision Framework
 
