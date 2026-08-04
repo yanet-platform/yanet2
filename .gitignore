@@ -137,11 +137,19 @@ deploy/packages/
 # checkout, and a directory-only pattern does not match a symlink.
 .claude/agent-memory
 .claude/settings.*.json
-.claude/skills/loadtest-hw
-.agents/skills/loadtest-hw
 .claude/worktrees
 /.codex/
 /.agent-state
+
+# Ignore skills by default.
+#
+# Public skills are whitelisted below, so adding a new private skill needs
+# no change here.
+.agents/skills/*
+!.agents/skills/review-change
+!.agents/skills/ship-pr
+.claude/skills/*
+!.claude/skills/ship-pr
 
 ### Uncategorized ###
 # Worktree symlinks: a worktree may symlink this tree into the main
