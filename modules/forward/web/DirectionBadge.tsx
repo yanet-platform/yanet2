@@ -8,7 +8,7 @@ interface DirectionBadgeProps {
     mode: ForwardMode;
 }
 
-/** Colored pill badge showing direction mode (IN / OUT / NONE) with equal width. */
+/** Colored pill badge showing forwarding mode (IN / OUT / NONE) with equal width. */
 const DirectionBadge: React.FC<DirectionBadgeProps> = ({ mode }) => {
     let cls = 'yn-badge-dir';
     if (mode === ForwardMode.IN) cls += ' yn-badge-dir--in';

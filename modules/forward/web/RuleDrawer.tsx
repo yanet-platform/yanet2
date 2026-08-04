@@ -137,11 +137,11 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 value={draft.target}
                                 onChange={(e) => updateField('target', e.target.value)}
                             />
-                            <span className="yn-field__hint">Output target device matched traffic is forwarded to.</span>
+                            <span className="yn-field__hint">Target device of the rule. Matched packets are dropped if no device with this name exists.</span>
                         </div>
                         <div className="yn-field">
                             <label className="yn-field__label">Mode</label>
-                            <div className="yn-segmented" role="radiogroup" aria-label="Direction mode">
+                            <div className="yn-segmented" role="radiogroup" aria-label="Forwarding mode">
                                 {modeOptions.map((opt) => (
                                     <button
                                         key={opt.value}
@@ -156,9 +156,9 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 ))}
                             </div>
                             <span className="yn-field__hint">
-                                {draft.mode === ForwardMode.IN && 'Match traffic entering the device.'}
-                                {draft.mode === ForwardMode.OUT && 'Match traffic exiting the device.'}
-                                {draft.mode === ForwardMode.NONE && 'Match without direction binding.'}
+                                {draft.mode === ForwardMode.IN && 'Matched packets are scheduled to the input path of the target device.'}
+                                {draft.mode === ForwardMode.OUT && 'Matched packets are scheduled to the output path of the target device.'}
+                                {draft.mode === ForwardMode.NONE && 'Matched packets stay on the chain and go to the next module. The target is still resolved.'}
                             </span>
                         </div>
                     </div>
