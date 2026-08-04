@@ -28,6 +28,11 @@
 
 #define TTL 64
 
+// Bytes that packet_decap strips off a GRE-in-IPv4 frame, namely the outer
+// IPv4 header and a GRE header carrying none of the optional fields.
+#define TUNNEL_HDRS_LEN                                                        \
+	(sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_gre_hdr))
+
 static const uint8_t src4[NET4_LEN] = {192, 168, 1, 1};
 static const uint8_t dst4[NET4_LEN] = {192, 168, 1, 2};
 
@@ -110,14 +115,16 @@ build_ip6(struct packet *p, bool with_fragment, uint16_t offset_flag_host) {
 	return parse_packet(p);
 }
 
-// Builds an IPv4-in-GRE-in-IPv4 packet parsed down to its outer headers.
+// Builds a GRE-in-IPv4 packet carrying an IPv4 or an IPv6 inner packet, parsed
+// down to its outer headers.
 //
 // Prepending the tunnel leaves transport_header describing the inner UDP
 // header, so the frame is parsed again to make transport_header name the outer
 // GRE header, which is what packet_decap and pkt_gre read.
 static int
-build_gre_encapped(struct packet *p) {
-	if (build_ip4(p, 0) != 0) {
+build_gre_encapped(struct packet *p, bool inner_v6) {
+	int rc = inner_v6 ? build_ip6(p, false, 0) : build_ip4(p, 0);
+	if (rc != 0) {
 		return -1;
 	}
 	if (packet_ip4_encap_gre(p, outer_dst4, outer_src4) != 0) {
@@ -242,32 +249,70 @@ test_ip6_reserved_only(void) {
 	return run_ip6_case(true, 0x0006, 0, 0);
 }
 
-// Verifies that a GRE header with cleared reserved bits and version is
-// accepted, and that the encapsulated packet is unwrapped.
+// Decapsulates a GRE-encapsulated frame and checks that the tunnel is gone.
+//
+// The transport type and the packet length both differ between the outer and
+// the inner frame, so either one fails if packet_decap reports success without
+// stripping the tunnel. The network type differs only when the inner packet is
+// IPv6.
 static int
-test_gre_accepted(void) {
+run_gre_accepted_case(bool inner_v6, uint16_t expect_ether_type) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_gre_encapped(&p), "build");
+	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, inner_v6), "build");
 	TEST_ASSERT_EQUAL(
 		p.transport_header.type, IPPROTO_GRE, "outer transport is GRE"
 	);
+	TEST_ASSERT_EQUAL(
+		p.network_header.type,
+		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
+		"outer network type is IPv4"
+	);
+	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
 
 	TEST_ASSERT_EQUAL(packet_decap(&p), 0, "rc");
 	TEST_ASSERT_EQUAL(
 		p.network_header.type,
-		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
-		"inner network type after decap"
+		expect_ether_type,
+		"network type after decap"
+	);
+	TEST_ASSERT_EQUAL(
+		p.transport_header.type,
+		IPPROTO_UDP,
+		"transport type after decap"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_pkt_len(p.mbuf),
+		pkt_len_before - TUNNEL_HDRS_LEN,
+		"pkt_len after decap"
 	);
 
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
+// Verifies that a GRE header with cleared reserved bits and version is
+// accepted, and that the encapsulated IPv4 packet is unwrapped.
+static int
+test_gre_accepted(void) {
+	return run_gre_accepted_case(
+		false, rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)
+	);
+}
+
+// Verifies that an encapsulated IPv6 packet is unwrapped and that its network
+// header type replaces the outer IPv4 one.
+static int
+test_gre_accepted_inner_v6(void) {
+	return run_gre_accepted_case(
+		true, rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
+	);
+}
+
 // Verifies that a GRE header carrying a nonzero version is rejected.
 static int
 test_gre_reject_ver(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_gre_encapped(&p), "build");
+	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->ver = 1;
 	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
 	free_packet(&p);
@@ -278,7 +323,7 @@ test_gre_reject_ver(void) {
 static int
 test_gre_reject_res1(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_gre_encapped(&p), "build");
+	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->res1 = 1;
 	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
 	free_packet(&p);
@@ -289,7 +334,7 @@ test_gre_reject_res1(void) {
 static int
 test_gre_reject_res2(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_gre_encapped(&p), "build");
+	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->res2 = 1;
 	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
 	free_packet(&p);
@@ -300,7 +345,7 @@ test_gre_reject_res2(void) {
 static int
 test_gre_reject_res3(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_gre_encapped(&p), "build");
+	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->res3 = 1;
 	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
 	free_packet(&p);
@@ -327,6 +372,7 @@ main(void) {
 		{"ip6_offset_only", test_ip6_offset_only},
 		{"ip6_reserved_only", test_ip6_reserved_only},
 		{"gre_accepted", test_gre_accepted},
+		{"gre_accepted_inner_v6", test_gre_accepted_inner_v6},
 		{"gre_reject_ver", test_gre_reject_ver},
 		{"gre_reject_res1", test_gre_reject_res1},
 		{"gre_reject_res2", test_gre_reject_res2},
