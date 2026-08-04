@@ -449,7 +449,8 @@ print_upkt(struct upkt *pkt) {
 		RTE_LOG(INFO,
 			NAT64_TEST,
 			"  Flags: 0x%01X\n",
-			(pkt->ip.ipv4.fragment_offset & 0x00E0) >> 5);
+			rte_be_to_cpu_16(pkt->ip.ipv4.fragment_offset) >>
+				RTE_IPV4_HDR_MF_SHIFT);
 		RTE_LOG(INFO,
 			NAT64_TEST,
 			"  Fragment Offset: %d\n",
@@ -764,7 +765,8 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
 		RTE_LOG(INFO,
 			NAT64_TEST,
 			"  Flags: 0x%01X\n",
-			(ipv4_hdr->fragment_offset & 0x00E0) >> 5);
+			rte_be_to_cpu_16(ipv4_hdr->fragment_offset) >>
+				RTE_IPV4_HDR_MF_SHIFT);
 		RTE_LOG(INFO,
 			NAT64_TEST,
 			"  Fragment Offset: %d\n",

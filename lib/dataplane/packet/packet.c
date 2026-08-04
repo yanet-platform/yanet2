@@ -92,11 +92,13 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	packet->hash = crc32(&ipv4_hdr->src_addr, 4, packet->hash);
 	packet->hash = crc32(&ipv4_hdr->dst_addr, 4, packet->hash);
 
-	if ((ipv4_hdr->fragment_offset & 0xFF3F) != 0) {
+	if ((ipv4_hdr->fragment_offset &
+	     RTE_BE16(RTE_IPV4_HDR_MF_FLAG | RTE_IPV4_HDR_OFFSET_MASK)) != 0) {
 		packet->flags |= 1 << PACKET_FLAG_FRAGMENTED;
 
 		packet->fragment_offset =
-			rte_be_to_cpu_16(ipv4_hdr->fragment_offset & 0xFF1F);
+			rte_be_to_cpu_16(ipv4_hdr->fragment_offset) &
+			RTE_IPV4_HDR_OFFSET_MASK;
 	}
 
 	// FIXME: process extensions
@@ -177,11 +179,12 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 					*offset
 				);
 
-			if ((ext->offset_flag & 0xF9FF) != 0x0000) {
+			if ((ext->offset_flag &
+			     RTE_BE16(RTE_IPV6_FRAG_USED_MASK)) != 0x0000) {
 				packet->flags |= 1 << PACKET_FLAG_FRAGMENTED;
-				packet->fragment_offset = rte_be_to_cpu_16(
-					ext->offset_flag & 0xF8FF
-				);
+				packet->fragment_offset =
+					rte_be_to_cpu_16(ext->offset_flag) &
+					RTE_IPV6_EHDR_FO_MASK;
 			}
 
 			ext_type = ext->next_header;
