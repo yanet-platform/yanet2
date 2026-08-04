@@ -22,8 +22,12 @@ import (
 // simulating a service that is missing from the gateway's registry.
 type emptyRegistry struct{}
 
-func (m emptyRegistry) GetBackend(_ string) (proxy.Backend, bool) {
-	return nil, false
+func (m emptyRegistry) GetBackend(_ string) (proxy.Backend, func(), bool) {
+	return nil, func() {}, false
+}
+
+func (m emptyRegistry) HasBackend(_ string) bool {
+	return false
 }
 
 // TestServeHTTP_UnknownService verifies that a registry miss is answered
@@ -66,6 +70,55 @@ func TestServeHTTP_UnknownService(t *testing.T) {
 	}
 }
 
+// explodingBody is an io.Reader that fails the test if it is ever read.
+//
+// It stands in for a request body in the unregistered-service tests, where
+// the handler must reject the request before reading it.
+type explodingBody struct {
+	t *testing.T
+}
+
+func (m explodingBody) Read(_ []byte) (int, error) {
+	m.t.Fatal("request body was read for an unregistered service")
+	return 0, nil
+}
+
+// TestServeHTTP_UnknownService_DoesNotReadBody verifies that a registry miss
+// is answered without the handler ever consuming the request body, on both
+// the unary and server-streaming request paths.
+func TestServeHTTP_UnknownService_DoesNotReadBody(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "unary",
+			path: "/api/some.unknown.Service/Method",
+		},
+		{
+			name: "streaming",
+			path: "/api" + ynpb.ReadinessService_Watch_FullMethodName,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := httpproxy.NewHTTPHandler(emptyRegistry{})
+
+			req := httptest.NewRequest(http.MethodPost, testCase.path, explodingBody{t: t})
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+		})
+	}
+}
+
 // unreachableBackend is a proxy.Backend whose GetConnection always fails,
 // simulating a registered service whose upstream connection cannot be
 // established.
@@ -101,8 +154,12 @@ type unreachableRegistry struct {
 	backend unreachableBackend
 }
 
-func (m unreachableRegistry) GetBackend(_ string) (proxy.Backend, bool) {
-	return m.backend, true
+func (m unreachableRegistry) GetBackend(_ string) (proxy.Backend, func(), bool) {
+	return m.backend, func() {}, true
+}
+
+func (m unreachableRegistry) HasBackend(_ string) bool {
+	return true
 }
 
 // TestServeHTTP_BackendUnreachable verifies that a GetConnection failure is

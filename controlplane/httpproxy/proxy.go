@@ -22,8 +22,16 @@ import (
 )
 
 // BackendRegistry is the subset of backend lookup API required by the HTTP proxy.
+//
+// GetBackend leases the returned backend: the caller must call the release
+// function exactly once when it is done using the backend, or the
+// connection may be kept open past the point it should have closed.
+// HasBackend performs the same lookup without leasing, so a handler can
+// reject an unregistered service before it pays for reading the request
+// body.
 type BackendRegistry interface {
-	GetBackend(service string) (proxy.Backend, bool)
+	GetBackend(service string) (proxy.Backend, func(), bool)
+	HasBackend(service string) bool
 }
 
 // TransparentWebGRPCProxy is an HTTP handler that translates HTTP requests
@@ -137,8 +145,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	backend, ok := m.registry.GetBackend(service)
-	if !ok {
+	if !m.registry.HasBackend(service) {
 		m.writeRegistryMissError(w, service)
 		return
 	}
@@ -148,6 +155,13 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
 		return
 	}
+
+	backend, release, ok := m.registry.GetBackend(service)
+	if !ok {
+		m.writeRegistryMissError(w, service)
+		return
+	}
+	defer release()
 
 	requestMsg, err := m.jsonToProtobuf(fullMethodName, body, true)
 	if err != nil {
@@ -325,8 +339,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	backend, ok := m.registry.GetBackend(service)
-	if !ok {
+	if !m.registry.HasBackend(service) {
 		m.writeRegistryMissError(w, service)
 		return
 	}
@@ -336,6 +349,13 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
 		return
 	}
+
+	backend, release, ok := m.registry.GetBackend(service)
+	if !ok {
+		m.writeRegistryMissError(w, service)
+		return
+	}
+	defer release()
 
 	requestMsg, err := m.jsonToProtobuf(fullMethodName, body, true)
 	if err != nil {

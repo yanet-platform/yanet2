@@ -164,7 +164,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			return proxy.One2One, nil, status.Errorf(codes.NotFound, "malformed gRPC method name: %v", err)
 		}
 
-		backend, ok := registry.GetBackend(service)
+		backend, release, ok := registry.GetBackend(service)
 		if !ok {
 			// The HTTP surface answers 503 for this same condition,
 			// because it cannot tell an HTTP client "this service never
@@ -186,6 +186,14 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			_ = grpc.SetTrailer(ctx, metadata.Pairs(errorReasonMetadataKey, errorReasonServiceUnregistered))
 			return proxy.One2One, nil, status.Errorf(codes.NotFound, "unknown service")
 		}
+
+		// The proxy library hands backend to its own machinery for the
+		// whole call rather than returning it to this closure, so there is
+		// no return-site here to release the lease at. ctx is the RPC's
+		// own server-side stream context, which the proxy library cancels
+		// once this call finishes, so tying the release to it releases the
+		// lease exactly when the call is done, however it ends.
+		context.AfterFunc(ctx, release)
 
 		log.Debug("proxying request",
 			zap.String("method", fullMethodName),
@@ -225,7 +233,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	// A registry backend lookup is mutex-guarded and cheap. The gateway's
 	// own registered services are read from the cached serviceKnown snapshot.
 	serviceFilter := func(service string) bool {
-		if _, ok := registry.GetBackend(service); ok {
+		if registry.HasBackend(service) {
 			return true
 		}
 		_, ok := serviceKnown()[service]

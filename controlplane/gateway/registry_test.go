@@ -211,6 +211,35 @@ func TestBackendRegistry_DisplacingLastSharedNameClosesBackend(t *testing.T) {
 	require.Equal(t, otherB, entryB.backend)
 }
 
+// TestBackendRegistry_RenewingWithASharedBackendKeepsItOpen verifies that
+// renewing a service name with a backend object the registry already tracks
+// under another service name leaves that backend open.
+//
+// This is the regression guard for the shared loopback hazard on the
+// renewal path: renewing svc.A with the very backend object already
+// registered under both svc.A and svc.B must not close it out from under
+// svc.B, even though the renewal branch treats the passed-in backend as
+// redundant.
+func TestBackendRegistry_RenewingWithASharedBackendKeepsItOpen(t *testing.T) {
+	reg := NewBackendRegistry()
+	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
+	reg.RegisterBackend("svc.A", shared, BackendKindBuiltin)
+	reg.RegisterBackend("svc.B", shared, BackendKindBuiltin)
+
+	status := reg.RegisterBackend("svc.A", shared, BackendKindBuiltin)
+
+	require.Equal(t, RegistrationRenewed, status)
+	require.False(t, shared.Closed(), "the shared backend must not be closed")
+
+	entryA, ok := reg.backends["svc.A"]
+	require.True(t, ok)
+	require.Equal(t, shared, entryA.backend)
+
+	entryB, ok := reg.backends["svc.B"]
+	require.True(t, ok)
+	require.Equal(t, shared, entryB.backend)
+}
+
 func TestBackendRegistry_Close(t *testing.T) {
 	reg := NewBackendRegistry()
 	bA := &fakeBackend{endpoint: "127.0.0.1:9000"}
@@ -292,7 +321,9 @@ func TestBackendRegistry_ConcurrentRace(t *testing.T) {
 			b := &fakeBackend{endpoint: "127.0.0.1:9000"}
 			reg.RegisterBackend("svc.Race", b, BackendKindExternal)
 			reg.Renew("svc.Race", "127.0.0.1:9000")
-			reg.GetBackend("svc.Race")
+			if _, release, ok := reg.GetBackend("svc.Race"); ok {
+				release()
+			}
 			reg.ListBackends()
 		}()
 	}
@@ -437,6 +468,101 @@ func TestBackendRegistry_EvictStaleSparesSharedBackend(t *testing.T) {
 	require.True(t, ok, "svc.A must remain registered")
 	_, ok = reg.backends["svc.B"]
 	require.True(t, ok, "svc.B must remain registered")
+}
+
+// TestBackendRegistry_LeaseSurvivesConcurrentEviction verifies that a
+// backend obtained via GetBackend is not closed by a concurrent EvictStale
+// while the lease is still held, and is closed once that lease is the last
+// one released.
+//
+// This is the direct regression guard for the eviction race: GetBackend
+// used to hand out a raw backend with no ownership guarantee, so a sweep
+// that ran between lookup and use could close the connection out from
+// under an in-flight call.
+func TestBackendRegistry_LeaseSurvivesConcurrentEviction(t *testing.T) {
+	t.Parallel()
+
+	reg := NewBackendRegistry()
+	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
+
+	backend, release, ok := reg.GetBackend("svc.Foo")
+	require.True(t, ok)
+	require.NotNil(t, backend)
+
+	// Make the entry stale so a sweep evicts it while the lease above is
+	// still outstanding.
+	entry := reg.backends["svc.Foo"]
+	entry.lastSeenAt = time.Now().UTC().Add(-time.Hour)
+	reg.backends["svc.Foo"] = entry
+
+	evictedCh := make(chan []BackendEntry, 1)
+	go func() {
+		evictedCh <- reg.EvictStale(time.Now().UTC())
+	}()
+
+	var evicted []BackendEntry
+	select {
+	case evicted = <-evictedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvictStale did not return")
+	}
+	require.Len(t, evicted, 1)
+
+	require.False(t, b.Closed(), "backend must stay open while the lease obtained before eviction is still held")
+
+	release()
+
+	require.True(t, b.Closed(), "backend must be closed once its last outstanding lease is released")
+}
+
+// TestBackendRegistry_ReRegisterAfterEvictionLeavesNewBackendUsable verifies
+// that releasing a lease held on a backend evicted and superseded by a
+// fresh registration under the same service name closes only the old
+// backend, never the new one.
+//
+// This guards the evict-then-re-register cycle: a lease taken before
+// eviction outlives the entry it was obtained from, so its eventual
+// release must not reach past that entry into whatever now occupies the
+// same service name.
+func TestBackendRegistry_ReRegisterAfterEvictionLeavesNewBackendUsable(t *testing.T) {
+	t.Parallel()
+
+	reg := NewBackendRegistry()
+	old := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	reg.RegisterBackend("svc.Foo", old, BackendKindExternal)
+
+	// Simulate a call that obtained the backend just before the sweeper
+	// runs.
+	_, release, ok := reg.GetBackend("svc.Foo")
+	require.True(t, ok)
+
+	entry := reg.backends["svc.Foo"]
+	entry.lastSeenAt = time.Now().UTC().Add(-time.Hour)
+	reg.backends["svc.Foo"] = entry
+
+	evicted := reg.EvictStale(time.Now().UTC())
+	require.Len(t, evicted, 1)
+	require.False(t, old.Closed(), "old backend must stay open while its lease is outstanding")
+
+	// A fresh registration under the same service name, using a distinct
+	// connection, lands before the old lease is released.
+	next := &fakeBackend{endpoint: "127.0.0.1:9001"}
+	status := reg.RegisterBackend("svc.Foo", next, BackendKindExternal)
+	require.Equal(t, RegistrationRegistered, status)
+
+	nextBackend, nextRelease, ok := reg.GetBackend("svc.Foo")
+	require.True(t, ok)
+	require.Same(t, next, nextBackend)
+
+	// Releasing the stale lease must close only the now-unreferenced old
+	// backend, never the newly registered one sharing its service name.
+	release()
+	require.True(t, old.Closed(), "old backend must close once its last lease is released")
+	require.False(t, next.Closed(), "re-registered backend must not be closed by the old lease's release")
+
+	nextRelease()
+	require.False(t, next.Closed(), "releasing the only lease on a still-registered backend must not close it")
 }
 
 // TestBackendRegistry_RenewSavesFromEviction verifies that a Renew after
