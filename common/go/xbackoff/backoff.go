@@ -70,13 +70,9 @@ func WithOnReset(f func()) Option {
 // Backoff is a retry helper with exponential delay and a pluggable
 // wait strategy.
 type Backoff struct {
-	initial    time.Duration
-	max        time.Duration
-	multiplier float64
-	jitter     float64
-	sleeper    Sleeper
-	onRetry    func(attempt int, delay time.Duration, err error)
-	onReset    func()
+	sleeper Sleeper
+	onRetry func(attempt int, delay time.Duration, err error)
+	onReset func()
 
 	inner   backoff.ExponentialBackOff
 	attempt int
@@ -90,13 +86,9 @@ func New(initial time.Duration, options ...Option) *Backoff {
 	}
 
 	m := &Backoff{
-		initial:    initial,
-		max:        opts.Max,
-		multiplier: opts.Multiplier,
-		jitter:     opts.Jitter,
-		sleeper:    opts.Sleeper,
-		onRetry:    opts.OnRetry,
-		onReset:    opts.OnReset,
+		sleeper: opts.Sleeper,
+		onRetry: opts.OnRetry,
+		onReset: opts.OnReset,
 		inner: backoff.ExponentialBackOff{
 			InitialInterval:     initial,
 			RandomizationFactor: opts.Jitter,
