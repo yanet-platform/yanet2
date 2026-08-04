@@ -1,8 +1,12 @@
 package framework
 
 import (
+	"crypto/sha256"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBaselineTemplatePath(t *testing.T) {
@@ -65,5 +69,33 @@ func TestDefaultRouteConfig(t *testing.T) {
 	}
 	if !strings.Contains(config, `end: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"`) {
 		t.Errorf("DefaultRouteConfig() missing IPv6 default range end: %s", config)
+	}
+}
+
+func TestHashFileDetectsChangedContents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact")
+	stamp := time.Unix(1, 0)
+	if err := os.WriteFile(path, []byte("one!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	first := sha256.New()
+	if err := hashFile(first, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("two!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	second := sha256.New()
+	if err := hashFile(second, path); err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Sum(nil)) == string(second.Sum(nil)) {
+		t.Fatal("same-size artifact content change did not change fingerprint")
 	}
 }

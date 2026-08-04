@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -84,7 +86,7 @@ func (m *application) command() *cobra.Command {
 }
 
 func (m *application) execCommand() *cobra.Command {
-	return &cobra.Command{Use: "exec -- COMMAND [ARG...]", Short: "Execute a command in the guest", Args: cobra.MinimumNArgs(1), DisableFlagParsing: true, RunE: func(_ *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "exec -- COMMAND [ARG...]", Short: "Execute a command in the guest", Args: cobra.MinimumNArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 		return m.simple("exec", args)
 	}}
 }
@@ -222,17 +224,16 @@ func (m *application) doctor() error {
 }
 
 func (m *application) up() error {
-	if _, err := m.call(request{Action: "status"}); err == nil {
-		return m.simple("status", nil)
+	if response, err := m.call(request{Action: "status"}); err == nil && response.OK {
+		return m.printResponse(response)
 	}
-	dir, socket, err := sessionPaths(m.session)
+	dir, _, err := sessionPaths(m.session)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	_ = os.Remove(socket)
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -253,7 +254,7 @@ func (m *application) up() error {
 	go func() { exited <- command.Wait() }()
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
-		if response, callErr := m.call(request{Action: "status"}); callErr == nil {
+		if response, callErr := m.call(request{Action: "status"}); callErr == nil && response.OK {
 			return m.printResponse(response)
 		}
 		select {
@@ -262,11 +263,18 @@ func (m *application) up() error {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+	_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		<-exited
+	}
 	return fmt.Errorf("lab did not start; see %s", filepath.Join(dir, "supervisor.log"))
 }
 
 func (m *application) ensureUp() error {
-	if _, err := m.call(request{Action: "status"}); err == nil {
+	if response, err := m.call(request{Action: "status"}); err == nil && response.OK {
 		return nil
 	}
 	return m.up()
@@ -342,7 +350,7 @@ func (m *application) printValue(value any) error {
 	return nil
 }
 
-func (m *application) serve() error {
+func (m *application) serve() (err error) {
 	dir, socket, err := sessionPaths(m.session)
 	if err != nil {
 		return err
@@ -350,13 +358,28 @@ func (m *application) serve() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	lock, err := acquireSessionLock(dir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	_ = os.Remove(socket)
 	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{PoolName: "lab-" + m.session})
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	defer harness.Shutdown()
+	var shutdownOnce sync.Once
+	var shutdownErr error
+	shutdown := func() error {
+		shutdownOnce.Do(func() { shutdownErr = harness.Shutdown() })
+		return shutdownErr
+	}
+	defer func() {
+		if shutdownErr := shutdown(); err == nil && shutdownErr != nil {
+			err = fmt.Errorf("shut down lab: %w", shutdownErr)
+		}
+	}()
 	fw := harness.Pool().Acquire()
 	defer harness.Pool().Release(fw)
 	if err := harness.Restore(fw); err != nil {
@@ -380,14 +403,14 @@ func (m *application) serve() error {
 			}
 			return acceptErr
 		}
-		stop := handleConnection(connection, fw, dir, func() error { return harness.Restore(fw) })
+		stop := handleConnection(connection, fw, dir, func() error { return harness.Restore(fw) }, shutdown)
 		if stop {
 			return nil
 		}
 	}
 }
 
-func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, restore func() error) bool {
+func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, restore func() error, shutdown func() error) bool {
 	defer connection.Close()
 	var value request
 	if err := json.NewDecoder(connection).Decode(&value); err != nil {
@@ -397,7 +420,13 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	reply := response{OK: true}
 	switch value.Action {
 	case "status":
-		output, err := fw.ExecuteCommand("pgrep -x yanet-dataplane >/dev/null && echo 'VM: running; YANET: ready'")
+		output, err := fw.ExecuteCommand("pgrep -f '[y]anet-dataplane' >/dev/null && pgrep -f '[y]anet-controlplane' >/dev/null")
+		if err == nil {
+			err = fw.WaitForDatapathReady(2 * time.Second)
+		}
+		if err == nil {
+			output = "VM: running; YANET: ready"
+		}
 		reply.Output = output
 		setError(&reply, err)
 	case "exec":
@@ -421,19 +450,27 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		if !report.Success {
 			reply.Error = "manifest run failed"
 		}
-		data, _ := json.MarshalIndent(report, "", "  ")
-		_ = os.WriteFile(filepath.Join(dir, "last-report.json"), data, 0o600)
+		data, marshalErr := json.MarshalIndent(report, "", "  ")
+		if marshalErr != nil {
+			setError(&reply, marshalErr)
+		} else {
+			setError(&reply, writeFile(filepath.Join(dir, "last-report.json"), data))
+		}
 	case "report":
 		status, statusErr := fw.ExecuteCommand("pgrep -a yanet-dataplane; pgrep -a yanet-controlplane; ip -brief address show kni0")
-		reportPath := filepath.Join(dir, "report-"+time.Now().Format("20060102-150405")+".txt")
-		if writeErr := os.WriteFile(reportPath, []byte(status), 0o600); writeErr != nil {
+		reportPath, writeErr := writeReport(dir, []byte(status))
+		if writeErr != nil {
 			setError(&reply, writeErr)
 		} else {
 			reply.Output = reportPath
 			setError(&reply, statusErr)
 		}
 	case "down":
-		reply.Output = "lab stopped"
+		if err := shutdown(); err != nil {
+			setError(&reply, err)
+		} else {
+			reply.Output = "lab stopped"
+		}
 		_ = json.NewEncoder(connection).Encode(reply)
 		return true
 	default:
@@ -449,6 +486,62 @@ func setError(reply *response, err error) {
 		reply.OK = false
 		reply.Error = err.Error()
 	}
+}
+
+func writeReport(dir string, data []byte) (string, error) {
+	file, err := os.CreateTemp(dir, "report-*.txt")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func writeFile(path string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}
+
+func acquireSessionLock(dir string) (*os.File, error) {
+	lock, err := os.OpenFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("lab session is already running: %w", err)
+	}
+	return lock, nil
 }
 
 func shellJoin(argv []string) string {
@@ -467,9 +560,21 @@ func sessionPaths(name string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", err
+	}
+	return sessionPathsForRoot(root, name)
+}
+
+func sessionPathsForRoot(root, name string) (string, string, error) {
+	if !validSessionName(name) {
+		return "", "", errors.New("invalid session name")
+	}
 	// Use /tmp directly: macOS TMPDIR paths are too long for Unix-domain
 	// sockets once a session name is appended.
-	base := filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()), filepath.Base(root), name)
+	digest := sha256.Sum256([]byte(root))
+	base := filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()), fmt.Sprintf("%x", digest[:6]), name)
 	return base, filepath.Join(base, "supervisor.sock"), nil
 }
 

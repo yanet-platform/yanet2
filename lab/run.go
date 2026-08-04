@@ -40,7 +40,7 @@ type ManifestRuntime interface {
 	ExecuteCommands(...string) ([]string, error)
 	ResetConnections()
 	RestoreClean(string) error
-	SendPacketAndCapture(int, int, []byte, time.Duration) ([]byte, error)
+	SendPacketAndCaptureAllUnfiltered(int, int, []byte, time.Duration) ([][]byte, error)
 	StartYANET(string, string) error
 	WaitForDatapathReady(time.Duration) error
 }
@@ -102,13 +102,8 @@ func RunManifest(runtime ManifestRuntime, path string) RunReport {
 			break
 		}
 		started := time.Now()
-		data, readErr := os.ReadFile(filepath.Join(baseDir, file.Source))
 		result := Result{Name: file.Source, Kind: "file"}
-		if readErr == nil {
-			command := "echo " + shellQuote(base64.StdEncoding.EncodeToString(data)) +
-				" | base64 -d > " + shellQuote(file.Destination)
-			_, readErr = runtime.ExecuteCommand(command)
-		}
+		readErr := transferFile(runtime, filepath.Join(baseDir, file.Source), file.Destination)
 		result.Duration = time.Since(started)
 		result.Success = readErr == nil
 		if readErr != nil {
@@ -155,6 +150,34 @@ func RunManifest(runtime ManifestRuntime, path string) RunReport {
 	return report
 }
 
+func transferFile(runtime ManifestRuntime, source, destination string) error {
+	file, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := runtime.ExecuteCommand(": > " + shellQuote(destination)); err != nil {
+		return err
+	}
+	buffer := make([]byte, 384)
+	for {
+		count, readErr := file.Read(buffer)
+		if count > 0 {
+			encoded := base64.StdEncoding.EncodeToString(buffer[:count])
+			command := "echo " + shellQuote(encoded) + " | base64 -d >> " + shellQuote(destination)
+			if _, err := runtime.ExecuteCommand(command); err != nil {
+				return err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
 func runProbe(runtime ManifestRuntime, baseDir string, probe Probe) Result {
 	started := time.Now()
 	result := Result{Name: probe.Name, Kind: "probe"}
@@ -173,39 +196,32 @@ func runProbe(runtime ManifestRuntime, baseDir string, probe Probe) Result {
 	if probe.Timeout != "" {
 		timeout, _ = time.ParseDuration(probe.Timeout)
 	}
-	actual, captureErr := runtime.SendPacketAndCapture(probe.Ingress, probe.Egress, packets[0], timeout)
-	if probe.Expect.Drop {
-		result.Success, result.Error = evaluateDropProbe(actual, captureErr)
+	actual, captureErr := runtime.SendPacketAndCaptureAllUnfiltered(probe.Ingress, probe.Egress, packets[0], timeout)
+	if captureErr != nil {
+		result.Error = captureErr.Error()
+	} else if probe.Expect.Drop {
+		if len(actual) == 0 {
+			result.Success = true
+		} else {
+			result.Error = fmt.Sprintf("expected packet to be dropped, but captured %d", len(actual))
+		}
 	} else {
 		expected, expectedErr := readPCAP(filepath.Join(baseDir, probe.Expect.PCAP))
 		switch {
 		case expectedErr != nil:
 			result.Error = expectedErr.Error()
-		case captureErr != nil:
-			result.Error = captureErr.Error()
 		case len(expected) != 1:
 			result.Error = fmt.Sprintf("expect PCAP must contain exactly one packet, got %d", len(expected))
-		case string(expected[0]) != string(actual):
-			result.Error = fmt.Sprintf("packet mismatch\nexpected: %s\nactual:   %s", hex.EncodeToString(expected[0]), hex.EncodeToString(actual))
+		case len(actual) != 1:
+			result.Error = fmt.Sprintf("expected exactly one packet, got %d", len(actual))
+		case string(expected[0]) != string(actual[0]):
+			result.Error = fmt.Sprintf("packet mismatch\nexpected: %s\nactual:   %s", hex.EncodeToString(expected[0]), hex.EncodeToString(actual[0]))
 		default:
 			result.Success = true
 		}
 	}
 	result.Duration = time.Since(started)
 	return result
-}
-
-func evaluateDropProbe(actual []byte, captureErr error) (bool, string) {
-	switch {
-	case captureErr == nil && len(actual) == 0:
-		return true, ""
-	case errors.Is(captureErr, framework.ErrCaptureTimeout):
-		return true, ""
-	case captureErr != nil:
-		return false, captureErr.Error()
-	default:
-		return false, "expected packet to be dropped, but one was captured"
-	}
 }
 
 func readPCAP(path string) ([][]byte, error) {
@@ -218,11 +234,11 @@ func readPCAP(path string) ([][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read PCAP header %s: %w", path, err)
 	}
-	var packets [][]byte
-	for {
+	packets := make([][]byte, 0, 2)
+	for range 2 {
 		data, _, readErr := reader.ReadPacketData()
 		if errors.Is(readErr, io.EOF) {
-			break
+			return packets, nil
 		}
 		if readErr != nil {
 			return nil, fmt.Errorf("read PCAP packet %s: %w", path, readErr)
