@@ -428,10 +428,10 @@ impl FWStateService {
             .into_iter()
             .map(Metric::from_proto)
             .filter(|m| {
-                if let Some(ref f) = cmd.name {
-                    if !f.matches(m) {
-                        return false;
-                    }
+                if let Some(ref f) = cmd.name
+                    && !f.matches(m)
+                {
+                    return false;
                 }
                 label_filters.iter().all(|(k, v)| m.label_value(k) == Some(v))
             })

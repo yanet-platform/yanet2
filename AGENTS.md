@@ -286,6 +286,6 @@ These rules bind the delegating agent, not the implementer.
 
 - **DPDK**: v23+ (submodule)
 - **Go**: 1.24.13+
-- **Rust**: 1.84+ (nightly for formatting)
+- **Rust**: 1.88+ (nightly for formatting)
 - **Meson**: 0.61+
 - **Protobuf**: 3.0+ (protoc-gen-go >=1.36.5, protoc-gen-go-grpc >=1.5.1)

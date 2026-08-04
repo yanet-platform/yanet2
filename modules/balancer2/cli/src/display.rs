@@ -299,15 +299,15 @@ fn print_decap(state: &balancerpb::BalancerState) {
     let Some(addr) = &state.addr else {
         return;
     };
-    if !addr.source_ip4.is_empty() {
-        if let Ok(ip) = bytes_to_ip(&addr.source_ip4) {
-            println!("Source IPv4: {}", ip);
-        }
+    if !addr.source_ip4.is_empty()
+        && let Ok(ip) = bytes_to_ip(&addr.source_ip4)
+    {
+        println!("Source IPv4: {}", ip);
     }
-    if !addr.source_ip6.is_empty() {
-        if let Ok(ip) = bytes_to_ip(&addr.source_ip6) {
-            println!("Source IPv6: {}", ip);
-        }
+    if !addr.source_ip6.is_empty()
+        && let Ok(ip) = bytes_to_ip(&addr.source_ip6)
+    {
+        println!("Source IPv6: {}", ip);
     }
     if !addr.decaps.is_empty() {
         println!("Decap Addresses:");
