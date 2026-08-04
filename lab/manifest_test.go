@@ -78,3 +78,13 @@ steps:
 		t.Fatalf("expected duplicate name error, got %v", err)
 	}
 }
+
+func TestBuiltInManifestsLoad(t *testing.T) {
+	for _, name := range []string{"forward-route", "decap", "nat64"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := lab.LoadManifest(filepath.Join("scenarios", name, "manifest.yaml")); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

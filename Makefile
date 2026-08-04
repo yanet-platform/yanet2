@@ -258,6 +258,7 @@ cli-clean/%:
 
 test: go-cache-clean dataplane
 	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
+	go test -count=1 ./tests/functional/framework
 	meson test -C build
 
 test-asan: go-cache-clean

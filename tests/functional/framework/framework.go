@@ -3,7 +3,6 @@ package framework
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,10 +17,6 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"go.uber.org/zap"
 )
-
-// ErrCaptureTimeout indicates that packet transmission succeeded but no packet
-// was captured before the receive deadline.
-var ErrCaptureTimeout = errors.New("packet capture timed out")
 
 const (
 	// MAC addresses used in test framework
@@ -625,6 +620,16 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 
 // SendPacketAndCaptureAll sends a network packet and captures all response packets.
 func (f *TestFramework) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+	return f.sendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout, false)
+}
+
+// SendPacketAndCaptureAllUnfiltered captures every packet observed on the
+// selected egress during timeout.
+func (f *TestFramework) SendPacketAndCaptureAllUnfiltered(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+	return f.sendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout, true)
+}
+
+func (f *TestFramework) sendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration, unfiltered bool) ([][]byte, error) {
 	inputClient, err := f.GetSocketClient(inputIfaceIndex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get input socket client: %w", err)
@@ -645,10 +650,17 @@ func (f *TestFramework) SendPacketAndCaptureAll(inputIfaceIndex int, outputIface
 		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
 	}
 
+	if unfiltered {
+		_, _ = outputClient.ReceiveAllPacketsUnfiltered(50*time.Millisecond, outputDumpPath)
+	}
+
 	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
 		return nil, fmt.Errorf("failed to send packet: %w", err)
 	}
 
+	if unfiltered {
+		return outputClient.ReceiveAllPacketsUnfiltered(timeout, outputDumpPath)
+	}
 	return outputClient.ReceiveAllPackets(timeout, outputDumpPath)
 }
 

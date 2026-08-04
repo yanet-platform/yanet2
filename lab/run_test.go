@@ -2,7 +2,6 @@ package lab_test
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,16 +13,18 @@ import (
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/lab"
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 type manifestRuntime struct {
-	Actual     []byte
+	Actual     [][]byte
 	CaptureErr error
+	Commands   []string
+	Unfiltered bool
 }
 
 func (m *manifestRuntime) CommonConfigCommands() []string { return nil }
-func (m *manifestRuntime) ExecuteCommand(string) (string, error) {
+func (m *manifestRuntime) ExecuteCommand(command string) (string, error) {
+	m.Commands = append(m.Commands, command)
 	return "", nil
 }
 func (m *manifestRuntime) ExecuteCommandWithTimeout(string, time.Duration) (string, error) {
@@ -32,7 +33,8 @@ func (m *manifestRuntime) ExecuteCommandWithTimeout(string, time.Duration) (stri
 func (m *manifestRuntime) ExecuteCommands(...string) ([]string, error) { return nil, nil }
 func (m *manifestRuntime) ResetConnections()                           {}
 func (m *manifestRuntime) RestoreClean(string) error                   { return nil }
-func (m *manifestRuntime) SendPacketAndCapture(int, int, []byte, time.Duration) ([]byte, error) {
+func (m *manifestRuntime) SendPacketAndCaptureAllUnfiltered(int, int, []byte, time.Duration) ([][]byte, error) {
+	m.Unfiltered = true
 	return m.Actual, m.CaptureErr
 }
 func (m *manifestRuntime) StartYANET(string, string) error          { return nil }
@@ -41,17 +43,12 @@ func (m *manifestRuntime) WaitForDatapathReady(time.Duration) error { return nil
 func TestRunManifestEvaluatesExpectedDrop(t *testing.T) {
 	tests := []struct {
 		name       string
-		actual     []byte
+		actual     [][]byte
 		captureErr error
 		wantOK     bool
 		wantError  string
 	}{
 		{name: "no packet", wantOK: true},
-		{
-			name:       "receive timeout",
-			captureErr: fmt.Errorf("capture: %w", framework.ErrCaptureTimeout),
-			wantOK:     true,
-		},
 		{
 			name:       "connection failure",
 			captureErr: errors.New("failed to connect to output socket"),
@@ -69,8 +66,13 @@ func TestRunManifestEvaluatesExpectedDrop(t *testing.T) {
 		},
 		{
 			name:      "captured packet",
-			actual:    []byte{1, 2, 3},
-			wantError: "expected packet to be dropped, but one was captured",
+			actual:    [][]byte{{1, 2, 3}},
+			wantError: "expected packet to be dropped, but captured 1",
+		},
+		{
+			name:      "multiple captured packets",
+			actual:    [][]byte{{1, 2, 3}, {4, 5, 6}},
+			wantError: "expected packet to be dropped, but captured 2",
 		},
 	}
 
@@ -81,10 +83,37 @@ func TestRunManifestEvaluatesExpectedDrop(t *testing.T) {
 			report := lab.RunManifest(runtime, manifestPath)
 
 			require.Equal(t, test.wantOK, report.Success)
+			require.True(t, runtime.Unfiltered)
 			require.Len(t, report.Results, 1)
 			require.Equal(t, "probe", report.Results[0].Kind)
 			require.Equal(t, test.wantError, report.Results[0].Error)
 		})
+	}
+}
+
+func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
+	directory := t.TempDir()
+	fixture := filepath.Join(directory, "fixture")
+	if err := os.WriteFile(fixture, make([]byte, 769), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: files\nfiles:\n  - source: fixture\n    destination: /tmp/fixture\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &manifestRuntime{}
+	report := lab.RunManifest(runtime, manifestPath)
+	if !report.Success {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(runtime.Commands) != 4 {
+		t.Fatalf("commands = %#v", runtime.Commands)
+	}
+	for _, command := range runtime.Commands {
+		if len(command) > 800 {
+			t.Fatalf("command is too long: %d", len(command))
+		}
 	}
 }
 

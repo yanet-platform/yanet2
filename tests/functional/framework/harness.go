@@ -1,9 +1,14 @@
 package framework
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"syscall"
 	"testing"
 	"time"
 
@@ -338,6 +343,14 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 
 	bootedTemplate := BootedImagePath(qemuImage)
 	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag)
+	projectRoot, err := findProjectRoot()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to locate project root for baseline: %w", err)
+	}
+	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fingerprint baseline: %w", err)
+	}
 
 	baseline := &baselineSetup{
 		dataplane:    dataplane,
@@ -345,6 +358,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		forward:      forward,
 		route:        route,
 		poolName:     config.PoolName,
+		fingerprint:  fingerprint,
 		log:          logger,
 	}
 	if err = baseline.ensureTemplate(qemuImage, bootedTemplate, baselineTemplate); err != nil {
@@ -419,13 +433,12 @@ func (m *Harness) RestoreBooted(t *testing.T, fw *TestFramework) {
 // testing package. Lab tools use this method to get the same fast-path and
 // fallback behavior as functional tests.
 func (m *Harness) Restore(fw *TestFramework) error {
-	fw.AdoptRunningConfig(m.dataplane, m.controlplane)
-
-	err := fw.RestoreAndReconnect("baseline")
-	if err == nil {
-		return nil
+	if err := fw.RestoreClean("baseline"); err == nil {
+		fw.ResetConnections()
+		if err := fw.WaitForDatapathReady(15 * time.Second); err == nil {
+			return nil
+		}
 	}
-	fw.log.Infof("baseline restore failed, falling back to preyanet + fresh StartYANET: %v", err)
 
 	if err := fw.RestoreClean("preyanet"); err != nil {
 		return fmt.Errorf("restore VM to preyanet: %w", err)
@@ -440,14 +453,15 @@ func (m *Harness) Restore(fw *TestFramework) error {
 	fw.ResetConnections()
 
 	const dpTimeout = 15 * time.Second
+	if err := fw.WaitForDatapathReady(dpTimeout); err == nil {
+		return nil
+	}
+	if err := fw.RestartYANET(); err != nil {
+		return fmt.Errorf("restart YANET: %w", err)
+	}
+	fw.ResetConnections()
 	if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-		if restartErr := fw.RestartYANET(); restartErr != nil {
-			return fmt.Errorf("restart YANET: %w", restartErr)
-		}
-		fw.ResetConnections()
-		if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-			return fmt.Errorf("wait for dataplane after restart: %w", err)
-		}
+		return fmt.Errorf("wait for dataplane after restart: %w", err)
 	}
 	return nil
 }
@@ -460,13 +474,19 @@ type baselineSetup struct {
 	forward      string
 	route        string
 	poolName     string
+	fingerprint  string
 	log          *zap.SugaredLogger
 }
 
 // ensureTemplate makes sure baselineTemplate holds a "baseline" snapshot,
 // bootstrapping it from the booted template when the cache is cold.
 func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTemplate string) error {
-	if OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) {
+	lock, err := acquireBaselineLock(baselineTemplate)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) && fingerprintMatches(baselineTemplate, m.fingerprint) {
 		m.log.Infof("Using cached baseline template: %s", baselineTemplate)
 		return nil
 	}
@@ -504,15 +524,105 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	}
 	m.log.Info("Baseline snapshot saved successfully")
 
-	if err := prepFW.ExportCurrentOverlay(baselineTemplate); err != nil {
+	temporary := baselineTemplate + ".tmp.qcow2"
+	_ = os.Remove(temporary)
+	if err := prepFW.ExportCurrentOverlay(temporary); err != nil {
 		return fmt.Errorf("failed to export baseline template: %w", err)
 	}
-	if !OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) {
-		return fmt.Errorf("exported baseline template %s is missing snapshot %q", baselineTemplate, baselineSnapshotName)
+	defer os.Remove(temporary)
+	if !OverlayHasSnapshot(temporary, baselineSnapshotName) {
+		return fmt.Errorf("exported baseline template %s is missing snapshot %q", temporary, baselineSnapshotName)
+	}
+	if err := os.Rename(temporary, baselineTemplate); err != nil {
+		return fmt.Errorf("replace baseline template: %w", err)
+	}
+	if err := writeFingerprint(baselineTemplate, m.fingerprint); err != nil {
+		return fmt.Errorf("write baseline fingerprint: %w", err)
 	}
 
 	m.log.Infof("Baseline template cached at %s", baselineTemplate)
 	return nil
+}
+
+func acquireBaselineLock(baselineTemplate string) (*os.File, error) {
+	lock, err := os.OpenFile(baselineTemplate+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return lock, nil
+}
+
+func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string) (string, error) {
+	hash := sha256.New()
+	for _, value := range []string{"dataplane", dataplane, "controlplane", controlplane, "forward", forward, "route", route} {
+		_, _ = io.WriteString(hash, value)
+		_, _ = io.WriteString(hash, "\x00")
+	}
+
+	image, err := os.Stat(qemuImage)
+	if err != nil {
+		return "", err
+	}
+	imagePath, err := filepath.EvalSymlinks(qemuImage)
+	if err != nil {
+		return "", err
+	}
+	_, _ = io.WriteString(hash, imagePath)
+	_, _ = io.WriteString(hash, fmt.Sprintf("\x00%d\x00%d", image.Size(), image.ModTime().UnixNano()))
+
+	paths := []string{
+		filepath.Join(projectRoot, "build", "dataplane", "yanet-dataplane"),
+		filepath.Join(projectRoot, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(projectRoot, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
+	}
+	for _, name := range CLIBinaryNames {
+		paths = append(paths, filepath.Join(projectRoot, "target", "release", name))
+	}
+	plugins, err := filepath.Glob(filepath.Join(projectRoot, "build", "modules", "*", "dataplane", "*_dp_plugin.so"))
+	if err != nil {
+		return "", err
+	}
+	paths = append(paths, plugins...)
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := hashFile(hash, path); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func hashFile(hash io.Writer, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := io.WriteString(hash, path+"\x00"); err != nil {
+		return err
+	}
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	_, err = io.WriteString(hash, "\x00")
+	return err
+}
+
+func fingerprintMatches(baselineTemplate, want string) bool {
+	data, err := os.ReadFile(baselineTemplate + ".sha256")
+	return err == nil && string(data) == want
+}
+
+func writeFingerprint(baselineTemplate, value string) error {
+	temporary := baselineTemplate + ".sha256.tmp"
+	if err := os.WriteFile(temporary, []byte(value), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, baselineTemplate+".sha256")
 }
 
 // configure writes the baseline config files, captures a "preyanet" fallback

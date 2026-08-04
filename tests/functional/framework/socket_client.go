@@ -2,7 +2,6 @@ package framework
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -362,12 +361,8 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 		}
 
 		// Read the packet length prefix (4 bytes)
-		lengthPrefix, bytesRead, err := sc.readFullCount(4, timeout)
+		lengthPrefix, err := sc.readFull(4, timeout)
 		if err != nil {
-			var timeoutErr net.Error
-			if bytesRead == 0 && errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
-				return nil, fmt.Errorf("failed to read packet length prefix: %w: %w", ErrCaptureTimeout, err)
-			}
 			return nil, fmt.Errorf("failed to read packet length prefix: %w", err)
 		}
 		sc.log.Debugf("Received packet length prefix: % x", lengthPrefix)
@@ -634,25 +629,19 @@ func (sc *SocketClient) WithLog(log *zap.SugaredLogger) *SocketClient {
 // readFull reads exactly n bytes from the connection within the timeout.
 // Returns an error if all bytes cannot be read before the deadline expires.
 func (sc *SocketClient) readFull(n int, timeout time.Duration) ([]byte, error) {
-	buf, _, err := sc.readFullCount(n, timeout)
-	return buf, err
-}
-
-func (sc *SocketClient) readFullCount(n int, timeout time.Duration) ([]byte, int, error) {
 	if sc.inner.conn == nil {
-		return nil, 0, fmt.Errorf("not connected to socket")
+		return nil, fmt.Errorf("not connected to socket")
 	}
 
 	if err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, 0, fmt.Errorf("failed to set read deadline: %w", err)
+		return nil, fmt.Errorf("failed to set read deadline: %w", err)
 	}
 
 	buf := make([]byte, n)
-	bytesRead, err := io.ReadFull(sc.inner.conn, buf)
-	if err != nil {
-		return nil, bytesRead, err
+	if _, err := io.ReadFull(sc.inner.conn, buf); err != nil {
+		return nil, err
 	}
-	return buf, bytesRead, nil
+	return buf, nil
 }
 
 // writeFull writes all bytes in the buffer to the connection within the timeout.
