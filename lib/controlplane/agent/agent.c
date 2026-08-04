@@ -13,6 +13,7 @@
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/memory_block.h"
+#include "common/spinlock.h"
 #include "common/strutils.h"
 
 #include "controlplane/config/cp_module.h"
@@ -25,6 +26,7 @@
 #include "lib/errors/errors.h"
 
 #include "api/agent.h"
+#include "api/info.h"
 
 #include <stdio.h>
 
@@ -1227,6 +1229,109 @@ yanet_get_cp_device_output_pipeline_info(
 	return device_info->pipelines + device_info->input_count + idx;
 }
 
+// Count the nodes of a memory_context subtree, depth-first.
+static uint64_t
+memory_context_count_nodes(struct memory_context *ctx) {
+	uint64_t count = 1;
+	struct memory_context *child = ADDR_OF(&ctx->first_child);
+	while (child != NULL) {
+		count += memory_context_count_nodes(child);
+		child = ADDR_OF(&child->next_sibling);
+	}
+	return count;
+}
+
+// Snapshot a memory_context subtree into nodes, depth-first, capped at
+// capacity entries.
+static void
+memory_context_fill_nodes(
+	struct memory_context *ctx,
+	struct cp_memory_node_info *nodes,
+	uint32_t parent_idx,
+	uint32_t *next_idx,
+	uint32_t capacity
+) {
+	if (*next_idx >= capacity) {
+		return;
+	}
+	uint32_t my_idx = (*next_idx)++;
+	struct cp_memory_node_info *node = &nodes[my_idx];
+	strtcpy(node->name, ctx->name, sizeof(node->name));
+	node->parent_idx = parent_idx;
+	node->_pad = 0;
+	node->balloc_count =
+		__atomic_load_n(&ctx->balloc_count, __ATOMIC_RELAXED);
+	node->bfree_count =
+		__atomic_load_n(&ctx->bfree_count, __ATOMIC_RELAXED);
+	node->balloc_size =
+		__atomic_load_n(&ctx->balloc_size, __ATOMIC_RELAXED);
+	node->bfree_size = __atomic_load_n(&ctx->bfree_size, __ATOMIC_RELAXED);
+
+	struct memory_context *child = ADDR_OF(&ctx->first_child);
+	while (child != NULL) {
+		struct memory_context *sibling = ADDR_OF(&child->next_sibling);
+		memory_context_fill_nodes(
+			child, nodes, my_idx, next_idx, capacity
+		);
+		child = sibling;
+	}
+}
+
+// Build the heap-side instance info for one agent, including its
+// memory-context tree snapshot.
+//
+// The tree is a two-phase best-effort read: count under lock, malloc outside
+// it, then fill under lock again bounded by the counted capacity. Config
+// compilation is now parallel, so the tree can legitimately change between
+// the two passes -- a node appearing or vanishing is not a bug, it is the
+// documented best-effort semantics of memory_node_count.
+static struct cp_agent_instance_info *
+build_instance_info(struct agent *agent) {
+	// The allocator backing agent->memory_context also guards the
+	// context-tree splices (see the lock's own comment in
+	// common/memory_block.h). For agent_attach'd agents that allocator is
+	// the agent's own block_allocator; for dp_system_agent_new agents the
+	// context is rooted in cp_config's context instead, so its tree is
+	// guarded by cp_config's allocator lock. Reading the lock off the
+	// context itself covers both cases uniformly.
+	struct block_allocator *alloc =
+		ADDR_OF(&agent->memory_context.block_allocator);
+
+	spinlock_lock(&alloc->lock);
+	uint64_t node_count =
+		memory_context_count_nodes(&agent->memory_context);
+	spinlock_unlock(&alloc->lock);
+
+	struct cp_agent_instance_info *info = (struct cp_agent_instance_info *)
+		malloc(sizeof(struct cp_agent_instance_info) +
+		       sizeof(struct cp_memory_node_info) * node_count);
+	if (info == NULL) {
+		return NULL;
+	}
+	info->pid = agent->pid;
+	info->memory_limit = agent->memory_limit;
+	info->gen = agent->gen;
+	// For agent_attach'd agents, &agent->block_allocator is the same
+	// allocator as alloc above, and its spinlock is not reentrant, so this
+	// call must run strictly outside the locked sections above and below.
+	// For dp_system_agent_new agents the two allocators differ, but running
+	// it here uniformly keeps the call site the same for both shapes.
+	info->free_bytes = block_allocator_free_size(&agent->block_allocator);
+
+	uint32_t next_idx = 0;
+	spinlock_lock(&alloc->lock);
+	memory_context_fill_nodes(
+		&agent->memory_context,
+		info->memory_nodes,
+		UINT32_MAX,
+		&next_idx,
+		(uint32_t)node_count
+	);
+	spinlock_unlock(&alloc->lock);
+	info->memory_node_count = next_idx;
+	return info;
+}
+
 int
 yanet_get_cp_agent_instance_info(
 	struct cp_agent_info *agent_info,
@@ -1238,7 +1343,7 @@ yanet_get_cp_agent_instance_info(
 		return -1;
 	}
 
-	*instance_info = agent_info->instances + index;
+	*instance_info = agent_info->instances[index];
 
 	return 0;
 }
@@ -1259,11 +1364,23 @@ yanet_get_cp_agent_info(
 
 void
 cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info) {
+	if (agent_list_info == NULL) {
+		return;
+	}
 	for (uint64_t agent_idx = 0; agent_idx < agent_list_info->count;
 	     ++agent_idx) {
-		free(agent_list_info->agents[agent_idx]);
+		struct cp_agent_info *agent_info =
+			agent_list_info->agents[agent_idx];
+		if (agent_info == NULL) {
+			continue;
+		}
+		for (uint64_t inst_idx = 0;
+		     inst_idx < agent_info->instance_count;
+		     ++inst_idx) {
+			free(agent_info->instances[inst_idx]);
+		}
+		free(agent_info);
 	}
-
 	free(agent_list_info);
 }
 
@@ -1298,7 +1415,7 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 
 		struct cp_agent_info *agent_info = (struct cp_agent_info *)
 			malloc(sizeof(struct cp_agent_info) +
-			       sizeof(struct cp_agent_instance_info) *
+			       sizeof(struct cp_agent_instance_info *) *
 				       instance_count);
 		if (agent_info == NULL) {
 			cp_agent_list_info_free(agent_list_info);
@@ -1311,14 +1428,20 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 		agent_info->instance_count = 0;
 		while (agent_info->instance_count < instance_count) {
 			struct cp_agent_instance_info *instance =
-				agent_info->instances +
-				agent_info->instance_count++;
-			instance->pid = agent->pid;
-			instance->memory_limit = agent->memory_limit;
-			instance->gen = agent->gen;
-			instance->free_bytes = block_allocator_free_size(
-				&agent->block_allocator
-			);
+				build_instance_info(agent);
+			if (instance == NULL) {
+				for (uint64_t k = 0;
+				     k < agent_info->instance_count;
+				     ++k) {
+					free(agent_info->instances[k]);
+				}
+				free(agent_info);
+				cp_agent_list_info_free(agent_list_info);
+				agent_list_info = NULL;
+				goto unlock;
+			}
+			agent_info->instances[agent_info->instance_count++] =
+				instance;
 
 			agent = ADDR_OF(&agent->prev);
 		}

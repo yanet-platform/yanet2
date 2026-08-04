@@ -1,5 +1,7 @@
 //! CLI for YANET "inspect" module.
 
+use core::cmp::Reverse;
+
 use bytesize::ByteSize;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -10,7 +12,7 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse};
+use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse, MemoryNode};
 
 const INSPECT_SERVICE: &str = "controlplane.ynpb.v1.InspectService";
 
@@ -131,6 +133,9 @@ fn render_tree(response: &InspectResponse) {
             tree.add_empty_child(format!("Used:         {}", ByteSize::b(used)));
             tree.add_empty_child(format!("Free:         {}", ByteSize::b(instance.free_bytes)));
             tree.add_empty_child(format!("Generation: {}", instance.generation));
+            if !instance.memory_tree.is_empty() {
+                add_memory_tree(&mut tree, &instance.memory_tree);
+            }
             tree.end_child();
         }
 
@@ -216,4 +221,65 @@ fn render_tree(response: &InspectResponse) {
 
     let tree = tree.build();
     let _ = ptree::print_tree(&tree);
+}
+
+/// Live bytes held by a memory node: allocated minus freed, floored at zero.
+fn node_live(node: &MemoryNode) -> u64 {
+    node.balloc_size.saturating_sub(node.bfree_size)
+}
+
+/// Subtree total: a node's own live bytes plus the live bytes of all its
+/// descendants.
+fn subtree_live(nodes: &[MemoryNode], children_of: &[Vec<usize>], idx: usize) -> u64 {
+    let self_live = node_live(&nodes[idx]);
+    let children_total: u64 = children_of[idx]
+        .iter()
+        .map(|&child| subtree_live(nodes, children_of, child))
+        .sum();
+
+    self_live.saturating_add(children_total)
+}
+
+/// Render one node and its children into the tree builder.
+///
+/// Children are ordered by subtree total descending so the heaviest
+/// subtrees come first; zero-total subtrees are skipped.
+fn render_memory_node(tree: &mut TreeBuilder, nodes: &[MemoryNode], idx: usize, children_of: &[Vec<usize>]) {
+    let node = &nodes[idx];
+    let total = subtree_live(nodes, children_of, idx);
+    tree.begin_child(format!("{} (Used: {})", node.name, ByteSize::b(total)));
+
+    let mut children = children_of[idx].clone();
+    children.sort_by_key(|&child| Reverse(subtree_live(nodes, children_of, child)));
+    for child in children {
+        if subtree_live(nodes, children_of, child) > 0 {
+            render_memory_node(tree, nodes, child, children_of);
+        }
+    }
+
+    tree.end_child();
+}
+
+/// Render the memory-context tree under a `Memory tree:` branch.
+fn add_memory_tree(tree: &mut TreeBuilder, nodes: &[MemoryNode]) {
+    let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+    let mut root_idx: Option<usize> = None;
+    for (idx, node) in nodes.iter().enumerate() {
+        if node.parent_idx == u32::MAX {
+            root_idx = Some(idx);
+        } else {
+            let parent = node.parent_idx as usize;
+            if parent < nodes.len() {
+                children_of[parent].push(idx);
+            }
+        }
+    }
+
+    let Some(root) = root_idx else {
+        return;
+    };
+
+    tree.begin_child("Memory tree:".to_string());
+    render_memory_node(tree, nodes, root, &children_of);
+    tree.end_child();
 }

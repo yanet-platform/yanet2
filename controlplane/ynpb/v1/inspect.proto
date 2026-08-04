@@ -185,10 +185,38 @@ message AgentInfo {
   repeated AgentInstanceInfo instances = 2;
 }
 
+// MemoryNode is one entry in a flat depth-first snapshot of an agent's
+// memory-context tree.
+//
+// The tree is produced by the C info API and copied to the heap before
+// being returned, so no shared-memory lifetime concerns apply.
+message MemoryNode {
+  // Human-readable name of this memory context.
+  string name = 1;
+
+  // Index of the parent node within the same memory_tree array.
+  //
+  // UINT32_MAX (0xFFFFFFFF) marks the root node, the agent's own context.
+  uint32 parent_idx = 2;
+
+  // Number of allocation calls made through this context.
+  uint64 balloc_count = 3;
+
+  // Number of free calls made through this context.
+  uint64 bfree_count = 4;
+
+  // Total bytes allocated through this context.
+  uint64 balloc_size = 5;
+
+  // Total bytes freed through this context.
+  uint64 bfree_size = 6;
+}
+
 // AgentInstanceInfo contains runtime information about a specific agent process
 // instance.
 message AgentInstanceInfo {
   // Operating system process ID of the agent instance.
+  //
   // Can be used for monitoring and debugging purposes.
   uint32 pid = 1;
   // Maximum memory (in bytes) this agent instance is allowed to allocate
@@ -204,8 +232,15 @@ message AgentInstanceInfo {
   // allowing the dataplane to coordinate atomic configuration switches.
   uint64 generation = 5;
   // Bytes still available for allocation in this agent instance.
+  //
   // Subtract from memory_limit to find how much memory is currently in use.
   uint64 free_bytes = 6;
+  // Flat depth-first snapshot of the agent's memory-context tree.
+  //
+  // Index 0 is the root; each later node references its parent via
+  // parent_idx. Best-effort: a concurrent update may make a node appear or
+  // vanish between traversal passes.
+  repeated MemoryNode memory_tree = 7;
 }
 
 // DeviceInfo contains information about a network device.

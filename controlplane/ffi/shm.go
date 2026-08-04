@@ -261,6 +261,9 @@ func (m *DPConfig) Pipelines() []Pipeline {
 // Agents returns all agent information from the dataplane.
 func (m *DPConfig) Agents() []AgentInfo {
 	agentListInfo := C.yanet_get_cp_agent_list_info(m.ptr)
+	if agentListInfo == nil {
+		return nil
+	}
 	defer C.cp_agent_list_info_free(agentListInfo)
 
 	out := make([]AgentInfo, agentListInfo.count)
@@ -283,11 +286,37 @@ func (m *DPConfig) Agents() []AgentInfo {
 				panic("FFI corruption: agent instance index became invalid")
 			}
 
+			nodeCount := uint64(instanceInfo.memory_node_count)
+			memoryTree := make([]AgentMemoryNode, nodeCount)
+			if nodeCount > 0 {
+				cNodes := unsafe.Slice(
+					(*C.struct_cp_memory_node_info)(
+						unsafe.Add(
+							unsafe.Pointer(instanceInfo),
+							unsafe.Sizeof(*instanceInfo),
+						),
+					),
+					nodeCount,
+				)
+				for nodeIdx := range memoryTree {
+					n := &cNodes[nodeIdx]
+					memoryTree[nodeIdx] = AgentMemoryNode{
+						Name:        C.GoString(&n.name[0]),
+						ParentIdx:   uint32(n.parent_idx),
+						BAllocCount: uint64(n.balloc_count),
+						BFreeCount:  uint64(n.bfree_count),
+						BAllocSize:  uint64(n.balloc_size),
+						BFreeSize:   uint64(n.bfree_size),
+					}
+				}
+			}
+
 			instances[instIdx] = AgentInstanceInfo{
 				PID:         uint32(instanceInfo.pid),
 				MemoryLimit: uint64(instanceInfo.memory_limit),
 				FreeBytes:   uint64(instanceInfo.free_bytes),
 				Gen:         uint64(instanceInfo.gen),
+				MemoryTree:  memoryTree,
 			}
 		}
 
@@ -326,12 +355,33 @@ type AgentInfo struct {
 	Instances []AgentInstanceInfo
 }
 
+// AgentMemoryNode is one entry in a flat depth-first snapshot of an agent's
+// memory-context tree.
+//
+// Copied from shared memory by the C info API; the caller never accesses
+// shared memory directly through this type.
+type AgentMemoryNode struct {
+	Name        string
+	ParentIdx   uint32
+	BAllocCount uint64
+	BFreeCount  uint64
+	BAllocSize  uint64
+	BFreeSize   uint64
+}
+
 // AgentInstanceInfo contains details about a specific agent instance.
 type AgentInstanceInfo struct {
 	PID         uint32
 	MemoryLimit uint64
 	FreeBytes   uint64
 	Gen         uint64
+	// MemoryTree is a flat depth-first snapshot of the agent's
+	// memory-context tree.
+	//
+	// Index 0 is the root; each later node references its parent via
+	// ParentIdx. Best-effort: a concurrent update may make a node appear or
+	// vanish between traversal passes.
+	MemoryTree []AgentMemoryNode
 }
 
 // Name returns the name of the dataplane module.

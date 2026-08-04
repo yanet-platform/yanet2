@@ -155,11 +155,23 @@ func (m *Inspect) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 		}
 
 		for instanceIdx, instance := range agent.Instances {
+			memoryTree := make([]*ynpb.MemoryNode, len(instance.MemoryTree))
+			for nodeIdx, node := range instance.MemoryTree {
+				memoryTree[nodeIdx] = &ynpb.MemoryNode{
+					Name:        node.Name,
+					ParentIdx:   node.ParentIdx,
+					BallocCount: node.BAllocCount,
+					BfreeCount:  node.BFreeCount,
+					BallocSize:  node.BAllocSize,
+					BfreeSize:   node.BFreeSize,
+				}
+			}
 			agentInfo.Instances[instanceIdx] = &ynpb.AgentInstanceInfo{
 				Pid:         instance.PID,
 				MemoryLimit: instance.MemoryLimit,
 				FreeBytes:   instance.FreeBytes,
 				Generation:  instance.Gen,
+				MemoryTree:  memoryTree,
 			}
 		}
 

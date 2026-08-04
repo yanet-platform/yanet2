@@ -188,6 +188,26 @@ yanet_get_cp_device_output_pipeline_info(
 
 // Instance
 
+// Length of a memory_context name, matching sizeof(memory_context::name).
+#define CP_MCTX_NAME_LEN 64
+
+// One node of an agent's memory_context tree.
+//
+// Copied to the heap by the info API so the caller never touches shared
+// memory.
+struct cp_memory_node_info {
+	char name[CP_MCTX_NAME_LEN];
+	// Index of this node's parent within the enclosing memory_nodes array.
+	//
+	// UINT32_MAX marks the root node, the agent's own context.
+	uint32_t parent_idx;
+	uint32_t _pad;
+	uint64_t balloc_count;
+	uint64_t bfree_count;
+	uint64_t balloc_size;
+	uint64_t bfree_size;
+};
+
 struct cp_agent_instance_info {
 	pid_t pid;
 	uint64_t memory_limit;
@@ -197,12 +217,22 @@ struct cp_agent_instance_info {
 	// Subtract from memory_limit to see how much memory the agent is
 	// currently using.
 	uint64_t free_bytes;
+	// Flat depth-first snapshot of the agent instance's memory-context
+	// subtree.
+	//
+	// Node 0 is the root, the agent's own context. Every later node's
+	// parent_idx points back into this array. Best-effort: a concurrent
+	// update may make a node appear or vanish between passes.
+	uint64_t memory_node_count;
+	struct cp_memory_node_info memory_nodes[];
 };
 
 struct cp_agent_info {
 	char name[80];
 	uint64_t instance_count;
-	struct cp_agent_instance_info instances[];
+	// Each element is a separately allocated block holding the
+	// cp_agent_instance_info header and its trailing memory_nodes array.
+	struct cp_agent_instance_info *instances[];
 };
 
 struct cp_agent_list_info {
