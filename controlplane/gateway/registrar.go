@@ -9,7 +9,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding/gzip"
+	"google.golang.org/grpc/status"
 
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -127,6 +129,26 @@ func (m *GatewayRegistrar) Endpoint() string {
 	return m.endpoint
 }
 
+// isPermanentRegisterError reports whether err is a rejection that retrying
+// the same Register call can never turn into success.
+//
+// Every retry resends a byte-identical request with the same (absent)
+// credentials, against a permission set the gateway loads once at startup,
+// so a rejection of the request's content or of the caller's identity
+// repeats forever. Everything else, including framework statuses such as
+// Unimplemented and ambiguous ones such as Unknown and Internal, fails open
+// toward retrying.
+func isPermanentRegisterError(err error) bool {
+	switch status.Code(err) {
+	case codes.InvalidArgument,
+		codes.Unauthenticated,
+		codes.PermissionDenied:
+		return true
+	default:
+		return false
+	}
+}
+
 // RegisterServices registers services with the same backend endpoint.
 func (m *GatewayRegistrar) RegisterServices(
 	ctx context.Context,
@@ -156,6 +178,13 @@ func (m *GatewayRegistrar) RegisterServices(
 			_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
 				resp, err := m.client.Register(ctx, request)
 				if err != nil {
+					if isPermanentRegisterError(err) {
+						log.Error("gateway rejected registration permanently, abandoning this attempt", zap.Error(err))
+						return nil, backoff.Permanent(fmt.Errorf(
+							"gateway %q permanently rejected registration of service %q: %w",
+							m.endpoint, name, err,
+						))
+					}
 					log.Warn("failed to register in gateway", zap.Error(err))
 					return nil, err
 				}

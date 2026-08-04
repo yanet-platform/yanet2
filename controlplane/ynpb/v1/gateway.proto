@@ -11,6 +11,18 @@ service Gateway {
   // ListServices returns all registered backends.
   rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
   // Register registers a new backend.
+  //
+  // Terminal statuses the gateway itself produces, which a registrant must
+  // not retry:
+  //
+  // - INVALID_ARGUMENT: the request is malformed (no backend, or an empty
+  //   name or endpoint), so resending it unchanged cannot succeed.
+  // - UNAUTHENTICATED, PERMISSION_DENIED: with authentication enabled, a
+  //   registrant that presents the same credentials on every attempt is
+  //   refused on every attempt.
+  //
+  // A status from the transport or the framework, such as a peer that does
+  // not serve this RPC, is outside this contract.
   rpc Register(RegisterRequest) returns (RegisterResponse);
 }
 

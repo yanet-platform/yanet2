@@ -176,8 +176,5 @@ func (m *ServiceRunner) register(ctx context.Context, addr net.Addr) error {
 	}
 	defer registrar.Close()
 
-	if err = registrar.RegisterServices(ctx, m.module.ServicesNames(), addr.String()); err != nil {
-		return fmt.Errorf("failed to register services: %w", err)
-	}
-	return nil
+	return registrar.RegisterServices(ctx, m.module.ServicesNames(), addr.String())
 }
