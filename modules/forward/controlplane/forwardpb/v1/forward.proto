@@ -66,6 +66,13 @@ message Rule {
 message Action {
   string target = 1;
   ForwardMode mode = 2;
+
+  // Name of the per-rule dataplane counter.
+  //
+  // May be left empty. UpdateConfig then stores "to_" plus the rule's
+  // target, bounded to the counter-name limit, so a rule applied through it
+  // never carries an empty name. A config the dataplane received directly
+  // through the C API still can, though ShowConfig does not report those.
   string counter = 3;
 }
 

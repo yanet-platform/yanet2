@@ -3,9 +3,16 @@ import type { Rule } from '@yanet/core/api/forward';
 import { ForwardMode, FORWARD_MODE_LABELS } from '@yanet/core/api/forward';
 import { formatIPNetItem, dumpYamlDoc } from '@yanet/core/utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '@yanet/core/components';
+import { effectiveCounterName } from './hooks';
 
-/** Serialize a rules array into the canonical YAML schema for diff display. */
-export const rulesToDiffYaml = (rules: Rule[]): string => {
+/**
+ * Serialize a rules array into the canonical YAML schema.
+ *
+ * The `counter` key mirrors the raw stored value by default. Pass
+ * `showEffectiveCounter` to emit the name the server would use instead
+ * (`to_<target>` when unset), as the pre-save diff preview does.
+ */
+export const rulesToDiffYaml = (rules: Rule[], showEffectiveCounter = false): string => {
     const yamlRules = rules.map((r) => {
         const devices = (r.devices ?? []).map(d => d.name ?? '').filter(Boolean);
         const srcs = (r.srcs ?? []).map(formatIPNetItem).filter(Boolean);
@@ -15,10 +22,13 @@ export const rulesToDiffYaml = (rules: Rule[]): string => {
             to: vr.to ?? 0,
         }));
 
+        const target = r.action?.target ?? '';
         const entry: Record<string, unknown> = {
-            target: r.action?.target ?? '',
+            target,
         };
-        if (r.action?.counter) {
+        if (showEffectiveCounter) {
+            entry['counter'] = effectiveCounterName(r.action?.counter ?? '', target);
+        } else if (r.action?.counter) {
             entry['counter'] = r.action.counter;
         }
         if (vlan_ranges.length > 0) {
@@ -60,8 +70,8 @@ export const SaveDiffModal: React.FC<SaveDiffModalProps> = ({
     onClose,
     onApply,
 }) => {
-    const beforeYaml = useMemo(() => rulesToDiffYaml(serverRules), [serverRules]);
-    const afterYaml = useMemo(() => rulesToDiffYaml(draftRules), [draftRules]);
+    const beforeYaml = useMemo(() => rulesToDiffYaml(serverRules, true), [serverRules]);
+    const afterYaml = useMemo(() => rulesToDiffYaml(draftRules, true), [draftRules]);
 
     return (
         <SharedSaveDiffModal

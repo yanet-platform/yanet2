@@ -1,6 +1,7 @@
 import React from 'react';
 import type { RuleItem } from './types';
 import type { RuleRate } from './useForwardRuleCounters';
+import { effectiveCounterName } from './hooks';
 import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from '@yanet/core/components/Sparkline';
@@ -80,11 +81,14 @@ const RuleTable: React.FC<RuleTableProps> = ({
             key: 'counter',
             header: 'Counter',
             gridTrack: '140px',
-            renderCell: (item) => (
-                <span className="yn-cell-mono yn-cell-muted" title={item.counter}>
-                    {item.counter || '—'}
-                </span>
-            ),
+            renderCell: (item) => {
+                const name = effectiveCounterName(item.counter, item.target);
+                return (
+                    <span className="yn-cell-mono yn-cell-muted" title={name}>
+                        {name}
+                    </span>
+                );
+            },
         },
         {
             key: 'devices',

@@ -207,11 +207,20 @@ impl TryFrom<forwardpb::Rule> for ForwardRule {
 ///
 /// Every rule field is always emitted, including an empty sequence as `[]`
 /// and an empty counter as an empty string, and none of them is optional on
-/// `update` either. A network renders from the address and mask actually
-/// stored, so re-applying shown output normalises an address that carries
-/// host bits outside its mask. A stored IPv6 network's mask may have a hole
-/// at the `/64` boundary. Such a network renders in expanded-mask form, and
+/// `update` either.
+///
+/// A network renders from the address and mask actually stored, so
+/// re-applying shown output normalises an address that carries host bits
+/// outside its mask. A stored IPv6 network's mask may have a hole at the
+/// `/64` boundary. Such a network renders in expanded-mask form, and
 /// `update` rejects it because it requires a contiguous mask.
+///
+/// A `counter` left empty on `update` is not stored empty: the server
+/// materialises it to `to_<target>` before storing, bounded to whatever
+/// length the shared-memory counter registry accepts by cutting it back
+/// to the last whole character that still fits, so `show` renders that
+/// name instead of an empty string once the rule has gone through
+/// `update`, and a non-empty `counter` is used verbatim.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ForwardConfig {
     rules: Vec<ForwardRule>,

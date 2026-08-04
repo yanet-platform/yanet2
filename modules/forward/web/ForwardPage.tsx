@@ -10,7 +10,7 @@ import type { RuleItem, RuleDraft } from './types';
 import { MODE_LABELS } from './types';
 import { ModeFilter } from './ModeFilter';
 import type { ModeFilterValue } from './ModeFilter';
-import { rulesToNgItems, draftToRule, itemToDraft } from './hooks';
+import { rulesToNgItems, draftToRule, itemToDraft, effectiveCounterName } from './hooks';
 import RuleTable from './RuleTable';
 import RuleDrawer from './RuleDrawer';
 import type { RuleDrawerHandle } from './RuleDrawer';
@@ -123,7 +123,7 @@ const ForwardPage: React.FC = () => {
         if (q) {
             res = res.filter((item) =>
                 item.target.toLowerCase().includes(q) ||
-                item.counter.toLowerCase().includes(q) ||
+                effectiveCounterName(item.counter, item.target).toLowerCase().includes(q) ||
                 item.deviceNames.some((d) => d.toLowerCase().includes(q)) ||
                 item.sourceCidrs.some((s) => s.toLowerCase().includes(q)) ||
                 item.dstCidrs.some((s) => s.toLowerCase().includes(q))
@@ -253,12 +253,11 @@ const ForwardPage: React.FC = () => {
         getId: (it) => it.id,
         getLabel: (it) => it.target || '(no target)',
         getSub: (it) => {
-            const parts: string[] = [MODE_LABELS[it.mode]];
-            if (it.counter) parts.push(it.counter);
+            const parts: string[] = [MODE_LABELS[it.mode], effectiveCounterName(it.counter, it.target)];
             if (it.deviceNames.length) parts.push(it.deviceNames.join(', '));
             return parts.join(' · ');
         },
-        searchText: (it) => [it.target, it.counter, ...it.deviceNames, ...it.sourceCidrs, ...it.dstCidrs].join(' '),
+        searchText: (it) => [it.target, effectiveCounterName(it.counter, it.target), ...it.deviceNames, ...it.sourceCidrs, ...it.dstCidrs].join(' '),
         onSelect: (id) => { setModeFilter('all'); handleSearchChange(''); handleJumpToRow(id); },
         icon: '→',
     }), [allItems, handleSearchChange, handleJumpToRow]);

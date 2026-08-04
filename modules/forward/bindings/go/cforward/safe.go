@@ -10,6 +10,15 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 )
 
+// CounterNameMaxLen is the longest counter name the shared-memory counter
+// registry accepts.
+//
+// The C buffer backing a counter name (COUNTER_NAME_LEN) reserves one byte
+// for a trailing NUL terminator. counter_registry_register in
+// lib/counters/counters.c rejects a name whose strnlen reaches the full
+// buffer size, so the longest name it accepts is the buffer size minus one.
+const CounterNameMaxLen = C.COUNTER_NAME_LEN - 1
+
 // ForwardMode defines the forwarding direction.
 type ForwardMode int
 

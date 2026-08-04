@@ -19,6 +19,16 @@ const computeIsAllVlans = (ranges: VlanRange[] | undefined): boolean => {
     return false;
 };
 
+/**
+ * Counter name to display for a rule.
+ *
+ * An explicit counter wins. Otherwise this mirrors the server's
+ * `to_<target>` default, minus its length truncation, so a long target
+ * reads untruncated until the saved config is refetched.
+ */
+export const effectiveCounterName = (counter: string, target: string): string =>
+    counter || `to_${target}`;
+
 /** Convert a Rule array from the API to RuleItem array for UI display. */
 export const rulesToNgItems = (rules: Rule[]): RuleItem[] => {
     return rules.map((rule, index) => {

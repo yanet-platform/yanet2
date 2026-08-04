@@ -168,11 +168,13 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                         </label>
                         <input
                             className="yn-input"
-                            placeholder={draft.target ? `to_${draft.target}` : 'e.g. my_counter'}
+                            placeholder={draft.target ? `to_${draft.target} (default)` : 'e.g. my_counter'}
                             value={draft.counter}
                             onChange={(e) => updateField('counter', e.target.value)}
                         />
-                        <span className="yn-field__hint">Name shown in /stats. Leave empty to skip counting.</span>
+                        <span className="yn-field__hint">
+                            Name shown in /stats. Leave empty to use the auto-assigned default name (to_&lt;target&gt;).
+                        </span>
                     </div>
                 </div>
             </section>

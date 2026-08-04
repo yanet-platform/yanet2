@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -100,6 +101,31 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 	return response, nil
 }
 
+// materializeCounter builds the default counter name for a rule that left
+// it empty: "to_" plus the target, bounded to the counter-name limit.
+//
+// The cut lands on a rune boundary because a name split mid-rune is not
+// valid UTF-8, and a ShowConfig response carrying it would fail to marshal.
+func materializeCounter(target string) string {
+	name := "to_" + target
+	if len(name) <= cforward.CounterNameMaxLen {
+		return name
+	}
+
+	cut := cforward.CounterNameMaxLen
+	for cut > 0 && !utf8.RuneStart(name[cut]) {
+		cut--
+	}
+	return name[:cut]
+}
+
+// UpdateConfig replaces the rule set for a named forward module config and
+// publishes it to the dataplane.
+//
+// A rule that leaves its counter empty is stored with "to_" plus its
+// target, bounded to the counter-name limit, so ShowConfig never returns an
+// empty name for a rule applied here. A non-empty counter is passed through
+// verbatim.
 func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.UpdateConfigRequest) (*forwardpb.UpdateConfigResponse, error) {
 	name := req.GetName()
 	if name == "" {
@@ -113,6 +139,14 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		action := reqRule.GetAction()
 		if action == nil {
 			return nil, status.Error(codes.InvalidArgument, "rule action is required")
+		}
+
+		// Assign onto the request's own action message: the ForwardRule
+		// built below and the reqRules stored into m.configs after the
+		// backend call both read this same action, so one assignment here
+		// keeps the shared-memory write and ShowConfig in agreement.
+		if action.Counter == "" {
+			action.Counter = materializeCounter(action.Target)
 		}
 
 		devices, err := filterpb.ToDevices(reqRule.Devices)

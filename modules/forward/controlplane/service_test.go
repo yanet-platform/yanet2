@@ -3,12 +3,15 @@ package forward_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -44,6 +47,22 @@ type nilHandleBackend struct {
 
 func (m *nilHandleBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
 	return nil, nil
+}
+
+// recordingBackend captures the rules handed to UpdateModule so a test can
+// inspect what the service sends to shared memory.
+//
+// Only single-goroutine tests use it. TestForwardServiceConcurrentAccess
+// uses mockBackend instead, since this field is unguarded under -race.
+type recordingBackend struct {
+	mockBackend
+
+	rules []cforward.ForwardRule
+}
+
+func (m *recordingBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+	m.rules = rules
+	return &mockModuleHandle{}, nil
 }
 
 // TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
@@ -101,6 +120,147 @@ func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {
 
 	_, err = svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{Name: "config"})
 	require.NoError(t, err)
+}
+
+// TestUpdateConfigMaterializesEmptyCounter verifies that a rule with an
+// empty counter and a non-empty target is materialised to "to_" + target
+// both in the rules handed to the backend and in what ShowConfig returns
+// afterward.
+func TestUpdateConfigMaterializesEmptyCounter(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{Target: "device0"},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.Equal(t, "to_device0", backend.rules[0].Counter)
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Len(t, response.GetRules(), 1)
+	require.Equal(t, "to_device0", response.GetRules()[0].GetAction().GetCounter())
+}
+
+// TestUpdateConfigKeepsNonEmptyCounter verifies that a rule with a
+// non-empty counter is passed through verbatim, unmaterialised.
+func TestUpdateConfigKeepsNonEmptyCounter(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{Target: "device0", Counter: "custom"},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.Equal(t, "custom", backend.rules[0].Counter)
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "custom", response.GetRules()[0].GetAction().GetCounter())
+}
+
+// TestUpdateConfigEmptyCounterEmptyTarget verifies the degenerate case: a
+// rule with both an empty counter and an empty target materialises to
+// "to_" rather than being rejected.
+func TestUpdateConfigEmptyCounterEmptyTarget(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.Equal(t, "to_", backend.rules[0].Counter)
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, "to_", response.GetRules()[0].GetAction().GetCounter())
+}
+
+// TestUpdateConfigMaterializesEmptyCounterLongTarget verifies that a target
+// long enough to overflow the counter-name limit still applies, with the
+// counter cut to exactly that limit.
+//
+// The expected length (127) is asserted as a literal, not derived from
+// cforward.CounterNameMaxLen, so an off-by-one in that constant would not
+// make this test pass vacuously.
+func TestUpdateConfigMaterializesEmptyCounterLongTarget(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	target := strings.Repeat("a", 300)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{Target: target},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.Len(t, backend.rules[0].Counter, 127)
+	require.True(t, strings.HasPrefix(backend.rules[0].Counter, "to_aaa"))
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+	require.Equal(t, backend.rules[0].Counter, response.GetRules()[0].GetAction().GetCounter())
+}
+
+// TestUpdateConfigMaterializesEmptyCounterUTF8Boundary verifies that when
+// the counter-name cut would otherwise split a multi-byte rune, UpdateConfig
+// backs it off to the previous rune boundary instead.
+//
+// The target places a two-byte "é" rune where a byte-wise cut would land on
+// its continuation byte. proto.Marshal is the oracle, not utf8.ValidString
+// alone, because a marshal failure is what a real ShowConfig call would hit.
+func TestUpdateConfigMaterializesEmptyCounterUTF8Boundary(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	target := strings.Repeat("a", 123) + "é" + strings.Repeat("b", 10)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{Target: target},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.True(t, utf8.ValidString(backend.rules[0].Counter), "counter must be valid UTF-8")
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
+	require.NoError(t, err)
+
+	_, err = proto.Marshal(response)
+	require.NoError(t, err, "ShowConfigResponse carrying the materialised counter must marshal")
 }
 
 // Run with: go test -race

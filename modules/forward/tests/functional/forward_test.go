@@ -3,6 +3,7 @@ package forward_test
 import (
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -11,11 +12,13 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 // Memory sizes for the forward functional harness.
@@ -342,6 +345,117 @@ func TestForward_ModeOut_IPv4(t *testing.T) {
 		ModuleName: "test",
 	}
 	dataplaneut.RequireModuleCounter(t, h, path, "rule0", 1, pktSize)
+}
+
+// TestForward_EmptyCounterMaterializesToTarget verifies that a rule applied
+// through the real ForwardService with an empty counter runs the packet
+// path under the materialised "to_"+target counter, and that no counter the
+// module registers is left unnamed.
+//
+// Goes through ForwardService.UpdateConfig rather than backend.UpdateModule
+// directly, so the service's materialisation runs end to end.
+func TestForward_EmptyCounterMaterializesToTarget(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	svc := forward.NewForwardService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "test",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{
+					Target: "port1",
+					Mode:   forwardpb.ForwardMode_OUT,
+				},
+				Srcs: []*filterpb.IPNet{
+					{Addr: []byte{0, 0, 0, 0}, Mask: []byte{0, 0, 0, 0}},
+				},
+				Dsts: []*filterpb.IPNet{
+					{Addr: []byte{10, 0, 0, 0}, Mask: []byte{255, 255, 255, 0}},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// The config is now applied and owned by the service. Wiring the
+	// pipeline afterward matches applyRules's own ordering requirement.
+	wireForwardPipeline(t, agent, "port0", "test", []string{"port1"})
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "ModeOut packet must reach output after egress pipeline")
+	require.Empty(t, result.Drop, "ModeOut packet with valid device must not be dropped")
+
+	path := dataplaneut.CounterPath{
+		Device:     "port0",
+		Pipeline:   "test",
+		Function:   "test",
+		Chain:      "test_chain",
+		ModuleType: "forward",
+		ModuleName: "test",
+	}
+	dataplaneut.RequireModuleCounter(t, h, path, "to_port1", 1, pktSize)
+
+	// A nil query returns every counter the module registers, including the
+	// generic rx/tx/drop/pending_*/hist_* counters from cp_module_init. None
+	// of those are empty either.
+	registered := h.SharedMemory().DPConfig(0).ModuleCounters(
+		path.Device, path.Pipeline, path.Function, path.Chain, path.ModuleType, path.ModuleName, nil,
+	)
+	require.NotEmpty(t, registered)
+	for _, counter := range registered {
+		require.NotEmpty(t, counter.Name, "module must not register an unnamed counter")
+	}
+}
+
+// TestForward_EmptyCounterLongTargetRegistersInCounterRegistry verifies that
+// the C counter registry accepts and registers a counter name cut to the
+// shared-memory limit — the layer no Go-level test can reach.
+//
+// The target need not name a real device: cp_module_link_device only
+// records it in the module's own device table.
+func TestForward_EmptyCounterLongTargetRegistersInCounterRegistry(t *testing.T) {
+	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	svc := forward.NewForwardService(backend)
+
+	target := strings.Repeat("a", 300)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "test",
+		Rules: []*forwardpb.Rule{
+			{
+				Action: &forwardpb.Action{
+					Target: target,
+					Mode:   forwardpb.ForwardMode_NONE,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "test"})
+	require.NoError(t, err)
+	require.Len(t, response.GetRules(), 1)
+
+	wantCounter := response.GetRules()[0].GetAction().GetCounter()
+	require.NotEmpty(t, wantCounter)
+	require.Len(t, wantCounter, 127, "materialised counter must be cut to the registry's usable limit")
+
+	wireForwardPipeline(t, agent, "port0", "test", nil)
+
+	registered := h.SharedMemory().DPConfig(0).ModuleCounters(
+		"port0", "test", "test", "test_chain", "forward", "test", nil,
+	)
+
+	names := make([]string, 0, len(registered))
+	for _, counter := range registered {
+		names = append(names, counter.Name)
+	}
+	require.Contains(t, names, wantCounter)
 }
 
 // TestForward_ModeIn_IPv4 verifies that an IPv4 packet matched by a ModeIn
