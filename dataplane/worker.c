@@ -345,36 +345,43 @@ worker_loop_round(struct dataplane_worker *worker) {
 	);
 	*worker->dp_worker->iterations += 1;
 
-	struct packet_front packet_front;
-	packet_front_init(&packet_front);
-
-	worker_read(worker, &packet_front);
-
+	// No configuration has been installed yet (startup). Drain the NIC
+	// RX ring into a throwaway stack front so packets that arrived
+	// before the first configuration do not accumulate and get
+	// processed stale once a configuration appears.
 	if (config_gen_ectx == NULL) {
+		struct packet_front packet_front;
+		packet_front_init(&packet_front);
+
+		worker_read(worker, &packet_front);
 		worker_write(worker, &packet_front);
 
 		packet_front_drop_pending_input(&packet_front);
 
 		*(worker->dp_worker->drop_count) += packet_front.drop_count;
 		dataplane_drop_packets(worker->dataplane, &packet_front.drop);
-
 		return;
 	}
 
+	struct packet_front *packet_front = &config_gen_ectx->packet_front;
+
+	worker_read(worker, packet_front);
+
 	worker_pipeline_round(
-		worker->dp_worker, cp_config_gen, config_gen_ectx, &packet_front
+		worker->dp_worker, cp_config_gen, config_gen_ectx, packet_front
 	);
 
-	worker_write(worker, &packet_front);
+	worker_write(worker, packet_front);
 
 	/*
 	 * `output` now contains failed-to-transmit packets which should be
 	 * freed.
 	 */
-	packet_front_drop_output(&packet_front);
+	packet_front_drop_output(packet_front);
 
-	*(worker->dp_worker->drop_count) += packet_front.drop_count;
-	dataplane_drop_packets(worker->dataplane, &packet_front.drop);
+	*(worker->dp_worker->drop_count) += packet_front->drop_count;
+	dataplane_drop_packets(worker->dataplane, &packet_front->drop);
+	packet_front_recycle(packet_front);
 }
 
 static void *

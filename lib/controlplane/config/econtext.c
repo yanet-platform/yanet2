@@ -1571,6 +1571,7 @@ config_gen_ectx_create(
 		return NULL;
 	}
 	memset(config_gen_ectx, 0, ectx_size);
+	packet_front_init(&config_gen_ectx->packet_front);
 
 	SET_OFFSET_OF(&config_gen_ectx->cp_config_gen, cp_config_gen);
 

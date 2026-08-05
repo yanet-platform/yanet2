@@ -28,33 +28,47 @@ worker_pipeline_round(
 	int force_poll = 1;
 
 	while (1) {
-		struct packet_front schedule_input[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			packet_front_init(schedule_input + idx);
-		}
-
-		struct packet_front schedule_output[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			packet_front_init(schedule_output + idx);
-		}
-
 		struct packet *packet;
 
 		int empty = 1;
 
+		// Demux pending traffic into each target device's per-entry
+		// schedule front. A packet whose target device is absent from
+		// this generation (out of range or not configured) cannot be
+		// delivered, so it is dropped rather than stranded.
 		while ((packet = packet_list_pop(&packet_front->pending_input)
 		       ) != NULL) {
 			empty = 0;
+			struct device_ectx *device_ectx =
+				config_gen_ectx_get_device(
+					config_gen_ectx, packet->tx_device_id
+				);
+			if (device_ectx == NULL) {
+				packet_front_drop(packet_front, packet);
+				continue;
+			}
 			packet_front_output(
-				schedule_input + packet->tx_device_id, packet
+				&ADDR_OF(&device_ectx->input_pipelines)
+					 ->schedule,
+				packet
 			);
 		}
 
 		while ((packet = packet_list_pop(&packet_front->pending_output)
 		       ) != NULL) {
 			empty = 0;
+			struct device_ectx *device_ectx =
+				config_gen_ectx_get_device(
+					config_gen_ectx, packet->tx_device_id
+				);
+			if (device_ectx == NULL) {
+				packet_front_drop(packet_front, packet);
+				continue;
+			}
 			packet_front_output(
-				schedule_output + packet->tx_device_id, packet
+				&ADDR_OF(&device_ectx->output_pipelines)
+					 ->schedule,
+				packet
 			);
 		}
 
@@ -71,14 +85,17 @@ worker_pipeline_round(
 				continue;
 			}
 
+			struct packet_front *schedule =
+				&ADDR_OF(&device_ectx->input_pipelines)
+					 ->schedule;
+
 			if (!force_poll &&
-			    packet_list_first(&schedule_input[idx].output) ==
-				    NULL) {
+			    packet_list_first(&schedule->output) == NULL) {
 				continue;
 			}
 
 			device_ectx_process_input(
-				dp_worker, device_ectx, schedule_input + idx
+				dp_worker, device_ectx, schedule
 			);
 
 			/*
@@ -87,9 +104,9 @@ worker_pipeline_round(
 			 * The only chance for a packet to be survived is
 			 * being scheduled into pending input/output queues.
 			 */
-			packet_front_drop_output(schedule_input + idx);
+			packet_front_drop_output(schedule);
 
-			packet_front_merge(packet_front, schedule_input + idx);
+			packet_front_merge(packet_front, schedule);
 		}
 
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
@@ -101,17 +118,20 @@ worker_pipeline_round(
 				continue;
 			}
 
+			struct packet_front *schedule =
+				&ADDR_OF(&device_ectx->output_pipelines)
+					 ->schedule;
+
 			if (!force_poll &&
-			    packet_list_first(&schedule_output[idx].output) ==
-				    NULL) {
+			    packet_list_first(&schedule->output) == NULL) {
 				continue;
 			}
 
 			device_ectx_process_output(
-				dp_worker, device_ectx, schedule_output + idx
+				dp_worker, device_ectx, schedule
 			);
 
-			packet_front_merge(packet_front, schedule_output + idx);
+			packet_front_merge(packet_front, schedule);
 		}
 
 		force_poll = 0;

@@ -110,6 +110,13 @@ struct device_entry_ectx {
 	uint64_t pipeline_count;
 	struct pipeline_ectx **pipelines;
 	uint64_t pipeline_map_size;
+	// Per-entry scratch front the worker round demuxes traffic into.
+	//
+	// The round pops pending input/output for this device's entry point
+	// into this front, runs the entry, then merges the result back and
+	// leaves the front empty, so it is reused in place across rounds
+	// instead of being reinitialized on the stack every iteration.
+	struct packet_front schedule;
 	uint64_t pipeline_map[];
 };
 
@@ -143,6 +150,13 @@ struct config_gen_ectx {
 	// member.
 	uint64_t object_count;
 	struct object_ectx **objects;
+
+	// Per-worker scratch front reused across worker rounds.
+	//
+	// Initialized once when the ectx is created and left clean at the
+	// end of every worker round, so the worker loop reuses it in place
+	// instead of reinitializing a fresh front on each iteration.
+	struct packet_front packet_front;
 
 	uint64_t device_count;
 	struct device_ectx *devices[];

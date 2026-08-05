@@ -63,6 +63,25 @@ packet_front_init(struct packet_front *packet_front) {
 	packet_front->drop_bytes = 0;
 }
 
+// Resets a fully-drained front to a clean reusable state.
+//
+// Only valid on a front whose input, output and pending lists have already
+// been drained to empty by a completed worker round. Resets the spent drop
+// list (its mbufs were already freed by the caller, so only the head needs
+// resetting) and the stale pending/drop accumulator counters, so the front
+// can be handed to the next round without a full packet_front_init.
+static inline void
+packet_front_recycle(struct packet_front *packet_front) {
+	packet_list_init(&packet_front->drop);
+
+	packet_front->drop_count = 0;
+	packet_front->drop_bytes = 0;
+	packet_front->pending_input_count = 0;
+	packet_front->pending_input_bytes = 0;
+	packet_front->pending_output_count = 0;
+	packet_front->pending_output_bytes = 0;
+}
+
 // Move the whole output, drop and pending lists from src into dst, transferring
 // the counters, and leave src empty.
 //
