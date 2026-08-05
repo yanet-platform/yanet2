@@ -509,6 +509,23 @@ mod test {
         assert_eq!("192.168.1.1/32", cidrs[0]);
     }
 
+    /// The `value` oneof's wire name (`counter`), not the Rust variant
+    /// identifier (`Counter`) prost generates for it, is what must appear
+    /// in the tag.
+    #[test]
+    fn serde_metric_value_oneof_uses_snake_case_tag() {
+        let metric = pb::Metric {
+            name: "fwstate_sync_packets".to_string(),
+            labels: vec![],
+            value: Some(pb::metric::Value::Counter(42)),
+        };
+        let json = serde_json::to_string(&metric).unwrap();
+        assert_eq!(
+            r#"{"name":"fwstate_sync_packets","labels":[],"value":{"counter":42}}"#,
+            json
+        );
+    }
+
     #[test]
     fn iprange_cidrs_invalid_family() {
         let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));

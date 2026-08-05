@@ -38,8 +38,14 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         // Covers `Metric`'s `value` oneof, generated as its own enum --
         // `Metric` cannot derive `Serialize`/`Deserialize` unless that enum
         // does too. No message here excludes an enum, so this stays a
-        // blanket path unlike `SERDE_MESSAGES` above.
-        .enum_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
+        // blanket path unlike `SERDE_MESSAGES` above. The rename is needed
+        // because prost upper-camel-cases the oneof member names, and
+        // without it the default tag would emit a Rust identifier rather
+        // than the proto field name.
+        .enum_attribute(
+            ".",
+            "#[derive(serde::Serialize, serde::Deserialize)]#[serde(rename_all = \"snake_case\")]",
+        );
     for message in SERDE_MESSAGES {
         config = config.message_attribute(message, "#[derive(serde::Serialize, serde::Deserialize)]");
     }
