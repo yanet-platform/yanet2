@@ -136,6 +136,12 @@ export class IPv6Address {
             return err(IPv6ParseError.EmptyString);
         }
 
+        // The URL parser strips leading/trailing tab, LF and CR before parsing,
+        // so the `new URL` guard below cannot be relied on to reject them.
+        if (ip !== ip.trim()) {
+            return err(IPv6ParseError.InvalidFormat);
+        }
+
         try {
             // Use URL constructor to validate - it throws for invalid IPs
             new URL(`http://[${ip}]`);
@@ -169,15 +175,17 @@ export class IPv6Address {
                 }
             }
 
-            // Parse groups (expand :: to zeros)
-            const expanded = normalized.replace('::', ':0000'.repeat(9 - parts.length)).split(':');
+            // Running the embedded-IPv4 expansion again here on an already-expanded
+            // string is idempotent: the rebuilt tail is hex digits from
+            // Number.prototype.toString(16), which never contains a dot, so the
+            // second pass takes the early return and leaves it untouched.
+            const bytes = parseIPv6ToBytes(normalized);
+            if (bytes === undefined) {
+                return err(IPv6ParseError.InvalidFormat);
+            }
             const groups: number[] = [];
-            for (const group of expanded) {
-                const num = parseInt(group || '0', 16);
-                if (isNaN(num) || num < 0 || num > 0xFFFF) {
-                    return err(IPv6ParseError.InvalidFormat);
-                }
-                groups.push(num);
+            for (let i = 0; i < 8; i++) {
+                groups.push((bytes[2 * i] << 8) | bytes[2 * i + 1]);
             }
 
             return ok(new IPv6Address(groups));
@@ -190,49 +198,11 @@ export class IPv6Address {
      * Convert to string representation (compressed format)
      */
     toString(): string {
-        // Find longest sequence of zeros for compression
-        let bestStart = -1;
-        let bestLength = 0;
-        let currentStart = -1;
-        let currentLength = 0;
-
-        for (let i = 0; i < this.groups.length; i++) {
-            if (this.groups[i] === 0) {
-                if (currentStart === -1) {
-                    currentStart = i;
-                    currentLength = 1;
-                } else {
-                    currentLength++;
-                }
-            } else {
-                if (currentLength > bestLength) {
-                    bestStart = currentStart;
-                    bestLength = currentLength;
-                }
-                currentStart = -1;
-                currentLength = 0;
-            }
+        const bytes: number[] = [];
+        for (const group of this.groups) {
+            bytes.push((group >> 8) & 0xff, group & 0xff);
         }
-
-        // Check the last sequence
-        if (currentLength > bestLength) {
-            bestStart = currentStart;
-            bestLength = currentLength;
-        }
-
-        // Build the string
-        const parts: string[] = [];
-        for (let i = 0; i < this.groups.length; i++) {
-            if (bestStart !== -1 && i >= bestStart && i < bestStart + bestLength) {
-                if (i === bestStart) {
-                    parts.push('');
-                }
-                continue;
-            }
-            parts.push(this.groups[i].toString(16));
-        }
-
-        return parts.join(':');
+        return formatIPv6FromBytes(bytes);
     }
 
     /**
@@ -901,9 +871,6 @@ export const cidrToIPRange = (cidr: string): IPRangeWire | undefined => {
     const prefixLen = getPrefixLength(cidr);
     if (prefixLen === null) return undefined;
 
-    // Parse bytes from the address substring directly rather than round-tripping
-    // through address.toString(), whose IPv6 :: compression drops the trailing
-    // colon when the compressed run reaches the end of the address.
     const addrPart = cidr.slice(0, cidr.lastIndexOf('/'));
     const addrBytes = parseIPToBytes(addrPart);
     if (!addrBytes) return undefined;

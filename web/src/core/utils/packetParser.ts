@@ -1,5 +1,7 @@
 // Packet parser for Ethernet/IPv4/IPv6/TCP/UDP/ICMP
 
+import { formatIPv6FromBytes } from './netip';
+
 export interface EthernetHeader {
     dstMac: string;
     srcMac: string;
@@ -151,16 +153,7 @@ const formatIPv4 = (bytes: Uint8Array, offset: number): string => {
 };
 
 const formatIPv6 = (bytes: Uint8Array, offset: number): string => {
-    const parts: string[] = [];
-    for (let i = 0; i < 8; i++) {
-        const val = (bytes[offset + i * 2] << 8) | bytes[offset + i * 2 + 1];
-        parts.push(val.toString(16));
-    }
-    // Simple compression: find longest run of zeros
-    let result = parts.join(':');
-    // Replace longest run of :0:0:... with ::
-    result = result.replace(/(?:^|:)0(?::0)+(?::|$)/, '::');
-    return result;
+    return formatIPv6FromBytes(Array.from(bytes.subarray(offset, offset + 16)));
 };
 
 const getEtherTypeName = (etherType: number): string => {

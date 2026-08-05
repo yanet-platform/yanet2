@@ -8,6 +8,7 @@ import {
     parseCidrsToIPNets,
     parseIPToBytes,
     IPv4Prefix,
+    IPv6Address,
     CIDRParseError,
 } from './netip';
 
@@ -340,5 +341,129 @@ describe('parseCidrsToIPNets mask strictness', () => {
         expect(parseCidrsToIPNets(['1:2:3:4:5:6:10.0.0.1abc/128', '64:ff9b::10.0.0.0/120']))
             .toEqual(parseCidrsToIPNets(['64:ff9b::10.0.0.0/120']));
         expect(parseCidrsToIPNets(['64:ff9b::10.0.0.0/120'])).toHaveLength(1);
+    });
+});
+
+describe('IPv6Address.parse groups', () => {
+    it('expands a leading :: into 8 groups', () => {
+        const result = IPv6Address.parse('::1');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.groups).toEqual([0, 0, 0, 0, 0, 0, 0, 1]);
+        }
+    });
+
+    it('converts a leading-:: address to the correct BigInt value', () => {
+        const result = IPv6Address.parse('::1');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.toBigInt()).toBe(1n);
+        }
+    });
+
+    it('expands a mid-string :: into 8 groups', () => {
+        const result = IPv6Address.parse('2001:db8::1');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.groups).toEqual([0x2001, 0x0db8, 0, 0, 0, 0, 0, 1]);
+        }
+    });
+
+    it('expands the unspecified address :: into 8 zero groups', () => {
+        const result = IPv6Address.parse('::');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.groups).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+        }
+    });
+
+    it('parses an uncompressed 8-group address without change', () => {
+        const result = IPv6Address.parse('1:2:3:4:5:6:7:8');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.groups).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+        }
+    });
+
+    it('expands an embedded-IPv4 tail after a leading ::', () => {
+        const result = IPv6Address.parse('::ffff:192.168.1.1');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.groups).toEqual([0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101]);
+        }
+    });
+
+    it('expands an embedded-IPv4 tail after a mid-string ::', () => {
+        const result = IPv6Address.parse('64:ff9b::10.0.0.0');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.groups).toEqual([0x0064, 0xff9b, 0, 0, 0, 0, 0x0a00, 0]);
+        }
+    });
+
+    it('rejects a group with trailing non-hex junk', () => {
+        expect(IPv6Address.parse('1abcg::').ok).toBe(false);
+    });
+
+    it('rejects a group with trailing non-hex junk in an uncompressed address', () => {
+        expect(IPv6Address.parse('1:2:3:4:5:6:7:8abcg').ok).toBe(false);
+    });
+
+    it('rejects a group with more than 4 hex digits', () => {
+        expect(IPv6Address.parse('12345::1').ok).toBe(false);
+    });
+
+    it('rejects 9 uncompressed groups', () => {
+        expect(IPv6Address.parse('1:2:3:4:5:6:7:8:9').ok).toBe(false);
+    });
+
+    it('rejects the empty string', () => {
+        expect(IPv6Address.parse('').ok).toBe(false);
+    });
+
+    it('rejects a leading tab, which the URL parser would otherwise strip', () => {
+        expect(IPv6Address.parse('\t::1').ok).toBe(false);
+    });
+
+    it('rejects a leading newline, which the URL parser would otherwise strip', () => {
+        expect(IPv6Address.parse('\n::1').ok).toBe(false);
+    });
+
+    it('rejects a leading carriage return, which the URL parser would otherwise strip', () => {
+        expect(IPv6Address.parse('\r::1').ok).toBe(false);
+    });
+
+    it('rejects a trailing tab, which the URL parser would otherwise strip', () => {
+        expect(IPv6Address.parse('::1\t').ok).toBe(false);
+    });
+
+    it('still accepts the plain form with no surrounding whitespace', () => {
+        expect(IPv6Address.parse('::1').ok).toBe(true);
+    });
+});
+
+describe('IPv6Address.toString round-trip', () => {
+    it('round-trips the unspecified address ::', () => {
+        const result = IPv6Address.parse('::');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.toString()).toBe('::');
+        }
+    });
+
+    it('round-trips a trailing-:: address whose compressed run reaches the last group', () => {
+        const result = IPv6Address.parse('2a02:6b8:2:d::');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.toString()).toBe('2a02:6b8:2:d::');
+        }
+    });
+
+    it('does not compress a single zero group, per RFC 5952 4.2.2', () => {
+        const result = IPv6Address.parse('1:0:2:3:4:5:6:7');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.toString()).toBe('1:0:2:3:4:5:6:7');
+        }
     });
 });
