@@ -43,7 +43,35 @@ struct module_ectx {
 
 	uint64_t cm_index_size;
 	uint64_t *cm_index;
+
+	// One entry per object this module links to. Each entry owns a counter
+	// storage spawned from the linked object's link counter registry and
+	// references that object's per-worker execution context.
+	uint64_t object_link_count;
+	struct module_object_link_ectx *object_links;
 };
+
+// Per-worker, per-link state for a module's link to a cp_object.
+//
+// counter_storage holds the values for the counters declared in the linked
+// object's link counter registry, private to this module link on this worker.
+// object_ectx references the linked object's per-worker execution context.
+struct module_object_link_ectx {
+	struct counter_storage *counter_storage;
+	struct object_ectx *object_ectx;
+};
+
+// Return the object link execution context at the given link index, or NULL
+// when the index is out of range (the module has no object link at that slot).
+static inline struct module_object_link_ectx *
+object_link_get_address(struct module_ectx *module_ectx, uint64_t index) {
+	if (index >= module_ectx->object_link_count) {
+		return NULL;
+	}
+	struct module_object_link_ectx *links =
+		ADDR_OF(&module_ectx->object_links);
+	return links + index;
+}
 
 static inline uint64_t
 module_ectx_encode_device(struct module_ectx *module_ectx, uint64_t index) {

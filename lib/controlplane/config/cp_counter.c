@@ -475,10 +475,7 @@ cp_config_counter_storage_registry_lookup_module(
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
 		{.key = "pipeline", .value = pipeline_name},
-		{
-			.key = "function",
-			.value = function_name,
-		},
+		{.key = "function", .value = function_name},
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
 		{.key = "module_name", .value = module_name},
@@ -542,5 +539,60 @@ cp_config_counter_storage_registry_insert_object(
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 3, counter_storage, err
+	);
+}
+
+struct counter_storage *
+cp_config_counter_storage_registry_lookup_module_object_link(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name,
+	const char *object_type,
+	const char *object_name
+) {
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = module_type},
+		{.key = "module_name", .value = module_name},
+		{.key = "object_type", .value = object_type},
+		{.key = "object_name", .value = object_name}
+	};
+	return get_one(registry, tags, 8);
+}
+
+int
+cp_config_counter_storage_registry_insert_module_object_link(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name,
+	const char *object_type,
+	const char *object_name,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+) {
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = module_type},
+		{.key = "module_name", .value = module_name},
+		{.key = "object_type", .value = object_type},
+		{.key = "object_name", .value = object_name},
+		{.key = "kind", .value = "module_object_link"}
+	};
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 9, counter_storage, err
 	);
 }

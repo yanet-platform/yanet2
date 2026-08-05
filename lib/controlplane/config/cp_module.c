@@ -184,6 +184,18 @@ cp_module_fini(struct cp_module *cp_module) {
 	SET_OFFSET_OF(&cp_module->devices, NULL);
 	cp_module->device_count = 0;
 
+	struct cp_module_object *objects = ADDR_OF(&cp_module->objects);
+	if (objects != NULL) {
+		memory_bfree(
+			&cp_module->memory_context,
+			objects,
+			sizeof(struct cp_module_object) *
+				cp_module->object_count
+		);
+	}
+	SET_OFFSET_OF(&cp_module->objects, NULL);
+	cp_module->object_count = 0;
+
 	SET_OFFSET_OF(&cp_module->agent, NULL);
 
 	memory_context_fini(&cp_module->memory_context);
@@ -225,6 +237,56 @@ cp_module_link_device(
 	SET_OFFSET_OF(&cp_module->devices, devices);
 	*index = cp_module->device_count;
 	++cp_module->device_count;
+
+	return 0;
+}
+
+int
+cp_module_link_object(
+	struct cp_module *cp_module,
+	const char *object_type,
+	const char *object_name,
+	uint64_t *index,
+	yanet_error **err
+) {
+	struct cp_module_object *objects = ADDR_OF(&cp_module->objects);
+	for (uint64_t idx = 0; idx < cp_module->object_count; ++idx) {
+		if (!strncmp(
+			    objects[idx].type, object_type, CP_OBJECT_TYPE_LEN
+		    ) &&
+		    !strncmp(
+			    objects[idx].name, object_name, CP_OBJECT_NAME_LEN
+		    )) {
+			*index = idx;
+			return 0;
+		}
+	}
+
+	objects = (struct cp_module_object *)memory_brealloc(
+		&cp_module->memory_context,
+		objects,
+		sizeof(struct cp_module_object) * cp_module->object_count,
+		sizeof(struct cp_module_object) * (cp_module->object_count + 1)
+	);
+	if (objects == NULL) {
+		yanet_error_add(
+			err,
+			"failed to reallocate objects array for module '%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
+		return -1;
+	}
+
+	strtcpy(objects[cp_module->object_count].type,
+		object_type,
+		CP_OBJECT_TYPE_LEN);
+	strtcpy(objects[cp_module->object_count].name,
+		object_name,
+		CP_OBJECT_NAME_LEN);
+	SET_OFFSET_OF(&cp_module->objects, objects);
+	*index = cp_module->object_count;
+	++cp_module->object_count;
 
 	return 0;
 }

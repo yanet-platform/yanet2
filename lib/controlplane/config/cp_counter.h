@@ -9,7 +9,7 @@ struct memory_context;
 
 #define KEY_MAX_SIZE 80
 #define VALUE_MAX_SIZE 80
-#define MAX_TAG_COUNT 8
+#define MAX_TAG_COUNT 16
 
 struct cp_counter_tag {
 	char key[KEY_MAX_SIZE];
@@ -160,6 +160,34 @@ cp_config_counter_storage_registry_lookup_object(
 int
 cp_config_counter_storage_registry_insert_object(
 	struct cp_config_counter_storage_registry *registry,
+	const char *object_type,
+	const char *object_name,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+);
+
+struct counter_storage *
+cp_config_counter_storage_registry_lookup_module_object_link(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name,
+	const char *object_type,
+	const char *object_name
+);
+
+int
+cp_config_counter_storage_registry_insert_module_object_link(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name,
 	const char *object_type,
 	const char *object_name,
 	struct counter_storage *counter_storage,
