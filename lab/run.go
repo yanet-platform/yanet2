@@ -1,7 +1,9 @@
 package lab
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -214,7 +216,7 @@ func runProbe(runtime ManifestRuntime, baseDir string, probe Probe) Result {
 			result.Error = fmt.Sprintf("expect PCAP must contain exactly one packet, got %d", len(expected))
 		case len(actual) != 1:
 			result.Error = fmt.Sprintf("expected exactly one packet, got %d", len(actual))
-		case string(expected[0]) != string(actual[0]):
+		case !equalPacket(expected[0], actual[0]):
 			result.Error = fmt.Sprintf("packet mismatch\nexpected: %s\nactual:   %s", hex.EncodeToString(expected[0]), hex.EncodeToString(actual[0]))
 		default:
 			result.Success = true
@@ -222,6 +224,53 @@ func runProbe(runtime ManifestRuntime, baseDir string, probe Probe) Result {
 	}
 	result.Duration = time.Since(started)
 	return result
+}
+
+func equalPacket(expected, actual []byte) bool {
+	return bytes.Equal(withoutEthernetPadding(expected), withoutEthernetPadding(actual))
+}
+
+func withoutEthernetPadding(packet []byte) []byte {
+	if len(packet) < 14 {
+		return packet
+	}
+	typeOffset := 12
+	for {
+		if len(packet) < typeOffset+2 {
+			return packet
+		}
+		etherType := binary.BigEndian.Uint16(packet[typeOffset:])
+		if etherType != 0x8100 && etherType != 0x88a8 {
+			networkOffset := typeOffset + 2
+			switch etherType {
+			case 0x0800:
+				if len(packet) < networkOffset+4 {
+					return packet
+				}
+				if packet[networkOffset]>>4 != 4 {
+					return packet
+				}
+				headerLength := int(packet[networkOffset]&0x0f) * 4
+				length := int(binary.BigEndian.Uint16(packet[networkOffset+2:]))
+				if headerLength >= 20 && length >= headerLength && networkOffset+length <= len(packet) {
+					return packet[:networkOffset+length]
+				}
+			case 0x86dd:
+				if len(packet) < networkOffset+6 {
+					return packet
+				}
+				if packet[networkOffset]>>4 != 6 {
+					return packet
+				}
+				length := 40 + int(binary.BigEndian.Uint16(packet[networkOffset+4:]))
+				if networkOffset+length <= len(packet) {
+					return packet[:networkOffset+length]
+				}
+			}
+			return packet
+		}
+		typeOffset += 4
+	}
 }
 
 func readPCAP(path string) ([][]byte, error) {

@@ -60,6 +60,7 @@ type QEMUManager struct {
 	readyMutex       sync.RWMutex
 	instanceID       string
 	sshPort          int
+	enableSSHForward bool
 	serialReaderDone chan struct{}
 	// processExit is closed when the QEMU process for the current Start()
 	// call has exited. WaitForReady selects on it to fail immediately instead
@@ -432,7 +433,7 @@ func (q *QEMUManager) Start() (bool, error) {
 	// The monitor gives no reply until a client has also connected to the
 	// serial socket, so the forward is added only now that both consoles
 	// are wired up.
-	if ShouldKeepVMAlive() {
+	if q.enableSSHForward || ShouldKeepVMAlive() {
 		q.addSSHHostForward()
 	}
 
@@ -605,6 +606,39 @@ func (q *QEMUManager) GetStdin() io.WriteCloser {
 		}
 	}
 	return q.serialConn
+}
+
+// SSHPort returns the loopback port forwarded to the guest SSH server.
+func (q *QEMUManager) SSHPort() int {
+	return q.sshPort
+}
+
+// EnableSSHForward configures a loopback SSH forward for this VM.
+func (q *QEMUManager) EnableSSHForward() {
+	q.enableSSHForward = true
+}
+
+// AttachSerial gives a caller exclusive access to the serial console.
+//
+// The returned release function restores the framework's serial reader.
+func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
+	q.stopSerialReader()
+	if err := q.connectToSerial(); err != nil {
+		return nil, nil, fmt.Errorf("connect serial for attachment: %w", err)
+	}
+	connection := q.serialConn
+	release := func() error {
+		if q.serialConn != nil {
+			_ = q.serialConn.Close()
+			q.serialConn = nil
+		}
+		if err := q.connectToSerial(); err != nil {
+			return fmt.Errorf("restore serial reader: %w", err)
+		}
+		go q.readSerial()
+		return nil
+	}
+	return connection, release, nil
 }
 
 // resetSerialBuffer clears the accumulated serial console output buffer.

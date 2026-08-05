@@ -117,21 +117,49 @@ func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 	}
 }
 
+func TestRunManifestIgnoresEthernetPadding(t *testing.T) {
+	directory := t.TempDir()
+	expected := []byte{
+		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0x08, 0,
+		0x45, 0, 0, 20, 0, 0, 0, 0, 64, 17, 0, 0, 192, 0, 2, 1, 198, 51, 100, 1,
+	}
+	writePacket(t, filepath.Join(directory, "input.pcap"), expected)
+	writePacket(t, filepath.Join(directory, "expected.pcap"), expected)
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: padding\nprobes:\n  - name: packet\n    ingress: 0\n    egress: 1\n    send: {pcap: input.pcap}\n    expect: {pcap: expected.pcap}\n"
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	runtime := &manifestRuntime{Actual: [][]byte{append(expected, 0, 0, 0, 0)}}
+	report := lab.RunManifest(runtime, manifestPath)
+
+	require.True(t, report.Success)
+	require.True(t, report.Results[0].Success)
+}
+
+func TestRunManifestComparesMalformedIPFramesExactly(t *testing.T) {
+	directory := t.TempDir()
+	expected := []byte{
+		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0x08, 0,
+		0x55, 0, 0, 20, 0, 0, 0, 0, 64, 17, 0, 0, 192, 0, 2, 1, 198, 51, 100, 1,
+	}
+	writePacket(t, filepath.Join(directory, "input.pcap"), expected)
+	writePacket(t, filepath.Join(directory, "expected.pcap"), expected)
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: malformed\nprobes:\n  - name: packet\n    ingress: 0\n    egress: 1\n    send: {pcap: input.pcap}\n    expect: {pcap: expected.pcap}\n"
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	runtime := &manifestRuntime{Actual: [][]byte{append(expected, 0, 0, 0, 0)}}
+	report := lab.RunManifest(runtime, manifestPath)
+
+	require.False(t, report.Success)
+	require.Contains(t, report.Results[0].Error, "packet mismatch")
+}
+
 func writeDropManifest(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()
 	packetPath := filepath.Join(directory, "input.pcap")
-	file, err := os.Create(packetPath)
-	require.NoError(t, err)
-	writer := pcapgo.NewWriter(file)
-	require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
-	packet := []byte{0, 1, 2, 3}
-	require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{
-		Timestamp:     time.Now(),
-		CaptureLength: len(packet),
-		Length:        len(packet),
-	}, packet))
-	require.NoError(t, file.Close())
+	writePacket(t, packetPath, []byte{0, 1, 2, 3})
 
 	manifest := strings.Join([]string{
 		"version: 1",
@@ -147,4 +175,18 @@ func writeDropManifest(t *testing.T) string {
 	manifestPath := filepath.Join(directory, "manifest.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
 	return manifestPath
+}
+
+func writePacket(t *testing.T, path string, packet []byte) {
+	t.Helper()
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	writer := pcapgo.NewWriter(file)
+	require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{
+		Timestamp:     time.Now(),
+		CaptureLength: len(packet),
+		Length:        len(packet),
+	}, packet))
+	require.NoError(t, file.Close())
 }

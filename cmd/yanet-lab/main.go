@@ -1,11 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -21,6 +22,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yanet-platform/yanet2/lab"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/term"
 )
 
 const defaultSession = "default"
@@ -29,18 +32,85 @@ type request struct {
 	Action   string   `json:"action"`
 	Argv     []string `json:"argv,omitempty"`
 	Manifest string   `json:"manifest,omitempty"`
+	Rows     int      `json:"rows,omitempty"`
+	Columns  int      `json:"columns,omitempty"`
 }
 
 type response struct {
-	OK     bool           `json:"ok"`
-	Output string         `json:"output,omitempty"`
-	Error  string         `json:"error,omitempty"`
-	Report *lab.RunReport `json:"report,omitempty"`
+	OK      bool           `json:"ok"`
+	Output  string         `json:"output,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Report  *lab.RunReport `json:"report,omitempty"`
+	SSHPort int            `json:"ssh_port,omitempty"`
 }
 
 type application struct {
 	session string
 	json    bool
+}
+
+type supervisor struct {
+	operationMutex sync.Mutex
+	serialMutex    sync.Mutex
+	serial         net.Conn
+	stopping       bool
+}
+
+type sessionRuntime struct {
+	Ready     chan struct{}
+	State     *supervisor
+	Framework *framework.TestFramework
+	Restore   func() error
+	Shutdown  func() error
+}
+
+func (m *supervisor) TryOperation() bool {
+	m.serialMutex.Lock()
+	defer m.serialMutex.Unlock()
+	return !m.stopping && m.operationMutex.TryLock()
+}
+
+func (m *supervisor) ReleaseOperation() {
+	m.operationMutex.Unlock()
+}
+
+func (m *supervisor) TrySerial(connection net.Conn) bool {
+	m.serialMutex.Lock()
+	defer m.serialMutex.Unlock()
+	if m.stopping || !m.operationMutex.TryLock() {
+		return false
+	}
+	m.serial = connection
+	return true
+}
+
+func (m *supervisor) ReleaseSerial(connection net.Conn) {
+	m.serialMutex.Lock()
+	if m.serial == connection {
+		m.serial = nil
+	}
+	m.serialMutex.Unlock()
+	m.operationMutex.Unlock()
+}
+
+func (m *supervisor) CloseSerial() {
+	m.serialMutex.Lock()
+	defer m.serialMutex.Unlock()
+	if m.serial != nil {
+		_ = m.serial.Close()
+	}
+}
+
+func (m *supervisor) Shutdown(fn func() error) error {
+	m.serialMutex.Lock()
+	m.stopping = true
+	if m.serial != nil {
+		_ = m.serial.Close()
+	}
+	m.serialMutex.Unlock()
+	m.operationMutex.Lock()
+	defer m.operationMutex.Unlock()
+	return fn()
 }
 
 func main() {
@@ -80,7 +150,7 @@ func (m *application) command() *cobra.Command {
 		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return m.simple("reset", nil) }},
 		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return m.simple("report", nil) }},
 		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return m.simple("down", nil) }},
-		m.execCommand(), m.shellCommand(), m.manifestCommand(), m.scenarioCommand(), m.serveCommand(),
+		m.execCommand(), m.shellCommand(), m.serialCommand(), m.manifestCommand(), m.scenarioCommand(), m.serveCommand(),
 	)
 	return root
 }
@@ -93,23 +163,92 @@ func (m *application) execCommand() *cobra.Command {
 
 func (m *application) shellCommand() *cobra.Command {
 	return &cobra.Command{Use: "shell", Short: "Open an interactive guest command shell", RunE: func(*cobra.Command, []string) error {
-		scanner := bufio.NewScanner(os.Stdin)
-		for {
-			fmt.Print("yanet-lab> ")
-			if !scanner.Scan() {
-				return scanner.Err()
-			}
-			line := strings.TrimSpace(scanner.Text())
-			if line == "exit" || line == "quit" {
-				return nil
-			}
-			if line != "" {
-				if err := m.simple("shell", []string{line}); err != nil {
-					fmt.Fprintln(os.Stderr, err)
+		response, err := m.call(request{Action: "shell"})
+		if err != nil {
+			return err
+		}
+		if !response.OK {
+			return errors.New(response.Error)
+		}
+		dir, _, err := sessionPaths(m.session)
+		if err != nil {
+			return err
+		}
+		command := exec.Command("ssh", "-tt", "-i", filepath.Join(dir, "id_ed25519"), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "PasswordAuthentication=no", "-p", fmt.Sprint(response.SSHPort), "root@127.0.0.1", "bash", "--rcfile", "/tmp/yanet/lab.bashrc", "-i")
+		command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return command.Run()
+	}}
+}
+
+func (m *application) serialCommand() *cobra.Command {
+	return &cobra.Command{Use: "serial", Short: "Attach to the guest ttyS0 console", RunE: func(*cobra.Command, []string) error {
+		rows, columns := 24, 80
+		if width, height, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+			rows, columns = serialDimensions(width, height)
+		}
+		connection, err := m.sessionConnection()
+		if err != nil {
+			return err
+		}
+		defer connection.Close()
+		if err := json.NewEncoder(connection).Encode(request{Action: "serial", Rows: rows, Columns: columns}); err != nil {
+			return err
+		}
+		var response response
+		if err := json.NewDecoder(connection).Decode(&response); err != nil {
+			return err
+		}
+		if !response.OK {
+			return errors.New(response.Error)
+		}
+		if _, err := connection.Write([]byte{1}); err != nil {
+			return err
+		}
+		state, err := term.MakeRaw(int(os.Stdin.Fd()))
+		if err != nil {
+			return fmt.Errorf("set terminal raw mode: %w", err)
+		}
+		defer term.Restore(int(os.Stdin.Fd()), state)
+		fmt.Fprintln(os.Stderr, "Detach with Ctrl-].")
+		done := make(chan struct{})
+		go func() {
+			_, _ = io.Copy(os.Stdout, connection)
+			close(done)
+		}()
+		if err := copySerialInput(connection, os.Stdin); err != nil {
+			return err
+		}
+		_ = connection.Close()
+		<-done
+		return nil
+	}}
+}
+
+func serialDimensions(width, height int) (int, int) {
+	return height, width
+}
+
+func copySerialInput(destination io.Writer, source io.Reader) error {
+	buffer := make([]byte, 1024)
+	for {
+		count, err := source.Read(buffer)
+		if count > 0 {
+			for _, value := range buffer[:count] {
+				if value == 0x1d {
+					return nil
+				}
+				if _, writeErr := destination.Write([]byte{value}); writeErr != nil {
+					return writeErr
 				}
 			}
 		}
-	}}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 func (m *application) manifestCommand() *cobra.Command {
@@ -186,7 +325,7 @@ func (m *application) doctor() error {
 		Detail string `json:"detail"`
 	}
 	checks := []check{}
-	for _, name := range []string{"go", "just", "qemu-system-x86_64", "qemu-img"} {
+	for _, name := range []string{"go", "just", "qemu-system-x86_64", "qemu-img", "ssh", "ssh-keygen"} {
 		path, lookErr := exec.LookPath(name)
 		checks = append(checks, check{Name: name, OK: lookErr == nil, Detail: path})
 	}
@@ -224,21 +363,21 @@ func (m *application) doctor() error {
 }
 
 func (m *application) up() error {
-	if response, err := m.call(request{Action: "status"}); err == nil && response.OK {
+	if response, err := m.call(request{Action: "status"}); err == nil {
 		return m.printResponse(response)
 	}
 	dir, _, err := sessionPaths(m.session)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := ensureSessionDirectory(dir); err != nil {
 		return err
 	}
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	logFile, err := os.OpenFile(filepath.Join(dir, "supervisor.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logFile, err := openPrivateFile(filepath.Join(dir, "supervisor.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return err
 	}
@@ -252,10 +391,14 @@ func (m *application) up() error {
 	_ = logFile.Close()
 	exited := make(chan error, 1)
 	go func() { exited <- command.Wait() }()
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(startupTimeout())
+	lastStatusError := ""
 	for time.Now().Before(deadline) {
-		if response, callErr := m.call(request{Action: "status"}); callErr == nil && response.OK {
-			return m.printResponse(response)
+		if response, callErr := m.call(request{Action: "status"}); callErr == nil {
+			if response.OK {
+				return m.printResponse(response)
+			}
+			lastStatusError = response.Error
 		}
 		select {
 		case processErr := <-exited:
@@ -270,7 +413,18 @@ func (m *application) up() error {
 		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 		<-exited
 	}
-	return fmt.Errorf("lab did not start; see %s", filepath.Join(dir, "supervisor.log"))
+	return startupFailure(lastStatusError, filepath.Join(dir, "supervisor.log"))
+}
+
+func startupTimeout() time.Duration {
+	return 2*framework.VMReadyTimeout() + 5*time.Minute
+}
+
+func startupFailure(lastStatusError, logPath string) error {
+	if lastStatusError == "" {
+		return fmt.Errorf("lab did not start; see %s", logPath)
+	}
+	return fmt.Errorf("lab did not start: %s; see %s", lastStatusError, logPath)
 }
 
 func (m *application) ensureUp() error {
@@ -297,13 +451,9 @@ func (m *application) simpleManifest(path string) error {
 }
 
 func (m *application) call(value request) (*response, error) {
-	_, socket, err := sessionPaths(m.session)
+	connection, err := m.sessionConnection()
 	if err != nil {
 		return nil, err
-	}
-	connection, err := net.DialTimeout("unix", socket, time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("lab session %q is not running; use 'yanet-lab up'", m.session)
 	}
 	defer connection.Close()
 	if err := json.NewEncoder(connection).Encode(value); err != nil {
@@ -314,6 +464,30 @@ func (m *application) call(value request) (*response, error) {
 		return nil, err
 	}
 	return &reply, nil
+}
+
+func (m *application) sessionConnection() (net.Conn, error) {
+	dir, socket, err := sessionPaths(m.session)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSessionDirectory(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("lab session %q is not running; use 'yanet-lab up'", m.session)
+		}
+		return nil, err
+	}
+	if err := validateSessionSocket(socket); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("lab session %q is not running; use 'yanet-lab up'", m.session)
+		}
+		return nil, err
+	}
+	connection, err := net.DialTimeout("unix", socket, time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("lab session %q is not running; use 'yanet-lab up'", m.session)
+	}
+	return connection, nil
 }
 
 func (m *application) printResponse(value *response) error {
@@ -355,7 +529,7 @@ func (m *application) serve() (err error) {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := ensureSessionDirectory(dir); err != nil {
 		return err
 	}
 	lock, err := acquireSessionLock(dir)
@@ -364,7 +538,44 @@ func (m *application) serve() (err error) {
 	}
 	defer lock.Close()
 	_ = os.Remove(socket)
-	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{PoolName: "lab-" + m.session})
+	keyPath, err := ensureSSHKey(dir)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	defer os.Remove(socket)
+	if err := os.Chmod(socket, 0o600); err != nil {
+		return err
+	}
+	runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}}
+	acceptErrors := make(chan error, 1)
+	var handlers errgroup.Group
+	go func() {
+		for {
+			connection, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				acceptErrors <- acceptErr
+				return
+			}
+			handlers.Go(func() error {
+				handleRuntimeConnection(connection, dir, runtime, func() { _ = listener.Close() })
+				return nil
+			})
+		}
+	}()
+	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{
+		PoolName:         "lab-" + m.session,
+		BaselineTag:      "lab-operators",
+		EnableSSHForward: true,
+		Prepare:          lab.PrepareOperators,
+		AfterStart:       lab.StartOperators,
+		ProfileReady:     lab.CheckOperators,
+		FingerprintFiles: lab.OperatorFingerprintFiles(),
+	})
 	if err != nil {
 		return err
 	}
@@ -385,47 +596,84 @@ func (m *application) serve() (err error) {
 	if err := harness.Restore(fw); err != nil {
 		return err
 	}
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
+	if err := setupGuestShell(fw, keyPath); err != nil {
 		return err
 	}
-	defer listener.Close()
-	defer os.Remove(socket)
-	_ = os.Chmod(socket, 0o600)
 	stopping := make(chan os.Signal, 1)
 	signal.Notify(stopping, syscall.SIGINT, syscall.SIGTERM)
-	go func() { <-stopping; _ = listener.Close() }()
-	for {
-		connection, acceptErr := listener.Accept()
-		if acceptErr != nil {
-			if errors.Is(acceptErr, net.ErrClosed) {
-				return nil
-			}
-			return acceptErr
+	defer signal.Stop(stopping)
+	go func() {
+		<-stopping
+		runtime.State.CloseSerial()
+		_ = listener.Close()
+	}()
+	restore := func() error {
+		if err := harness.Restore(fw); err != nil {
+			return err
 		}
-		stop := handleConnection(connection, fw, dir, func() error { return harness.Restore(fw) }, shutdown)
-		if stop {
-			return nil
+		return setupGuestShell(fw, keyPath)
+	}
+	runtime.Framework = fw
+	runtime.Restore = restore
+	runtime.Shutdown = shutdown
+	close(runtime.Ready)
+	acceptErr := <-acceptErrors
+	runtime.State.CloseSerial()
+	_ = handlers.Wait()
+	if errors.Is(acceptErr, net.ErrClosed) {
+		return nil
+	}
+	return acceptErr
+}
+
+func handleRuntimeConnection(connection net.Conn, dir string, runtime *sessionRuntime, stop func()) {
+	select {
+	case <-runtime.Ready:
+		handleConnection(connection, runtime.Framework, dir, runtime.State, runtime.Restore, runtime.Shutdown, stop)
+	default:
+		defer connection.Close()
+		var value request
+		if err := json.NewDecoder(connection).Decode(&value); err != nil {
+			_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
+			return
 		}
+		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting"})
 	}
 }
 
-func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, restore func() error, shutdown func() error) bool {
+func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, state *supervisor, restore func() error, shutdown func() error, stop func()) {
 	defer connection.Close()
 	var value request
 	if err := json.NewDecoder(connection).Decode(&value); err != nil {
 		_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
-		return false
+		return
 	}
 	reply := response{OK: true}
+	if value.Action == "serial" {
+		if !state.TrySerial(connection) {
+			reply.OK = false
+			reply.Error = "lab is busy"
+			_ = json.NewEncoder(connection).Encode(reply)
+			return
+		}
+		defer state.ReleaseSerial(connection)
+	} else if value.Action != "down" {
+		if !state.TryOperation() {
+			reply.OK = false
+			reply.Error = "lab is busy"
+			_ = json.NewEncoder(connection).Encode(reply)
+			return
+		}
+		defer state.ReleaseOperation()
+	}
 	switch value.Action {
 	case "status":
 		output, err := fw.ExecuteCommand("pgrep -f '[y]anet-dataplane' >/dev/null && pgrep -f '[y]anet-controlplane' >/dev/null")
 		if err == nil {
-			err = fw.WaitForDatapathReady(2 * time.Second)
+			err = lab.CheckOperators(fw)
 		}
 		if err == nil {
-			output = "VM: running; YANET: ready"
+			output = "VM: running; YANET: ready; operators: ready"
 		}
 		reply.Output = output
 		setError(&reply, err)
@@ -434,9 +682,16 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		reply.Output = output
 		setError(&reply, err)
 	case "shell":
-		output, err := fw.ExecuteCommand(strings.Join(value.Argv, " "))
-		reply.Output = output
-		setError(&reply, err)
+		reply.SSHPort = fw.SSHPort()
+		if reply.SSHPort == 0 {
+			setError(&reply, errors.New("guest SSH forwarding is unavailable"))
+		}
+	case "serial":
+		if err := json.NewEncoder(connection).Encode(reply); err != nil {
+			return
+		}
+		streamSerial(connection, fw, value.Rows, value.Columns)
+		return
 	case "reset":
 		err := restore()
 		setError(&reply, err)
@@ -466,19 +721,115 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			setError(&reply, statusErr)
 		}
 	case "down":
-		if err := shutdown(); err != nil {
+		if err := state.Shutdown(shutdown); err != nil {
 			setError(&reply, err)
 		} else {
 			reply.Output = "lab stopped"
 		}
 		_ = json.NewEncoder(connection).Encode(reply)
-		return true
+		stop()
+		return
 	default:
 		reply.OK = false
 		reply.Error = "unknown action: " + value.Action
 	}
 	_ = json.NewEncoder(connection).Encode(reply)
-	return false
+}
+
+func ensureSSHKey(dir string) (string, error) {
+	path := filepath.Join(dir, "id_ed25519")
+	if _, err := os.Lstat(path); err == nil {
+		if err := validatePrivateFile(path, 0o600); err != nil {
+			return "", err
+		}
+		if err := validatePublicFile(path + ".pub"); err != nil {
+			return "", fmt.Errorf("invalid SSH public key: %w", err)
+		}
+		return path, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if _, err := os.Lstat(path + ".pub"); err == nil {
+		return "", fmt.Errorf("SSH private key missing while public key exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	command := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", path)
+	if output, err := command.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("generate lab SSH key: %w: %s", err, output)
+	}
+	if err := validatePrivateFile(path, 0o600); err != nil {
+		return "", err
+	}
+	if err := validatePublicFile(path + ".pub"); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func setupGuestShell(fw *framework.TestFramework, keyPath string) error {
+	publicKey, err := os.ReadFile(keyPath + ".pub")
+	if err != nil {
+		return fmt.Errorf("read lab SSH public key: %w", err)
+	}
+	rcFile := `if [ -f /root/.bashrc ]; then
+  . /root/.bashrc
+fi
+export PATH=/tmp/yanet/cli:$PATH
+for command in /tmp/yanet/cli/yanet-cli*; do
+  [ -x "$command" ] || continue
+  source <(COMPLETE=bash "$command")
+done
+printf '\nYANET lab: CLI=/tmp/yanet/cli config=/tmp/yanet/config logs=/tmp/yanet/logs build=/tmp/yanet/build\n'
+printf 'Host controls: just lab reset | just lab down\n\n'
+`
+	if err := writeGuestShellFile(fw, "/root/.ssh/authorized_keys", publicKey); err != nil {
+		return err
+	}
+	if err := writeGuestShellFile(fw, "/tmp/yanet/lab.bashrc", []byte(rcFile)); err != nil {
+		return err
+	}
+	if _, err := fw.ExecuteCommand("chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys; chmod 600 /tmp/yanet/lab.bashrc; service ssh start"); err != nil {
+		return fmt.Errorf("start guest SSH service: %w", err)
+	}
+	return nil
+}
+
+func writeGuestShellFile(fw *framework.TestFramework, path string, contents []byte) error {
+	encoded := base64.StdEncoding.EncodeToString(contents)
+	command := fmt.Sprintf("mkdir -p /root/.ssh /tmp/yanet; printf '%%s' '%s' | base64 -d > %s", encoded, path)
+	if _, err := fw.ExecuteCommand(command); err != nil {
+		return fmt.Errorf("write guest shell file %s: %w", path, err)
+	}
+	return nil
+}
+
+func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, columns int) {
+	if _, err := io.ReadFull(connection, make([]byte, 1)); err != nil {
+		return
+	}
+	if rows < 1 {
+		rows = 24
+	}
+	if columns < 1 {
+		columns = 80
+	}
+	serial, release, err := fw.AttachSerial()
+	if err != nil {
+		return
+	}
+	defer release()
+	if _, err := fmt.Fprintf(serial, "stty rows %d columns %d; exec bash --rcfile /tmp/yanet/lab.bashrc -i\n", rows, columns); err != nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(connection, serial)
+		close(done)
+	}()
+	_, _ = io.Copy(serial, connection)
+	_ = serial.Close()
+	<-done
 }
 
 func setError(reply *response, err error) {
@@ -533,7 +884,7 @@ func writeFile(path string, data []byte) error {
 }
 
 func acquireSessionLock(dir string) (*os.File, error) {
-	lock, err := os.OpenFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := openPrivateFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return nil, err
 	}
@@ -576,6 +927,119 @@ func sessionPathsForRoot(root, name string) (string, string, error) {
 	digest := sha256.Sum256([]byte(root))
 	base := filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()), fmt.Sprintf("%x", digest[:6]), name)
 	return base, filepath.Join(base, "supervisor.sock"), nil
+}
+
+func ensureSessionDirectory(dir string) error {
+	for _, path := range []string{filepath.Dir(filepath.Dir(dir)), filepath.Dir(dir), dir} {
+		if err := ensurePrivateDirectory(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSessionDirectory(dir string) error {
+	for _, path := range []string{filepath.Dir(filepath.Dir(dir)), filepath.Dir(dir), dir} {
+		if err := validatePrivateDirectory(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensurePrivateDirectory(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return validatePrivateDirectory(path)
+}
+
+func validatePrivateDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("unsafe lab path %s: expected a directory", path)
+	}
+	if err := validateOwner(path, info); err != nil {
+		return err
+	}
+	if info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("unsafe lab path %s: mode is %o, want 700", path, info.Mode().Perm())
+	}
+	return nil
+}
+
+func validateSessionSocket(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("unsafe lab path %s: expected a Unix socket", path)
+	}
+	if err := validateOwner(path, info); err != nil {
+		return err
+	}
+	if info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("unsafe lab path %s: mode is %o, want 600", path, info.Mode().Perm())
+	}
+	return nil
+}
+
+func validatePrivateFile(path string, mode os.FileMode) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("unsafe lab path %s: expected a regular file", path)
+	}
+	if err := validateOwner(path, info); err != nil {
+		return err
+	}
+	if info.Mode().Perm() != mode {
+		return fmt.Errorf("unsafe lab path %s: mode is %o, want %o", path, info.Mode().Perm(), mode)
+	}
+	return nil
+}
+
+func validatePublicFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("unsafe lab path %s: expected a regular file", path)
+	}
+	if err := validateOwner(path, info); err != nil {
+		return err
+	}
+	if info.Mode().Perm() != 0o644 {
+		return fmt.Errorf("unsafe lab path %s: mode is %o, want 644", path, info.Mode().Perm())
+	}
+	return nil
+}
+
+func validateOwner(path string, info os.FileInfo) error {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("unsafe lab path %s: not owned by uid %d", path, os.Getuid())
+	}
+	return nil
+}
+
+func openPrivateFile(path string, flags int) (*os.File, error) {
+	file, err := os.OpenFile(path, flags|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := validatePrivateFile(path, 0o600); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
 }
 
 var sessionNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)

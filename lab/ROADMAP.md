@@ -10,7 +10,6 @@ test harness internals.
 
 - Exercise `doctor`, lifecycle, and the built-in scenarios on Linux/KVM and
   macOS/TCG in regular development.
-- Add transformation PCAP probes to the `decap` and `nat64` walkthroughs.
 - Improve report diagnostics with bounded dataplane/control-plane log tails.
 - Stabilize the JSON output and document its compatibility policy.
 
@@ -37,6 +36,7 @@ test harness internals.
   report commands.
 - Guided `forward-route`, `decap`, and `nat64` scenarios.
 - Deterministic PCAP fixture generation and exact packet expectations.
+- Exact transformation probes for the `decap` and `nat64` walkthroughs.
 - Repository documentation, Just entry point, and agent skill.
 
 ## Decision log
