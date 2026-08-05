@@ -13,7 +13,7 @@ use tabled::{
 };
 use ync::output;
 
-use super::{format_mac, range_endpoints};
+use super::range_endpoints;
 use crate::routepb::{FibEntry, FibNexthop};
 
 /// One table row: either a full entry (or its first nexthop), or a
@@ -67,8 +67,8 @@ fn nexthop_rows(from: String, to: String, nexthops: &[FibNexthop]) -> Vec<FibRow
             from: if index == 0 { from.clone() } else { String::new() },
             to: if index == 0 { to.clone() } else { String::new() },
             device: sanitize_wire_text(&nexthop.device),
-            dst_mac: format_mac(nexthop.dst_mac),
-            src_mac: format_mac(nexthop.src_mac),
+            dst_mac: nexthop.dst_mac.unwrap_or_default().to_string(),
+            src_mac: nexthop.src_mac.unwrap_or_default().to_string(),
         })
         .collect()
 }

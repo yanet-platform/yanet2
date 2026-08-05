@@ -8,14 +8,12 @@
 //! The server validates every range before ShowFIB's response can carry
 //! it, and the data itself comes from an LPM dump that cannot produce a
 //! malformed or inverted pair, so [`render`] does not reclassify or decode
-//! a range either. This module only holds the two formatting helpers
-//! [`render`] uses: [`format_mac`] for a nexthop's MAC address, and
-//! [`range_endpoints`] for a range's two endpoints.
+//! a range either. This module only holds the formatting helper
+//! [`render`] uses: [`range_endpoints`] for a range's two endpoints.
 
 pub mod render;
 
-use commonpb::pb::{IpAddress, IpRange, MacAddress};
-use netip::MacAddr;
+use commonpb::pb::{IpAddress, IpRange};
 
 /// The literal rendered for a range endpoint that is absent.
 ///
@@ -40,18 +38,6 @@ pub(crate) fn range_endpoints(range: Option<&IpRange>) -> (String, String) {
 fn format_endpoint(addr: Option<&IpAddress>) -> String {
     addr.map(IpAddress::to_string)
         .unwrap_or_else(|| INVALID_ENDPOINT.to_owned())
-}
-
-/// Renders a nexthop's MAC address, or a fallback for a missing/invalid one.
-pub(crate) fn format_mac(mac: Option<MacAddress>) -> String {
-    let mac = match mac {
-        Some(mac) => match MacAddr::try_from(&mac) {
-            Ok(mac) => return mac.to_string(),
-            Err(..) => "invalid",
-        },
-        None => "00:00:00:00:00:00",
-    };
-    mac.to_string()
 }
 
 #[cfg(test)]

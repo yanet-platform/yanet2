@@ -54,20 +54,25 @@ impl TryFrom<&pb::MacAddress> for MacAddr {
     }
 }
 
+impl Display for pb::MacAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match MacAddr::try_from(self) {
+            Ok(mac) => mac.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
 impl serde::Serialize for pb::MacAddress {
-    /// Serializes as `aa:bb:cc:dd:ee:ff`, via `MacAddr`'s own `Display`.
+    /// Serializes as the string `Display` renders.
     ///
-    /// A message with the upper 16 bits set is not a valid MAC address --
-    /// `TryFrom<&pb::MacAddress> for MacAddr` rejects it -- and renders as
-    /// the literal `"invalid"` instead.
+    /// A message with the upper 16 bits set renders as the literal
+    /// `"invalid"`, since that is what `Display` already falls back to.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match MacAddr::try_from(self) {
-            Ok(mac) => serializer.collect_str(&mac),
-            Err(..) => serializer.serialize_str("invalid"),
-        }
+        serializer.collect_str(self)
     }
 }
 
@@ -411,6 +416,23 @@ mod test {
         let json = serde_json::to_string(&malformed).unwrap();
         assert_eq!(r#""invalid""#, json);
         assert!(serde_json::from_str::<pb::IpAddress>(&json).is_err());
+    }
+
+    #[test]
+    fn mac_display() {
+        let mac = pb::MacAddress::from("aa:bb:cc:dd:ee:ff".parse::<MacAddr>().unwrap());
+        assert_eq!("aa:bb:cc:dd:ee:ff", mac.to_string());
+    }
+
+    #[test]
+    fn mac_display_invalid_upper_bits() {
+        let mac = pb::MacAddress { addr: 0x1_0000_0000_0000 };
+        assert_eq!("invalid", mac.to_string());
+    }
+
+    #[test]
+    fn mac_display_default() {
+        assert_eq!("00:00:00:00:00:00", pb::MacAddress::default().to_string());
     }
 
     #[test]
