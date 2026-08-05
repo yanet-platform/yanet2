@@ -54,6 +54,15 @@ impl TryFrom<&pb::MacAddress> for MacAddr {
     }
 }
 
+impl FromStr for pb::MacAddress {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mac = MacAddr::from_str(s)?;
+        Ok(Self::from(mac))
+    }
+}
+
 impl Display for pb::MacAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         match MacAddr::try_from(self) {
@@ -77,7 +86,7 @@ impl serde::Serialize for pb::MacAddress {
 }
 
 impl<'de> serde::Deserialize<'de> for pb::MacAddress {
-    /// Parses `aa:bb:cc:dd:ee:ff` via `MacAddr`'s own `FromStr`.
+    /// Parses the string `Serialize` produces, via `FromStr`.
     ///
     /// The literal `"invalid"` a set upper 16 bits serializes to is not
     /// itself a parseable MAC address, so it fails here with a
@@ -89,8 +98,7 @@ impl<'de> serde::Deserialize<'de> for pb::MacAddress {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let mac = s.parse::<MacAddr>().map_err(serde::de::Error::custom)?;
-        Ok(Self::from(mac))
+        s.parse::<Self>().map_err(serde::de::Error::custom)
     }
 }
 
@@ -367,6 +375,18 @@ mod test {
     fn mac_try_from_rejects_upper_bits() {
         let proto = pb::MacAddress { addr: 0x1_0000_0000_0000 };
         assert!(MacAddr::try_from(&proto).is_err());
+    }
+
+    #[test]
+    fn mac_from_str_parses_valid() {
+        let mac: pb::MacAddress = "aa:bb:cc:dd:ee:ff".parse().unwrap();
+        assert_eq!(0xaabbccddeeff, mac.addr);
+    }
+
+    #[test]
+    fn mac_from_str_rejects_invalid() {
+        assert!("".parse::<pb::MacAddress>().is_err());
+        assert!("not-a-mac".parse::<pb::MacAddress>().is_err());
     }
 
     #[test]

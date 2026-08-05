@@ -4,12 +4,11 @@
 //! (the operator process directly, or the gateway once registration
 //! has propagated) and drives the operator-owned neighbour tables.
 
-use core::{
-    fmt::{self, Display, Formatter},
-    net::IpAddr,
-    time::Duration,
+use core::{net::IpAddr, time::Duration};
+use std::{
+    borrow::Cow,
+    time::{SystemTime, UNIX_EPOCH},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::{
@@ -17,7 +16,6 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
 };
 use commonpb::pb::{IpAddress, MacAddress};
-use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -30,8 +28,9 @@ use ync::{
 
 use crate::operatorpb::{
     CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
-    NeighbourEntry as ProtoNeighbourEntry, NeighbourTableInfo, RemoveNeighbourTableRequest, RemoveNeighboursRequest,
-    UpdateNeighbourTableRequest, UpdateNeighboursRequest, neighbour_service_client::NeighbourServiceClient,
+    NeighbourEntry as ProtoNeighbourEntry, NeighbourState, NeighbourTableInfo, RemoveNeighbourTableRequest,
+    RemoveNeighboursRequest, UpdateNeighbourTableRequest, UpdateNeighboursRequest,
+    neighbour_service_client::NeighbourServiceClient,
 };
 
 #[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
@@ -231,9 +230,15 @@ impl NeighbourService {
                     return;
                 }
 
-                let mut entries: Vec<NeighbourEntry> =
-                    response.neighbours.iter().cloned().map(NeighbourEntry::from).collect();
-                entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
+                let mut entries: Vec<&ProtoNeighbourEntry> = response.neighbours.iter().collect();
+                entries.sort_by_key(|entry| {
+                    let next_hop = entry
+                        .next_hop
+                        .as_ref()
+                        .and_then(|addr| IpAddr::try_from(addr).ok())
+                        .map(|addr| addr.to_canonical());
+                    (entry.state, next_hop)
+                });
                 print_table_from_entries(entries);
             },
         );
@@ -242,8 +247,14 @@ impl NeighbourService {
     }
 
     pub async fn update_neighbour(&mut self, cmd: AddCmd) -> Result<(), Error> {
-        let link_addr = parse_mac(&cmd.link_addr).map_err(|err| self.service.invalid("add", err))?;
-        let hardware_addr = parse_mac(&cmd.hardware_addr).map_err(|err| self.service.invalid("add", err))?;
+        let link_addr = cmd
+            .link_addr
+            .parse::<MacAddress>()
+            .map_err(|err| self.service.invalid("add", err.to_string()))?;
+        let hardware_addr = cmd
+            .hardware_addr
+            .parse::<MacAddress>()
+            .map_err(|err| self.service.invalid("add", err.to_string()))?;
         let next_hop = cmd
             .next_hop
             .parse::<IpAddress>()
@@ -329,7 +340,7 @@ impl NeighbourService {
                     return;
                 }
 
-                let entries: Vec<TableEntry> = response.tables.iter().cloned().map(TableEntry::from).collect();
+                let entries: Vec<&NeighbourTableInfo> = response.tables.iter().collect();
                 print_table_from_entries(entries);
             },
         );
@@ -392,113 +403,84 @@ impl NeighbourService {
     }
 }
 
-fn parse_mac(s: &str) -> Result<MacAddress, String> {
-    s.parse::<MacAddr>().map(MacAddr::into).map_err(|err| err.to_string())
+/// Returns the proto-defined name for a `NeighbourState` discriminant,
+/// stripped of its `NUD_` prefix (e.g. `"REACHABLE"`).
+///
+/// An unrecognized discriminant falls back to `NeighbourState::NudUnknown`.
+fn state_name(value: i32) -> &'static str {
+    let name = NeighbourState::try_from(value)
+        .unwrap_or(NeighbourState::NudUnknown)
+        .as_str_name();
+    name.strip_prefix("NUD_").unwrap_or(name)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct State(pub i32);
+/// Serializes the `state` field of `NeighbourEntry` as its proto-defined
+/// name (e.g. `"REACHABLE"`) instead of the raw `i32` enum discriminant.
+pub fn serialize_neighbour_state<S>(value: &i32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(state_name(*value))
+}
 
-impl Display for State {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let v = match self {
-            Self(0x00) => "NONE",
-            Self(0x01) => "INCOMPLETE",
-            Self(0x02) => "REACHABLE",
-            Self(0x04) => "STALE",
-            Self(0x08) => "DELAY",
-            Self(0x10) => "PROBE",
-            Self(0x20) => "FAILED",
-            Self(0x40) => "NOARP",
-            Self(0x80) => "PERMANENT",
-            Self(..) => "UNKNOWN",
-        };
-        write!(f, "{v}")
+/// Formats the time elapsed since a neighbour entry's `updated_at` Unix
+/// timestamp, clamping a negative timestamp to the epoch to avoid an
+/// overflow panic.
+fn age(updated_at: i64) -> String {
+    let updated_at = UNIX_EPOCH + Duration::from_secs(updated_at.max(0) as u64);
+    let elapsed = SystemTime::now().duration_since(updated_at).unwrap_or_default();
+    format!("{elapsed:.2?}")
+}
+
+impl Tabled for ProtoNeighbourEntry {
+    const LENGTH: usize = 8;
+
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![
+            Cow::Owned(self.next_hop.clone().unwrap_or_default().to_string()),
+            Cow::Owned(self.link_addr.unwrap_or_default().to_string()),
+            Cow::Owned(self.hardware_addr.unwrap_or_default().to_string()),
+            Cow::Borrowed(self.device.as_str()),
+            Cow::Borrowed(state_name(self.state)),
+            Cow::Owned(age(self.updated_at)),
+            Cow::Borrowed(self.source.as_str()),
+            Cow::Owned(self.priority.to_string()),
+        ]
+    }
+
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![
+            Cow::Borrowed("NEXTHOP"),
+            Cow::Borrowed("NEIGHBOUR MAC"),
+            Cow::Borrowed("INTERFACE MAC"),
+            Cow::Borrowed("DEVICE"),
+            Cow::Borrowed("STATE"),
+            Cow::Borrowed("AGE"),
+            Cow::Borrowed("SOURCE"),
+            Cow::Borrowed("PRIORITY"),
+        ]
     }
 }
 
-#[derive(Debug)]
-pub struct Age(pub SystemTime);
+impl Tabled for NeighbourTableInfo {
+    const LENGTH: usize = 4;
 
-impl Display for Age {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let now = SystemTime::now();
-        let duration = match self {
-            Self(timestamp) => now.duration_since(*timestamp).unwrap_or_default(),
-        };
-        write!(f, "{duration:.2?}")
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![
+            Cow::Borrowed(self.name.as_str()),
+            Cow::Owned(self.default_priority.to_string()),
+            Cow::Owned(self.entry_count.to_string()),
+            Cow::Owned(self.built_in.to_string()),
+        ]
     }
-}
 
-#[derive(Debug, Tabled)]
-pub struct NeighbourEntry {
-    #[tabled(rename = "NEXTHOP")]
-    pub next_hop: IpAddr,
-    #[tabled(rename = "NEIGHBOUR MAC")]
-    pub link_addr: MacAddr,
-    #[tabled(rename = "INTERFACE MAC")]
-    pub hardware_addr: MacAddr,
-    #[tabled(rename = "DEVICE")]
-    pub device: String,
-    #[tabled(rename = "STATE")]
-    pub state: State,
-    #[tabled(rename = "AGE")]
-    pub age: Age,
-    #[tabled(rename = "SOURCE")]
-    pub source: String,
-    #[tabled(rename = "PRIORITY")]
-    pub priority: u32,
-}
-
-impl From<ProtoNeighbourEntry> for NeighbourEntry {
-    fn from(entry: ProtoNeighbourEntry) -> Self {
-        let updated_at = UNIX_EPOCH + Duration::from_secs(entry.updated_at as u64);
-        let next_hop = IpAddr::try_from(entry.next_hop.as_ref().expect("neighbour entry missing next_hop"))
-            .expect("neighbour entry has invalid next_hop");
-        let link_addr = entry
-            .link_addr
-            .as_ref()
-            .map(|addr| MacAddr::try_from(addr).expect("neighbour entry has invalid link_addr"))
-            .unwrap_or_else(|| MacAddr::from(0));
-        let hardware_addr = entry
-            .hardware_addr
-            .as_ref()
-            .map(|addr| MacAddr::try_from(addr).expect("neighbour entry has invalid hardware_addr"))
-            .unwrap_or_else(|| MacAddr::from(0));
-
-        Self {
-            next_hop,
-            link_addr,
-            hardware_addr,
-            device: entry.device,
-            state: State(entry.state),
-            age: Age(updated_at),
-            source: entry.source,
-            priority: entry.priority,
-        }
-    }
-}
-
-#[derive(Debug, Tabled)]
-pub struct TableEntry {
-    #[tabled(rename = "NAME")]
-    pub name: String,
-    #[tabled(rename = "DEFAULT PRIORITY")]
-    pub default_priority: u32,
-    #[tabled(rename = "ENTRIES")]
-    pub entry_count: i64,
-    #[tabled(rename = "BUILT-IN")]
-    pub built_in: bool,
-}
-
-impl From<NeighbourTableInfo> for TableEntry {
-    fn from(table: NeighbourTableInfo) -> Self {
-        Self {
-            name: table.name,
-            default_priority: table.default_priority,
-            entry_count: table.entry_count,
-            built_in: table.built_in,
-        }
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![
+            Cow::Borrowed("NAME"),
+            Cow::Borrowed("DEFAULT PRIORITY"),
+            Cow::Borrowed("ENTRIES"),
+            Cow::Borrowed("BUILT-IN"),
+        ]
     }
 }
 
@@ -525,4 +507,31 @@ fn table_candidates() -> Vec<CompletionCandidate> {
                 .collect())
         },
     )
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Pins the JSON shape of a serialized `NeighbourEntry`.
+    ///
+    /// `next_hop`/`link_addr` need no `serialize_with` override, since
+    /// commonpb's own `Serialize` impl already renders them as plain address
+    /// strings. `state` does need one, via `serialize_neighbour_state`.
+    #[test]
+    fn neighbour_entry_serializes_addresses_as_strings_and_state_as_its_name() {
+        let entry = ProtoNeighbourEntry {
+            next_hop: Some(IpAddress::from(IpAddr::V4(core::net::Ipv4Addr::new(192, 0, 2, 1)))),
+            link_addr: Some("aa:bb:cc:dd:ee:ff".parse::<MacAddress>().unwrap()),
+            state: NeighbourState::NudReachable as i32,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+
+        assert_eq!(
+            r#"{"next_hop":"192.0.2.1","link_addr":"aa:bb:cc:dd:ee:ff","hardware_addr":null,"state":"REACHABLE","updated_at":0,"source":"","priority":0,"device":""}"#,
+            json
+        );
+    }
 }
