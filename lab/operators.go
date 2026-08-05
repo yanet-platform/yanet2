@@ -3,6 +3,7 @@ package lab
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
@@ -54,6 +55,26 @@ func OperatorFingerprintFiles() []string {
 	return files
 }
 
+// RequiredArtifacts lists host files needed to prepare the operator baseline.
+func RequiredArtifacts(root string) []string {
+	paths := []string{
+		filepath.Join(root, "build", "dataplane", "yanet-dataplane"),
+		filepath.Join(root, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(root, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
+	}
+	for _, path := range operatorArtifacts {
+		if filepath.IsAbs(path) {
+			paths = append(paths, path)
+		} else {
+			paths = append(paths, filepath.Join(root, path))
+		}
+	}
+	for _, name := range framework.CLIBinaryNames {
+		paths = append(paths, filepath.Join(root, "target", "release", name))
+	}
+	return paths
+}
+
 // PrepareOperators stages the lab-only operator and BIRD artifacts in guest tmpfs.
 func PrepareOperators(fw *framework.TestFramework) error {
 	if _, err := fw.ExecuteCommand("mkdir -p /tmp/yanet/operators /tmp/yanet/config/operators /tmp/yanet/bird /tmp/yanet/logs /tmp/yanet/run"); err != nil {
@@ -90,7 +111,9 @@ func PrepareOperators(fw *framework.TestFramework) error {
 // StartOperators launches the complete operator-owned lab configuration.
 func StartOperators(fw *framework.TestFramework) error {
 	commands := []string{
+		"ip addr replace 203.0.113.14/24 dev kni0",
 		"ip addr replace 2001:db8::14/64 dev kni0",
+		"ip nei replace 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0",
 		"ip nei replace 2001:db8::1 lladdr 52:54:00:6b:ff:a1 dev kni0",
 		"bash -c 'nohup /tmp/yanet/operators/yanet-route-operator -c /tmp/yanet/config/operators/route.yaml > /tmp/yanet/logs/yanet-route-operator.log 2>&1 &'",
 		"bash -c 'nohup /tmp/yanet/operators/yanet-forward-operator -c /tmp/yanet/config/operators/forward.yaml > /tmp/yanet/logs/yanet-forward-operator.log 2>&1 &'",
@@ -133,10 +156,15 @@ func CheckOperators(fw *framework.TestFramework) error {
 	if err != nil {
 		return fmt.Errorf("operator forwarding probe: %w", err)
 	}
-	if len(packets) != 1 || len(packets[0]) < len(forwardingExpected) || !bytes.Equal(packets[0][:len(forwardingExpected)], forwardingExpected) {
+	if len(packets) != 1 || !matchesForwardingProbe(packets[0]) {
 		return fmt.Errorf("operator forwarding probe returned %d unexpected packets", len(packets))
 	}
 	return nil
+}
+
+func matchesForwardingProbe(packet []byte) bool {
+	stripped := WithoutEthernetPadding(packet)
+	return bytes.Equal(stripped, forwardingExpected)
 }
 
 // WaitOperators waits for the complete operator-owned lab profile.

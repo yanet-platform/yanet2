@@ -1,6 +1,7 @@
 package lab_test
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -94,7 +95,11 @@ func TestRunManifestEvaluatesExpectedDrop(t *testing.T) {
 func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 	directory := t.TempDir()
 	fixture := filepath.Join(directory, "fixture")
-	if err := os.WriteFile(fixture, make([]byte, 769), 0o600); err != nil {
+	want := make([]byte, 769)
+	for idx := range want {
+		want[idx] = byte(idx)
+	}
+	if err := os.WriteFile(fixture, want, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(directory, "manifest.yaml")
@@ -107,14 +112,37 @@ func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 	if !report.Success {
 		t.Fatalf("report = %#v", report)
 	}
-	if len(runtime.Commands) != 4 {
-		t.Fatalf("commands = %#v", runtime.Commands)
+	if len(runtime.Commands) < 2 {
+		t.Fatalf("expected at least 2 commands, got %d: %#v", len(runtime.Commands), runtime.Commands)
 	}
 	for _, command := range runtime.Commands {
 		if len(command) > 800 {
 			t.Fatalf("command is too long: %d", len(command))
 		}
 	}
+	var transferred []byte
+	for _, command := range runtime.Commands[1:] {
+		encoded := strings.TrimPrefix(command, "echo '")
+		encoded = strings.TrimSuffix(encoded, "' | base64 -d >> '/tmp/fixture'")
+		chunk, err := base64.StdEncoding.DecodeString(encoded)
+		require.NoError(t, err)
+		transferred = append(transferred, chunk...)
+	}
+	require.Equal(t, want, transferred)
+}
+
+func TestRunManifestRejectsOversizedFiles(t *testing.T) {
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "fixture"), make([]byte, 64*1024+1), 0o600))
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte("version: 1\nname: files\nfiles:\n  - source: fixture\n    destination: /tmp/fixture\n"), 0o600))
+
+	runtime := &manifestRuntime{}
+	report := lab.RunManifest(runtime, manifestPath)
+
+	require.False(t, report.Success)
+	require.Contains(t, report.Results[0].Error, "too large")
+	require.Empty(t, runtime.Commands)
 }
 
 func TestRunManifestIgnoresEthernetPadding(t *testing.T) {
@@ -155,6 +183,19 @@ func TestRunManifestComparesMalformedIPFramesExactly(t *testing.T) {
 	require.Contains(t, report.Results[0].Error, "packet mismatch")
 }
 
+func TestRunManifestRejectsNonEthernetPCAP(t *testing.T) {
+	directory := t.TempDir()
+	writePacketWithLinkType(t, filepath.Join(directory, "input.pcap"), layers.LinkTypeIPv4, []byte{1, 2, 3})
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: link\nprobes:\n  - name: packet\n    ingress: 0\n    egress: 1\n    send: {pcap: input.pcap}\n    expect: {drop: true}\n"
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	report := lab.RunManifest(&manifestRuntime{}, manifestPath)
+
+	require.False(t, report.Success)
+	require.Contains(t, report.Results[0].Error, "want Ethernet")
+}
+
 func writeDropManifest(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()
@@ -178,11 +219,15 @@ func writeDropManifest(t *testing.T) string {
 }
 
 func writePacket(t *testing.T, path string, packet []byte) {
+	writePacketWithLinkType(t, path, layers.LinkTypeEthernet, packet)
+}
+
+func writePacketWithLinkType(t *testing.T, path string, linkType layers.LinkType, packet []byte) {
 	t.Helper()
 	file, err := os.Create(path)
 	require.NoError(t, err)
 	writer := pcapgo.NewWriter(file)
-	require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	require.NoError(t, writer.WriteFileHeader(65535, linkType))
 	require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{
 		Timestamp:     time.Now(),
 		CaptureLength: len(packet),

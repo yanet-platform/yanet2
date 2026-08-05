@@ -16,6 +16,10 @@ just lab report
 just lab down
 ```
 
+`just lab` without a subcommand prints quick-start help and does not start a
+VM. Build host artifacts first with `make all`; the lab also needs the
+functional-test image and operator binaries produced by the Meson build.
+
 The first `up` can take several minutes because the functional harness may need
 to prepare its base image, baseline snapshot, and pinned
 `yanet-bird2 2.15.1.1785924912.af804ec4-1` package. Later starts and `reset`
@@ -25,7 +29,8 @@ supervisor; inspect it with `status`, `report`, or `down`.
 
 ## Commands
 
-- `doctor` checks Go, Just, QEMU, the disk image, and optional Linux KVM.
+- `doctor` checks Go, Just, QEMU, the disk image, required host artifacts, and
+  optional Linux KVM.
 - `up` starts or reuses a named session; `--session NAME` selects another one.
 - `status` verifies the dataplane, control plane, operators, BIRD session, and
   imported lab routes.
@@ -76,7 +81,8 @@ one packet in its input PCAP and either one exact expected packet or
 `files` can copy local fixtures into the guest before steps run. Its
 `destination` is a guest path; `source` is relative to the manifest. Commands
 are transported as `argv`, quoted by the runner, and never evaluated by the
-host shell.
+host shell. Fixture files are limited to 64 KiB and packet captures must use
+the Ethernet link type.
 
 ## Built-in scenarios
 

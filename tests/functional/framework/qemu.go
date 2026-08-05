@@ -45,6 +45,7 @@ type QEMUManager struct {
 	ConfigDir        string
 	BuildDir         string
 	TargetDir        string
+	ProjectDir       string
 	SerialPath       string
 	MonitorPath      string
 	SocketPaths      []string
@@ -61,6 +62,7 @@ type QEMUManager struct {
 	instanceID       string
 	sshPort          int
 	enableSSHForward bool
+	forceStop        bool
 	serialReaderDone chan struct{}
 	// processExit is closed when the QEMU process for the current Start()
 	// call has exited. WaitForReady selects on it to fail immediately instead
@@ -78,6 +80,8 @@ type QEMUManager struct {
 	// When empty, Start() falls back to BootedSnapshotName.
 	TemplateSnapshotName string
 }
+
+const maxSerialBufferSize = 4 << 20
 
 // NewQEMUManager creates and initializes a new QEMU manager instance for virtual
 // machine testing. The manager sets up all necessary directories, generates unique
@@ -124,19 +128,19 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 
 	qemuLog := logger.Named("QEMU")
 	q := &QEMUManager{
-		Name:             name,
-		ImagePath:        imagePath,
-		WorkDir:          workDir,
-		LogsDir:          filepath.Join(workDir, "logs"),
-		ConfigDir:        filepath.Join(workDir, "config"),
-		BuildDir:         buildDir,
-		TargetDir:        targetDir,
-		readySignal:      make(chan bool, 1),
-		log:              qemuLog,
-		instanceID:       instanceID,
-		SerialPath:       filepath.Join(workDir, "serial.sock"),
-		MonitorPath:      filepath.Join(workDir, "monitor.sock"),
-		serialReaderDone: make(chan struct{}),
+		Name:        name,
+		ImagePath:   imagePath,
+		WorkDir:     workDir,
+		LogsDir:     filepath.Join(workDir, "logs"),
+		ConfigDir:   filepath.Join(workDir, "config"),
+		BuildDir:    buildDir,
+		TargetDir:   targetDir,
+		ProjectDir:  projectRoot,
+		readySignal: make(chan bool, 1),
+		log:         qemuLog,
+		instanceID:  instanceID,
+		SerialPath:  filepath.Join(workDir, "serial.sock"),
+		MonitorPath: filepath.Join(workDir, "monitor.sock"),
 	}
 	q.serialLog.Store(qemuLog)
 	return q, nil
@@ -199,7 +203,7 @@ func (q *QEMUManager) Start() (bool, error) {
 	// Reset readiness and serial state for fresh start.
 	q.isReady = false
 	q.readySignal = make(chan bool, 1)
-	q.serialReaderDone = make(chan struct{})
+	q.serialReaderDone = nil
 
 	// Generate socket paths for Unix stream interface
 	q.log.Debug("Generating socket paths...")
@@ -302,13 +306,13 @@ func (q *QEMUManager) Start() (bool, error) {
 		"-fsdev", "local,id=fsdev1,path="+q.ConfigDir+",security_model=none",
 		"-device", "virtio-9p-pci,fsdev=fsdev1,mount_tag=config",
 		// Share build directory
-		"-fsdev", "local,id=fsdev2,path="+q.BuildDir+",security_model=none",
+		"-fsdev", "local,id=fsdev2,path="+q.BuildDir+",security_model=none,readonly=on",
 		"-device", "virtio-9p-pci,fsdev=fsdev2,mount_tag=build",
 		// Share target directory
 		"-fsdev", "local,id=fsdev3,path="+q.TargetDir+",security_model=none,readonly=on",
 		"-device", "virtio-9p-pci,fsdev=fsdev3,mount_tag=target",
 		// Share all code directory
-		"-fsdev", "local,id=fsdev4,path="+q.TargetDir+"/..,security_model=none,readonly=on",
+		"-fsdev", "local,id=fsdev4,path="+q.ProjectDir+",security_model=none,readonly=on",
 		"-device", "virtio-9p-pci,fsdev=fsdev4,mount_tag=yanet2",
 	)
 
@@ -428,7 +432,7 @@ func (q *QEMUManager) Start() (bool, error) {
 		}
 	}
 
-	go q.readSerial()
+	q.startSerialReader()
 
 	// The monitor gives no reply until a client has also connected to the
 	// serial socket, so the forward is added only now that both consoles
@@ -518,6 +522,7 @@ func parseUsernetSSHPort(output string) (int, error) {
 //	}
 func (q *QEMUManager) Stop() error {
 	var errs []error
+	q.stopSerialReader()
 
 	// Close connections first (avoid double closing)
 	if q.monitorConn != nil {
@@ -537,7 +542,7 @@ func (q *QEMUManager) Stop() error {
 	// If the process already exited on its own, skip Kill and drain the
 	// supervisor goroutine so it cannot write to a closed log file after
 	// WorkDir cleanup.
-	if ShouldKeepVMAlive() {
+	if ShouldKeepVMAlive() && !q.forceStop {
 		if q.Command != nil && q.Command.Process != nil {
 			q.log.Infof("Keeping VM alive (PID: %d) for manual debugging", q.Command.Process.Pid)
 		}
@@ -556,11 +561,8 @@ func (q *QEMUManager) Stop() error {
 			}
 		}
 		if !alreadyExited && q.Command != nil && q.Command.Process != nil {
-			if err := q.Command.Process.Kill(); err != nil {
-				// The "process already finished" error is not an error here.
-				if !strings.Contains(err.Error(), "process already finished") {
-					errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
-				}
+			if err := q.Command.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
 			}
 		}
 		// Wait for the supervisor goroutine to finish so it does not race
@@ -635,10 +637,15 @@ func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 		if err := q.connectToSerial(); err != nil {
 			return fmt.Errorf("restore serial reader: %w", err)
 		}
-		go q.readSerial()
+		q.startSerialReader()
 		return nil
 	}
 	return connection, release, nil
+}
+
+// ForceStop makes Stop terminate this VM even when the test keep-alive mode is set.
+func (q *QEMUManager) ForceStop() {
+	q.forceStop = true
 }
 
 // resetSerialBuffer clears the accumulated serial console output buffer.
@@ -646,6 +653,17 @@ func (q *QEMUManager) resetSerialBuffer() {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
 	q.serialBuffer.Reset()
+}
+
+func (q *QEMUManager) discardSerialThrough(marker string) {
+	q.serialMutex.Lock()
+	defer q.serialMutex.Unlock()
+	output := q.serialBuffer.String()
+	index := strings.Index(output, marker)
+	if index >= 0 {
+		q.serialBuffer.Reset()
+		q.serialBuffer.WriteString(output[index+len(marker):])
+	}
 }
 
 // serialBufferSnapshot returns the current contents of the serial console output buffer.
@@ -905,7 +923,7 @@ func promptAwareSplit(data []byte, atEOF bool) (advance int, token []byte, err e
 // time. Both conn and readySignal are captured at goroutine start so that a
 // reconnect (which replaces q.serialConn and q.readySignal) cannot race with
 // a running goroutine from the previous connection.
-func (q *QEMUManager) readSerial() {
+func (q *QEMUManager) readSerial(done chan struct{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			q.log.Errorf("readSerial recovered panic: %v", r)
@@ -915,11 +933,9 @@ func (q *QEMUManager) readSerial() {
 	conn := q.serialConn
 	if conn == nil {
 		q.log.Error("readSerial: serial connection is nil")
-		close(q.serialReaderDone)
 		return
 	}
 	readySig := q.readySignal
-	done := q.serialReaderDone
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -933,6 +949,11 @@ func (q *QEMUManager) readSerial() {
 
 		q.serialMutex.Lock()
 		q.serialBuffer.WriteString(line + "\n")
+		if q.serialBuffer.Len() > maxSerialBufferSize {
+			output := q.serialBuffer.String()
+			q.serialBuffer.Reset()
+			q.serialBuffer.WriteString(output[len(output)-maxSerialBufferSize:])
+		}
 		q.serialMutex.Unlock()
 
 		q.getSerialLog().Debugf("VM output: %s", line)
@@ -966,13 +987,8 @@ func (q *QEMUManager) readSerial() {
 // the serial connection (which unblocks scanner.Scan) and waits for the
 // goroutine to exit. Must be called before starting a new readSerial.
 func (q *QEMUManager) stopSerialReader() {
-	// Check if already stopped.
-	select {
-	case <-q.serialReaderDone:
-		q.log.Debug("Serial reader already stopped")
-		q.serialReaderDone = make(chan struct{})
+	if q.serialReaderDone == nil {
 		return
-	default:
 	}
 
 	// Close the connection to unblock scanner.Scan() in the goroutine.
@@ -984,9 +1000,15 @@ func (q *QEMUManager) stopSerialReader() {
 	// Wait for the goroutine to exit.
 	<-q.serialReaderDone
 	q.log.Debug("Serial reader stopped")
+	q.serialReaderDone = nil
+}
 
-	// Prepare done channel for the next reader.
+func (q *QEMUManager) startSerialReader() {
+	if q.serialConn == nil {
+		return
+	}
 	q.serialReaderDone = make(chan struct{})
+	go q.readSerial(q.serialReaderDone)
 }
 
 // WaitForReady blocks until the virtual machine becomes ready for command
@@ -1193,7 +1215,6 @@ func (q *QEMUManager) RestoreBooted() error {
 
 	// Open new serial connection.
 	if err := q.connectToSerial(); err != nil {
-		close(q.serialReaderDone)
 		return fmt.Errorf("reconnect serial after booted restore: %w", err)
 	}
 
@@ -1203,7 +1224,7 @@ func (q *QEMUManager) RestoreBooted() error {
 	}
 
 	// Launch the new reader goroutine.
-	go q.readSerial()
+	q.startSerialReader()
 
 	// Wait for shell readiness.
 	if err := q.WaitForReady(VMReadyTimeout()); err != nil {

@@ -27,6 +27,18 @@ func TestValidSessionName(t *testing.T) {
 	}
 }
 
+func TestRootCommandShowsHelpWithoutStartingLab(t *testing.T) {
+	application := newApplication()
+	command := application.command()
+	var output bytes.Buffer
+	command.SetOut(&output)
+	command.SetErr(&output)
+	command.SetArgs(nil)
+
+	require.NoError(t, command.Execute())
+	require.Contains(t, output.String(), "Use 'yanet-lab up'")
+}
+
 func TestExecCommandConsumesSeparator(t *testing.T) {
 	command := newApplication().execCommand()
 	var got []string
@@ -77,6 +89,23 @@ func TestHandleRuntimeConnectionReportsStarting(t *testing.T) {
 	require.NoError(t, json.NewDecoder(client).Decode(&reply))
 	require.False(t, reply.OK)
 	require.Equal(t, "lab is starting", reply.Error)
+}
+
+func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
+	runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}}
+	server, client := net.Pipe()
+	defer client.Close()
+	go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.Equal(t, supervisorProtocolVersion, reply.Protocol)
+}
+
+func TestRequestTimeoutIsFastForAllClientActions(t *testing.T) {
+	for _, action := range []string{"status", "down", "manifest", "exec", "shell", "reset", "serial"} {
+		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "action %q", action)
+	}
 }
 
 func TestWriteReportCreatesDistinctFiles(t *testing.T) {
