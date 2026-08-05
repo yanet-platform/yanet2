@@ -237,6 +237,11 @@ route_handle_packets(
 		route_set_packet_destination(packet, route);
 		packet->tx_device_id = device_id;
 		route_count_packet(module_ectx, counters->forwarded, packet);
+		if (route->counter_id != COUNTER_INVALID) {
+			route_count_packet(
+				module_ectx, route->counter_id, packet
+			);
+		}
 		packet_front_pending_output(packet_front, packet);
 	}
 }

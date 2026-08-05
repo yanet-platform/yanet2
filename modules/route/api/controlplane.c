@@ -202,6 +202,7 @@ route_module_config_add_route(
 	struct ether_addr dst_addr,
 	struct ether_addr src_addr,
 	const char *device_name,
+	const char *counter_name,
 	yanet_error **err
 ) {
 	struct route_module_config *config =
@@ -211,6 +212,24 @@ route_module_config_add_route(
 	uint64_t device_index;
 	if (cp_module_link_device(cp_module, device_name, &device_index, err)) {
 		return -1;
+	}
+
+	uint64_t counter_id = COUNTER_INVALID;
+	if (counter_name != NULL && counter_name[0] != '\0') {
+		counter_id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counter_name,
+			2,
+			err
+		);
+		if (counter_id == COUNTER_INVALID) {
+			yanet_error_add(
+				err,
+				"failed to register counter '%s'",
+				counter_name
+			);
+			return -1;
+		}
 	}
 
 	if (mem_array_expand_exp(
@@ -226,6 +245,7 @@ route_module_config_add_route(
 		.dst_addr = dst_addr,
 		.src_addr = src_addr,
 		.device_id = device_index,
+		.counter_id = counter_id,
 	};
 	SET_OFFSET_OF(&config->routes, routes);
 
@@ -492,6 +512,21 @@ fib_iter_nexthop_device_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 	struct cp_module_device *devices = ADDR_OF(&config->cp_module.devices);
 	if (r->device_id < config->cp_module.device_count) {
 		return devices[r->device_id].name;
+	}
+	return "";
+}
+
+const char *
+fib_iter_nexthop_counter_name(const struct fib_iter *it, uint64_t nexthop_idx) {
+	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
+	if (r == NULL || r->counter_id == COUNTER_INVALID) {
+		return "";
+	}
+
+	struct route_module_config *config = it->config;
+	struct counter_registry *registry = &config->cp_module.counter_registry;
+	if (r->counter_id < registry->count) {
+		return ADDR_OF(&registry->names)[r->counter_id].name;
 	}
 	return "";
 }

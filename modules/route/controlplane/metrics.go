@@ -83,6 +83,83 @@ var counterMappings = map[string]counterMapping{
 // request is stable across scrapes.
 var counterNames = slices.Sorted(maps.Keys(counterMappings))
 
+// intersectSorted returns the elements common to two ascending,
+// deduplicated slices.
+func intersectSorted(a, b []string) []string {
+	result := make([]string, 0, min(len(a), len(b)))
+	for idxA, idxB := 0, 0; idxA < len(a) && idxB < len(b); {
+		switch {
+		case a[idxA] < b[idxB]:
+			idxA++
+		case a[idxA] > b[idxB]:
+			idxB++
+		default:
+			result = append(result, a[idxA])
+			idxA++
+			idxB++
+		}
+	}
+
+	return result
+}
+
+var noNexthopStructuralCounters = []string{}
+
+// collectNexthopMetrics gathers packet and byte counters for every
+// per-nexthop counter registered by any applied config.
+//
+// A "counter" tag is pushed down into the dataplane counter read, so
+// counters excluded by tags are never read from shared memory. An empty
+// name list is never passed to ModuleCounters, which treats it as "all
+// counters", and an exact tag is intersected against the config's own
+// registered names so a module-level or foreign-config counter can never
+// surface under this family.
+func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
+	m.shmLock.RLock()
+	defer m.shmLock.RUnlock()
+
+	result := make([]*commonpb.Metric, 0)
+	for configName, entry := range m.configs {
+		names, ok := metrics.Query(tags, entry.NexthopCounterNames, noNexthopStructuralCounters)
+		if !ok {
+			continue
+		}
+
+		names = intersectSorted(names, entry.NexthopCounterNames)
+		if len(names) == 0 {
+			continue
+		}
+
+		for _, counter := range m.backend.ModuleCounters(configName, names) {
+			var packets, bytes uint64
+			for _, instance := range counter.Values {
+				if len(instance) > 0 {
+					packets += instance[0]
+				}
+				if len(instance) > 1 {
+					bytes += instance[1]
+				}
+			}
+
+			labels := []*commonpb.Label{
+				{Name: "config", Value: configName},
+				{Name: "device", Value: counter.Device},
+				{Name: "pipeline", Value: counter.Pipeline},
+				{Name: "function", Value: counter.Function},
+				{Name: "chain", Value: counter.Chain},
+				{Name: "counter", Value: counter.Name},
+			}
+
+			result = append(result,
+				commonpb.NewMetricCounter("route_nexthop_packets", packets, labels...),
+				commonpb.NewMetricCounter("route_nexthop_bytes", bytes, labels...),
+			)
+		}
+	}
+
+	return result
+}
+
 // collectDataplaneMetrics gathers the module-level packet and byte counters
 // of every config, summed across worker instances.
 //

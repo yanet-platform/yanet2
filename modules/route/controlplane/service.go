@@ -2,7 +2,9 @@ package route
 
 import (
 	"context"
+	"encoding/hex"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +23,8 @@ import (
 type RouteServiceOption func(*routeServiceOptions)
 
 type routeServiceOptions struct {
-	Metrics grpcmetrics.Factory
+	Metrics                grpcmetrics.Factory
+	DisableNexthopCounters bool
 }
 
 func newRouteServiceOptions() *routeServiceOptions {
@@ -34,6 +37,16 @@ func newRouteServiceOptions() *routeServiceOptions {
 func WithMetrics(factory grpcmetrics.Factory) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.Metrics = factory
+	}
+}
+
+// WithNexthopCountersDisabled turns off per-nexthop dataplane counters.
+//
+// UpdateFIB then rejects any nexthop that carries an explicit counter name,
+// and never materializes one for a nexthop that left it empty.
+func WithNexthopCountersDisabled() RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.DisableNexthopCounters = true
 	}
 }
 
@@ -53,6 +66,10 @@ type configEntry struct {
 	// NexthopCount is the number of distinct hardware nexthops the config
 	// resolves its prefixes to.
 	NexthopCount uint64
+	// NexthopCounterNames is the deduplicated, sorted set of per-nexthop
+	// counter names this config registered, so the metrics path can query
+	// them without re-walking the FIB.
+	NexthopCounterNames []string
 	// UpdatedAt is when the FIB was applied to the dataplane, and backs
 	// the staleness gauge.
 	UpdatedAt time.Time
@@ -80,6 +97,11 @@ type RouteService struct {
 	configs map[string]configEntry
 
 	metrics *grpcmetrics.ServerMetrics
+
+	// disableNexthopCounters mirrors Config.DisableNexthopCounters: when
+	// set, UpdateFIB rejects an explicit counter and never materializes
+	// one for an empty nexthop.
+	disableNexthopCounters bool
 }
 
 // NewRouteService builds a RouteService bound to the supplied backend.
@@ -90,8 +112,9 @@ func NewRouteService(backend Backend, options ...RouteServiceOption) *RouteServi
 	}
 
 	m := &RouteService{
-		backend: backend,
-		configs: map[string]configEntry{},
+		backend:                backend,
+		configs:                map[string]configEntry{},
+		disableNexthopCounters: opts.DisableNexthopCounters,
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -203,9 +226,10 @@ func (m *RouteService) ShowFIB(
 		nexthops := make([]*routepb.FIBNexthop, len(e.Nexthops))
 		for idx, nh := range e.Nexthops {
 			nexthops[idx] = &routepb.FIBNexthop{
-				DstMac: commonpb.NewMACAddressEUI48([6]byte(nh.DstMAC)),
-				SrcMac: commonpb.NewMACAddressEUI48([6]byte(nh.SrcMAC)),
-				Device: nh.Device,
+				DstMac:  commonpb.NewMACAddressEUI48([6]byte(nh.DstMAC)),
+				SrcMac:  commonpb.NewMACAddressEUI48([6]byte(nh.SrcMAC)),
+				Device:  nh.Device,
+				Counter: nh.Counter,
 			}
 		}
 
@@ -249,6 +273,113 @@ func (m *RouteService) DeleteConfig(
 	return &routepb.DeleteConfigResponse{}, nil
 }
 
+// nexthopCounterPrefix keeps a nexthop counter name from colliding with a
+// route_* name or a generic per-module one ("rx", "tx", "drop", ...).
+const nexthopCounterPrefix = "nexthop_"
+
+func materializeNexthopCounter(device string, dstMAC [6]byte) string {
+	return nexthopCounterPrefix + device + "_" + hex.EncodeToString(dstMAC[:])
+}
+
+// resolveNexthopCounters validates and materializes nexthop counter names
+// across entries, returning the deduplicated, sorted set of names.
+//
+// A generated name is never truncated on overflow: the trailing MAC is what
+// makes two nexthops distinct, so truncating would merge their counters.
+//
+// The conflict check spans the whole request: backend.UpdateModule keys a
+// nexthop's route by hardware identity alone, so only the first entry for
+// an identity sets its counter, and a per-entry check could miss the clash.
+func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]string, error) {
+	names := map[string]struct{}{}
+	identityCounters := map[HardwareRoute]string{}
+
+	for _, entry := range entries {
+		for _, nh := range entry.GetNexthops() {
+			counter := nh.GetCounter()
+
+			if m.disableNexthopCounters {
+				if counter != "" {
+					return nil, status.Errorf(
+						codes.InvalidArgument,
+						"nexthop for device %q (dst_mac=%x) carries a counter name but nexthop counters are disabled (disable_nexthop_counters)",
+						nh.GetDevice(),
+						nh.GetDstMac().GetAddr(),
+					)
+				}
+				continue
+			}
+
+			generated := counter == ""
+			if generated {
+				counter = materializeNexthopCounter(nh.GetDevice(), nh.GetDstMac().EUI48())
+				nh.Counter = counter
+			} else if !strings.HasPrefix(counter, nexthopCounterPrefix) {
+				return nil, status.Errorf(
+					codes.InvalidArgument,
+					"nexthop counter %q must start with %q",
+					counter,
+					nexthopCounterPrefix,
+				)
+			}
+
+			// Rejected rather than silently truncated at the C strnlen
+			// boundary, which would diverge from the name in this dedup set.
+			if strings.IndexByte(counter, 0) >= 0 {
+				return nil, status.Errorf(
+					codes.InvalidArgument,
+					"nexthop counter %q must not contain a NUL byte",
+					counter,
+				)
+			}
+
+			if len(counter) > croute.CounterNameMaxLen {
+				if generated {
+					return nil, status.Errorf(
+						codes.InvalidArgument,
+						"generated nexthop counter %q for device %q exceeds the maximum length of %d",
+						counter,
+						nh.GetDevice(),
+						croute.CounterNameMaxLen,
+					)
+				}
+				return nil, status.Errorf(
+					codes.InvalidArgument,
+					"nexthop counter %q exceeds the maximum length of %d",
+					counter,
+					croute.CounterNameMaxLen,
+				)
+			}
+
+			// Identity-parse failures are left for backend.UpdateModule to
+			// reject — this check only needs the identity, not full validation.
+			if hardwareRoute, err := newHardwareRoute(nh); err == nil {
+				if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
+					return nil, status.Errorf(
+						codes.InvalidArgument,
+						"nexthop %s (device %q) carries conflicting counter names %q and %q",
+						hardwareRoute,
+						hardwareRoute.Device,
+						prior,
+						counter,
+					)
+				}
+				identityCounters[hardwareRoute] = counter
+			}
+
+			names[counter] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+
+	return result, nil
+}
+
 // UpdateFIB applies a freshly-built FIB to the dataplane atomically.
 func (m *RouteService) UpdateFIB(
 	ctx context.Context,
@@ -270,6 +401,14 @@ func (m *RouteService) UpdateFIB(
 		}
 	}
 
+	// Runs before the backend call: a disabled-but-set or over-long name is
+	// rejected before anything is applied, and the generated name written
+	// onto nh.Counter is what the backend and the FIBEntry list agree on.
+	nexthopCounterNames, err := m.resolveNexthopCounters(entries)
+	if err != nil {
+		return nil, err
+	}
+
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
@@ -286,20 +425,22 @@ func (m *RouteService) UpdateFIB(
 	// FIB never changes again for this generation, and each read walks the
 	// LPM keyspace.
 	m.configs[name] = configEntry{
-		Handle:          module,
-		FIBRangeCountV4: module.FIBRangeCountV4(),
-		FIBRangeCountV6: module.FIBRangeCountV6(),
-		NexthopCount:    module.RouteCount(),
-		UpdatedAt:       time.Now(),
+		Handle:              module,
+		FIBRangeCountV4:     module.FIBRangeCountV4(),
+		FIBRangeCountV6:     module.FIBRangeCountV6(),
+		NexthopCount:        module.RouteCount(),
+		NexthopCounterNames: nexthopCounterNames,
+		UpdatedAt:           time.Now(),
 	}
 
 	return &routepb.UpdateFIBResponse{}, nil
 }
 
 // Metrics returns route module metrics matching tags: per-config FIB
-// gauges, the module-level dataplane counters, plus gRPC call metrics.
+// gauges, the module-level dataplane counters, the per-nexthop dataplane
+// counters, plus gRPC call metrics.
 //
-// A "counter" tag is pushed down into the dataplane counter read, so
+// A "counter" tag is pushed down into both dataplane counter reads, so
 // counters excluded by tags are never read from shared memory.
 //
 // Labels:
@@ -312,6 +453,8 @@ func (m *RouteService) UpdateFIB(
 //   - function:     pipeline function name (all dataplane counter metrics)
 //   - chain:        pipeline chain name (all dataplane counter metrics)
 //   - reason:       drop cause (route_drop_packets / route_drop_bytes only)
+//   - counter:      per-nexthop counter name (route_nexthop_packets /
+//     route_nexthop_bytes only)
 //   - grpc_type:    always "unary" (gRPC metrics)
 //   - grpc_service: fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:  RPC name (gRPC metrics)
@@ -319,6 +462,7 @@ func (m *RouteService) UpdateFIB(
 func (m *RouteService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	result := m.collectConfigMetrics()
 	result = append(result, m.collectDataplaneMetrics(tags)...)
+	result = append(result, m.collectNexthopMetrics(tags)...)
 	if m.metrics != nil {
 		result = append(result, m.metrics.Collect()...)
 	}

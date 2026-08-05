@@ -74,6 +74,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 			.addr = {0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c},
 		},
 		"dev0",
+		NULL,
 		err
 	);
 	if (route_idx == -1) {

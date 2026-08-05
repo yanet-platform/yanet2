@@ -31,6 +31,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .field_attribute(
             ".modules.route.controlplane.routepb.v1.FIBEntry.nexthops",
             "#[serde(default)]",
+        )
+        // `counter` is a plain `String`, so prost's derived `Deserialize`
+        // has no `Option` to default on its own. Empty is the normal
+        // uncounted state, so `skip_serializing_if` drops the key on write
+        // and `default` restores it on read, instead of a dead
+        // `"counter":""` on every uncounted row.
+        .field_attribute(
+            ".modules.route.controlplane.routepb.v1.FIBNexthop.counter",
+            "#[serde(default, skip_serializing_if = \"String::is_empty\")]",
         );
     for message in SERDE_MESSAGES {
         config = config

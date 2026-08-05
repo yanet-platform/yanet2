@@ -33,6 +33,12 @@ type FIBNexthop struct {
 	DstMAC net.HardwareAddr
 	SrcMAC net.HardwareAddr
 	Device string
+	// Counter is the per-nexthop dataplane counter name.
+	//
+	// applyFIB passes this straight to backend.UpdateModule, bypassing
+	// RouteService.UpdateFIB, so nothing on this path auto-fills an empty
+	// value.
+	Counter string
 }
 
 // FIBEntry is a test-domain FIB prefix with associated nexthops.
@@ -141,9 +147,10 @@ func applyFIB(
 		nexthops := make([]*routepb.FIBNexthop, 0, len(e.Nexthops))
 		for _, nh := range e.Nexthops {
 			nexthops = append(nexthops, &routepb.FIBNexthop{
-				DstMac: commonpb.NewMACAddressEUI48([6]byte(nh.DstMAC)),
-				SrcMac: commonpb.NewMACAddressEUI48([6]byte(nh.SrcMAC)),
-				Device: nh.Device,
+				DstMac:  commonpb.NewMACAddressEUI48([6]byte(nh.DstMAC)),
+				SrcMac:  commonpb.NewMACAddressEUI48([6]byte(nh.SrcMAC)),
+				Device:  nh.Device,
+				Counter: nh.Counter,
 			})
 		}
 		ipRange, err := commonpb.NewIPRange(e.Prefix.Addr(), xnetip.LastAddr(e.Prefix))
@@ -959,6 +966,109 @@ func TestRoute_PerOutcomeCounters(t *testing.T) {
 	}
 }
 
+// TestRoute_NexthopCounter verifies that a nexthop carrying an explicit
+// counter name reaches the real C counter registry: a matching packet
+// increments the named counter by exactly one packet and its own byte
+// length.
+func TestRoute_NexthopCounter(t *testing.T) {
+	const counterName = "nexthop_port0_deadbeef0001"
+
+	countedHop := FIBNexthop{
+		DstMAC:  xerror.Unwrap(net.ParseMAC("de:ad:be:ef:00:01")),
+		SrcMAC:  xerror.Unwrap(net.ParseMAC("ca:fe:ba:be:00:01")),
+		Device:  "port0",
+		Counter: counterName,
+	}
+
+	h, agent, backend := setupRouteHarness(t, "port0")
+	handle := applyFIB(t, backend, "test", []FIBEntry{
+		{Prefix: netip.MustParsePrefix("10.0.0.0/24"), Nexthops: []FIBNexthop{countedHop}},
+	})
+	wirePipeline(t, agent, "port0", "test")
+
+	pkt := buildRouteIPv4Packet(t, "10.0.0.5", 64)
+	pktSize := uint64(len(pkt.Data()))
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "expected one forwarded packet")
+	require.Empty(t, result.Drop, "expected no dropped packets")
+
+	path := dataplaneut.CounterPath{
+		Device: "port0", Pipeline: "test", Function: "test",
+		Chain: "test_chain", ModuleType: "route", ModuleName: "test",
+	}
+	dataplaneut.RequireModuleCounter(t, h, path, counterName, 1, pktSize)
+
+	// Close the round trip: ShowFIB's DumpFIB path must resolve the same
+	// name back out of the real C counter registry, not just accept it on
+	// write.
+	fib, err := handle.DumpFIB()
+	require.NoError(t, err)
+	require.Len(t, fib, 1)
+	require.Len(t, fib[0].Nexthops, 1)
+	require.Equal(t, counterName, fib[0].Nexthops[0].Counter)
+}
+
+// TestRoute_ECMPSameIdentitySameCounterDedupesToOneMember verifies that
+// listing the same (src_mac, dst_mac, device) nexthop twice under the same
+// counter name resolves to a single route-list member, not two.
+//
+// A duplicated member takes 2/N of the ECMP hash space instead of 1/N: this
+// exercises the real backend.UpdateModule dedup against shared memory and
+// inspects the resulting nexthop set via DumpFIB, since a fake backend
+// cannot observe route-list membership at all.
+func TestRoute_ECMPSameIdentitySameCounterDedupesToOneMember(t *testing.T) {
+	prefix := netip.MustParsePrefix("192.168.4.0/24")
+	hop := FIBNexthop{
+		DstMAC:  xerror.Unwrap(net.ParseMAC("de:ad:be:ef:00:04")),
+		SrcMAC:  xerror.Unwrap(net.ParseMAC("ca:fe:ba:be:00:04")),
+		Device:  "port0",
+		Counter: "nexthop_dup",
+	}
+
+	_, _, backend := setupRouteHarness(t, "port0")
+	handle := applyFIB(t, backend, "test", []FIBEntry{
+		{Prefix: prefix, Nexthops: []FIBNexthop{hop, hop}},
+	})
+
+	fib, err := handle.DumpFIB()
+	require.NoError(t, err)
+	require.Len(t, fib, 1)
+	require.Len(t, fib[0].Nexthops, 1, "a duplicated hardware route must collapse to one route-list member")
+}
+
+// TestRoute_ECMPDistinctSourceMACRemainsSeparate verifies that two nexthops
+// sharing a destination MAC and device but differing in source MAC remain
+// distinct route-list members, since source MAC is part of the forwarding
+// identity.
+func TestRoute_ECMPDistinctSourceMACRemainsSeparate(t *testing.T) {
+	prefix := netip.MustParsePrefix("192.168.5.0/24")
+	dstMAC := xerror.Unwrap(net.ParseMAC("de:ad:be:ef:00:05"))
+	hopA := FIBNexthop{
+		DstMAC:  dstMAC,
+		SrcMAC:  xerror.Unwrap(net.ParseMAC("ca:fe:ba:be:00:05")),
+		Device:  "port0",
+		Counter: "nexthop_a",
+	}
+	hopB := FIBNexthop{
+		DstMAC:  dstMAC,
+		SrcMAC:  xerror.Unwrap(net.ParseMAC("ca:fe:ba:be:00:06")),
+		Device:  "port0",
+		Counter: "nexthop_b",
+	}
+
+	_, _, backend := setupRouteHarness(t, "port0")
+	handle := applyFIB(t, backend, "test", []FIBEntry{
+		{Prefix: prefix, Nexthops: []FIBNexthop{hopA, hopB}},
+	})
+
+	fib, err := handle.DumpFIB()
+	require.NoError(t, err)
+	require.Len(t, fib, 1)
+	require.Len(t, fib[0].Nexthops, 2, "nexthops differing only in src_mac must remain distinct routes")
+}
+
 // TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry verifies the
 // UpdateFIBRequest doc comment's claim that an entry with no nexthops is
 // skipped rather than overwriting an earlier overlapping entry.
@@ -986,4 +1096,5 @@ func TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry(t *testing.T) {
 	require.Len(t, fib, 1, "expected the earlier nexthop-bearing entry to survive alone")
 	require.Len(t, fib[0].Nexthops, 1)
 	require.Equal(t, "port0", fib[0].Nexthops[0].Device)
+	require.Empty(t, fib[0].Nexthops[0].Counter, "uncounted nexthop must round-trip as empty, not a stale or garbage name")
 }

@@ -104,7 +104,11 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 
 			idx, ok := hardwareIndex[hardwareRoute]
 			if !ok {
-				added, err := module.AddRoute(hardwareRoute.SourceMAC[:], hardwareRoute.DestinationMAC[:], hardwareRoute.Device)
+				// Read from nh, not hardwareRoute: RouteService already
+				// rejects two different counter names for one identity, so
+				// the first nexthop seen carries the name every later one
+				// for this identity would have agreed on.
+				added, err := module.AddRoute(hardwareRoute.SourceMAC[:], hardwareRoute.DestinationMAC[:], hardwareRoute.Device, nh.GetCounter())
 				if err != nil {
 					module.Free()
 					return nil, fmt.Errorf("failed to add hardware route: %w", err)
@@ -182,6 +186,11 @@ func (m *backend) ModuleCounters(name string, counterNames []string) []CounterVi
 }
 
 // HardwareRoute represents a route in the Layer 2 (L2) networking stack.
+//
+// This is the dataplane's forwarding identity: two nexthops agreeing on
+// these three fields share one route slot regardless of what else the
+// request says about them (e.g. counter name). Keying UpdateModule's dedup
+// map on more would split one physical neighbour across slots, skewing ECMP.
 type HardwareRoute struct {
 	// SourceMAC is the MAC address of the local interface that observed
 	// the neighbour.

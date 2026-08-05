@@ -30,15 +30,17 @@ struct FibRow {
     dst_mac: String,
     #[tabled(rename = "Src MAC")]
     src_mac: String,
+    #[tabled(rename = "Counter")]
+    counter: String,
 }
 
 /// Strips every `char::is_control` character out of `value`, replacing each
 /// with `?`.
 ///
-/// Applied to a device name before it is pushed into a cell: `device` is
-/// echoed verbatim from the wire with no upstream validation beyond
-/// non-emptiness, so a control character a peer embedded in it -- an ANSI
-/// escape, say -- would otherwise reach the terminal unfiltered.
+/// Applied to a device name or counter name before either is pushed into a
+/// cell: both are echoed verbatim from the wire, and neither is validated
+/// for control characters upstream, so a peer-embedded control character --
+/// an ANSI escape, say -- would otherwise reach the terminal unfiltered.
 fn sanitize_wire_text(value: &str) -> String {
     value.chars().map(|ch| if ch.is_control() { '?' } else { ch }).collect()
 }
@@ -51,6 +53,7 @@ fn no_nexthops_row(from: String, to: String) -> FibRow {
         device: "(no nexthops)".to_owned(),
         dst_mac: String::new(),
         src_mac: String::new(),
+        counter: String::new(),
     }
 }
 
@@ -69,6 +72,7 @@ fn nexthop_rows(from: String, to: String, nexthops: &[FibNexthop]) -> Vec<FibRow
             device: sanitize_wire_text(&nexthop.device),
             dst_mac: nexthop.dst_mac.unwrap_or_default().to_string(),
             src_mac: nexthop.src_mac.unwrap_or_default().to_string(),
+            counter: sanitize_wire_text(&nexthop.counter),
         })
         .collect()
 }

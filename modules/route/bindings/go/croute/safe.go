@@ -16,6 +16,12 @@ type FIBNexthop struct {
 	DstMAC net.HardwareAddr
 	SrcMAC net.HardwareAddr
 	Device string
+
+	// Counter is the per-nexthop dataplane counter name.
+	//
+	// Empty means no name was read, ordinarily because the nexthop isn't
+	// individually counted.
+	Counter string
 }
 
 // FIBEntry represents a single FIB prefix with its nexthops.
@@ -26,8 +32,11 @@ type FIBEntry struct {
 	Nexthops      []FIBNexthop
 }
 
-// AddRoute adds a hardware route with MAC addresses and egress device.
-func (m *ModuleConfig) AddRoute(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, device string) (int, error) {
+// AddRoute adds a hardware route with MAC addresses, egress device, and an
+// optional per-nexthop dataplane counter name.
+//
+// An empty counter leaves the nexthop uncounted.
+func (m *ModuleConfig) AddRoute(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, device string, counter string) (int, error) {
 	if len(srcAddr) != 6 {
 		return -1, fmt.Errorf("unsupported source MAC address: must be EUI-48")
 	}
@@ -38,7 +47,7 @@ func (m *ModuleConfig) AddRoute(srcAddr net.HardwareAddr, dstAddr net.HardwareAd
 		return -1, fmt.Errorf("device name is required")
 	}
 
-	return m.addRoute([6]byte(dstAddr), [6]byte(srcAddr), device)
+	return m.addRoute([6]byte(dstAddr), [6]byte(srcAddr), device, counter)
 }
 
 // AddRouteList adds a list of route indices as an ECMP group.
@@ -109,9 +118,10 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 			srcMAC := iter.nexthopSrcMAC(idx)
 
 			nexthops[idx] = FIBNexthop{
-				DstMAC: net.HardwareAddr(dstMAC[:]),
-				SrcMAC: net.HardwareAddr(srcMAC[:]),
-				Device: iter.nexthopDeviceName(idx),
+				DstMAC:  net.HardwareAddr(dstMAC[:]),
+				SrcMAC:  net.HardwareAddr(srcMAC[:]),
+				Device:  iter.nexthopDeviceName(idx),
+				Counter: iter.nexthopCounterName(idx),
 			}
 		}
 

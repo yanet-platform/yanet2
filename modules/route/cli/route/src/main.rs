@@ -312,13 +312,14 @@ mod test {
                 dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
                 src_mac: Some(mac("11:22:33:44:55:66")),
                 device: "vlan100".to_owned(),
+                counter: "nexthop_custom-counter".to_owned(),
             }],
         };
 
         let json = serde_json::to_string(&entry).unwrap();
 
         assert_eq!(
-            r#"{"range":{"start":"10.0.0.0","end":"10.0.0.255"},"nexthops":[{"dst_mac":"aa:bb:cc:dd:ee:ff","src_mac":"11:22:33:44:55:66","device":"vlan100"}]}"#,
+            r#"{"range":{"start":"10.0.0.0","end":"10.0.0.255"},"nexthops":[{"dst_mac":"aa:bb:cc:dd:ee:ff","src_mac":"11:22:33:44:55:66","device":"vlan100","counter":"nexthop_custom-counter"}]}"#,
             json
         );
     }
@@ -334,13 +335,15 @@ mod test {
         assert_eq!(r#"{"range":null,"nexthops":[]}"#, json);
     }
 
-    /// An absent MAC serializes as JSON `null`.
+    /// An absent MAC serializes as JSON `null`. `counter` is also empty
+    /// here, so the key is absent entirely.
     #[test]
     fn fib_nexthop_json_absent_mac_is_null() {
         let nexthop = routepb::FibNexthop {
             dst_mac: None,
             src_mac: None,
             device: "vlan100".to_owned(),
+            counter: String::new(),
         };
 
         let json = serde_json::to_string(&nexthop).unwrap();
@@ -358,11 +361,23 @@ mod test {
             dst_mac: Some(MacAddress { addr: 0x1_0000_0000_0000 }),
             src_mac: None,
             device: "vlan100".to_owned(),
+            counter: String::new(),
         };
 
         let json = serde_json::to_string(&nexthop).unwrap();
 
         assert_eq!(r#"{"dst_mac":"invalid","src_mac":null,"device":"vlan100"}"#, json);
+    }
+
+    /// The `counter` key, omitted by `skip_serializing_if` when empty (see
+    /// `fib_nexthop_json_absent_mac_is_null`), still loads back: the paired
+    /// `#[serde(default)]` fills a missing `counter` in as empty.
+    #[test]
+    fn fib_nexthop_json_missing_counter_key_defaults_to_empty() {
+        let nexthop: routepb::FibNexthop =
+            serde_json::from_str(r#"{"dst_mac":null,"src_mac":null,"device":"vlan100"}"#).unwrap();
+
+        assert_eq!("", nexthop.counter);
     }
 
     #[test]
@@ -386,6 +401,7 @@ entries:
                     dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
                     src_mac: Some(mac("11:22:33:44:55:66")),
                     device: "eth0".to_owned(),
+                    counter: String::new(),
                 }],
             }],
             config.entries
@@ -419,6 +435,7 @@ entries:
                     dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
                     src_mac: Some(mac("11:22:33:44:55:66")),
                     device: "eth0".to_owned(),
+                    counter: String::new(),
                 }],
             }],
             config.entries
@@ -441,6 +458,49 @@ entries:
 
         assert_eq!(1, config.entries.len());
         assert!(config.entries[0].nexthops.is_empty());
+    }
+
+    /// A nexthop can omit `counter` entirely -- `FIBNexthop.counter`'s proto
+    /// doc calls that the way to ask the server to generate the name itself
+    /// -- and still load, thanks to `build.rs`'s `#[serde(default)]` on that
+    /// field (the same treatment `FIBEntry.nexthops` gets above, needed here
+    /// too since `counter` is a plain `String` rather than a message field
+    /// that would default on its own).
+    #[test]
+    fn fib_config_yaml_nexthop_without_counter_defaults_to_empty() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+    nexthops:
+      - dst_mac: aa:bb:cc:dd:ee:ff
+        src_mac: 11:22:33:44:55:66
+        device: eth0
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(1, config.entries[0].nexthops.len());
+        assert_eq!("", config.entries[0].nexthops[0].counter);
+    }
+
+    /// A nexthop's `counter` key, when present, loads verbatim.
+    #[test]
+    fn fib_config_yaml_nexthop_with_counter_loads_given_name() {
+        let yaml = "
+entries:
+  - range:
+      start: 10.0.0.0
+      end: 10.0.0.255
+    nexthops:
+      - dst_mac: aa:bb:cc:dd:ee:ff
+        src_mac: 11:22:33:44:55:66
+        device: eth0
+        counter: nexthop_my-counter
+";
+        let config: FibConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!("nexthop_my-counter", config.entries[0].nexthops[0].counter);
     }
 
     /// A malformed address in the file fails to load rather than silently
@@ -583,6 +643,7 @@ entries:
                     dst_mac: Some(mac("aa:bb:cc:dd:ee:ff")),
                     src_mac: Some(mac("11:22:33:44:55:66")),
                     device: "eth0".to_owned(),
+                    counter: "nexthop_custom-counter".to_owned(),
                 }],
             }],
         };

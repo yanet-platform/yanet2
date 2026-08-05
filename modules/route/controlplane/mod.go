@@ -74,12 +74,16 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := NewRouteService(
-		NewBackend(agent),
+	serviceOptions := []RouteServiceOption{
 		WithMetrics(grpcmetrics.NewFactory(
 			grpcmetrics.WithLabeler(labeler),
 		)),
-	)
+	}
+	if cfg.DisableNexthopCounters {
+		serviceOptions = append(serviceOptions, WithNexthopCountersDisabled())
+	}
+
+	service := NewRouteService(NewBackend(agent), serviceOptions...)
 
 	metricsService := NewMetricsService(service)
 

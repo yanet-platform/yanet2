@@ -13,6 +13,10 @@ struct route {
 	struct ether_addr dst_addr;
 	struct ether_addr src_addr;
 	uint64_t device_id;
+
+	// Per-nexthop packet/byte counter, or COUNTER_INVALID if this
+	// nexthop is not individually counted.
+	uint64_t counter_id;
 };
 
 struct route_list {

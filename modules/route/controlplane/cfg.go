@@ -17,6 +17,12 @@ type Config struct {
 	MemoryRequirements xcfg.NonZero[datasize.ByteSize] `yaml:"memory_requirements"`
 	// Endpoint is the gRPC endpoint of the route module shim.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
+	// DisableNexthopCounters turns off the per-nexthop dataplane counters.
+	//
+	// Negative polarity so the zero value keeps counters on: an operator
+	// who never sets this field gets the safer, more observable default
+	// without DefaultConfig needing an explicit entry for it.
+	DisableNexthopCounters bool `yaml:"disable_nexthop_counters"`
 }
 
 // DefaultConfig returns a Config populated with sensible defaults.

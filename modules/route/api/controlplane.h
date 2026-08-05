@@ -46,12 +46,17 @@ route_module_config_register_counters(
 	struct route_module_config *config, yanet_error **err
 );
 
+// Appends a nexthop route to the config.
+//
+// A NULL or empty counter_name leaves the nexthop uncounted — otherwise it
+// names a per-nexthop packet/byte counter to register.
 int
 route_module_config_add_route(
 	struct cp_module *cp_module,
 	struct ether_addr dst_addr,
 	struct ether_addr src_addr,
 	const char *device_name,
+	const char *counter_name,
 	yanet_error **err
 );
 
@@ -141,3 +146,10 @@ fib_iter_nexthop_src_mac(
 // Returns a pointer to the device name of the i-th nexthop.
 const char *
 fib_iter_nexthop_device_name(const struct fib_iter *it, uint64_t nexthop_idx);
+
+// Returns the nexthop's registered counter name.
+//
+// Returns an empty string when no counter name was read for the nexthop,
+// ordinarily because it isn't individually counted.
+const char *
+fib_iter_nexthop_counter_name(const struct fib_iter *it, uint64_t nexthop_idx);

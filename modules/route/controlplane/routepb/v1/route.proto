@@ -67,6 +67,12 @@ message FIBNexthop {
   common.commonpb.v1.MACAddress src_mac = 2;
   // Egress device name.
   string device = 3;
+
+  // Name of the per-nexthop dataplane counter.
+  //
+  // A non-empty name must start with "nexthop_". Left empty, a name may be
+  // generated from the device and destination MAC.
+  string counter = 4;
 }
 
 // FIBEntry represents a single dataplane FIB row.

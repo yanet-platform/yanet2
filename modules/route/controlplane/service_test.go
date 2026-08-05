@@ -1,6 +1,8 @@
 package route_test
 
 import (
+	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 
@@ -47,8 +49,9 @@ type fakeBackend struct {
 	mu       sync.Mutex
 	handle   *fakeHandle
 	counters []route.CounterView
-	// queried records the counter names the service asked for.
-	queried []string
+	// queries records the counterNames argument of every ModuleCounters
+	// call, in call order.
+	queries [][]string
 	// updateCalls records the range entries passed to UpdateModule on
 	// every call, in call order.
 	updateCalls [][]*routepb.FIBEntry
@@ -74,7 +77,7 @@ func (m *fakeBackend) ModuleCounters(name string, counterNames []string) []route
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.queried = counterNames
+	m.queries = append(m.queries, append([]string(nil), counterNames...))
 	return m.counters
 }
 
@@ -219,6 +222,9 @@ func TestDataplaneCounterQueryCoversContract(t *testing.T) {
 	_, err := service.Metrics()
 	require.NoError(t, err)
 
+	// No nexthop counters registered, so this is collectDataplaneMetrics's
+	// query alone.
+	require.Len(t, backend.queries, 1)
 	require.ElementsMatch(t, []string{
 		"route_forwarded_v4",
 		"route_forwarded_v6",
@@ -231,7 +237,7 @@ func TestDataplaneCounterQueryCoversContract(t *testing.T) {
 		"route_drop_empty_route_list_v6",
 		"route_drop_device_unresolved_v4",
 		"route_drop_device_unresolved_v6",
-	}, backend.queried)
+	}, backend.queries[0])
 }
 
 // TestDataplaneMetricsEmitZeroCounters verifies that a counter reading zero is
@@ -411,4 +417,277 @@ func TestShowFIBEmptyConfig(t *testing.T) {
 	response, err := service.ShowFIB(t.Context(), &routepb.ShowFIBRequest{Name: "cfg"})
 	require.NoError(t, err)
 	require.Empty(t, response.GetEntries())
+}
+
+// testDstMAC and testSrcMAC are the fixed EUI-48 addresses used across the
+// nexthop-counter tests below.
+var (
+	testDstMAC = [6]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01}
+	testSrcMAC = [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55}
+)
+
+// testNexthop builds a FIBNexthop carrying the fixed test MACs and the
+// given device and counter.
+func testNexthop(device, counter string) *routepb.FIBNexthop {
+	return &routepb.FIBNexthop{
+		DstMac:  commonpb.NewMACAddressEUI48(testDstMAC),
+		SrcMac:  commonpb.NewMACAddressEUI48(testSrcMAC),
+		Device:  device,
+		Counter: counter,
+	}
+}
+
+// testFIBEntry builds a single-address FIBEntry range covering the given
+// prefix's network address, carrying nexthops.
+func testFIBEntry(t *testing.T, prefix string, nexthops ...*routepb.FIBNexthop) *routepb.FIBEntry {
+	t.Helper()
+
+	addr := netip.MustParsePrefix(prefix).Addr()
+	ipRange, err := commonpb.NewIPRange(addr, addr)
+	require.NoError(t, err)
+
+	return &routepb.FIBEntry{Range: ipRange, Nexthops: nexthops}
+}
+
+// TestUpdateFIBMaterializesEmptyCounter verifies that a nexthop which leaves
+// counter empty is materialized to "nexthop_<device>_<dst_mac>" in what the
+// backend receives.
+func TestUpdateFIBMaterializesEmptyCounter(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", ""))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.updateCalls, 1)
+	got := backend.updateCalls[0][0].Nexthops[0]
+	require.Equal(t, "nexthop_eth0_aabbccddee01", got.GetCounter())
+}
+
+// TestUpdateFIBPassesThroughExplicitCounter verifies that a nexthop's
+// explicit counter reaches the backend verbatim, unmodified.
+func TestUpdateFIBPassesThroughExplicitCounter(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_my_counter"))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.NoError(t, err)
+
+	got := backend.updateCalls[0][0].Nexthops[0]
+	require.Equal(t, "nexthop_my_counter", got.GetCounter())
+}
+
+// TestUpdateFIBDisabledRejectsExplicitCounter verifies that an explicit
+// counter name is rejected as InvalidArgument when nexthop counters are
+// disabled, and that the config is never applied to the backend.
+func TestUpdateFIBDisabledRejectsExplicitCounter(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend, route.WithNexthopCountersDisabled())
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_my_counter"))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// TestUpdateFIBDisabledAllowsEmptyCounter verifies that a nexthop leaving
+// counter empty succeeds while nexthop counters are disabled, and stays
+// empty rather than being materialized.
+func TestUpdateFIBDisabledAllowsEmptyCounter(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend, route.WithNexthopCountersDisabled())
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", ""))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.NoError(t, err)
+
+	got := backend.updateCalls[0][0].Nexthops[0]
+	require.Empty(t, got.GetCounter())
+}
+
+// TestUpdateFIBRejectsOverlongCounter verifies the accepted counter-name
+// length boundary directly against literal byte counts, rather than through
+// croute.CounterNameMaxLen, so an off-by-one in the constant itself cannot
+// hide the regression.
+func TestUpdateFIBRejectsOverlongCounter(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	okEntry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 127-len("nexthop_"))))
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{okEntry},
+	})
+	require.NoError(t, err, "a 127-byte counter name must be accepted")
+
+	tooLongEntry := testFIBEntry(t, "10.0.0.1/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 128-len("nexthop_"))))
+	_, err = service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{tooLongEntry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "a 128-byte counter name must be rejected")
+}
+
+// TestUpdateFIBRejectsCounterWithNULByte verifies that a counter name
+// carrying an embedded NUL byte is rejected, rather than silently
+// truncated at the C boundary where it would diverge from the name
+// recorded in the deduplicated counter-name set.
+func TestUpdateFIBRejectsCounterWithNULByte(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_ab\x00cd"))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// TestUpdateFIBRejectsCounterWithoutPrefix verifies that an explicit
+// counter name not starting with "nexthop_" is rejected, rather than being
+// accepted and risking a future collision with a route-specific or generic
+// module-level counter name.
+func TestUpdateFIBRejectsCounterWithoutPrefix(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "route_forwarded_v4"))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// TestUpdateFIBRejectsConflictingCounterNamesWithinEntry verifies that
+// listing the same forwarding identity twice in one entry under two
+// different counter names is rejected as InvalidArgument naming both
+// names, and that nothing reaches the backend.
+func TestUpdateFIBRejectsConflictingCounterNamesWithinEntry(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32",
+		testNexthop("eth0", "nexthop_a"),
+		testNexthop("eth0", "nexthop_b"),
+	)
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.ErrorContains(t, err, "nexthop_a")
+	require.ErrorContains(t, err, "nexthop_b")
+	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// TestUpdateFIBRejectsConflictingCounterNamesAcrossEntries verifies that the
+// conflicting-counter check spans the whole request rather than one entry
+// at a time.
+func TestUpdateFIBRejectsConflictingCounterNamesAcrossEntries(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entryA := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_a"))
+	entryB := testFIBEntry(t, "10.0.1.0/32", testNexthop("eth0", "nexthop_b"))
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entryA, entryB},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// TestNexthopMetricsSumWorkerInstances verifies that collectNexthopMetrics
+// reaches the dataplane through RouteService.Metrics and sums a registered
+// nexthop counter's worker instances into one series carrying the full
+// label set, rather than only exercising resolveNexthopCounters.
+func TestNexthopMetricsSumWorkerInstances(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_my_counter"))
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.NoError(t, err)
+
+	backend.counters = []route.CounterView{
+		counterView("nexthop_my_counter", [][]uint64{{1, 100}, {2, 200}}),
+	}
+
+	all, err := service.Metrics()
+	require.NoError(t, err)
+
+	wantLabels := map[string]string{
+		"config":   "cfg",
+		"device":   "dev0",
+		"pipeline": "pipe0",
+		"function": "func0",
+		"chain":    "chain0",
+		"counter":  "nexthop_my_counter",
+	}
+
+	packets := requireMetric(t, all, "route_nexthop_packets", wantLabels)
+	require.Equal(t, uint64(3), packets.GetCounter())
+
+	bytes := requireMetric(t, all, "route_nexthop_bytes", wantLabels)
+	require.Equal(t, uint64(300), bytes.GetCounter())
+}
+
+// TestNexthopMetricsExactTagNeverReadsForeignCounter verifies that an exact
+// "counter" tag naming a module-level counter never reaches
+// collectNexthopMetrics's dataplane read, so the structural counter can
+// never resurface mislabeled under the route_nexthop_* family.
+func TestNexthopMetricsExactTagNeverReadsForeignCounter(t *testing.T) {
+	backend := newFakeBackend()
+	backend.counters = []route.CounterView{
+		counterView("route_forwarded_v4", [][]uint64{{7, 700}}),
+	}
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_my_counter"))
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.NoError(t, err)
+
+	tag := &commonpb.MetricTag{Name: "counter", Value: "route_forwarded_v4"}
+	all, err := service.Metrics(tag)
+	require.NoError(t, err)
+
+	require.Empty(t, findMetrics(all, "route_nexthop_packets"))
+	require.Empty(t, findMetrics(all, "route_nexthop_bytes"))
+
+	// Only "nexthop_my_counter" is registered, so the foreign tag leaves
+	// collectNexthopMetrics nothing to query.
+	require.Len(t, backend.queries, 1)
+	require.Equal(t, []string{"route_forwarded_v4"}, backend.queries[0])
 }

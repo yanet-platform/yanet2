@@ -4,6 +4,7 @@ package croute
 //#cgo LDFLAGS: -L../../../../../build/modules/route/api -lroute_cp
 //
 //#include "api/agent.h"
+//#include "counters/counters.h"
 //#include "modules/route/api/controlplane.h"
 import "C"
 
@@ -14,6 +15,10 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
+
+// CounterNameMaxLen is the longest counter name the shared-memory counter
+// registry accepts.
+const CounterNameMaxLen = C.COUNTER_NAME_LEN - 1
 
 // ModuleConfig is an opaque handle to the route module configuration in shared
 // memory.
@@ -57,9 +62,19 @@ func (m *ModuleConfig) Free() {
 }
 
 // addRoute maps 1:1 to route_module_config_add_route.
-func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string) (int, error) {
+//
+// An empty counter reaches C as a nil pointer: route_module_config_add_route
+// treats a NULL counter_name the same as an empty one, and passing nil here
+// avoids allocating a zero-length CString for the common uncounted case.
+func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string, counter string) (int, error) {
 	cName := C.CString(device)
 	defer C.free(unsafe.Pointer(cName))
+
+	var cCounter *C.char
+	if counter != "" {
+		cCounter = C.CString(counter)
+		defer C.free(unsafe.Pointer(cCounter))
+	}
 
 	var cErr *C.yanet_error
 	idx := C.route_module_config_add_route(
@@ -67,6 +82,7 @@ func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string) (
 		*(*C.struct_ether_addr)(unsafe.Pointer(&dstMAC)),
 		*(*C.struct_ether_addr)(unsafe.Pointer(&srcMAC)),
 		cName,
+		cCounter,
 		&cErr,
 	)
 	if idx < 0 {
@@ -213,4 +229,9 @@ func (m *fibIter) nexthopSrcMAC(idx uint64) [6]byte {
 // nexthopDeviceName maps 1:1 to fib_iter_nexthop_device_name.
 func (m *fibIter) nexthopDeviceName(idx uint64) string {
 	return C.GoString(C.fib_iter_nexthop_device_name(m.ptr, C.uint64_t(idx)))
+}
+
+// nexthopCounterName maps 1:1 to fib_iter_nexthop_counter_name.
+func (m *fibIter) nexthopCounterName(idx uint64) string {
+	return C.GoString(C.fib_iter_nexthop_counter_name(m.ptr, C.uint64_t(idx)))
 }
