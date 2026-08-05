@@ -1,10 +1,11 @@
 //! Shared metrics rendering for module CLIs.
 //!
-//! Converts a `GetMetricsResponse` into the domain `Metric` type, formats
-//! gauge/histogram values for human display, and renders the `GRPC CALLS` /
-//! `GRPC HANDLING LATENCIES` sections shared by every module's `metrics`
-//! subcommand. Module-specific grouping (per-module counter tables) stays in
-//! each CLI, since the label sets and grouping keys differ per module.
+//! Free functions read a wire `Metric`'s kind and label values without
+//! converting it, so a caller can filter protobuf messages and keep them on
+//! the machine-readable output path. The domain `Metric` type serves human
+//! display, with helpers that format gauge and histogram values and render
+//! the `GRPC CALLS` / `GRPC HANDLING LATENCIES` sections. Per-module counter
+//! grouping stays in each CLI, since label sets and grouping keys differ.
 
 use std::collections::HashMap;
 
@@ -54,6 +55,7 @@ pub struct Metric {
 
 impl Metric {
     pub fn from_proto(m: commonpb::pb::Metric) -> Self {
+        let kind = proto_kind(&m);
         let labels = m
             .labels
             .into_iter()
@@ -64,21 +66,21 @@ impl Metric {
             Some(Value::Counter(c)) => Self {
                 name: m.name,
                 labels,
-                kind: Kind::Counter,
+                kind,
                 value: Some(c as f64),
                 histogram: None,
             },
             Some(Value::Gauge(g)) => Self {
                 name: m.name,
                 labels,
-                kind: Kind::Gauge,
+                kind,
                 value: Some(g),
                 histogram: None,
             },
             Some(Value::Histogram(h)) => Self {
                 name: m.name,
                 labels,
-                kind: Kind::Histogram,
+                kind,
                 value: None,
                 histogram: Some(Histogram {
                     total_count: h.total_count,
@@ -95,7 +97,7 @@ impl Metric {
             None => Self {
                 name: m.name,
                 labels,
-                kind: Kind::Unknown,
+                kind,
                 value: None,
                 histogram: None,
             },
@@ -105,6 +107,21 @@ impl Metric {
     pub fn label_value(&self, key: &str) -> Option<&str> {
         self.labels.iter().find(|l| l.name == key).map(|l| l.value.as_str())
     }
+}
+
+/// Returns the [`Kind`] of a wire metric from its `value` oneof.
+pub fn proto_kind(m: &commonpb::pb::Metric) -> Kind {
+    match &m.value {
+        Some(Value::Counter(_)) => Kind::Counter,
+        Some(Value::Gauge(_)) => Kind::Gauge,
+        Some(Value::Histogram(_)) => Kind::Histogram,
+        None => Kind::Unknown,
+    }
+}
+
+/// Returns the first label value matching `key` on a wire metric.
+pub fn proto_label_value<'a>(m: &'a commonpb::pb::Metric, key: &str) -> Option<&'a str> {
+    m.labels.iter().find(|l| l.name == key).map(|l| l.value.as_str())
 }
 
 /// Computes the p-th percentile bucket label for a histogram whose upper
@@ -321,6 +338,32 @@ mod test {
 
     fn bucket(upper_bound: f64, count: u64) -> Bucket {
         Bucket { upper_bound, count }
+    }
+
+    #[test]
+    fn proto_kind_matches_from_proto_mapping() {
+        let wire = |value| commonpb::pb::Metric {
+            name: "m".to_string(),
+            labels: Vec::new(),
+            value,
+        };
+        let cases = [
+            (wire(Some(Value::Counter(1))), Kind::Counter),
+            (wire(Some(Value::Gauge(1.0))), Kind::Gauge),
+            (
+                wire(Some(Value::Histogram(commonpb::pb::Histogram {
+                    buckets: Vec::new(),
+                    total_count: 0,
+                }))),
+                Kind::Histogram,
+            ),
+            (wire(None), Kind::Unknown),
+        ];
+
+        for (m, expected) in cases {
+            assert!(proto_kind(&m) == expected);
+            assert!(Metric::from_proto(m).kind == expected);
+        }
     }
 
     #[test]

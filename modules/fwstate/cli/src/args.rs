@@ -2,7 +2,8 @@ use core::time::Duration;
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;
-use ync::metrics::{Kind, Metric};
+use commonpb::pb::Metric;
+use ync::metrics::{self, Kind};
 
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {
@@ -181,10 +182,11 @@ pub enum MetricName {
 impl MetricName {
     /// Returns true when the metric belongs to this category.
     pub fn matches(&self, m: &Metric) -> bool {
+        let kind = metrics::proto_kind(m);
         match self {
-            Self::Counters => m.kind == Kind::Counter && m.name.starts_with("fwstate_"),
-            Self::MapStats => m.kind == Kind::Gauge && m.name.starts_with("fwstate_"),
-            Self::Sync => m.kind == Kind::Counter && m.name.starts_with("fwstate_sync_"),
+            Self::Counters => kind == Kind::Counter && m.name.starts_with("fwstate_"),
+            Self::MapStats => kind == Kind::Gauge && m.name.starts_with("fwstate_"),
+            Self::Sync => kind == Kind::Counter && m.name.starts_with("fwstate_sync_"),
             Self::Grpc => m.name.starts_with("grpc_"),
         }
     }

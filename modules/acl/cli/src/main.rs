@@ -436,10 +436,9 @@ impl ACLService {
             .map_err(self.metrics.status("metrics"))?
             .into_inner();
 
-        let metrics: Vec<Metric> = response
+        let metrics: Vec<commonpb::Metric> = response
             .metrics
             .into_iter()
-            .map(Metric::from_proto)
             .filter(|m| cmd.name.as_ref().is_none_or(|f| m.name.contains(f.as_filter())))
             .collect();
 
@@ -454,6 +453,7 @@ impl ACLService {
                     return;
                 }
 
+                let metrics: Vec<Metric> = metrics.iter().cloned().map(Metric::from_proto).collect();
                 print_metrics_table(&metrics)
             },
         );

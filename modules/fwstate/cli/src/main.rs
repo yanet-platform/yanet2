@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
-use commonpb::pb::{GetMetricsRequest, IpAddress, MacAddress};
+use commonpb::pb::{GetMetricsRequest, IpAddress, MacAddress, Metric as ProtoMetric};
 use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
@@ -417,17 +417,18 @@ impl FWStateService {
             }
         }
 
-        let metrics: Vec<Metric> = response
+        let metrics: Vec<ProtoMetric> = response
             .metrics
             .into_iter()
-            .map(Metric::from_proto)
             .filter(|m| {
                 if let Some(ref f) = cmd.name
                     && !f.matches(m)
                 {
                     return false;
                 }
-                label_filters.iter().all(|(k, v)| m.label_value(k) == Some(v))
+                label_filters
+                    .iter()
+                    .all(|(k, v)| metrics::proto_label_value(m, k) == Some(v))
             })
             .collect();
 
@@ -444,6 +445,7 @@ impl FWStateService {
                     return;
                 }
 
+                let metrics: Vec<Metric> = metrics.iter().cloned().map(Metric::from_proto).collect();
                 print_metrics_table(&metrics)
             },
         );
