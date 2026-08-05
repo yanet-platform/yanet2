@@ -105,7 +105,7 @@ impl GatewayService {
 }
 
 /// A displayable row for the gateway services table.
-#[derive(Debug, Tabled, serde::Serialize)]
+#[derive(Debug, Tabled)]
 pub struct ServiceRow {
     #[tabled(rename = "Name")]
     pub name: String,
