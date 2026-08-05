@@ -278,7 +278,7 @@ impl RouteService {
                 }
 
                 let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
-                entries.sort_by_key(|entry| entry.prefix.0);
+                entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
                 annotate_ecmp_groups(&mut entries);
                 print_route_table(entries);
             },
@@ -447,14 +447,36 @@ impl Display for Communities {
     }
 }
 
-/// Wraps a prefix with its best-route flag and ECMP group size.
+/// A destination prefix as reported by the server: either successfully
+/// parsed, or the raw string that failed to parse.
 ///
-/// `Ord` and `Eq` are by the address/prefix pair only; `is_best` and
+/// The malformed case keeps the original string instead of discarding it, so
+/// two different malformed values never compare equal and are never grouped
+/// into the same ECMP set. Every parsed value orders before every malformed
+/// one. Malformed values order lexicographically by their raw string.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PrefixValue {
+    Parsed(Contiguous<IpNetwork>),
+    Malformed(String),
+}
+
+impl Display for PrefixValue {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Parsed(prefix) => write!(f, "{prefix}"),
+            Self::Malformed(_) => f.write_str("invalid"),
+        }
+    }
+}
+
+/// Wraps a prefix value with its best-route flag and ECMP group size.
+///
+/// `Ord` and `Eq` delegate to the wrapped `PrefixValue`. `is_best` and
 /// `ecmp_size` are render-only hints intentionally excluded from identity.
 /// `ecmp_size` is set to 1 initially and updated by `annotate_ecmp_groups`
 /// when multiple best routes share the same prefix.
 #[derive(Debug)]
-pub struct Prefix(pub Contiguous<IpNetwork>, pub bool, pub usize);
+pub struct Prefix(pub PrefixValue, pub bool, pub usize);
 
 impl Display for Prefix {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
@@ -528,7 +550,10 @@ pub struct RouteEntry {
 impl From<operatorpb::Route> for RouteEntry {
     fn from(route: operatorpb::Route) -> Self {
         let communities = route.large_communities.into_iter().map(|c| c.into()).collect();
-        let prefix = Contiguous::<IpNetwork>::parse(&route.prefix).expect("must be valid prefix");
+        let prefix = match Contiguous::<IpNetwork>::parse(&route.prefix) {
+            Ok(prefix) => PrefixValue::Parsed(prefix),
+            Err(..) => PrefixValue::Malformed(route.prefix),
+        };
 
         Self {
             prefix: Prefix(prefix, route.is_best, 1),
@@ -554,19 +579,17 @@ impl From<operatorpb::Route> for RouteEntry {
 /// entries that are not best, or whose prefix has only one best route,
 /// retain size 1 (unmarked).
 fn annotate_ecmp_groups(entries: &mut [RouteEntry]) {
-    let mut best_counts: HashMap<String, usize> = HashMap::new();
+    let mut best_counts: HashMap<PrefixValue, usize> = HashMap::new();
 
     for entry in entries.iter() {
         if entry.prefix.1 {
-            let key = entry.prefix.0.to_string();
-            *best_counts.entry(key).or_insert(0) += 1;
+            *best_counts.entry(entry.prefix.0.clone()).or_insert(0) += 1;
         }
     }
 
     for entry in entries.iter_mut() {
         if entry.prefix.1 {
-            let key = entry.prefix.0.to_string();
-            let count = best_counts.get(&key).copied().unwrap_or(1);
+            let count = best_counts.get(&entry.prefix.0).copied().unwrap_or(1);
             entry.prefix.2 = count;
         }
     }
@@ -699,8 +722,7 @@ mod test {
         assert_eq!("192.0.2.1", remove.nexthop_addrs[0].to_string());
     }
 
-    fn make_entry(prefix_str: &str, source: &str, is_best: bool) -> RouteEntry {
-        let prefix = Contiguous::<IpNetwork>::parse(prefix_str).expect("must be valid prefix");
+    fn entry_with(prefix: PrefixValue, source: &str, is_best: bool) -> RouteEntry {
         RouteEntry {
             prefix: Prefix(prefix, is_best, 1),
             next_hop: String::new(),
@@ -714,6 +736,31 @@ mod test {
             ifindex: 1,
             communities: Communities(vec![]),
         }
+    }
+
+    fn make_entry(prefix_str: &str, source: &str, is_best: bool) -> RouteEntry {
+        let prefix = Contiguous::<IpNetwork>::parse(prefix_str).expect("must be valid prefix");
+        entry_with(PrefixValue::Parsed(prefix), source, is_best)
+    }
+
+    fn make_malformed_entry(prefix_str: &str, source: &str, is_best: bool) -> RouteEntry {
+        entry_with(PrefixValue::Malformed(prefix_str.to_string()), source, is_best)
+    }
+
+    /// A malformed prefix string from the server converts into a
+    /// `RouteEntry` carrying the raw string, instead of aborting the
+    /// process.
+    #[test]
+    fn route_entry_from_malformed_prefix_does_not_panic() {
+        let route = operatorpb::Route {
+            prefix: "not-a-prefix".to_owned(),
+            is_best: true,
+            ..Default::default()
+        };
+
+        let entry = RouteEntry::from(route);
+
+        assert_eq!(PrefixValue::Malformed("not-a-prefix".to_owned()), entry.prefix.0);
     }
 
     /// Two best routes sharing a prefix are marked with ECMP size 2; a prefix
@@ -767,6 +814,24 @@ mod test {
 
         assert_eq!(2, entries[0].prefix.2);
         assert_eq!(2, entries[1].prefix.2);
+    }
+
+    /// Two malformed prefixes with different raw strings stay in separate
+    /// ECMP groups — the same raw string groups together like a real
+    /// duplicate.
+    #[test]
+    fn annotate_ecmp_groups_keeps_distinct_malformed_prefixes_apart() {
+        let mut entries = vec![
+            make_malformed_entry("garbage-a", "static", true),
+            make_malformed_entry("garbage-b", "static", true),
+            make_malformed_entry("garbage-a", "static", true),
+        ];
+
+        annotate_ecmp_groups(&mut entries);
+
+        assert_eq!(2, entries[0].prefix.2);
+        assert_eq!(1, entries[1].prefix.2);
+        assert_eq!(2, entries[2].prefix.2);
     }
 
     #[test]
