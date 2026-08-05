@@ -1,8 +1,11 @@
 package framework
 
 import (
+	"encoding/binary"
+	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestRestartYANETGuardsMissingConfig verifies that RestartYANET rejects a
@@ -38,6 +41,25 @@ func TestRestartYANETGuardsMissingConfig(t *testing.T) {
 		if !strings.Contains(err.Error(), "no recorded configuration") {
 			t.Errorf("case %d (%s): RestartYANET() error = %q, want it to describe the no-recorded-configuration case", idx, testCase.name, err.Error())
 		}
+	}
+}
+
+func TestReceiveAllPacketsUnfilteredReportsPartialFrame(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	clientSocket := &SocketClient{inner: &socketClientInner{conn: client}}
+	go func() {
+		var length [4]byte
+		binary.BigEndian.PutUint32(length[:], 4)
+		_, _ = server.Write(length[:])
+		_, _ = server.Write([]byte{1})
+	}()
+
+	_, err := clientSocket.ReceiveAllPacketsUnfiltered(20*time.Millisecond, "")
+
+	if err == nil || !strings.Contains(err.Error(), "packet data") {
+		t.Fatalf("error = %v, want partial packet error", err)
 	}
 }
 

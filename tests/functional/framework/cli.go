@@ -3,6 +3,7 @@ package framework
 import (
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -177,7 +178,19 @@ func (c *CLIManager) ExecuteCommandWithTimeout(command string, timeout time.Dura
 	if err != nil {
 		return "", fmt.Errorf("failed to send command to VM: %w", err)
 	}
-	return c.waitForCommandCompletionWithMarkers(command, fullCommand, commandMarker, endMarker, timeout)
+	output, err := c.waitForCommandCompletionWithMarkers(command, fullCommand, commandMarker, endMarker, timeout)
+	if err != nil {
+		if stdinErr := writeInterrupt(stdin); stdinErr != nil {
+			c.log.Warnf("failed to interrupt timed-out command: %v", stdinErr)
+		}
+		c.inner.qemu.resetSerialBuffer()
+	}
+	return output, err
+}
+
+func writeInterrupt(stdin io.Writer) error {
+	_, err := stdin.Write([]byte{3, '\n'})
+	return err
 }
 
 // ExecuteCommands executes multiple CLI commands sequentially within the QEMU
@@ -257,6 +270,7 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 		if foundStart && strings.Contains(output, endMarker) {
 			result, err := c.extractCommandOutputWithMarkers(output, startMarker, endMarker)
 			if err == nil {
+				c.inner.qemu.discardSerialThrough(endMarker)
 				c.log.Debugf("DEBUG: Found end marker for command: %s", command)
 				return result, nil
 			}

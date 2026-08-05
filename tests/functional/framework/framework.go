@@ -651,7 +651,9 @@ func (f *TestFramework) sendPacketAndCaptureAll(inputIfaceIndex int, outputIface
 	}
 
 	if unfiltered {
-		_, _ = outputClient.ReceiveAllPacketsUnfiltered(50*time.Millisecond, outputDumpPath)
+		if _, err := outputClient.ReceiveAllPacketsUnfiltered(50*time.Millisecond, outputDumpPath); err != nil {
+			return nil, fmt.Errorf("failed to drain output socket: %w", err)
+		}
 	}
 
 	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
@@ -1425,9 +1427,8 @@ func (f *TestFramework) Unmount9P() error {
 	for _, mp := range guest9PMountPoints {
 		cmd.WriteString(" " + mp)
 	}
-	cmd.WriteString(" 2>/dev/null; true")
 	if _, err := f.ExecuteCommand(cmd.String()); err != nil {
-		f.log.Debugf("batch umount returned error (may be already unmounted): %v", err)
+		return fmt.Errorf("unmount 9P shares: %w", err)
 	}
 	f.qemu.Ninepmounted.Store(false)
 	f.log.Debug("All 9P mounts unmounted")
@@ -1613,7 +1614,7 @@ func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
 	f.qemu.setVMReady(false)
 	f.qemu.readySignal = make(chan bool, 1)
 	f.qemu.resetSerialBuffer()
-	go f.qemu.readSerial()
+	f.qemu.startSerialReader()
 
 	stdin := f.qemu.GetStdin()
 	if stdin == nil {

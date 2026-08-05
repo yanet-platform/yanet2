@@ -11,6 +11,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "Justfile"
+      - "lab/**"
+      - "docs/lab.md"
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
@@ -26,6 +29,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "Justfile"
+      - "lab/**"
+      - "docs/lab.md"
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
@@ -267,6 +273,19 @@ jobs:
               exit 1
           fi
 
+      - name: Stage operator binaries
+        run: |
+          set -euo pipefail
+          for path in \
+            build/operators/route/yanet-route-operator \
+            build/operators/forward/yanet-forward-operator \
+            build/operators/decap/yanet-decap-operator \
+            build/operators/pipeline/yanet-pipeline-operator \
+            build/operators/bird-adapter/yanet-bird-adapter; do
+            test -x "$path"
+            cp "$path" "$(basename "$path")"
+          done
+
       - name: Upload YANET binaries
         uses: actions/upload-artifact@v4
         with:
@@ -275,6 +294,7 @@ jobs:
             build/dataplane/yanet-dataplane
             build/controlplane/yanet-controlplane
             target/release/yanet-cli*
+            yanet-*-operator
 
   clang-tidy:
     runs-on: ubuntu-24.04
@@ -496,6 +516,12 @@ jobs:
           if ls ./yanet-cli* 1>/dev/null 2>&1; then
               mv -f ./yanet-cli-* target/release/
           fi
+          mkdir -p build/operators/{route,forward,decap,pipeline,bird-adapter}
+          mv -f ./yanet-route-operator build/operators/route/
+          mv -f ./yanet-forward-operator build/operators/forward/
+          mv -f ./yanet-decap-operator build/operators/decap/
+          mv -f ./yanet-pipeline-operator build/operators/pipeline/
+          mv -f ./yanet-bird-adapter build/operators/bird-adapter/
           chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
           chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
           chmod +x target/release/yanet-cli* 2>/dev/null || true
@@ -568,6 +594,16 @@ jobs:
           exit $ret
         timeout-minutes: 45
 
+      - name: Run reusable lab scenarios
+        run: |
+          set -euo pipefail
+          trap 'go run ./cmd/yanet-lab down || true' EXIT
+          go run ./cmd/yanet-lab up
+          for scenario in forward-route decap nat64; do
+            go run ./cmd/yanet-lab reset
+            go run ./cmd/yanet-lab scenario run "$scenario"
+          done
+
       - name: Upload functional test logs
         uses: actions/upload-artifact@v4
         if: always()
@@ -576,3 +612,5 @@ jobs:
           path: |
             tests/functional/main/test.log
             tests/functional/converted/test.log
+            /tmp/yanet2-lab-*/**/supervisor.log
+            /tmp/yanet2-lab-*/**/last-report.json

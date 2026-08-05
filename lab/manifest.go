@@ -68,6 +68,16 @@ type ProbeExpect struct {
 }
 
 func LoadManifest(path string) (*Manifest, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect manifest: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("manifest %q is not a regular file", path)
+	}
+	if info.Size() > maxManifestFileSize {
+		return nil, fmt.Errorf("manifest %s is too large: %d bytes, maximum %d", path, info.Size(), maxManifestFileSize)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
@@ -178,8 +188,12 @@ func validateDuration(value string) error {
 	if value == "" {
 		return nil
 	}
-	if _, err := time.ParseDuration(value); err != nil {
+	duration, err := time.ParseDuration(value)
+	if err != nil {
 		return err
+	}
+	if duration <= 0 {
+		return errors.New("duration must be positive")
 	}
 	return nil
 }
@@ -193,11 +207,18 @@ func validateLocalPath(baseDir, value string) error {
 		return fmt.Errorf("path %q escapes the manifest directory", value)
 	}
 	path := filepath.Join(baseDir, clean)
-	if _, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("path %q does not exist", value)
 		}
 		return fmt.Errorf("inspect path %q: %w", value, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("path %q is not a regular file", value)
+	}
+	if info.Size() > maxManifestFileSize {
+		return fmt.Errorf("path %s is too large: %d bytes, maximum %d", value, info.Size(), maxManifestFileSize)
 	}
 	realBase, err := filepath.EvalSymlinks(baseDir)
 	if err != nil {

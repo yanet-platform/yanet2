@@ -26,6 +26,7 @@ type VMPool struct {
 	templateOverlay      string // preferred startup template overlay for pool VMs
 	templateSnapshotName string // snapshot loaded from templateOverlay
 	log                  *zap.SugaredLogger
+	forceStop            bool
 }
 
 type poolEntry struct {
@@ -155,6 +156,14 @@ func (p *VMPool) Size() int {
 	return p.size
 }
 
+// ForceStop makes every VM in the pool ignore the test keep-alive setting.
+func (p *VMPool) ForceStop() {
+	p.forceStop = true
+	for _, entry := range p.vms {
+		entry.manager.ForceStop()
+	}
+}
+
 // StartAll starts all VM slots. It prefers the configured template overlay when
 // available and otherwise falls back to the cached booted template.
 //
@@ -185,12 +194,15 @@ func (p *VMPool) StartAll() error {
 func (p *VMPool) validateBootedTemplate() error {
 	vm0ImagePath := p.vms[0].manager.ImagePath
 
-	valMgr, err := NewQEMUManager("validate-booted", vm0ImagePath, p.log)
+	valMgr, err := NewQEMUManager("validate-booted-"+p.vms[0].manager.Name, vm0ImagePath, p.log)
 	if err != nil {
 		return fmt.Errorf("failed to create validation manager: %w", err)
 	}
 	valMgr.TemplateOverlay = p.bootedTemplate
 	valMgr.TemplateSnapshotName = BootedSnapshotName
+	if p.forceStop {
+		valMgr.ForceStop()
+	}
 
 	valFW := &TestFramework{
 		qemu: valMgr,
@@ -205,12 +217,12 @@ func (p *VMPool) validateBootedTemplate() error {
 		return fmt.Errorf("failed to create validation CLI: %w", err)
 	}
 	valFW.cli = cli
+	defer valFW.Stop() //nolint:errcheck
 
 	p.log.Infof("Starting validation VM from booted template...")
 	if _, err := valFW.Start(); err != nil {
 		return fmt.Errorf("validation VM start failed: %w", err)
 	}
-	defer valFW.Stop() //nolint:errcheck
 
 	if err := valMgr.WaitForReady(VMReadyTimeout()); err != nil {
 		return fmt.Errorf("validation VM not ready after start: %w", err)

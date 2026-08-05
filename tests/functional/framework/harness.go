@@ -229,6 +229,7 @@ entries:
 // builders when left empty.
 type HarnessConfig struct {
 	PoolName         string
+	PoolSize         int
 	BaselineTag      string
 	QEMUImage        string
 	Dataplane        string
@@ -240,17 +241,20 @@ type HarnessConfig struct {
 	AfterStart       func(*TestFramework) error
 	ProfileReady     func(*TestFramework) error
 	FingerprintFiles []string
+	SkipCommonConfig bool
+	ForceStop        bool
 }
 
 // Harness owns a booted, baseline-configured VM pool shared by the tests of
 // one functional-test package, together with the YANET configuration used to
 // restore a VM to that baseline.
 type Harness struct {
-	pool         *VMPool
-	dataplane    string
-	controlplane string
-	afterStart   func(*TestFramework) error
-	profileReady func(*TestFramework) error
+	pool             *VMPool
+	dataplane        string
+	controlplane     string
+	afterStart       func(*TestFramework) error
+	profileReady     func(*TestFramework) error
+	skipCommonConfig bool
 }
 
 // Pool returns the underlying VM pool.
@@ -351,7 +355,6 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	}
 
 	bootedTemplate := BootedImagePath(qemuImage)
-	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag)
 	projectRoot, err := findProjectRoot()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to locate project root for baseline: %w", err)
@@ -360,33 +363,43 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("fingerprint baseline: %w", err)
 	}
+	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag+"-"+fingerprint[:16])
 
 	baseline := &baselineSetup{
-		dataplane:    dataplane,
-		controlplane: controlplane,
-		forward:      forward,
-		route:        route,
-		poolName:     config.PoolName,
-		fingerprint:  fingerprint,
-		log:          logger,
-		prepare:      config.Prepare,
-		afterStart:   config.AfterStart,
-		profileReady: config.ProfileReady,
+		dataplane:        dataplane,
+		controlplane:     controlplane,
+		forward:          forward,
+		route:            route,
+		poolName:         config.PoolName,
+		fingerprint:      fingerprint,
+		log:              logger,
+		prepare:          config.Prepare,
+		afterStart:       config.AfterStart,
+		profileReady:     config.ProfileReady,
+		skipCommonConfig: config.SkipCommonConfig,
+		forceStop:        config.ForceStop,
 	}
 	if err = baseline.ensureTemplate(qemuImage, bootedTemplate, baselineTemplate); err != nil {
 		return nil, nil, fmt.Errorf("failed to prepare baseline template: %w", err)
 	}
 	MarkBaselineSaved()
 
+	poolSize := config.PoolSize
+	if poolSize < 1 {
+		poolSize = PoolSize()
+	}
 	logger.Infof("Starting VM pool %q with size %d (baseline template: %s)",
-		config.PoolName, PoolSize(), baselineTemplate)
+		config.PoolName, poolSize, baselineTemplate)
 
 	pool, err := NewVMPool(
-		PoolSize(), config.PoolName, qemuImage,
+		poolSize, config.PoolName, qemuImage,
 		bootedTemplate, baselineTemplate, baselineSnapshotName, config.EnableSSHForward, logger,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create VM pool: %w", err)
+	}
+	if config.ForceStop {
+		pool.ForceStop()
 	}
 
 	defer func() {
@@ -409,11 +422,12 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	pool.StopAllCPU()
 
 	harness := &Harness{
-		pool:         pool,
-		dataplane:    dataplane,
-		controlplane: controlplane,
-		afterStart:   config.AfterStart,
-		profileReady: config.ProfileReady,
+		pool:             pool,
+		dataplane:        dataplane,
+		controlplane:     controlplane,
+		afterStart:       config.AfterStart,
+		profileReady:     config.ProfileReady,
+		skipCommonConfig: config.SkipCommonConfig,
 	}
 	return harness, syncLog, nil
 }
@@ -465,8 +479,10 @@ func (m *Harness) Restore(fw *TestFramework) error {
 	if err := fw.StartYANET(m.dataplane, m.controlplane); err != nil {
 		return fmt.Errorf("start YANET: %w", err)
 	}
-	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
-		return fmt.Errorf("configure YANET: %w", err)
+	if !m.skipCommonConfig {
+		if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+			return fmt.Errorf("configure YANET: %w", err)
+		}
 	}
 
 	fw.ResetConnections()
@@ -501,16 +517,18 @@ func runProfileHooks(fw *TestFramework, afterStart, profileReady func(*TestFrame
 // baselineSetup captures the YANET configuration used while baking a baseline
 // template overlay.
 type baselineSetup struct {
-	dataplane    string
-	controlplane string
-	forward      string
-	route        string
-	poolName     string
-	fingerprint  string
-	log          *zap.SugaredLogger
-	prepare      func(*TestFramework) error
-	afterStart   func(*TestFramework) error
-	profileReady func(*TestFramework) error
+	dataplane        string
+	controlplane     string
+	forward          string
+	route            string
+	poolName         string
+	fingerprint      string
+	log              *zap.SugaredLogger
+	prepare          func(*TestFramework) error
+	afterStart       func(*TestFramework) error
+	profileReady     func(*TestFramework) error
+	skipCommonConfig bool
+	forceStop        bool
 }
 
 // ensureTemplate makes sure baselineTemplate holds a "baseline" snapshot,
@@ -531,6 +549,9 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	prepPool, err := NewVMPool(1, "baseline-prep-"+m.poolName, qemuImage, bootedTemplate, "", "", false, m.log)
 	if err != nil {
 		return fmt.Errorf("failed to create baseline prep pool: %w", err)
+	}
+	if m.forceStop {
+		prepPool.ForceStop()
 	}
 	defer func() {
 		if err := prepPool.Shutdown(); err != nil {
@@ -702,8 +723,10 @@ func (m *baselineSetup) configure(fw *TestFramework) error {
 
 	m.dumpMemoryDiagnostics(fw)
 
-	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
-		return err
+	if !m.skipCommonConfig {
+		if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+			return err
+		}
 	}
 	if err := runProfileHooks(fw, m.afterStart, m.profileReady); err != nil {
 		return err

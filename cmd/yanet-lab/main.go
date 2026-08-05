@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +28,10 @@ import (
 
 const defaultSession = "default"
 
+const supervisorRequestTimeout = 5 * time.Second
+
+const supervisorProtocolVersion = 2
+
 type request struct {
 	Action   string   `json:"action"`
 	Argv     []string `json:"argv,omitempty"`
@@ -37,11 +41,12 @@ type request struct {
 }
 
 type response struct {
-	OK      bool           `json:"ok"`
-	Output  string         `json:"output,omitempty"`
-	Error   string         `json:"error,omitempty"`
-	Report  *lab.RunReport `json:"report,omitempty"`
-	SSHPort int            `json:"ssh_port,omitempty"`
+	OK       bool           `json:"ok"`
+	Output   string         `json:"output,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Report   *lab.RunReport `json:"report,omitempty"`
+	SSHPort  int            `json:"ssh_port,omitempty"`
+	Protocol int            `json:"protocol,omitempty"`
 }
 
 type application struct {
@@ -140,7 +145,13 @@ func (m *application) Run() int {
 }
 
 func (m *application) command() *cobra.Command {
-	root := &cobra.Command{Use: "yanet-lab", Short: "Operate a reusable local YANET2 QEMU lab", SilenceUsage: true}
+	root := &cobra.Command{
+		Use:          "yanet-lab",
+		Short:        "Operate a reusable local YANET2 QEMU lab",
+		Long:         "Use 'yanet-lab up' to start the lab, then 'status', 'reset', 'scenario', or 'down'.",
+		RunE:         func(command *cobra.Command, _ []string) error { return command.Help() },
+		SilenceUsage: true,
+	}
 	root.PersistentFlags().StringVar(&m.session, "session", defaultSession, "lab session name")
 	root.PersistentFlags().BoolVar(&m.json, "json", false, "emit machine-readable JSON")
 	root.AddCommand(
@@ -335,6 +346,11 @@ func (m *application) doctor() error {
 	}
 	_, imageErr := os.Stat(image)
 	checks = append(checks, check{Name: "qemu-image", OK: imageErr == nil, Detail: image})
+	for _, path := range lab.RequiredArtifacts(root) {
+		info, artifactErr := os.Stat(path)
+		artifactOK := artifactErr == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+		checks = append(checks, check{Name: "artifact", OK: artifactOK, Detail: path})
+	}
 	if runtime.GOOS == "linux" {
 		_, kvmErr := os.Stat("/dev/kvm")
 		checks = append(checks, check{Name: "kvm-optional", OK: kvmErr == nil, Detail: "/dev/kvm"})
@@ -363,8 +379,8 @@ func (m *application) doctor() error {
 }
 
 func (m *application) up() error {
-	if response, err := m.call(request{Action: "status"}); err == nil {
-		return m.printResponse(response)
+	if _, err := m.shutdownStaleSupervisor(); err != nil {
+		return err
 	}
 	dir, _, err := sessionPaths(m.session)
 	if err != nil {
@@ -428,10 +444,39 @@ func startupFailure(lastStatusError, logPath string) error {
 }
 
 func (m *application) ensureUp() error {
-	if response, err := m.call(request{Action: "status"}); err == nil && response.OK {
-		return nil
+	if _, err := m.shutdownStaleSupervisor(); err != nil {
+		return err
 	}
 	return m.up()
+}
+
+// shutdownStaleSupervisor checks for a running lab supervisor. If one exists
+// with the current protocol version it returns the status response. If a stale
+// (wrong-version) supervisor is running, it sends "down" and polls until the
+// socket goes away. Returns nil when no stale supervisor remains.
+func (m *application) shutdownStaleSupervisor() (*response, error) {
+	response, err := m.call(request{Action: "status"})
+	if err != nil {
+		return nil, nil
+	}
+	if response.Protocol == supervisorProtocolVersion {
+		return response, nil
+	}
+	staleResponse, staleErr := m.call(request{Action: "down"})
+	if staleErr != nil {
+		return nil, fmt.Errorf("stale lab supervisor is running; stop it before starting a new one: %w", staleErr)
+	}
+	if !staleResponse.OK {
+		return nil, fmt.Errorf("stale lab supervisor refused shutdown: %s", staleResponse.Error)
+	}
+	deadline := time.Now().Add(supervisorRequestTimeout)
+	for time.Now().Before(deadline) {
+		if _, callErr := m.call(request{Action: "status"}); callErr != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil, nil
 }
 
 func (m *application) simple(action string, argv []string) error {
@@ -460,10 +505,18 @@ func (m *application) call(value request) (*response, error) {
 		return nil, err
 	}
 	var reply response
+	if err := connection.SetReadDeadline(time.Now().Add(requestTimeout(value.Action))); err != nil {
+		return nil, err
+	}
+	defer connection.SetReadDeadline(time.Time{})
 	if err := json.NewDecoder(connection).Decode(&reply); err != nil {
 		return nil, err
 	}
 	return &reply, nil
+}
+
+func requestTimeout(action string) time.Duration {
+	return supervisorRequestTimeout
 }
 
 func (m *application) sessionConnection() (net.Conn, error) {
@@ -552,6 +605,16 @@ func (m *application) serve() (err error) {
 		return err
 	}
 	runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}}
+	startupInterrupted := atomic.Bool{}
+	stopping := make(chan os.Signal, 1)
+	signal.Notify(stopping, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(stopping)
+	go func() {
+		<-stopping
+		startupInterrupted.Store(true)
+		runtime.State.CloseSerial()
+		_ = listener.Close()
+	}()
 	acceptErrors := make(chan error, 1)
 	var handlers errgroup.Group
 	go func() {
@@ -568,9 +631,11 @@ func (m *application) serve() (err error) {
 		}
 	}()
 	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{
-		PoolName:         "lab-" + m.session,
+		PoolName:         "lab-" + filepath.Base(filepath.Dir(dir)) + "-" + m.session,
+		PoolSize:         1,
 		BaselineTag:      "lab-operators",
 		EnableSSHForward: true,
+		ForceStop:        true,
 		Prepare:          lab.PrepareOperators,
 		AfterStart:       lab.StartOperators,
 		ProfileReady:     lab.CheckOperators,
@@ -580,11 +645,23 @@ func (m *application) serve() (err error) {
 		return err
 	}
 	defer cleanup()
-	var shutdownOnce sync.Once
-	var shutdownErr error
+	var shutdownMutex sync.Mutex
+	var shutdownDone bool
 	shutdown := func() error {
-		shutdownOnce.Do(func() { shutdownErr = harness.Shutdown() })
-		return shutdownErr
+		shutdownMutex.Lock()
+		defer shutdownMutex.Unlock()
+		if shutdownDone {
+			return nil
+		}
+		err := harness.Shutdown()
+		if err == nil {
+			shutdownDone = true
+		}
+		return err
+	}
+	if startupInterrupted.Load() {
+		_ = shutdown()
+		return fmt.Errorf("lab startup interrupted")
 	}
 	defer func() {
 		if shutdownErr := shutdown(); err == nil && shutdownErr != nil {
@@ -599,14 +676,6 @@ func (m *application) serve() (err error) {
 	if err := setupGuestShell(fw, keyPath); err != nil {
 		return err
 	}
-	stopping := make(chan os.Signal, 1)
-	signal.Notify(stopping, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(stopping)
-	go func() {
-		<-stopping
-		runtime.State.CloseSerial()
-		_ = listener.Close()
-	}()
 	restore := func() error {
 		if err := harness.Restore(fw); err != nil {
 			return err
@@ -627,28 +696,28 @@ func (m *application) serve() (err error) {
 }
 
 func handleRuntimeConnection(connection net.Conn, dir string, runtime *sessionRuntime, stop func()) {
+	defer connection.Close()
 	select {
 	case <-runtime.Ready:
 		handleConnection(connection, runtime.Framework, dir, runtime.State, runtime.Restore, runtime.Shutdown, stop)
 	default:
-		defer connection.Close()
 		var value request
-		if err := json.NewDecoder(connection).Decode(&value); err != nil {
+		if err := decodeRequest(connection, &value); err != nil {
 			_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
 			return
 		}
-		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting"})
+		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting", Protocol: supervisorProtocolVersion})
 	}
 }
 
 func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, state *supervisor, restore func() error, shutdown func() error, stop func()) {
 	defer connection.Close()
 	var value request
-	if err := json.NewDecoder(connection).Decode(&value); err != nil {
+	if err := decodeRequest(connection, &value); err != nil {
 		_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
 		return
 	}
-	reply := response{OK: true}
+	reply := response{OK: true, Protocol: supervisorProtocolVersion}
 	if value.Action == "serial" {
 		if !state.TrySerial(connection) {
 			reply.OK = false
@@ -678,7 +747,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		reply.Output = output
 		setError(&reply, err)
 	case "exec":
-		output, err := fw.ExecuteCommand(shellJoin(value.Argv))
+		output, err := fw.ExecuteCommand(lab.ShellJoin(value.Argv))
 		reply.Output = output
 		setError(&reply, err)
 	case "shell":
@@ -690,7 +759,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		if err := json.NewEncoder(connection).Encode(reply); err != nil {
 			return
 		}
-		streamSerial(connection, fw, value.Rows, value.Columns)
+		streamSerial(connection, fw, value.Rows, value.Columns, stop)
 		return
 	case "reset":
 		err := restore()
@@ -804,7 +873,7 @@ func writeGuestShellFile(fw *framework.TestFramework, path string, contents []by
 	return nil
 }
 
-func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, columns int) {
+func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, columns int, stop func()) {
 	if _, err := io.ReadFull(connection, make([]byte, 1)); err != nil {
 		return
 	}
@@ -818,7 +887,11 @@ func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, column
 	if err != nil {
 		return
 	}
-	defer release()
+	defer func() {
+		if err := release(); err != nil {
+			stop()
+		}
+	}()
 	if _, err := fmt.Fprintf(serial, "stty rows %d columns %d; exec bash --rcfile /tmp/yanet/lab.bashrc -i\n", rows, columns); err != nil {
 		return
 	}
@@ -830,6 +903,14 @@ func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, column
 	_, _ = io.Copy(serial, connection)
 	_ = serial.Close()
 	<-done
+}
+
+func decodeRequest(connection net.Conn, value *request) error {
+	if err := connection.SetReadDeadline(time.Now().Add(supervisorRequestTimeout)); err != nil {
+		return err
+	}
+	defer connection.SetReadDeadline(time.Time{})
+	return json.NewDecoder(connection).Decode(value)
 }
 
 func setError(reply *response, err error) {
@@ -893,14 +974,6 @@ func acquireSessionLock(dir string) (*os.File, error) {
 		return nil, fmt.Errorf("lab session is already running: %w", err)
 	}
 	return lock, nil
-}
-
-func shellJoin(argv []string) string {
-	quoted := make([]string, len(argv))
-	for index, arg := range argv {
-		quoted[index] = "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
-	}
-	return strings.Join(quoted, " ")
 }
 
 func sessionPaths(name string) (string, string, error) {

@@ -80,6 +80,15 @@ steps:
 	}
 }
 
+func TestParseManifestRejectsNonPositiveDurations(t *testing.T) {
+	for _, value := range []string{"0s", "-1s"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := lab.ParseManifest([]byte("version: 1\nname: smoke\nsteps:\n  - name: wait\n    argv: [\"true\"]\n    timeout: "+value+"\n"), t.TempDir())
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestBuiltInManifestsLoad(t *testing.T) {
 	for _, name := range []string{"forward-route", "decap", "nat64"} {
 		t.Run(name, func(t *testing.T) {

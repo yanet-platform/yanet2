@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
@@ -33,6 +34,8 @@ type RunReport struct {
 	Success  bool      `json:"success"`
 	Results  []Result  `json:"results"`
 }
+
+const maxManifestFileSize = 64 * 1024
 
 // ManifestRuntime provides the VM operations needed to execute a manifest.
 type ManifestRuntime interface {
@@ -125,7 +128,7 @@ func RunManifest(runtime ManifestRuntime, path string) RunReport {
 			if step.Timeout != "" {
 				timeout, _ = time.ParseDuration(step.Timeout)
 			}
-			output, stepErr := runtime.ExecuteCommandWithTimeout(shellJoin(step.Argv), timeout)
+			output, stepErr := runtime.ExecuteCommandWithTimeout(ShellJoin(step.Argv), timeout)
 			result := Result{Name: step.Name, Kind: "step", Success: stepErr == nil, Duration: time.Since(started), Output: output}
 			if stepErr != nil {
 				result.Error = stepErr.Error()
@@ -158,6 +161,13 @@ func transferFile(runtime ManifestRuntime, source, destination string) error {
 		return err
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() > maxManifestFileSize {
+		return fmt.Errorf("manifest file %s is too large: %d bytes, maximum %d", source, info.Size(), maxManifestFileSize)
+	}
 	if _, err := runtime.ExecuteCommand(": > " + shellQuote(destination)); err != nil {
 		return err
 	}
@@ -227,10 +237,13 @@ func runProbe(runtime ManifestRuntime, baseDir string, probe Probe) Result {
 }
 
 func equalPacket(expected, actual []byte) bool {
-	return bytes.Equal(withoutEthernetPadding(expected), withoutEthernetPadding(actual))
+	return bytes.Equal(WithoutEthernetPadding(expected), WithoutEthernetPadding(actual))
 }
 
-func withoutEthernetPadding(packet []byte) []byte {
+// WithoutEthernetPadding strips Ethernet padding from a packet, returning only
+// the bytes up to and including the IP payload as indicated by the IP header
+// length field. Returns the original packet if the header is too short.
+func WithoutEthernetPadding(packet []byte) []byte {
 	if len(packet) < 14 {
 		return packet
 	}
@@ -283,6 +296,9 @@ func readPCAP(path string) ([][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read PCAP header %s: %w", path, err)
 	}
+	if reader.LinkType() != layers.LinkTypeEthernet {
+		return nil, fmt.Errorf("PCAP %s uses link type %s, want Ethernet", path, reader.LinkType())
+	}
 	packets := make([][]byte, 0, 2)
 	for range 2 {
 		data, _, readErr := reader.ReadPacketData()
@@ -297,7 +313,9 @@ func readPCAP(path string) ([][]byte, error) {
 	return packets, nil
 }
 
-func shellJoin(argv []string) string {
+// ShellJoin quotes each argument with single-quote escaping and joins them
+// with spaces, suitable for passing a command and arguments to a POSIX shell.
+func ShellJoin(argv []string) string {
 	quoted := make([]string, len(argv))
 	for index, arg := range argv {
 		quoted[index] = shellQuote(arg)
