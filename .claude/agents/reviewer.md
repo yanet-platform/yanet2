@@ -180,7 +180,7 @@ that enumeration is an incomplete review.
 
 Review rules are organized by severity. When time or context window is limited, prioritize Safety-critical issues over Correctness over Convention. Never skip safety checks.
 
-Convention-level rules for each language the diff touches live in `.claude/conventions/<lang>.md` (`c`, `go`, `rust`, `ts`) — read the ones that apply before reviewing; do not re-derive them from memory. A convention item that guards memory/type safety (buffer bounds, CGO pinning, unsafe blocks) is still a Critical finding, not downgraded because it lives in a convention file.
+Convention-level rules for each language the diff touches live in `.claude/conventions/<lang>.md` (`c`, `go`, `rust`, `ts`) — read the ones that apply before reviewing; do not re-derive them from memory. `.claude/conventions/comments.md` is not a language file and applies to any diff that adds or edits a comment. A convention item that guards memory/type safety (buffer bounds, CGO pinning, unsafe blocks) is still a Critical finding, not downgraded because it lives in a convention file.
 
 ### C Code (`dataplane/`, `modules/*/api/`, `lib/`, `common/`)
 
@@ -248,6 +248,8 @@ Convention-level rules for each language the diff touches live in `.claude/conve
 - Changes match task requirements (no scope creep, no missing pieces)
 - No secrets or credentials
 - Error handling appropriate (not swallowed, not over-handled)
+- Comments within budget: over 8 prose lines is a finding, over 12 is blocking. A comment this diff pushed further over budget is a finding.
+- A comment stating several ideas at once is blocking whether it is a doc comment or inline.
 
 ### Tests & Benchmarks (any language)
 

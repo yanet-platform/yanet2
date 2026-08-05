@@ -1,0 +1,6 @@
+# Comment conventions
+
+Loaded on demand by the agent writing or reviewing a comment. It is the single source for rationale content and claim falsification. Shape, budget and prose rules stay in `AGENTS.md`.
+
+- **A rationale cites the operative guarantee and prescribes a working remedy.** For panic, safety, impossibility, reachability, or remedies, name what must fail for the claim to fail, and deletion-test it. After grepping the claim, correct every sibling occurrence across file types, including every clause and execution-order claim (`before`, `after`, `first`, `already`, `then`). Open sibling files before claiming no other caller or test exists.
+- **A more specific claim is falsified before it ships.** First-pass or rewrite, check a precise statement against the code it describes, including a dependency's real defaults and everything the subject reaches through its collaborators. Where the check fails, drop the exclusivity word — for example `only`, `never`, `reserved`, or a load-bearing definite article — and state what the code does. A rewrite a reader falsifies in one lookup is worse than the vague original. A caveat added each round grows the comment without bound, while a weaker claim that stays true costs nothing further. Rewriting an already-corrected false clause is the highest-risk case.
