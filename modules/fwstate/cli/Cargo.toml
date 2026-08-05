@@ -23,7 +23,6 @@ tonic = { version = "0.13", features = ["gzip"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 humantime = "2"
-netip = "0.3"
 tabled = { version = "0.18", features = ["ansi"] }
 
 [build-dependencies]

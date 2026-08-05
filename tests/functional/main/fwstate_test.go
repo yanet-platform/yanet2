@@ -111,22 +111,28 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON output:\n", output)
 
+		const tcpProto = 6
+		// flags is the raw fw_state_flags_u byte: low nibble tracks the
+		// forward direction, high nibble the backward direction, with bits
+		// 0x01 FIN, 0x02 SYN, 0x04 RST, 0x08 ACK. SYN-only forward is 0x02.
+		const flagsSYNForward = 2
+
+		// The CLI serializes the FwStateEntry proto message as-is.
 		type jsonEntry struct {
-			Idx     int    `json:"idx"`
-			SrcPort int    `json:"src_port"`
-			DstPort int    `json:"dst_port"`
-			SrcAddr string `json:"src_addr"`
-			DstAddr string `json:"dst_addr"`
-			Proto   string `json:"proto"`
-			Origin  string `json:"origin"`
-			Flags   struct {
-				Src []string `json:"src"`
-				Dst []string `json:"dst"`
-			} `json:"flags"`
-			Packets struct {
-				Src int `json:"src"`
-				Dst int `json:"dst"`
-			} `json:"packets"`
+			Idx int `json:"idx"`
+			Key struct {
+				Proto   int    `json:"proto"`
+				SrcPort int    `json:"src_port"`
+				DstPort int    `json:"dst_port"`
+				SrcAddr string `json:"src_addr"`
+				DstAddr string `json:"dst_addr"`
+			} `json:"key"`
+			Value struct {
+				External        bool `json:"external"`
+				Flags           int  `json:"flags"`
+				PacketsForward  int  `json:"packets_forward"`
+				PacketsBackward int  `json:"packets_backward"`
+			} `json:"value"`
 		}
 
 		var entries []jsonEntry
@@ -144,16 +150,15 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 
 		for i, e := range entries {
 			require.Equal(t, i, e.Idx, "entry %d idx", i)
-			require.Equal(t, "TCP", e.Proto, "entry %d proto should be TCP", i)
-			require.Equal(t, 10000+i, e.SrcPort, "entry %d src_port", i)
-			require.Equal(t, 80, e.DstPort, "entry %d dst_port", i)
-			require.Equal(t, fmt.Sprintf("192.0.2.%d", 10+i), e.SrcAddr, "entry %d src_addr", i)
-			require.Equal(t, "192.0.3.1", e.DstAddr, "entry %d dst_addr", i)
-			require.Equal(t, "local", e.Origin, "entry %d origin should be local", i)
-			require.Equal(t, []string{"SYN"}, e.Flags.Src, "entry %d flags.src should be [SYN]", i)
-			require.Empty(t, e.Flags.Dst, "entry %d flags.dst should be empty", i)
-			require.Equal(t, 1, e.Packets.Src, "entry %d packets.src", i)
-			require.Equal(t, 0, e.Packets.Dst, "entry %d packets.dst", i)
+			require.Equal(t, tcpProto, e.Key.Proto, "entry %d proto should be TCP", i)
+			require.Equal(t, 10000+i, e.Key.SrcPort, "entry %d src_port", i)
+			require.Equal(t, 80, e.Key.DstPort, "entry %d dst_port", i)
+			require.Equal(t, fmt.Sprintf("192.0.2.%d", 10+i), e.Key.SrcAddr, "entry %d src_addr", i)
+			require.Equal(t, "192.0.3.1", e.Key.DstAddr, "entry %d dst_addr", i)
+			require.False(t, e.Value.External, "entry %d should not be external", i)
+			require.Equal(t, flagsSYNForward, e.Value.Flags, "entry %d flags should be SYN forward only", i)
+			require.Equal(t, 1, e.Value.PacketsForward, "entry %d packets_forward", i)
+			require.Equal(t, 0, e.Value.PacketsBackward, "entry %d packets_backward", i)
 		}
 	})
 
@@ -698,13 +703,19 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON entries:\n", output)
 
+		const tcpProto = 6
+
 		type jsonEntry struct {
-			SrcPort int    `json:"src_port"`
-			DstPort int    `json:"dst_port"`
-			SrcAddr string `json:"src_addr"`
-			DstAddr string `json:"dst_addr"`
-			Proto   string `json:"proto"`
-			Origin  string `json:"origin"`
+			Key struct {
+				Proto   int    `json:"proto"`
+				SrcPort int    `json:"src_port"`
+				DstPort int    `json:"dst_port"`
+				SrcAddr string `json:"src_addr"`
+				DstAddr string `json:"dst_addr"`
+			} `json:"key"`
+			Value struct {
+				External bool `json:"external"`
+			} `json:"value"`
 		}
 
 		var entries []jsonEntry
@@ -720,12 +731,12 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 
 		require.Len(t, entries, 1, "should have exactly 1 state entry from external sync")
 		e := entries[0]
-		require.Equal(t, "10.0.0.1", e.SrcAddr, "src_addr should match sync frame")
-		require.Equal(t, "10.0.0.2", e.DstAddr, "dst_addr should match sync frame")
-		require.Equal(t, 5000, e.SrcPort, "src_port should match sync frame")
-		require.Equal(t, 80, e.DstPort, "dst_port should match sync frame")
-		require.Equal(t, "TCP", e.Proto, "proto should be TCP")
-		require.Equal(t, "external", e.Origin, "origin should be external")
+		require.Equal(t, "10.0.0.1", e.Key.SrcAddr, "src_addr should match sync frame")
+		require.Equal(t, "10.0.0.2", e.Key.DstAddr, "dst_addr should match sync frame")
+		require.Equal(t, 5000, e.Key.SrcPort, "src_port should match sync frame")
+		require.Equal(t, 80, e.Key.DstPort, "dst_port should match sync frame")
+		require.Equal(t, tcpProto, e.Key.Proto, "proto should be TCP")
+		require.True(t, e.Value.External, "entry should be marked external")
 	})
 
 	// 7. Verify stats show exactly 1 entry.

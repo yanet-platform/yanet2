@@ -1,17 +1,15 @@
-use core::{fmt, net::Ipv6Addr, time::Duration};
-use std::{collections::HashMap, time::UNIX_EPOCH};
+use core::{fmt, net::Ipv6Addr};
+use std::collections::HashMap;
 
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
-use commonpb::pb::{GetMetricsRequest, IpAddress};
+use commonpb::pb::{GetMetricsRequest, IpAddress, MacAddress};
 use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
     metrics_service_client::MetricsServiceClient,
 };
-use netip::MacAddr;
-use serde::Serialize;
 use tabled::Tabled;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -61,11 +59,6 @@ pub struct Cmd {
 fn parse_ipv6(s: &str) -> Result<IpAddress, String> {
     let addr = s.parse::<Ipv6Addr>().map_err(|err| err.to_string())?;
     Ok(IpAddress { addr: addr.octets().to_vec() })
-}
-
-/// Parse a MAC address string.
-fn parse_mac(s: &str) -> Result<MacAddr, String> {
-    s.parse::<MacAddr>().map_err(|err| err.to_string())
 }
 
 pub struct FWStateService {
@@ -193,8 +186,10 @@ impl FWStateService {
         }
 
         if let Some(ref dst_ether) = cmd.dst_ether {
-            let mac = parse_mac(dst_ether).map_err(|err| self.service.invalid("update", err))?;
-            sync_config.dst_ether = Some(mac.into());
+            let mac = dst_ether
+                .parse::<MacAddress>()
+                .map_err(|err| self.service.invalid("update", err.to_string()))?;
+            sync_config.dst_ether = Some(mac);
         }
 
         if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
@@ -364,10 +359,9 @@ impl FWStateService {
                         print_entry(entry);
                     }
                     CommonFormat::Json => {
-                        let json_entry = JsonEntry::from_entry(entry);
                         println!(
                             "{}",
-                            serde_json::to_string(&json_entry).expect("fwstate entry JSON serialization must not fail")
+                            serde_json::to_string(entry).expect("fwstate entry JSON serialization must not fail")
                         );
                     }
                 }
@@ -487,26 +481,11 @@ fn format_proto(proto: u32) -> String {
 ///   - 0x08 = ACK
 struct TcpNibble(u8);
 
-const TCP_FLAG_TABLE: [(u8, char, &str); 4] = [
-    (0x08, 'A', "ACK"),
-    (0x02, 'S', "SYN"),
-    (0x04, 'R', "RST"),
-    (0x01, 'F', "FIN"),
-];
-
-impl TcpNibble {
-    fn names(&self) -> Vec<&'static str> {
-        TCP_FLAG_TABLE
-            .iter()
-            .filter(|(mask, _, _)| self.0 & mask != 0)
-            .map(|(_, _, name)| *name)
-            .collect()
-    }
-}
+const TCP_FLAG_TABLE: [(u8, char); 4] = [(0x08, 'A'), (0x02, 'S'), (0x04, 'R'), (0x01, 'F')];
 
 impl fmt::Display for TcpNibble {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (mask, ch, _) in TCP_FLAG_TABLE {
+        for (mask, ch) in TCP_FLAG_TABLE {
             if self.0 & mask != 0 {
                 write!(f, "{ch}")?;
             } else {
@@ -538,71 +517,6 @@ impl FwStateFlags {
 impl fmt::Display for FwStateFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}|{}", self.src(), self.dst())
-    }
-}
-
-/// Flat JSON representation of a firewall state entry.
-#[derive(Serialize)]
-struct JsonEntry {
-    idx: u32,
-    expired: bool,
-    src_port: u32,
-    dst_port: u32,
-    src_addr: String,
-    dst_addr: String,
-    proto: String,
-    origin: &'static str,
-    flags: SrcDstFlags,
-    packets: SrcDstPackets,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Serialize)]
-struct SrcDstFlags {
-    src: Vec<&'static str>,
-    dst: Vec<&'static str>,
-}
-
-#[derive(Serialize)]
-struct SrcDstPackets {
-    src: u64,
-    dst: u64,
-}
-
-impl JsonEntry {
-    fn from_entry(entry: &fwstatepb::FwStateEntry) -> Self {
-        let key = entry.key.as_ref();
-        let val = entry.value.as_ref();
-        let flags = FwStateFlags(val.map(|v| v.flags).unwrap_or(0));
-        let external = val.map(|v| v.external).unwrap_or(false);
-
-        Self {
-            idx: entry.idx,
-            expired: entry.expired,
-            src_port: key.map(|k| k.src_port).unwrap_or(0),
-            dst_port: key.map(|k| k.dst_port).unwrap_or(0),
-            src_addr: format_addr(key.and_then(|k| k.src_addr.as_ref())),
-            dst_addr: format_addr(key.and_then(|k| k.dst_addr.as_ref())),
-            proto: format_proto(key.map(|k| k.proto).unwrap_or(0)),
-            origin: if external { "external" } else { "local" },
-            flags: SrcDstFlags {
-                src: flags.src().names(),
-                dst: flags.dst().names(),
-            },
-            packets: SrcDstPackets {
-                src: val.map(|v| v.packets_forward).unwrap_or(0),
-                dst: val.map(|v| v.packets_backward).unwrap_or(0),
-            },
-            created_at: humantime::format_rfc3339(
-                UNIX_EPOCH + Duration::from_nanos(val.map(|v| v.created_at).unwrap_or(0)),
-            )
-            .to_string(),
-            updated_at: humantime::format_rfc3339(
-                UNIX_EPOCH + Duration::from_nanos(val.map(|v| v.updated_at).unwrap_or(0)),
-            )
-            .to_string(),
-        }
     }
 }
 
