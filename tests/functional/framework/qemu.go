@@ -57,6 +57,7 @@ type QEMUManager struct {
 	readyMutex       sync.RWMutex
 	instanceID       string
 	sshPort          int
+	enableSSHForward bool
 	serialReaderDone chan struct{}
 	// TemplateOverlay is an optional path to a qcow2 overlay that already
 	// contains a reusable VM snapshot. When set, Start() copies it instead
@@ -266,7 +267,7 @@ func (q *QEMUManager) Start() (bool, error) {
 	// Network interface configuration. SSH forwarding is added in
 	// keep-alive mode for manual debugging.
 	netdev := "user,id=net0"
-	if ShouldKeepVMAlive() {
+	if q.enableSSHForward || ShouldKeepVMAlive() {
 		// Get a random free port for SSH forwarding to support multiple VMs
 		var err error
 		q.sshPort, err = getFreePort()
@@ -486,6 +487,39 @@ func (q *QEMUManager) GetStdin() io.WriteCloser {
 		}
 	}
 	return q.serialConn
+}
+
+// SSHPort returns the loopback port forwarded to the guest SSH server.
+func (q *QEMUManager) SSHPort() int {
+	return q.sshPort
+}
+
+// EnableSSHForward configures a loopback SSH forward for this VM.
+func (q *QEMUManager) EnableSSHForward() {
+	q.enableSSHForward = true
+}
+
+// AttachSerial gives a caller exclusive access to the serial console.
+//
+// The returned release function restores the framework's serial reader.
+func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
+	q.stopSerialReader()
+	if err := q.connectToSerial(); err != nil {
+		return nil, nil, fmt.Errorf("connect serial for attachment: %w", err)
+	}
+	connection := q.serialConn
+	release := func() error {
+		if q.serialConn != nil {
+			_ = q.serialConn.Close()
+			q.serialConn = nil
+		}
+		if err := q.connectToSerial(); err != nil {
+			return fmt.Errorf("restore serial reader: %w", err)
+		}
+		go q.readSerial()
+		return nil
+	}
+	return connection, release, nil
 }
 
 // resetSerialBuffer clears the accumulated serial console output buffer.

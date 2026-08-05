@@ -2,10 +2,13 @@ package framework
 
 import (
 	"crypto/sha256"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBaselineTemplatePath(t *testing.T) {
@@ -67,5 +70,45 @@ func TestHashFileDetectsChangedContents(t *testing.T) {
 	}
 	if string(first.Sum(nil)) == string(second.Sum(nil)) {
 		t.Fatal("same-size artifact content change did not change fingerprint")
+	}
+}
+
+func TestRunProfileHooks(t *testing.T) {
+	startError := errors.New("start failed")
+	readyError := errors.New("not ready")
+	testCases := []struct {
+		name       string
+		startError error
+		readyError error
+		wantCalls  []string
+		wantError  string
+	}{
+		{name: "success", wantCalls: []string{"start", "ready"}},
+		{name: "start failure", startError: startError, wantCalls: []string{"start"}, wantError: "start profile: start failed"},
+		{name: "readiness failure", readyError: readyError, wantCalls: []string{"start", "ready"}, wantError: "wait for profile readiness: not ready"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var calls []string
+			err := runProfileHooks(
+				&TestFramework{},
+				func(*TestFramework) error {
+					calls = append(calls, "start")
+					return testCase.startError
+				},
+				func(*TestFramework) error {
+					calls = append(calls, "ready")
+					return testCase.readyError
+				},
+			)
+
+			require.Equal(t, testCase.wantCalls, calls)
+			if testCase.wantError == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, testCase.wantError)
+			}
+		})
 	}
 }

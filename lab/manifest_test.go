@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/lab"
 )
 
@@ -85,6 +86,23 @@ func TestBuiltInManifestsLoad(t *testing.T) {
 			if _, err := lab.LoadManifest(filepath.Join("scenarios", name, "manifest.yaml")); err != nil {
 				t.Fatal(err)
 			}
+		})
+	}
+}
+
+func TestTransformationScenariosUseLabExtension(t *testing.T) {
+	for _, name := range []string{"decap", "nat64"} {
+		t.Run(name, func(t *testing.T) {
+			manifest, err := lab.LoadManifest(filepath.Join("scenarios", name, "manifest.yaml"))
+			require.NoError(t, err)
+			require.NotEmpty(t, manifest.Probes)
+			var arguments []string
+			for _, step := range manifest.Steps {
+				arguments = append(arguments, step.Argv...)
+			}
+			joined := strings.Join(arguments, " ")
+			require.Contains(t, joined, "--name=fn:lab")
+			require.NotContains(t, joined, "--name=test")
 		})
 	}
 }

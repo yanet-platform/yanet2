@@ -88,7 +88,7 @@ func PoolSize() int {
 // booted template and bootstraps it if needed.
 //
 // VMs are not started yet - call StartAll after creating the pool.
-func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, log *zap.SugaredLogger) (_ *VMPool, err error) {
+func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, enableSSHForward bool, log *zap.SugaredLogger) (_ *VMPool, err error) {
 	if size < 1 {
 		size = 1
 	}
@@ -123,6 +123,9 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		if qemuErr != nil {
 			err = qemuErr
 			return nil, fmt.Errorf("failed to create QEMU manager for pool slot %d: %w", i, err)
+		}
+		if enableSSHForward {
+			qemu.EnableSSHForward()
 		}
 
 		fw := &TestFramework{

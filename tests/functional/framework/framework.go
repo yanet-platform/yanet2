@@ -886,6 +886,16 @@ func (f *TestFramework) ExecuteCommand(command string) (string, error) {
 	return f.cli.ExecuteCommand(command)
 }
 
+// SSHPort returns the loopback port forwarded to the guest SSH server.
+func (f *TestFramework) SSHPort() int {
+	return f.qemu.SSHPort()
+}
+
+// AttachSerial gives a caller exclusive access to the guest serial console.
+func (f *TestFramework) AttachSerial() (net.Conn, func() error, error) {
+	return f.qemu.AttachSerial()
+}
+
 // ExecuteCommandWithTimeout executes a single CLI command with a custom
 // timeout. Use this for operations that may take longer than the default
 // 30s, such as copying large binaries on slow emulated VMs.
@@ -1213,6 +1223,11 @@ func (f *TestFramework) CreateForwardConfig(config string) error {
 	}
 	// 9P mode: write to host filesystem, accessible via 9P mount.
 	return f.CreateConfigFile("forward.yaml", config)
+}
+
+// WriteGuestFile writes a file into the guest filesystem.
+func (f *TestFramework) WriteGuestFile(path string, contents string) error {
+	return f.createGuestFile(path, contents)
 }
 
 // createConfigFiles creates YANET configuration files in the host filesystem

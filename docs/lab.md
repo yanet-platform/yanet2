@@ -17,17 +17,23 @@ just lab down
 ```
 
 The first `up` can take several minutes because the functional harness may need
-to prepare its base image and baseline snapshot. Later starts and `reset` reuse
-the snapshot. Set `YANET_QEMU_IMAGE` to use a non-default image.
+to prepare its base image, baseline snapshot, and pinned
+`yanet-bird2 2.15.1.1785924912.af804ec4-1` package. Later starts and `reset`
+reuse the snapshot. Set `YANET_QEMU_IMAGE` to use a non-default image. If an
+existing session is unhealthy, `up` returns its status instead of replacing its
+supervisor; inspect it with `status`, `report`, or `down`.
 
 ## Commands
 
 - `doctor` checks Go, Just, QEMU, the disk image, and optional Linux KVM.
 - `up` starts or reuses a named session; `--session NAME` selects another one.
-- `status` verifies that the supervisor and YANET dataplane are alive.
+- `status` verifies the dataplane, control plane, operators, BIRD session, and
+  imported lab routes.
 - `exec -- COMMAND ARG...` executes one command without shell interpolation.
-- `shell` opens a small interactive command loop over the guest serial console.
-- `reset` restores the known-good `baseline` QEMU snapshot.
+- `shell` opens an SSH-backed interactive Bash session in the guest.
+- `serial` attaches directly to the guest's ttyS0 Bash console. Press `Ctrl-]`
+  to detach without stopping the VM.
+- `reset` restores the known-good operator baseline QEMU snapshot.
 - `report` records process and `kni0` state in the session directory.
 - `down` stops the VM and supervisor.
 - `scenario list|run` discovers and runs the built-in guided scenarios.
@@ -76,22 +82,53 @@ host shell.
 
 - `forward-route` validates the baseline forward/route pipeline with a UDP
   packet and an exact PCAP expectation.
-- `decap` configures decapsulation prefixes, attaches the module, and inspects
-  the resulting live state.
-- `nat64` configures a prefix and mapping, attaches the module, and inspects its
-  live state.
+- `decap` configures an unmanaged decapsulation module and verifies an exact
+  IPv4-in-IPv4 transformation.
+- `nat64` configures an unmanaged prefix and mapping and verifies an exact
+  IPv4-to-IPv6 transformation.
 
 Run `reset` between unrelated experiments. Scenario execution is fail-fast and
 writes its latest structured report to the session runtime directory under the
 system temporary directory.
+
+## Operator baseline
+
+The saved lab baseline runs the route, forward, decap, and pipeline operators,
+BIRD, and the BIRD adapter. It includes permanent IPv4 and IPv6 neighbours,
+default routes, and BIRD routes for `198.51.100.0/24` and
+`2001:db8:100::/48`. `status` requires every operator readiness service, the
+active `route0` adapter session, and both BIRD routes.
+
+BIRD comes from the pinned
+[`v2.15.1-yanet.1`](https://github.com/yanet-platform/bird/releases/tag/v2.15.1-yanet.1)
+release asset. It is built from `af804ec4`, which exports the interface index
+the current BIRD adapter requires.
+
+The operators reconcile `fn:route`, `fn:forward`, `fn:decap`, and the `test`
+pipeline. Use `fn:lab` for manual modules that should participate in that
+pipeline without being overwritten by reconciliation. The built-in decap and
+NAT64 scenarios follow this rule and use separate `decap_lab` and `nat64_lab`
+module names.
+
+## Guest shells
+
+Both `just lab shell` and `just lab serial` start Bash with
+`/tmp/yanet/cli` on `PATH`. They enable each YANET CLI's dynamic Bash
+completion and show the guest paths for CLI binaries, configuration, logs, and
+build artifacts. `shell` is the normal choice because it has a native SSH TTY;
+use `serial` to inspect the QEMU console directly. Other VM commands report
+`lab is busy` while serial is attached; `down` closes the attachment. `reset`
+restores the guest snapshot and reapplies this shell setup.
 
 ## Troubleshooting
 
 Run `just lab doctor` first. If `up` fails, its error points to
 `supervisor.log`, which contains the functional harness and QEMU startup logs.
 Use `just lab report`, `just lab status`, and guest commands such as
-`just lab exec -- ps aux` before resetting the VM. The runtime directory uses
-mode `0700`; reports do not copy the host environment or other secret sources.
+`just lab exec -- ps aux` before resetting the VM. Every runtime directory is
+owned by the current user with mode `0700`; keys, sockets, locks, and reports
+reject unsafe file types or permissions. Reports do not copy the host
+environment or other secret sources.
 
 Development ideas and delivered milestones live in
 [`lab/ROADMAP.md`](../lab/ROADMAP.md).

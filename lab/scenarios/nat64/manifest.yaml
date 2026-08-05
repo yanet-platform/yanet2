@@ -1,18 +1,27 @@
 $schema: ../../yanet2-lab.schema.json
 version: 1
 name: nat64
-description: Configure a stateless NAT64 prefix and mapping, then inspect live state.
+description: Configure an unmanaged stateless NAT64 module and verify IPv4-to-IPv6 translation.
 steps:
   - name: add-prefix
-    argv: [/tmp/yanet/cli/yanet-cli-nat64, prefix, add, --name, nat64_0, --prefix, "2001:db8::/96"]
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, prefix, add, --name, nat64_lab, --prefix, "2001:db8::/96"]
   - name: add-mapping
-    argv: [/tmp/yanet/cli/yanet-cli-nat64, mapping, add, --name, nat64_0, --ipv4, 198.51.100.2, --ipv6, "2001:db8::3", --prefix-index, "0"]
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, mapping, add, --name, nat64_lab, --ipv4, 198.51.100.2, --ipv6, "2001:db8::3", --prefix-index, "0"]
   - name: attach-nat64
     argv:
       - /tmp/yanet/cli/yanet-cli-function
       - update
-      - --name=test
+      - --name=fn:lab
       - --chains
-      - chain0:1=forward:forward0,nat64:nat64_0,route:route0
+      - default:1=nat64:nat64_lab
   - name: inspect-nat64
-    argv: [/tmp/yanet/cli/yanet-cli-nat64, show, --name, nat64_0]
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, show, --name, nat64_lab]
+probes:
+  - name: nat64-ipv4-to-ipv6
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send:
+      pcap: input.pcap
+    expect:
+      pcap: expected.pcap
