@@ -13,6 +13,7 @@
 
 #include "controlplane/agent/agent.h"
 #include "controlplane/config/cp_object.h"
+#include "controlplane/config/econtext.h"
 #include "controlplane/config/zone.h"
 
 #include "counters/counters.h"
@@ -23,6 +24,7 @@
 #include "logging/log.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CP_OBJECT_GEN_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
@@ -346,6 +348,125 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// After install, the object's per-worker execution context owns a spawned
+// counter storage carrying the object's registered counters, and that storage
+// is reachable through the config generation's tag-indexed counter storage
+// registry under the object_type and object_name tags.
+static int
+test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-object-gen-ectx",
+		CP_OBJECT_GEN_TEST_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_object *obj = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	TEST_ASSERT_NOT_NULL(obj, "object allocation failed");
+	TEST_ASSERT_SUCCESS(
+		cp_object_init(obj, agent, "test", "with-counters", &err),
+		"cp_object_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT(
+		counter_registry_register(
+			&obj->counter_registry, "bytes", 2, &err
+		) != COUNTER_INVALID,
+		"failed to register counter on object"
+	);
+
+	struct cp_object *objects[] = {obj};
+	TEST_ASSERT_SUCCESS(
+		agent_update_objects(agent, 1, objects, &err),
+		"agent_update_objects failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+
+	uint64_t idx;
+	TEST_ASSERT_SUCCESS(
+		cp_config_gen_lookup_object_index(
+			gen, "test", "with-counters", &idx
+		),
+		"lookup_object_index(with-counters) failed"
+	);
+
+	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(gen, 0);
+	TEST_ASSERT_NOT_NULL(ectx, "worker 0 execution context must exist");
+
+	struct object_ectx *object_ectx = config_gen_ectx_get_object(ectx, idx);
+	TEST_ASSERT_NOT_NULL(
+		object_ectx,
+		"object execution context must exist for the installed object"
+	);
+
+	struct counter_storage *storage =
+		ADDR_OF(&object_ectx->counter_storage);
+	TEST_ASSERT_NOT_NULL(
+		storage,
+		"object execution context must own a spawned counter storage"
+	);
+
+	struct counter_registry *storage_registry = ADDR_OF(&storage->registry);
+	TEST_ASSERT_EQUAL(
+		(long)storage_registry->count,
+		1L,
+		"spawned storage must carry the object's registered counter"
+	);
+
+	// The same storage is reachable through the tag-indexed registry, so
+	// the object's counters are queryable by object_type and object_name.
+	struct counter_tag tags[] = {
+		{.key = "object_type", .value = "test"},
+		{.key = "object_name", .value = "with-counters"}
+	};
+	struct cp_counter_storage **found =
+		cp_config_counter_storage_registry_find(
+			ADDR_OF(&ectx->counter_storage_registry), tags, 2, NULL
+		);
+	TEST_ASSERT_NOT_NULL(found, "tag find must not fail");
+	TEST_ASSERT(
+		found[0] != NULL && found[1] == NULL,
+		"tag find must match exactly the one object storage"
+	);
+	TEST_ASSERT(
+		ADDR_OF(&found[0]->storage) == storage,
+		"tag find must return the object execution context's storage"
+	);
+	free(found);
+
+	TEST_ASSERT_SUCCESS(
+		agent_delete_object(agent, "test", "with-counters", &err),
+		"delete_object(with-counters) failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	cp_object_fini(obj);
+	memory_bfree(&agent->memory_context, obj, sizeof(*obj));
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline: baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -384,6 +505,9 @@ main(void) {
 	int res = test_cp_object_gen_update_and_lookup(shm);
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_gen_replace_delete(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_gen_ectx_counter_storage(shm);
 	}
 
 	dataplane_ut_free(ut);

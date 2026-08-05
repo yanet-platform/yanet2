@@ -507,3 +507,33 @@ cp_config_counter_storage_registry_insert_module(
 		registry, tags, 6, counter_storage, err
 	);
 }
+
+struct counter_storage *
+cp_config_counter_storage_registry_lookup_object(
+	struct cp_config_counter_storage_registry *registry,
+	const char *object_type,
+	const char *object_name
+) {
+	struct counter_tag tags[] = {
+		{.key = "object_type", .value = object_type},
+		{.key = "object_name", .value = object_name}
+	};
+	return get_one(registry, tags, 2);
+}
+
+int
+cp_config_counter_storage_registry_insert_object(
+	struct cp_config_counter_storage_registry *registry,
+	const char *object_type,
+	const char *object_name,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+) {
+	struct counter_tag tags[] = {
+		{.key = "object_type", .value = object_type},
+		{.key = "object_name", .value = object_name}
+	};
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 2, counter_storage, err
+	);
+}

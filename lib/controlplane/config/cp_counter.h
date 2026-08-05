@@ -149,3 +149,19 @@ cp_config_counter_storage_registry_insert_module(
 	struct counter_storage *counter_storage,
 	yanet_error **err
 );
+
+struct counter_storage *
+cp_config_counter_storage_registry_lookup_object(
+	struct cp_config_counter_storage_registry *registry,
+	const char *object_type,
+	const char *object_name
+);
+
+int
+cp_config_counter_storage_registry_insert_object(
+	struct cp_config_counter_storage_registry *registry,
+	const char *object_type,
+	const char *object_name,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+);
