@@ -28,6 +28,10 @@
 #include <string.h>
 
 #define CP_OBJECT_GEN_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
+// A link-object unit test allocates only a base cp_module and a small objects
+// array, so a small arena is plenty and avoids cumulative cp-pool pressure
+// from the other tests' no-op agent_detach cycles.
+#define CP_MODULE_LINK_TEST_MEMORY_LIMIT (256u * 1024u)
 
 // Update installs objects into the live generation; lookup, lookup_index,
 // and get_object all agree on identity and index, and a missing name
@@ -382,6 +386,12 @@ test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
 		) != COUNTER_INVALID,
 		"failed to register counter on object"
 	);
+	TEST_ASSERT(
+		counter_registry_register(
+			&obj->link_counter_registry, "lookups", 1, &err
+		) != COUNTER_INVALID,
+		"failed to register counter on object link counter registry"
+	);
 
 	struct cp_object *objects[] = {obj};
 	TEST_ASSERT_SUCCESS(
@@ -424,6 +434,20 @@ test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
 		"spawned storage must carry the object's registered counter"
 	);
 
+	// The dedicated link counter registry is independent of the object's
+	// own registry: it carries the relation counter registered above, and
+	// the object's spawned storage does not include it.
+	TEST_ASSERT_EQUAL(
+		(long)obj->link_counter_registry.count,
+		1L,
+		"link counter registry must hold its registered counter"
+	);
+	TEST_ASSERT(
+		storage_registry != &obj->link_counter_registry,
+		"object storage must spawn from the object's own registry, not "
+		"the link registry"
+	);
+
 	// The same storage is reachable through the tag-indexed registry, so
 	// the object's counters are queryable by object_type and object_name.
 	struct counter_tag tags[] = {
@@ -453,6 +477,113 @@ test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
 
 	cp_object_fini(obj);
 	memory_bfree(&agent->memory_context, obj, sizeof(*obj));
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline: baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// cp_module_link_object keys links by the object's (type, name): a repeat link
+// returns the existing index, a same-name different-type object is a distinct
+// link, and cp_module_fini reclaims the array. Uses a base cp_module whose
+// memory context is initialized directly, avoiding module-type loading.
+static int
+test_cp_module_link_object(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-module-link-object",
+		CP_MODULE_LINK_TEST_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_module *module = (struct cp_module *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_module)
+	);
+	TEST_ASSERT_NOT_NULL(module, "module allocation failed");
+	memset(module, 0, sizeof(struct cp_module));
+	memory_context_init_from(
+		&module->memory_context, &agent->memory_context, "test-module"
+	);
+
+	uint64_t idx1;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(module, "test", "obj-a", &idx1, &err),
+		"link_object(test:obj-a) failed"
+	);
+	TEST_ASSERT_EQUAL((long)idx1, 0L, "first link must be at index 0");
+
+	uint64_t idx1_again;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(
+			module, "test", "obj-a", &idx1_again, &err
+		),
+		"link_object(test:obj-a) repeat failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)idx1_again,
+		0L,
+		"repeat link must return the existing index"
+	);
+
+	uint64_t idx2;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(module, "other", "obj-a", &idx2, &err),
+		"link_object(other:obj-a) failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)idx2,
+		1L,
+		"same name, different type must append at index 1"
+	);
+
+	uint64_t idx3;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(module, "test", "obj-b", &idx3, &err),
+		"link_object(test:obj-b) failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)idx3, 2L, "third distinct link must append at index 2"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)module->object_count, 3L, "object_count must be 3"
+	);
+
+	struct cp_module_object *objects = ADDR_OF(&module->objects);
+	TEST_ASSERT(
+		!strncmp(objects[0].type, "test", CP_OBJECT_TYPE_LEN) &&
+			!strncmp(objects[0].name, "obj-a", CP_OBJECT_NAME_LEN),
+		"link 0 must keep the (test, obj-a) identity"
+	);
+	TEST_ASSERT(
+		!strncmp(objects[1].type, "other", CP_OBJECT_TYPE_LEN) &&
+			!strncmp(objects[1].name, "obj-a", CP_OBJECT_NAME_LEN),
+		"link 1 must keep the (other, obj-a) identity"
+	);
+	TEST_ASSERT(
+		!strncmp(objects[2].type, "test", CP_OBJECT_TYPE_LEN) &&
+			!strncmp(objects[2].name, "obj-b", CP_OBJECT_NAME_LEN),
+		"link 2 must keep the (test, obj-b) identity"
+	);
+
+	// cp_module_fini frees the objects array (and the base allocations),
+	// verifying the new cleanup path; the struct itself is then returned to
+	// the agent arena.
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(*module));
 
 	size_t after = block_allocator_free_size(&agent->block_allocator);
 	TEST_ASSERT_EQUAL(
@@ -508,6 +639,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_gen_ectx_counter_storage(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_module_link_object(shm);
 	}
 
 	dataplane_ut_free(ut);

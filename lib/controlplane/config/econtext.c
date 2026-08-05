@@ -37,6 +37,24 @@ module_ectx_free(
 		);
 	}
 
+	struct module_object_link_ectx *object_links =
+		ADDR_OF(&module_ectx->object_links);
+	if (object_links != NULL) {
+		for (uint64_t idx = 0; idx < module_ectx->object_link_count;
+		     ++idx) {
+			struct counter_storage *link_storage =
+				ADDR_OF(&object_links[idx].counter_storage);
+			if (link_storage != NULL)
+				counter_storage_free(link_storage);
+		}
+		memory_bfree(
+			memory_context,
+			object_links,
+			sizeof(struct module_object_link_ectx) *
+				module_ectx->object_link_count
+		);
+	}
+
 	memory_bfree(memory_context, module_ectx, sizeof(struct module_ectx));
 }
 
@@ -177,13 +195,95 @@ module_ectx_create(
 
 	SET_OFFSET_OF(&module_ectx->counter_storage, counter_storage);
 
+	if (cp_module->object_count > 0) {
+		struct memory_context *counter_storage_memory_context =
+			&cp_config->counter_storage_memory_context;
+
+		struct module_object_link_ectx *object_links =
+			(struct module_object_link_ectx *)memory_balloc(
+				memory_context,
+				sizeof(struct module_object_link_ectx) *
+					cp_module->object_count
+			);
+		if (object_links == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate memory for module object "
+				"link execution contexts"
+			);
+			goto error;
+		}
+		memset(object_links,
+		       0,
+		       sizeof(struct module_object_link_ectx) *
+			       cp_module->object_count);
+		module_ectx->object_link_count = cp_module->object_count;
+		SET_OFFSET_OF(&module_ectx->object_links, object_links);
+
+		struct cp_module_object *linked_objects =
+			ADDR_OF(&cp_module->objects);
+		for (uint64_t link_idx = 0; link_idx < cp_module->object_count;
+		     ++link_idx) {
+			uint64_t object_idx;
+			if (cp_config_gen_lookup_object_index(
+				    cp_config_gen,
+				    linked_objects[link_idx].type,
+				    linked_objects[link_idx].name,
+				    &object_idx
+			    )) {
+				yanet_error_add(
+					err,
+					"linked object '%s:%s' not found for "
+					"module '%s:%s'",
+					linked_objects[link_idx].type,
+					linked_objects[link_idx].name,
+					cp_module->type,
+					cp_module->name
+				);
+				goto error;
+			}
+
+			struct cp_object *cp_object = cp_config_gen_get_object(
+				cp_config_gen, object_idx
+			);
+			struct object_ectx *object_ectx =
+				config_gen_ectx_get_object(
+					config_gen_ectx, object_idx
+				);
+
+			struct counter_storage *link_storage =
+				counter_storage_spawn(
+					counter_storage_memory_context,
+					NULL,
+					&cp_object->link_counter_registry
+				);
+			if (link_storage == NULL) {
+				yanet_error_add(
+					err,
+					"failed to spawn link counter storage "
+					"for object '%s:%s'",
+					cp_object->type,
+					cp_object->name
+				);
+				goto error;
+			}
+			SET_OFFSET_OF(
+				&object_links[link_idx].counter_storage,
+				link_storage
+			);
+			SET_OFFSET_OF(
+				&object_links[link_idx].object_ectx, object_ectx
+			);
+		}
+	}
+
 	return module_ectx;
 
 error_storage:
 	counter_storage_free(counter_storage);
 
 error:
-	memory_bfree(memory_context, module_ectx, ectx_size);
+	module_ectx_free(cp_config_gen, module_ectx);
 
 	return NULL;
 }

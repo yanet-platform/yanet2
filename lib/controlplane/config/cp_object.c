@@ -52,6 +52,18 @@ cp_object_init(
 		goto err_out;
 	}
 
+	if (counter_registry_init(
+		    &self->link_counter_registry, &self->memory_context, 0
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to initialize link counter registry for object "
+			"'%s'",
+			name
+		);
+		goto err_out;
+	}
+
 	return 0;
 
 err_out:
@@ -61,6 +73,7 @@ err_out:
 
 void
 cp_object_fini(struct cp_object *self) {
+	counter_registry_fini(&self->link_counter_registry);
 	counter_registry_fini(&self->counter_registry);
 
 	SET_OFFSET_OF(&self->agent, NULL);
@@ -215,6 +228,22 @@ cp_object_registry_upsert(
 		yanet_error_add(
 			err,
 			"failed to link counter registry for object '%s:%s'",
+			object_type,
+			object_name
+		);
+		return -1;
+	}
+
+	if (counter_registry_link(
+		    &new_object->link_counter_registry,
+		    (old_object != NULL) ? &old_object->link_counter_registry
+					 : NULL,
+		    err
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to link link counter registry for object "
+			"'%s:%s'",
 			object_type,
 			object_name
 		);

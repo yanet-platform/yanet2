@@ -32,6 +32,14 @@ struct cp_module_device {
 	char name[CP_DEVICE_NAME_LEN];
 };
 
+// A module's declared link to a cp_object, identified by the object's
+// (type, name) pair. Resolved to a per-worker object_ectx at execution-context
+// build time, mirroring cp_module_device's name-based device linkage.
+struct cp_module_object {
+	char type[CP_OBJECT_TYPE_LEN];
+	char name[CP_OBJECT_NAME_LEN];
+};
+
 struct cp_module {
 	struct registry_item config_item;
 
@@ -79,6 +87,11 @@ struct cp_module {
 
 	uint64_t device_count;
 	struct cp_module_device *devices;
+
+	// Objects this module links to, declared via cp_module_link_object and
+	// resolved to per-worker object execution contexts at build time.
+	uint64_t object_count;
+	struct cp_module_object *objects;
 };
 
 /**
@@ -96,6 +109,29 @@ int
 cp_module_link_device(
 	struct cp_module *cp_module,
 	const char *name,
+	uint64_t *index,
+	yanet_error **err
+);
+
+/**
+ * Link an object to a module configuration.
+ *
+ * Associates a cp_object with the module by the object's type and name. If an
+ * entry for the same (type, name) already exists, its index is returned
+ * unchanged; otherwise a new entry is appended.
+ *
+ * @param cp_module Pointer to the module configuration
+ * @param object_type Type identifier of the object to link
+ * @param object_name Name identifier of the object to link
+ * @param index Output parameter for the link index
+ * @param err Error output parameter
+ * @return 0 on success, negative error code on failure
+ */
+int
+cp_module_link_object(
+	struct cp_module *cp_module,
+	const char *object_type,
+	const char *object_name,
 	uint64_t *index,
 	yanet_error **err
 );

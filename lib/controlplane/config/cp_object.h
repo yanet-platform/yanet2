@@ -30,6 +30,12 @@ struct cp_object {
 
 	struct counter_registry counter_registry;
 
+	// Counters describing the relation between this object and the modules
+	// that link it. Each module's per-worker link execution context spawns
+	// its own counter storage from this registry, keeping the counter
+	// definitions on the object and the per-link values independent.
+	struct counter_registry link_counter_registry;
+
 	// Controlplane agent the configuration belongs to.
 	struct agent *agent;
 
