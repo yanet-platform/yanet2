@@ -607,11 +607,12 @@ export const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
     // Handle :: expansion
     let fullAddr = normalized;
     if (normalized.includes('::')) {
-        const parts = normalized.split('::');
-        const left = parts[0] ? parts[0].split(':') : [];
-        const right = parts[1] ? parts[1].split(':') : [];
+        const doubleColonParts = normalized.split('::');
+        if (doubleColonParts.length !== 2) return undefined;
+        const left = doubleColonParts[0] ? doubleColonParts[0].split(':') : [];
+        const right = doubleColonParts[1] ? doubleColonParts[1].split(':') : [];
         const missing = 8 - left.length - right.length;
-        if (missing < 0) return undefined;
+        if (missing < 1) return undefined;
         const middle = Array(missing).fill('0');
         fullAddr = [...left, ...middle, ...right].join(':');
     }
@@ -621,10 +622,7 @@ export const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
 
     const bytes: number[] = [];
     for (const part of parts) {
-        // The `::` expansion above always substitutes an explicit '0' for a
-        // compressed group, so an empty part here only comes from that path -
-        // keep it as zero rather than routing it through the strict parser.
-        const num = part === '' ? 0 : parseStrictHexGroup(part);
+        const num = parseStrictHexGroup(part);
         if (num === undefined) return undefined;
         bytes.push((num >> 8) & 0xff);
         bytes.push(num & 0xff);
@@ -899,18 +897,24 @@ export const cidrToIPRange = (cidr: string): IPRangeWire | undefined => {
     };
 };
 
-/** Parse CIDR strings to IPNet array with base64-encoded bytes. */
+/**
+ * Parse CIDR strings to IPNet array with base64-encoded bytes.
+ *
+ * A token with no `/mask` is a bare host address and is encoded at full
+ * width for its family (/32 for IPv4, /128 for IPv6). A token with an
+ * empty or malformed mask is dropped.
+ */
 export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask: string }> => {
     const results: Array<{ addr: string; mask: string }> = [];
     for (const cidr of cidrs) {
         const parts = cidr.trim().split('/');
-        if (parts.length !== 2) continue;
+        if (parts.length > 2) continue;
         const [ipPart, maskStr] = parts;
         const addrBytes = parseIPToBytes(ipPart);
         if (!addrBytes) continue;
         const isIPv4 = addrBytes.length === 4;
         const maxPrefix = isIPv4 ? 32 : 128;
-        const prefixLength = parseStrictPrefixLength(maskStr, maxPrefix);
+        const prefixLength = parts.length === 1 ? maxPrefix : parseStrictPrefixLength(maskStr, maxPrefix);
         if (prefixLength === undefined) continue;
         const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
         results.push({

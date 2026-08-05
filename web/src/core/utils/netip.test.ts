@@ -7,6 +7,7 @@ import {
     parseCIDRPrefix,
     parseCidrsToIPNets,
     parseIPToBytes,
+    parseIPv6ToBytes,
     IPv4Prefix,
     IPv6Address,
     CIDRParseError,
@@ -238,6 +239,49 @@ describe('parseIPv6ToBytes hex-group strictness', () => {
     });
 });
 
+describe('parseIPv6ToBytes malformed :: and empty-group rejection', () => {
+    it('rejects more than one :: in the address', () => {
+        expect(parseIPv6ToBytes('1::2::3')).toBeUndefined();
+    });
+
+    it('rejects a stray empty group produced by :: colliding with an adjacent colon', () => {
+        expect(parseIPv6ToBytes('2001:db8:::1')).toBeUndefined();
+    });
+
+    it('rejects a bare ::: with no other groups', () => {
+        expect(parseIPv6ToBytes(':::')).toBeUndefined();
+    });
+
+    it('rejects a leading single colon with no :: compression', () => {
+        expect(parseIPv6ToBytes(':1:2:3:4:5:6:7')).toBeUndefined();
+    });
+
+    it('rejects a trailing :: that compresses zero groups', () => {
+        expect(parseIPv6ToBytes('1:2:3:4:5:6:7:8::')).toBeUndefined();
+    });
+
+    it('accepts a :: compressing exactly one group and expands it in place', () => {
+        expect(parseIPv6ToBytes('1:2:3:4:5:6:7::')).toEqual([
+            0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 0,
+        ]);
+        expect(parseIPv6ToBytes('1:2:3:4:5:6::8')).toEqual([
+            0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 0, 0, 8,
+        ]);
+    });
+});
+
+describe('parseCidrsToIPNets rejects malformed :: forms in both spellings', () => {
+    it('drops ::: bare and with /128', () => {
+        expect(parseCidrsToIPNets([':::'])).toEqual([]);
+        expect(parseCidrsToIPNets([':::/128'])).toEqual([]);
+    });
+
+    it('drops 1::2::3 bare and with /128', () => {
+        expect(parseCidrsToIPNets(['1::2::3'])).toEqual([]);
+        expect(parseCidrsToIPNets(['1::2::3/128'])).toEqual([]);
+    });
+});
+
 describe('parseCidrsToIPNets hex-group strictness', () => {
     it('drops an entry with trailing junk in the first group', () => {
         expect(parseCidrsToIPNets(['1abcg::/64'])).toEqual([]);
@@ -354,6 +398,39 @@ describe('parseCidrsToIPNets mask strictness', () => {
     it('keeps a mask of exactly "/0" (positive control, guard is not over-broad)', () => {
         expect(parseCidrsToIPNets(['0.0.0.0/0'])).toHaveLength(1);
         expect(parseCidrsToIPNets(['::/0'])).toHaveLength(1);
+    });
+});
+
+describe('parseCidrsToIPNets mask-less host addresses', () => {
+    it('converts a mask-less IPv4 address identically to the same address written /32', () => {
+        expect(parseCidrsToIPNets(['192.168.1.1'])).toEqual(
+            parseCidrsToIPNets(['192.168.1.1/32']),
+        );
+        expect(parseCidrsToIPNets(['192.168.1.1'])).toHaveLength(1);
+    });
+
+    it('encodes a mask-less IPv6 address as a full-width /128 host prefix', () => {
+        expect(parseCidrsToIPNets(['2001:db8::1'])).toEqual([
+            { addr: 'IAENuAAAAAAAAAAAAAAAAQ==', mask: '/////////////////////w==' },
+        ]);
+    });
+
+    it('converts a mask-less embedded-IPv4 address identically to the same address written /128', () => {
+        expect(parseCidrsToIPNets(['::ffff:192.168.1.1'])).toEqual(
+            parseCidrsToIPNets(['::ffff:192.168.1.1/128']),
+        );
+        expect(parseCidrsToIPNets(['::ffff:192.168.1.1'])).toHaveLength(1);
+    });
+
+    it('still drops an entry with an empty mask rather than treating it as mask-less', () => {
+        expect(parseCidrsToIPNets(['10.0.0.0/'])).toEqual([]);
+    });
+
+    it('keeps a mask-less entry alongside a well-formed masked one, in order', () => {
+        expect(parseCidrsToIPNets(['192.168.1.1', '10.0.0.0/24'])).toEqual([
+            ...parseCidrsToIPNets(['192.168.1.1/32']),
+            ...parseCidrsToIPNets(['10.0.0.0/24']),
+        ]);
     });
 });
 
