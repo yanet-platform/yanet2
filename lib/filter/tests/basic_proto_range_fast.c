@@ -72,8 +72,9 @@ test_basic_tcp_udp(void *memory) {
 	struct filter_rule rules[2] = {r1, r2};
 
 	const struct filter_rule *rule_ptrs[2];
-	for (size_t rp_i = 0; rp_i < 2; rp_i++)
+	for (size_t rp_i = 0; rp_i < 2; rp_i++) {
 		rule_ptrs[rp_i] = &rules[rp_i];
+	}
 
 	struct filter filter;
 
@@ -139,8 +140,9 @@ test_tcp_flags(void *memory) {
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	const struct filter_rule *rule_ptrs[3];
-	for (size_t rp_i = 0; rp_i < 3; rp_i++)
+	for (size_t rp_i = 0; rp_i < 3; rp_i++) {
 		rule_ptrs[rp_i] = &rules[rp_i];
+	}
 
 	struct filter filter;
 	res = filter_init(
@@ -194,8 +196,9 @@ test_multiple_ranges_per_rule(void *memory) {
 	struct filter_rule rules[1] = {r1};
 
 	const struct filter_rule *rule_ptrs[1];
-	for (size_t rp_i = 0; rp_i < 1; rp_i++)
+	for (size_t rp_i = 0; rp_i < 1; rp_i++) {
 		rule_ptrs[rp_i] = &rules[rp_i];
+	}
 
 	struct filter filter;
 	res = filter_init(
@@ -247,8 +250,9 @@ test_boundary_values(void *memory) {
 	struct filter_rule rules[2] = {r1, r2};
 
 	const struct filter_rule *rule_ptrs[2];
-	for (size_t rp_i = 0; rp_i < 2; rp_i++)
+	for (size_t rp_i = 0; rp_i < 2; rp_i++) {
 		rule_ptrs[rp_i] = &rules[rp_i];
+	}
 
 	struct filter filter;
 	res = filter_init(

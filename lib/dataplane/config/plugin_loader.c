@@ -23,16 +23,20 @@ plugin_name_from_filename(const char *filename, char *name, size_t name_len) {
 	size_t suffix_len = strlen(PLUGIN_SO_SUFFIX);
 	size_t fn_len = strlen(filename);
 
-	if (fn_len <= prefix_len + suffix_len)
+	if (fn_len <= prefix_len + suffix_len) {
 		return -1;
-	if (strncmp(filename, PLUGIN_SO_PREFIX, prefix_len) != 0)
+	}
+	if (strncmp(filename, PLUGIN_SO_PREFIX, prefix_len) != 0) {
 		return -1;
-	if (strcmp(filename + fn_len - suffix_len, PLUGIN_SO_SUFFIX) != 0)
+	}
+	if (strcmp(filename + fn_len - suffix_len, PLUGIN_SO_SUFFIX) != 0) {
 		return -1;
+	}
 
 	size_t mod_len = fn_len - prefix_len - suffix_len;
-	if (mod_len >= name_len)
+	if (mod_len >= name_len) {
 		return -1;
+	}
 
 	memcpy(name, filename + prefix_len, mod_len);
 	name[mod_len] = '\0';
@@ -86,8 +90,9 @@ dp_load_plugins(const char *plugin_dir, struct plugin_registry *registry) {
 		char name[PLUGIN_NAME_LEN];
 		if (plugin_name_from_filename(
 			    entry->d_name, name, sizeof(name)
-		    ) != 0)
+		    ) != 0) {
 			continue;
+		}
 
 		char so_path[512];
 		snprintf(
@@ -99,8 +104,9 @@ dp_load_plugins(const char *plugin_dir, struct plugin_registry *registry) {
 		);
 
 		struct stat st;
-		if (stat(so_path, &st) != 0 || !S_ISREG(st.st_mode))
+		if (stat(so_path, &st) != 0 || !S_ISREG(st.st_mode)) {
 			continue;
+		}
 
 		// A file matching the plugin filename pattern is an explicitly
 		// configured plugin. If it is present but broken, abort startup
@@ -176,8 +182,9 @@ fail:
 
 void
 dp_unload_plugins(struct plugin_registry *registry) {
-	if (registry->plugins == NULL)
+	if (registry->plugins == NULL) {
 		return;
+	}
 
 	for (uint64_t i = 0; i < registry->count; i++) {
 		struct plugin_handle *p = &registry->plugins[i];

@@ -21,8 +21,9 @@ collect_port_values(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_table_init(table, memory_context, 1, 65536))
+	if (value_table_init(table, memory_context, 1, 65536)) {
 		return -1;
+	}
 
 	struct remap_table remap_table;
 	if (remap_table_init(&remap_table, memory_context, 65536)) {
@@ -35,8 +36,9 @@ collect_port_values(
 
 		remap_table_new_gen(&remap_table);
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		struct filter_port_range *port_ranges;
@@ -45,8 +47,9 @@ collect_port_values(
 		for (struct filter_port_range *ports = port_ranges;
 		     ports < port_ranges + port_range_count;
 		     ++ports) {
-			if (ports->to - ports->from == 65535)
+			if (ports->to - ports->from == 65535) {
 				continue;
+			}
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
 				uint32_t *value =
@@ -71,8 +74,9 @@ collect_port_values(
 		if (value_registry_start(registry)) {
 			goto error_collect;
 		}
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		struct filter_port_range *port_ranges;
@@ -200,8 +204,9 @@ FILTER_ATTR_COMPILER_FREE_FUNC(port_src)(
 	void *data, struct memory_context *memory_context
 ) {
 	struct value_table *table = (struct value_table *)data;
-	if (table == NULL)
+	if (table == NULL) {
 		return;
+	}
 
 	value_table_free(table);
 	memory_bfree(memory_context, table, sizeof(struct value_table));
@@ -212,8 +217,9 @@ FILTER_ATTR_COMPILER_FREE_FUNC(port_dst)(
 	void *data, struct memory_context *memory_context
 ) {
 	struct value_table *table = (struct value_table *)data;
-	if (table == NULL)
+	if (table == NULL) {
 		return;
+	}
 
 	value_table_free(table);
 	memory_bfree(memory_context, table, sizeof(struct value_table));

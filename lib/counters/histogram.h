@@ -14,11 +14,13 @@ counter_hist_bucket_exp2(
 	uint64_t value, uint64_t min_bucket, uint64_t max_bucket
 ) {
 	uint64_t bucket = uint64_log_up(value);
-	if (bucket < min_bucket)
+	if (bucket < min_bucket) {
 		bucket = min_bucket;
+	}
 	bucket -= min_bucket;
-	if (bucket > max_bucket - 1)
+	if (bucket > max_bucket - 1) {
 		bucket = max_bucket - 1;
+	}
 
 	return bucket;
 }

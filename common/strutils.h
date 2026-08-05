@@ -24,7 +24,8 @@ strtcpy(char *restrict dst, const char *restrict src, size_t dsize) {
 	memcpy(dst, src, dlen);
 	dst[dlen] = '\0';
 
-	if (trunc)
+	if (trunc) {
 		errno = E2BIG;
+	}
 	return trunc ? -1 : (ssize_t)slen;
 }

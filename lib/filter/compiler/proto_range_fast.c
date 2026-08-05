@@ -24,8 +24,9 @@ static int
 validate_and_count(const struct filter_rule **rules, size_t rules_count) {
 	int cnt = 0;
 	for (size_t i = 0; i < rules_count; ++i) {
-		if (rules[i] == NULL)
+		if (rules[i] == NULL) {
 			continue;
+		}
 		struct filter_proto_ranges ranges;
 		ranges.count = rules[i]->transport.proto_count;
 		ranges.items = rules[i]->transport.protos;
@@ -66,8 +67,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range_fast)(
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
-		if (rule == NULL)
+		if (rule == NULL) {
 			continue;
+		}
 		struct filter_proto_range *proto_ranges =
 			rule->transport.protos;
 		size_t proto_count = rule->transport.proto_count;
@@ -94,8 +96,9 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(proto_range_fast)(
 	void *data, struct memory_context *memory_context
 ) {
-	if (data == NULL)
+	if (data == NULL) {
 		return;
+	}
 	struct proto_range_fast_classifier *c =
 		(struct proto_range_fast_classifier *)data;
 	segments_classifier_u16_fini(&c->classifier, memory_context);

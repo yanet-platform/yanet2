@@ -481,8 +481,9 @@ cp_chain_config_create(
 		calloc(1,
 		       sizeof(struct cp_chain_config) +
 			       sizeof(struct cp_chain_module_config) * length);
-	if (cp_chain_config == NULL)
+	if (cp_chain_config == NULL) {
 		return NULL;
+	}
 
 	strtcpy(cp_chain_config->name, name, CP_CHAIN_NAME_LEN);
 	cp_chain_config->length = length;
@@ -510,8 +511,9 @@ cp_function_config_create(const char *name, uint64_t chain_count) {
 		sizeof(struct cp_function_config) +
 			sizeof(struct cp_function_chain_config) * chain_count
 	);
-	if (config == NULL)
+	if (config == NULL) {
 		return NULL;
+	}
 	strtcpy(config->name, name, CP_FUNCTION_NAME_LEN);
 	config->chain_count = chain_count;
 
@@ -521,8 +523,9 @@ cp_function_config_create(const char *name, uint64_t chain_count) {
 void
 cp_function_config_free(struct cp_function_config *config) {
 	for (uint64_t idx = 0; idx < config->chain_count; ++idx) {
-		if (config->chains[idx].chain != NULL)
+		if (config->chains[idx].chain != NULL) {
 			cp_chain_config_free(config->chains[idx].chain);
+		}
 	}
 	free(config);
 }
@@ -534,11 +537,13 @@ cp_function_config_set_chain(
 	struct cp_chain_config *cp_chain_config,
 	uint64_t weight
 ) {
-	if (index >= cp_function_config->chain_count)
+	if (index >= cp_function_config->chain_count) {
 		return -1;
+	}
 
-	if (cp_function_config->chains[index].chain != NULL)
+	if (cp_function_config->chains[index].chain != NULL) {
 		return -1;
+	}
 
 	cp_function_config->chains[index] = (struct cp_function_chain_config){
 		.chain = cp_chain_config,
@@ -653,8 +658,9 @@ int
 cp_pipeline_config_set_function(
 	struct cp_pipeline_config *config, uint64_t index, const char *name
 ) {
-	if (index >= config->length)
+	if (index >= config->length) {
 		return -1;
+	}
 	strtcpy(config->functions[index], name, sizeof(config->functions[index])
 	);
 	return 0;
@@ -756,8 +762,9 @@ yanet_get_dp_module_info(
 	uint64_t index,
 	struct dp_module_info *module_info
 ) {
-	if (index >= module_list->module_count)
+	if (index >= module_list->module_count) {
 		return -1;
+	}
 	*module_info = module_list->modules[index];
 	return 0;
 }
@@ -776,8 +783,9 @@ yanet_get_dp_module_list_info(struct dp_config *dp_config) {
 			sizeof(struct dp_module_list_info) +
 			dp_config->module_count * sizeof(struct dp_module_info)
 		);
-	if (module_list_info == NULL)
+	if (module_list_info == NULL) {
 		goto unlock;
+	}
 
 	struct dp_module *modules = ADDR_OF(&dp_config->dp_modules);
 
@@ -817,8 +825,9 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 			sizeof(struct cp_module_info) *
 				module_registry->registry.capacity
 		);
-	if (module_list_info == NULL)
+	if (module_list_info == NULL) {
 		goto unlock;
+	}
 
 	module_list_info->module_count = 0;
 
@@ -850,8 +859,9 @@ struct cp_module_info *
 yanet_get_cp_module_info(
 	struct cp_module_list_info *module_list, uint64_t index
 ) {
-	if (index >= module_list->module_count)
+	if (index >= module_list->module_count) {
 		return NULL;
+	}
 	return module_list->modules + index;
 }
 
@@ -893,8 +903,9 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 			sizeof(struct cp_function_info *) *
 				function_registry->registry.capacity
 		);
-	if (function_list_info == NULL)
+	if (function_list_info == NULL) {
 		goto unlock;
+	}
 
 	function_list_info->function_count = 0;
 
@@ -987,8 +998,9 @@ struct cp_function_info *
 yanet_get_cp_function_info(
 	struct cp_function_list_info *function_list, uint64_t index
 ) {
-	if (index >= function_list->function_count)
+	if (index >= function_list->function_count) {
 		return NULL;
+	}
 
 	return function_list->functions[index];
 }
@@ -997,8 +1009,9 @@ struct cp_chain_info *
 yanet_get_cp_function_chain_info(
 	struct cp_function_info *function_info, uint64_t index
 ) {
-	if (index >= function_info->chain_count)
+	if (index >= function_info->chain_count) {
 		return NULL;
+	}
 
 	return function_info->chains[index];
 }
@@ -1007,8 +1020,9 @@ struct cp_module_info_id *
 yanet_get_cp_function_chain_module_info(
 	struct cp_chain_info *chain_info, uint64_t index
 ) {
-	if (index >= chain_info->length)
+	if (index >= chain_info->length) {
 		return NULL;
+	}
 
 	return chain_info->modules + index;
 }
@@ -1017,8 +1031,9 @@ yanet_get_cp_function_chain_module_info(
 
 void
 cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
-	for (uint64_t idx = 0; idx < pipeline_list_info->count; ++idx)
+	for (uint64_t idx = 0; idx < pipeline_list_info->count; ++idx) {
 		free(pipeline_list_info->pipelines[idx]);
+	}
 	free(pipeline_list_info);
 }
 
@@ -1037,8 +1052,9 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			sizeof(struct cp_pipeline_info *) *
 				pipeline_registry->capacity
 		);
-	if (pipeline_list_info == NULL)
+	if (pipeline_list_info == NULL) {
 		goto unlock;
+	}
 
 	memset(pipeline_list_info,
 	       0,
@@ -1087,8 +1103,9 @@ struct cp_pipeline_info *
 yanet_get_cp_pipeline_info(
 	struct cp_pipeline_list_info *pipeline_list_info, uint64_t index
 ) {
-	if (index >= pipeline_list_info->count)
+	if (index >= pipeline_list_info->count) {
 		return NULL;
+	}
 
 	return pipeline_list_info->pipelines[index];
 }
@@ -1097,8 +1114,9 @@ struct cp_function_info_id *
 yanet_get_cp_pipeline_function_info_id(
 	struct cp_pipeline_info *pipeline_info, uint64_t index
 ) {
-	if (index >= pipeline_info->length)
+	if (index >= pipeline_info->length) {
 		return NULL;
+	}
 
 	return pipeline_info->functions + index;
 }
@@ -1173,8 +1191,9 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 			device_registry->registry.capacity;
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
-	if (device_list_info == NULL)
+	if (device_list_info == NULL) {
 		goto unlock;
+	}
 
 	memset(device_list_info, 0, device_list_info_size);
 	device_list_info->device_count = 0;
@@ -1208,8 +1227,9 @@ struct cp_device_info *
 yanet_get_cp_device_info(
 	struct cp_device_list_info *device_list_info, uint64_t idx
 ) {
-	if (idx >= device_list_info->device_count)
+	if (idx >= device_list_info->device_count) {
 		return NULL;
+	}
 
 	return device_list_info->devices[idx];
 }
@@ -1218,8 +1238,9 @@ struct cp_device_pipeline_info *
 yanet_get_cp_device_input_pipeline_info(
 	struct cp_device_info *device_info, uint64_t idx
 ) {
-	if (idx >= device_info->input_count)
+	if (idx >= device_info->input_count) {
 		return NULL;
+	}
 
 	return device_info->pipelines + idx;
 }
@@ -1228,8 +1249,9 @@ struct cp_device_pipeline_info *
 yanet_get_cp_device_output_pipeline_info(
 	struct cp_device_info *device_info, uint64_t idx
 ) {
-	if (idx >= device_info->output_count)
+	if (idx >= device_info->output_count) {
 		return NULL;
+	}
 
 	return device_info->pipelines + device_info->input_count + idx;
 }
@@ -1348,8 +1370,9 @@ cp_device_config_create(
 		(struct cp_device_config *)malloc(sizeof(struct cp_device_config
 		));
 
-	if (config == NULL)
+	if (config == NULL) {
 		return NULL;
+	}
 
 	memset(config, 0, sizeof(struct cp_device_config));
 	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
@@ -1399,8 +1422,9 @@ cp_device_config_set_input_pipeline(
 	const char *name,
 	uint64_t weight
 ) {
-	if (index >= device->input_pipelines->count)
+	if (index >= device->input_pipelines->count) {
 		return -1;
+	}
 	strtcpy(device->input_pipelines->pipelines[index].name,
 		name,
 		CP_PIPELINE_NAME_LEN);
@@ -1416,8 +1440,9 @@ cp_device_config_set_output_pipeline(
 	const char *name,
 	uint64_t weight
 ) {
-	if (index >= device->output_pipelines->count)
+	if (index >= device->output_pipelines->count) {
 		return -1;
+	}
 	strtcpy(device->output_pipelines->pipelines[index].name,
 		name,
 		CP_PIPELINE_NAME_LEN);
@@ -1787,8 +1812,9 @@ yanet_get_device_counters(
 
 struct counter_handle *
 yanet_get_counter(struct counter_handle_list *counters, uint64_t idx) {
-	if (idx >= counters->count)
+	if (idx >= counters->count) {
 		return NULL;
+	}
 	return counters->counters + idx;
 }
 
@@ -1829,8 +1855,9 @@ counter_handle_list_build(
 		sizeof(struct counter_handle) * count
 	);
 
-	if (list == NULL)
+	if (list == NULL) {
 		return NULL;
+	}
 	list->instance_count = worker_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
@@ -1925,8 +1952,9 @@ yanet_get_port_counters(struct dp_config *dp_config) {
 			sizeof(struct port_counter_group_list) +
 			sizeof(struct port_counter_group) * port_count
 		);
-	if (groups == NULL)
+	if (groups == NULL) {
 		return NULL;
+	}
 	groups->port_count = port_count;
 
 	for (uint64_t idx = 0; idx < port_count; ++idx) {

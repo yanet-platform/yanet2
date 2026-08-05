@@ -8,8 +8,9 @@ static inline struct device_ectx *
 config_gen_ectx_get_device(
 	struct config_gen_ectx *config_gen_ectx, uint64_t index
 ) {
-	if (index >= config_gen_ectx->device_count)
+	if (index >= config_gen_ectx->device_count) {
 		return NULL;
+	}
 	return ADDR_OF(config_gen_ectx->devices + index);
 }
 

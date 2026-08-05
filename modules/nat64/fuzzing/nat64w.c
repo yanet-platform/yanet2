@@ -99,18 +99,20 @@ nat64_test_config(struct cp_module **cp_module) {
 	return 0;
 
 error_mappings:
-	if (config->mappings.list)
+	if (config->mappings.list) {
 		memory_bfree(
 			&config->cp_module.memory_context,
 			config->mappings.list,
 			sizeof(struct ip4to6) * config->mappings.count
 		);
-	if (config->prefixes.prefixes)
+	}
+	if (config->prefixes.prefixes) {
 		memory_bfree(
 			&config->cp_module.memory_context,
 			config->prefixes.prefixes,
 			sizeof(struct nat64_prefix) * config->prefixes.count
 		);
+	}
 
 error_lpm_prefixes:
 	lpm_free(&config->prefixes.v6_prefixes);

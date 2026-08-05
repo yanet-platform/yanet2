@@ -52,8 +52,9 @@ validate_and_count(
 ) {
 	int cnt = 0;
 	for (size_t i = 0; i < rules_count; ++i) {
-		if (rules[i] == NULL)
+		if (rules[i] == NULL) {
 			continue;
+		}
 		struct net4_count n4_count = getter(rules[i]);
 		for (size_t j = 0; j < n4_count.count; ++j) {
 			if (!validate_net4(n4_count.net4 + j)) {
@@ -94,8 +95,9 @@ classifier_init(
 
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
-		if (rules[rule_idx] == NULL)
+		if (rules[rule_idx] == NULL) {
 			continue;
+		}
 		struct net4_count cur = getter(rules[rule_idx]);
 		for (size_t j = 0; j < cur.count; ++j) {
 			uint32_t from, to;

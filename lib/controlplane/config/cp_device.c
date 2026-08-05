@@ -359,8 +359,9 @@ cp_device_entry_free(
 	struct memory_context *memory_context,
 	struct cp_device_entry *cp_device_entry
 ) {
-	if (cp_device_entry == NULL)
+	if (cp_device_entry == NULL) {
 		return;
+	}
 	memory_bfree(
 		memory_context,
 		cp_device_entry,

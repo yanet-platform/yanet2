@@ -590,8 +590,9 @@ main(int argc, char **argv) {
 	printf("Initializing filter...\n");
 	const struct filter_rule **rule_ptrs =
 		malloc(sizeof(const struct filter_rule *) * config.num_rules);
-	for (size_t rp_i = 0; rp_i < config.num_rules; rp_i++)
+	for (size_t rp_i = 0; rp_i < config.num_rules; rp_i++) {
 		rule_ptrs[rp_i] = &rules[rp_i];
+	}
 
 	struct filter filter;
 	switch (config.sig_type) {

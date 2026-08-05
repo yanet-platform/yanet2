@@ -168,10 +168,11 @@ cp_config_gen_free(
 		     ++idx) {
 			struct config_gen_ectx *config_gen_ectx =
 				ADDR_OF(config_gen_ectxs + idx);
-			if (config_gen_ectx != NULL)
+			if (config_gen_ectx != NULL) {
 				config_gen_ectx_free(
 					config_gen, config_gen_ectx
 				);
+			}
 		}
 		memory_bfree(
 			&cp_config->ectx_memory_context,

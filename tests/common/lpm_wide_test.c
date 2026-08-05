@@ -35,17 +35,20 @@ walk_func(
 	if (read_u32(from + 8) != htobe32(value * 256)) {
 		return -1;
 	}
-	if (from[15] != 4)
+	if (from[15] != 4) {
 		return -1;
+	}
 
 	if (read_u32(to + 8) != htobe32(value * 256)) {
 		return -1;
 	}
-	if (to[15] != 8)
+	if (to[15] != 8) {
 		return -1;
+	}
 
-	if (value != *(uint32_t *)check)
+	if (value != *(uint32_t *)check) {
 		return -1;
+	}
 
 	++(*(uint32_t *)check);
 	return 0;
@@ -56,8 +59,9 @@ walk_func(
 static int
 test_overlapping_prefixes(void) {
 	void *arena = malloc(ARENA_SIZE);
-	if (arena == NULL)
+	if (arena == NULL) {
 		return -1;
+	}
 
 	struct block_allocator ba;
 	block_allocator_init(&ba);
@@ -140,8 +144,9 @@ main(int argc, char **argv) {
 		from[15] = 4;
 		write_u32(to + 8, htobe32(idx * 256));
 		to[15] = 8;
-		if (lpm_wide_insert(&lpm, 16, from, to, idx))
+		if (lpm_wide_insert(&lpm, 16, from, to, idx)) {
 			break;
+		}
 		++idx;
 	} while (1);
 	uint32_t fail_idx = idx;
@@ -166,8 +171,9 @@ main(int argc, char **argv) {
 		from[15] = 4;
 		write_u32(to + 8, htobe32(idx * 256));
 		to[15] = 8;
-		if (lpm_wide_insert(&lpm, 16, from, to, idx))
+		if (lpm_wide_insert(&lpm, 16, from, to, idx)) {
 			break;
+		}
 		++idx;
 	} while (1);
 

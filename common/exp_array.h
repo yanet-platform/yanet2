@@ -21,8 +21,9 @@ mem_array_expand_exp(
 		void *new_array = memory_brealloc(
 			memory_context, *array, old_size, new_size
 		);
-		if (!new_array)
+		if (!new_array) {
 			return -1;
+		}
 		*array = new_array;
 	}
 
@@ -37,8 +38,9 @@ mem_array_free_exp(
 	size_t item_size,
 	uint64_t count
 ) {
-	if (!count)
+	if (!count) {
 		return;
+	}
 
 	uint64_t capacity = 1 << uint64_log_up(count);
 	memory_bfree(memory_context, array, capacity * item_size);

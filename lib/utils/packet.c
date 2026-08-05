@@ -40,10 +40,11 @@ make_mbuf4(
 
 	uint16_t total_len =
 		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr);
-	if (proto == IPPROTO_UDP)
+	if (proto == IPPROTO_UDP) {
 		total_len += sizeof(struct rte_udp_hdr);
-	else
+	} else {
 		total_len += sizeof(struct rte_tcp_hdr);
+	}
 
 	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
 	mbuf->data_len = MBUF_MAX_SIZE;

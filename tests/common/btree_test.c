@@ -2322,90 +2322,130 @@ main() {
 	int failed = 0;
 
 	// Run uint16_t tests
-	if (test_btree_u16_init_free() != TEST_SUCCESS)
+	if (test_btree_u16_init_free() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_empty() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_empty() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_single_element() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_single_element() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_lower_bound() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_lower_bound() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_upper_bound() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_upper_bound() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_large_dataset() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_large_dataset() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_duplicates() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_duplicates() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_sequential_searches() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_sequential_searches() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_boundary_values() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_boundary_values() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_power_of_2_sizes() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_power_of_2_sizes() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_upper_bounds_batch() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_upper_bounds_batch() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_upper_bounds_large_batch() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_upper_bounds_large_batch() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u16_sentinel_high_bit() != TEST_SUCCESS)
+	}
+	if (test_btree_u16_sentinel_high_bit() != TEST_SUCCESS) {
 		failed++;
+	}
 
 	// Run uint32_t tests
-	if (test_btree_u32_init_free() != TEST_SUCCESS)
+	if (test_btree_u32_init_free() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_empty() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_empty() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_single_element() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_single_element() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_lower_bound() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_lower_bound() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_upper_bound() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_upper_bound() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_large_dataset() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_large_dataset() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_duplicates() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_duplicates() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_sequential_searches() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_sequential_searches() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_boundary_values() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_boundary_values() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_power_of_2_sizes() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_power_of_2_sizes() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_upper_bounds_batch() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_upper_bounds_batch() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_upper_bounds_large_batch() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_upper_bounds_large_batch() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u32_sentinel_high_bit() != TEST_SUCCESS)
+	}
+	if (test_btree_u32_sentinel_high_bit() != TEST_SUCCESS) {
 		failed++;
+	}
 
 	// Run uint64_t tests
-	if (test_btree_u64_init_free() != TEST_SUCCESS)
+	if (test_btree_u64_init_free() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_empty() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_empty() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_single_element() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_single_element() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_lower_bound() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_lower_bound() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_upper_bound() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_upper_bound() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_basic() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_basic() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_large_dataset() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_large_dataset() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_duplicates() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_duplicates() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_sequential_searches() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_sequential_searches() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_boundary_values() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_boundary_values() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_power_of_2_sizes() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_power_of_2_sizes() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_upper_bounds_batch() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_upper_bounds_batch() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_upper_bounds_large_batch() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_upper_bounds_large_batch() != TEST_SUCCESS) {
 		failed++;
-	if (test_btree_u64_sentinel_high_bit() != TEST_SUCCESS)
+	}
+	if (test_btree_u64_sentinel_high_bit() != TEST_SUCCESS) {
 		failed++;
+	}
 
 	// Run various size tests
 	size_t ns[] = {
@@ -2425,12 +2465,15 @@ main() {
 		(1 << 14) - 1
 	};
 	for (size_t i = 0; i < sizeof(ns) / sizeof(size_t); i++) {
-		if (test_btree_u16_various_n(ns[i]) != TEST_SUCCESS)
+		if (test_btree_u16_various_n(ns[i]) != TEST_SUCCESS) {
 			failed++;
-		if (test_btree_u32_various_n(ns[i]) != TEST_SUCCESS)
+		}
+		if (test_btree_u32_various_n(ns[i]) != TEST_SUCCESS) {
 			failed++;
-		if (test_btree_u64_various_n(ns[i]) != TEST_SUCCESS)
+		}
+		if (test_btree_u64_various_n(ns[i]) != TEST_SUCCESS) {
 			failed++;
+		}
 	}
 
 	if (failed == 0) {

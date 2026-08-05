@@ -146,8 +146,9 @@ memory_balloc(struct memory_context *context, size_t size) {
 	void *result = block_allocator_balloc(
 		ADDR_OF(&context->block_allocator), size
 	);
-	if (result == NULL)
+	if (result == NULL) {
 		return NULL;
+	}
 	// A single memory_context (e.g. an agent's own context) can now be
 	// ballocked from by several controlplane threads at once.
 	__atomic_fetch_add(&context->balloc_count, 1, __ATOMIC_RELAXED);
@@ -157,8 +158,9 @@ memory_balloc(struct memory_context *context, size_t size) {
 
 static inline void
 memory_bfree(struct memory_context *context, void *block, size_t size) {
-	if (block == NULL || !size)
+	if (block == NULL || !size) {
 		return;
+	}
 // Verified reproducing: gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, release
 // build flags (-O2 -g -Wall -Wextra -Werror -march=haswell -fPIC), e.g.
 // modules/acl/api/controlplane.c inlining memory_bfree into
@@ -190,8 +192,9 @@ memory_brealloc(
 	size_t old_size,
 	size_t new_size
 ) {
-	if (!new_size && !old_size)
+	if (!new_size && !old_size) {
 		return NULL;
+	}
 
 	if (!new_size) {
 		memory_bfree(context, data, old_size);
@@ -199,16 +202,19 @@ memory_brealloc(
 	}
 
 	void *new_data = memory_balloc(context, new_size);
-	if (new_data == NULL)
+	if (new_data == NULL) {
 		return NULL;
+	}
 	if (old_size < new_size) {
-		if (old_size)
+		if (old_size) {
 			memcpy(new_data, data, old_size);
+		}
 	} else {
 		memcpy(new_data, data, new_size);
 	}
 
-	if (old_size)
+	if (old_size) {
 		memory_bfree(context, data, old_size);
+	}
 	return new_data;
 }

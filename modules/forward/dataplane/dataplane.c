@@ -99,18 +99,21 @@ forward_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			if (ip4_result[ip4_idx] < action)
+			if (ip4_result[ip4_idx] < action) {
 				action = ip4_result[ip4_idx];
+			}
 			++ip4_idx;
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			if (ip6_result[ip6_idx] < action)
+			if (ip6_result[ip6_idx] < action) {
 				action = ip6_result[ip6_idx];
+			}
 			++ip6_idx;
 		}
 
-		if (action != FILTER_RULE_INVALID)
+		if (action != FILTER_RULE_INVALID) {
 			target = ADDR_OF(&forward_config->targets) + action;
+		}
 
 		if (target != NULL) {
 			uint64_t *counters = counter_get_address(

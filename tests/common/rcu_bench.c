@@ -237,10 +237,12 @@ benchmark_contention(void) {
 	uint64_t sum_time = 0;
 
 	for (size_t i = 0; i < BENCH_WORKERS; i++) {
-		if (worker_times[i] < min_time)
+		if (worker_times[i] < min_time) {
 			min_time = worker_times[i];
-		if (worker_times[i] > max_time)
+		}
+		if (worker_times[i] > max_time) {
 			max_time = worker_times[i];
+		}
 		sum_time += worker_times[i];
 	}
 
@@ -295,10 +297,12 @@ benchmark_latency_distribution(void) {
 	uint64_t sum_lat = 0;
 
 	for (size_t i = 0; i < num_samples; i++) {
-		if (latencies[i] < min_lat)
+		if (latencies[i] < min_lat) {
 			min_lat = latencies[i];
-		if (latencies[i] > max_lat)
+		}
+		if (latencies[i] > max_lat) {
 			max_lat = latencies[i];
+		}
 		sum_lat += latencies[i];
 	}
 
@@ -488,10 +492,12 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 		(updates < max_latencies) ? updates : max_latencies;
 
 	for (size_t i = 0; i < num_latencies; i++) {
-		if (update_latencies[i] < min_update_lat)
+		if (update_latencies[i] < min_update_lat) {
 			min_update_lat = update_latencies[i];
-		if (update_latencies[i] > max_update_lat)
+		}
+		if (update_latencies[i] > max_update_lat) {
 			max_update_lat = update_latencies[i];
+		}
 		sum_update_lat += update_latencies[i];
 	}
 

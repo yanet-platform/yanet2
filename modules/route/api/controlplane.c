@@ -128,8 +128,9 @@ route_module_config_data_init(
 	struct route_module_config *config,
 	struct memory_context *memory_context
 ) {
-	if (lpm_init(&config->lpm_v4, memory_context))
+	if (lpm_init(&config->lpm_v4, memory_context)) {
 		return -1;
+	}
 	if (lpm_init(&config->lpm_v6, memory_context)) {
 		lpm_free(&config->lpm_v4);
 		return -1;
@@ -353,8 +354,9 @@ route_module_config_fib_range_count_v6(struct cp_module *cp_module) {
 struct fib_iter *
 fib_iter_new(struct cp_module *cp_module) {
 	struct fib_iter *it = calloc(1, sizeof(*it));
-	if (it == NULL)
+	if (it == NULL) {
 		return NULL;
+	}
 	it->config =
 		container_of(cp_module, struct route_module_config, cp_module);
 	return it;
@@ -423,8 +425,9 @@ uint64_t
 fib_iter_nexthop_count(const struct fib_iter *it) {
 	uint32_t rli = it->lpm_it.cur_value;
 	struct route_module_config *config = it->config;
-	if (rli >= config->route_list_count)
+	if (rli >= config->route_list_count) {
 		return 0;
+	}
 	struct route_list *rls = ADDR_OF(&config->route_lists);
 	return rls[rli].count;
 }
@@ -434,18 +437,21 @@ static const struct route *
 fib_iter_resolve_route(const struct fib_iter *it, uint64_t nexthop_idx) {
 	uint32_t rli = it->lpm_it.cur_value;
 	struct route_module_config *config = it->config;
-	if (rli >= config->route_list_count)
+	if (rli >= config->route_list_count) {
 		return NULL;
+	}
 
 	struct route_list *rls = ADDR_OF(&config->route_lists);
 	struct route_list *rl = &rls[rli];
-	if (nexthop_idx >= rl->count)
+	if (nexthop_idx >= rl->count) {
 		return NULL;
+	}
 
 	uint64_t *route_indexes = ADDR_OF(&config->route_indexes);
 	uint64_t route_idx = route_indexes[rl->start + nexthop_idx];
-	if (route_idx >= config->route_count)
+	if (route_idx >= config->route_count) {
 		return NULL;
+	}
 
 	struct route *routes = ADDR_OF(&config->routes);
 	return &routes[route_idx];
@@ -456,10 +462,11 @@ fib_iter_nexthop_dst_mac(
 	const struct fib_iter *it, uint64_t nexthop_idx, struct ether_addr *dst
 ) {
 	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
-	if (r != NULL)
+	if (r != NULL) {
 		*dst = r->dst_addr;
-	else
+	} else {
 		memset(dst, 0, sizeof(*dst));
+	}
 }
 
 void
@@ -467,21 +474,24 @@ fib_iter_nexthop_src_mac(
 	const struct fib_iter *it, uint64_t nexthop_idx, struct ether_addr *dst
 ) {
 	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
-	if (r != NULL)
+	if (r != NULL) {
 		*dst = r->src_addr;
-	else
+	} else {
 		memset(dst, 0, sizeof(*dst));
+	}
 }
 
 const char *
 fib_iter_nexthop_device_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
-	if (r == NULL)
+	if (r == NULL) {
 		return "";
+	}
 
 	struct route_module_config *config = it->config;
 	struct cp_module_device *devices = ADDR_OF(&config->cp_module.devices);
-	if (r->device_id < config->cp_module.device_count)
+	if (r->device_id < config->cp_module.device_count) {
 		return devices[r->device_id].name;
+	}
 	return "";
 }

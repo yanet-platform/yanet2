@@ -182,10 +182,12 @@ lpm_wide_key_to_be(uint8_t word_size, const uint16_t *words, uint8_t *key) {
 static inline int
 lpm_wide_key_cmp(uint8_t word_size, const uint16_t *l, const uint16_t *r) {
 	for (size_t i = 0; i < word_size; ++i) {
-		if (l[i] < r[i])
+		if (l[i] < r[i]) {
 			return -1;
-		if (l[i] > r[i])
+		}
+		if (l[i] > r[i]) {
 			return 1;
+		}
 	}
 	return 0;
 }
@@ -200,12 +202,14 @@ lpm_wide_check_range_lo(
 	uint16_t check[word_size];
 	memcpy(check, key, (hop + 1) * sizeof(uint16_t));
 
-	if (hop + 1 < word_size)
+	if (hop + 1 < word_size) {
 		memset(check + hop + 1,
 		       0x00,
 		       (word_size - hop - 1) * sizeof(uint16_t));
-	if (lpm_wide_key_cmp(word_size, check, from) < 0)
+	}
+	if (lpm_wide_key_cmp(word_size, check, from) < 0) {
 		return -1;
+	}
 
 	return 0;
 }
@@ -223,8 +227,9 @@ lpm_wide_check_range_hi(
 			check[word_idx] = 0xffff;
 		}
 	}
-	if (lpm_wide_key_cmp(word_size, check, to) > 0)
+	if (lpm_wide_key_cmp(word_size, check, to) > 0) {
 		return -1;
+	}
 
 	return 0;
 }
@@ -237,8 +242,9 @@ lpm_wide_insert(
 	const uint8_t *to,
 	uint32_t value
 ) {
-	if (lpm_wide_check_key_size(key_size))
+	if (lpm_wide_check_key_size(key_size)) {
 		return -1;
+	}
 
 	uint8_t word_size = key_size / 2;
 
@@ -267,8 +273,9 @@ lpm_wide_insert(
 			     lpm_wide_check_range_hi(
 				     word_size, key, to_words, hop
 			     ))) {
-				if (lpm_wide_new_page(lpm, stored_value))
+				if (lpm_wide_new_page(lpm, stored_value)) {
 					return -1;
+				}
 				++hop;
 				if (hop > max_hop) {
 					key[hop] = from_words[hop];
@@ -305,11 +312,13 @@ lpm_wide_insert(
 				}
 			}
 			if (next > upper_bound) {
-				if (hop == 0)
+				if (hop == 0) {
 					return 0;
+				}
 				--hop;
-			} else
+			} else {
 				break;
+			}
 		} while (1);
 	}
 
@@ -320,8 +329,9 @@ static inline uint32_t
 lpm_wide_lookup(
 	const struct lpm_wide *lpm, uint8_t key_size, const uint8_t *key
 ) {
-	if (lpm_wide_check_key_size(key_size))
+	if (lpm_wide_check_key_size(key_size)) {
 		return LPM_WIDE_VALUE_INVALID;
+	}
 
 	uint8_t word_size = key_size / 2;
 	uint16_t key_words[word_size];
@@ -332,8 +342,9 @@ lpm_wide_lookup(
 
 	for (uint8_t hop = 0; hop < word_size; ++hop) {
 		value = page->values + key_words[hop];
-		if (value->value & LPM_WIDE_VALUE_FLAG)
+		if (value->value & LPM_WIDE_VALUE_FLAG) {
 			break;
+		}
 		page = ADDR_OF(&value->page);
 	}
 
@@ -362,8 +373,9 @@ lpm_wide_walk(
 	lpm_wide_walk_func walk_func,
 	void *walk_func_data
 ) {
-	if (lpm_wide_check_key_size(key_size))
+	if (lpm_wide_check_key_size(key_size)) {
 		return -1;
+	}
 
 	uint8_t word_size = key_size / 2;
 
@@ -433,8 +445,9 @@ lpm_wide_walk(
 				prev_to[word_idx] = 0xffff;
 			}
 		} else {
-			if (key[hop] == to_words[hop] && hop == hi_limit)
+			if (key[hop] == to_words[hop] && hop == hi_limit) {
 				++hi_limit;
+			}
 
 			++hop;
 			if (hop > max_hop) {
@@ -450,8 +463,9 @@ lpm_wide_walk(
 		do {
 			uint32_t next = (uint32_t)key[hop] + 1;
 			uint16_t upper_bound = 0xffff;
-			if (hop == hi_limit)
+			if (hop == hi_limit) {
 				upper_bound = to_words[hop];
+			}
 			if (next > upper_bound) {
 				if (hop == hi_limit) {
 					goto out;
@@ -498,8 +512,9 @@ lpm_wide_collect_values(
 	lpm_wide_collect_values_func collect_func,
 	void *collect_func_data
 ) {
-	if (lpm_wide_check_key_size(key_size))
+	if (lpm_wide_check_key_size(key_size)) {
 		return -1;
+	}
 
 	uint8_t word_size = key_size / 2;
 
@@ -533,8 +548,9 @@ lpm_wide_collect_values(
 				}
 			}
 		} else {
-			if (key[hop] == to_words[hop] && hop == hi_limit)
+			if (key[hop] == to_words[hop] && hop == hi_limit) {
 				++hi_limit;
+			}
 
 			++hop;
 			if (hop > max_hop) {
@@ -551,8 +567,9 @@ lpm_wide_collect_values(
 			uint32_t next = (uint32_t)key[hop] + 1;
 
 			uint16_t upper_bound = 0xffff;
-			if (hop == hi_limit)
+			if (hop == hi_limit) {
 				upper_bound = to_words[hop];
+			}
 			if (next > upper_bound) {
 				if (hop == hi_limit) {
 					goto out;
@@ -575,8 +592,9 @@ static inline void
 lpm_wide_remap(
 	struct lpm_wide *lpm, uint8_t key_size, struct value_table *table
 ) {
-	if (lpm_wide_check_key_size(key_size))
+	if (lpm_wide_check_key_size(key_size)) {
 		return;
+	}
 
 	uint8_t word_size = key_size / 2;
 	uint16_t key[word_size];
@@ -602,8 +620,9 @@ lpm_wide_remap(
 		do {
 			uint32_t next = (uint32_t)key[hop] + 1;
 			if (next > 0xffff) {
-				if (hop == 0)
+				if (hop == 0) {
 					goto out;
+				}
 				--hop;
 			} else {
 				key[hop] = next;
@@ -618,8 +637,9 @@ out:
 
 static inline void
 lpm_wide_compact(struct lpm_wide *lpm, uint8_t key_size) {
-	if (lpm_wide_check_key_size(key_size))
+	if (lpm_wide_check_key_size(key_size)) {
 		return;
+	}
 
 	uint8_t word_size = key_size / 2;
 	uint16_t key[word_size];
@@ -641,8 +661,9 @@ lpm_wide_compact(struct lpm_wide *lpm, uint8_t key_size) {
 		do {
 			uint32_t next = (uint32_t)key[hop] + 1;
 			if (next > 0xffff) {
-				if (hop == 0)
+				if (hop == 0) {
 					goto out;
+				}
 
 				uint64_t first_value =
 					pages[hop]->values[0].value;

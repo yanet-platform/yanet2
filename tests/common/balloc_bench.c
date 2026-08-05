@@ -27,8 +27,9 @@ get_time_us(void) {
 static inline uint64_t
 rng_next_bounded(uint64_t *r, uint64_t bound_inclusive) {
 	/* returns [0..bound_inclusive] */
-	if (bound_inclusive == 0)
+	if (bound_inclusive == 0) {
 		return 0;
+	}
 	return rng_next(r) % (bound_inclusive + 1);
 }
 
@@ -81,14 +82,18 @@ print_help(const char *argv0) {
 
 static void
 clamp_config(struct bench_config *cfg) {
-	if (cfg->max_pool >= MEMORY_BLOCK_ALLOCATOR_EXP)
+	if (cfg->max_pool >= MEMORY_BLOCK_ALLOCATOR_EXP) {
 		cfg->max_pool = MEMORY_BLOCK_ALLOCATOR_EXP - 1;
-	if (cfg->min_pool > cfg->max_pool)
+	}
+	if (cfg->min_pool > cfg->max_pool) {
 		cfg->min_pool = cfg->max_pool;
-	if (cfg->working_set == 0)
+	}
+	if (cfg->working_set == 0) {
 		cfg->working_set = 1;
-	if (cfg->arena_mb == 0)
+	}
+	if (cfg->arena_mb == 0) {
 		cfg->arena_mb = 1;
+	}
 }
 
 static int
@@ -219,10 +224,12 @@ main(int argc, char **argv) {
 		     ++attempt) {
 			req = pool_req_size(&ba, pool_idx);
 			p = memory_balloc(&mctx, req);
-			if (p != NULL)
+			if (p != NULL) {
 				break;
-			if (pool_idx == cfg.min_pool)
+			}
+			if (pool_idx == cfg.min_pool) {
 				break;
+			}
 			pool_idx--;
 		}
 		if (p == NULL) {
@@ -270,10 +277,12 @@ main(int argc, char **argv) {
 		     ++attempt) {
 			req = pool_req_size(&ba, pool_idx);
 			p = memory_balloc(&mctx, req);
-			if (p != NULL)
+			if (p != NULL) {
 				break;
-			if (pool_idx == cfg.min_pool)
+			}
+			if (pool_idx == cfg.min_pool) {
 				break;
+			}
 			pool_idx--;
 		}
 
@@ -317,8 +326,9 @@ main(int argc, char **argv) {
 
 	/* 7) Cleanup: free live blocks, teardown */
 	for (size_t i = 0; i < cfg.working_set; ++i) {
-		if (slots[i] != NULL)
+		if (slots[i] != NULL) {
 			memory_bfree(&mctx, slots[i], sizes[i]);
+		}
 	}
 
 	free(slots);

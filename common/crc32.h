@@ -84,8 +84,9 @@ crc32(const void *data, uint64_t size, uint32_t hash) {
 		data += 2;
 	}
 
-	if (size & 0x1)
+	if (size & 0x1) {
 		hash = crc32_u8(*(const uint8_t *)data, hash);
+	}
 
 	return hash;
 }

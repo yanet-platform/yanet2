@@ -62,8 +62,9 @@ dataplane_worker_connect(
 			tx_conn->pipes,
 			sizeof(struct worker_tx_pipe) * 2 * (tx_conn->count + 1)
 		);
-		if (pipes == NULL)
+		if (pipes == NULL) {
 			return -1;
+		}
 		tx_conn->pipes = pipes;
 	}
 
@@ -74,14 +75,16 @@ dataplane_worker_connect(
 			sizeof(struct data_pipe) * 2 *
 				(wrk_rx->write_ctx.rx_pipe_count + 1)
 		);
-		if (pipes == NULL)
+		if (pipes == NULL) {
 			return -1;
+		}
 		wrk_rx->write_ctx.rx_pipes = pipes;
 	}
 
 	struct worker_tx_pipe *tx_pipe = tx_conn->pipes + tx_conn->count;
-	if (data_pipe_init(&tx_pipe->pipe, WORKER_TX_PIPE_SIZE))
+	if (data_pipe_init(&tx_pipe->pipe, WORKER_TX_PIPE_SIZE)) {
 		return -1;
+	}
 
 	uint32_t pending_capacity =
 		1u << (WORKER_TX_PIPE_SIZE + WORKER_TX_PIPE_PENDING_SHIFT);
@@ -117,8 +120,9 @@ dataplane_connect_device(
 	 * device worker.
 	 */
 	size_t pipe_count = from_device->worker_count;
-	if (to_device->worker_count > pipe_count)
+	if (to_device->worker_count > pipe_count) {
 		pipe_count = to_device->worker_count;
+	}
 
 	for (size_t pipe_idx = 0; pipe_idx < pipe_count; ++pipe_idx) {
 		// Select source and destination workers

@@ -15,8 +15,9 @@ module_ectx_free(
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&module_ectx->counter_storage);
-	if (counter_storage != NULL)
+	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
 
 	uint64_t *cm_index = ADDR_OF(&module_ectx->cm_index);
 	if (cm_index != NULL) {
@@ -197,16 +198,18 @@ chain_ectx_free(
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		struct module_ectx *module_ectx =
 			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
-		if (module_ectx == NULL)
+		if (module_ectx == NULL) {
 			continue;
+		}
 
 		module_ectx_free(cp_config_gen, module_ectx);
 	}
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&chain_ectx->counter_storage);
-	if (counter_storage != NULL)
+	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
 
 	memory_bfree(
 		memory_context,
@@ -388,8 +391,9 @@ function_ectx_free(
 		for (uint64_t idx = 0; idx < function_ectx->chain_count;
 		     ++idx) {
 			struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
-			if (chain_ectx == NULL)
+			if (chain_ectx == NULL) {
 				continue;
+			}
 
 			chain_ectx_free(cp_config_gen, chain_ectx);
 		}
@@ -402,8 +406,9 @@ function_ectx_free(
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&function_ectx->counter_storage);
-	if (counter_storage != NULL)
+	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
 
 	size_t ectx_size =
 		sizeof(struct function_ectx) +
@@ -595,16 +600,18 @@ pipeline_ectx_free(
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
 			ADDR_OF(pipeline_ectx->functions + idx);
-		if (function_ectx == NULL)
+		if (function_ectx == NULL) {
 			continue;
+		}
 
 		function_ectx_free(cp_config_gen, function_ectx);
 	}
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&pipeline_ectx->counter_storage);
-	if (counter_storage != NULL)
+	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
 
 	size_t ectx_size =
 		sizeof(struct pipeline_ectx) +
@@ -774,8 +781,9 @@ device_entry_ectx_free(
 		     ++idx) {
 			struct pipeline_ectx *pipeline_ectx =
 				ADDR_OF(pipelines + idx);
-			if (pipeline_ectx == NULL)
+			if (pipeline_ectx == NULL) {
 				continue;
+			}
 			pipeline_ectx_free(cp_config_gen, pipeline_ectx);
 		}
 
@@ -889,8 +897,9 @@ device_entry_ectx_create(
 	}
 	device_entry_ectx->pipeline_count = cp_device_entry->pipeline_count;
 
-	if (!device_entry_ectx->pipeline_count)
+	if (!device_entry_ectx->pipeline_count) {
 		return device_entry_ectx;
+	}
 
 	memset(pipelines,
 	       0,
@@ -951,17 +960,20 @@ device_ectx_free(
 
 	struct device_entry_ectx *input =
 		ADDR_OF(&device_ectx->input_pipelines);
-	if (input)
+	if (input) {
 		device_entry_ectx_free(cp_config_gen, input);
+	}
 	struct device_entry_ectx *output =
 		ADDR_OF(&device_ectx->output_pipelines);
-	if (output)
+	if (output) {
 		device_entry_ectx_free(cp_config_gen, output);
+	}
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&device_ectx->counter_storage);
-	if (counter_storage != NULL)
+	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
 
 	size_t ectx_size = sizeof(struct device_ectx);
 	memory_bfree(memory_context, device_ectx, ectx_size);
@@ -1152,8 +1164,9 @@ link_module_ectx(
 		);
 		goto error;
 	}
-	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx)
+	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
 		cm_index[idx] = 0;
+	}
 	SET_OFFSET_OF(&module_ectx->cm_index, cm_index);
 	module_ectx->cm_index_size = config_gen_ectx->device_count;
 
@@ -1170,8 +1183,9 @@ link_module_ectx(
 		);
 		goto error;
 	}
-	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx)
+	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx) {
 		mc_index[idx] = -1;
+	}
 	SET_OFFSET_OF(&module_ectx->mc_index, mc_index);
 	module_ectx->mc_index_size = cp_module->device_count;
 
@@ -1182,8 +1196,9 @@ link_module_ectx(
 		     ++c_idx) {
 			struct device_ectx *device_ectx =
 				ADDR_OF(config_gen_ectx->devices + c_idx);
-			if (device_ectx == NULL)
+			if (device_ectx == NULL) {
 				continue;
+			}
 			struct cp_device *cp_device =
 				ADDR_OF(&device_ectx->cp_device);
 			if (!strncmp(
@@ -1216,8 +1231,9 @@ link_chain_ectx(
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		struct module_ectx *module_ectx =
 			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
-		if (module_ectx == NULL)
+		if (module_ectx == NULL) {
 			continue;
+		}
 		if (link_module_ectx(
 			    config_gen_ectx,
 			    device_ectx,
@@ -1253,8 +1269,9 @@ link_function_ectx(
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
 		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
-		if (chain_ectx == NULL)
+		if (chain_ectx == NULL) {
 			continue;
+		}
 		if (link_chain_ectx(
 			    config_gen_ectx,
 			    device_ectx,
@@ -1288,8 +1305,9 @@ link_pipeline_ectx(
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
 			ADDR_OF(pipeline_ectx->functions + idx);
-		if (function_ectx == NULL)
+		if (function_ectx == NULL) {
 			continue;
+		}
 		if (link_function_ectx(
 			    config_gen_ectx,
 			    device_ectx,
@@ -1322,8 +1340,9 @@ link_device_entry_ectx(
 		ADDR_OF(&device_entry_ectx->pipelines);
 	for (uint64_t idx = 0; idx < device_entry_ectx->pipeline_count; ++idx) {
 		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
-		if (pipeline_ectx == NULL)
+		if (pipeline_ectx == NULL) {
 			continue;
+		}
 		if (link_pipeline_ectx(
 			    config_gen_ectx,
 			    device_ectx,
@@ -1388,8 +1407,9 @@ link_config_gen_ectx(
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
 		struct device_ectx *device_ectx =
 			ADDR_OF(config_gen_ectx->devices + idx);
-		if (device_ectx == NULL)
+		if (device_ectx == NULL) {
 			continue;
+		}
 		if (link_device_ectx(config_gen_ectx, device_ectx, err)) {
 			yanet_error_add(
 				err, "failed to link device execution context"
@@ -1560,8 +1580,9 @@ error:
 	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
 		struct config_gen_ectx *config_gen_ectx =
 			ADDR_OF(ectxs + worker_idx);
-		if (config_gen_ectx != NULL)
+		if (config_gen_ectx != NULL) {
 			config_gen_ectx_free(cp_config_gen, config_gen_ectx);
+		}
 	}
 	memory_bfree(
 		memory_context,

@@ -476,8 +476,9 @@ acl_handle_packets(
 			}
 		}
 
-		if (action != FILTER_RULE_INVALID)
+		if (action != FILTER_RULE_INVALID) {
 			target = ADDR_OF(&acl_config->targets) + action;
+		}
 
 		const uint64_t pkt_len = packet_data_len(packet);
 

@@ -130,17 +130,19 @@ rwlock_write_lock(rwlock_t *rwl) {
 				    YANET_RWLOCK_WRITE,
 				    memory_order_acquire,
 				    memory_order_relaxed
-			    ))
+			    )) {
 				return;
+			}
 		}
 
 		/* Turn on writer wait bit */
-		if (!(x & YANET_RWLOCK_WAIT))
+		if (!(x & YANET_RWLOCK_WAIT)) {
 			atomic_fetch_or_explicit(
 				&rwl->cnt,
 				YANET_RWLOCK_WAIT,
 				memory_order_relaxed
 			);
+		}
 	}
 }
 

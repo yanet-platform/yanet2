@@ -355,8 +355,9 @@ forward_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (forward_module_init_ip4(
 		    cp_module,
@@ -365,8 +366,9 @@ forward_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (forward_module_init_ip6(
 		    cp_module,
@@ -375,8 +377,9 @@ forward_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	free(filter_rule_ptrs);
 	free(filter_rules);

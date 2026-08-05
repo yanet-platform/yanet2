@@ -360,8 +360,9 @@ sock_dev_create(const char *path, const char *name, int numa_node) {
 		(struct sock_internals *)rte_zmalloc_socket(
 			path, sizeof(struct sock_internals), 0, numa_node
 		);
-	if (internals == NULL)
+	if (internals == NULL) {
 		return ENOSPC;
+	}
 
 	internals->pci_id.device_id = 0xBEEF;
 

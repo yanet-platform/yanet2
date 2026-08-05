@@ -16,8 +16,9 @@ int
 packet_prepend(struct packet *packet, const void *header, const size_t size) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (rte_pktmbuf_prepend(mbuf, size) == NULL)
+	if (rte_pktmbuf_prepend(mbuf, size) == NULL) {
 		return -1;
+	}
 	memcpy(rte_pktmbuf_mtod(mbuf, char *), header, size);
 
 	packet->network_header.offset += size;
@@ -36,8 +37,9 @@ packet_network_prepend(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (rte_pktmbuf_prepend(mbuf, size) == NULL)
+	if (rte_pktmbuf_prepend(mbuf, size) == NULL) {
 		return -1;
+	}
 	memmove(rte_pktmbuf_mtod(mbuf, char *),
 		rte_pktmbuf_mtod_offset(mbuf, char *, size),
 		packet->network_header.offset);
@@ -232,8 +234,9 @@ packet_mpls_encap(
 
 	if (packet_network_prepend(
 		    packet, rte_cpu_to_be_16(RTE_ETHER_TYPE_MPLS), &label, 4
-	    ))
+	    )) {
 		return -1;
+	}
 
 	return 0;
 }
@@ -290,16 +293,18 @@ packet_ip4_encap_udp(
 
 	if (packet_network_prepend(
 		    packet, 0, &udp_header, sizeof(struct rte_udp_hdr)
-	    ))
+	    )) {
 		return -1;
+	}
 
 	if (packet_network_prepend(
 		    packet,
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
 		    &ip_header,
 		    sizeof(struct rte_ipv4_hdr)
-	    ))
+	    )) {
 		return -1;
+	}
 
 	return 0;
 }
@@ -349,16 +354,18 @@ packet_ip6_encap_udp(
 
 	if (packet_network_prepend(
 		    packet, 0, &udp_header, sizeof(struct rte_udp_hdr)
-	    ))
+	    )) {
 		return -1;
+	}
 
 	if (packet_network_prepend(
 		    packet,
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
 		    &ip_header,
 		    sizeof(struct rte_ipv6_hdr)
-	    ))
+	    )) {
 		return -1;
+	}
 
 	return 0;
 }

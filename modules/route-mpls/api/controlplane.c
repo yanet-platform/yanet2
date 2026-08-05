@@ -63,8 +63,9 @@ route_mpls_module_config_fini(struct module_config *config) {
 	struct target **targets = ADDR_OF(&config->targets);
 	for (uint64_t idx = 0; idx < config->target_count; ++idx) {
 		struct target *target = ADDR_OF(targets + idx);
-		if (target == NULL)
+		if (target == NULL) {
 			continue;
+		}
 
 		if (ADDR_OF(&target->nexthops) != NULL) {
 			memory_bfree(
@@ -260,8 +261,9 @@ route_mpls_rule_target_new(
 	struct target *target = (struct target *)memory_balloc(
 		memory_context, target_memory_size(map_size)
 	);
-	if (target == NULL)
+	if (target == NULL) {
 		return NULL;
+	}
 
 	memset(target, 0, target_memory_size(map_size));
 	target->nexthop_map_size = map_size;
@@ -270,8 +272,9 @@ route_mpls_rule_target_new(
 		memory_context,
 		sizeof(struct nexthop) * route_mpls_rule->nexthop_count
 	);
-	if (nexthops == NULL)
+	if (nexthops == NULL) {
 		goto error_target;
+	}
 
 	memset(nexthops,
 	       0,
@@ -365,8 +368,9 @@ route_mpls_module_config_update(
 			cp_module, route_mpls_rules + idx, err
 		);
 
-		if (target == NULL)
+		if (target == NULL) {
 			goto error;
+		}
 
 		SET_OFFSET_OF(targets + idx, target);
 	}
@@ -398,8 +402,9 @@ route_mpls_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (route_mpls_module_init_ip6(
 		    cp_module,
@@ -408,8 +413,9 @@ route_mpls_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	free(filter_rule_ptrs);
 	free(filter_rules);

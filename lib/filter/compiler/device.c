@@ -19,8 +19,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	for (const struct filter_rule **r_ptr = rules;
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 
 		for (uint16_t idx = 0; idx < r->device_count; ++idx) {
@@ -49,8 +50,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	for (const struct filter_rule **r_ptr = rules;
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 
 		if (r->device_count == 0) {
@@ -78,8 +80,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 			goto error_collect;
 		}
 
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 
 		if (r->device_count == 0) {
@@ -124,8 +127,9 @@ FILTER_ATTR_COMPILER_FREE_FUNC(device)(
 	void *data, struct memory_context *memory_context
 ) {
 	struct value_table *t = (struct value_table *)data;
-	if (t == NULL)
+	if (t == NULL) {
 		return;
+	}
 	value_table_free(t);
 	memory_bfree(memory_context, t, sizeof(struct value_table));
 }

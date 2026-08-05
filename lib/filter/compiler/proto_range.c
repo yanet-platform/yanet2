@@ -19,8 +19,9 @@ collect_proto_values(
 ) {
 	if (value_table_init(
 		    table, memory_context, 1, PROTO_RANGE_CLASSIFIER_MAX_VALUE
-	    ))
+	    )) {
 		return -1;
+	}
 
 	struct remap_table remap_table;
 	if (remap_table_init(
@@ -34,8 +35,9 @@ collect_proto_values(
 	for (const struct filter_rule **rule_ptr = rules;
 	     rule_ptr < rules + count;
 	     ++rule_ptr) {
-		if (*rule_ptr == NULL)
+		if (*rule_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *rule = *rule_ptr;
 
 		remap_table_new_gen(&remap_table);
@@ -72,8 +74,9 @@ collect_proto_values(
 		if (value_registry_start(registry)) {
 			goto error_collect;
 		}
-		if (*rule_ptr == NULL)
+		if (*rule_ptr == NULL) {
 			continue;
+		}
 
 		const struct filter_rule *rule = *rule_ptr;
 
@@ -138,8 +141,9 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(proto_range)(
 	void *data, struct memory_context *memory_context
 ) {
-	if (data == NULL)
+	if (data == NULL) {
 		return;
+	}
 	struct proto_range_classifier *c =
 		(struct proto_range_classifier *)data;
 	value_table_free(&c->table);

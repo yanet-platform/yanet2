@@ -30,8 +30,9 @@ proto_classifier_init_internal(
 	for (const struct filter_rule **r_ptr = rules;
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 
 		const struct filter_proto *proto = &r->transport.proto;
@@ -78,8 +79,9 @@ proto_classifier_init_internal(
 	     ++r_ptr) {
 		// A value range should be created even for empty rules
 		value_registry_start(registry);
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 		const struct filter_proto *proto = &r->transport.proto;
 		switch (proto->proto) {

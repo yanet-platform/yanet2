@@ -62,17 +62,19 @@ cmd_autotest_parsed(
 	int ret = 0;
 
 	TAILQ_FOREACH(t, &commands_list, next) {
-		if (!strcmp(res->autotest, t->command))
+		if (!strcmp(res->autotest, t->command)) {
 			ret = t->callback();
+		}
 	}
 
 	last_test_result = ret;
-	if (ret == 0)
+	if (ret == 0) {
 		printf("Test OK\n");
-	else if (ret == TEST_SKIPPED)
+	} else if (ret == TEST_SKIPPED) {
 		printf("Test Skipped\n");
-	else
+	} else {
 		printf("Test Failed\n");
+	}
 	fflush(stdout);
 }
 
@@ -113,24 +115,25 @@ cmd_dump_parsed(
 ) {
 	struct cmd_dump_result *res = parsed_result;
 
-	if (!strcmp(res->dump, "dump_physmem"))
+	if (!strcmp(res->dump, "dump_physmem")) {
 		rte_dump_physmem_layout(stdout);
-	else if (!strcmp(res->dump, "dump_memzone"))
+	} else if (!strcmp(res->dump, "dump_memzone")) {
 		rte_memzone_dump(stdout);
-	else if (!strcmp(res->dump, "dump_struct_sizes"))
+	} else if (!strcmp(res->dump, "dump_struct_sizes")) {
 		dump_struct_sizes();
-	else if (!strcmp(res->dump, "dump_ring"))
+	} else if (!strcmp(res->dump, "dump_ring")) {
 		rte_ring_list_dump(stdout);
-	else if (!strcmp(res->dump, "dump_mempool"))
+	} else if (!strcmp(res->dump, "dump_mempool")) {
 		rte_mempool_list_dump(stdout);
-	else if (!strcmp(res->dump, "dump_devargs"))
+	} else if (!strcmp(res->dump, "dump_devargs")) {
 		rte_devargs_dump(stdout);
-	else if (!strcmp(res->dump, "dump_log_types"))
+	} else if (!strcmp(res->dump, "dump_log_types")) {
 		rte_log_dump(stdout);
-	else if (!strcmp(res->dump, "dump_malloc_stats"))
+	} else if (!strcmp(res->dump, "dump_malloc_stats")) {
 		rte_malloc_dump_stats(stdout, NULL);
-	else if (!strcmp(res->dump, "dump_malloc_heaps"))
+	} else if (!strcmp(res->dump, "dump_malloc_heaps")) {
 		rte_malloc_dump_heaps(stdout);
+	}
 }
 
 cmdline_parse_token_string_t cmd_dump_dump = TOKEN_STRING_INITIALIZER(
@@ -257,13 +260,15 @@ commands_init(void) {
 	}
 
 	commands = (char *)calloc(commands_len, sizeof(char));
-	if (!commands)
+	if (!commands) {
 		return -1;
+	}
 
 	TAILQ_FOREACH(t, &commands_list, next) {
 		strlcat(commands, t->command, commands_len);
-		if (TAILQ_NEXT(t, next) != NULL)
+		if (TAILQ_NEXT(t, next) != NULL) {
 			strlcat(commands, "#", commands_len);
+		}
 	}
 
 	cmd_autotest_autotest.string_data.str = commands;

@@ -407,8 +407,9 @@ test_capacity_limits(void *arena) {
 		);
 		if (ret >= 0) {
 			inserted++;
-			if (inserted >= target)
+			if (inserted >= target) {
 				break;
+			}
 		} else {
 			failed++;
 		}

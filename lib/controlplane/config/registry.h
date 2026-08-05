@@ -25,8 +25,9 @@ registry_item_unref(
 	void *free_func_data
 ) {
 	item->refcnt -= 1;
-	if (!item->refcnt)
+	if (!item->refcnt) {
 		free_func(item, free_func_data);
+	}
 }
 
 struct registry {
@@ -38,8 +39,9 @@ struct registry {
 static inline struct registry_item *
 registry_get(struct registry *registry, uint64_t idx) {
 #ifdef REGISTRY_SANITIZE
-	if (idx >= registry->capacity)
+	if (idx >= registry->capacity) {
 		return NULL;
+	}
 #endif
 	return ADDR_OF(ADDR_OF(&registry->items) + idx);
 }
@@ -49,8 +51,9 @@ registry_set(
 	struct registry *registry, uint64_t idx, struct registry_item *item
 ) {
 #ifdef REGISTRY_SANITIZE
-	if (idx >= registry->capacity)
+	if (idx >= registry->capacity) {
 		return;
+	}
 #endif
 	SET_OFFSET_OF(ADDR_OF(&registry->items) + idx, item);
 }
@@ -191,8 +194,9 @@ registry_lookup(
 ) {
 	for (uint64_t idx = 0; idx < registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(registry, idx);
-		if (item == NULL)
+		if (item == NULL) {
 			continue;
+		}
 		if (!cmp_func(item, cmp_data)) {
 			*index = idx;
 			return 0;

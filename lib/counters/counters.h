@@ -121,8 +121,9 @@ counter_get_address(uint64_t counter_id, struct counter_storage *storage) {
 		counter_get_value_handle(counter_id, storage);
 
 #ifdef COUNTERS_CHECK
-	if (value_handle == NULL)
+	if (value_handle == NULL) {
 		return NULL;
+	}
 #endif
 
 	return counter_handle_get_value(value_handle);

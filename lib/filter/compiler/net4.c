@@ -38,8 +38,9 @@ net4_collect_values(
 	uint32_t *values = ADDR_OF(&range_index->values);
 
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		if (*(uint32_t *)net4->mask == 0x00000000)
+		if (*(uint32_t *)net4->mask == 0x00000000) {
 			continue;
+		}
 		uint32_t to =
 			*(uint32_t *)net4->addr | ~*(uint32_t *)net4->mask;
 		filter_key_inc(4, (uint8_t *)&to);
@@ -47,10 +48,11 @@ net4_collect_values(
 		uint32_t start =
 			radix_lookup(&range_index->radix, 4, net4->addr);
 		uint32_t stop = range_index->count;
-		if (to != 0)
+		if (to != 0) {
 			stop = radix_lookup(
 				&range_index->radix, 4, (uint8_t *)&to
 			);
+		}
 
 		for (uint32_t idx = start; idx < stop; ++idx) {
 			uint32_t *value =
@@ -99,14 +101,16 @@ collect_net4_values(
 	struct value_registry *registry
 ) {
 	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context))
+	if (range_collector_init(&collector, memory_context)) {
 		goto error;
+	}
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
 	     ++action_ptr) {
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		if (action->net4.src_count == 0 &&
@@ -125,8 +129,9 @@ collect_net4_values(
 				    net4->addr,
 				    __builtin_popcountll(*(uint32_t *)net4->mask
 				    )
-			    ))
+			    )) {
 				goto error_collector;
+			}
 		}
 	}
 	if (lpm_init(lpm, memory_context)) {
@@ -146,12 +151,14 @@ collect_net4_values(
 	}
 
 	struct value_table table;
-	if (value_table_init(&table, memory_context, 1, collector.count))
+	if (value_table_init(&table, memory_context, 1, collector.count)) {
 		goto error_table;
+	}
 
 	struct remap_table remap_table;
-	if (remap_table_init(&remap_table, memory_context, collector.count))
+	if (remap_table_init(&remap_table, memory_context, collector.count)) {
 		goto error_remap;
+	}
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
@@ -159,8 +166,9 @@ collect_net4_values(
 
 		remap_table_new_gen(&remap_table);
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 
 		const struct filter_rule *action = *action_ptr;
 
@@ -187,8 +195,9 @@ collect_net4_values(
 			goto error_net_collect;
 		}
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		struct net4 *nets;
@@ -289,8 +298,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 static void
 free_net4(void *data, struct memory_context *memory_context) {
 	struct lpm *lpm = (struct lpm *)data;
-	if (lpm == NULL)
+	if (lpm == NULL) {
 		return;
+	}
 	lpm_free(lpm);
 	memory_bfree(memory_context, lpm, sizeof(struct lpm));
 }

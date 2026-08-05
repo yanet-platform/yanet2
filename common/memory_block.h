@@ -98,8 +98,9 @@ static inline size_t
 block_allocator_pool_index(struct block_allocator *allocator, size_t size) {
 	(void)allocator;
 
-	if (size < MEMORY_BLOCK_ALLOCATOR_MIN_SIZE)
+	if (size < MEMORY_BLOCK_ALLOCATOR_MIN_SIZE) {
 		return 0;
+	}
 
 	// Make 'size' the upper end of its power-of-2 range
 	size = (size << 1) - 1;
@@ -164,11 +165,13 @@ block_allocator_pool_borrow(
 
 static inline void *
 block_allocator_balloc(struct block_allocator *allocator, size_t size) {
-	if (!size)
+	if (!size) {
 		return NULL;
+	}
 
-	if (size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
+	if (size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
 		return NULL;
+	}
 
 	size += 2 * ASAN_RED_ZONE;
 
@@ -202,8 +205,9 @@ static inline void
 block_allocator_bfree_internal(
 	struct block_allocator *allocator, void *block, size_t size
 ) {
-	if (!size)
+	if (!size) {
 		return;
+	}
 
 	size_t pool_index = block_allocator_pool_index(allocator, size);
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
@@ -221,8 +225,9 @@ static inline void
 block_allocator_bfree(
 	struct block_allocator *allocator, void *block, size_t size
 ) {
-	if (!size)
+	if (!size) {
 		return;
+	}
 
 	size += 2 * ASAN_RED_ZONE;
 	block -= ASAN_RED_ZONE;
@@ -257,11 +262,13 @@ block_allocator_put_arena(
 		 * The loop bellow could be replaced with some bit magic but
 		 * let us do it in the future
 		 */
-		while (pos + block_size > end)
+		while (pos + block_size > end) {
 			block_size >>= 1;
+		}
 
-		if (block_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE_INTERNAL)
+		if (block_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE_INTERNAL) {
 			block_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE_INTERNAL;
+		}
 
 		block_allocator_bfree_internal(
 			allocator, (void *)pos, block_size

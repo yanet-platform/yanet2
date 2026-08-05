@@ -3751,10 +3751,12 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 		);
 
 		if (!pkt_v4 || !pkt_v6) {
-			if (pkt_v4)
+			if (pkt_v4) {
 				rte_free(pkt_v4);
-			if (pkt_v6)
+			}
+			if (pkt_v6) {
 				rte_free(pkt_v6);
+			}
 			return -1;
 		}
 
@@ -5231,8 +5233,9 @@ static uint8_t *
 build_embedded_icmp_echo(uint16_t embedded_total_len, uint16_t *out_len) {
 	*out_len = sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr);
 	uint8_t *buf = rte_malloc(NULL, *out_len, 0);
-	if (!buf)
+	if (!buf) {
 		return NULL;
+	}
 
 	struct rte_ipv4_hdr *ip4 = (struct rte_ipv4_hdr *)buf;
 	ip4->version_ihl = RTE_IPV4_VHL_DEF;

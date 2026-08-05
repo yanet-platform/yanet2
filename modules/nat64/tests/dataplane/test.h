@@ -167,8 +167,9 @@ struct unit_test_case {
 
 static inline void
 debug_hexdump(FILE *file, const char *title, const void *buf, size_t len) {
-	if (rte_log_get_global_level() == RTE_LOG_DEBUG)
+	if (rte_log_get_global_level() == RTE_LOG_DEBUG) {
 		rte_hexdump(file, title, buf, len);
+	}
 }
 
 struct unit_test_suite {

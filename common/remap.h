@@ -70,8 +70,9 @@ remap_table_init(
 		table->memory_context, sizeof(struct remap_item *)
 	);
 
-	if (keys == NULL)
+	if (keys == NULL) {
 		return -1;
+	}
 
 	struct remap_item *chunk = (struct remap_item *)memory_balloc(
 		table->memory_context,
@@ -97,8 +98,9 @@ static inline void
 remap_table_free(struct remap_table *table) {
 	struct remap_item **keys = ADDR_OF(&table->keys);
 
-	if (keys == NULL)
+	if (keys == NULL) {
 		return;
+	}
 
 	uint32_t chunk_count = (table->count + REMAP_TABLE_CHUNK_SIZE - 1) /
 			       REMAP_TABLE_CHUNK_SIZE;
@@ -159,8 +161,9 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 					REMAP_TABLE_CHUNK_SIZE
 			);
 
-		if (new_chunk == NULL)
+		if (new_chunk == NULL) {
 			return -1;
+		}
 
 		uint32_t old_chunk_count =
 			table->count / REMAP_TABLE_CHUNK_SIZE;
@@ -214,8 +217,9 @@ remap_table_touch(struct remap_table *table, uint32_t key, uint32_t *value) {
 	if (item->gen != table->gen) {
 		// Allocate new key and update generation
 		uint32_t new_key;
-		if (remap_table_new_key(table, &new_key))
+		if (remap_table_new_key(table, &new_key)) {
 			return -1;
+		}
 		item->gen = table->gen;
 		item->value = new_key;
 		res = 1;

@@ -32,8 +32,9 @@ validate_and_count(
 ) {
 	int cnt = 0;
 	for (size_t i = 0; i < rules_count; ++i) {
-		if (rules[i] == NULL)
+		if (rules[i] == NULL) {
 			continue;
+		}
 		struct filter_port_ranges ranges = getter(rules[i]);
 		if (!validate_port_ranges(ranges)) {
 			return -1;
@@ -66,8 +67,9 @@ classifier_init(
 		malloc(sizeof(struct segment_u16) * count);
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
-		if (rules[rule_idx] == NULL)
+		if (rules[rule_idx] == NULL) {
 			continue;
+		}
 		struct filter_port_ranges ranges = getter(rules[rule_idx]);
 		for (size_t range_idx = 0; range_idx < ranges.count;
 		     ++range_idx) {

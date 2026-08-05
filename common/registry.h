@@ -91,8 +91,9 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 			new_chunk_count * sizeof(uint32_t *)
 		);
 
-		if (new_use_map == NULL)
+		if (new_use_map == NULL) {
 			return -1;
+		}
 
 		// Set correct relative addresses
 		for (uint32_t idx = 0; idx < collector->chunk_count; ++idx) {
@@ -102,8 +103,9 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 
 		for (uint32_t idx = collector->chunk_count;
 		     idx < new_chunk_count;
-		     ++idx)
+		     ++idx) {
 			new_use_map[idx] = NULL;
+		}
 
 		memory_bfree(
 			collector->memory_context,
@@ -123,8 +125,9 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 			VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
 		);
 
-		if (chunk == NULL)
+		if (chunk == NULL) {
 			return -1;
+		}
 
 		memset(chunk,
 		       0xff,
@@ -146,8 +149,9 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 static inline int
 value_collector_collect(struct value_collector *collector, uint32_t value) {
 	int check = value_collector_check(collector, value);
-	if (check != 1)
+	if (check != 1) {
 		return check;
+	}
 
 	uint32_t **use_map = ADDR_OF(&collector->use_map);
 	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
@@ -179,8 +183,9 @@ static inline int
 value_registry_init(
 	struct value_registry *registry, struct memory_context *memory_context
 ) {
-	if (value_collector_init(&registry->collector, memory_context))
+	if (value_collector_init(&registry->collector, memory_context)) {
 		return -1;
+	}
 
 	registry->memory_context = memory_context;
 
@@ -210,8 +215,9 @@ value_registry_start(struct value_registry *registry) {
 				new_capacity * sizeof(struct value_range)
 			);
 
-		if (new_ranges == NULL)
+		if (new_ranges == NULL) {
 			return -1;
+		}
 
 		for (uint64_t idx = 0; idx < old_capacity; ++idx) {
 			SET_OFFSET_OF(
@@ -273,11 +279,15 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 	if (rc == 1) {
 		struct value_range *range =
 			ADDR_OF(&registry->ranges) + registry->range_count - 1;
-		if (value_range_append(registry->memory_context, range, value))
+		if (value_range_append(
+			    registry->memory_context, range, value
+		    )) {
 			return -1;
+		}
 
-		if (value > registry->max_value)
+		if (value > registry->max_value) {
 			registry->max_value = value;
+		}
 	}
 
 	return 0;

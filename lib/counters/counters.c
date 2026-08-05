@@ -14,8 +14,9 @@ counter_registry_init(
 	SET_OFFSET_OF(&registry->memory_context, memory_context);
 
 	registry->count = 0;
-	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx)
+	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
 		registry->counts[idx] = 0;
+	}
 
 	registry->capacity = 0;
 	registry->gen = gen;
@@ -69,8 +70,9 @@ counter_registry_lookup_index(
 		registry
 	);
 
-	if (index != STR_INDEX_INVALID)
+	if (index != STR_INDEX_INVALID) {
 		return index;
+	}
 
 	return (uint64_t)-1;
 }
@@ -92,8 +94,9 @@ counter_registry_expand(
 		);
 		return -1;
 	}
-	if (new_capacity == registry->capacity)
+	if (new_capacity == registry->capacity) {
 		return 0;
+	}
 
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
@@ -134,13 +137,15 @@ counter_registry_insert(
 	uint64_t gen,
 	yanet_error **err
 ) {
-	if (!size)
+	if (!size) {
 		return -1;
+	}
 
 	if (registry->count >= registry->capacity) {
 		uint64_t new_capacity = registry->capacity * 2;
-		if (new_capacity == 0)
+		if (new_capacity == 0) {
 			new_capacity = 8;
+		}
 		if (counter_registry_expand(registry, new_capacity, err)) {
 			yanet_error_add(
 				err, "failed to expand counter registry"
@@ -237,8 +242,9 @@ counter_registry_link(
 				ADDR_OF(&src->names) + src_idx;
 
 			// Skip outdated counters
-			if (src_name->gen != src->gen)
+			if (src_name->gen != src->gen) {
 				continue;
+			}
 
 			uint64_t dst_idx = counter_registry_lookup_index(
 				dst, src_name->name
@@ -297,8 +303,9 @@ counter_storage_new_page(struct memory_context *memory_context) {
 		(struct counter_storage_page *)memory_balloc(
 			memory_context, sizeof(struct counter_storage_page)
 		);
-	if (page == NULL)
+	if (page == NULL) {
 		return NULL;
+	}
 	memset(page, 0, sizeof(struct counter_storage_page));
 	return page;
 }
@@ -344,8 +351,9 @@ counter_storage_spawn(
 
 	struct counter_storage *new_counter_storage = (struct counter_storage *)
 		memory_balloc(memory_context, sizeof(struct counter_storage));
-	if (new_counter_storage == NULL)
+	if (new_counter_storage == NULL) {
 		return NULL;
+	}
 
 	counter_storage_init(
 		memory_context, new_counter_storage, counter_registry
@@ -474,16 +482,18 @@ static void
 counter_storage_pool_fini(
 	struct counter_storage *storage, struct counter_storage_pool *pool
 ) {
-	if (ADDR_OF(&pool->blocks) == NULL)
+	if (ADDR_OF(&pool->blocks) == NULL) {
 		return;
+	}
 
 	struct memory_context *memory_context =
 		ADDR_OF(&storage->memory_context);
 	for (uint64_t idx = 0; idx < pool->block_count; ++idx) {
 		struct counter_storage_block *block =
 			ADDR_OF(ADDR_OF(&pool->blocks) + idx);
-		if (block == NULL)
+		if (block == NULL) {
 			continue;
+		}
 
 		if (--block->refcnt == 0) {
 			memory_bfree(
@@ -508,11 +518,13 @@ counter_storage_pool_fini(
 
 void
 counter_storage_free(struct counter_storage *storage) {
-	if (storage == NULL)
+	if (storage == NULL) {
 		return;
+	}
 
-	if (--storage->refcnt > 0)
+	if (--storage->refcnt > 0) {
 		return;
+	}
 
 	struct memory_context *memory_context =
 		ADDR_OF(&storage->memory_context);

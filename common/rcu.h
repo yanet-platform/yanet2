@@ -334,8 +334,9 @@ wait_epoch_flush(rcu_t *rcu, unsigned e) {
 				}
 			}
 		}
-		if (!any)
+		if (!any) {
 			break;
+		}
 		cpu_pause();
 	}
 }

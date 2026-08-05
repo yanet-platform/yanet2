@@ -240,10 +240,12 @@ benchmark_btree_u64(size_t num_elements) {
 		uint64_t iter_time = iter_end - iter_start;
 
 		total_time_ns += iter_time;
-		if (iter_time < min_time_ns)
+		if (iter_time < min_time_ns) {
 			min_time_ns = iter_time;
-		if (iter_time > max_time_ns)
+		}
+		if (iter_time > max_time_ns) {
 			max_time_ns = iter_time;
+		}
 
 		double iter_time_ms = iter_time / 1000000.0;
 		double searches_per_sec =
@@ -408,10 +410,12 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 		uint64_t iter_time = iter_end - iter_start;
 
 		total_time_ns += iter_time;
-		if (iter_time < min_time_ns)
+		if (iter_time < min_time_ns) {
 			min_time_ns = iter_time;
-		if (iter_time > max_time_ns)
+		}
+		if (iter_time > max_time_ns) {
 			max_time_ns = iter_time;
+		}
 
 		double iter_time_ms = iter_time / 1000000.0;
 		double searches_per_sec =

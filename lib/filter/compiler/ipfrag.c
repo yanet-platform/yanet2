@@ -33,8 +33,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 	for (const struct filter_rule **r_ptr = rules;
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 
 		if (r->fragment == FILTER_IP_FRAG_ANY) {
@@ -42,10 +43,11 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 		}
 		remap_table_new_gen(&remap_table);
 		uint32_t id;
-		if (r->fragment == FILTER_IP_FRAG_NONE)
+		if (r->fragment == FILTER_IP_FRAG_NONE) {
 			id = 0;
-		else
+		} else {
 			id = 1;
+		}
 		uint32_t *value = value_table_get_ptr(t, 0, id);
 		if (remap_table_touch(&remap_table, *value, value) < 0) {
 			goto error_touch;
@@ -63,8 +65,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 		if (value_registry_start(registry)) {
 			goto error_collect;
 		}
-		if (*r_ptr == NULL)
+		if (*r_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *r = *r_ptr;
 
 		if (r->fragment == FILTER_IP_FRAG_ANY) {
@@ -73,8 +76,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 			    ) ||
 			    value_registry_collect(
 				    registry, value_table_get(t, 0, 1)
-			    ))
+			    )) {
 				goto error_collect;
+			}
 		} else {
 			if (value_registry_collect(
 				    registry,
@@ -85,8 +89,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 						    ? 0
 						    : 1
 				    )
-			    ))
+			    )) {
 				goto error_collect;
+			}
 		}
 	}
 	return 0;
@@ -110,8 +115,9 @@ FILTER_ATTR_COMPILER_FREE_FUNC(ip_frag)(
 	void *data, struct memory_context *memory_context
 ) {
 	struct value_table *t = (struct value_table *)data;
-	if (t == NULL)
+	if (t == NULL) {
 		return;
+	}
 	value_table_free(t);
 	memory_bfree(memory_context, t, sizeof(struct value_table));
 }

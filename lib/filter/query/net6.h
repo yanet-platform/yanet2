@@ -14,8 +14,9 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net6_dst)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	if (!count)
+	if (!count) {
 		return;
+	}
 
 	struct net6_classifier *c = (struct net6_classifier *)data;
 
@@ -59,8 +60,9 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net6_src)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	if (!count)
+	if (!count) {
 		return;
+	}
 
 	struct net6_classifier *c = (struct net6_classifier *)data;
 

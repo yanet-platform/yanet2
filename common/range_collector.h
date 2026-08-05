@@ -24,8 +24,9 @@ range_collector_init(
 ) {
 	collector->memory_context = memory_context;
 
-	if (radix_init(&collector->radix, collector->memory_context))
+	if (radix_init(&collector->radix, collector->memory_context)) {
 		return -1;
+	}
 	collector->masks = NULL;
 	collector->mask_count = 0;
 
@@ -89,8 +90,9 @@ range_collector_add(
 	const uint8_t *value,
 	const uint8_t prefix
 ) {
-	if (!prefix)
+	if (!prefix) {
 		return 0;
+	}
 
 	uint32_t mask_index = radix_lookup(&collector->radix, key_size, value);
 	if (mask_index == RADIX_VALUE_INVALID) {
@@ -169,13 +171,15 @@ range_collector_stack_emit(
 	struct range_collector_stack_item item =
 		range_collector_stack_last(ctx, key_size);
 
-	if (*item.value == LPM_VALUE_INVALID)
+	if (*item.value == LPM_VALUE_INVALID) {
 		*item.value = ctx->max_value++;
+	}
 
 	if (range_index_insert(
 		    ctx->range_index, key_size, ctx->pos, *item.value
-	    ))
+	    )) {
 		return -1;
+	}
 
 	memcpy(ctx->pos, to, key_size);
 	filter_key_inc(key_size, ctx->pos);
@@ -191,8 +195,11 @@ range_collector_stack_emit_until(
 		struct range_collector_stack_item item =
 			range_collector_stack_last(ctx, key_size);
 		if (filter_key_cmp(key_size, item.to, to) < 0) {
-			if (range_collector_stack_emit(ctx, key_size, item.to))
+			if (range_collector_stack_emit(
+				    ctx, key_size, item.to
+			    )) {
 				return -1;
+			}
 			--ctx->stack_depth;
 		} else if (filter_key_cmp(key_size, ctx->pos, to) < 0) {
 			uint8_t emit_to[key_size];
@@ -216,8 +223,9 @@ range_collector_add_network(
 	const uint8_t *to,
 	struct range_collector_ctx *ctx
 ) {
-	if (range_collector_stack_emit_until(ctx, key_size, from))
+	if (range_collector_stack_emit_until(ctx, key_size, from)) {
 		return -1;
+	}
 	range_collector_stack_push(ctx, key_size, to);
 
 	return 0;
@@ -242,8 +250,9 @@ range_collector_iterate(
 			mask_item ^= 0x01 << (7 - (prefix - 1) % 8);
 			if (range_collector_add_network(
 				    key_size, from, to, ctx
-			    ))
+			    )) {
 				return -1;
+			}
 		}
 	}
 
@@ -279,14 +288,16 @@ range_collector_collect(
 
 	if (radix_walk(
 		    &collector->radix, key_size, range_collector_iterate, &ctx
-	    ))
+	    )) {
 		goto error;
+	}
 
 	while (ctx.stack_depth > 0) {
 		struct range_collector_stack_item item =
 			range_collector_stack_last(&ctx, key_size);
-		if (range_collector_stack_emit(&ctx, key_size, item.to))
+		if (range_collector_stack_emit(&ctx, key_size, item.to)) {
 			goto error;
+		}
 		--ctx.stack_depth;
 	}
 

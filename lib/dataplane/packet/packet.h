@@ -84,8 +84,9 @@ packet_list_first(struct packet_list *list) {
 static inline void
 packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 	// Nothing to do if src is empty
-	if (src->first == NULL)
+	if (src->first == NULL) {
 		return;
+	}
 
 	// Replace dst with src if dst is empty
 	if (dst->first == NULL) {
@@ -103,12 +104,14 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 static inline struct packet *
 packet_list_pop(struct packet_list *packets) {
 	struct packet *res = packets->first;
-	if (res == NULL)
+	if (res == NULL) {
 		return res;
+	}
 
 	packets->first = res->next;
-	if (packets->first == NULL)
+	if (packets->first == NULL) {
 		packets->last = NULL;
+	}
 
 	return res;
 }

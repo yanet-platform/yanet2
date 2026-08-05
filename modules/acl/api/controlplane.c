@@ -741,8 +741,9 @@ acl_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (acl_module_init_ip4(
 		    cp_module,
@@ -751,8 +752,9 @@ acl_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (acl_module_init_ip4_port(
 		    cp_module,
@@ -761,8 +763,9 @@ acl_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (acl_module_init_ip6(
 		    cp_module,
@@ -771,8 +774,9 @@ acl_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (acl_module_init_ip6_port(
 		    cp_module,
@@ -781,8 +785,9 @@ acl_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	if (acl_module_init_net6_share(
 		    cp_module,
@@ -791,8 +796,9 @@ acl_module_config_update(
 		    filter_rules,
 		    filter_rule_ptrs,
 		    err
-	    ))
+	    )) {
 		goto error_rule_ptrs;
+	}
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	config->compilation_time_ns =

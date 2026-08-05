@@ -64,8 +64,9 @@ static int
 value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct value_set_ctx *set_ctx = (struct value_set_ctx *)data;
 	uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
-	if (*value != FILTER_RULE_INVALID)
+	if (*value != FILTER_RULE_INVALID) {
 		return 0;
+	}
 	*value = idx;
 
 	return 0;
@@ -108,8 +109,9 @@ merge_and_set_registry_values(
 			    range_idx,
 			    value_table_set_action,
 			    &set_ctx
-		    ))
+		    )) {
 			goto error_join;
+		}
 	}
 
 	return 0;

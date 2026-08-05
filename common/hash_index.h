@@ -65,8 +65,9 @@ hash_index_init(
 static inline void
 hash_index_fini(struct hash_index *hash_index) {
 	uint32_t *entries = ADDR_OF(&hash_index->entries);
-	if (entries == NULL)
+	if (entries == NULL) {
 		return;
+	}
 
 	memory_bfree(
 		ADDR_OF(&hash_index->memory_context),
@@ -86,16 +87,18 @@ hash_index_lookup(
 	hash_index_eq_func eq_func,
 	const void *eq_func_data
 ) {
-	if (!hash_index->capacity)
+	if (!hash_index->capacity) {
 		return HASH_INDEX_INVALID;
+	}
 
 	uint32_t bucket =
 		hash % (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
 	const uint32_t *entries = ADDR_OF(&hash_index->entries);
 
 	while (entries[bucket] != HASH_INDEX_INVALID) {
-		if (eq_func(entries[bucket], eq_func_data) == 0)
+		if (eq_func(entries[bucket], eq_func_data) == 0) {
 			return entries[bucket];
+		}
 		bucket = (bucket + 1) %
 			 (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
 	}
@@ -110,16 +113,18 @@ static inline int
 hash_index_insert(
 	struct hash_index *hash_index, uint32_t hash, uint32_t value
 ) {
-	if (hash_index->count >= hash_index->capacity)
+	if (hash_index->count >= hash_index->capacity) {
 		return -1;
+	}
 
 	uint32_t bucket =
 		hash % (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
 	uint32_t *entries = ADDR_OF(&hash_index->entries);
 
-	while (entries[bucket] != HASH_INDEX_INVALID)
+	while (entries[bucket] != HASH_INDEX_INVALID) {
 		bucket = (bucket + 1) %
 			 (hash_index->capacity * HASH_INDEX_SPARSE_FACTOR);
+	}
 
 	entries[bucket] = value;
 	hash_index->count += 1;

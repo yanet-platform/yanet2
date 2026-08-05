@@ -47,8 +47,9 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			memory_context, sizeof(radix_page_t) * RADIX_CHUNK_SIZE
 		);
 
-		if (new_chunk == NULL)
+		if (new_chunk == NULL) {
 			return -1;
+		}
 
 		radix_page_t **old_pages = ADDR_OF(&radix->pages);
 		uint64_t old_chunk_count = radix->page_count / RADIX_CHUNK_SIZE;
@@ -79,8 +80,9 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			old_chunk_count * sizeof(radix_page_t *)
 		);
 	}
-	if (page_idx != NULL)
+	if (page_idx != NULL) {
 		*page_idx = radix->page_count;
+	}
 	radix_page_t *page = radix_page(radix, radix->page_count);
 	memset(page, 0xff, sizeof(radix_page_t));
 	radix->page_count += 1;
@@ -103,8 +105,9 @@ radix_free(struct radix *radix) {
 		(radix->page_count + RADIX_CHUNK_SIZE - 1) / RADIX_CHUNK_SIZE;
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		radix_page_t *chunk = ADDR_OF(&pages[chunk_idx]);
-		if (chunk == NULL)
+		if (chunk == NULL) {
 			continue;
+		}
 
 		memory_bfree(
 			memory_context,
@@ -131,8 +134,9 @@ radix_insert(
 	for (uint8_t iter = 0; iter < key_size - 1; ++iter) {
 		uint32_t *stored_value = (*page) + key[iter];
 		if ((*stored_value == RADIX_VALUE_INVALID) &&
-		    radix_new_page(radix, stored_value))
+		    radix_new_page(radix, stored_value)) {
 			return -1;
+		}
 		page = radix_page(radix, *stored_value);
 	}
 
@@ -147,8 +151,9 @@ radix_lookup(const struct radix *radix, uint8_t key_size, const uint8_t *key) {
 	radix_page_t *page = radix_page(radix, 0);
 	for (uint8_t iter = 0; iter < key_size - 1; ++iter) {
 		value = (*page)[key[iter]];
-		if (value == RADIX_VALUE_INVALID)
+		if (value == RADIX_VALUE_INVALID) {
 			return RADIX_VALUE_INVALID;
+		}
 
 		page = radix_page(radix, value);
 	}
@@ -189,11 +194,13 @@ radix_walk_rec(
 				    depth + 1,
 				    cb,
 				    cb_data
-			    ))
+			    )) {
 				return -1;
+			}
 		} else {
-			if (cb(key_size, key, value, cb_data))
+			if (cb(key_size, key, value, cb_data)) {
 				return -1;
+			}
 		}
 	}
 	return 0;

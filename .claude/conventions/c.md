@@ -2,7 +2,7 @@
 
 Loaded on demand by the agent writing or reviewing C; this is the single source for these rules.
 
-- Always use braces for `if`/`else`/`for`/`while`, even single-line bodies.
+- Always use braces for `if`/`else`/`for`/`while`, even single-line bodies. Enforce this rule with `clang-format` (`InsertBraces: true`).
 - Format with `clang-format`.
 - **Functions with more than six parameters are a code smell.** Split them or use a designated-initializer config struct; omnibus initialisers are untestable.
 - **Multi-segment mbufs**: `rte_pktmbuf_data_len()` is head-only. Whole-packet work walks `mbuf->next`/uses `rte_pktmbuf_pkt_len()`, or rejects chained packets.

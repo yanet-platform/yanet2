@@ -91,16 +91,18 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 	yaml_parser_t parser;
 	yaml_event_t event;
-	if (!yaml_parser_initialize(&parser))
+	if (!yaml_parser_initialize(&parser)) {
 		return -1;
+	}
 
 	yaml_parser_set_input_file(&parser, file);
 
 	struct dataplane_config *dataplane =
 		(struct dataplane_config *)malloc(sizeof(struct dataplane_config
 		));
-	if (dataplane == NULL)
+	if (dataplane == NULL) {
 		goto err_alloc_config;
+	}
 
 	memset(dataplane, 0, sizeof(*dataplane));
 
@@ -144,8 +146,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_dataplane_dpdk_memory:
 				dataplane->dpdk_memory =
 					strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 				state = state_dataplane;
 				break;
 			case state_dataplane_iova_mode:
@@ -168,8 +171,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_modules:
 				if (dataplane->module_count >=
-				    DATAPLANE_MAX_MODULES)
+				    DATAPLANE_MAX_MODULES) {
 					goto error;
+				}
 				strtcpy(dataplane->module_names
 						[dataplane->module_count],
 					start,
@@ -180,20 +184,23 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			// handle new instance
 			case state_instance_numa_id:
 				instance->numa_idx = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 				state = state_instance;
 				break;
 			case state_instance_dp_memory:
 				instance->dp_memory = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 				state = state_instance;
 				break;
 			case state_instance_cp_memory:
 				instance->cp_memory = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 				state = state_instance;
 				break;
 			case state_device_name:
@@ -217,58 +224,66 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_device_mtu:
 				device->mtu = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 				state = state_device;
 				break;
 			case state_device_max_lro_packet_size:
 				device->max_lro_packet_size =
 					strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_device;
 				break;
 			case state_device_rss_hash:
 				device->rss_hash = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_device;
 				break;
 
 			case state_worker_core_id:
 				worker->core_id = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_worker;
 				break;
 			case state_worker_instance_id:
 				worker->instance_id = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_worker;
 				break;
 			case state_worker_rx_queue_len:
 				worker->rx_queue_len = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_worker;
 				break;
 			case state_worker_tx_queue_len:
 				worker->tx_queue_len = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_worker;
 				break;
 			case state_worker_num_mbufs:
 				worker->num_mbufs = strtol(start, &end, 10);
-				if (*end != '\0')
+				if (*end != '\0') {
 					goto error;
+				}
 
 				state = state_worker;
 				break;
@@ -550,8 +565,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	}
 	yaml_event_delete(&event);
 
-	if (resolve_connections(dataplane) != 0)
+	if (resolve_connections(dataplane) != 0) {
 		goto error;
+	}
 
 	yaml_parser_delete(&parser);
 

@@ -99,17 +99,20 @@ main(int argc, char **argv) {
 			goto out;
 		}
 
-		for (i = 0; i < argc; i++)
+		for (i = 0; i < argc; i++) {
 			all_argv[i] = argv[i];
-		for (i = 0; i < eargc; i++)
+		}
+		for (i = 0; i < eargc; i++) {
 			all_argv[argc + i] = eargv[i];
+		}
 		all_argv[all_argc] = NULL;
 
 		/* call eal_init with combined args */
 		ret = rte_eal_init(all_argc, all_argv);
 		free(all_argv);
-	} else
+	} else {
 		ret = rte_eal_init(argc, argv);
+	}
 	if (ret < 0) {
 		ret = -1;
 		goto out;
@@ -142,10 +145,12 @@ main(int argc, char **argv) {
 
 	char *dpdk_test = getenv("YANET_TEST");
 
-	if (dpdk_test && strlen(dpdk_test) > 0)
+	if (dpdk_test && strlen(dpdk_test) > 0) {
 		tests[test_count++] = dpdk_test;
-	for (i = 1; i < argc; i++)
+	}
+	for (i = 1; i < argc; i++) {
 		tests[test_count++] = argv[i];
+	}
 
 	if (test_count > 0) {
 		char buf[1024];
@@ -168,10 +173,11 @@ main(int argc, char **argv) {
 				RTE_DIM(skip_tests),
 				','
 			);
-			if (split_ret > 0)
+			if (split_ret > 0) {
 				n_skip_tests = split_ret;
-			else
+			} else {
 				free(dpdk_test_skip);
+			}
 		}
 
 		cl = cmdline_new(main_ctx, "YANET>>", 0, 1);
@@ -201,15 +207,18 @@ main(int argc, char **argv) {
 			} else if (cmdline_in(cl, buf, strlen(buf)) < 0) {
 				printf("error on cmdline input\n");
 				ret = -1;
-			} else
+			} else {
 				ret = last_test_result;
+			}
 
 		end_of_cmd:
-			if (ret != 0 && ret != TEST_SKIPPED)
+			if (ret != 0 && ret != TEST_SKIPPED) {
 				break;
+			}
 		}
-		if (n_skip_tests > 0)
+		if (n_skip_tests > 0) {
 			free(dpdk_test_skip);
+		}
 
 		cmdline_free(cl);
 		goto out;
@@ -257,18 +266,20 @@ unit_test_suite_count_tcs_on_setup_fail(
 		suite->total += ts->total;
 		suite->failed += ts->failed;
 		suite->skipped += ts->skipped;
-		if (ts->failed)
+		if (ts->failed) {
 			(*sub_ts_failed)++;
-		else
+		} else {
 			(*sub_ts_skipped)++;
+		}
 		(*sub_ts_total)++;
 	}
 	FOR_EACH_SUITE_TESTCASE(i, suite, tc) {
 		suite->total++;
-		if (!tc.enabled || test_success == TEST_SKIPPED)
+		if (!tc.enabled || test_success == TEST_SKIPPED) {
 			suite->skipped++;
-		else
+		} else {
 			suite->failed++;
+		}
 	}
 }
 
@@ -335,30 +346,33 @@ unit_test_suite_runner(struct unit_test_suite *suite) {
 		}
 
 		/* run test case setup */
-		if (tc.setup)
+		if (tc.setup) {
 			test_success = tc.setup();
-		else
+		} else {
 			test_success = TEST_SUCCESS;
+		}
 
 		if (test_success == TEST_SUCCESS) {
 			/* run the test case */
-			if (tc.testcase)
+			if (tc.testcase) {
 				test_success = tc.testcase();
-			else if (tc.testcase_with_data)
+			} else if (tc.testcase_with_data) {
 				test_success = tc.testcase_with_data(tc.data);
-			else
+			} else {
 				test_success = -ENOTSUP;
+			}
 
-			if (test_success == TEST_SUCCESS)
+			if (test_success == TEST_SUCCESS) {
 				suite->succeeded++;
-			else if (test_success == TEST_SKIPPED) {
+			} else if (test_success == TEST_SKIPPED) {
 				suite->skipped++;
 				suite->executed--;
 			} else if (test_success == -ENOTSUP) {
 				suite->unsupported++;
 				suite->executed--;
-			} else
+			} else {
 				suite->failed++;
+			}
 		} else if (test_success == -ENOTSUP) {
 			suite->unsupported++;
 		} else if (test_success == TEST_SKIPPED) {
@@ -368,17 +382,19 @@ unit_test_suite_runner(struct unit_test_suite *suite) {
 		}
 
 		/* run the test case teardown */
-		if (tc.teardown)
+		if (tc.teardown) {
 			tc.teardown();
+		}
 
-		if (test_success == TEST_SUCCESS)
+		if (test_success == TEST_SUCCESS) {
 			status = "succeeded";
-		else if (test_success == TEST_SKIPPED)
+		} else if (test_success == TEST_SKIPPED) {
 			status = "skipped";
-		else if (test_success == -ENOTSUP)
+		} else if (test_success == -ENOTSUP) {
 			status = "unsupported";
-		else
+		} else {
 			status = "failed";
+		}
 
 		printf(" + TestCase [%2d] : %s %s\n",
 		       suite->total,
@@ -387,12 +403,13 @@ unit_test_suite_runner(struct unit_test_suite *suite) {
 	}
 	FOR_EACH_SUITE_TESTSUITE(i, suite, ts) {
 		ret = unit_test_suite_runner(ts);
-		if (ret == TEST_SUCCESS)
+		if (ret == TEST_SUCCESS) {
 			sub_ts_succeeded++;
-		else if (ret == TEST_SKIPPED)
+		} else if (ret == TEST_SKIPPED) {
 			sub_ts_skipped++;
-		else
+		} else {
 			sub_ts_failed++;
+		}
 		sub_ts_total++;
 
 		suite->total += ts->total;
@@ -404,8 +421,9 @@ unit_test_suite_runner(struct unit_test_suite *suite) {
 	}
 
 	/* Run test suite teardown */
-	if (suite->teardown)
+	if (suite->teardown) {
 		suite->teardown();
+	}
 
 	goto suite_summary;
 
@@ -453,9 +471,11 @@ suite_summary:
 
 	last_test_result = suite->failed;
 
-	if (suite->failed)
+	if (suite->failed) {
 		return TEST_FAILED;
-	if (suite->total == suite->skipped)
+	}
+	if (suite->total == suite->skipped) {
 		return TEST_SKIPPED;
+	}
 	return TEST_SUCCESS;
 }

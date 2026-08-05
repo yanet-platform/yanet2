@@ -260,11 +260,13 @@ static inline struct config_gen_ectx *
 cp_config_gen_worker_ectx(
 	struct cp_config_gen *config_gen, uint64_t worker_idx
 ) {
-	if (worker_idx >= config_gen->config_gen_ectx_count)
+	if (worker_idx >= config_gen->config_gen_ectx_count) {
 		return NULL;
+	}
 	struct config_gen_ectx **ectxs = ADDR_OF(&config_gen->config_gen_ectxs);
-	if (ectxs == NULL)
+	if (ectxs == NULL) {
 		return NULL;
+	}
 	return ADDR_OF(ectxs + worker_idx);
 }
 

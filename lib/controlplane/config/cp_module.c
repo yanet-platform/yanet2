@@ -292,8 +292,9 @@ cp_module_registry_get(
 ) {
 	struct registry_item *item =
 		registry_get(&module_registry->registry, index);
-	if (item == NULL)
+	if (item == NULL) {
 		return NULL;
+	}
 	return container_of(item, struct cp_module, config_item);
 }
 
@@ -314,8 +315,9 @@ cp_module_registry_item_cmp(
 
 	int cmp = strncmp(module->name, cmp_data->name, sizeof(module->name));
 
-	if (cmp)
+	if (cmp) {
 		return cmp;
+	}
 
 	return strncmp(module->type, cmp_data->type, sizeof(module->type));
 }

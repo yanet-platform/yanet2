@@ -163,10 +163,12 @@ lpm_check_range_lo(
 	uint8_t check[key_size];
 	memcpy(check, key, hop + 1);
 
-	if (hop + 1 < key_size)
+	if (hop + 1 < key_size) {
 		memset(check + hop + 1, 0x00, key_size - hop - 1);
-	if (filter_key_cmp(key_size, check, from) < 0)
+	}
+	if (filter_key_cmp(key_size, check, from) < 0) {
 		return -1;
+	}
 
 	return 0;
 }
@@ -178,10 +180,12 @@ lpm_check_range_hi(
 	uint8_t check[key_size];
 	memcpy(check, key, key_size);
 
-	if (hop + 1 < key_size)
+	if (hop + 1 < key_size) {
 		memset(check + hop + 1, 0xff, key_size - hop - 1);
-	if (filter_key_cmp(key_size, check, to) > 0)
+	}
+	if (filter_key_cmp(key_size, check, to) > 0) {
 		return -1;
+	}
 
 	return 0;
 }
@@ -223,8 +227,9 @@ lpm_insert(
 			if (hop < key_size - 1 &&
 			    (lpm_check_range_lo(key_size, key, from, hop) ||
 			     lpm_check_range_hi(key_size, key, to, hop))) {
-				if (lpm_new_page(lpm, stored_value))
+				if (lpm_new_page(lpm, stored_value)) {
 					return -1;
+				}
 				++hop;
 				if (hop > max_hop) {
 					key[hop] = from[hop];
@@ -252,14 +257,17 @@ lpm_insert(
 		do {
 			key[hop]++;
 			uint8_t upper_bound = 0xff;
-			if (lpm_check_range_hi(key_size, key, to, hop))
+			if (lpm_check_range_hi(key_size, key, to, hop)) {
 				upper_bound = to[hop];
+			}
 			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == 0)
+				if (hop == 0) {
 					return 0;
+				}
 				--hop;
-			} else
+			} else {
 				break;
+			}
 		} while (1);
 	}
 
@@ -273,8 +281,9 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 
 	for (uint8_t hop = 0; hop < key_size; ++hop) {
 		value = page->values + key[hop];
-		if (value->value & LPM_VALUE_FLAG)
+		if (value->value & LPM_VALUE_FLAG) {
 			break;
+		}
 		// An intermediate node (flag clear) always has a child page, so
 		// the relative pointer is never NULL here — skip the NULL test.
 		page = ADDR_OF_NONNULL(&value->page);
@@ -496,8 +505,9 @@ lpm_walk(
 			memcpy(prev_to, key, key_size);
 			memset(prev_to + hop + 1, 0xff, key_size - hop - 1);
 		} else {
-			if (key[hop] == to[hop] && hop == hi_limit)
+			if (key[hop] == to[hop] && hop == hi_limit) {
 				++hi_limit;
+			}
 
 			++hop;
 			if (hop > max_hop) {
@@ -513,15 +523,17 @@ lpm_walk(
 		do {
 			key[hop]++;
 			uint8_t upper_bound = 0xff;
-			if (hop == hi_limit)
+			if (hop == hi_limit) {
 				upper_bound = to[hop];
+			}
 			if (key[hop] == (uint8_t)(upper_bound + 1)) {
 				if (hop == hi_limit) {
 					goto out;
 				}
 				--hop;
-			} else
+			} else {
 				break;
+			}
 		} while (1);
 	}
 
@@ -583,8 +595,9 @@ lpm_collect_values(
 				}
 			}
 		} else {
-			if (key[hop] == to[hop] && hop == hi_limit)
+			if (key[hop] == to[hop] && hop == hi_limit) {
 				++hi_limit;
+			}
 
 			++hop;
 			if (hop > max_hop) {
@@ -601,15 +614,17 @@ lpm_collect_values(
 			key[hop]++;
 
 			uint8_t upper_bound = 0xff;
-			if (hop == hi_limit)
+			if (hop == hi_limit) {
 				upper_bound = to[hop];
+			}
 			if (key[hop] == (uint8_t)(upper_bound + 1)) {
 				if (hop == hi_limit) {
 					goto out;
 				}
 				--hop;
-			} else
+			} else {
 				break;
+			}
 
 		} while (1);
 	}
@@ -650,11 +665,13 @@ lpm_remap(struct lpm *lpm, uint8_t key_size, struct value_table *table) {
 		do {
 			key[hop]++;
 			if (key[hop] == 0) {
-				if (hop == 0)
+				if (hop == 0) {
 					goto out;
+				}
 				--hop;
-			} else
+			} else {
 				break;
+			}
 		} while (1);
 	}
 
@@ -683,18 +700,20 @@ lpm_compact(struct lpm *lpm, uint8_t key_size) {
 		do {
 			key[hop]++;
 			if (key[hop] == 0) {
-				if (hop == 0)
+				if (hop == 0) {
 					goto out;
+				}
 
 				uint64_t first_value =
 					pages[hop]->values[0].value;
 				bool is_monolite = first_value & LPM_VALUE_FLAG;
 
 				for (uint8_t idx = 255; is_monolite && idx > 0;
-				     --idx)
+				     --idx) {
 					is_monolite &=
 						first_value ==
 						pages[hop]->values[idx].value;
+				}
 
 				--hop;
 				if (is_monolite) {

@@ -13,6 +13,9 @@ BinPackParameters: false
 AlwaysBreakAfterReturnType: All
 ContinuationIndentWidth: 8
 
+# Always add braces to if/else/for/while bodies, even single-line ones.
+InsertBraces: true
+
 # Special rules for proto files
 ---
 Language: Proto

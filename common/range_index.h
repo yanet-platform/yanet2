@@ -54,14 +54,16 @@ range_index_insert(
 	if (!((range_index->count - 1) & range_index->count)) {
 		old_count = range_index->count;
 		new_count = old_count * 2;
-		if (!new_count)
+		if (!new_count) {
 			new_count = 1;
+		}
 		new_values = (uint32_t *)memory_balloc(
 			memory_context, new_count * sizeof(uint32_t)
 		);
 
-		if (new_values == NULL)
+		if (new_values == NULL) {
 			return -1;
+		}
 		if (old_count > 0) {
 			memcpy(new_values,
 			       old_values,
@@ -91,8 +93,9 @@ range_index_insert(
 		);
 	}
 
-	if (value > range_index->max_value)
+	if (value > range_index->max_value) {
 		range_index->max_value = value;
+	}
 
 	return 0;
 }
@@ -158,8 +161,9 @@ range_index_lpm_cb(
 			    ctx->prev_from,
 			    to,
 			    ctx->prev_value
-		    ))
+		    )) {
 			return -1;
+		}
 	}
 
 	memcpy(ctx->prev_from, from, key_size);
@@ -176,16 +180,20 @@ range_index_build_lpm(
 	ctx.values = ADDR_OF(&range_index->values);
 	ctx.prev_value = LPM_VALUE_INVALID;
 
-	if (radix_walk(&range_index->radix, key_size, range_index_lpm_cb, &ctx))
+	if (radix_walk(
+		    &range_index->radix, key_size, range_index_lpm_cb, &ctx
+	    )) {
 		return -1;
+	}
 
 	if (ctx.prev_value != LPM_VALUE_INVALID) {
 		uint8_t to[key_size];
 		memset(to, 0xff, key_size);
 		if (lpm_insert(
 			    lpm, key_size, ctx.prev_from, to, ctx.prev_value
-		    ))
+		    )) {
 			return -1;
+		}
 	}
 
 	return 0;

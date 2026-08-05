@@ -51,8 +51,9 @@ static inline void
 net6_normalize(struct net6 *src, struct net6 *dst) {
 	memcpy(dst->addr, src->addr, 16);
 	memcpy(dst->mask, src->mask, 16);
-	for (uint8_t idx = 0; idx < 16; ++idx)
+	for (uint8_t idx = 0; idx < 16; ++idx) {
 		dst->addr[idx] &= src->mask[idx];
+	}
 }
 
 static inline int
@@ -66,15 +67,17 @@ collect_net6_range(
 	struct range_index *ri
 ) {
 	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context))
+	if (range_collector_init(&collector, memory_context)) {
 		goto error;
+	}
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		struct net6 *nets;
@@ -94,8 +97,9 @@ collect_net6_range(
 				    &collector,
 				    addr,
 				    __builtin_popcountll(*(uint64_t *)mask)
-			    ))
+			    )) {
 				goto error_collector;
+			}
 		}
 	}
 	if (lpm_init(lpm, memory_context)) {
@@ -155,8 +159,9 @@ net6_part_range_index_bound(
 	filter_key_inc(8, next);
 	*start = radix_lookup(&range_index->radix, 8, addr);
 	*stop = range_index->count;
-	if (*(uint64_t *)next != 0)
+	if (*(uint64_t *)next != 0) {
 		*stop = radix_lookup(&range_index->radix, 8, next);
+	}
 }
 
 /*
@@ -225,8 +230,9 @@ touch_network_ranges(
 
 			// Skip `any` network
 			if (*(uint64_t *)net6.mask == 0 &&
-			    *(uint64_t *)(net6.mask + 8) == 0)
+			    *(uint64_t *)(net6.mask + 8) == 0) {
 				continue;
+			}
 
 			uint32_t start_hi;
 			uint32_t stop_hi;
@@ -362,8 +368,9 @@ build_net6_info(
 	     action_ptr < actions + action_count;
 	     ++action_ptr) {
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		struct net6 *rule_nets;
@@ -377,8 +384,9 @@ build_net6_info(
 			net6_normalize(rule_net, &net6);
 
 			if (radix_lookup(net_radix, 32, net6.addr) !=
-			    RADIX_VALUE_INVALID)
+			    RADIX_VALUE_INVALID) {
 				continue;
+			}
 
 			if (radix_insert(
 				    net_radix, 32, net6.addr, *net_count
@@ -415,8 +423,9 @@ build_net6_info(
 	     action_ptr < actions + action_count;
 	     ++action_ptr) {
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		remap_table_new_gen(&net_remap);
@@ -445,15 +454,18 @@ build_net6_info(
 	value_table_compact(&net_table, &net_remap);
 	remap_table_free(&net_remap);
 
-	for (uint32_t idx = 0; idx < *net_count; ++idx)
-		if (value_table_get(&net_table, 0, idx) >= *net_range_count)
+	for (uint32_t idx = 0; idx < *net_count; ++idx) {
+		if (value_table_get(&net_table, 0, idx) >= *net_range_count) {
 			*net_range_count =
 				value_table_get(&net_table, 0, idx) + 1;
+		}
+	}
 	*net_ranges = (struct value_range *)memory_balloc(
 		memory_context, sizeof(struct value_range) * *net_range_count
 	);
-	if (*net_ranges == NULL)
+	if (*net_ranges == NULL) {
 		goto error_table;
+	}
 
 	memset(*net_ranges, 0, sizeof(struct value_range) * *net_range_count);
 	for (uint32_t net_idx = 0; net_idx < *net_count; ++net_idx) {
@@ -581,11 +593,13 @@ merge_net6_range(
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		if (value_registry_start(registry))
+		if (value_registry_start(registry)) {
 			goto error_registry;
+		}
 
-		if (*action_ptr == NULL)
+		if (*action_ptr == NULL) {
 			continue;
+		}
 		const struct filter_rule *action = *action_ptr;
 
 		struct net6 *nets;
@@ -680,8 +694,9 @@ init_net6(
 ) {
 	struct net6_classifier *net6 =
 		memory_balloc(memory_context, sizeof(struct net6_classifier));
-	if (net6 == NULL)
+	if (net6 == NULL) {
 		return -1;
+	}
 	SET_OFFSET_OF(data, net6);
 
 	struct range_index ri_hi;
@@ -786,11 +801,13 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_dst)(
 // Allows to free data for IPv6 classification.
 static inline void
 free_net6(void *data, struct memory_context *memory_context) {
-	if (data == NULL)
+	if (data == NULL) {
 		return;
+	}
 	struct net6_classifier *c = (struct net6_classifier *)data;
-	if (c == NULL)
+	if (c == NULL) {
 		return;
+	}
 	lpm_free(&c->lo);
 	lpm_free(&c->hi);
 	value_table_free(&c->comb);

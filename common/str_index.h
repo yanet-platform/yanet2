@@ -74,8 +74,9 @@ str_index_init(
 
 static inline void
 str_index_fini(struct str_index *str_index) {
-	if (str_index->values == NULL)
+	if (str_index->values == NULL) {
 		return;
+	}
 
 	uint32_t *values = ADDR_OF(&str_index->values);
 	memory_bfree(
@@ -94,8 +95,9 @@ str_index_lookup(
 	str_index_read_func read_func,
 	const void *read_func_data
 ) {
-	if (!str_index->capacity)
+	if (!str_index->capacity) {
 		return STR_INDEX_INVALID;
+	}
 
 	uint32_t length = strnlen(key, key_size);
 	uint32_t hash = str_index_fnv1a(key, length, 0);
@@ -145,8 +147,9 @@ str_index_expand(
 		ADDR_OF(&str_index->memory_context),
 		sizeof(uint32_t) * new_capacity
 	);
-	if (new_values == NULL)
+	if (new_values == NULL) {
 		return -1;
+	}
 
 	memset(new_values, 0xff, sizeof(uint32_t) * new_capacity);
 
@@ -157,8 +160,9 @@ str_index_expand(
 	str_index->capacity = new_capacity;
 
 	for (uint32_t pos = 0; pos < old_capacity; ++pos) {
-		if (old_values[pos] == STR_INDEX_INVALID)
+		if (old_values[pos] == STR_INDEX_INVALID) {
 			continue;
+		}
 		const char *key = read_func(old_values[pos], read_func_data);
 		str_index_insert_force(
 			str_index, key, key_size, old_values[pos]

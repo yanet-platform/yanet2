@@ -28,8 +28,9 @@ static int
 match_item(uint32_t value, const void *data) {
 	const struct eq_context *ctx = (const struct eq_context *)data;
 	if (items[value].key == ctx->want_key &&
-	    items[value].tag == ctx->want_tag)
+	    items[value].tag == ctx->want_tag) {
 		return 0;
+	}
 	return 1;
 }
 
@@ -80,8 +81,9 @@ fixture_fini(struct fixture *fix) {
 static int
 test_single_insert_lookup(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, ITEM_COUNT) != 0)
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
 		return TEST_FAILED;
+	}
 
 	items[0] = (struct test_item){.key = 42, .tag = 100};
 	TEST_ASSERT(
@@ -108,8 +110,9 @@ test_single_insert_lookup(void) {
 static int
 test_lookup_empty(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, ITEM_COUNT) != 0)
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
 		return TEST_FAILED;
+	}
 
 	struct eq_context ctx = {.want_key = 1, .want_tag = 1};
 	uint32_t result =
@@ -127,8 +130,9 @@ test_lookup_empty(void) {
 static int
 test_zero_capacity(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, 0) != 0)
+	if (fixture_init(&fix, 0) != 0) {
 		return TEST_FAILED;
+	}
 
 	TEST_ASSERT(fix.index.capacity == 0, "capacity must be 0");
 	TEST_ASSERT(fix.index.count == 0, "count must be 0");
@@ -156,8 +160,9 @@ test_zero_capacity(void) {
 static int
 test_distinct_keys(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, ITEM_COUNT) != 0)
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
 		return TEST_FAILED;
+	}
 
 	for (uint32_t idx = 0; idx < 16; ++idx) {
 		items[idx] = (struct test_item){.key = idx * 7 + 3,
@@ -194,8 +199,9 @@ test_distinct_keys(void) {
 static int
 test_fill_capacity(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, ITEM_COUNT) != 0)
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
 		return TEST_FAILED;
+	}
 
 	for (uint32_t idx = 0; idx < ITEM_COUNT; ++idx) {
 		items[idx] = (struct test_item){.key = idx * 7 + 1,
@@ -238,8 +244,9 @@ test_fill_capacity(void) {
 static int
 test_same_hash_multiple_values(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, ITEM_COUNT) != 0)
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
 		return TEST_FAILED;
+	}
 
 	items[0] = (struct test_item){.key = 7, .tag = 10};
 	items[1] = (struct test_item){.key = 7, .tag = 20};
@@ -277,8 +284,9 @@ test_same_hash_multiple_values(void) {
 static int
 test_fini_idempotent(void) {
 	struct fixture fix;
-	if (fixture_init(&fix, ITEM_COUNT) != 0)
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
 		return TEST_FAILED;
+	}
 
 	items[0] = (struct test_item){.key = 1, .tag = 1};
 	TEST_ASSERT(
