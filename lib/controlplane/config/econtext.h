@@ -14,6 +14,19 @@ config_gen_ectx_get_device(
 	return ADDR_OF(config_gen_ectx->devices + index);
 }
 
+// Return the object execution context installed at the given object index, or
+// NULL when the index is out of range or no context was created for that slot.
+static inline struct object_ectx *
+config_gen_ectx_get_object(
+	struct config_gen_ectx *config_gen_ectx, uint64_t index
+) {
+	if (index >= config_gen_ectx->object_count) {
+		return NULL;
+	}
+	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
+	return ADDR_OF(objects + index);
+}
+
 // Build one execution context per worker.
 //
 // Returns an array of worker_count offset pointers, each a config_gen_ectx

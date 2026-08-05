@@ -1089,6 +1089,107 @@ error:
 	return NULL;
 }
 
+static void
+object_ectx_free(
+	struct cp_config_gen *cp_config_gen, struct object_ectx *object_ectx
+) {
+	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
+
+	struct counter_storage *counter_storage =
+		ADDR_OF(&object_ectx->counter_storage);
+	if (counter_storage != NULL) {
+		counter_storage_free(counter_storage);
+	}
+
+	memory_bfree(memory_context, object_ectx, sizeof(struct object_ectx));
+}
+
+// Spawn one object's per-worker counter storage and register it under its
+// object_type/object_name tags so it is reachable through the config
+// generation's counter storage registry.
+//
+// The counter_storage field is set before the registry insert so the error
+// path's object_ectx_free reaches and frees the spawned storage if the insert
+// fails, mirroring device_ectx_create.
+static struct object_ectx *
+object_ectx_create(
+	struct cp_config_gen *cp_config_gen,
+	struct cp_object *cp_object,
+	struct config_gen_ectx *config_gen_ectx,
+	struct cp_config_gen *old_config_gen,
+	uint64_t worker_idx,
+	yanet_error **err
+) {
+	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
+
+	struct object_ectx *object_ectx = (struct object_ectx *)memory_balloc(
+		memory_context, sizeof(struct object_ectx)
+	);
+	if (object_ectx == NULL) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for object execution context"
+		);
+		return NULL;
+	}
+	memset(object_ectx, 0, sizeof(struct object_ectx));
+	SET_OFFSET_OF(&object_ectx->cp_object, cp_object);
+
+	struct counter_storage *old_counter_storage = NULL;
+	struct config_gen_ectx *old_ectx =
+		cp_config_gen_worker_ectx(old_config_gen, worker_idx);
+	if (old_ectx != NULL) {
+		old_counter_storage =
+			cp_config_counter_storage_registry_lookup_object(
+				ADDR_OF(&old_ectx->counter_storage_registry),
+				cp_object->type,
+				cp_object->name
+			);
+	}
+
+	struct counter_storage *counter_storage = counter_storage_spawn(
+		&cp_config->counter_storage_memory_context,
+		old_counter_storage,
+		&cp_object->counter_registry
+	);
+	if (counter_storage == NULL) {
+		yanet_error_add(
+			err,
+			"failed to spawn counter storage for object '%s:%s'",
+			cp_object->type,
+			cp_object->name
+		);
+		goto error;
+	}
+
+	SET_OFFSET_OF(&object_ectx->counter_storage, counter_storage);
+
+	if (cp_config_counter_storage_registry_insert_object(
+		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
+		    cp_object->type,
+		    cp_object->name,
+		    counter_storage,
+		    err
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to insert counter storage for object '%s:%s'",
+			cp_object->type,
+			cp_object->name
+		);
+		goto error;
+	}
+
+	return object_ectx;
+
+error:
+	object_ectx_free(cp_config_gen, object_ectx);
+
+	return NULL;
+}
+
 void
 config_gen_ectx_free(
 	struct cp_config_gen *cp_config_gen,
@@ -1107,6 +1208,25 @@ config_gen_ectx_free(
 		if (device_ectx != NULL) {
 			device_ectx_free(cp_config_gen, device_ectx);
 		}
+	}
+
+	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
+	if (objects != NULL) {
+		for (uint64_t object_idx = 0;
+		     object_idx < config_gen_ectx->object_count;
+		     ++object_idx) {
+			struct object_ectx *object_ectx =
+				ADDR_OF(objects + object_idx);
+			if (object_ectx != NULL) {
+				object_ectx_free(cp_config_gen, object_ectx);
+			}
+		}
+		memory_bfree(
+			memory_context,
+			objects,
+			sizeof(struct object_ectx *) *
+				config_gen_ectx->object_count
+		);
 	}
 
 	struct cp_config_counter_storage_registry *registry =
@@ -1516,6 +1636,55 @@ config_gen_ectx_create(
 			"failed to link config generation execution context"
 		);
 		goto error;
+	}
+
+	config_gen_ectx->object_count =
+		cp_object_registry_capacity(&cp_config_gen->object_registry);
+
+	if (config_gen_ectx->object_count > 0) {
+		struct object_ectx **objects =
+			(struct object_ectx **)memory_balloc(
+				memory_context,
+				sizeof(struct object_ectx *) *
+					config_gen_ectx->object_count
+			);
+		if (objects == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate memory for object "
+				"execution contexts"
+			);
+			goto error;
+		}
+		memset(objects,
+		       0,
+		       sizeof(struct object_ectx *) *
+			       config_gen_ectx->object_count);
+		SET_OFFSET_OF(&config_gen_ectx->objects, objects);
+
+		for (uint64_t object_idx = 0;
+		     object_idx < config_gen_ectx->object_count;
+		     ++object_idx) {
+			struct cp_object *cp_object = cp_config_gen_get_object(
+				cp_config_gen, object_idx
+			);
+			if (cp_object == NULL) {
+				continue;
+			}
+
+			struct object_ectx *object_ectx = object_ectx_create(
+				cp_config_gen,
+				cp_object,
+				config_gen_ectx,
+				old_config_gen,
+				worker_idx,
+				err
+			);
+			if (object_ectx == NULL) {
+				goto error;
+			}
+			SET_OFFSET_OF(objects + object_idx, object_ectx);
+		}
 	}
 
 	return config_gen_ectx;

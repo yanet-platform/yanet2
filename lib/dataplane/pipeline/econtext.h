@@ -17,6 +17,7 @@ struct cp_chain;
 struct cp_function;
 struct cp_pipeline;
 struct cp_device;
+struct cp_object;
 
 struct cp_config_gen;
 struct cp_config_counter_storage_registry;
@@ -119,11 +120,29 @@ struct device_ectx {
 	struct device_entry_ectx *output_pipelines;
 };
 
+// Per-worker execution context for a cp_object.
+//
+// Owns the counter_storage spawned from the object's counter_registry for this
+// worker. Counters are read by name through the storage, and the storage is
+// reachable through the config generation's tag-indexed counter storage
+// registry under the object_type and object_name tags.
+struct object_ectx {
+	struct cp_object *cp_object;
+	struct counter_storage *counter_storage;
+};
+
 struct config_gen_ectx {
 	struct cp_config_gen *cp_config_gen;
 	struct phy_device_map *phy_device_maps;
 
 	struct cp_config_counter_storage_registry *counter_storage_registry;
+
+	// Offset pointer to a separately allocated array of object_ectx offset
+	// pointers, one per object index, parallel to devices below. Lives in
+	// its own allocation because devices[] is the trailing flexible array
+	// member.
+	uint64_t object_count;
+	struct object_ectx **objects;
 
 	uint64_t device_count;
 	struct device_ectx *devices[];
