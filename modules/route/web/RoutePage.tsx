@@ -12,9 +12,9 @@ import FIBYamlIO from './FIBYamlIO';
 import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '@yanet/core/components';
 import { useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '@yanet/core/components/draft';
-import { isValidCidr as isValidCIDR } from '@yanet/core/utils';
 import type { Command, RowAdapter, PagePaletteContribution } from '@yanet/core/components/command-palette';
 import { buildConfigCommands } from '@yanet/core/components/command-palette';
+import { isValidRangeInput, parseRangeInput } from './rangeInput';
 import '@yanet/core/styles/chrome.scss';
 import './route.scss';
 
@@ -25,16 +25,20 @@ let idCounter = 0;
 const makeRowId = (): string => `new-${++idCounter}-${Date.now()}`;
 
 const matchesFIBSearch = (r: FIBRowItem, q: string): boolean =>
-    r.prefix.toLowerCase().includes(q) ||
+    r.from.toLowerCase().includes(q) ||
+    r.to.toLowerCase().includes(q) ||
     r.dst_mac.toLowerCase().includes(q) ||
     r.src_mac.toLowerCase().includes(q) ||
-    r.device.toLowerCase().includes(q);
+    r.device.toLowerCase().includes(q) ||
+    r.counter.toLowerCase().includes(q);
 
 const fibRowsEqual = (s: FIBRowItem, r: FIBRowItem): boolean =>
-    s.prefix === r.prefix &&
+    s.from === r.from &&
+    s.to === r.to &&
     s.dst_mac === r.dst_mac &&
     s.src_mac === r.src_mac &&
-    s.device === r.device;
+    s.device === r.device &&
+    s.counter === r.counter;
 
 const RoutePage: React.FC = () => {
     const {
@@ -89,8 +93,17 @@ const RoutePage: React.FC = () => {
         dragDrop,
     });
 
-    const openAdd = useCallback((prefix = ''): void => {
-        const newRow: FIBRowItem = { id: makeRowId(), prefix, dst_mac: '', src_mac: '', device: '' };
+    const openAdd = useCallback((rangeInput = ''): void => {
+        const parsed = parseRangeInput(rangeInput);
+        const newRow: FIBRowItem = {
+            id: makeRowId(),
+            from: parsed?.start ?? '',
+            to: parsed?.end ?? '',
+            dst_mac: '',
+            src_mac: '',
+            device: '',
+            counter: '',
+        };
         dispatchDraft({ type: 'ADD_ROW', configName: currentConfig, row: newRow });
         setActiveRowId(newRow.id);
         setEditingRowId(newRow.id);
@@ -172,13 +185,13 @@ const RoutePage: React.FC = () => {
     }, [canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet, search, handlers, handleConfigSelect, handleSearchChange, openAdd]);
 
     const dynamicCommands = useCallback((q: string): Command[] => {
-        if (isValidCIDR(q.trim())) {
+        if (isValidRangeInput(q.trim())) {
             return [
                 {
                     id: '__add_cidr',
                     icon: '⌖',
                     label: `Add route for ${q.trim()}`,
-                    sub: 'Pre-fill a new route with this prefix',
+                    sub: 'Pre-fill a new route with this range',
                     onSelect: () => openAdd(q.trim()),
                 },
             ];
@@ -189,9 +202,9 @@ const RoutePage: React.FC = () => {
     const rowAdapter = useMemo((): RowAdapter<FIBRowItem> => ({
         rows: rawRows,
         getId: (r) => r.id,
-        getLabel: (r) => r.prefix || '(no prefix)',
+        getLabel: (r) => (r.from && r.to ? `${r.from} - ${r.to}` : '(no range)'),
         getSub: (r) => `${r.dst_mac || '—'} · ${r.device || '—'}`,
-        searchText: (r) => [r.prefix, r.dst_mac, r.src_mac, r.device].join(' '),
+        searchText: (r) => [r.from, r.to, r.dst_mac, r.src_mac, r.device, r.counter].join(' '),
         onSelect: (id) => { setActiveRowId(id); setEditingRowId(id); },
         icon: '→',
         max: 7,

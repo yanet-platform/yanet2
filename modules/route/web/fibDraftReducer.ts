@@ -8,10 +8,12 @@ export type FIBDraftAction = DraftAction<FIBRowItem>;
 const { reducer: fibDraftReducer, initialState: initialFIBDraftState } = createDraftReducer<FIBRowItem>({
     getId: (r) => r.id,
     equals: (a, b) =>
-        a.prefix === b.prefix &&
+        a.from === b.from &&
+        a.to === b.to &&
         a.dst_mac === b.dst_mac &&
         a.src_mac === b.src_mac &&
-        a.device === b.device,
+        a.device === b.device &&
+        a.counter === b.counter,
 });
 
 export { fibDraftReducer, initialFIBDraftState };

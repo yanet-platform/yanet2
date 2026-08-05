@@ -897,6 +897,31 @@ export const cidrToIPRange = (cidr: string): IPRangeWire | undefined => {
     };
 };
 
+// Build a canonical wire IPRange from explicit endpoint strings. Both must
+// parse as the same address family and start must not exceed end. Returns
+// undefined otherwise.
+export const normalizeIPRange = (from: string, to: string): IPRangeWire | undefined => {
+    const fromBytes = parseIPToBytes(from);
+    const toBytes = parseIPToBytes(to);
+    if (!fromBytes || !toBytes || fromBytes.length !== toBytes.length) return undefined;
+    if (bytesToBigInt(fromBytes) > bytesToBigInt(toBytes)) return undefined;
+    return {
+        start: formatIPFromBytes(fromBytes),
+        end: formatIPFromBytes(toBytes),
+    };
+};
+
+// Number of addresses between a range's endpoints (end - start), used to
+// order ranges by specificity. Returns undefined for missing/unparseable
+// endpoints.
+export const ipRangeSpan = (range: IPRangeWire | undefined): bigint | undefined => {
+    if (!range?.start || !range?.end) return undefined;
+    const startBytes = parseIPToBytes(range.start);
+    const endBytes = parseIPToBytes(range.end);
+    if (!startBytes || !endBytes || startBytes.length !== endBytes.length) return undefined;
+    return bytesToBigInt(endBytes) - bytesToBigInt(startBytes);
+};
+
 /**
  * Parse CIDR strings to IPNet array with base64-encoded bytes.
  *

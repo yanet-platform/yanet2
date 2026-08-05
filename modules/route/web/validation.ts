@@ -1,8 +1,12 @@
 import type { FIBRowItem, FIBRowErrors } from './types';
-import { isValidCidrPrefix, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '@yanet/core/utils';
+import { normalizeIPRange } from '@yanet/core/utils/netip';
+import { rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '@yanet/core/utils';
 
-/** Returns true if s is a valid IPv4 or IPv6 CIDR prefix with a /mask. */
-export const isValidPrefix = isValidCidrPrefix;
+const MAX_COUNTER_NAME_BYTES = 127;
+
+/** Returns true if the row's from/to parse as a valid, non-reversed IP range. */
+export const isValidRange = (row: Pick<FIBRowItem, 'from' | 'to'>): boolean =>
+    !!normalizeIPRange(row.from, row.to);
 
 /** Returns true if s is a valid MAC address (colon-separated hex). */
 export const isValidMac = (s: string): boolean =>
@@ -12,12 +16,21 @@ export const isValidMac = (s: string): boolean =>
 export const isValidDevice = (s: string): boolean =>
     !!(s && /^[A-Za-z0-9_.\-]+$/.test(s));
 
+/** Returns the counter field's error, or null when empty (server-generated) or valid. */
+const counterError = (s: string): string | null => {
+    if (!s) return null;
+    if (!s.startsWith('nexthop_')) return 'Must start with nexthop_';
+    if (new TextEncoder().encode(s).length > MAX_COUNTER_NAME_BYTES) return 'Too long (max 127 bytes)';
+    return null;
+};
+
 /** Validate all fields of a FIB row. Returns null per field if valid. */
 export const validateRow = (row: FIBRowItem): FIBRowErrors => ({
-    prefix: isValidPrefix(row.prefix) ? null : (row.prefix ? 'Invalid CIDR' : 'Required'),
+    range: isValidRange(row) ? null : ((row.from || row.to) ? 'Invalid range' : 'Required'),
     dst_mac: isValidMac(row.dst_mac) ? null : (row.dst_mac ? 'Invalid MAC' : 'Required'),
     src_mac: isValidMac(row.src_mac) ? null : (row.src_mac ? 'Invalid MAC' : 'Required'),
     device: isValidDevice(row.device) ? null : (row.device ? 'Invalid device name' : 'Required'),
+    counter: counterError(row.counter),
 });
 
 /** Returns true if the row has any validation error. */

@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { FIBRowItem, FIBRowErrors } from './types';
 import { validateRow } from './validation';
+import { formatRangeInput, parseRangeInput } from './rangeInput';
 import { DraftItemDrawer } from '@yanet/core/components/draft';
-import { CidrPrefixField } from '@yanet/core/components';
 import { useRowDraft } from '@yanet/core/hooks';
 
 interface FIBDrawerProps {
@@ -22,6 +22,8 @@ export interface FIBDrawerHandle {
     flushAndApply(): boolean;
 }
 
+const EMPTY_ERRORS: FIBRowErrors = { range: null, dst_mac: null, src_mac: null, device: null, counter: null };
+
 /** Side drawer for adding/editing a single FIB row. */
 const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
     open,
@@ -34,8 +36,31 @@ const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
     onJump,
 }, ref) => {
     const { draft, errors, updateField, handleApply } = useRowDraft<FIBRowItem, FIBRowErrors>({
-        open, row, emptyErrors: { prefix: null, dst_mac: null, src_mac: null, device: null }, validateRow, onChange, onClose, handleRef: ref,
+        open, row, emptyErrors: EMPTY_ERRORS, validateRow, onChange, onClose, handleRef: ref,
     });
+
+    // The range field shows a single combined "CIDR or from - to" string,
+    // decoupled from draft.from/to so an in-progress invalid edit doesn't
+    // get silently dropped or reformatted mid-typing.
+    const [rangeText, setRangeText] = useState('');
+    useEffect(() => {
+        if (open && row) {
+            setRangeText(formatRangeInput(row.from, row.to));
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, row?.id]);
+
+    const handleRangeChange = (text: string): void => {
+        setRangeText(text);
+        const parsed = parseRangeInput(text);
+        if (parsed?.start && parsed?.end) {
+            updateField('from', parsed.start);
+            updateField('to', parsed.end);
+        } else {
+            updateField('from', text.trim());
+            updateField('to', '');
+        }
+    };
 
     return (
         <DraftItemDrawer
@@ -52,13 +77,20 @@ const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
             <section className="yn-section">
                 <div className="yn-section-h">Destination</div>
                 <div className="yn-section__body">
-                    <CidrPrefixField
-                        label="Prefix"
-                        placeholder="10.0.0.0/8 or 2a02:6b8::/32"
-                        value={draft?.prefix ?? ''}
-                        error={errors.prefix}
-                        onChange={(v) => updateField('prefix', v.trim())}
-                    />
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Range <span className="yn-field__req">*</span>
+                        </label>
+                        <input
+                            className={`yn-input yn-input--mono${errors.range ? ' yn-input--invalid' : ''}`}
+                            value={rangeText}
+                            placeholder="10.0.0.0/24 or 10.0.0.0 - 10.0.0.255"
+                            onChange={(e) => handleRangeChange(e.target.value)}
+                        />
+                        {errors.range
+                            ? <span className="yn-field__hint yn-field__error">{errors.range}</span>
+                            : <span className="yn-field__hint">CIDR prefix or an explicit "from - to" range.</span>}
+                    </div>
                 </div>
             </section>
 
@@ -111,6 +143,18 @@ const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
                         />
                         {errors.device && (
                             <span className="yn-field__hint yn-field__error">{errors.device}</span>
+                        )}
+                    </div>
+                    <div className="yn-field">
+                        <label className="yn-field__label">Counter</label>
+                        <input
+                            className={`yn-input yn-input--mono${errors.counter ? ' yn-input--invalid' : ''}`}
+                            value={draft?.counter ?? ''}
+                            placeholder="nexthop_custom-name (leave empty to auto-generate)"
+                            onChange={(e) => updateField('counter', e.target.value.trim())}
+                        />
+                        {errors.counter && (
+                            <span className="yn-field__hint yn-field__error">{errors.counter}</span>
                         )}
                     </div>
                 </div>

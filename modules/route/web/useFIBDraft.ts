@@ -2,7 +2,8 @@ import { useCallback } from 'react';
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { warnConfigsUnknown } from '@yanet/core/utils';
 import type { FIBEntry, FIBNexthop } from '@yanet/core/api/routes';
-import { cidrToIPRange, ipRangeToCIDRs } from '@yanet/core/utils/netip';
+import { ipRangeSpan, normalizeIPRange } from '@yanet/core/utils/netip';
+import type { IPRangeWire } from '@yanet/core/utils/netip';
 import type { FIBRowItem } from './types';
 import { fibDraftReducer, initialFIBDraftState } from './fibDraftReducer';
 import { useDraft } from '@yanet/core/components/draft';
@@ -11,74 +12,110 @@ import type { UseDraftResult } from '@yanet/core/components/draft';
 let rowIdCounter = 0;
 const newRowId = (): string => `row-${++rowIdCounter}-${Date.now()}`;
 
-/** Flatten FIBEntry array into flat (prefix, nexthop) row items. */
+/** Flatten FIBEntry array into flat (range, nexthop) row items, one row per nexthop. */
 export const flattenFIBEntries = (entries: FIBEntry[]): FIBRowItem[] => {
     const rows: FIBRowItem[] = [];
     for (const entry of entries) {
-        const cidrs = ipRangeToCIDRs(entry.range);
+        const from = entry.range?.start ?? '';
+        const to = entry.range?.end ?? '';
         const nexthops = entry.nexthops || [];
-        for (const prefix of cidrs) {
-            if (nexthops.length === 0) {
-                rows.push({ id: newRowId(), prefix, dst_mac: '', src_mac: '', device: '' });
-            } else {
-                for (const nh of nexthops) {
-                    rows.push({
-                        id: newRowId(),
-                        prefix,
-                        dst_mac: nh.dst_mac?.addr || '',
-                        src_mac: nh.src_mac?.addr || '',
-                        device: nh.device || '',
-                    });
-                }
+        if (nexthops.length === 0) {
+            rows.push({ id: newRowId(), from, to, dst_mac: '', src_mac: '', device: '', counter: '' });
+        } else {
+            for (const nh of nexthops) {
+                rows.push({
+                    id: newRowId(),
+                    from,
+                    to,
+                    dst_mac: nh.dst_mac?.addr || '',
+                    src_mac: nh.src_mac?.addr || '',
+                    device: nh.device || '',
+                    counter: nh.counter || '',
+                });
             }
         }
     }
     return rows;
 };
 
+/** Span of an entry whose range was already validated by rowsToFIBEntries. */
+const requireSpan = (entry: FIBEntry): bigint => {
+    const span = ipRangeSpan(entry.range);
+    if (span === undefined) {
+        throw new Error(`Cannot compute span for range "${entry.range?.start} - ${entry.range?.end}"`);
+    }
+    return span;
+};
+
 /**
- * Group flat rows back into a FIBEntry list (consecutive rows with the
- * same prefix collapse into one entry with several ECMP nexthops).
+ * Order entries so that lpm_insert's last-write-wins overlap resolution
+ * reproduces longest-prefix-match: broadest ranges are inserted first,
+ * narrowest last, so a more specific row always overrides a broader one it
+ * overlaps. The sort is stable, so non-overlapping entries of equal span
+ * keep their original relative order.
+ */
+const orderEntriesForCommit = (entries: FIBEntry[]): FIBEntry[] =>
+    [...entries].sort((a, b) => {
+        const spanA = requireSpan(a);
+        const spanB = requireSpan(b);
+        if (spanA === spanB) return 0;
+        return spanA > spanB ? -1 : 1;
+    });
+
+/**
+ * Group flat rows back into a FIBEntry list (rows sharing the same range,
+ * wherever they sit in the table, collapse into one entry with several ECMP
+ * nexthops — not just adjacent rows, since the table lets equal ranges land
+ * apart).
  *
- * A row can reach here without having passed validateRow at all, and even a
- * row that passed it can still fail conversion, since validateRow's
- * isValidCidrPrefix is a looser check than cidrToIPRange's strict parser.
- * Throwing here rather than dropping the row is deliberate: a dropped row
- * would silently delete a route from the FIB, which is worse than failing
- * the whole commit loudly.
+ * A row can reach here without having passed validateRow at all, via YAML
+ * import. Throwing here rather than dropping the row is deliberate: a
+ * dropped row would silently delete a route from the FIB, which is worse
+ * than failing the whole commit loudly.
  */
 export const rowsToFIBEntries = (rows: FIBRowItem[]): FIBEntry[] => {
+    const byRange = new Map<string, FIBEntry>();
     const entries: FIBEntry[] = [];
     for (const row of rows) {
-        const range = cidrToIPRange(row.prefix);
+        const range: IPRangeWire | undefined = normalizeIPRange(row.from, row.to);
         if (!range) {
-            throw new Error(`Cannot convert FIB row prefix "${row.prefix}" to an IP range`);
+            throw new Error(`Cannot convert FIB row range "${row.from} - ${row.to}" to an IP range`);
         }
 
-        const last = entries[entries.length - 1];
         const nh: FIBNexthop = {
             dst_mac: { addr: row.dst_mac },
             src_mac: { addr: row.src_mac },
             device: row.device,
+            counter: row.counter,
         };
-        if (last && last.range?.start === range.start && last.range?.end === range.end) {
-            last.nexthops = [...(last.nexthops || []), nh];
+        const key = `${range.start}-${range.end}`;
+        const existing = byRange.get(key);
+        if (existing) {
+            existing.nexthops = [...(existing.nexthops || []), nh];
         } else {
-            entries.push({ range, nexthops: [nh] });
+            const entry: FIBEntry = { range, nexthops: [nh] };
+            byRange.set(key, entry);
+            entries.push(entry);
         }
     }
-    return entries;
+    return orderEntriesForCommit(entries);
 };
 
 export type UseFIBDraftResult = UseDraftResult<FIBRowItem>;
+
+const loadConfig = async (name: string): Promise<{ name: string; rows: FIBRowItem[] }> => {
+    const fibResp = await API.route.showFIB({ name });
+    return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
+};
 
 /**
  * Wraps FIB config data with a local-draft layer.
  *
  * Server state is fetched once on mount via the route.listConfigs, inspect and route.showFIB APIs.
  * All UI mutations go through dispatchDraft and update only local state until the user
- * explicitly calls commitConfig. On commit the full draft rows are sent via API.route.updateFIB
- * and the local server snapshot is updated so dirty clears.
+ * explicitly calls commitConfig. On commit the full draft rows are sent via API.route.updateFIB.
+ * Since the server may materialize an empty counter into a generated name, the config is then
+ * re-fetched so the draft and server snapshots reflect what was actually saved.
  */
 export const useFIBDraft = (): UseFIBDraftResult => {
     const load = useCallback(async (): Promise<Array<{ name: string; rows: FIBRowItem[] }>> => {
@@ -87,10 +124,7 @@ export const useFIBDraft = (): UseFIBDraftResult => {
             inventoryConfigNames('route'),
         ]);
         const configNames = unionConfigNames(configsResp.configs ?? [], inventoryNames);
-        return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
-            const fibResp = await API.route.showFIB({ name });
-            return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
-        }, { onDropped: warnConfigsUnknown('route-configs-unknown', 'route') });
+        return loadKnownConfigs(configNames, loadConfig, { onDropped: warnConfigsUnknown('route-configs-unknown', 'route') });
     }, []);
 
     const commit = useCallback(async (configName: string, draftRows: FIBRowItem[]): Promise<void> => {
@@ -98,7 +132,7 @@ export const useFIBDraft = (): UseFIBDraftResult => {
         await API.route.updateFIB({ module_name: configName, entries });
     }, []);
 
-    return useDraft<FIBRowItem>({
+    const draft = useDraft<FIBRowItem>({
         load,
         commit,
         reducer: fibDraftReducer,
@@ -107,4 +141,17 @@ export const useFIBDraft = (): UseFIBDraftResult => {
         errorSubject: 'FIB',
         cacheKey: 'route',
     });
+
+    const commitConfig = useCallback(async (configName: string): Promise<void> => {
+        await draft.commitConfig(configName);
+        try {
+            const { rows } = await loadConfig(configName);
+            draft.dispatchDraft({ type: 'REFRESH_CONFIG', configName, rows });
+        } catch {
+            // Best effort: the draft already reflects the save, just not any
+            // server-generated counter names until the next full reload.
+        }
+    }, [draft]);
+
+    return { ...draft, commitConfig };
 };

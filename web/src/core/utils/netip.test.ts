@@ -4,6 +4,8 @@ import {
     stringToIPAddress,
     ipRangeToCIDRs,
     cidrToIPRange,
+    normalizeIPRange,
+    ipRangeSpan,
     parseCIDRPrefix,
     parseCidrsToIPNets,
     parseIPToBytes,
@@ -555,5 +557,33 @@ describe('IPv6Address.toString round-trip', () => {
         if (result.ok) {
             expect(result.value.toString()).toBe('1:0:2:3:4:5:6:7');
         }
+    });
+});
+
+describe('normalizeIPRange', () => {
+    it('canonicalizes valid ascending endpoints', () => {
+        expect(normalizeIPRange('10.0.0.1', '10.0.0.130')).toEqual({ start: '10.0.0.1', end: '10.0.0.130' });
+    });
+
+    it('rejects a reversed range', () => {
+        expect(normalizeIPRange('10.0.0.130', '10.0.0.1')).toBeUndefined();
+    });
+
+    it('rejects mismatched address families', () => {
+        expect(normalizeIPRange('10.0.0.1', '::1')).toBeUndefined();
+    });
+});
+
+describe('ipRangeSpan', () => {
+    it('returns a larger span for a broader range', () => {
+        const narrow = ipRangeSpan({ start: '10.0.0.0', end: '10.0.0.255' });
+        const broad = ipRangeSpan({ start: '10.0.0.0', end: '10.255.255.255' });
+        expect(narrow).toBeDefined();
+        expect(broad).toBeDefined();
+        expect(broad! > narrow!).toBe(true);
+    });
+
+    it('returns undefined for a missing endpoint', () => {
+        expect(ipRangeSpan({ start: '10.0.0.0' })).toBeUndefined();
     });
 });

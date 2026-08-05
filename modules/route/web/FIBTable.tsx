@@ -6,28 +6,35 @@ import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus, VirtualDraf
 import { DraftActionButtons } from '@yanet/core/components/draft';
 
 const COLUMN_WIDTHS = {
-    prefix: 220,
+    from: 170,
+    to: 170,
     dst_mac: 180,
     src_mac: 180,
     device: 120,
+    counter: 160,
 } as const;
 
 const TOTAL_WIDTH =
     LEADING_TOTAL_WIDTH +
-    COLUMN_WIDTHS.prefix + COLUMN_WIDTHS.dst_mac + COLUMN_WIDTHS.src_mac + COLUMN_WIDTHS.device;
+    COLUMN_WIDTHS.from + COLUMN_WIDTHS.to + COLUMN_WIDTHS.dst_mac + COLUMN_WIDTHS.src_mac +
+    COLUMN_WIDTHS.device + COLUMN_WIDTHS.counter;
 
 const COLUMN_HEADERS: TableColumnHeader[] = [
-    { width: COLUMN_WIDTHS.prefix, label: 'Prefix' },
+    { width: COLUMN_WIDTHS.from, label: 'From' },
+    { width: COLUMN_WIDTHS.to, label: 'To' },
     { width: COLUMN_WIDTHS.dst_mac, label: 'Dst MAC' },
     { width: COLUMN_WIDTHS.src_mac, label: 'Src MAC' },
     { width: COLUMN_WIDTHS.device, label: 'Device' },
+    { width: COLUMN_WIDTHS.counter, label: 'Counter' },
 ];
 
 const REMOVED_COLUMNS: RemovedColumnDescriptor<FIBRowItem>[] = [
-    { width: COLUMN_WIDTHS.prefix, render: (r) => <span className="yn-cell-mono">{r.prefix}</span> },
+    { width: COLUMN_WIDTHS.from, render: (r) => <span className="yn-cell-mono">{r.from}</span> },
+    { width: COLUMN_WIDTHS.to, render: (r) => <span className="yn-cell-mono">{r.to}</span> },
     { width: COLUMN_WIDTHS.dst_mac, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.dst_mac}</span> },
     { width: COLUMN_WIDTHS.src_mac, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.src_mac}</span> },
     { width: COLUMN_WIDTHS.device, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.device}</span> },
+    { width: COLUMN_WIDTHS.counter, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.counter}</span> },
 ];
 
 const dataCellStyle = (width: number, hasError: boolean): React.CSSProperties => ({
@@ -48,9 +55,14 @@ const renderFIBDataCells = (row: FIBRowItem): React.ReactNode => {
     const errors = validateRow(row);
     return (
         <>
-            <div style={dataCellStyle(COLUMN_WIDTHS.prefix, !!errors.prefix)} title={row.prefix || undefined}>
+            <div style={dataCellStyle(COLUMN_WIDTHS.from, !!errors.range)} title={row.from || undefined}>
                 <span className="yn-cell-mono yn-cell-strong">
-                    {row.prefix || <span style={{ color: 'var(--yn-text-3)', fontStyle: 'italic' }}>prefix?</span>}
+                    {row.from || <span style={{ color: 'var(--yn-text-3)', fontStyle: 'italic' }}>from?</span>}
+                </span>
+            </div>
+            <div style={dataCellStyle(COLUMN_WIDTHS.to, !!errors.range)} title={row.to || undefined}>
+                <span className="yn-cell-mono yn-cell-strong">
+                    {row.to || <span style={{ color: 'var(--yn-text-3)', fontStyle: 'italic' }}>to?</span>}
                 </span>
             </div>
             <div style={dataCellStyle(COLUMN_WIDTHS.dst_mac, !!errors.dst_mac)} title={row.dst_mac || undefined}>
@@ -61,6 +73,9 @@ const renderFIBDataCells = (row: FIBRowItem): React.ReactNode => {
             </div>
             <div style={dataCellStyle(COLUMN_WIDTHS.device, !!errors.device)} title={row.device || undefined}>
                 <span className="yn-cell-mono yn-cell-muted">{row.device || '—'}</span>
+            </div>
+            <div style={dataCellStyle(COLUMN_WIDTHS.counter, !!errors.counter)} title={row.counter || undefined}>
+                <span className="yn-cell-mono yn-cell-muted">{row.counter || '—'}</span>
             </div>
         </>
     );

@@ -15,6 +15,7 @@ export interface DraftState<T> {
 
 export type DraftAction<T> =
     | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rows: T[] }> }
+    | { type: 'REFRESH_CONFIG'; configName: string; rows: T[] }
     | { type: 'ADD_ROW'; configName: string; row: T; afterIndex?: number }
     | { type: 'UPDATE_ROW'; configName: string; id: string; patch: Partial<T> }
     | { type: 'REMOVE_ROW'; configName: string; id: string }
@@ -91,6 +92,26 @@ export const createDraftReducer = <T extends { id?: unknown }>(
                     serverConfigs.push(name);
                 }
                 const next = { ...state, server: newServer, draft: newDraft, serverConfigs };
+                return { ...next, dirty: recomputeDirty(next, equals) };
+            }
+
+            /** Refreshes one config's server rows without touching any other config's tab or dirty state. */
+            case 'REFRESH_CONFIG': {
+                const { configName, rows } = action;
+                const prevServer = state.server[configName] ?? [];
+                const prevDraft = state.draft[configName] ?? [];
+                const unchanged =
+                    prevServer.length === prevDraft.length &&
+                    prevServer.every((r, idx) => equals(r, prevDraft[idx]));
+                const next = {
+                    ...state,
+                    server: { ...state.server, [configName]: rows },
+                    draft: unchanged ? { ...state.draft, [configName]: rows } : state.draft,
+                    serverConfigs: state.serverConfigs.includes(configName)
+                        ? state.serverConfigs
+                        : [...state.serverConfigs, configName],
+                    localOnlyConfigs: state.localOnlyConfigs.filter((n) => n !== configName),
+                };
                 return { ...next, dirty: recomputeDirty(next, equals) };
             }
 

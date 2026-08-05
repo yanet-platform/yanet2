@@ -94,6 +94,8 @@ export interface FIBNexthop {
     dst_mac?: MACAddress;
     src_mac?: MACAddress;
     device?: string;
+    /** Explicit nexthop counter name. Empty lets the server generate one. */
+    counter?: string;
 }
 
 const routeService = createService('modules.route.controlplane.routepb.v1.RouteService');
