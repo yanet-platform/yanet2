@@ -341,4 +341,17 @@ describe('parseCidrsToIPNets mask strictness', () => {
             .toEqual(parseCidrsToIPNets(['64:ff9b::10.0.0.0/120']));
         expect(parseCidrsToIPNets(['64:ff9b::10.0.0.0/120'])).toHaveLength(1);
     });
+
+    it('drops an entry with a zero-padded IPv4 mask', () => {
+        expect(parseCidrsToIPNets(['10.0.0.0/024'])).toEqual([]);
+    });
+
+    it('drops an entry with a zero-padded IPv6 mask', () => {
+        expect(parseCidrsToIPNets(['2001:db8::/0128'])).toEqual([]);
+    });
+
+    it('keeps a mask of exactly "/0" (positive control, guard is not over-broad)', () => {
+        expect(parseCidrsToIPNets(['0.0.0.0/0'])).toHaveLength(1);
+        expect(parseCidrsToIPNets(['::/0'])).toHaveLength(1);
+    });
 });

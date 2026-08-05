@@ -277,8 +277,17 @@ const parseStrictUint = (str: string, maxValue: number, radix: 10 | 16 = 10): nu
     return num;
 };
 
-/** Parse a prefix-length string as a strict base-10 integer within [0, maxMask]. */
+/**
+ * Parse a prefix-length string as a strict base-10 integer within [0, maxMask].
+ *
+ * Rejects leading zeros (e.g. "024") because Go's netip.ParsePrefix rejects
+ * them too, so a padded mask cannot pass validation here and then fail when
+ * the control plane reparses the prefix string.
+ */
 const parseStrictPrefixLength = (maskStr: string, maxMask: number): number | undefined => {
+    if (maskStr.length > 1 && maskStr.startsWith('0')) {
+        return undefined;
+    }
     return parseStrictUint(maskStr, maxMask);
 };
 
