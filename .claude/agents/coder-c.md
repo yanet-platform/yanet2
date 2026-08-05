@@ -77,9 +77,8 @@ This is a high-performance packet processing system. On the dataplane hot path:
 - [ ] `clang-format -i <changed files>` — run it on every changed C file.
 - [ ] `meson compile -C build` — must compile cleanly.
 - [ ] `meson test -C build <test_name>` — must pass if tests exist for changed code.
-- [ ] All control flow has braces, even single-line bodies.
 - [ ] Meson build files updated if new source files added.
-- [ ] `.claude/conventions/c.md` rules held: `cp_module` field order, `container_of()` usage, `memory_balloc`/`memory_bfree` pairing, packet bounds checks.
+- [ ] Every rule in `.claude/conventions/c.md` held, such as `cp_module` field order, `container_of()` usage, `memory_balloc`/`memory_bfree` pairing, and packet bounds checks.
 - [ ] Fuzzing target added/updated if input parsing changed.
 - [ ] No Go, Rust, TypeScript, or protobuf files were modified.
 
