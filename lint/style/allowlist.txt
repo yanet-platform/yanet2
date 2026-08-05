@@ -195,6 +195,7 @@ private:modules/acl/controlplane/service.go:ACLService.withEntries:e.updateMu:1 
 private:modules/acl/controlplane/service.go:ACLService.withEntries:e.updateMu:2  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.withEntry:entry.updateMu:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.withEntry:entry.updateMu:2  # legacy: encapsulate behind an exported method or field
+private:modules/route/bindings/go/croute/safe.go:ModuleConfig.ActiveNexthopCounterNames:iter.activeCounterNames:1  # mirrors the sibling fibIter accessors DumpFIB already reaches through
 private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.addressFamily:1  # legacy: encapsulate behind an exported method or field
 private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.destroy:1  # legacy: encapsulate behind an exported method or field
 private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.next:1  # legacy: encapsulate behind an exported method or field

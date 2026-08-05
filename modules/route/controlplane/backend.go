@@ -16,6 +16,11 @@ import (
 // memory.
 type ModuleHandle interface {
 	DumpFIB() ([]croute.FIBEntry, error)
+	// ActiveNexthopCounterNames returns the deduplicated, sorted set of
+	// per-nexthop counter names reachable through the resolved FIB.
+	//
+	// The only realistic failure is a control-plane allocation failure.
+	ActiveNexthopCounterNames() ([]string, error)
 	// RouteCount returns the number of distinct hardware nexthops the
 	// config resolves prefixes to.
 	RouteCount() uint64

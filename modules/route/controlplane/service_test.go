@@ -1,7 +1,9 @@
 package route_test
 
 import (
+	"errors"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -18,14 +20,26 @@ import (
 
 // fakeHandle is an in-memory implementation of route.ModuleHandle.
 type fakeHandle struct {
-	routeCount uint64
-	rangesV4   uint64
-	rangesV6   uint64
-	freed      bool
+	routeCount          uint64
+	rangesV4            uint64
+	rangesV6            uint64
+	nexthopCounterNames []string
+	// activeNamesErr, when set, is returned by ActiveNexthopCounterNames
+	// instead of nexthopCounterNames, standing in for the control-plane
+	// OOM that is the only realistic way that call fails.
+	activeNamesErr error
+	freed          bool
 }
 
 func (m *fakeHandle) DumpFIB() ([]croute.FIBEntry, error) {
 	return nil, nil
+}
+
+func (m *fakeHandle) ActiveNexthopCounterNames() ([]string, error) {
+	if m.activeNamesErr != nil {
+		return nil, m.activeNamesErr
+	}
+	return m.nexthopCounterNames, nil
 }
 
 func (m *fakeHandle) RouteCount() uint64 {
@@ -61,11 +75,31 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{handle: &fakeHandle{}}
 }
 
+// UpdateModule records the call and derives the handle's counter names
+// straight off entries, without resolving overlaps: the fake has no LPM, so
+// a test exercising shadowed-nexthop exclusion must go through the real
+// backend instead.
 func (m *fakeBackend) UpdateModule(name string, entries []*routepb.FIBEntry) (route.ModuleHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.updateCalls = append(m.updateCalls, entries)
+
+	names := map[string]struct{}{}
+	for _, entry := range entries {
+		for _, nh := range entry.GetNexthops() {
+			if counter := nh.GetCounter(); counter != "" {
+				names[counter] = struct{}{}
+			}
+		}
+	}
+	sorted := make([]string, 0, len(names))
+	for name := range names {
+		sorted = append(sorted, name)
+	}
+	sort.Strings(sorted)
+	m.handle.nexthopCounterNames = sorted
+
 	return m.handle, nil
 }
 
@@ -549,7 +583,7 @@ func TestUpdateFIBRejectsOverlongCounter(t *testing.T) {
 // TestUpdateFIBRejectsCounterWithNULByte verifies that a counter name
 // carrying an embedded NUL byte is rejected, rather than silently
 // truncated at the C boundary where it would diverge from the name
-// recorded in the deduplicated counter-name set.
+// registered later.
 func TestUpdateFIBRejectsCounterWithNULByte(t *testing.T) {
 	backend := newFakeBackend()
 	service := route.NewRouteService(backend)
@@ -621,6 +655,40 @@ func TestUpdateFIBRejectsConflictingCounterNamesAcrossEntries(t *testing.T) {
 	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Empty(t, backend.updateCalls, "the backend must not be called when validation rejects the request")
+}
+
+// TestUpdateFIBToleratesActiveNexthopCounterNamesFailure verifies that a
+// failure reading back the reachable counter-name set off an
+// already-published handle still reports success, since the FIB itself did
+// apply, and leaves the handle live and tracked rather than freeing it.
+func TestUpdateFIBToleratesActiveNexthopCounterNamesFailure(t *testing.T) {
+	backend := newFakeBackend()
+	backend.handle = &fakeHandle{routeCount: 3, activeNamesErr: errors.New("fib_iter_new: allocation failure")}
+	backend.counters = []route.CounterView{
+		counterView("nexthop_my_counter", [][]uint64{{1, 100}}),
+	}
+	service := route.NewRouteService(backend)
+
+	entry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_my_counter"))
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "cfg",
+		Entries:    []*routepb.FIBEntry{entry},
+	})
+	require.NoError(t, err, "the FIB itself did apply, so the RPC must still report success")
+	require.False(t, backend.handle.freed, "a published handle must never be freed on this path")
+
+	requireConfigGauges(t, service, 0, 0, 3)
+
+	all, err := service.Metrics()
+	require.NoError(t, err)
+	require.Empty(t, findMetrics(all, "route_nexthop_packets"), "the counter set must be empty until the next update")
+	for _, query := range backend.queries {
+		require.NotContains(t, query, "nexthop_my_counter", "the empty counter set must never be queried for")
+	}
+
+	_, err = service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "cfg"})
+	require.NoError(t, err)
+	require.True(t, backend.handle.freed, "the config must still be tracked so DeleteConfig can free it")
 }
 
 // TestNexthopMetricsSumWorkerInstances verifies that collectNexthopMetrics

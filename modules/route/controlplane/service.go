@@ -67,8 +67,8 @@ type configEntry struct {
 	// resolves its prefixes to.
 	NexthopCount uint64
 	// NexthopCounterNames is the deduplicated, sorted set of per-nexthop
-	// counter names this config registered, so the metrics path can query
-	// them without re-walking the FIB.
+	// counter names reachable through this config, so the metrics path
+	// can query them without re-walking the FIB.
 	NexthopCounterNames []string
 	// UpdatedAt is when the FIB was applied to the dataplane, and backs
 	// the staleness gauge.
@@ -282,7 +282,7 @@ func materializeNexthopCounter(device string, dstMAC [6]byte) string {
 }
 
 // resolveNexthopCounters validates and materializes nexthop counter names
-// across entries, returning the deduplicated, sorted set of names.
+// across entries.
 //
 // A generated name is never truncated on overflow: the trailing MAC is what
 // makes two nexthops distinct, so truncating would merge their counters.
@@ -290,8 +290,7 @@ func materializeNexthopCounter(device string, dstMAC [6]byte) string {
 // The conflict check spans the whole request: backend.UpdateModule keys a
 // nexthop's route by hardware identity alone, so only the first entry for
 // an identity sets its counter, and a per-entry check could miss the clash.
-func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]string, error) {
-	names := map[string]struct{}{}
+func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) error {
 	identityCounters := map[HardwareRoute]string{}
 
 	for _, entry := range entries {
@@ -300,7 +299,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 
 			if m.disableNexthopCounters {
 				if counter != "" {
-					return nil, status.Errorf(
+					return status.Errorf(
 						codes.InvalidArgument,
 						"nexthop for device %q (dst_mac=%x) carries a counter name but nexthop counters are disabled (disable_nexthop_counters)",
 						nh.GetDevice(),
@@ -315,7 +314,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 				counter = materializeNexthopCounter(nh.GetDevice(), nh.GetDstMac().EUI48())
 				nh.Counter = counter
 			} else if !strings.HasPrefix(counter, nexthopCounterPrefix) {
-				return nil, status.Errorf(
+				return status.Errorf(
 					codes.InvalidArgument,
 					"nexthop counter %q must start with %q",
 					counter,
@@ -324,9 +323,9 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 			}
 
 			// Rejected rather than silently truncated at the C strnlen
-			// boundary, which would diverge from the name in this dedup set.
+			// boundary, which would diverge from the name registered later.
 			if strings.IndexByte(counter, 0) >= 0 {
-				return nil, status.Errorf(
+				return status.Errorf(
 					codes.InvalidArgument,
 					"nexthop counter %q must not contain a NUL byte",
 					counter,
@@ -335,7 +334,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 
 			if len(counter) > croute.CounterNameMaxLen {
 				if generated {
-					return nil, status.Errorf(
+					return status.Errorf(
 						codes.InvalidArgument,
 						"generated nexthop counter %q for device %q exceeds the maximum length of %d",
 						counter,
@@ -343,7 +342,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 						croute.CounterNameMaxLen,
 					)
 				}
-				return nil, status.Errorf(
+				return status.Errorf(
 					codes.InvalidArgument,
 					"nexthop counter %q exceeds the maximum length of %d",
 					counter,
@@ -355,7 +354,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 			// reject — this check only needs the identity, not full validation.
 			if hardwareRoute, err := newHardwareRoute(nh); err == nil {
 				if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
-					return nil, status.Errorf(
+					return status.Errorf(
 						codes.InvalidArgument,
 						"nexthop %s (device %q) carries conflicting counter names %q and %q",
 						hardwareRoute,
@@ -366,18 +365,10 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) ([]st
 				}
 				identityCounters[hardwareRoute] = counter
 			}
-
-			names[counter] = struct{}{}
 		}
 	}
 
-	result := make([]string, 0, len(names))
-	for name := range names {
-		result = append(result, name)
-	}
-	sort.Strings(result)
-
-	return result, nil
+	return nil
 }
 
 // UpdateFIB applies a freshly-built FIB to the dataplane atomically.
@@ -404,8 +395,7 @@ func (m *RouteService) UpdateFIB(
 	// Runs before the backend call: a disabled-but-set or over-long name is
 	// rejected before anything is applied, and the generated name written
 	// onto nh.Counter is what the backend and the FIBEntry list agree on.
-	nexthopCounterNames, err := m.resolveNexthopCounters(entries)
-	if err != nil {
+	if err := m.resolveNexthopCounters(entries); err != nil {
 		return nil, err
 	}
 
@@ -415,6 +405,18 @@ func (m *RouteService) UpdateFIB(
 	module, err := m.backend.UpdateModule(name, entries)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to apply FIB for %q: %v", name, err)
+	}
+
+	// The exported set is the reachable one, read back off the handle
+	// rather than the request: an entry a later one fully shadows never
+	// materializes a range here, so its counter name is not exported.
+	nexthopCounterNames, err := module.ActiveNexthopCounterNames()
+	if err != nil {
+		// module is live, so this must never free it here — workers may
+		// dereference it. The caller retries on error and resends the
+		// whole FIB, so surfacing this one would burn a fresh config
+		// generation from the arena, the worst response to memory pressure.
+		nexthopCounterNames = nil
 	}
 
 	if old, ok := m.configs[name]; ok {

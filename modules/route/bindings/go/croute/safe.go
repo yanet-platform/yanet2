@@ -2,8 +2,10 @@ package croute
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
+	"slices"
 )
 
 const (
@@ -134,4 +136,19 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// ActiveNexthopCounterNames returns the deduplicated, sorted set of
+// per-nexthop counter names reachable through the resolved FIB.
+//
+// The iterator walks the LPM after overlap resolution, so a nexthop fully
+// shadowed by a later, overlapping entry is excluded here even though its
+// route and counter are still registered in shared memory.
+func (m *ModuleConfig) ActiveNexthopCounterNames() ([]string, error) {
+	iter, err := newFIBIter(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create FIB iterator: %w", err)
+	}
+
+	return slices.Sorted(maps.Keys(iter.activeCounterNames())), nil
 }

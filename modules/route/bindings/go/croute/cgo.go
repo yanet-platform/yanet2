@@ -181,8 +181,13 @@ func newFIBIter(config *ModuleConfig) (*fibIter, error) {
 }
 
 // destroy maps 1:1 to fib_iter_free.
+//
+// Safe to call multiple times: subsequent calls are no-ops.
 func (m *fibIter) destroy() {
-	C.fib_iter_free(m.ptr)
+	if m.ptr != nil {
+		C.fib_iter_free(m.ptr)
+		m.ptr = nil
+	}
 }
 
 // next maps 1:1 to fib_iter_next.
@@ -234,4 +239,20 @@ func (m *fibIter) nexthopDeviceName(idx uint64) string {
 // nexthopCounterName maps 1:1 to fib_iter_nexthop_counter_name.
 func (m *fibIter) nexthopCounterName(idx uint64) string {
 	return C.GoString(C.fib_iter_nexthop_counter_name(m.ptr, C.uint64_t(idx)))
+}
+
+// activeCounterNames walks the remainder of the FIB, collecting every
+// non-empty per-nexthop counter name, then destroys the iterator.
+func (m *fibIter) activeCounterNames() map[string]struct{} {
+	defer m.destroy()
+
+	names := map[string]struct{}{}
+	for m.next() {
+		for idx := range m.nexthopCount() {
+			if name := m.nexthopCounterName(idx); name != "" {
+				names[name] = struct{}{}
+			}
+		}
+	}
+	return names
 }

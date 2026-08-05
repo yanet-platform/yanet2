@@ -130,16 +130,8 @@ func wirePipeline(
 	}}))
 }
 
-// applyFIB pushes entries via backend.UpdateModule and registers cleanup.
-//
-// Returns the route.ModuleHandle. The caller may inspect it. The handle is
-// freed via tb.Cleanup.
-func applyFIB(
-	tb testing.TB,
-	backend route.Backend,
-	name string,
-	entries []FIBEntry,
-) route.ModuleHandle {
+// toFIBEntries converts test-domain FIB entries to their wire form.
+func toFIBEntries(tb testing.TB, entries []FIBEntry) []*routepb.FIBEntry {
 	tb.Helper()
 
 	pbEntries := make([]*routepb.FIBEntry, 0, len(entries))
@@ -160,8 +152,22 @@ func applyFIB(
 			Nexthops: nexthops,
 		})
 	}
+	return pbEntries
+}
 
-	handle, err := backend.UpdateModule(name, pbEntries)
+// applyFIB pushes entries via backend.UpdateModule and registers cleanup.
+//
+// Returns the route.ModuleHandle. The caller may inspect it. The handle is
+// freed via tb.Cleanup.
+func applyFIB(
+	tb testing.TB,
+	backend route.Backend,
+	name string,
+	entries []FIBEntry,
+) route.ModuleHandle {
+	tb.Helper()
+
+	handle, err := backend.UpdateModule(name, toFIBEntries(tb, entries))
 	require.NoError(tb, err)
 	tb.Cleanup(handle.Free)
 	return handle
@@ -1097,4 +1103,66 @@ func TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry(t *testing.T) {
 	require.Len(t, fib[0].Nexthops, 1)
 	require.Equal(t, "port0", fib[0].Nexthops[0].Device)
 	require.Empty(t, fib[0].Nexthops[0].Counter, "uncounted nexthop must round-trip as empty, not a stale or garbage name")
+}
+
+// nexthopCounterLabels returns the "counter" label value of every
+// route_nexthop_packets series.
+func nexthopCounterLabels(all []*commonpb.Metric) []string {
+	var names []string
+	for _, metric := range all {
+		if metric.GetName() != "route_nexthop_packets" {
+			continue
+		}
+		for _, label := range metric.GetLabels() {
+			if label.GetName() == "counter" {
+				names = append(names, label.GetValue())
+			}
+		}
+	}
+	return names
+}
+
+// TestUpdateFIB_ShadowedNexthopCounterExcludedFromMetrics verifies that a
+// nexthop entirely shadowed by a later, overlapping entry never surfaces a
+// route_nexthop_* series, while the surviving nexthop's series does.
+//
+// It goes through RouteService.UpdateFIB and Metrics with the real backend:
+// only the real LPM resolves the overlap, and a fake ModuleCounters can't
+// reveal which names the metrics path actually asked the dataplane for.
+func TestUpdateFIB_ShadowedNexthopCounterExcludedFromMetrics(t *testing.T) {
+	shadowedHop := FIBNexthop{
+		DstMAC:  xerror.Unwrap(net.ParseMAC("de:ad:be:ef:00:07")),
+		SrcMAC:  xerror.Unwrap(net.ParseMAC("ca:fe:ba:be:00:07")),
+		Device:  "port0",
+		Counter: "nexthop_shadowed",
+	}
+	survivingHop := FIBNexthop{
+		DstMAC:  xerror.Unwrap(net.ParseMAC("de:ad:be:ef:00:08")),
+		SrcMAC:  xerror.Unwrap(net.ParseMAC("ca:fe:ba:be:00:08")),
+		Device:  "port0",
+		Counter: "nexthop_surviving",
+	}
+
+	_, agent, backend := setupRouteHarness(t, "port0")
+	service := route.NewRouteService(backend)
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "test",
+		Entries: toFIBEntries(t, []FIBEntry{
+			{Prefix: netip.MustParsePrefix("10.0.0.0/24"), Nexthops: []FIBNexthop{shadowedHop}},
+			// Applied later, so it wins the whole range above plus more.
+			{Prefix: netip.MustParsePrefix("10.0.0.0/23"), Nexthops: []FIBNexthop{survivingHop}},
+		}),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "test"}) })
+
+	wirePipeline(t, agent, "port0", "test")
+
+	all, err := service.Metrics()
+	require.NoError(t, err)
+
+	names := nexthopCounterLabels(all)
+	require.NotContains(t, names, "nexthop_shadowed", "a fully shadowed nexthop must not be scraped")
+	require.Contains(t, names, "nexthop_surviving")
 }

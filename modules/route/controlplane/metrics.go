@@ -106,13 +106,13 @@ func intersectSorted(a, b []string) []string {
 var noNexthopStructuralCounters = []string{}
 
 // collectNexthopMetrics gathers packet and byte counters for every
-// per-nexthop counter registered by any applied config.
+// per-nexthop counter reachable through any applied config.
 //
 // A "counter" tag is pushed down into the dataplane counter read, so
 // counters excluded by tags are never read from shared memory. An empty
 // name list is never passed to ModuleCounters, which treats it as "all
 // counters", and an exact tag is intersected against the config's own
-// registered names so a module-level or foreign-config counter can never
+// reachable names so a module-level or foreign-config counter can never
 // surface under this family.
 func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
 	m.shmLock.RLock()
