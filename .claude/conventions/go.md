@@ -18,4 +18,5 @@ Loaded on demand by the agent writing or reviewing Go; this is the single source
 - **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
 - **No log-only RPC stubs**: when a brief names an RPC, actually invoke the client. `m.log.Debug("would call …")` is a bug, not a stub.
 - **Comments**: English, period-terminated, about 80 columns, and list production callers only. Doc comments begin with a one-sentence period-terminated brief and separate detail with a blank `//` line.
+- **Call wrapping**: once a call spans multiple lines, the last argument gets a trailing comma and the closing paren stands alone on its own line — never `"...", counter)` sharing a line with the paren. A leading label may ride the call line (`log.Debug("msg",`); else the open paren stands alone, and what follows may be one argument per line or packed together. `gofmt` accepts every shape, so this is applied by hand.
 - **Tests**: table-driven with `require.NoError(t, err)`; production comments never mention tests. `_test.go` uses `package <pkg>_test` and `testpkg` gates it; `package main` is exempt because it is unimportable.
