@@ -10,10 +10,10 @@ import (
 )
 
 func TestNewLoader_FileAutoDetect(t *testing.T) {
-	loader := NewLoader("/etc/yanet/auth/ca.yaml")
+	loader := NewLoader("/etc/yanet2/auth/ca.yaml")
 	_, ok := loader.(*fileLoader)
 	assert.True(t, ok, "expected fileLoader for file path")
-	assert.Equal(t, "/etc/yanet/auth/ca.yaml", loader.Source())
+	assert.Equal(t, "/etc/yanet2/auth/ca.yaml", loader.Source())
 }
 
 func TestNewLoader_HTTPAutoDetect(t *testing.T) {

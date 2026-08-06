@@ -19,12 +19,22 @@ gateway:
     # i.e. ::1). Override via `server_name` if you need a different SNI.
     # Cert rotation requires a director restart.
     # tls:
-    #   cert_file: /etc/yanet/tls/server.pem
-    #   key_file:  /etc/yanet/tls/server.key
+    #   cert_file: /etc/yanet2/tls/server.pem
+    #   key_file:  /etc/yanet2/tls/server.key
     #   server_name: localhost
   auth:
     disabled: true
-    permissions_path: /etc/yanet/auth/permissions.yaml
+    # Enabling auth means setting `disabled: false` plus all three keys
+    # below: an identity source, an authenticator, a permissions policy.
+    # None of the referenced files ships with the package — add per site.
+    # identity_providers:
+    #   - type: file
+    #     path: /etc/yanet2/auth/identities.yaml
+    # authenticators:
+    #   - type: basic
+    #     config:
+    #       credentials_path: /etc/yanet2/auth/basic_auth.yaml
+    # permissions_path: /etc/yanet2/auth/permissions.yaml
   registry:
     # The gateway drops backends that stopped refreshing their registration,
     # so a stopped operator disappears from the registry instead of
