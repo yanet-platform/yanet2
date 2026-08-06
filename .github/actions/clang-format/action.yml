@@ -16,4 +16,6 @@ inputs:
 
 runs:
   using: 'docker'
-  image: 'docker://ghcr.io/yanet-platform/clang-format:19'
+  # Immutable digest pin: clang-format 19.1.7, built from llvmorg-19.1.7.
+  # Read README.md before changing this line — a bump is a two-step process.
+  image: 'docker://ghcr.io/yanet-platform/clang-format@sha256:d5929186c477ddddd58a03d81b4029c868d9736c1eedbf4f4bac30fd31a1b241'

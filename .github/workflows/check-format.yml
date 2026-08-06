@@ -6,11 +6,15 @@ on:
     paths:
       - "**.h"
       - "**.c"
+      - ".github/actions/clang-format/**"
+      - ".github/workflows/check-format.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "**.h"
       - "**.c"
+      - ".github/actions/clang-format/**"
+      - ".github/workflows/check-format.yml"
 
 jobs:
   c-cpp-fmt:
