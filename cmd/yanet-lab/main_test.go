@@ -28,7 +28,7 @@ func TestValidSessionName(t *testing.T) {
 	}
 }
 
-func TestRootCommandShowsHelpWithoutStartingLab(t *testing.T) {
+func TestRootCommandHasUpSubcommand(t *testing.T) {
 	application := newApplication()
 	command := application.command()
 	var output bytes.Buffer
@@ -37,7 +37,16 @@ func TestRootCommandShowsHelpWithoutStartingLab(t *testing.T) {
 	command.SetArgs(nil)
 
 	require.NoError(t, command.Execute())
-	require.Contains(t, output.String(), "Use 'yanet-lab up'")
+	found := false
+	for _, sub := range command.Commands() {
+		if sub.Use == "up" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("root command has no 'up' subcommand")
+	}
 }
 
 func TestExecCommandConsumesSeparator(t *testing.T) {

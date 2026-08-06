@@ -21,6 +21,8 @@ type manifestRuntime struct {
 	CaptureErr error
 	Commands   []string
 	Unfiltered bool
+	failStep   int
+	stepCount  int
 }
 
 func (m *manifestRuntime) CommonConfigCommands() []string { return nil }
@@ -29,6 +31,10 @@ func (m *manifestRuntime) ExecuteCommand(command string) (string, error) {
 	return "", nil
 }
 func (m *manifestRuntime) ExecuteCommandWithTimeout(string, time.Duration) (string, error) {
+	m.stepCount++
+	if m.stepCount >= m.failStep && m.failStep > 0 {
+		return "", errors.New("step failed")
+	}
 	return "", nil
 }
 func (m *manifestRuntime) ExecuteCommands(...string) ([]string, error) { return nil, nil }
@@ -222,6 +228,27 @@ func writePacket(t *testing.T, path string, packet []byte) {
 	writePacketWithLinkType(t, path, layers.LinkTypeEthernet, packet)
 }
 
+func TestShellJoinQuotesArguments(t *testing.T) {
+	cases := []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"echo", "hello"}, "'echo' 'hello'"},
+		{[]string{"echo", "it's fine"}, "'echo' 'it'\"'\"'s fine'"},
+		{[]string{"echo", "$HOME"}, "'echo' '$HOME'"},
+		{[]string{"echo", "; rm -rf /"}, "'echo' '; rm -rf /'"},
+		{[]string{"echo", "`whoami`"}, "'echo' '`whoami`'"},
+		{[]string{"cat", "/tmp/yanet/config.yaml"}, "'cat' '/tmp/yanet/config.yaml'"},
+		{[]string{"echo", ""}, "'echo' ''"},
+	}
+	for _, tc := range cases {
+		got := lab.ShellJoin(tc.argv)
+		if got != tc.want {
+			t.Errorf("ShellJoin(%v) = %q, want %q", tc.argv, got, tc.want)
+		}
+	}
+}
+
 func writePacketWithLinkType(t *testing.T, path string, linkType layers.LinkType, packet []byte) {
 	t.Helper()
 	file, err := os.Create(path)
@@ -234,4 +261,39 @@ func writePacketWithLinkType(t *testing.T, path string, linkType layers.LinkType
 		Length:        len(packet),
 	}, packet))
 	require.NoError(t, file.Close())
+}
+
+func TestRunManifestBootCallsStartYANET(t *testing.T) {
+	directory := t.TempDir()
+	dataplaneYAML := filepath.Join(directory, "dataplane.yaml")
+	if err := os.WriteFile(dataplaneYAML, []byte("interfaces: []"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n  controlplane: dataplane.yaml\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &manifestRuntime{}
+	report := lab.RunManifest(runtime, manifestPath)
+	if !report.Success {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(report.Results) == 0 || report.Results[0].Kind != "boot" {
+		t.Fatalf("expected boot result, got %#v", report.Results)
+	}
+}
+
+func TestRunManifestStepsBreakOnFailure(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: steps-test\nsteps:\n  - command: first\n  - command: second\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &manifestRuntime{failStep: 2}
+	report := lab.RunManifest(runtime, manifestPath)
+	if report.Success {
+		t.Fatal("expected failure on second step")
+	}
 }
