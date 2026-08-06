@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -102,10 +103,15 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 	require.Equal(t, supervisorProtocolVersion, reply.Protocol)
 }
 
-func TestRequestTimeoutIsFastForAllClientActions(t *testing.T) {
-	for _, action := range []string{"status", "down", "manifest", "exec", "shell", "reset", "serial"} {
-		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "action %q", action)
+func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
+	fast := []string{"status", "shell", "report", "serial"}
+	for _, action := range fast {
+		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "fast action %q", action)
 	}
+	assert.Equal(t, supervisorManifestTimeout, requestTimeout("manifest"))
+	assert.Equal(t, supervisorExecTimeout, requestTimeout("exec"))
+	assert.Equal(t, supervisorResetTimeout, requestTimeout("reset"))
+	assert.Equal(t, supervisorShutdownTimeout, requestTimeout("down"))
 }
 
 func TestWriteReportCreatesDistinctFiles(t *testing.T) {
