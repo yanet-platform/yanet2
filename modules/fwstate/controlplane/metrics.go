@@ -126,7 +126,10 @@ func (m *FWStateService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]
 
 	positions := dpConfig.AllModulePositions("fwstate")
 
-	names, read := metrics.Query(tags, nil, fwstateStructuralCounters)
+	names, read := metrics.Query(tags,
+		metrics.WithStructuralCounters(fwstateStructuralCounters),
+		metrics.WithUnknownEntryCounters(),
+	)
 
 	result := make([]*commonpb.Metric, 0)
 	for pos := range positions {

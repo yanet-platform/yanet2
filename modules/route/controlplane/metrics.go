@@ -83,50 +83,22 @@ var counterMappings = map[string]counterMapping{
 // request is stable across scrapes.
 var counterNames = slices.Sorted(maps.Keys(counterMappings))
 
-// intersectSorted returns the elements common to two ascending,
-// deduplicated slices.
-func intersectSorted(a, b []string) []string {
-	result := make([]string, 0, min(len(a), len(b)))
-	for idxA, idxB := 0, 0; idxA < len(a) && idxB < len(b); {
-		switch {
-		case a[idxA] < b[idxB]:
-			idxA++
-		case a[idxA] > b[idxB]:
-			idxB++
-		default:
-			result = append(result, a[idxA])
-			idxA++
-			idxB++
-		}
-	}
-
-	return result
-}
-
-var noNexthopStructuralCounters = []string{}
-
 // collectNexthopMetrics gathers packet and byte counters for every
 // per-nexthop counter reachable through any applied config.
 //
 // A "counter" tag is pushed down into the dataplane counter read, so
-// counters excluded by tags are never read from shared memory. An empty
-// name list is never passed to ModuleCounters, which treats it as "all
-// counters", and an exact tag is intersected against the config's own
-// reachable names so a module-level or foreign-config counter can never
-// surface under this family.
+// counters excluded by tags are never read from shared memory, and an
+// exact tag naming anything outside a config's own reachable names leaves
+// that config with nothing to read — a module-level or foreign-config
+// counter can never surface under this family.
 func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
 	m.shmLock.RLock()
 	defer m.shmLock.RUnlock()
 
 	result := make([]*commonpb.Metric, 0)
 	for configName, entry := range m.configs {
-		names, ok := metrics.Query(tags, entry.NexthopCounterNames, noNexthopStructuralCounters)
+		names, ok := metrics.Query(tags, metrics.WithEntryCounters(entry.NexthopCounterNames))
 		if !ok {
-			continue
-		}
-
-		names = intersectSorted(names, entry.NexthopCounterNames)
-		if len(names) == 0 {
 			continue
 		}
 
@@ -164,16 +136,16 @@ func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*comm
 // of every config, summed across worker instances.
 //
 // A "counter" tag is pushed down into the dataplane counter read, so
-// counters excluded by tags are never read from shared memory. Every known
-// counter is emitted even when it reads zero. A series that disappears and
-// reappears breaks rate() in Prometheus, and the empty route list counters
-// are invariant canaries expected to read zero forever, which only works if
-// they are visible.
+// counters excluded by tags are never read from shared memory. Untagged,
+// every known counter is emitted even when it reads zero. A series that
+// disappears and reappears breaks rate() in Prometheus, and the empty
+// route list counters are invariant canaries expected to read zero
+// forever, which only works if they are visible.
 func (m *RouteService) collectDataplaneMetrics(tags []*commonpb.MetricTag) []*commonpb.Metric {
 	m.shmLock.RLock()
 	defer m.shmLock.RUnlock()
 
-	names, read := metrics.Query(tags, counterNames, counterNames)
+	names, read := metrics.Query(tags, metrics.WithStructuralCounters(counterNames))
 	if !read {
 		return []*commonpb.Metric{}
 	}

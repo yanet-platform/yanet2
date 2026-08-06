@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
@@ -63,6 +64,22 @@ type recordingBackend struct {
 func (m *recordingBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
 	m.rules = rules
 	return &mockModuleHandle{}, nil
+}
+
+// counterQueryBackend records every counterNames slice handed to
+// ModuleCounters and always answers with a single view named "rx", the
+// generic per-module counter every module registers alongside its own.
+type counterQueryBackend struct {
+	mockBackend
+
+	queries [][]string
+}
+
+func (m *counterQueryBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {
+	m.queries = append(m.queries, counterNames)
+	return []forward.CounterView{
+		{Device: "dev0", Pipeline: "pipe0", Function: "func0", Chain: "chain0", Name: "rx", Values: [][]uint64{{1, 100}}},
+	}
 }
 
 // TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
@@ -261,6 +278,31 @@ func TestUpdateConfigMaterializesEmptyCounterUTF8Boundary(t *testing.T) {
 
 	_, err = proto.Marshal(response)
 	require.NoError(t, err, "ShowConfigResponse carrying the materialised counter must marshal")
+}
+
+// TestMetricsExactTagNeverReadsForeignCounter verifies that an exact
+// "counter" tag naming a counter outside a config's own rule set never
+// reaches the dataplane read, so a generic per-module counter such as "rx"
+// can never surface mislabeled under the forward_rule_* family.
+func TestMetricsExactTagNeverReadsForeignCounter(t *testing.T) {
+	backend := &counterQueryBackend{}
+	svc := forward.NewForwardService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{Action: &forwardpb.Action{Target: "device0", Counter: "to_device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	all, err := svc.Metrics(&commonpb.MetricTag{Name: "counter", Value: "rx"})
+	require.NoError(t, err)
+
+	for _, metric := range all {
+		require.NotContains(t, metric.GetName(), "forward_rule")
+	}
+	require.Empty(t, backend.queries, "rx is not one of the config's own rule counters, so ModuleCounters must never be called")
 }
 
 // Run with: go test -race

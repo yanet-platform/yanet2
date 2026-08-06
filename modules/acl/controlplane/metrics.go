@@ -89,7 +89,10 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 
 	positions := dpConfig.AllModulePositions("acl")
 
-	names, read := metrics.Query(tags, nil, aclStructuralCounters)
+	names, read := metrics.Query(tags,
+		metrics.WithStructuralCounters(aclStructuralCounters),
+		metrics.WithUnknownEntryCounters(),
+	)
 
 	result := make([]*commonpb.Metric, 0)
 	gaugesEmitted := make(map[string]struct{})

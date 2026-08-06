@@ -51,19 +51,18 @@ func (m *ForwardService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metri
 //
 // A "counter" tag is pushed down into the dataplane counter read, so
 // per-rule counters excluded by tags are never read from shared memory.
-// Forward has no structural (non-per-rule) counters, so its full name list
-// is exactly the rule set. An empty derived name list therefore means there
-// is nothing to read, never "read everything", so the read is skipped
-// rather than passed on to ModuleCounters, which treats an empty list as
-// "all counters".
+// Forward has no structural (non-per-rule) counters, so an exact tag
+// naming anything outside a config's own rule set — including a generic
+// per-module counter such as "rx" — leaves that config with nothing to
+// read.
 func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	result := make([]*commonpb.Metric, 0)
 	for configName, config := range m.configs {
-		names, read := metrics.Query(tags, ruleCounterNames(config.Rules), nil)
-		if !read || len(names) == 0 {
+		names, read := metrics.Query(tags, metrics.WithEntryCounters(ruleCounterNames(config.Rules)))
+		if !read {
 			continue
 		}
 

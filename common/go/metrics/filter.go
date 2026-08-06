@@ -1,5 +1,7 @@
 package metrics
 
+import "slices"
+
 // NameValue is satisfied by any tag or label that reports a name and a
 // value.
 type NameValue interface {
@@ -70,25 +72,71 @@ func Filter[M Labeled[L], L NameValue, T NameValue](metrics []M, tags []T) []M {
 	return selected
 }
 
-// Query derives the counter-name include-list a collector should pass to
-// the dataplane counter read, from the tags attached to a metrics request.
+// QueryOption declares one part of a collector's counter shape to Query.
+type QueryOption func(*queryOptions)
+
+// queryOptions is the collector's counter shape, assembled from the
+// options passed to Query.
+type queryOptions struct {
+	// Structural holds the fixed counters whose metrics carry no
+	// "counter" label.
+	Structural []string
+	// Entry holds the per-entry counters whose metrics carry a
+	// "counter" label, enumerated up front.
+	Entry []string
+	// UnknownEntry reports that per-entry counters exist but cannot be
+	// enumerated, so a read that includes them must stay unrestricted.
+	UnknownEntry bool
+}
+
+// WithStructuralCounters declares the collector's fixed counters, whose
+// metrics carry no "counter" label.
 //
-// It reduces every tag named counterLabel with logical AND into a
-// single effective predicate. An absent value ("") means only the
-// fixed, structural counters that carry no counter label. A
-// present-any value ("*") means every per-entry counter. Any other
-// value names an exact counter. No counter tag at all falls back to
-// defaultNames, read unconditionally.
-// An absent predicate resolves to fixedNames, with the second return
-// reporting whether there are any to read at all. A present-any
-// predicate resolves to defaultNames read in full, since Matches still
-// drops the structural metrics that lack the label at emission time.
-// Two counter tags that can never both hold (e.g. two different exact
-// values) make the request unsatisfiable: the second return is false
-// and the caller must skip the counter read and emit no per-entry
-// metrics. Query only decides what to read, while Matches remains the
-// correctness gate applied to each emitted metric.
-func Query[T NameValue](tags []T, defaultNames, fixedNames []string) ([]string, bool) {
+// Omitted, the collector has no structural counter family.
+func WithStructuralCounters(names []string) QueryOption {
+	return func(o *queryOptions) {
+		o.Structural = names
+	}
+}
+
+// WithEntryCounters declares the collector's per-entry counters — those
+// whose metrics carry a "counter" label — enumerable up front.
+//
+// Omitted, the collector has no per-entry counters. Its names must be
+// disjoint from WithStructuralCounters', since Query unions the two sets
+// without deduping.
+func WithEntryCounters(names []string) QueryOption {
+	return func(o *queryOptions) {
+		o.Entry = names
+	}
+}
+
+// WithUnknownEntryCounters declares that the collector has per-entry
+// counters whose names it cannot enumerate, because the dataplane creates
+// them.
+//
+// It wins over WithEntryCounters when both are set.
+func WithUnknownEntryCounters() QueryOption {
+	return func(o *queryOptions) {
+		o.UnknownEntry = true
+	}
+}
+
+// Query derives the counter-name include-list for the dataplane counter
+// read from a metrics request's tags and the collector's counter shape.
+//
+// The second return says whether there is anything to read — false means
+// skip the read entirely. A nil or empty first return paired with true
+// happens only under WithUnknownEntryCounters, meaning leave the read
+// unrestricted. Otherwise a readable result is always non-empty, safe to
+// hand straight to ModuleCounters. Query only decides what to read —
+// Matches stays the correctness gate applied to each emitted metric.
+func Query[T NameValue](tags []T, opts ...QueryOption) ([]string, bool) {
+	var o queryOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	var values []string
 	for _, tag := range tags {
 		if tag.GetName() == counterLabel {
@@ -97,7 +145,11 @@ func Query[T NameValue](tags []T, defaultNames, fixedNames []string) ([]string, 
 	}
 
 	if len(values) == 0 {
-		return defaultNames, true
+		if o.UnknownEntry {
+			return nil, true
+		}
+		names := union(o.Structural, o.Entry)
+		return names, len(names) > 0
 	}
 
 	value, ok := reduceValues(values)
@@ -107,11 +159,32 @@ func Query[T NameValue](tags []T, defaultNames, fixedNames []string) ([]string, 
 
 	switch value {
 	case "":
-		return fixedNames, len(fixedNames) > 0
+		return o.Structural, len(o.Structural) > 0
 	case "*":
-		return defaultNames, true
+		if o.UnknownEntry {
+			return nil, true
+		}
+		return o.Entry, len(o.Entry) > 0
 	default:
-		return []string{value}, true
+		if o.UnknownEntry || slices.Contains(o.Entry, value) {
+			return []string{value}, true
+		}
+		return nil, false
+	}
+}
+
+// union returns the combined structural and entry counter names.
+//
+// It returns the non-empty side unchanged rather than allocating, and
+// only concatenates when both sides hold names.
+func union(structural, entry []string) []string {
+	switch {
+	case len(entry) == 0:
+		return structural
+	case len(structural) == 0:
+		return entry
+	default:
+		return slices.Concat(structural, entry)
 	}
 }
 

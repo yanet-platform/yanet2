@@ -166,52 +166,96 @@ func TestFilter(t *testing.T) {
 }
 
 // TestQuery verifies the counter-name include-list derivation from the
-// counter tags attached to a metrics request.
+// counter tags attached to a metrics request, across every combination of
+// structural counters, enumerable entry counters, and an unknown entry
+// family.
 func TestQuery(t *testing.T) {
-	defaultNames := []string{"rx", "tx", "acl_rule"}
-	fixedNames := []string{"rx", "tx"}
+	structural := []string{"rx", "tx"}
+	entry := []string{"acl_rule", "acl_rule2"}
 
 	tests := []struct {
 		name          string
 		tags          []nameValue
-		fixedNames    []string
+		opts          []metrics.QueryOption
 		expectedNames []string
 		expectedRead  bool
 	}{
 		{
-			name:          "no counter tag reads the default set",
+			name:          "no options and no tag is not readable",
 			tags:          nil,
-			fixedNames:    fixedNames,
-			expectedNames: defaultNames,
-			expectedRead:  true,
-		},
-		{
-			name:          "absent counter reads the fixed set",
-			tags:          []nameValue{{name: "counter", value: ""}},
-			fixedNames:    fixedNames,
-			expectedNames: fixedNames,
-			expectedRead:  true,
-		},
-		{
-			name:          "absent counter with no fixed names skips the read",
-			tags:          []nameValue{{name: "counter", value: ""}},
-			fixedNames:    nil,
+			opts:          nil,
 			expectedNames: nil,
 			expectedRead:  false,
 		},
 		{
-			name:          "wildcard counter reads the default set in full",
-			tags:          []nameValue{{name: "counter", value: "*"}},
-			fixedNames:    fixedNames,
-			expectedNames: defaultNames,
+			name:          "no counter tag unions structural and entry names",
+			tags:          nil,
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithEntryCounters(entry)},
+			expectedNames: []string{"rx", "tx", "acl_rule", "acl_rule2"},
 			expectedRead:  true,
 		},
 		{
-			name:          "exact counter reads only that name",
+			name:          "no counter tag with only entry counters reads the entry set",
+			tags:          nil,
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry)},
+			expectedNames: entry,
+			expectedRead:  true,
+		},
+		{
+			name:          "no counter tag with only structural counters reads the structural set",
+			tags:          nil,
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural)},
+			expectedNames: structural,
+			expectedRead:  true,
+		},
+		{
+			name:          "no counter tag with an unknown entry family among enumerable counters is unrestricted",
+			tags:          nil,
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithEntryCounters(entry), metrics.WithUnknownEntryCounters()},
+			expectedNames: nil,
+			expectedRead:  true,
+		},
+		{
+			name:          "absent counter reads the structural set",
+			tags:          []nameValue{{name: "counter", value: ""}},
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithEntryCounters(entry)},
+			expectedNames: structural,
+			expectedRead:  true,
+		},
+		{
+			name:          "absent counter with no structural names skips the read",
+			tags:          []nameValue{{name: "counter", value: ""}},
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry)},
+			expectedNames: nil,
+			expectedRead:  false,
+		},
+		{
+			name:          "wildcard counter reads the entry set in full",
+			tags:          []nameValue{{name: "counter", value: "*"}},
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithEntryCounters(entry)},
+			expectedNames: entry,
+			expectedRead:  true,
+		},
+		{
+			name:          "wildcard counter with an empty entry set is not readable",
+			tags:          []nameValue{{name: "counter", value: "*"}},
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural)},
+			expectedNames: nil,
+			expectedRead:  false,
+		},
+		{
+			name:          "exact counter naming an entry member reads only that name",
 			tags:          []nameValue{{name: "counter", value: "acl_rule"}},
-			fixedNames:    fixedNames,
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithEntryCounters(entry)},
 			expectedNames: []string{"acl_rule"},
 			expectedRead:  true,
+		},
+		{
+			name:          "exact counter naming a non-member is not readable",
+			tags:          []nameValue{{name: "counter", value: "rx"}},
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithEntryCounters(entry)},
+			expectedNames: nil,
+			expectedRead:  false,
 		},
 		{
 			name: "conflicting exact counters are unsatisfiable",
@@ -219,7 +263,7 @@ func TestQuery(t *testing.T) {
 				{name: "counter", value: "acl_rule"},
 				{name: "counter", value: "acl_rule2"},
 			},
-			fixedNames:    fixedNames,
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry)},
 			expectedNames: nil,
 			expectedRead:  false,
 		},
@@ -229,7 +273,7 @@ func TestQuery(t *testing.T) {
 				{name: "counter", value: "acl_rule"},
 				{name: "counter", value: "acl_rule"},
 			},
-			fixedNames:    fixedNames,
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry)},
 			expectedNames: []string{"acl_rule"},
 			expectedRead:  true,
 		},
@@ -239,7 +283,7 @@ func TestQuery(t *testing.T) {
 				{name: "counter", value: "*"},
 				{name: "counter", value: "acl_rule"},
 			},
-			fixedNames:    fixedNames,
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry)},
 			expectedNames: []string{"acl_rule"},
 			expectedRead:  true,
 		},
@@ -249,15 +293,50 @@ func TestQuery(t *testing.T) {
 				{name: "counter", value: ""},
 				{name: "counter", value: "acl_rule"},
 			},
-			fixedNames:    fixedNames,
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry)},
 			expectedNames: nil,
 			expectedRead:  false,
+		},
+		{
+			name:          "unknown entry collector with no tag is unrestricted",
+			tags:          nil,
+			opts:          []metrics.QueryOption{metrics.WithStructuralCounters(structural), metrics.WithUnknownEntryCounters()},
+			expectedNames: nil,
+			expectedRead:  true,
+		},
+		{
+			name:          "unknown entry collector with a wildcard is unrestricted",
+			tags:          []nameValue{{name: "counter", value: "*"}},
+			opts:          []metrics.QueryOption{metrics.WithUnknownEntryCounters()},
+			expectedNames: nil,
+			expectedRead:  true,
+		},
+		{
+			name:          "unknown entry collector with an exact tag reads only that name",
+			tags:          []nameValue{{name: "counter", value: "unregistered_rule"}},
+			opts:          []metrics.QueryOption{metrics.WithUnknownEntryCounters()},
+			expectedNames: []string{"unregistered_rule"},
+			expectedRead:  true,
+		},
+		{
+			name:          "wildcard counter with unknown entry set wins over the entry set",
+			tags:          []nameValue{{name: "counter", value: "*"}},
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry), metrics.WithUnknownEntryCounters()},
+			expectedNames: nil,
+			expectedRead:  true,
+		},
+		{
+			name:          "exact counter naming a non-member with unknown entry set wins over the entry set",
+			tags:          []nameValue{{name: "counter", value: "unregistered_rule"}},
+			opts:          []metrics.QueryOption{metrics.WithEntryCounters(entry), metrics.WithUnknownEntryCounters()},
+			expectedNames: []string{"unregistered_rule"},
+			expectedRead:  true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			names, read := metrics.Query(test.tags, defaultNames, test.fixedNames)
+			names, read := metrics.Query(test.tags, test.opts...)
 
 			require.Equal(t, test.expectedRead, read)
 			require.Equal(t, test.expectedNames, names)
