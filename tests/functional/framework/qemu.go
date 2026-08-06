@@ -545,11 +545,10 @@ func (q *QEMUManager) resetSerialBuffer() {
 func (q *QEMUManager) discardSerialThrough(marker string) {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
-	output := q.serialBuffer.String()
-	index := strings.Index(output, marker)
-	if index >= 0 {
+	_, after, found := strings.Cut(q.serialBuffer.String(), marker)
+	if found {
 		q.serialBuffer.Reset()
-		q.serialBuffer.WriteString(output[index+len(marker):])
+		q.serialBuffer.WriteString(after)
 	}
 }
 
