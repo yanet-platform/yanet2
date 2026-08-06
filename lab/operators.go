@@ -39,7 +39,7 @@ var forwardingProbe = []byte{
 	0x79, 0x61, 0x6e, 0x65, 0x74, 0x32, 0x2d, 0x6c, 0x61, 0x62,
 }
 
-var forwardingExpected = []byte{
+var ForwardingExpected = []byte{
 	0x52, 0x54, 0x00, 0x6b, 0xff, 0xa1, 0x52, 0x54, 0x00, 0x6b, 0xff, 0xa5, 0x08, 0x00,
 	0x45, 0x00, 0x00, 0x26, 0x00, 0x01, 0x00, 0x00, 0x3f, 0x11, 0x8f, 0x74, 0xc0, 0x00,
 	0x02, 0x0a, 0xc6, 0x33, 0x64, 0x14, 0x30, 0x39, 0x1f, 0x90, 0x00, 0x12, 0xd8, 0xe6,
@@ -156,15 +156,15 @@ func CheckOperators(fw *framework.TestFramework) error {
 	if err != nil {
 		return fmt.Errorf("operator forwarding probe: %w", err)
 	}
-	if len(packets) != 1 || !matchesForwardingProbe(packets[0]) {
+	if len(packets) != 1 || !MatchesForwardingProbe(packets[0]) {
 		return fmt.Errorf("operator forwarding probe returned %d unexpected packets", len(packets))
 	}
 	return nil
 }
 
-func matchesForwardingProbe(packet []byte) bool {
+func MatchesForwardingProbe(packet []byte) bool {
 	stripped := WithoutEthernetPadding(packet)
-	return bytes.Equal(stripped, forwardingExpected)
+	return bytes.Equal(stripped, ForwardingExpected)
 }
 
 // WaitOperators waits for the complete operator-owned lab profile.
