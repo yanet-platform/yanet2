@@ -60,7 +60,7 @@ Reviews code quality and verifies task completeness: conventions, safety, builds
 
 ### `planner` — Multi-Horizon Planning Partner (read-only on code, both repos, public-first)
 
-Keeps a living, hierarchical plan (Themes→Epics→Tasks, parent-linked) behind a compact `INDEX.md` in gitignored `.arch/planner/`. One tracker covers **both repos**; every item carries `repo: public|private` and defaults to public. Decomposes fuzzy goals, recommends the highest-value next item (packet-path-safety-first), ingests surfaced debt/backlog, closes finished work, runs bounded autonomous discovery scans. Every task carries `kind` (`defect|debt|feature|chore`) and `origin` (`review:<ref>|followup:<ref>|scan|user`), so it can hand back a filtered, ranked batch of debt or follow-ups for a period. Runs on `sonnet`; never writes code, never delegates, never runs git/builds.
+Keeps the plan **in GitHub**: every item is an issue in `yanet-platform/yanet2` or `yanet-platform/yanet2-private`, typed `Bug|Feature|Task`, carrying the org `Priority`/`Effort` fields, an epic's children attached as native sub-issues, and membership of exactly one org project used as a board (#7 packet-path safety, #8 platform quality, #9 release and operations, #10 private NGFW, which takes every private issue). Decomposes fuzzy goals, recommends the highest-value next item (packet-path-safety-first), ingests surfaced debt/backlog, closes finished work, runs bounded autonomous discovery scans, and hands back a filtered, ranked batch of open debt for a period — filtered on repo, board, label and creation date. Each issue body carries a prose `Source:` line naming the evidence and the change it came from: documentation for a human, not a query axis. Runs on `sonnet`; never writes code, never delegates, never runs git writes or builds, and writes no repo file.
 **Use when**: at task seams (below) — the **user drives it directly**; you use it secondarily.
 
 ### `bug-hunter` — Defect Confirmation & Dynamic Analysis (read-mostly, never fixes)
@@ -128,26 +128,30 @@ The `planner` is primarily the user's tool, but use it at the natural seams of y
 cheap (sonnet) and keeps the plan honest:
 
 1. **After a task/PR is merged** → `planner close` with the PR# + one-line description, so the
-   tracker and epic convergence stay current.
+   issue, its board Status and its epic stay current. A PR body carrying `Closes #N` closes the
+   issue by itself, so this seam is mostly verification plus the board move.
 2. **When debt/backlog surfaces mid-task** (a hack you shipped, a reviewer follow-up, a "we should
-   also…") → `planner ingest` immediately, so it isn't lost. Name the PR or TASK that spawned it in
-   the payload, and say what surfaced it — a review, a bug-hunter or performance-engineer sweep, or
-   the work itself — so the planner can record `review:<ref>`, `scan`, or `followup:<ref>`. That
-   reference is what later lets a debt sweep find the tail and route it back to the change that
-   owes it. An ingest without it still lands, but arrives unattributed.
+   also…") → `planner ingest` immediately, so it isn't lost. Name the PR or issue that spawned it
+   in the payload, and say what surfaced it — a review, a bug-hunter or performance-engineer
+   sweep, or the work itself — so the planner can record it in the issue's `Source:` line.
+   Mentioning `#N` there puts the tail on that change's own timeline, which is where anyone asking
+   what it left behind looks. An ingest without it still lands, but arrives unattributed.
 3. **When unsure what to pick next** (or the user asks "what's next?") → `planner next`.
-4. **When the user asks to burn down debt or follow-ups over a period** ("почини техдолг за
+4. **When you begin work on a tracked issue** — the point where you open the worktree and brief a
+   specialist → `planner start <#issue>`, which assigns it to the user and moves the board Status
+   to `In Progress`, so the board stops lying about what is running.
+5. **When the user asks to burn down debt or follow-ups over a period** ("почини техдолг за
    вчера") → `planner debt` with the window. It returns a filtered, ranked batch grouped into
-   plausible PRs; it deliberately does **not** mark anything `active`, so deciding what actually
+   plausible PRs; it deliberately moves nothing to `In Progress`, so deciding what actually
    starts — and delegating it — is still yours.
-5. **Escalation:** if the planner flags an item `needs-architect` (decomposition too gnarly for
+6. **Escalation:** if the planner flags an issue `needs-architect` (decomposition too gnarly for
    sonnet), do the decomposition yourself on opus and hand it back via `planner ingest`.
 
-The planner is read-only on code and writes only its own tracker under `.arch/planner/`. It
-tracks **both repos in one tracker**, so check the `repo` on anything it hands you: a `private`
-item is worked in `../yanet2-private`, never in this checkout, and is never referenced from
-anything committable here. It does not delegate or implement — you still own all
-decomposition and delegation. Do NOT make it a mandatory step on every task.
+The planner is read-only on code and writes no repo file — its state is GitHub issues, projects
+and comments, plus its own memory. It covers **both repos**, so check which repo an issue it hands
+you lives in: a `yanet2-private` issue is worked in `../yanet2-private`, never in this checkout,
+and is never referenced from anything committable here. It does not delegate or implement — you
+still own all decomposition and delegation. Do NOT make it a mandatory step on every task.
 
 ## Bug-Hunt Loop
 
