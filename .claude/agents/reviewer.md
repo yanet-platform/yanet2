@@ -378,14 +378,14 @@ If you flag the same class of issue **twice in the same specialist** (within one
 - Path: `<REPO_ROOT>/.claude/agent-memory/coder-<lang>/`.
 - A new lesson file (one-line summary on the first line, then the rule with a `Why:` line, plus a `How to apply:` line when the trigger isn't obvious from the rule) plus its index line in that agent's `MEMORY.md`, under `## Rules`. The index line text must be identical to the file's first line. End the body with `Last applied: YYYY-MM` for the current month — the decay sweep reads it, and a lesson without it is ambiguous rather than merely untidy.
 - Annotate the summary `(seen: 2)`. If the lesson already exists, bump its `(seen: N)` count by one and refresh its `Last applied` month.
-- When `(seen: 5)` is reached, the rule has earned promotion — a language-specific rule to `.claude/conventions/<lang>.md`, and only a rule every agent needs to `AGENTS.md`. Promote it, delete the lesson file + index line, and mention the promotion in your review verdict so the architect is aware.
+- When `(seen: 5)` is reached, the rule has earned consideration for promotion — a language-specific rule to `.claude/conventions/<lang>.md`, and only a rule every agent needs to `AGENTS.md`. Promote it unless the lesson is marked `(kept local)`, which records a settled decline you do not re-litigate; when you do promote, delete the lesson file + index line and mention the promotion in your review verdict so the architect is aware. Most existing digests still carry one shared counter for many rules: apportion it by hand, promote only the sub-rules that independently reached five, keep the rest with a line naming what was promoted out, and re-count the file from the survivors.
 
 ### After every APPROVED verdict
 
 Run a quick hygiene sweep on the memory directories of the specialists that touched code in this review:
 
 - Look for duplicate notes (same lesson, different wording or split across files) — merge into one file, delete the other, fix the index.
-- Look for `(seen: 5)` candidates — promote a language-specific rule to `.claude/conventions/<lang>.md`, and only a rule every agent needs to `AGENTS.md`.
+- Look for `(seen: 5)` candidates — promote a language-specific rule to `.claude/conventions/<lang>.md`, and only a rule every agent needs to `AGENTS.md`. Respect a `(kept local)` marker as a settled decline. On a digest, promote only the sub-rules that independently reached five.
 - Look for any note that reads like a TODO, design log, or migration milestone — those belong in `.arch/<PLAN>.md` or `TODO.md`, not in agent memory. Flag the architect to relocate; do not silently delete.
 - Check every index line points at an existing lesson file and vice versa.
 
