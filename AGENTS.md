@@ -71,6 +71,8 @@ Top-level directories and their roles:
 - `api/`           — public C API headers exposed to control plane (`agent.h`, `config.h`, `counter.h`, `info.h`).
 - `bindings/go/`   — root-level Go CGO bindings for the agent/shared-memory agent surface.
 - `cli/`           — Rust CLI workspace: `core/` (yanet-cli library), `modules/` (shared CLI subcommands), `Makefile`.
+- `lab/`           — reusable local QEMU lab library (manifests, scenarios, operator baseline).
+- `cmd/yanet-lab/` — developer-only lab supervisor CLI (not packaged).
 - `common/`        — shared libraries across languages (see Shared Libraries).
 - `web/`           — TypeScript/React Web UI.
 - `subprojects/dpdk/` — DPDK as a Meson subproject.
