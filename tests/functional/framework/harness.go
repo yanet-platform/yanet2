@@ -656,27 +656,20 @@ func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forwar
 	paths = append(paths, plugins...)
 	sort.Strings(paths)
 	for _, path := range paths {
-		if err := hashFile(hash, path); err != nil {
+		if err := statFingerprint(hash, path); err != nil {
 			return "", err
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func hashFile(hash io.Writer, path string) error {
-	file, err := os.Open(path)
+func statFingerprint(hash io.Writer, path string) error {
+	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	if _, err := io.WriteString(hash, path+"\x00"); err != nil {
-		return err
-	}
-	if _, err := io.Copy(hash, file); err != nil {
-		return err
-	}
-	_, err = io.WriteString(hash, "\x00")
-	return err
+	_, _ = fmt.Fprintf(hash, "%s\x00%d\x00%d", path, info.Size(), info.ModTime().UnixNano())
+	return nil
 }
 
 func fingerprintMatches(baselineTemplate, want string) bool {

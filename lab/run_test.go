@@ -116,7 +116,7 @@ func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 		t.Fatalf("expected at least 2 commands, got %d: %#v", len(runtime.Commands), runtime.Commands)
 	}
 	for _, command := range runtime.Commands {
-		if len(command) > 800 {
+		if len(command) > 5600 {
 			t.Fatalf("command is too long: %d", len(command))
 		}
 	}

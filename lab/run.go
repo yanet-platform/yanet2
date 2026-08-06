@@ -171,7 +171,7 @@ func transferFile(runtime ManifestRuntime, source, destination string) error {
 	if _, err := runtime.ExecuteCommand(": > " + shellQuote(destination)); err != nil {
 		return err
 	}
-	buffer := make([]byte, 384)
+	buffer := make([]byte, 4096)
 	for {
 		count, readErr := file.Read(buffer)
 		if count > 0 {

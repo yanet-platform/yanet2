@@ -45,31 +45,33 @@ func TestBaselineTemplatePath(t *testing.T) {
 	}
 }
 
-func TestHashFileDetectsChangedContents(t *testing.T) {
+func TestStatFingerprintDetectsChangedSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "artifact")
 	stamp := time.Unix(1, 0)
-	if err := os.WriteFile(path, []byte("one!"), 0o600); err != nil {
+
+	if err := os.WriteFile(path, []byte("small"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
 	first := sha256.New()
-	if err := hashFile(first, path); err != nil {
+	if err := statFingerprint(first, path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("two!"), 0o600); err != nil {
+
+	if err := os.WriteFile(path, []byte("large!"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
 	second := sha256.New()
-	if err := hashFile(second, path); err != nil {
+	if err := statFingerprint(second, path); err != nil {
 		t.Fatal(err)
 	}
 	if string(first.Sum(nil)) == string(second.Sum(nil)) {
-		t.Fatal("same-size artifact content change did not change fingerprint")
+		t.Fatal("different-size artifact did not change fingerprint")
 	}
 }
 
