@@ -178,5 +178,5 @@ Notes:
 - `builder_add_port_src_range`, `builder_add_port_dst_range`
 - `builder_add_net4_src`, `builder_add_net4_dst`
 - `builder_add_net6_src`, `builder_add_net6_dst`
-- `builder_add_proto_range`, `builder_set_proto`
+- `builder_add_proto_range`, `builder_set_proto_range`
 - `builder_set_vlan`

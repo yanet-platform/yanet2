@@ -36,8 +36,6 @@ struct filter_rule_builder {
 
 	struct filter_proto_range proto_ranges[filter_TEST_MAX_RANGES];
 	size_t proto_ranges_count;
-
-	struct filter_proto proto;
 };
 
 static inline void
@@ -50,8 +48,6 @@ builder_init(struct filter_rule_builder *b) {
 	b->net6_dst_count = 0;
 	b->vlan_range_count = 0;
 	b->proto_ranges_count = 0;
-	b->proto = (struct filter_proto
-	){.proto = PROTO_UNSPEC, .enable_bits = 0, .disable_bits = 0};
 }
 
 static inline void
@@ -117,16 +113,6 @@ builder_add_proto_range(
 }
 
 static inline void
-builder_set_proto(
-	struct filter_rule_builder *b,
-	uint8_t proto,
-	uint16_t enable_bits,
-	uint16_t disable_bits
-) {
-	b->proto = (struct filter_proto){proto, enable_bits, disable_bits};
-}
-
-static inline void
 builder_set_proto_range(
 	struct filter_rule_builder *b, uint8_t proto, uint16_t flags_or_type
 ) {
@@ -156,7 +142,6 @@ build_rule(struct filter_rule_builder *b) {
 	r.net6.dst_count = (uint32_t)b->net6_dst_count;
 	r.net6.dsts = b->net6_dst;
 
-	r.transport.proto = b->proto;
 	r.transport.src_count = (uint16_t)b->src_port_ranges_count;
 	r.transport.srcs = b->src_port_ranges;
 	r.transport.dst_count = (uint16_t)b->dst_port_ranges_count;

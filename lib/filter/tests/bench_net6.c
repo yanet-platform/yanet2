@@ -239,7 +239,11 @@ generate_rules(
 			// Alternate between TCP and UDP
 			uint8_t proto =
 				(i % 2 == 0) ? IPPROTO_TCP : IPPROTO_UDP;
-			builder_set_proto(&builders[i], proto, 0, 0);
+			builder_add_proto_range(
+				&builders[i],
+				(uint16_t)proto * 256,
+				(uint16_t)proto * 256 + 255
+			);
 		}
 
 		rules[i] = build_rule(&builders[i]);

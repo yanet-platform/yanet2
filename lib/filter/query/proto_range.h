@@ -6,7 +6,9 @@
 
 #include <stdint.h>
 
+#include <netinet/in.h>
 #include <rte_icmp.h>
+#include <rte_mbuf.h>
 #include <rte_tcp.h>
 
 static inline void

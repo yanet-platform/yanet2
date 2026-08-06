@@ -52,12 +52,7 @@ filter_packets(struct common *common) {
 			&common->filter, filter_sign, &packet_ptr, &actions, 1
 		);
 		free_packet(&packet);
-		if (res < 0) {
-			LOG(ERROR,
-			    "error occurred durring classification: %d",
-			    res);
-			++errors;
-		} else if (actions != FILTER_RULE_INVALID) {
+		if (actions != FILTER_RULE_INVALID) {
 			++found;
 		}
 	}
@@ -67,11 +62,16 @@ filter_packets(struct common *common) {
 	    packets,
 	    100.0 * (double)found / packets);
 	if (errors > 0) {
-		LOG(ERROR, "%lu errors occurred during classification", errors);
+		LOG(ERROR, "%lu packets could not be built", errors);
 		return 1;
-	} else {
-		return 0;
 	}
+	if (found == 0) {
+		// Rules and packets are generated to overlap, so zero matches
+		// means a whole classifier dimension collected no value.
+		LOG(ERROR, "no packets matched any rule");
+		return 1;
+	}
+	return 0;
 }
 
 int
@@ -162,8 +162,8 @@ main(int argc, char **argv) {
 
 	LOG(INFO, "running filter packets routine...");
 
-	if (filter_packets(common) < 0) {
-		LOG(ERROR, "failed to filter packets: %s", strerror(errno));
+	if (filter_packets(common) != 0) {
+		LOG(ERROR, "failed to filter packets");
 		return 1;
 	}
 

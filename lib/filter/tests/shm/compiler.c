@@ -37,8 +37,11 @@ build_filter(struct common *common, struct memory_context *mctx) {
 		uint8_t mask[4];
 		memset(mask, 0xFF, 4);
 		builder_add_net4_dst(builder, addr, mask);
-		builder_set_proto(
-			builder, i % 2 == 0 ? IPPROTO_TCP : IPPROTO_UDP, 0, 0
+		uint8_t proto = i % 2 == 0 ? IPPROTO_TCP : IPPROTO_UDP;
+		builder_add_proto_range(
+			builder,
+			(uint16_t)proto * 256,
+			(uint16_t)proto * 256 + 255
 		);
 		rules[i] = build_rule(builder);
 		rule_ptrs[i] = rules + i;
@@ -153,8 +156,8 @@ main(int argc, char **argv) {
 	LOG(INFO, "building filter...");
 
 	// Build filter
-	if (build_filter(common, &mctx) < 0) {
-		LOG(ERROR, "failed to build filter: %s", strerror(errno));
+	if (build_filter(common, &mctx) != 0) {
+		LOG(ERROR, "failed to build filter");
 		return 1;
 	}
 
