@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,27 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
+
+// Test_ShippedDefaultConfig_NoUnknownKeys guards the shipped default config
+// against a key that matches no field in Config.
+//
+// FunctionConfig.UnmarshalYAML re-decodes through a fresh, non-strict
+// yaml.v3 decoder, so xcfg.WithKnownFields cannot see a stray key inside a
+// functions entry. xcfg.CheckKnownKeys walks the reflected struct shape
+// directly instead, which is unaffected by that re-decode.
+func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
+	data, err := os.ReadFile("../../etc/yanet/yanet-decap-operator-default.yaml")
+	require.NoError(t, err)
+	require.NoError(t, xcfg.CheckKnownKeys[Config](data))
+}
+
+// Test_ShippedPrefixesDefault_NoUnknownKeys guards the shipped decap
+// prefixes file against a key that matches no field in yamlPrefixFile.
+func Test_ShippedPrefixesDefault_NoUnknownKeys(t *testing.T) {
+	data, err := os.ReadFile("../../etc/yanet/decap.d/default.yaml")
+	require.NoError(t, err)
+	require.NoError(t, xcfg.CheckKnownKeys[yamlPrefixFile](data))
+}
 
 func TestDefaultConfig_ServerEndpoint(t *testing.T) {
 	cfg := DefaultConfig()

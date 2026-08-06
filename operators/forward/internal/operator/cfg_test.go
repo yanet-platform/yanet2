@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +9,28 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
+
+// Test_ShippedDefaultConfig_NoUnknownKeys guards the shipped default config
+// against a key that matches no field in Config.
+func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
+	data, err := os.ReadFile("../../etc/yanet/yanet-forward-operator-default.yaml")
+	require.NoError(t, err)
+	require.NoError(t, xcfg.CheckKnownKeys[Config](data))
+}
+
+// Test_ShippedRulesDefault_NoUnknownKeys guards the shipped forward rules
+// files against a key that matches no field in yamlForwardConfig.
+func Test_ShippedRulesDefault_NoUnknownKeys(t *testing.T) {
+	paths := []string{
+		"../../etc/yanet/forward.d/vlan-phy-default.yaml",
+		"../../etc/yanet/forward.d/phy-vlan-default.yaml",
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.NoError(t, xcfg.CheckKnownKeys[yamlForwardConfig](data))
+	}
+}
 
 // TestDecode_FunctionMissingRequiredField verifies that xcfg.Decode catches a
 // functions entry that omits a required NonEmptyString field, surfacing it as a
