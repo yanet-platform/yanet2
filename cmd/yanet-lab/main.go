@@ -28,7 +28,13 @@ import (
 
 const defaultSession = "default"
 
-const supervisorRequestTimeout = 5 * time.Second
+const (
+	supervisorRequestTimeout  = 5 * time.Second
+	supervisorExecTimeout     = 5 * time.Minute
+	supervisorManifestTimeout = 10 * time.Minute
+	supervisorResetTimeout    = 2 * time.Minute
+	supervisorShutdownTimeout = 2 * time.Minute
+)
 
 const supervisorProtocolVersion = 2
 
@@ -379,8 +385,12 @@ func (m *application) doctor() error {
 }
 
 func (m *application) up() error {
-	if _, err := m.shutdownStaleSupervisor(); err != nil {
+	status, err := m.shutdownStaleSupervisor()
+	if err != nil {
 		return err
+	}
+	if status != nil {
+		return m.printResponse(status)
 	}
 	dir, _, err := sessionPaths(m.session)
 	if err != nil {
@@ -444,9 +454,6 @@ func startupFailure(lastStatusError, logPath string) error {
 }
 
 func (m *application) ensureUp() error {
-	if _, err := m.shutdownStaleSupervisor(); err != nil {
-		return err
-	}
 	return m.up()
 }
 
@@ -516,7 +523,18 @@ func (m *application) call(value request) (*response, error) {
 }
 
 func requestTimeout(action string) time.Duration {
-	return supervisorRequestTimeout
+	switch action {
+	case "manifest":
+		return supervisorManifestTimeout
+	case "exec":
+		return supervisorExecTimeout
+	case "reset":
+		return supervisorResetTimeout
+	case "down":
+		return supervisorShutdownTimeout
+	default:
+		return supervisorRequestTimeout
+	}
 }
 
 func (m *application) sessionConnection() (net.Conn, error) {
