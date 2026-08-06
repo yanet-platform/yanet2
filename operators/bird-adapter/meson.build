@@ -8,6 +8,11 @@ install_data(
     install_dir: '/etc/yanet2',
 )
 
+install_data(
+    'etc/yanet/bird-adapter-default.yaml',
+    install_dir: '/etc/yanet2',
+)
+
 bird_adapter_ld_flags = '-X github.com/yanet-platform/yanet2/operators/bird-adapter/internal/version.version=' + yanet_version
 
 # Skip bird-adapter when fuzzing — it does not use CGO but still gets sanitizer

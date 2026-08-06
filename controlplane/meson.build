@@ -1,5 +1,10 @@
 subdir('ynpb')
 
+install_data(
+    'etc/yanet/controlplane-default.yaml',
+    install_dir: '/etc/yanet2',
+)
+
 ld_flags = '-X github.com/yanet-platform/yanet2/controlplane/internal/version.version=' + yanet_version
 
 custom_target(

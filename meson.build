@@ -241,6 +241,12 @@ subdir('devices')
 subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 
+install_data(
+  'dataplane.yaml',
+  install_dir: '/etc/yanet2',
+  rename: 'dataplane-default.yaml',
+)
+
 if not dataplane_only
   subdir('lib/controlplane/tests')
   # Operator proto targets must exist before their consumers are declared.

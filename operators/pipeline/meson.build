@@ -1,3 +1,8 @@
+install_data(
+    'etc/yanet/yanet-pipeline-operator-default.yaml',
+    install_dir: '/etc/yanet2',
+)
+
 # Skip pipeline-operator when fuzzing — no CGO but still gets sanitizer flags
 # that interfere with the fuzzing build.
 if not get_option('fuzzing').enabled()

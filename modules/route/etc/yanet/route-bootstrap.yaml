@@ -1,3 +1,0 @@
-routes:
-  - prefix: 2a02:6b8::/32
-    nexthop: fe80::1

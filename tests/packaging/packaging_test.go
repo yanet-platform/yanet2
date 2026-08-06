@@ -26,8 +26,8 @@ const etcYanet2Prefix = "/etc/yanet2/"
 // shippedConfigPaths lists every default config YAML installed under
 // /etc/yanet2, relative to the repository root.
 //
-// Some are shipped by the root Makefile's install target, others by an
-// operator's meson install_data.
+// Each is installed by a meson install_data rule, not copied by hand in
+// the root Makefile.
 var shippedConfigPaths = []string{
 	"controlplane/etc/yanet/controlplane-default.yaml",
 	"dataplane.yaml",

@@ -313,17 +313,6 @@ install1:
 
 install: dataplane cli-install
 	meson install -C build --skip-subprojects
-	install -d $(DESTDIR)/etc/yanet2
-	install -m 644 controlplane/etc/yanet/controlplane-default.yaml $(DESTDIR)/etc/yanet2/controlplane-default.yaml
-	install -m 644 dataplane.yaml $(DESTDIR)/etc/yanet2/dataplane-default.yaml
-	install -m 644 operators/bird-adapter/etc/yanet/bird-adapter-default.yaml $(DESTDIR)/etc/yanet2/bird-adapter-default.yaml
-	install -m 644 operators/pipeline/etc/yanet/yanet-pipeline-operator-default.yaml $(DESTDIR)/etc/yanet2/yanet-pipeline-operator-default.yaml
-	install -m 644 operators/route/etc/yanet/yanet-route-operator-default.yaml $(DESTDIR)/etc/yanet2/yanet-route-operator-default.yaml
-	install -d $(DESTDIR)/etc/yanet2/forward.d
-	install -m 644 operators/forward/etc/yanet/forward.d/vlan-phy-default.yaml $(DESTDIR)/etc/yanet2/forward.d/vlan-phy-default.yaml
-	install -m 644 operators/forward/etc/yanet/forward.d/phy-vlan-default.yaml $(DESTDIR)/etc/yanet2/forward.d/phy-vlan-default.yaml
-	install -d $(DESTDIR)/etc/yanet2/decap.d
-	install -m 644 operators/decap/etc/yanet/decap.d/default.yaml $(DESTDIR)/etc/yanet2/decap.d/default.yaml
 
 clean: go-cache-clean cli-clean
 	@echo "Cleaning build directories..."
