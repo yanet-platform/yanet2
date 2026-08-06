@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -299,7 +299,19 @@ func (m *application) scenarioCommand() *cobra.Command {
 	command := &cobra.Command{Use: "scenario", Short: "List or run built-in guided scenarios"}
 	command.AddCommand(
 		&cobra.Command{Use: "list", RunE: func(*cobra.Command, []string) error {
-			names := []string{"forward-route", "decap", "nat64"}
+			root, err := projectRoot()
+			if err != nil {
+				return err
+			}
+			matches, err := filepath.Glob(filepath.Join(root, "lab", "scenarios", "*", "manifest.yaml"))
+			if err != nil {
+				return err
+			}
+			names := make([]string, 0, len(matches))
+			for _, m := range matches {
+				names = append(names, filepath.Base(filepath.Dir(m)))
+			}
+			sort.Strings(names)
 			if m.json {
 				return json.NewEncoder(os.Stdout).Encode(names)
 			}
@@ -309,6 +321,9 @@ func (m *application) scenarioCommand() *cobra.Command {
 			return nil
 		}},
 		&cobra.Command{Use: "run NAME", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+			if !validSessionName(args[0]) {
+				return fmt.Errorf("invalid scenario name: %q", args[0])
+			}
 			root, err := projectRoot()
 			if err != nil {
 				return err
@@ -870,23 +885,14 @@ done
 printf '\nYANET lab: CLI=/tmp/yanet/cli config=/tmp/yanet/config logs=/tmp/yanet/logs build=/tmp/yanet/build\n'
 printf 'Host controls: just lab reset | just lab down\n\n'
 `
-	if err := writeGuestShellFile(fw, "/root/.ssh/authorized_keys", publicKey); err != nil {
+	if err := fw.WriteGuestFile("/root/.ssh/authorized_keys", string(publicKey)); err != nil {
 		return err
 	}
-	if err := writeGuestShellFile(fw, "/tmp/yanet/lab.bashrc", []byte(rcFile)); err != nil {
+	if err := fw.WriteGuestFile("/tmp/yanet/lab.bashrc", rcFile); err != nil {
 		return err
 	}
 	if _, err := fw.ExecuteCommand("chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys; chmod 600 /tmp/yanet/lab.bashrc; service ssh start"); err != nil {
 		return fmt.Errorf("start guest SSH service: %w", err)
-	}
-	return nil
-}
-
-func writeGuestShellFile(fw *framework.TestFramework, path string, contents []byte) error {
-	encoded := base64.StdEncoding.EncodeToString(contents)
-	command := fmt.Sprintf("mkdir -p /root/.ssh /tmp/yanet; printf '%%s' '%s' | base64 -d > %s", encoded, path)
-	if _, err := fw.ExecuteCommand(command); err != nil {
-		return fmt.Errorf("write guest shell file %s: %w", path, err)
 	}
 	return nil
 }
@@ -907,7 +913,7 @@ func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, column
 	}
 	defer func() {
 		if err := release(); err != nil {
-			stop()
+			fmt.Fprintf(os.Stderr, "release serial: %v\n", err)
 		}
 	}()
 	if _, err := fmt.Fprintf(serial, "stty rows %d columns %d; exec bash --rcfile /tmp/yanet/lab.bashrc -i\n", rows, columns); err != nil {
