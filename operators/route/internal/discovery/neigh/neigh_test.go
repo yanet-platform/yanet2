@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
@@ -100,6 +102,78 @@ func TestNeighMonitorRejectsUnusableSourceMAC(t *testing.T) {
 				require.Equal(t, [6]byte(tt.linkHardwareAddr), entry.HardwareRoute.SourceMAC)
 				require.Equal(t, [6]byte(neighbourMAC), entry.HardwareRoute.DestinationMAC)
 			}
+		})
+	}
+}
+
+// TestNeighMonitorClassifiesMissingVsMalformedDestinationMAC verifies how a
+// destination hardware address is classified by its length.
+//
+// A neighbour with no hardware address is skipped without a warning, while a
+// present but non-EUI-48 address still warns. Both are excluded from the
+// resolved nexthop cache either way.
+func TestNeighMonitorClassifiesMissingVsMalformedDestinationMAC(t *testing.T) {
+	nexthop := netip.MustParseAddr("10.0.0.2")
+	linkHardwareAddr := net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+
+	tests := []struct {
+		name              string
+		neighHardwareAddr net.HardwareAddr
+		wantWarn          bool
+	}{
+		{
+			name:              "unresolved neighbour has no hardware address",
+			neighHardwareAddr: nil,
+			wantWarn:          false,
+		},
+		{
+			name:              "malformed non-empty hardware address",
+			neighHardwareAddr: net.HardwareAddr{0x0a, 0x00, 0x00, 0x01},
+			wantWarn:          true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			table := neigh.NewNeighTable()
+			source, err := table.CreateSource("kernel", 100, true)
+			require.NoError(t, err)
+
+			link := &netlink.Device{
+				LinkAttrs: netlink.LinkAttrs{
+					Index:        1,
+					Name:         "eth0",
+					HardwareAddr: linkHardwareAddr,
+				},
+			}
+			kernelNeigh := netlink.Neigh{
+				LinkIndex:    1,
+				IP:           nexthop.AsSlice(),
+				HardwareAddr: tt.neighHardwareAddr,
+				State:        netlink.NUD_INCOMPLETE,
+			}
+
+			fake := fakeKernelTable{
+				links:  []netlink.Link{link},
+				neighs: []netlink.Neigh{kernelNeigh},
+			}
+
+			core, logs := observer.New(zapcore.DebugLevel)
+			neigh.NewNeighMonitor(table, source,
+				neigh.WithKernelTable(fake),
+				neigh.WithLog(zap.New(core)),
+			)
+
+			_, ok := table.View().Lookup(nexthop)
+			require.False(t, ok, "entry with a bad destination MAC must never enter the cache")
+
+			gotWarn := false
+			for _, entry := range logs.All() {
+				if entry.Level == zapcore.WarnLevel {
+					gotWarn = true
+				}
+			}
+			require.Equal(t, tt.wantWarn, gotWarn)
 		})
 	}
 }

@@ -411,8 +411,17 @@ func (m *NeighMonitor) updateNeighbours() error {
 			continue
 		}
 
-		// Skip entries with invalid MAC.
-		if len(neigh.HardwareAddr) != 6 {
+		// An absent hardware address leaves nothing to forward to and is
+		// routine, so it is logged at debug level. A present but non-EUI-48
+		// address is rarer and still warrants a warning.
+		switch {
+		case len(neigh.HardwareAddr) == 0:
+			m.log.Debug("skipping entry with no destination MAC address",
+				zap.Stringer("state", NeighbourState(neigh.State)),
+				zap.Stringer("nexthop_addr", nexthopAddr),
+			)
+			continue
+		case len(neigh.HardwareAddr) != 6:
 			m.log.Warn("skipping entry with unsupported MAC address: must be EUI-48",
 				zap.Stringer("mac", neigh.HardwareAddr),
 			)
