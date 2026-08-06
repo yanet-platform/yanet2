@@ -233,7 +233,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                             onChange={e => updateField('counter', e.target.value)}
                         />
                         <span className="yn-field__hint">
-                            Counter name shown in /stats.
+                            Counter name shown in the table's Counter column.
                             {ruleItem !== null
                                 ? ' Leave empty to use the auto-assigned default name (shifts with rule position).'
                                 : ' Leave empty to use the auto-assigned default name.'}
