@@ -34,6 +34,7 @@ const (
 	supervisorManifestTimeout = 10 * time.Minute
 	supervisorResetTimeout    = 2 * time.Minute
 	supervisorShutdownTimeout = 2 * time.Minute
+	maxRequestSize            = 1 << 20 // 1 MiB
 )
 
 const supervisorProtocolVersion = 2
@@ -953,9 +954,13 @@ printf 'Host controls: just lab reset | just lab down\n\n'
 }
 
 func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, columns int) {
+	if err := connection.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return
+	}
 	if _, err := io.ReadFull(connection, make([]byte, 1)); err != nil {
 		return
 	}
+	_ = connection.SetReadDeadline(time.Time{})
 	if rows < 1 {
 		rows = 24
 	}
@@ -989,7 +994,7 @@ func decodeRequest(connection net.Conn, value *request) error {
 		return err
 	}
 	defer connection.SetReadDeadline(time.Time{})
-	return json.NewDecoder(connection).Decode(value)
+	return json.NewDecoder(io.LimitReader(connection, maxRequestSize)).Decode(value)
 }
 
 func setError(reply *response, err error) {
