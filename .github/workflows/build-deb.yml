@@ -103,7 +103,7 @@ jobs:
         run: |
           echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
       - name: Set up go cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ${{ env.modcache }}
