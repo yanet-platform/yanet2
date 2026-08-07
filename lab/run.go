@@ -35,7 +35,10 @@ type RunReport struct {
 	Results  []Result  `json:"results"`
 }
 
-const maxManifestFileSize = 64 * 1024
+const (
+	maxManifestFileSize = 64 * 1024
+	maxResultOutput     = 8 << 10 // 8 KiB per step/probe result
+)
 
 // ManifestRuntime provides the VM operations needed to execute a manifest.
 type ManifestRuntime interface {
@@ -129,6 +132,9 @@ func RunManifest(runtime ManifestRuntime, path string) RunReport {
 				timeout, _ = time.ParseDuration(step.Timeout)
 			}
 			output, stepErr := runtime.ExecuteCommandWithTimeout(ShellJoin(step.Argv), timeout)
+			if len(output) > maxResultOutput {
+				output = output[:maxResultOutput] + fmt.Sprintf("\n... truncated (%d bytes total)", len(output))
+			}
 			result := Result{Name: step.Name, Kind: "step", Success: stepErr == nil, Duration: time.Since(started), Output: output}
 			if stepErr != nil {
 				result.Error = stepErr.Error()
