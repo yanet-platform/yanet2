@@ -152,7 +152,6 @@ Active modules: `route, acl, balancer2, blackhole, forward, decap, nat64, fwstat
 - `common/rust/` — Rust shared crates: `commonpb`, `filterpb`, `ynpb` (compiled ynpb protos, exposes `pub mod pb`), `bitmap`. Module CLIs depend on these via `extern_path` instead of recompiling protos.
 - `common/commonpb/` — Go protos: `metric`, `target` (used by the metrics package).
 - `common/filterpb/` — Go filter proto plus helpers (`convert.go`, `filter.go`).
-- `common/btree/` — header-only C BTree (`u16.h`, `u32.h`, `u64.h`).
 - `common/ttlmap/` — header-only C TTL map (`ttlmap.h` + `detail/`).
 - `common/*.h` — C headers: `lpm.h`, `radix.h`, `crc32.h`, `hash.h`, `rcu.h`, `memory*.h`, etc.
 

@@ -178,7 +178,7 @@ The `performance-engineer` measures and locates throughput bottlenecks and prove
 
 **When to dispatch:**
 
-1. **After risky hot-path work** — when a change touches a module packet handler (`modules/*/dataplane/`), `lib/dataplane/`, hot data structures (`common/btree`, `common/ttlmap`, `lib/fwstate`, LPM/filter lookup paths), or an RCU/per-packet path, run a `review` (and `regression` if a baseline exists) pass.
+1. **After risky hot-path work** — when a change touches a module packet handler (`modules/*/dataplane/`), `lib/dataplane/`, hot data structures (`common/ttlmap`, `lib/fwstate`, LPM/filter lookup paths), or an RCU/per-packet path, run a `review` (and `regression` if a baseline exists) pass.
 2. **On an explicit "find bottlenecks" ask** — dispatch `profile` over the named scope.
 3. **At your discretion** — opportunistically, e.g. before a perf-sensitive refactor or to baseline a hot path. No fixed schedule, and NOT an auto-gate on every dataplane-adjacent diff.
 

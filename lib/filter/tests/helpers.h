@@ -113,16 +113,6 @@ builder_add_proto_range(
 }
 
 static inline void
-builder_set_proto_range(
-	struct filter_rule_builder *b, uint8_t proto, uint16_t flags_or_type
-) {
-	// proto_range encoding: proto * 256 + flags/type
-	uint16_t encoded = (uint16_t)proto * 256 + flags_or_type;
-	size_t i = b->proto_ranges_count++;
-	b->proto_ranges[i] = (struct filter_proto_range){encoded, encoded};
-}
-
-static inline void
 builder_set_vlan(struct filter_rule_builder *b, uint16_t vlan) {
 	b->vlan_ranges[0].from = vlan;
 	b->vlan_ranges[0].to = vlan;

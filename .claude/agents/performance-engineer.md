@@ -20,7 +20,7 @@ YANET2 sits in the packet path on DPDK and must utilize hardware to the maximum.
 
 This dev environment has **no hugepage/NIC/traffic-generator rig** — you cannot measure live line-rate throughput or produce real 100Gbit flamegraphs. Your *measurement* is realistically:
 
-- The **in-repo microbenchmarks** over LIVE hot paths: `tests/fwstate/*_bench_test.c`, `lib/filter/tests/bench_net*.c`, `tests/common/rcu_bench.c`. (Skip `tests/common/btree_bench_*` — `common/btree` is dead code.)
+- The **in-repo microbenchmarks** over LIVE hot paths: `tests/fwstate/*_bench_test.c`, `lib/filter/tests/bench_net*.c`, `tests/common/rcu_bench.c`.
 - **`rte_rdtsc`-based timing** via `lib/dataplane/time/tsc.h` and standalone harnesses you compile against built libs.
 - `go test -bench`, `cargo bench` where a hot path lives in those layers.
 

@@ -18,7 +18,7 @@ You own these directories and file types:
 - `modules/*/dataplane/` — Module packet handlers
 - `modules/*/api/` — C API layer for control plane FFI (controlplane.h/c)
 - `lib/` — Shared C libraries (dataplane helpers, counters, logging, fwstate)
-- `common/*.h` — Common C headers (lpm, radix, rcu, memory, btree, ttlmap)
+- `common/*.h` — Common C headers (lpm, radix, rcu, memory, ttlmap)
 - `filter/` — Packet filter compiler and classifiers
 - `modules/*/fuzzing/` — LibFuzzer targets
 - `modules/*/tests/` — C dataplane tests
