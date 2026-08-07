@@ -29,8 +29,8 @@ supervisor; inspect it with `status`, `report`, or `down`.
 
 ## Commands
 
-- `doctor` checks Go, Just, QEMU, the disk image, required host artifacts, and
-  optional Linux KVM.
+- `doctor` checks Go, Just, QEMU, SSH tooling (`ssh`, `ssh-keygen`), the disk
+  image, required host artifacts, and optional Linux KVM.
 - `up` starts or reuses a named session; `--session NAME` selects another one.
 - `status` verifies the dataplane, control plane, operators, BIRD session, and
   imported lab routes.

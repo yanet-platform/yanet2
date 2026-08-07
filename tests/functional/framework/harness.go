@@ -465,12 +465,11 @@ func (m *Harness) RestoreBooted(t *testing.T, fw *TestFramework) {
 // testing package. Lab tools use this method to get the same fast-path and
 // fallback behavior as functional tests.
 //
-// The fast path differs from the older RestoreBooted contract: it adopts the
-// running config first, then restores the "baseline" snapshot and resets
-// connections. When no profileReady hook is set it waits for datapath
-// readiness; functional tests that pass no hooks see the same net behavior as
-// before. The fallback additionally runs the afterStart/profileReady hooks
-// after a fresh StartYANET. Both hook paths are no-ops for nil hooks.
+// The fast path restores the "baseline" snapshot via RestoreClean, resets
+// connections, and checks datapath readiness. The fallback restores the
+// "preyanet" snapshot and starts YANET from scratch. Functional tests that
+// pass no hooks get a fast path that differs from the older RestoreBooted
+// contract (which used RestoreAndReconnect); the fallback path is unchanged.
 func (m *Harness) Restore(fw *TestFramework) error {
 	fw.AdoptRunningConfig(m.dataplane, m.controlplane)
 	if err := fw.RestoreClean("baseline"); err == nil {

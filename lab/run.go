@@ -99,11 +99,11 @@ func RunManifest(runtime ManifestRuntime, path string) RunReport {
 				result.Error = bootErr.Error()
 			} else if bootErr := runtime.StartYANET(dataplane, controlplane); bootErr != nil {
 				result.Error = bootErr.Error()
-			} else if _, bootErr := runtime.ExecuteCommands(runtime.CommonConfigCommands()...); bootErr != nil {
-				result.Error = bootErr.Error()
 			} else {
 				runtime.ResetConnections()
-				if bootErr := runtime.WaitForDatapathReady(15 * time.Second); bootErr != nil {
+				if _, bootErr := runtime.ExecuteCommands(runtime.CommonConfigCommands()...); bootErr != nil {
+					result.Error = bootErr.Error()
+				} else if bootErr := runtime.WaitForDatapathReady(15 * time.Second); bootErr != nil {
 					result.Error = bootErr.Error()
 				}
 			}
