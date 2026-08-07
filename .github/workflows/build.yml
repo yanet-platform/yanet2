@@ -32,6 +32,11 @@ on:
       - ".github/workflows/build.yml"
       - ".github/actions/apt-packages/**"
 
+concurrency:
+  # The run_id fallback keeps non-PR runs from cancelling each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   build-asan-test:
     runs-on: ubuntu-24.04
@@ -53,6 +58,7 @@ jobs:
           key: ${{ runner.os }}-build-asan-test-cache
           max-size: 2G
           verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: actions/setup-go@v5
         with:
@@ -62,14 +68,12 @@ jobs:
 
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
 
       - name: Set up go cache
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.cache }}
             ${{ env.modcache }}
           key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
@@ -88,9 +92,7 @@ jobs:
           make dataplane
 
       - name: Build and run tests (sanitize)
-        run: |
-          make go-cache-clean
-          make test-asan
+        run: make test-asan-only
 
       - name: Show meson test log
         if: always()
@@ -116,6 +118,7 @@ jobs:
           key: ${{ runner.os }}-build-tsan-test-cache
           max-size: 2G
           verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: actions/setup-go@v5
         with:
@@ -125,14 +128,12 @@ jobs:
 
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
 
       - name: Set up go cache
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.cache }}
             ${{ env.modcache }}
           key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
@@ -188,6 +189,7 @@ jobs:
           key: ${{ runner.os }}-build-release-artifacts-cache
           max-size: 2G
           verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: actions/setup-go@v5
         with:
@@ -197,14 +199,12 @@ jobs:
 
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
 
       - name: Set up go cache
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.cache }}
             ${{ env.modcache }}
           key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
@@ -223,7 +223,7 @@ jobs:
           make dataplane cli
 
       - name: Build and run tests (release)
-        run: make test
+        run: make test-only
 
       - name: Show meson test log
         if: always()
@@ -303,6 +303,7 @@ jobs:
           key: ${{ runner.os }}-clang-tidy-cache
           max-size: 2G
           verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: actions/setup-go@v5
         with:
@@ -312,14 +313,12 @@ jobs:
 
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
 
       - name: Set up go cache
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.cache }}
             ${{ env.modcache }}
           key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |

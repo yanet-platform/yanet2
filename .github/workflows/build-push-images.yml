@@ -52,14 +52,12 @@ jobs:
       # https://github.com/actions/setup-go/issues/358
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >> $GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
 
       - name: Set up go cache
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.cache }}
             ${{ env.modcache }}
           key: deb-build-24.04-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-24.04
           restore-keys: |

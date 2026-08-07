@@ -22,6 +22,11 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  # The run_id fallback keeps non-PR runs from cancelling each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   set-matrix:
     runs-on: ubuntu-latest
@@ -96,13 +101,11 @@ jobs:
       # https://github.com/actions/setup-go/issues/358
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >> $GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
       - name: Set up go cache
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.cache }}
             ${{ env.modcache }}
           key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-${{ matrix.unbtver }}
           restore-keys: |

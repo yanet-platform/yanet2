@@ -115,7 +115,9 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	lint-commit \
 	hooks \
 	test \
+	test-only \
 	test-asan \
+	test-asan-only \
 	test-tsan \
 	test-functional \
 	bench \
@@ -256,11 +258,24 @@ cli-clean:
 cli-clean/%:
 	$(CARGO) clean || true
 
-test: go-cache-clean dataplane
+# Wipes the Go build cache first: a stale entry can link a stale C archive.
+#
+# The clean is a recipe step rather than a prerequisite so that -j cannot run
+# it concurrently with the build. A caller that has already cleaned once, such
+# as a CI job, invokes the -only target instead.
+test:
+	$(MAKE) go-cache-clean
+	$(MAKE) test-only
+
+test-only: dataplane
 	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
 	meson test -C build
 
-test-asan: go-cache-clean
+test-asan:
+	$(MAKE) go-cache-clean
+	$(MAKE) test-asan-only
+
+test-asan-only:
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
 	else \
@@ -287,7 +302,9 @@ test-functional:
 #   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > old.txt
 #   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > new.txt
 #   benchstat old.txt new.txt
-bench: go-cache-clean dataplane
+bench:
+	$(MAKE) go-cache-clean
+	$(MAKE) dataplane
 	go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
 fuzz:

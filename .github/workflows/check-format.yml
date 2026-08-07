@@ -16,6 +16,10 @@ on:
       - ".github/actions/clang-format/**"
       - ".github/workflows/check-format.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   c-cpp-fmt:
     name: C formatting
