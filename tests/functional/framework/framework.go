@@ -1233,6 +1233,13 @@ func (f *TestFramework) WriteGuestFile(path string, contents string) error {
 	return f.createGuestFile(path, contents)
 }
 
+// AbortGuestSerial closes the guest serial connection so in-flight
+// ExecuteCommand calls fail. The caller must reconnect before issuing further
+// guest commands.
+func (f *TestFramework) AbortGuestSerial() {
+	f.qemu.AbortSerial()
+}
+
 // createConfigFiles creates YANET configuration files in the host filesystem
 // within the mounted config directory that is accessible from the virtual machine.
 // This method handles the host-side file creation for VM-accessible configuration.

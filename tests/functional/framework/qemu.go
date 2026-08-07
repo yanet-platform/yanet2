@@ -527,11 +527,17 @@ func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 			_ = q.serialConn.Close()
 			q.serialConn = nil
 		}
-		if err := q.connectToSerial(); err != nil {
-			return fmt.Errorf("restore serial reader: %w", err)
+		var lastErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if err := q.connectToSerial(); err != nil {
+				lastErr = err
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			q.startSerialReader()
+			return nil
 		}
-		q.startSerialReader()
-		return nil
+		return fmt.Errorf("restore serial reader after 3 attempts: %w", lastErr)
 	}
 	return connection, release, nil
 }
@@ -539,6 +545,19 @@ func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 // ForceStop makes Stop terminate this VM even when the test keep-alive mode is set.
 func (q *QEMUManager) ForceStop() {
 	q.forceStop = true
+}
+
+// AbortSerial stops the serial reader and closes the serial connection,
+// causing in-flight ExecuteCommand calls to fail immediately. The caller
+// must reconnect (via reset/up) before issuing further guest commands.
+func (q *QEMUManager) AbortSerial() {
+	q.stopSerialReader()
+	q.serialMutex.Lock()
+	if q.serialConn != nil {
+		_ = q.serialConn.Close()
+		q.serialConn = nil
+	}
+	q.serialMutex.Unlock()
 }
 
 // resetSerialBuffer clears the accumulated serial console output buffer.

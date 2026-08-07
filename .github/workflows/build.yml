@@ -427,6 +427,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          persist-credentials: false
 
       - name: Clean any pre-existing build artifacts
         run: |
@@ -442,7 +443,7 @@ jobs:
 
       - uses: ./.github/actions/apt-packages
         with:
-          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev
+          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev just
 
       - name: Configure system for QEMU
         run: |
