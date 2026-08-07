@@ -584,7 +584,15 @@ func (q *QEMUManager) discardSerialThrough(marker string) {
 func (q *QEMUManager) serialBufferContains(marker string) bool {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
-	return bytes.Contains(q.serialBuffer.Bytes(), []byte(marker))
+	data := q.serialBuffer.Bytes()
+	// Markers are appended after command output, so they are near the tail.
+	// Scan the last 1 MiB plus marker length to avoid O(n) over the full
+	// buffer on every 100ms poll tick.
+	scanSize := (1 << 20) + len(marker)
+	if len(data) > scanSize {
+		data = data[len(data)-scanSize:]
+	}
+	return bytes.Contains(data, []byte(marker))
 }
 
 // serialBufferSnapshot returns the current contents of the serial console output buffer.
