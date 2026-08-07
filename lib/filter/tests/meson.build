@@ -30,26 +30,6 @@ test_filter_basic_net4 = executable('basic_net4',
 )
 test('basic_net4', test_filter_basic_net4, suite: ['filter'])
 
-# test basic net4 fast
-test_filter_basic_net4_fast = executable('basic_net4_fast',
-['basic_net4_fast.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('basic_net4_fast', test_filter_basic_net4_fast, suite: ['filter'])
-
-# test basic net6 fast
-test_filter_basic_net6_fast = executable('basic_net6_fast',
-['basic_net6_fast.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('basic_net6_fast', test_filter_basic_net6_fast, suite: ['filter'])
-
 # test basic net6
 test_filter_basic_net6 = executable('basic_net6',
 ['basic_net6.c'],
@@ -123,53 +103,14 @@ filter_macros = executable(
 )
 test('macros', filter_macros, suite: ['filter'])
 
-basic_port_fast = executable('basic_port_fast',
-  ['basic_port_fast.c'], 
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('basic_port_fast', basic_port_fast, suite: ['filter'])
-
 basic_proto_range = executable('basic_proto_range',
-  ['basic_proto_range.c'], 
+  ['basic_proto_range.c'],
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
   dependencies: test_deps,
   link_language: 'c'
 )
 test('basic_proto_range', basic_proto_range, suite: ['filter'])
-
-
-basic_proto_range_fast = executable('basic_proto_range_fast',
-  ['basic_proto_range_fast.c'], 
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('basic_proto_range_fast', basic_proto_range_fast, suite: ['filter'])
-
-# test combo net4_fast_src + port_fast_src
-combo_net4_port_src = executable('combo_net4_port_src',
-  ['combo_net4_port_src.c'], 
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('combo_net4_port_src', combo_net4_port_src, suite: ['filter'])
-
-# test combo net6_fast_src + port_fast_src
-combo_net6_port_src = executable('combo_net6_port_src',
-  ['combo_net6_port_src.c'], 
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('combo_net6_port_src', combo_net6_port_src, suite: ['filter'])
 
 subdir('shm')
 
@@ -181,24 +122,8 @@ executable('bench_net4',
   link_language: 'c'
 )
 
-executable('bench_net4_fast',
-  ['bench_net4_fast.c'], 
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-
 executable('bench_net6',
-  ['bench_net6.c'], 
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-
-executable('bench_net6_fast',
-  ['bench_net6_fast.c'], 
+  ['bench_net6.c'],
   c_args: yanet_c_args,
   link_args: yanet_link_args,
   dependencies: test_deps,

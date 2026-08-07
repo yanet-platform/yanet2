@@ -4,13 +4,9 @@
 #include "device.h"
 #include "ipfrag.h"
 #include "net4.h"
-#include "net4_fast.h"
 #include "net6.h"
-#include "net6_fast.h"
 #include "port.h"
-#include "port_fast.h"
 #include "proto_range.h"
-#include "proto_range_fast.h"
 #include "vlan.h"
 
 typedef void (*filter_attr_query_func)(
@@ -31,20 +27,13 @@ struct filter_attr_query {
 
 REGISTER_ATTRIBUTE(port_src);
 REGISTER_ATTRIBUTE(port_dst);
-REGISTER_ATTRIBUTE(port_fast_src);
-REGISTER_ATTRIBUTE(port_fast_dst);
 REGISTER_ATTRIBUTE(proto_range);
-REGISTER_ATTRIBUTE(proto_range_fast);
 REGISTER_ATTRIBUTE(net4_src);
 REGISTER_ATTRIBUTE(net4_dst);
 REGISTER_ATTRIBUTE(net6_src);
 REGISTER_ATTRIBUTE(net6_dst);
 REGISTER_ATTRIBUTE(vlan);
 REGISTER_ATTRIBUTE(device);
-REGISTER_ATTRIBUTE(net4_fast_dst);
-REGISTER_ATTRIBUTE(net4_fast_src);
-REGISTER_ATTRIBUTE(net6_fast_dst);
-REGISTER_ATTRIBUTE(net6_fast_src);
 REGISTER_ATTRIBUTE(ip_frag);
 
 #undef REGISTER_ATTRIBUTE

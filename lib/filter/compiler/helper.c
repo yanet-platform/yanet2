@@ -216,14 +216,10 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	return 0;
 }
 
-// The registry is populated here but never initialised.
-//
-// Both callers already hold an initialised registry: the inner-merge
-// caller in filter_init initialises it right before this call, and the
-// leaf-attribute caller (net6_fast, via merge_and_collect_registry) reuses
-// the registry filter_init already initialised for that lookup.
-// Re-initialising it here would balloc and orphan a second memory-tree
-// node for the same registry.
+// The registry is populated here but never initialised: the caller
+// (filter_init's inner-merge loop, via merge_and_collect_registry) already
+// initialises it right before this call, and re-initialising it here would
+// balloc and orphan a second memory-tree node for the same registry.
 static int
 collect_registry_values(
 	struct value_registry *registry1,

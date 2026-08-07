@@ -163,19 +163,3 @@ build_rule(struct filter_rule_builder *b) {
 	(uint8_t[4]) {                                                         \
 		(uint8_t)(a), (uint8_t)(b), (uint8_t)(c), (uint8_t)(d)         \
 	}
-
-static inline int
-compare_expected_ranges(
-	uint32_t *ranges, uint32_t *expected, size_t packets_count
-) {
-	for (size_t packet_idx = 0; packet_idx < packets_count; ++packet_idx) {
-		TEST_ASSERT(
-			ranges[packet_idx] == expected[packet_idx],
-			"packet at idx %zu: not got expected action %u",
-			packet_idx,
-			expected[packet_idx]
-		);
-	}
-
-	return TEST_SUCCESS;
-}
