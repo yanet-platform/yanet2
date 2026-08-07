@@ -73,6 +73,7 @@ Top-level directories and their roles:
 - `cli/`           — Rust CLI workspace: `core/` (yanet-cli library), `modules/` (shared CLI subcommands), `Makefile`.
 - `lab/`           — reusable local QEMU lab library (manifests, scenarios, operator baseline).
 - `cmd/yanet-lab/` — developer-only lab supervisor CLI (not packaged).
+- `tests/functional/framework/` — shared QEMU/harness infrastructure used by both functional tests and the lab supervisor (not purely test code; imports `testing`).
 - `common/`        — shared libraries across languages (see Shared Libraries).
 - `web/`           — TypeScript/React Web UI.
 - `subprojects/dpdk/` — DPDK as a Meson subproject.

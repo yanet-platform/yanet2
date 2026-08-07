@@ -27,7 +27,7 @@
         "required": ["source", "destination"],
         "properties": {
           "source": { "$ref": "#/$defs/path" },
-          "destination": { "type": "string", "minLength": 1 }
+          "destination": { "type": "string", "minLength": 1, "description": "Any guest path; not validated because manifest steps already execute arbitrary guest commands." }
         }
       }
     },
@@ -94,7 +94,7 @@
     "path": { "type": "string", "minLength": 1 },
     "duration": {
       "type": "string",
-      "pattern": "^[1-9][0-9]*(ns|us|µs|ms|s|m|h)$"
+      "pattern": "^[0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h)$"
     }
   }
 }
