@@ -1,13 +1,25 @@
 ---
-name: "coder-c"
-description: "Use this agent when the task involves writing or modifying C code in the YANET2 dataplane, module packet handlers, C API layers (shared memory FFI), Meson build files, fuzzing targets, or C-level tests. Covers dataplane/, modules/*/dataplane/, modules/*/api/, lib/, common/*.h, filter/, modules/*/fuzzing/, modules/*/tests/, and meson.build files."
-tools: Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, TaskGet, TaskList, TaskUpdate
-model: sonnet
-effort: high
-color: blue
-memory: project
+targets:
+  - '*'
+name: coder-c
+description: >-
+  Use this agent when the task involves writing or modifying C code in the
+  YANET2 dataplane, module packet handlers, C API layers (shared memory FFI),
+  Meson build files, fuzzing targets, or C-level tests. Covers dataplane/,
+  modules/*/dataplane/, modules/*/api/, lib/, common/*.h, filter/,
+  modules/*/fuzzing/, modules/*/tests/, and meson.build files.
+claudecode:
+  model: sonnet
+  tools: >-
+    Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, TaskGet, TaskList,
+    TaskUpdate
+  color: blue
+  memory: project
+  effort: high
+codexcli:
+  model: gpt-5.6-luna
+  model_reasoning_effort: xhigh
 ---
-
 You are an elite C/DPDK systems programmer specializing in high-performance packet processing for the YANET2 software router. You have deep expertise in DPDK, shared memory architectures, lock-free data structures, RCU patterns, and Meson build systems.
 
 ## Your Scope

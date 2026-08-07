@@ -18,6 +18,9 @@ YANET is a high-performance software router built on DPDK. It uses a multi-langu
 git submodule update --init   # DPDK submodule
 meson setup build             # configure C/DPDK build
 
+# AI agent tooling (not needed to build YANET; requires Node/npm)
+make ai/agents                # generate .claude/agents/ and .codex/agents/ (regenerate after any pull touching .rulesync/)
+
 # Build everything
 make all                      # builds dataplane + CLI
 
@@ -178,6 +181,8 @@ Active modules: `route, acl, balancer2, blackhole, forward, decap, nat64, fwstat
 
 Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` with `go build`). Rust is built separately via Cargo. DPDK is a Meson subproject in `subprojects/dpdk/`. Sanitizer flags are propagated to CGO automatically when using `-Db_sanitize`.
 
+Agent charters are authored once at `.rulesync/subagents/*.md` — `make ai/agents` generates the `.claude/agents/` and `.codex/agents/` trees both clients read.
+
 ## Coding Conventions
 
 ### General (every language — C, Go, Rust, TypeScript, shell, Makefiles, proto, YAML)
@@ -226,6 +231,7 @@ Web UI lives in `web/` (the shell), but per-module pages are **co-located with t
 - **Seed a fresh worktree before launching anyone into it**, because it holds only tracked files. Symlink the client memory tree and local settings. The build directory is always called `build`, so every existing `meson compile -C build` recipe stays correct, but which of two things it is depends on what the task's gates do with it. A gate that only links against the archives already in it, or ignores it entirely, may borrow the primary `build` by symlink, seeding the generated `*.pb.go` beside it — `go build`, `go test`, `cargo`, `npm` and a lint-only target such as `make lint/comments` all qualify. A gate that PRODUCES or CONSUMES `build` needs the worktree's own real one instead: `make test`, `make dataplane`, `make fuzz` and `make test-asan` drive meson at it, and `make test-functional` mounts it into the VM without meson at all. Through the symlink each of those exercises the primary checkout's artifacts rather than yours, so the gate goes green on stale ones while ninja rewrites the archives every other worktree links against, and `meson setup --reconfigure`/`--wipe` retargets the developer's shared directory at your worktree. Building its own costs more than the tree: `meson setup build` initialises the empty `subprojects/dpdk` and `subprojects/libpcap` itself, but a linked worktree does not share the superproject's submodule objects, so git clones them from the remote (network required) into `.git/worktrees/<name>/modules/` — budget roughly 255 MB on top of the build, and put such a worktree on a volume with room. A web gate needs `npm ci` from the worktree root. A gitignored tree, such as a private module, cannot be worktree-isolated at all — work it at the primary checkout with absolute paths.
 - **Before a command that produces or consumes `build`, check whether it is a real directory and report a seeding gap if it is a symlink** — a borrowed link makes the gate exercise the primary checkout's artifacts instead of yours.
 - **If your memory tree is missing from the worktree, write through the primary checkout's absolute path** rather than creating a second copy that dies with the worktree.
+- **Never symlink `.claude/agents/` or `.codex/agents/` into a worktree.** `make ai/agents` writes every generated file through the symlink before it notices and refuses, and neither tree is git-tracked — the damage to the primary's real tree is neither prevented, detected, nor recoverable. `.worktreeinclude` gives a tool-created worktree its own copy instead, but nothing ever refreshes it: `.githooks/post-merge` no-ops outside the primary checkout, and the old tracked scheme's propagation through merge or rebase is gone. Charter generation (`make ai/agents`) runs only at the primary checkout, after merge.
 
 ### Commits & PRs
 

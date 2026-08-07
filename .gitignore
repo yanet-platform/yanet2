@@ -138,8 +138,11 @@ deploy/packages/
 .claude/agent-memory
 .claude/settings.*.json
 .claude/worktrees
-/.codex/
+/.codex
 /.agent-state
+
+# Generated from .rulesync/subagents/*.md by 'make ai/agents'.
+.claude/agents
 
 # Ignore skills by default.
 #

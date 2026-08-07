@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Warns after a pull if the primary checkout's generated agent charters
+# could not be verified against .rulesync/subagents/.
+#
+# .claude/agents/ and .codex/agents/ are generated from
+# .rulesync/subagents/ by 'make ai/agents' and are not tracked in git.
+# No-op in a linked worktree: core.hooksPath is shared across every
+# worktree, but only the primary checkout has git-dir == git-common-dir.
+# Never regenerates the charters on its own and never fails the pull.
+git_dir=$(git rev-parse --git-dir)
+common_dir=$(git rev-parse --git-common-dir)
+if [ "$git_dir" != "$common_dir" ]; then
+	exit 0
+fi
+
+if ! make lint/agents >/dev/null; then
+	echo "agent charters could not be verified; run 'make ai/agents' to regenerate .claude/agents/ and .codex/agents/, or inspect the error above" >&2
+fi
+
+exit 0

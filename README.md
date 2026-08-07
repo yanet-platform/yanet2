@@ -78,7 +78,7 @@ YANET employs a multi-language approach to leverage the strengths of different p
    ```bash
    git clone https://github.com/yanet-platform/yanet2.git
    cd yanet2
-   git submodule update --init   
+   git submodule update --init
    ```
 
 2. Configure and build with Meson:
