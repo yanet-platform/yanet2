@@ -1240,6 +1240,12 @@ func (f *TestFramework) AbortGuestSerial() {
 	f.qemu.AbortSerial()
 }
 
+// RestartGuestSerial reconnects the serial console and restarts the reader
+// goroutine after an AbortGuestSerial call.
+func (f *TestFramework) RestartGuestSerial() error {
+	return f.qemu.RestartSerial()
+}
+
 // createConfigFiles creates YANET configuration files in the host filesystem
 // within the mounted config directory that is accessible from the virtual machine.
 // This method handles the host-side file creation for VM-accessible configuration.
