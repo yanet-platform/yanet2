@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package controlplane.ynpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
+
+// MemoryService reports per-agent shared-memory arena utilization.
+//
+// It is the read side of a planned arena grow/shrink API: the sizing
+// decisions that API will make depend on the occupancy this service
+// already exposes.
+service MemoryService {
+  // ListArenas returns arena utilization for every agent generation.
+  rpc ListArenas(ListArenasRequest) returns (ListArenasResponse);
+}
+
+message ListArenasRequest {}
+
+message ListArenasResponse { repeated ArenaInfo arenas = 1; }
+
+// ArenaInfo describes one agent generation's shared-memory arena.
+//
+// It deliberately excludes the memory-context tree already exposed by
+// InspectService.Inspect, to avoid a second source of truth for it.
+message ArenaInfo {
+  string agent = 1;
+  uint64 generation = 2;
+  uint32 pid = 3;
+  uint64 memory_limit = 4;
+  uint64 free_bytes = 5;
+  // retired is true for a superseded generation still holding its arena.
+  bool retired = 6;
+}
