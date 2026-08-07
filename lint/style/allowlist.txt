@@ -195,17 +195,6 @@ private:modules/acl/controlplane/service.go:ACLService.withEntries:e.updateMu:1 
 private:modules/acl/controlplane/service.go:ACLService.withEntries:e.updateMu:2  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.withEntry:entry.updateMu:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.withEntry:entry.updateMu:2  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.ActiveNexthopCounterNames:iter.activeCounterNames:1  # mirrors the sibling fibIter accessors DumpFIB already reaches through
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.addressFamily:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.destroy:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.next:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopCount:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopCounterName:1  # mirrors the sibling fibIter accessors on the same iterator; encapsulating this one alone would split the pattern without benefit
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopDeviceName:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopDstMAC:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopSrcMAC:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixFrom:1  # legacy: encapsulate behind an exported method or field
-private:modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixTo:1  # legacy: encapsulate behind an exported method or field
 private:operators/route/internal/operator/operator.go:applyStaticSeed:routeSvc.getOrCreateRib:1  # legacy: encapsulate behind an exported method or field
 receiver:common/go/dataplane/packet.go:Packet.Data:1  # legacy: rename the receiver to m
 receiver:common/go/dataplane/packet.go:Packet.Free:1  # legacy: rename the receiver to m

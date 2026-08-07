@@ -90,52 +90,8 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create FIB iterator: %w", err)
 	}
-	defer iter.destroy()
 
-	var entries []FIBEntry
-
-	for iter.next() {
-		af := iter.addressFamily()
-
-		from := iter.prefixFrom()
-		to := iter.prefixTo()
-
-		var prefixFrom, prefixTo netip.Addr
-		switch af {
-		case AddressFamilyIPv4:
-			prefixFrom = netip.AddrFrom4(*(*[4]byte)(from))
-			prefixTo = netip.AddrFrom4(*(*[4]byte)(to))
-		case AddressFamilyIPv6:
-			prefixFrom = netip.AddrFrom16(*(*[16]byte)(from))
-			prefixTo = netip.AddrFrom16(*(*[16]byte)(to))
-		default:
-			continue
-		}
-
-		nhCount := iter.nexthopCount()
-		nexthops := make([]FIBNexthop, nhCount)
-
-		for idx := range nhCount {
-			dstMAC := iter.nexthopDstMAC(idx)
-			srcMAC := iter.nexthopSrcMAC(idx)
-
-			nexthops[idx] = FIBNexthop{
-				DstMAC:  net.HardwareAddr(dstMAC[:]),
-				SrcMAC:  net.HardwareAddr(srcMAC[:]),
-				Device:  iter.nexthopDeviceName(idx),
-				Counter: iter.nexthopCounterName(idx),
-			}
-		}
-
-		entries = append(entries, FIBEntry{
-			AddressFamily: af,
-			PrefixFrom:    prefixFrom,
-			PrefixTo:      prefixTo,
-			Nexthops:      nexthops,
-		})
-	}
-
-	return entries, nil
+	return iter.Entries(), nil
 }
 
 // ActiveNexthopCounterNames returns the deduplicated, sorted set of
@@ -150,5 +106,5 @@ func (m *ModuleConfig) ActiveNexthopCounterNames() ([]string, error) {
 		return nil, fmt.Errorf("failed to create FIB iterator: %w", err)
 	}
 
-	return slices.Sorted(maps.Keys(iter.activeCounterNames())), nil
+	return slices.Sorted(maps.Keys(iter.ActiveCounterNames())), nil
 }

@@ -10,6 +10,8 @@ import "C"
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -241,9 +243,9 @@ func (m *fibIter) nexthopCounterName(idx uint64) string {
 	return C.GoString(C.fib_iter_nexthop_counter_name(m.ptr, C.uint64_t(idx)))
 }
 
-// activeCounterNames walks the remainder of the FIB, collecting every
+// ActiveCounterNames walks the remainder of the FIB, collecting every
 // non-empty per-nexthop counter name, then destroys the iterator.
-func (m *fibIter) activeCounterNames() map[string]struct{} {
+func (m *fibIter) ActiveCounterNames() map[string]struct{} {
 	defer m.destroy()
 
 	names := map[string]struct{}{}
@@ -255,4 +257,60 @@ func (m *fibIter) activeCounterNames() map[string]struct{} {
 		}
 	}
 	return names
+}
+
+// Entries walks the remainder of the FIB into Go-owned entries, then
+// destroys the iterator.
+//
+// The prefix bounds returned during a step are borrowed from the iterator's
+// own cursor and get overwritten on the next step. Keeping the walk beside
+// the accessors confines that lifetime rule here, so the safe layer only
+// ever sees Go-owned values.
+func (m *fibIter) Entries() []FIBEntry {
+	defer m.destroy()
+
+	var entries []FIBEntry
+
+	for m.next() {
+		af := m.addressFamily()
+
+		from := m.prefixFrom()
+		to := m.prefixTo()
+
+		var prefixFrom, prefixTo netip.Addr
+		switch af {
+		case AddressFamilyIPv4:
+			prefixFrom = netip.AddrFrom4(*(*[4]byte)(from))
+			prefixTo = netip.AddrFrom4(*(*[4]byte)(to))
+		case AddressFamilyIPv6:
+			prefixFrom = netip.AddrFrom16(*(*[16]byte)(from))
+			prefixTo = netip.AddrFrom16(*(*[16]byte)(to))
+		default:
+			continue
+		}
+
+		nhCount := m.nexthopCount()
+		nexthops := make([]FIBNexthop, nhCount)
+
+		for idx := range nhCount {
+			dstMAC := m.nexthopDstMAC(idx)
+			srcMAC := m.nexthopSrcMAC(idx)
+
+			nexthops[idx] = FIBNexthop{
+				DstMAC:  net.HardwareAddr(dstMAC[:]),
+				SrcMAC:  net.HardwareAddr(srcMAC[:]),
+				Device:  m.nexthopDeviceName(idx),
+				Counter: m.nexthopCounterName(idx),
+			}
+		}
+
+		entries = append(entries, FIBEntry{
+			AddressFamily: af,
+			PrefixFrom:    prefixFrom,
+			PrefixTo:      prefixTo,
+			Nexthops:      nexthops,
+		})
+	}
+
+	return entries
 }
