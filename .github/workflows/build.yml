@@ -297,14 +297,6 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
-      - uses: hendrikmuhs/ccache-action@v1.2.18
-        name: ccache
-        with:
-          key: ${{ runner.os }}-clang-tidy-cache
-          max-size: 2G
-          verbose: 2
-          save: ${{ github.ref == 'refs/heads/main' }}
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
@@ -330,11 +322,9 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-      - name: Build YANET (release)
+      - name: Generate compile database
         run: |
-          make go-cache-clean
           meson setup build -Dbuildtype=release
-          make dataplane
 
       - name: Run clang-tidy
         env:
@@ -372,7 +362,7 @@ jobs:
           [ -n "$RTIDY" ] && echo "Using run-clang-tidy helper: $RTIDY"
 
           # Build file list from database (C files, exclude subprojects)
-          FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
+          FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -vE '(^|/)subprojects/' || true)"
           if [ -z "$FILES" ]; then
               echo "No source files to lint (after filtering)."
               exit 0
