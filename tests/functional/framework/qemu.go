@@ -2,6 +2,7 @@ package framework
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -52,7 +53,7 @@ type QEMUManager struct {
 	Ninepmounted     atomic.Bool
 	monitorConn      net.Conn
 	serialConn       net.Conn
-	serialBuffer     strings.Builder
+	serialBuffer     bytes.Buffer
 	serialMutex      sync.Mutex
 	serialLog        atomic.Value
 	log              *zap.SugaredLogger
@@ -72,6 +73,11 @@ type QEMUManager struct {
 }
 
 const maxSerialBufferSize = 4 << 20
+
+// serialTrimMargin allows the serial buffer to exceed its cap by up to 1 MiB
+// before trimming, so a full-buffer copy happens at most once per 1 MiB of new
+// output rather than on every line once the cap is reached.
+const serialTrimMargin = 1 << 20
 
 // NewQEMUManager creates and initializes a new QEMU manager instance for virtual
 // machine testing. The manager sets up all necessary directories, generates unique
@@ -545,11 +551,19 @@ func (q *QEMUManager) resetSerialBuffer() {
 func (q *QEMUManager) discardSerialThrough(marker string) {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
-	_, after, found := strings.Cut(q.serialBuffer.String(), marker)
-	if found {
+	data := q.serialBuffer.Bytes()
+	if index := bytes.Index(data, []byte(marker)); index >= 0 {
+		remainder := append([]byte(nil), data[index+len(marker):]...)
 		q.serialBuffer.Reset()
-		q.serialBuffer.WriteString(after)
+		q.serialBuffer.Write(remainder)
 	}
+}
+
+// serialBufferContains reports whether the serial console buffer contains marker.
+func (q *QEMUManager) serialBufferContains(marker string) bool {
+	q.serialMutex.Lock()
+	defer q.serialMutex.Unlock()
+	return bytes.Contains(q.serialBuffer.Bytes(), []byte(marker))
 }
 
 // serialBufferSnapshot returns the current contents of the serial console output buffer.
@@ -769,10 +783,11 @@ func (q *QEMUManager) readSerial(done chan struct{}) {
 
 		q.serialMutex.Lock()
 		q.serialBuffer.WriteString(line + "\n")
-		if q.serialBuffer.Len() > maxSerialBufferSize {
-			output := q.serialBuffer.String()
+		if q.serialBuffer.Len() > maxSerialBufferSize+serialTrimMargin {
+			data := q.serialBuffer.Bytes()
+			keep := append([]byte(nil), data[len(data)-maxSerialBufferSize/2:]...)
 			q.serialBuffer.Reset()
-			q.serialBuffer.WriteString(output[len(output)-maxSerialBufferSize:])
+			q.serialBuffer.Write(keep)
 		}
 		q.serialMutex.Unlock()
 
