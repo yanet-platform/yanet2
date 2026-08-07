@@ -112,6 +112,14 @@ func (m *supervisor) CloseSerial() {
 	}
 }
 
+// MarkStopping flags the supervisor as stopping so TryOperation and TrySerial
+// reject new work. It returns immediately without waiting for in-flight work.
+func (m *supervisor) MarkStopping() {
+	m.serialMutex.Lock()
+	m.stopping = true
+	m.serialMutex.Unlock()
+}
+
 func (m *supervisor) Shutdown(fn func() error) error {
 	m.serialMutex.Lock()
 	m.stopping = true
@@ -644,6 +652,7 @@ func (m *application) serve() (err error) {
 	defer signal.Stop(stopping)
 	go func() {
 		<-stopping
+		runtime.State.MarkStopping()
 		startupInterrupted.Store(true)
 		runtime.State.CloseSerial()
 		_ = listener.Close()
@@ -792,7 +801,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		if err := json.NewEncoder(connection).Encode(reply); err != nil {
 			return
 		}
-		streamSerial(connection, fw, value.Rows, value.Columns, stop)
+		streamSerial(connection, fw, value.Rows, value.Columns)
 		return
 	case "reset":
 		err := restore()
@@ -823,12 +832,9 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			setError(&reply, statusErr)
 		}
 	case "down":
-		if err := state.Shutdown(shutdown); err != nil {
-			setError(&reply, err)
-		} else {
-			reply.Output = "lab stopped"
-		}
+		reply.Output = "lab stopped"
 		_ = json.NewEncoder(connection).Encode(reply)
+		_ = state.Shutdown(shutdown)
 		stop()
 		return
 	default:
@@ -897,7 +903,7 @@ printf 'Host controls: just lab reset | just lab down\n\n'
 	return nil
 }
 
-func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, columns int, stop func()) {
+func streamSerial(connection net.Conn, fw *framework.TestFramework, rows, columns int) {
 	if _, err := io.ReadFull(connection, make([]byte, 1)); err != nil {
 		return
 	}
