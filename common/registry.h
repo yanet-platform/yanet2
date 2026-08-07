@@ -181,9 +181,32 @@ struct value_registry {
 
 static inline int
 value_registry_init(
-	struct value_registry *registry, struct memory_context *memory_context
+	struct value_registry *registry,
+	struct memory_context *parent_context,
+	const char *name
 ) {
+	// Balloc'd rather than embedded: a registry lives inside a tree
+	// vertex, and that tree is itself embedded by value inside
+	// shared-memory configs the dataplane reads, so an inline context
+	// here would multiply across every vertex of every tree — an ABI
+	// change, not an inspect-tree nicety.
+	struct memory_context *memory_context = (struct memory_context *)
+		memory_balloc(parent_context, sizeof(*memory_context));
+	if (memory_context == NULL) {
+		registry->memory_context = NULL;
+		return -1;
+	}
+	memory_context_init_from(memory_context, parent_context, name);
+
+	// The registry is the meaningful inspect-tree unit, so the collector's
+	// use-map allocations are attributed to the same child context rather
+	// than getting a node of their own.
 	if (value_collector_init(&registry->collector, memory_context)) {
+		struct memory_context *parent =
+			ADDR_OF(&memory_context->parent);
+		memory_context_fini(memory_context);
+		memory_bfree(parent, memory_context, sizeof(*memory_context));
+		registry->memory_context = NULL;
 		return -1;
 	}
 
@@ -293,15 +316,24 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 	return 0;
 }
 
+// Releases a value registry, including its own memory-tree node.
+//
+// Safe on a zero-initialised registry (never inited): memory_context reads
+// back NULL and every other field is untouched.
 static inline void
 value_registry_fini(struct value_registry *registry) {
+	struct memory_context *memory_context = registry->memory_context;
+	if (memory_context == NULL) {
+		return;
+	}
+
 	value_collector_fini(&registry->collector);
 
 	for (uint64_t idx = 0; idx < registry->range_count; ++idx) {
 		struct value_range *range = ADDR_OF(&registry->ranges) + idx;
 
 		mem_array_free_exp(
-			registry->memory_context,
+			memory_context,
 			ADDR_OF(&range->values),
 			sizeof(uint32_t),
 			range->count
@@ -314,7 +346,7 @@ value_registry_fini(struct value_registry *registry) {
 		uint64_t capacity = 1 << uint64_log_up(registry->range_count);
 
 		memory_bfree(
-			registry->memory_context,
+			memory_context,
 			ADDR_OF(&registry->ranges),
 			capacity * sizeof(struct value_range)
 		);
@@ -322,6 +354,14 @@ value_registry_fini(struct value_registry *registry) {
 	SET_OFFSET_OF(&registry->ranges, NULL);
 	registry->range_count = 0;
 	registry->max_value = 0;
+
+	// The memory_context was balloc'd out of its parent in
+	// value_registry_init, so it is released the same way. Read the parent
+	// before fini, which memsets memory_context and destroys that link.
+	struct memory_context *parent = ADDR_OF(&memory_context->parent);
+	memory_context_fini(memory_context);
+	memory_bfree(parent, memory_context, sizeof(*memory_context));
+	registry->memory_context = NULL;
 }
 
 static inline uint32_t

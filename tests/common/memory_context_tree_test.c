@@ -1,6 +1,8 @@
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/registry.h"
 #include "common/test_assert.h"
+#include "common/value.h"
 #include "lib/logging/log.h"
 
 #include <stddef.h>
@@ -421,6 +423,127 @@ test_stress_init_fini_cycle(void) {
 	return 0;
 }
 
+// Verifies that a value_table gets its own named child node under its parent
+// and that the node, and every byte it used, is gone once the table is
+// freed.
+static int
+test_value_table_child_context(void) {
+	uint8_t *arena = malloc(RAW_ALLOC_SZ);
+	TEST_ASSERT(arena != NULL, "failed to allocate arena");
+
+	struct block_allocator ba;
+	TEST_ASSERT(
+		block_allocator_init(&ba) == 0, "block_allocator_init failed"
+	);
+	block_allocator_put_arena(&ba, arena, RAW_ALLOC_SZ);
+
+	struct memory_context root;
+	TEST_ASSERT(
+		memory_context_init(&root, "root", &ba) == 0, "root init failed"
+	);
+
+	size_t balloc_before = root.balloc_size;
+	size_t bfree_before = root.bfree_size;
+
+	struct value_table table;
+	TEST_ASSERT(
+		value_table_init(&table, &root, "vt", 4, 4) == 0,
+		"value_table_init failed"
+	);
+
+	TEST_ASSERT(
+		helper_count_children(&root) == 1,
+		"root must have exactly 1 child after value_table_init"
+	);
+	struct memory_context *child = ADDR_OF(&root.first_child);
+	TEST_ASSERT(strcmp(child->name, "vt") == 0, "child must be named 'vt'");
+
+	value_table_free(&table);
+
+	TEST_ASSERT(
+		helper_count_children(&root) == 0,
+		"root must have 0 children after value_table_free"
+	);
+	TEST_ASSERT(
+		root.balloc_size - root.bfree_size ==
+			balloc_before - bfree_before,
+		"root's live byte count must return to its pre-init value"
+	);
+
+	memory_context_fini(&root);
+	free(arena);
+	return 0;
+}
+
+// Verifies that a value_registry gets its own named child node (shared with
+// its embedded collector, not a separate node) and that the node is fully
+// released by value_registry_fini.
+static int
+test_value_registry_child_context(void) {
+	uint8_t *arena = malloc(RAW_ALLOC_SZ);
+	TEST_ASSERT(arena != NULL, "failed to allocate arena");
+
+	struct block_allocator ba;
+	TEST_ASSERT(
+		block_allocator_init(&ba) == 0, "block_allocator_init failed"
+	);
+	block_allocator_put_arena(&ba, arena, RAW_ALLOC_SZ);
+
+	struct memory_context root;
+	TEST_ASSERT(
+		memory_context_init(&root, "root", &ba) == 0, "root init failed"
+	);
+
+	size_t balloc_before = root.balloc_size;
+	size_t bfree_before = root.bfree_size;
+
+	struct value_registry registry;
+	TEST_ASSERT(
+		value_registry_init(&registry, &root, "vr") == 0,
+		"value_registry_init failed"
+	);
+
+	TEST_ASSERT(
+		helper_count_children(&root) == 1,
+		"root must have exactly 1 child after value_registry_init"
+	);
+	struct memory_context *child = ADDR_OF(&root.first_child);
+	TEST_ASSERT(strcmp(child->name, "vr") == 0, "child must be named 'vr'");
+
+	// Populate the registry so the collector and the ranges array both
+	// allocate through the shared child context.
+	for (uint32_t range_idx = 0; range_idx < 4; ++range_idx) {
+		TEST_ASSERT(
+			value_registry_start(&registry) == 0,
+			"value_registry_start failed"
+		);
+		TEST_ASSERT(
+			value_registry_collect(&registry, range_idx) == 0,
+			"value_registry_collect failed"
+		);
+	}
+	TEST_ASSERT(
+		helper_count_children(&root) == 1,
+		"populating the registry must not add a second child"
+	);
+
+	value_registry_fini(&registry);
+
+	TEST_ASSERT(
+		helper_count_children(&root) == 0,
+		"root must have 0 children after value_registry_fini"
+	);
+	TEST_ASSERT(
+		root.balloc_size - root.bfree_size ==
+			balloc_before - bfree_before,
+		"root's live byte count must return to its pre-init value"
+	);
+
+	memory_context_fini(&root);
+	free(arena);
+	return 0;
+}
+
 int
 main(void) {
 	log_enable_name("info");
@@ -455,6 +578,14 @@ main(void) {
 	}
 	if (test_stress_init_fini_cycle() != 0) {
 		LOG(ERROR, "test_stress_init_fini_cycle failed");
+		return -1;
+	}
+	if (test_value_table_child_context() != 0) {
+		LOG(ERROR, "test_value_table_child_context failed");
+		return -1;
+	}
+	if (test_value_registry_child_context() != 0) {
+		LOG(ERROR, "test_value_registry_child_context failed");
 		return -1;
 	}
 

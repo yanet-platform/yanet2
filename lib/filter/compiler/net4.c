@@ -151,7 +151,9 @@ collect_net4_values(
 	}
 
 	struct value_table table;
-	if (value_table_init(&table, memory_context, 1, collector.count)) {
+	if (value_table_init(
+		    &table, memory_context, "net4", 1, collector.count
+	    )) {
 		goto error_table;
 	}
 

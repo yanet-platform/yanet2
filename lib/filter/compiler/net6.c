@@ -410,7 +410,9 @@ build_net6_info(
 	}
 
 	struct value_table net_table;
-	if (value_table_init(&net_table, memory_context, 1, *net_count)) {
+	if (value_table_init(
+		    &net_table, memory_context, "net6-nets", 1, *net_count
+	    )) {
 		goto error_nets;
 	}
 
@@ -556,6 +558,7 @@ merge_net6_range(
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    "comb",
 		    ri_hi->max_value + 1,
 		    ri_lo->max_value + 1
 	    )) {
@@ -575,7 +578,9 @@ merge_net6_range(
 	}
 
 	struct value_registry net_registry;
-	if (value_registry_init(&net_registry, memory_context)) {
+	if (value_registry_init(
+		    &net_registry, memory_context, "net6-net-registry"
+	    )) {
 		goto error_table;
 	}
 
@@ -585,9 +590,9 @@ merge_net6_range(
 		goto error_net_registry;
 	}
 
-	if (value_registry_init(registry, memory_context)) {
-		goto error_net_registry;
-	}
+	// The registry is the lookup's own registry, already initialised by
+	// filter_init before this attribute's init function ran, so it is
+	// populated directly below rather than re-initialised here.
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;

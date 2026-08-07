@@ -131,7 +131,7 @@ init_classifier(
 	}
 
 	struct value_registry high_registry;
-	if (value_registry_init(&high_registry, mctx) != 0) {
+	if (value_registry_init(&high_registry, mctx, "net6-fast-high") != 0) {
 		return -1;
 	}
 
@@ -150,7 +150,7 @@ init_classifier(
 	}
 
 	struct value_registry low_registry;
-	if (value_registry_init(&low_registry, mctx) != 0) {
+	if (value_registry_init(&low_registry, mctx, "net6-fast-low") != 0) {
 		value_registry_fini(&high_registry);
 		free_classifier_part(&classifier->high, mctx);
 		return -1;
@@ -177,7 +177,8 @@ init_classifier(
 		    &high_registry,
 		    &low_registry,
 		    &classifier->comb,
-		    registry
+		    registry,
+		    "net6-fast-comb"
 	    ) != 0) {
 		value_registry_fini(&high_registry);
 		value_registry_fini(&low_registry);

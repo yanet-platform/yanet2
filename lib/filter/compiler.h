@@ -10,7 +10,7 @@
 #include "common/registry.h"
 #include "common/value.h"
 #include "lib/errors/errors.h"
-#include <assert.h>
+#include <stdio.h>
 
 // Build and teardown functions for filter classification trees.
 //
@@ -155,8 +155,15 @@ filter_init(
 	     ++lookup_idx) {
 		struct filter_vertex *v =
 			filter->v + filter_compiler->lookup_count + lookup_idx;
+		char name[64];
+		snprintf(
+			name,
+			sizeof(name),
+			"registry[%zu]",
+			(size_t)(filter_compiler->lookup_count + lookup_idx)
+		);
 		if (value_registry_init(
-			    &v->registry, &filter->memory_context
+			    &v->registry, &filter->memory_context, name
 		    )) {
 			yanet_error_add(
 				err,
@@ -216,12 +223,36 @@ filter_init(
 	}
 
 	for (size_t idx = filter_compiler->lookup_count - 1; idx >= 2; --idx) {
+		char name[64];
+		snprintf(name, sizeof(name), "registry[%zu]", idx);
+		// The function merge_and_collect_registry only populates an
+		// already-initialised registry. The loop above initialised one
+		// only for leaf attributes, so this inner-node registry needs
+		// an explicit init first.
+		if (value_registry_init(
+			    &filter->v[idx].registry,
+			    &filter->memory_context,
+			    name
+		    )) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to init registry at "
+				"index %zu",
+				idx
+			);
+			goto init_failed;
+		}
+		char table_name[64];
+		snprintf(
+			table_name, sizeof(table_name), "merge-table[%zu]", idx
+		);
 		if (merge_and_collect_registry(
 			    &filter->memory_context,
 			    &filter->v[2 * idx].registry,
 			    &filter->v[2 * idx + 1].registry,
 			    &filter->v[idx].table,
-			    &filter->v[idx].registry
+			    &filter->v[idx].registry,
+			    table_name
 		    )) {
 			yanet_error_add(
 				err,
@@ -252,12 +283,4 @@ init_finish:
 init_failed:
 	filter_free(filter, filter_compiler);
 	return -1;
-}
-
-// TODO: docs
-static inline uint64_t
-filter_memory_usage(struct filter *filter) {
-	struct memory_context *mctx = &filter->memory_context;
-	assert(mctx->balloc_size >= mctx->bfree_size);
-	return mctx->balloc_size - mctx->bfree_size;
 }

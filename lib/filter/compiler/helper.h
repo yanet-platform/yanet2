@@ -15,7 +15,8 @@ merge_and_collect_registry(
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	const char *table_name
 );
 
 int

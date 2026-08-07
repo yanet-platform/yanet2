@@ -36,7 +36,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	if (t == NULL) {
 		return -1;
 	}
-	int res = value_table_init(t, memory_context, 1, max_device_id + 1);
+	int res = value_table_init(
+		t, memory_context, "device", 1, max_device_id + 1
+	);
 	if (res < 0) {
 		goto error_init;
 	}

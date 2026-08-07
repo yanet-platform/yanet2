@@ -18,7 +18,11 @@ collect_proto_values(
 	struct value_registry *registry
 ) {
 	if (value_table_init(
-		    table, memory_context, 1, PROTO_RANGE_CLASSIFIER_MAX_VALUE
+		    table,
+		    memory_context,
+		    "proto-range",
+		    1,
+		    PROTO_RANGE_CLASSIFIER_MAX_VALUE
 	    )) {
 		return -1;
 	}

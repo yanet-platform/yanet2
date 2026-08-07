@@ -37,7 +37,7 @@ init_dummy_registry(
 	uint32_t actions,
 	struct value_registry *registry
 ) {
-	int res = value_registry_init(registry, memory_context);
+	int res = value_registry_init(registry, memory_context, "dummy");
 	if (res < 0) {
 		return res;
 	}
@@ -82,6 +82,7 @@ merge_and_set_registry_values(
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    "action-table",
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -144,11 +145,13 @@ merge_registry_values(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
-	struct value_table *table
+	struct value_table *table,
+	const char *table_name
 ) {
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    table_name,
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -213,18 +216,21 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	return 0;
 }
 
+// The registry is populated here but never initialised.
+//
+// Both callers already hold an initialised registry: the inner-merge
+// caller in filter_init initialises it right before this call, and the
+// leaf-attribute caller (net6_fast, via merge_and_collect_registry) reuses
+// the registry filter_init already initialised for that lookup.
+// Re-initialising it here would balloc and orphan a second memory-tree
+// node for the same registry.
 static int
 collect_registry_values(
-	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_registry_init(registry, memory_context)) {
-		return -1;
-	}
-
 	struct value_collect_ctx collect_ctx;
 	collect_ctx.table = table;
 	collect_ctx.registry = registry;
@@ -259,17 +265,16 @@ merge_and_collect_registry(
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	const char *table_name
 ) {
 	if (merge_registry_values(
-		    memory_context, registry1, registry2, table
+		    memory_context, registry1, registry2, table, table_name
 	    )) {
 		return -1;
 	}
 
-	if (collect_registry_values(
-		    memory_context, registry1, registry2, table, registry
-	    )) {
+	if (collect_registry_values(registry1, registry2, table, registry)) {
 		value_table_free(table);
 		return -1;
 	}

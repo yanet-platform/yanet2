@@ -1,6 +1,7 @@
 //! CLI for YANET "inspect" module.
 
 use core::cmp::Reverse;
+use std::collections::BTreeMap;
 
 use bytesize::ByteSize;
 use clap::{ArgAction, CommandFactory, Parser};
@@ -228,35 +229,104 @@ fn node_live(node: &MemoryNode) -> u64 {
     node.balloc_size.saturating_sub(node.bfree_size)
 }
 
-/// Subtree total: a node's own live bytes plus the live bytes of all its
-/// descendants.
-fn subtree_live(nodes: &[MemoryNode], children_of: &[Vec<usize>], idx: usize) -> u64 {
-    let self_live = node_live(&nodes[idx]);
-    let children_total: u64 = children_of[idx]
-        .iter()
-        .map(|&child| subtree_live(nodes, children_of, child))
-        .sum();
+/// Fills `totals[idx]` and every descendant's slot with its subtree total:
+/// a node's own live bytes plus the live bytes of all its descendants.
+///
+/// Post-order, so each slot is computed exactly once regardless of how many
+/// times the tree is walked afterwards.
+fn compute_subtree_totals(nodes: &[MemoryNode], children_of: &[Vec<usize>], idx: usize, totals: &mut [u64]) {
+    let mut total = node_live(&nodes[idx]);
+    for &child in &children_of[idx] {
+        compute_subtree_totals(nodes, children_of, child, totals);
+        total = total.saturating_add(totals[child]);
+    }
 
-    self_live.saturating_add(children_total)
+    totals[idx] = total;
 }
 
 /// Render one node and its children into the tree builder.
 ///
 /// Children are ordered by subtree total descending so the heaviest
-/// subtrees come first; zero-total subtrees are skipped.
-fn render_memory_node(tree: &mut TreeBuilder, nodes: &[MemoryNode], idx: usize, children_of: &[Vec<usize>]) {
+/// subtrees come first; zero-total subtrees are skipped. The node's own
+/// live bytes are shown alongside the subtree total only when they differ
+/// — a leaf, or a node whose children are all zero, gets one number.
+fn render_memory_node(
+    tree: &mut TreeBuilder,
+    nodes: &[MemoryNode],
+    idx: usize,
+    children_of: &[Vec<usize>],
+    totals: &[u64],
+) {
     let node = &nodes[idx];
-    let total = subtree_live(nodes, children_of, idx);
-    tree.begin_child(format!("{} (Used: {})", node.name, ByteSize::b(total)));
+    let total = totals[idx];
+    let own = node_live(node);
+
+    let label = if own == total {
+        format!("{} (Used: {})", node.name, ByteSize::b(total))
+    } else {
+        format!(
+            "{} (Used: {}, own: {})",
+            node.name,
+            ByteSize::b(total),
+            ByteSize::b(own)
+        )
+    };
+    tree.begin_child(label);
 
     let mut children = children_of[idx].clone();
-    children.sort_by_key(|&child| Reverse(subtree_live(nodes, children_of, child)));
+    children.sort_by_key(|&child| Reverse(totals[child]));
     for child in children {
-        if subtree_live(nodes, children_of, child) > 0 {
-            render_memory_node(tree, nodes, child, children_of);
+        if totals[child] > 0 {
+            render_memory_node(tree, nodes, child, children_of, totals);
         }
     }
 
+    tree.end_child();
+}
+
+/// Cap on the number of context names shown in the "own bytes" rollup.
+const MEMORY_ROLLUP_LIMIT: usize = 10;
+
+/// Aggregates own live bytes and node count by context `name`, across the
+/// whole flat `nodes` slice regardless of depth or parent.
+///
+/// Own bytes (not subtree totals) avoid double-counting a parent and its
+/// children under the same name. Returns entries sorted by summed bytes
+/// descending, name ascending on ties, capped at [`MEMORY_ROLLUP_LIMIT`].
+fn rollup_by_name(nodes: &[MemoryNode]) -> Vec<(String, u64, usize)> {
+    let mut totals: BTreeMap<&str, (u64, usize)> = BTreeMap::new();
+    for node in nodes {
+        let entry = totals.entry(node.name.as_str()).or_insert((0, 0));
+        entry.0 = entry.0.saturating_add(node_live(node));
+        entry.1 += 1;
+    }
+
+    let mut rows: Vec<(String, u64, usize)> = totals
+        .into_iter()
+        .map(|(name, (bytes, count))| (name.to_string(), bytes, count))
+        .collect();
+    rows.sort_by_key(|&(_, bytes, _)| Reverse(bytes));
+    rows.truncate(MEMORY_ROLLUP_LIMIT);
+    rows
+}
+
+/// Render the "own bytes" rollup as plain aligned child lines.
+///
+/// Nested under the memory tree rather than a `tabled` table: it is a
+/// two-column list capped at [`MEMORY_ROLLUP_LIMIT`] rows inside a `ptree`
+/// branch, and `tabled`'s box-drawing output has no ptree-prefix awareness
+/// for a table embedded as a single multi-line child label.
+fn add_memory_rollup(tree: &mut TreeBuilder, nodes: &[MemoryNode]) {
+    let rows = rollup_by_name(nodes);
+    let Some(name_width) = rows.iter().map(|(name, _, _)| name.chars().count()).max() else {
+        return;
+    };
+
+    tree.begin_child("Top contexts by own bytes:".to_string());
+    for (name, bytes, count) in &rows {
+        let size = ByteSize::b(*bytes);
+        tree.add_empty_child(format!("{name:<name_width$}  {size:>10}  (×{count})"));
+    }
     tree.end_child();
 }
 
@@ -279,7 +349,85 @@ fn add_memory_tree(tree: &mut TreeBuilder, nodes: &[MemoryNode]) {
         return;
     };
 
+    let mut totals = vec![0u64; nodes.len()];
+    compute_subtree_totals(nodes, &children_of, root, &mut totals);
+
     tree.begin_child("Memory tree:".to_string());
-    render_memory_node(tree, nodes, root, &children_of);
+    render_memory_node(tree, nodes, root, &children_of, &totals);
+    add_memory_rollup(tree, nodes);
     tree.end_child();
+}
+
+#[cfg(test)]
+mod test {
+    use ynpb::pb::MemoryNode;
+
+    use super::{compute_subtree_totals, node_live, rollup_by_name};
+
+    fn node(name: &str, parent_idx: u32, balloc_size: u64, bfree_size: u64) -> MemoryNode {
+        MemoryNode {
+            name: name.to_string(),
+            parent_idx,
+            balloc_count: 0,
+            bfree_count: 0,
+            balloc_size,
+            bfree_size,
+        }
+    }
+
+    /// Builds the same parent -> children index map `add_memory_tree` does,
+    /// for tests exercising `compute_subtree_totals`/`rollup_by_name` directly.
+    fn children_of(nodes: &[MemoryNode]) -> Vec<Vec<usize>> {
+        let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+        for (idx, node) in nodes.iter().enumerate() {
+            if node.parent_idx != u32::MAX {
+                children_of[node.parent_idx as usize].push(idx);
+            }
+        }
+        children_of
+    }
+
+    #[test]
+    fn subtree_total_equals_sum_of_own_bytes() {
+        let nodes = vec![
+            node("root", u32::MAX, 100, 0),
+            node("filter", 0, 50, 0),
+            node("lpm", 0, 30, 10),
+            node("value_table", 2, 15, 5),
+        ];
+        let children_of = children_of(&nodes);
+        let mut totals = vec![0u64; nodes.len()];
+        compute_subtree_totals(&nodes, &children_of, 0, &mut totals);
+
+        let sum_of_own: u64 = nodes.iter().map(node_live).sum();
+        assert_eq!(sum_of_own, totals[0]);
+        assert_eq!(180, totals[0]);
+    }
+
+    #[test]
+    fn rollup_groups_by_name_across_depths() {
+        let nodes = vec![
+            node("root", u32::MAX, 100, 0),
+            node("filter", 0, 500, 10), // own 490, first filter
+            node("lpm", 1, 20, 0),      // own 20, under the first filter
+            node("filter", 0, 20, 10),  // own 10, second filter at the same depth
+            node("lpm", 3, 30, 0),      // own 30, under the second filter
+        ];
+
+        let rows = rollup_by_name(&nodes);
+
+        let filter = rows
+            .iter()
+            .find(|(name, ..)| name == "filter")
+            .expect("filter row present");
+        assert_eq!(500, filter.1);
+        assert_eq!(2, filter.2);
+
+        let lpm = rows.iter().find(|(name, ..)| name == "lpm").expect("lpm row present");
+        assert_eq!(50, lpm.1);
+        assert_eq!(2, lpm.2);
+
+        // filter (500) outranks root (100) outranks lpm (50).
+        assert_eq!("filter", rows[0].0);
+    }
 }

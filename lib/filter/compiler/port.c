@@ -21,7 +21,7 @@ collect_port_values(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_table_init(table, memory_context, 1, 65536)) {
+	if (value_table_init(table, memory_context, "port", 1, 65536)) {
 		return -1;
 	}
 

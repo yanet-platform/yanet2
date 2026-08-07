@@ -20,7 +20,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 		return -1;
 	}
 
-	if (value_table_init(t, memory_context, 1, 2)) {
+	if (value_table_init(t, memory_context, "ipfrag", 1, 2)) {
 		goto error_init;
 	}
 	SET_OFFSET_OF(data, t);
