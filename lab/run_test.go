@@ -17,12 +17,14 @@ import (
 )
 
 type manifestRuntime struct {
-	Actual     [][]byte
-	CaptureErr error
-	Commands   []string
-	Unfiltered bool
-	failStep   int
-	stepCount  int
+	Actual         [][]byte
+	CaptureErr     error
+	Commands       []string
+	Unfiltered     bool
+	failStep       int
+	stepCount      int
+	startYANETArgs []string
+	failRestore    bool
 }
 
 func (m *manifestRuntime) CommonConfigCommands() []string { return nil }
@@ -39,12 +41,20 @@ func (m *manifestRuntime) ExecuteCommandWithTimeout(string, time.Duration) (stri
 }
 func (m *manifestRuntime) ExecuteCommands(...string) ([]string, error) { return nil, nil }
 func (m *manifestRuntime) ResetConnections()                           {}
-func (m *manifestRuntime) RestoreClean(string) error                   { return nil }
+func (m *manifestRuntime) RestoreClean(string) error {
+	if m.failRestore {
+		return errors.New("restore failed")
+	}
+	return nil
+}
 func (m *manifestRuntime) SendPacketAndCaptureAllUnfiltered(int, int, []byte, time.Duration) ([][]byte, error) {
 	m.Unfiltered = true
 	return m.Actual, m.CaptureErr
 }
-func (m *manifestRuntime) StartYANET(string, string) error          { return nil }
+func (m *manifestRuntime) StartYANET(dataplane, controlplane string) error {
+	m.startYANETArgs = []string{dataplane, controlplane}
+	return nil
+}
 func (m *manifestRuntime) WaitForDatapathReady(time.Duration) error { return nil }
 
 func TestRunManifestEvaluatesExpectedDrop(t *testing.T) {
@@ -282,18 +292,25 @@ func TestRunManifestBootCallsStartYANET(t *testing.T) {
 	if len(report.Results) == 0 || report.Results[0].Kind != "boot" {
 		t.Fatalf("expected boot result, got %#v", report.Results)
 	}
+	if len(runtime.startYANETArgs) != 2 {
+		t.Fatalf("expected StartYANET to be called, got %v", runtime.startYANETArgs)
+	}
+	require.Equal(t, "interfaces: []", runtime.startYANETArgs[0], "dataplane config forwarded to StartYANET")
+	require.Equal(t, "interfaces: []", runtime.startYANETArgs[1], "controlplane config forwarded to StartYANET")
 }
 
 func TestRunManifestStepsBreakOnFailure(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "manifest.yaml")
-	manifest := "version: 1\nname: steps-test\nsteps:\n  - command: first\n  - command: second\n"
+	manifest := "version: 1\nname: steps-test\nsteps:\n" +
+		"  - name: first\n    argv: [\"true\"]\n" +
+		"  - name: second\n    argv: [\"false\"]\n" +
+		"  - name: third\n    argv: [\"true\"]\n"
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runtime := &manifestRuntime{failStep: 2}
 	report := lab.RunManifest(runtime, manifestPath)
-	if report.Success {
-		t.Fatal("expected failure on second step")
-	}
+	require.False(t, report.Success)
+	require.Equal(t, 2, runtime.stepCount, "third step must not execute after second step fails")
 }

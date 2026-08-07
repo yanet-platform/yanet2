@@ -1207,7 +1207,8 @@ func (f *TestFramework) CreateConfigFile(name string, config string) error {
 // on the serial terminal.
 func (f *TestFramework) createGuestFile(guestPath string, content string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	cmd := fmt.Sprintf("echo '%s' | base64 -d > %s", encoded, guestPath)
+	quoted := "'" + strings.ReplaceAll(guestPath, "'", "'\"'\"'") + "'"
+	cmd := fmt.Sprintf("echo '%s' | base64 -d > %s", encoded, quoted)
 	if _, err := f.ExecuteCommand(cmd); err != nil {
 		return fmt.Errorf("failed to write guest file %s: %w", guestPath, err)
 	}
