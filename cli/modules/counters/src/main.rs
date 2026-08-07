@@ -56,6 +56,10 @@ pub struct ByTagsCmd {
     pub module_type: Option<String>,
     #[arg(short = 'm', long)]
     pub module_name: Option<String>,
+    /// Owner level to filter by (device, pipeline, function, chain, module,
+    /// object).
+    #[arg(long)]
+    pub kind: Option<String>,
 }
 
 impl From<ByTagsCmd> for CountersByTagsRequest {
@@ -85,6 +89,9 @@ impl From<ByTagsCmd> for CountersByTagsRequest {
                 key: "module_name".to_string(),
                 value,
             });
+        }
+        if let Some(value) = cmd.kind {
+            tags.push(CounterTag { key: "kind".to_string(), value });
         }
 
         Self { tags, query: cmd.names }
