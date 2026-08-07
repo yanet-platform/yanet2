@@ -40,6 +40,15 @@ const (
 	maxResultOutput     = 8 << 10 // 8 KiB per step/probe result
 )
 
+// TruncateOutput caps output to maxResultOutput bytes, appending a truncation
+// notice if the original exceeded the limit.
+func TruncateOutput(output string) string {
+	if len(output) > maxResultOutput {
+		return output[:maxResultOutput] + fmt.Sprintf("\n... truncated (%d bytes total)", len(output))
+	}
+	return output
+}
+
 // ManifestRuntime provides the VM operations needed to execute a manifest.
 type ManifestRuntime interface {
 	CommonConfigCommands() []string
@@ -132,9 +141,7 @@ func RunManifest(runtime ManifestRuntime, path string) RunReport {
 				timeout, _ = time.ParseDuration(step.Timeout)
 			}
 			output, stepErr := runtime.ExecuteCommandWithTimeout(ShellJoin(step.Argv), timeout)
-			if len(output) > maxResultOutput {
-				output = output[:maxResultOutput] + fmt.Sprintf("\n... truncated (%d bytes total)", len(output))
-			}
+			output = TruncateOutput(output)
 			result := Result{Name: step.Name, Kind: "step", Success: stepErr == nil, Duration: time.Since(started), Output: output}
 			if stepErr != nil {
 				result.Error = stepErr.Error()

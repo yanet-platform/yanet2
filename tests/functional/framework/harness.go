@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -477,10 +478,16 @@ func (m *Harness) Restore(fw *TestFramework) error {
 		if m.profileReady != nil {
 			if err := m.profileReady(fw); err == nil {
 				return nil
+			} else {
+				log.Printf("harness: fast-path profileReady failed, falling back: %v", err)
 			}
 		} else if err := fw.WaitForDatapathReady(15 * time.Second); err == nil {
 			return nil
+		} else {
+			log.Printf("harness: fast-path datapath ready failed, falling back: %v", err)
 		}
+	} else {
+		log.Printf("harness: fast-path baseline restore failed, falling back: %v", err)
 	}
 
 	if err := fw.RestoreClean("preyanet"); err != nil {
