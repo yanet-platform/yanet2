@@ -75,6 +75,28 @@ func TestStatFingerprintDetectsChangedSize(t *testing.T) {
 	}
 }
 
+func TestStatFingerprintDetectsChangedMtime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact")
+	if err := os.WriteFile(path, []byte("same-size"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := sha256.New()
+	if err := statFingerprint(first, path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chtimes(path, time.Unix(2, 0), time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	second := sha256.New()
+	if err := statFingerprint(second, path); err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Sum(nil)) == string(second.Sum(nil)) {
+		t.Fatal("same-size artifact with fresh mtime did not change fingerprint")
+	}
+}
+
 func TestRunProfileHooks(t *testing.T) {
 	startError := errors.New("start failed")
 	readyError := errors.New("not ready")

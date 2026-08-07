@@ -84,6 +84,11 @@ are transported as `argv`, quoted by the runner, and never evaluated by the
 host shell. Fixture files are limited to 64 KiB and packet captures must use
 the Ethernet link type.
 
+`boot` starts YANET with custom dataplane and controlplane YAML instead of the
+baseline. It restores the pre-YANET snapshot, so the operator baseline
+(route/forward/decap/pipeline, BIRD, `fn:lab`) is not available in boot
+manifests.
+
 ## Built-in scenarios
 
 - `forward-route` validates the baseline forward/route pipeline with a UDP
