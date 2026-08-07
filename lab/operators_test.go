@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/lab"
 )
 
@@ -57,5 +58,19 @@ func TestRequiredArtifacts(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("RequiredArtifacts path %q does not exist: %v", path, err)
 		}
+	}
+
+	required := []string{
+		filepath.Join(root, "build", "dataplane", "yanet-dataplane"),
+		filepath.Join(root, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(root, "build", "operators", "route", "yanet-route-operator"),
+		filepath.Join(root, "build", "operators", "forward", "yanet-forward-operator"),
+		filepath.Join(root, "build", "operators", "decap", "yanet-decap-operator"),
+		filepath.Join(root, "build", "operators", "pipeline", "yanet-pipeline-operator"),
+		filepath.Join(root, "build", "operators", "bird-adapter", "yanet-bird-adapter"),
+		filepath.Join(root, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
+	}
+	for _, path := range required {
+		require.Contains(t, artifacts, path, "RequiredArtifacts must include %s", path)
 	}
 }

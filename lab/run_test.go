@@ -17,14 +17,17 @@ import (
 )
 
 type manifestRuntime struct {
-	Actual         [][]byte
-	CaptureErr     error
-	Commands       []string
-	Unfiltered     bool
-	failStep       int
-	stepCount      int
-	startYANETArgs []string
-	failRestore    bool
+	Actual          [][]byte
+	CaptureErr      error
+	Commands        []string
+	Unfiltered      bool
+	failStep        int
+	stepCount       int
+	startYANETArgs  []string
+	failRestore     bool
+	failStartYANET  bool
+	failWaitReady   bool
+	waitReadyCalled bool
 }
 
 func (m *manifestRuntime) CommonConfigCommands() []string { return nil }
@@ -53,9 +56,18 @@ func (m *manifestRuntime) SendPacketAndCaptureAllUnfiltered(int, int, []byte, ti
 }
 func (m *manifestRuntime) StartYANET(dataplane, controlplane string) error {
 	m.startYANETArgs = []string{dataplane, controlplane}
+	if m.failStartYANET {
+		return errors.New("start YANET failed")
+	}
 	return nil
 }
-func (m *manifestRuntime) WaitForDatapathReady(time.Duration) error { return nil }
+func (m *manifestRuntime) WaitForDatapathReady(time.Duration) error {
+	m.waitReadyCalled = true
+	if m.failWaitReady {
+		return errors.New("datapath not ready")
+	}
+	return nil
+}
 
 func TestRunManifestEvaluatesExpectedDrop(t *testing.T) {
 	tests := []struct {
@@ -348,11 +360,15 @@ func writePacketWithLinkType(t *testing.T, path string, linkType layers.LinkType
 func TestRunManifestBootCallsStartYANET(t *testing.T) {
 	directory := t.TempDir()
 	dataplaneYAML := filepath.Join(directory, "dataplane.yaml")
+	controlplaneYAML := filepath.Join(directory, "controlplane.yaml")
 	if err := os.WriteFile(dataplaneYAML, []byte("interfaces: []"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(controlplaneYAML, []byte("route: {configs: {}}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	manifestPath := filepath.Join(directory, "manifest.yaml")
-	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n  controlplane: dataplane.yaml\n"
+	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n  controlplane: controlplane.yaml\n"
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +384,46 @@ func TestRunManifestBootCallsStartYANET(t *testing.T) {
 		t.Fatalf("expected StartYANET to be called, got %v", runtime.startYANETArgs)
 	}
 	require.Equal(t, "interfaces: []", runtime.startYANETArgs[0], "dataplane config forwarded to StartYANET")
-	require.Equal(t, "interfaces: []", runtime.startYANETArgs[1], "controlplane config forwarded to StartYANET")
+	require.Equal(t, "route: {configs: {}}", runtime.startYANETArgs[1], "controlplane config forwarded to StartYANET")
+}
+
+func TestRunManifestBootFailsOnStartYANETError(t *testing.T) {
+	directory := t.TempDir()
+	dataplaneYAML := filepath.Join(directory, "dataplane.yaml")
+	if err := os.WriteFile(dataplaneYAML, []byte("interfaces: []"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &manifestRuntime{failStartYANET: true}
+	report := lab.RunManifest(runtime, manifestPath)
+	require.False(t, report.Success)
+	require.Len(t, report.Results, 1)
+	require.Equal(t, "boot", report.Results[0].Kind)
+	require.Contains(t, report.Results[0].Error, "start YANET failed")
+	require.False(t, runtime.waitReadyCalled, "WaitForDatapathReady must not be called when StartYANET fails")
+}
+
+func TestRunManifestBootFailsOnWaitForDatapath(t *testing.T) {
+	directory := t.TempDir()
+	dataplaneYAML := filepath.Join(directory, "dataplane.yaml")
+	if err := os.WriteFile(dataplaneYAML, []byte("interfaces: []"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &manifestRuntime{failWaitReady: true}
+	report := lab.RunManifest(runtime, manifestPath)
+	require.False(t, report.Success)
+	require.Len(t, report.Results, 1)
+	require.Equal(t, "boot", report.Results[0].Kind)
+	require.Contains(t, report.Results[0].Error, "datapath not ready")
 }
 
 func TestRunManifestStepsBreakOnFailure(t *testing.T) {
