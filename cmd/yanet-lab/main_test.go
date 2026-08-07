@@ -186,6 +186,34 @@ func TestHandleConnectionReturnsBusy(t *testing.T) {
 	}
 }
 
+func TestHandleConnectionDownAcksBeforeShutdown(t *testing.T) {
+	state := &supervisor{}
+	shutdownStarted := make(chan struct{})
+	shutdownReturned := make(chan struct{})
+	shutdown := func() error {
+		close(shutdownStarted)
+		<-shutdownReturned
+		return nil
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, nil, shutdown, func() {})
+		return nil
+	})
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.True(t, reply.OK)
+	require.Equal(t, "lab stopped", reply.Output)
+	// The response was decoded while shutdown was still blocked — proving
+	// the early ack-before-shutdown ordering.
+	close(shutdownReturned)
+	require.NoError(t, handlers.Wait())
+}
+
 func TestSupervisorClosesSerial(t *testing.T) {
 	state := &supervisor{}
 	server, client := net.Pipe()
