@@ -836,6 +836,13 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		case <-timer.C:
 			fw.AbortGuestSerial()
 			report = <-manifestDone
+			if err := fw.RestartGuestSerial(); err != nil {
+				report.Results = append(report.Results, lab.Result{
+					Name:  "serial-restart",
+					Kind:  "error",
+					Error: "failed to restart serial after timeout: " + err.Error(),
+				})
+			}
 			report.Success = false
 			report.Results = append(report.Results, lab.Result{
 				Name:  "server-timeout",

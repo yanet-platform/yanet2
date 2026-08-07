@@ -539,10 +539,14 @@ func (q *QEMUManager) Stop() error {
 		q.monitorConn = nil
 	}
 	if q.serialConn != nil {
-		if err := q.serialConn.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close serial connection: %w", err))
+		q.serialMutex.Lock()
+		if q.serialConn != nil {
+			if err := q.serialConn.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("failed to close serial connection: %w", err))
+			}
+			q.serialConn = nil
 		}
-		q.serialConn = nil
+		q.serialMutex.Unlock()
 	}
 
 	// Kill QEMU process if still running (unless VM should be kept alive).
@@ -607,14 +611,20 @@ func (q *QEMUManager) Stop() error {
 
 // GetStdin returns the stdin pipe for the QEMU process
 func (q *QEMUManager) GetStdin() io.WriteCloser {
-	// Try to connect if not already connected
-	if q.serialConn == nil {
-		if err := q.connectToSerial(); err != nil {
-			q.log.Errorf("Failed to connect to serial console: %v", err)
-			return nil
-		}
+	q.serialMutex.Lock()
+	conn := q.serialConn
+	q.serialMutex.Unlock()
+	if conn != nil {
+		return conn
 	}
-	return q.serialConn
+	if err := q.connectToSerial(); err != nil {
+		q.log.Errorf("Failed to connect to serial console: %v", err)
+		return nil
+	}
+	q.serialMutex.Lock()
+	conn = q.serialConn
+	q.serialMutex.Unlock()
+	return conn
 }
 
 // SSHPort returns the loopback port forwarded to the guest SSH server.
@@ -635,12 +645,16 @@ func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 	if err := q.connectToSerial(); err != nil {
 		return nil, nil, fmt.Errorf("connect serial for attachment: %w", err)
 	}
+	q.serialMutex.Lock()
 	connection := q.serialConn
+	q.serialMutex.Unlock()
 	release := func() error {
+		q.serialMutex.Lock()
 		if q.serialConn != nil {
 			_ = q.serialConn.Close()
 			q.serialConn = nil
 		}
+		q.serialMutex.Unlock()
 		var lastErr error
 		for range 3 {
 			if err := q.connectToSerial(); err != nil {
@@ -672,6 +686,17 @@ func (q *QEMUManager) AbortSerial() {
 		q.serialConn = nil
 	}
 	q.serialMutex.Unlock()
+}
+
+// RestartSerial reconnects the serial console and restarts the reader
+// goroutine after an AbortSerial call. Use this to restore command execution
+// capability after an abort.
+func (q *QEMUManager) RestartSerial() error {
+	if err := q.connectToSerial(); err != nil {
+		return err
+	}
+	q.startSerialReader()
+	return nil
 }
 
 // resetSerialBuffer clears the accumulated serial console output buffer.
@@ -913,7 +938,9 @@ func (q *QEMUManager) connectToSerial() error {
 		}
 
 		// Use connection
+		q.serialMutex.Lock()
 		q.serialConn = conn
+		q.serialMutex.Unlock()
 		q.log.Debugf("Successfully connected to serial console at %s", q.SerialPath)
 
 		return nil
@@ -1034,10 +1061,12 @@ func (q *QEMUManager) stopSerialReader() {
 	}
 
 	// Close the connection to unblock scanner.Scan() in the goroutine.
+	q.serialMutex.Lock()
 	if q.serialConn != nil {
 		q.serialConn.Close()
 		q.serialConn = nil
 	}
+	q.serialMutex.Unlock()
 
 	// Wait for the goroutine to exit.
 	<-q.serialReaderDone
@@ -1046,7 +1075,10 @@ func (q *QEMUManager) stopSerialReader() {
 }
 
 func (q *QEMUManager) startSerialReader() {
-	if q.serialConn == nil {
+	q.serialMutex.Lock()
+	conn := q.serialConn
+	q.serialMutex.Unlock()
+	if conn == nil {
 		return
 	}
 	q.serialReaderDone = make(chan struct{})
@@ -1222,10 +1254,12 @@ func (q *QEMUManager) RestoreSnapshot(name string) error {
 func (q *QEMUManager) ReconnectSerial() error {
 	// Close old connection — the running readSerial goroutine will detect
 	// EOF/error and exit cleanly.
+	q.serialMutex.Lock()
 	if q.serialConn != nil {
 		q.serialConn.Close()
 		q.serialConn = nil
 	}
+	q.serialMutex.Unlock()
 	return q.connectToSerial()
 }
 
