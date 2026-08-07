@@ -282,20 +282,13 @@ jobs:
       cache_name: clang-tidy
 
     steps:
-      - name: Install LLVM 19 toolchain
-        id: llvm
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "19.1.1"
-          directory: ${{ runner.temp }}/llvm
-
       - uses: actions/checkout@v4
         with:
           submodules: true
 
       - uses: ./.github/actions/apt-packages
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+          packages: meson clang clang-tidy-19 cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
       - uses: actions/setup-go@v5
         with:
@@ -327,9 +320,6 @@ jobs:
           meson setup build -Dbuildtype=release
 
       - name: Run clang-tidy
-        env:
-          # Use the same directory we asked the install-llvm-action to install to
-          LLVM_DIR: ${{ runner.temp }}/llvm
         run: |
           set -euo pipefail
           # Ensure compilation database exists
@@ -339,28 +329,6 @@ jobs:
               exit 1
           }
 
-          # Force using the freshly installed LLVM 19 to avoid ABI/lib conflicts with system packages
-          if [ ! -x "$LLVM_DIR/bin/clang-tidy" ]; then
-              echo "ERROR: LLVM 19 clang-tidy not found at $LLVM_DIR/bin/clang-tidy"
-              ls -la "$LLVM_DIR/bin" || true
-              exit 1
-          fi
-          export PATH="$LLVM_DIR/bin:$PATH"
-          export LD_LIBRARY_PATH="$LLVM_DIR/lib:${LD_LIBRARY_PATH:-}"
-
-          CTIDY="$LLVM_DIR/bin/clang-tidy"
-          # Locate run-clang-tidy.py shipped with LLVM
-          if [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
-              RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
-          elif [ -f "$LLVM_DIR/lib/clang/run-clang-tidy.py" ]; then
-              RTIDY="$LLVM_DIR/lib/clang/run-clang-tidy.py"
-          else
-              RTIDY=""
-          fi
-
-          echo "Using clang-tidy binary: $CTIDY"
-          [ -n "$RTIDY" ] && echo "Using run-clang-tidy helper: $RTIDY"
-
           # Build file list from database (C files, exclude subprojects)
           FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -vE '(^|/)subprojects/' || true)"
           if [ -z "$FILES" ]; then
@@ -368,23 +336,13 @@ jobs:
               exit 0
           fi
 
-          if [ -n "$RTIDY" ] && [ -f "$RTIDY" ]; then
-              # Use run-clang-tidy.py (handles DB well and parallelism)
-              python3 "$RTIDY" \
-                  -p build \
-                  -j "$(nproc)" \
-                  -clang-tidy-binary "$CTIDY" \
+          # Invoke clang-tidy from the database directory so -p . resolves
+          cd build
+          printf "%s\n" $FILES |
+              xargs -P"$(nproc)" -I{} clang-tidy-19 \
+                  -p . \
                   -header-filter='^(?!.*\/subprojects\/).*' \
-                  $FILES
-          else
-              # Fallback: invoke clang-tidy directly from DB directory
-              cd build
-              printf "%s\n" $FILES |
-                  xargs -P"$(nproc)" -I{} "$CTIDY" \
-                      -p . \
-                      -header-filter='^(?!.*\/subprojects\/).*' \
-                      {}
-          fi
+                  {}
 
   functional-tests:
     name: Run Functional Tests
