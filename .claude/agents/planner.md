@@ -154,10 +154,26 @@ prose house style only. Their labels, type and board membership are not a model 
 
 - **Title**: conventional-commit `type(scope): brief`, lowercase brief, no trailing period — the
   same convention as commit subjects.
-- **Body**: `## Motivation` (why it matters, packet-path impact, evidence with `file:line`,
+- **Body**: `## Motivation` (why it matters, packet-path impact, evidence linked to code,
   measured numbers and tables where they exist), then optional `## Scope` / `## Constraints` /
   `## Decomposition` / `## Out of scope` / `## Non-goals`, then `## Acceptance` as a checkbox
   list, then the `Source:` line.
+- **Code evidence is a link, never a bare `file:line`.** Everywhere the body points at code —
+  `## Motivation`, `## Constraints` and the `Source:` line alike — write
+  `https://github.com/<owner>/<repo>/blob/<sha>/<path>#L54-L55`, so a reader lands on the code
+  instead of reassembling `registry.h:54-55, :63, :90` by hand. The SHA is load-bearing:
+  `blob/main/` drifts as lines move, and a link to the wrong lines is worse than the bare
+  reference it replaced. Take it from `git log -1 --format=%H origin/main -- <path>`, pushed by
+  construction, then check it came back non-empty and that `git diff <sha> -- <path>` is empty —
+  an empty SHA means a misspelt or unpushed path and turns that diff into a worktree-vs-index
+  compare that looks clean whatever the file holds, while a non-empty one means a lagging local
+  `main` or an uncommitted edit numbered your lines against a version nobody else can see. Both
+  fall back to a prose `file:line` saying the code is not in a pushed commit. A prose section may
+  give its one or two decisive sites a bare URL on its own line, which GitHub expands into the
+  snippet itself when it points into the issue's own repo; an enumeration of sites, and the
+  `Source:` line, which stays one line, use markdown links (`[common/registry.h:54-55](<url>)`).
+  A blob URL is a repository path and obeys the same one-way rule as an issue ref: a public issue
+  links only public code.
 - An epic's children are the **native sub-issue list**, which is authoritative. A prose
   `## Sub-issues` section is optional, gives each child a one-line description, and needs no
   maintenance when a child closes.
