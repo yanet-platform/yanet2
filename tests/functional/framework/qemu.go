@@ -530,7 +530,7 @@ func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 			q.serialConn = nil
 		}
 		var lastErr error
-		for attempt := 0; attempt < 3; attempt++ {
+		for range 3 {
 			if err := q.connectToSerial(); err != nil {
 				lastErr = err
 				time.Sleep(200 * time.Millisecond)

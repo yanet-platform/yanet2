@@ -306,7 +306,7 @@ func readPCAP(path string) ([][]byte, error) {
 		return nil, fmt.Errorf("PCAP %s uses link type %s, want Ethernet", path, reader.LinkType())
 	}
 	packets := make([][]byte, 0, 2)
-	for range 2 {
+	for {
 		data, _, readErr := reader.ReadPacketData()
 		if errors.Is(readErr, io.EOF) {
 			return packets, nil
@@ -316,7 +316,6 @@ func readPCAP(path string) ([][]byte, error) {
 		}
 		packets = append(packets, append([]byte(nil), data...))
 	}
-	return packets, nil
 }
 
 // ShellJoin quotes each argument with single-quote escaping and joins them

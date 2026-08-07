@@ -168,8 +168,8 @@ func MatchesForwardingProbe(packet []byte) bool {
 }
 
 // ForwardingExpectedBytes returns a copy of the canonical operator forwarding
-// probe packet bytes. Callers must not mutate the returned slice; the
-// underlying fixture is private to prevent accidental shared state.
+// probe packet bytes. The returned slice is a copy; callers may freely mutate
+// it. The underlying fixture is private to prevent accidental shared state.
 func ForwardingExpectedBytes() []byte {
 	return append([]byte(nil), forwardingExpected...)
 }

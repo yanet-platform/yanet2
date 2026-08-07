@@ -121,12 +121,6 @@ the lab baseline. Running `just lab` without a subcommand only prints help.
 See the [YANET2 Lab guide](docs/lab.md) for manifests, packet probes,
 troubleshooting, and the built-in forward/route, decap, and NAT64 scenarios.
 
-YANET includes QEMU virtualization support for development and testing without physical hardware:
-
-1. Configure QEMU VM with virtual network interfaces.
-2. Set up shared folder for code access.
-3. Follow detailed instructions in the documentation.
-
 ## 📄 License
 
 YANET2 is licensed under the Apache License, Version 2.0.

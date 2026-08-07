@@ -11,7 +11,7 @@ func TestSerialBufferCapsAndRetainsTail(t *testing.T) {
 	// Feed enough chunks to exceed the buffer cap + margin (8 MiB + 2 MiB).
 	const chunk = 64 << 10
 	totalChunks := int((maxSerialBufferSize+serialTrimMargin)/chunk) + 10
-	for i := 0; i < totalChunks; i++ {
+	for i := range totalChunks {
 		block := strings.Repeat("x", chunk)
 		if i == totalChunks-1 {
 			block = marker + block[len(marker):]
