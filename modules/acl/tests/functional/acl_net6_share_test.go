@@ -449,7 +449,7 @@ const net6ShareScaleHeavyEnv = "ACL_NET6_SHARE_SCALE_HEAVY"
 // tens of thousands of rules, and a remap bug that only manifests once a
 // partition grows past that count would slip through the smaller gates.
 // Gated behind net6ShareScaleHeavyEnv rather than -short: neither
-// `make test` (Makefile:257) nor `make test-asan` (Makefile:267) passes
+// `make test` nor `make test-asan` passes
 // -short, so that alone would not have kept this off CI.
 func TestACL_Net6Share_VerdictParity_ScaleHeavy(t *testing.T) {
 	if os.Getenv(net6ShareScaleHeavyEnv) == "" {
