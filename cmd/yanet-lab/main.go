@@ -576,7 +576,7 @@ func (m *application) call(value request) (*response, error) {
 func requestTimeout(action string) time.Duration {
 	switch action {
 	case "manifest":
-		return supervisorManifestTimeout
+		return supervisorManifestTimeout + 30*time.Second
 	case "exec":
 		return supervisorExecTimeout
 	case "reset":
@@ -684,6 +684,13 @@ func (m *application) serve() (err error) {
 		startupInterrupted.Store(true)
 		runtime.State.CloseSerial()
 		_ = listener.Close()
+		select {
+		case <-runtime.Ready:
+			if runtime.Framework != nil {
+				runtime.Framework.AbortGuestSerial()
+			}
+		default:
+		}
 	}()
 	acceptErrors := make(chan error, 1)
 	var handlers errgroup.Group
@@ -773,7 +780,7 @@ func handleRuntimeConnection(connection net.Conn, dir string, runtime *sessionRu
 	default:
 		var value request
 		if err := decodeRequest(connection, &value); err != nil {
-			_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
+			_ = json.NewEncoder(connection).Encode(response{Error: err.Error(), Protocol: supervisorProtocolVersion})
 			return
 		}
 		if value.Action == "down" {

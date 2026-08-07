@@ -444,16 +444,14 @@ func (q *QEMUManager) Stop() error {
 		}
 		q.monitorConn = nil
 	}
+	q.serialMutex.Lock()
 	if q.serialConn != nil {
-		q.serialMutex.Lock()
-		if q.serialConn != nil {
-			if err := q.serialConn.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("failed to close serial connection: %w", err))
-			}
-			q.serialConn = nil
+		if err := q.serialConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close serial connection: %w", err))
 		}
-		q.serialMutex.Unlock()
+		q.serialConn = nil
 	}
+	q.serialMutex.Unlock()
 
 	// Kill QEMU process if running (unless VM should be kept alive for debugging)
 	if ShouldKeepVMAlive() && !q.forceStop {
@@ -598,6 +596,10 @@ func (q *QEMUManager) discardSerialThrough(marker string) {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
 	data := q.serialBuffer.Bytes()
+	scanSize := (1 << 20) + len(marker)
+	if len(data) > scanSize {
+		data = data[len(data)-scanSize:]
+	}
 	if index := bytes.Index(data, []byte(marker)); index >= 0 {
 		remainder := append([]byte(nil), data[index+len(marker):]...)
 		q.serialBuffer.Reset()

@@ -16,6 +16,8 @@ import (
 // Regular expressions used for parsing command output
 var (
 	retCodeRegex       = regexp.MustCompile(`=(\d+)=`)
+	ansiEscapeRegex    = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+	controlCharRegex   = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 	errMarkersNotFound = errors.New("markers not found in output")
 )
 
@@ -409,17 +411,12 @@ func (c *CLIManager) isShellPrompt(line string) bool {
 //	clean := cli.cleanControlCharacters(raw)
 //	// Result: "Hello World"
 func (c *CLIManager) cleanControlCharacters(line string) string {
-	// Remove ANSI escape sequences (like \x1b[?2004l)
-	re := regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-	cleaned := re.ReplaceAllString(line, "")
+	cleaned := ansiEscapeRegex.ReplaceAllString(line, "")
 
-	// Remove carriage returns and other control characters
 	cleaned = strings.ReplaceAll(cleaned, "\r", "")
 	cleaned = strings.ReplaceAll(cleaned, "\x00", "")
 
-	// Remove any remaining control characters
-	re2 := regexp.MustCompile(`[\x00-\x1f\x7f]`)
-	cleaned = re2.ReplaceAllString(cleaned, "")
+	cleaned = controlCharRegex.ReplaceAllString(cleaned, "")
 
 	// Trim whitespace
 	cleaned = strings.TrimSpace(cleaned)
