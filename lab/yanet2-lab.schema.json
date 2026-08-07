@@ -12,7 +12,7 @@
     "description": { "type": "string" },
     "boot": {
       "type": "object",
-      "description": "Boot YANET with custom dataplane/controlplane configuration. Restores the pre-YANET snapshot, so the operator baseline (route/forward/decap/pipeline, BIRD, fn:lab) is NOT available in boot manifests.",
+      "description": "Boot YANET with custom dataplane/controlplane configuration. Restores the pre-YANET snapshot, so the operator baseline (route/forward/decap/pipeline, BIRD, fn:lab) is NOT available in boot manifests. Common baseline configuration (kni0 interface, forwarding rules, route FIB) is still applied after the custom boot.",
       "additionalProperties": false,
       "properties": {
         "dataplane": { "$ref": "#/$defs/path" },

@@ -75,8 +75,9 @@ probes:
 
 The first version intentionally exposes only the two QEMU packet ports used by
 the functional framework, numbered `0` and `1`. Each probe currently accepts
-one packet in its input PCAP and either one exact expected packet or
-`expect: {drop: true}`. On mismatch, the report includes both packets as hex.
+one packet in its input PCAP and either one expected packet (compared after
+stripping Ethernet padding) or `expect: {drop: true}`. On mismatch, the
+report includes both packets as hex.
 
 `files` can copy local fixtures into the guest before steps run. Its
 `destination` is a guest path; `source` is relative to the manifest. Commands
@@ -87,7 +88,8 @@ the Ethernet link type.
 `boot` starts YANET with custom dataplane and controlplane YAML instead of the
 baseline. It restores the pre-YANET snapshot, so the operator baseline
 (route/forward/decap/pipeline, BIRD, `fn:lab`) is not available in boot
-manifests.
+manifests. Common baseline configuration (kni0 interface, forwarding rules,
+route FIB) is still applied after the custom boot.
 
 ## Built-in scenarios
 
