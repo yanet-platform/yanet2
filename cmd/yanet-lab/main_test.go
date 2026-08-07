@@ -123,17 +123,18 @@ func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
 	assert.Equal(t, supervisorShutdownTimeout, requestTimeout("down"))
 }
 
-func TestWriteReportCreatesDistinctFiles(t *testing.T) {
-	first, err := writeReport(t.TempDir(), []byte("first"))
+func TestWriteReportOverwritesLastReport(t *testing.T) {
+	dir := t.TempDir()
+	first, err := writeReport(dir, []byte("first"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := writeReport(filepath.Dir(first), []byte("second"))
+	second, err := writeReport(dir, []byte("second"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first == second {
-		t.Fatalf("report paths collide: %q", first)
+	if first != second {
+		t.Fatalf("report paths differ: %q vs %q", first, second)
 	}
 	data, err := os.ReadFile(second)
 	if err != nil {

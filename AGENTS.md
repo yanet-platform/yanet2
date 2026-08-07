@@ -39,6 +39,7 @@ make ai/agents                                     # regenerate agent charters f
 - `lint/` — repo linters (`style`, `commit`, `protobuf`); `docs/`, `deploy/`, `debian/`, `etc/`, `subprojects/dpdk/`.
 
 - `lab/` — reusable local QEMU lab library (manifests, scenarios, operator baseline); `cmd/yanet-lab/` — developer-only lab supervisor CLI (not packaged).
+- `tests/functional/framework/` — shared QEMU/harness infrastructure used by both functional tests and the lab supervisor (not purely test code; imports `testing`).
 
 ### Module layout (canonical — decap, dscp, forward, route as reference)
 

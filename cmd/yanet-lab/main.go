@@ -993,11 +993,11 @@ func setError(reply *response, err error) {
 }
 
 func writeReport(dir string, data []byte) (string, error) {
-	file, err := os.CreateTemp(dir, "report-*.txt")
+	path := filepath.Join(dir, "last-report.txt")
+	file, err := os.Create(path)
 	if err != nil {
 		return "", err
 	}
-	path := file.Name()
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
