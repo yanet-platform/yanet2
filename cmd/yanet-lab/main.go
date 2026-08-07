@@ -802,7 +802,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		setError(&reply, err)
 	case "exec":
 		output, err := fw.ExecuteCommand(lab.ShellJoin(value.Argv))
-		reply.Output = output
+		reply.Output = lab.TruncateOutput(output)
 		setError(&reply, err)
 	case "shell":
 		reply.SSHPort = fw.SSHPort()
@@ -866,6 +866,9 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	case "down":
 		reply.Output = "lab stopped"
 		_ = json.NewEncoder(connection).Encode(reply)
+		if fw != nil {
+			fw.AbortGuestSerial()
+		}
 		if err := state.Shutdown(shutdown); err != nil {
 			fmt.Fprintf(os.Stderr, "lab shutdown error: %v\n", err)
 		}
