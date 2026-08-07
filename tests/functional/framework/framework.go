@@ -1591,20 +1591,8 @@ func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
 		_, _ = stdin.Write([]byte{0x03})
 		time.Sleep(20 * time.Millisecond)
 	}
-	const restoreTimeout = 30 * time.Second
-	deadline := time.Now().Add(restoreTimeout)
-	_, _ = stdin.Write([]byte("\n\n"))
-	for !f.qemu.IsVMReady() && time.Now().Before(deadline) {
-		select {
-		case <-f.qemu.readySignal:
-		case <-time.After(1 * time.Second):
-			if !f.qemu.IsVMReady() {
-				_, _ = stdin.Write([]byte("\n\n"))
-			}
-		}
-	}
-	if !f.qemu.IsVMReady() {
-		return fmt.Errorf("VM did not respond within %v after restoring %q", restoreTimeout, snapshot)
+	if err := f.qemu.WaitForReady(30 * time.Second); err != nil {
+		return fmt.Errorf("VM did not respond within 30s after restoring %q: %w", snapshot, err)
 	}
 
 	if err := f.Mount9P(); err != nil {

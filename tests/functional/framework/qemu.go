@@ -709,6 +709,28 @@ func (q *QEMUManager) readSerial() {
 
 	defer close(done)
 
+	// The bash prompt (root@yanet-vm:~#) does not end with a newline,
+	// so bufio.Scanner cannot detect it as a complete line. Send periodic
+	// newlines to flush the prompt: bash responds to \n with a new prompt
+	// preceded by \n, which the scanner can then match.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-readySig:
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				if _, err := conn.Write([]byte("\n")); err != nil {
+					q.log.Debugf("serial flush goroutine exiting: %v", err)
+					return
+				}
+			}
+		}
+	}()
+
 	for scanner.Scan() {
 		line := scanner.Text()
 

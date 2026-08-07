@@ -98,6 +98,15 @@ runcmd:
     done
 
   - |
+    # Disable motd/release-check scripts that write to /var/lib on every login.
+    # Their I/O during savevm corrupts the cached booted snapshot (EXT4 checksum
+    # mismatch → journal abort → read-only remount on restore).
+    chmod -x /etc/update-motd.d/* 2>/dev/null || true
+    systemctl mask motd-news.service 2>/dev/null || true
+    apt-get -y remove --purge landscape-common update-notifier-common 2>/dev/null || true
+    sed -i '/pam_motd/s/^/# /' /etc/pam.d/common-session /etc/pam.d/common-session-noninteractive /etc/pam.d/login /etc/pam.d/sshd 2>/dev/null || true
+
+  - |
     # Remove password for ubuntu user
     passwd -d ubuntu
     # Remove password for root user
