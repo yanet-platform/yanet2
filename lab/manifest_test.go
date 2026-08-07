@@ -44,9 +44,21 @@ func TestParseManifestRejectsUnknownFields(t *testing.T) {
 }
 
 func TestParseManifestRejectsTraversal(t *testing.T) {
-	_, err := lab.ParseManifest([]byte("version: 1\nname: smoke\nboot:\n  dataplane: ../secret\n"), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "escapes") {
-		t.Fatalf("expected traversal error, got %v", err)
+	cases := []struct {
+		name     string
+		manifest string
+		errText  string
+	}{
+		{name: "relative", manifest: "version: 1\nname: smoke\nboot:\n  dataplane: ../secret\n", errText: "escapes"},
+		{name: "absolute", manifest: "version: 1\nname: smoke\nboot:\n  dataplane: /etc/passwd\n", errText: "relative"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := lab.ParseManifest([]byte(tc.manifest), t.TempDir())
+			if err == nil || !strings.Contains(err.Error(), tc.errText) {
+				t.Fatalf("expected %q error, got %v", tc.errText, err)
+			}
+		})
 	}
 }
 
