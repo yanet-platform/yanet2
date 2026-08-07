@@ -9,7 +9,7 @@ import (
 )
 
 func TestMatchesForwardingProbe(t *testing.T) {
-	expected := lab.ForwardingExpected
+	expected := lab.ForwardingExpectedBytes()
 
 	cases := []struct {
 		name   string
