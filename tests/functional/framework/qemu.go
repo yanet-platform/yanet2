@@ -72,12 +72,14 @@ type QEMUManager struct {
 	TemplateSnapshotName string
 }
 
-const maxSerialBufferSize = 4 << 20
+const maxSerialBufferSize = 8 << 20
 
-// serialTrimMargin allows the serial buffer to exceed its cap by up to 1 MiB
-// before trimming, so a full-buffer copy happens at most once per 1 MiB of new
-// output rather than on every line once the cap is reached.
-const serialTrimMargin = 1 << 20
+// serialTrimMargin allows the serial buffer to exceed its cap by up to 2 MiB
+// before trimming, so a full-buffer copy happens at most once per 2 MiB of new
+// output rather than on every line once the cap is reached. Marker-aware
+// trimming is a follow-up; for now, the larger buffer reduces the chance of
+// losing an active command's start marker.
+const serialTrimMargin = 2 << 20
 
 // NewQEMUManager creates and initializes a new QEMU manager instance for virtual
 // machine testing. The manager sets up all necessary directories, generates unique

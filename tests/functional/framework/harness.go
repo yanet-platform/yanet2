@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -327,6 +329,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	customConfig := config.Dataplane != "" || config.Controlplane != "" ||
 		config.Forward != "" || config.Route != "" || config.Prepare != nil ||
 		config.AfterStart != nil || config.ProfileReady != nil ||
+		config.SkipCommonConfig ||
 		len(config.FingerprintFiles) != 0
 	if config.BaselineTag == "" && customConfig {
 		return nil, nil, fmt.Errorf("failed to set up harness: a custom YAML configuration requires a non-empty BaselineTag so it does not reuse the shared baseline cache")
@@ -359,7 +362,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to locate project root for baseline: %w", err)
 	}
-	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route, config.FingerprintFiles)
+	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route, config.FingerprintFiles, config.SkipCommonConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fingerprint baseline: %w", err)
 	}
@@ -379,7 +382,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		skipCommonConfig: config.SkipCommonConfig,
 		forceStop:        config.ForceStop,
 	}
-	if err = baseline.ensureTemplate(qemuImage, bootedTemplate, baselineTemplate); err != nil {
+	if err = baseline.ensureTemplate(qemuImage, bootedTemplate, baselineTemplate, baselineTag); err != nil {
 		return nil, nil, fmt.Errorf("failed to prepare baseline template: %w", err)
 	}
 	MarkBaselineSaved()
@@ -540,7 +543,7 @@ type baselineSetup struct {
 
 // ensureTemplate makes sure baselineTemplate holds a "baseline" snapshot,
 // bootstrapping it from the booted template when the cache is cold.
-func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTemplate string) error {
+func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTemplate, baselineTag string) error {
 	lock, err := acquireBaselineLock(baselineTemplate)
 	if err != nil {
 		return err
@@ -609,6 +612,22 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	}
 
 	m.log.Infof("Baseline template cached at %s", baselineTemplate)
+
+	// Prune superseded fingerprinted templates with the same baseline tag
+	// to avoid unbounded overlay accumulation.
+	dir := filepath.Dir(baselineTemplate)
+	base := filepath.Base(baselineTemplate)
+	prefix := strings.TrimSuffix(base, "-"+baselineTemplateVersion+".qcow2")
+	prefix = strings.TrimSuffix(prefix, "-"+m.fingerprint[:16])
+	if matches, err := filepath.Glob(filepath.Join(dir, prefix+"-"+baselineTemplateVersion+".qcow2")); err == nil {
+		for _, old := range matches {
+			if old != baselineTemplate {
+				_ = os.Remove(old)
+				_ = os.Remove(old + ".sha256")
+				m.log.Infof("Pruned stale baseline template %s", old)
+			}
+		}
+	}
 	return nil
 }
 
@@ -624,9 +643,9 @@ func acquireBaselineLock(baselineTemplate string) (*os.File, error) {
 	return lock, nil
 }
 
-func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string, extraFiles []string) (string, error) {
+func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string, extraFiles []string, skipCommonConfig bool) (string, error) {
 	hash := sha256.New()
-	for _, value := range []string{"dataplane", dataplane, "controlplane", controlplane, "forward", forward, "route", route} {
+	for _, value := range []string{"dataplane", dataplane, "controlplane", controlplane, "forward", forward, "route", route, "skipCommonConfig", strconv.FormatBool(skipCommonConfig)} {
 		_, _ = io.WriteString(hash, value)
 		_, _ = io.WriteString(hash, "\x00")
 	}
@@ -670,6 +689,11 @@ func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forwar
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// statFingerprint records path, size, and mtime for O(1) fingerprint cost.
+// Meson/cargo rebuilds update both size and mtime, so fingerprints change
+// naturally. A manual same-size same-mtime replacement (for example `cp -p`
+// of a binary) is not detected — rerun `meson compile` or delete the cached
+// template to force re-baselining.
 func statFingerprint(hash io.Writer, path string) error {
 	info, err := os.Stat(path)
 	if err != nil {

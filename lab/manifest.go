@@ -86,6 +86,9 @@ func LoadManifest(path string) (*Manifest, error) {
 }
 
 func ParseManifest(data []byte, baseDir string) (*Manifest, error) {
+	if len(data) > maxManifestFileSize {
+		return nil, fmt.Errorf("manifest data too large: %d bytes, maximum %d", len(data), maxManifestFileSize)
+	}
 	jsonDocument, err := yamlToJSON(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
