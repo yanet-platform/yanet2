@@ -3,6 +3,7 @@ package lab_test
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -534,7 +535,7 @@ func TestRunManifestProbesBreakOnFailure(t *testing.T) {
 	manifestPath := filepath.Join(directory, "manifest.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
 
-	// First probe mismatches (actual has extra padding), second must not run.
+	// First probe mismatches (actual content differs from expected), second must not run.
 	runtime := &manifestRuntime{Actual: [][]byte{{9, 8, 7}}}
 	report := lab.RunManifest(runtime, manifestPath)
 
@@ -602,7 +603,7 @@ func TestTruncateOutputBoundary(t *testing.T) {
 			} else {
 				require.True(t, len(got) > tc.want, "truncated output must include notice")
 				require.Contains(t, got, "truncated")
-				require.Contains(t, got, "(8193 bytes total)")
+				require.Contains(t, got, fmt.Sprintf("(%d bytes total)", tc.size))
 			}
 		})
 	}

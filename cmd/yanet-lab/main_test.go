@@ -118,7 +118,7 @@ func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
 	for _, action := range fast {
 		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "fast action %q", action)
 	}
-	assert.Equal(t, supervisorManifestTimeout, requestTimeout("manifest"))
+	assert.Equal(t, supervisorManifestTimeout+30*time.Second, requestTimeout("manifest"))
 	assert.Equal(t, supervisorExecTimeout, requestTimeout("exec"))
 	assert.Equal(t, supervisorResetTimeout, requestTimeout("reset"))
 	assert.Equal(t, supervisorShutdownTimeout, requestTimeout("down"))
@@ -297,6 +297,7 @@ func TestClassifyStaleSupervisor(t *testing.T) {
 		{name: "no supervisor", resp: nil, callErr: errors.New("connect: connection refused"), expected: staleSupervisorAbsent},
 		{name: "current version", resp: &response{Protocol: supervisorProtocolVersion}, callErr: nil, expected: staleSupervisorCurrent},
 		{name: "stale version", resp: &response{Protocol: supervisorProtocolVersion + 1}, callErr: nil, expected: staleSupervisorStale},
+		{name: "old supervisor (protocol 0)", resp: &response{Protocol: 0}, callErr: nil, expected: staleSupervisorStale},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
