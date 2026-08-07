@@ -155,7 +155,9 @@ yanet_get_counter_values(
 // value.
 //
 // Recognized keys are "device", "pipeline", "function", "chain",
-// "module_type", "module_name".
+// "module_type", "module_name", and "kind". The "kind" value names the
+// owner level: "device", "pipeline", "function", "chain", "module", or
+// "object".
 //
 // A tag is rejected with err filled and NULL returned if any of the
 // following holds: key is NULL; value is NULL; key is unrecognized;
