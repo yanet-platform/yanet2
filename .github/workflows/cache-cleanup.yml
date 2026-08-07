@@ -1,0 +1,171 @@
+name: Actions cache cleanup
+
+# Prunes two classes of dead cache before the repo's 10 GB cap forces GitHub
+# to LRU-evict live entries: superseded ccache-action generations (it never
+# prunes its own timestamped keys) and caches left on already-merged or
+# closed PR refs.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log what would be deleted without deleting it'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  actions: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    name: Delete superseded and dead-PR-ref caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+
+    steps:
+      - name: Enumerate all repository caches
+        run: |
+          set -euo pipefail
+          per_page=100
+          page=1
+          total_count=""
+          : > "$RUNNER_TEMP/caches.jsonl"
+          while :; do
+            if ! response=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=${per_page}&page=${page}"); then
+              echo "::error::failed to list caches (page ${page})"
+              exit 1
+            fi
+            if [[ -z "$total_count" ]]; then
+              total_count=$(jq -r '.total_count' <<<"$response")
+            fi
+            page_count=$(jq '.actions_caches | length' <<<"$response")
+            jq -c '.actions_caches[]' <<<"$response" >> "$RUNNER_TEMP/caches.jsonl"
+            if [[ "$page_count" -lt "$per_page" ]]; then
+              break
+            fi
+            page=$((page + 1))
+          done
+
+          enumerated=$(wc -l < "$RUNNER_TEMP/caches.jsonl")
+          echo "Enumerated ${enumerated} cache entries across $((page)) page(s), API reports total_count=${total_count}"
+          if [[ "$enumerated" -ne "$total_count" ]]; then
+            echo "::error::enumerated ${enumerated} caches but total_count is ${total_count}; pagination is incomplete"
+            exit 1
+          fi
+          jq -s '.' "$RUNNER_TEMP/caches.jsonl" > "$RUNNER_TEMP/caches.json"
+
+      - name: Resolve state of PRs referenced by cache refs
+        run: |
+          set -euo pipefail
+          echo '{}' > "$RUNNER_TEMP/pr_states.json"
+          pr_numbers=$(jq -r '
+            .[] | .ref
+            | select(test("^refs/pull/[0-9]+/merge$"))
+            | capture("^refs/pull/(?<n>[0-9]+)/merge$") | .n
+          ' "$RUNNER_TEMP/caches.json" | sort -un)
+
+          for n in $pr_numbers; do
+            if ! pr_json=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}"); then
+              echo "::error::failed to look up state of PR #${n}"
+              exit 1
+            fi
+            state=$(jq -r '.state' <<<"$pr_json")
+            closed=false
+            [[ "$state" == "closed" ]] && closed=true
+            jq --arg n "$n" --argjson closed "$closed" '. + {($n): $closed}' \
+              "$RUNNER_TEMP/pr_states.json" > "$RUNNER_TEMP/pr_states.json.tmp"
+            mv "$RUNNER_TEMP/pr_states.json.tmp" "$RUNNER_TEMP/pr_states.json"
+          done
+
+      - name: Select caches to delete
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/select.jq" <<'JQ'
+          # Selection rules for cache deletion.
+          #
+          # Rule A: superseded ccache-action generations on any ref, grouped
+          # per (ref, family) with family = key minus its trailing ISO8601
+          # timestamp. The newest generation per group is kept. Rule B:
+          # every cache on a refs/pull/<N>/merge ref whose PR is closed or
+          # merged. --argjson pr_states maps PR number (string) to that bool.
+
+          def ccache_re: "^ccache-.+-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$";
+          def pr_ref_re: "^refs/pull/(?<n>[0-9]+)/merge$";
+
+          def with_family:
+            . + (.key | capture("^(?<family>ccache-.+)-(?<ts>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z)$"));
+
+          def rule_a($caches):
+            ($caches
+             | map(select(.key | test(ccache_re)))
+             | map(with_family))
+            | group_by([.ref, .family])
+            | map(sort_by(.ts) | .[0:-1])
+            | flatten
+            | map(.rule = "A");
+
+          def rule_b($caches; $pr_states):
+            ($caches
+             | map(select(.ref | test(pr_ref_re)))
+             | map(. + {pr_number: (.ref | capture(pr_ref_re) | .n)}))
+            | map(select($pr_states[.pr_number] == true))
+            | map(.rule = "B");
+
+          . as $caches
+          | (rule_a($caches) + rule_b($caches; $pr_states))
+          | group_by(.id)
+          | map(. as $g | $g[0] + {rules: ($g | map(.rule) | unique | join(","))})
+          | map({id, ref, key, size_in_bytes, rules})
+          JQ
+
+          jq -f "$RUNNER_TEMP/select.jq" "$RUNNER_TEMP/caches.json" \
+            --argjson pr_states "$(cat "$RUNNER_TEMP/pr_states.json")" \
+            > "$RUNNER_TEMP/selection.json"
+
+      - name: Delete superseded and dead-PR-ref caches
+        run: |
+          set -euo pipefail
+          dry_run="${DRY_RUN}"
+          count=$(jq 'length' "$RUNNER_TEMP/selection.json")
+          echo "Selected ${count} cache entries for deletion (dry_run=${dry_run})"
+
+          deleted=0
+          failed=0
+          reclaimed=0
+          while IFS=$'\t' read -r id ref key size rules; do
+            mb=$(awk -v b="$size" 'BEGIN { printf "%.1f", b / 1024 / 1024 }')
+            if [[ "$dry_run" == "true" ]]; then
+              echo "[DRY-RUN] would delete id=${id} rule=${rules} size=${mb}MiB ref=${ref} key=${key}"
+              deleted=$((deleted + 1))
+              reclaimed=$((reclaimed + size))
+              continue
+            fi
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" >/dev/null 2>&1; then
+              echo "deleted id=${id} rule=${rules} size=${mb}MiB ref=${ref} key=${key}"
+              deleted=$((deleted + 1))
+              reclaimed=$((reclaimed + size))
+            else
+              echo "::warning::failed to delete cache id=${id} key=${key} (may already be gone)"
+              failed=$((failed + 1))
+            fi
+          done < <(jq -r '.[] | [.id, .ref, .key, .size_in_bytes, .rules] | @tsv' "$RUNNER_TEMP/selection.json")
+
+          reclaimed_mb=$(awk -v b="$reclaimed" 'BEGIN { printf "%.1f", b / 1024 / 1024 }')
+          echo "Summary: ${deleted} deleted, ${failed} failed, ${reclaimed_mb}MiB reclaimed"
+
+          if [[ "$count" -gt 0 && "$failed" -eq "$count" ]]; then
+            echo "::error::every delete attempt failed"
+            exit 1
+          fi
+
+          if [[ "$((deleted + failed))" -ne "$count" ]]; then
+            echo "::error::processed $((deleted + failed)) of ${count} selected entries (deleted=${deleted} failed=${failed}); the delete loop exited early"
+            exit 1
+          fi
