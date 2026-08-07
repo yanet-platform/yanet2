@@ -259,6 +259,78 @@ func TestShellJoinQuotesArguments(t *testing.T) {
 	}
 }
 
+func TestWithoutEthernetPadding(t *testing.T) {
+	// Ethernet header: dst(6) + src(6) + ethertype(2) = 14 bytes.
+	buildIPv4 := func(vlanTags int) []byte {
+		header := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+		for range vlanTags {
+			header = append(header, 0x81, 0x00, 0x00, 0x64)
+		}
+		header = append(header, 0x08, 0x00)
+		// IPv4: version 4, IHL 5, total length 20.
+		ip := []byte{0x45, 0x00, 0x00, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		return append(header, ip...)
+	}
+	buildIPv6 := func() []byte {
+		header := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+		header = append(header, 0x86, 0xdd)
+		// IPv6 header is 40 bytes; payload length 0.
+		ip := make([]byte, 40)
+		ip[0] = 0x60
+		return append(header, ip...)
+	}
+
+	cases := []struct {
+		name   string
+		packet []byte
+		want   int
+	}{
+		{name: "untagged ipv4", packet: buildIPv4(0), want: 34},
+		{name: "single vlan ipv4", packet: buildIPv4(1), want: 38},
+		{name: "stacked vlan ipv4", packet: buildIPv4(2), want: 42},
+		{name: "ipv6", packet: buildIPv6(), want: 54},
+		{name: "short packet", packet: []byte{0, 1}, want: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := lab.WithoutEthernetPadding(tc.packet)
+			if len(got) != tc.want {
+				t.Fatalf("WithoutEthernetPadding(%d bytes) = %d bytes, want %d", len(tc.packet), len(got), tc.want)
+			}
+		})
+	}
+}
+
+func TestWithoutEthernetPaddingTrimsPadding(t *testing.T) {
+	// IPv4 total length 20, then 40 bytes of trailing padding.
+	packet := append([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0x08, 0x00,
+		0x45, 0x00, 0x00, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		make([]byte, 40)...)
+	got := lab.WithoutEthernetPadding(packet)
+	if len(got) != 34 {
+		t.Fatalf("WithEthernetPadding with trailing padding = %d bytes, want 34", len(got))
+	}
+}
+
+func TestRunManifestBootFailsOnRestoreError(t *testing.T) {
+	directory := t.TempDir()
+	dataplaneYAML := filepath.Join(directory, "dataplane.yaml")
+	if err := os.WriteFile(dataplaneYAML, []byte("interfaces: []"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &manifestRuntime{failRestore: true}
+	report := lab.RunManifest(runtime, manifestPath)
+	require.False(t, report.Success)
+	require.Len(t, report.Results, 1)
+	require.Equal(t, "boot", report.Results[0].Kind)
+	require.Contains(t, report.Results[0].Error, "restore failed")
+}
+
 func writePacketWithLinkType(t *testing.T, path string, linkType layers.LinkType, packet []byte) {
 	t.Helper()
 	file, err := os.Create(path)
