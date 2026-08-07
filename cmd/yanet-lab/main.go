@@ -68,11 +68,12 @@ type supervisor struct {
 }
 
 type sessionRuntime struct {
-	Ready     chan struct{}
-	State     *supervisor
-	Framework *framework.TestFramework
-	Restore   func() error
-	Shutdown  func() error
+	Ready       chan struct{}
+	State       *supervisor
+	Framework   *framework.TestFramework
+	Restore     func() error
+	Shutdown    func() error
+	Interrupted *atomic.Bool
 }
 
 func (m *supervisor) TryOperation() bool {
@@ -506,6 +507,9 @@ func (m *application) shutdownStaleSupervisor() (*response, error) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	if _, callErr := m.call(request{Action: "status"}); callErr == nil {
+		return nil, fmt.Errorf("stale lab supervisor did not shut down within %s; stop it manually", supervisorRequestTimeout)
+	}
 	return nil, nil
 }
 
@@ -645,8 +649,8 @@ func (m *application) serve() (err error) {
 	if err := os.Chmod(socket, 0o600); err != nil {
 		return err
 	}
-	runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}}
 	startupInterrupted := atomic.Bool{}
+	runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}, Interrupted: &startupInterrupted}
 	stopping := make(chan os.Signal, 1)
 	signal.Notify(stopping, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(stopping)
@@ -748,6 +752,14 @@ func handleRuntimeConnection(connection net.Conn, dir string, runtime *sessionRu
 			_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
 			return
 		}
+		if value.Action == "down" {
+			if runtime.Interrupted != nil {
+				runtime.Interrupted.Store(true)
+			}
+			_ = json.NewEncoder(connection).Encode(response{OK: true, Output: "lab stopped", Protocol: supervisorProtocolVersion})
+			stop()
+			return
+		}
 		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting", Protocol: supervisorProtocolVersion})
 	}
 }
@@ -810,11 +822,31 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			reply.Output = "baseline restored"
 		}
 	case "manifest":
-		report := lab.RunManifest(fw, value.Manifest)
+		manifestDone := make(chan lab.RunReport, 1)
+		go func() { manifestDone <- lab.RunManifest(fw, value.Manifest) }()
+		timer := time.NewTimer(supervisorManifestTimeout)
+		var report lab.RunReport
+		select {
+		case report = <-manifestDone:
+		case <-timer.C:
+			fw.AbortGuestSerial()
+			report = <-manifestDone
+			report.Success = false
+			report.Results = append(report.Results, lab.Result{
+				Name:  "server-timeout",
+				Kind:  "timeout",
+				Error: "manifest exceeded server-side timeout (" + supervisorManifestTimeout.String() + ")",
+			})
+			reply.OK = false
+			reply.Error = "manifest exceeded server-side timeout"
+		}
+		timer.Stop()
 		reply.Report = &report
-		reply.OK = report.Success
-		if !report.Success {
-			reply.Error = "manifest run failed"
+		if reply.OK {
+			reply.OK = report.Success
+			if !report.Success {
+				reply.Error = "manifest run failed"
+			}
 		}
 		data, marshalErr := json.MarshalIndent(report, "", "  ")
 		if marshalErr != nil {
@@ -834,7 +866,9 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	case "down":
 		reply.Output = "lab stopped"
 		_ = json.NewEncoder(connection).Encode(reply)
-		_ = state.Shutdown(shutdown)
+		if err := state.Shutdown(shutdown); err != nil {
+			fmt.Fprintf(os.Stderr, "lab shutdown error: %v\n", err)
+		}
 		stop()
 		return
 	default:
