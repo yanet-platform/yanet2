@@ -508,3 +508,102 @@ func TestRunManifestStepsBreakOnFailure(t *testing.T) {
 	require.False(t, report.Success)
 	require.Equal(t, 2, runtime.stepCount, "third step must not execute after second step fails")
 }
+
+func TestRunManifestProbesBreakOnFailure(t *testing.T) {
+	directory := t.TempDir()
+	expected := []byte{0, 1, 2, 3}
+	writePacket(t, filepath.Join(directory, "input.pcap"), expected)
+	writePacket(t, filepath.Join(directory, "expected.pcap"), expected)
+	writePacket(t, filepath.Join(directory, "second.pcap"), []byte{9, 8, 7})
+	manifest := strings.Join([]string{
+		"version: 1",
+		"name: multi-probe",
+		"probes:",
+		"  - name: first",
+		"    ingress: 0",
+		"    egress: 1",
+		"    send: {pcap: input.pcap}",
+		"    expect: {pcap: expected.pcap}",
+		"  - name: second",
+		"    ingress: 0",
+		"    egress: 1",
+		"    send: {pcap: input.pcap}",
+		"    expect: {pcap: second.pcap}",
+		"",
+	}, "\n")
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	// First probe mismatches (actual has extra padding), second must not run.
+	runtime := &manifestRuntime{Actual: [][]byte{{9, 8, 7}}}
+	report := lab.RunManifest(runtime, manifestPath)
+
+	require.False(t, report.Success)
+	require.Len(t, report.Results, 1, "second probe must not execute after first fails")
+	require.Equal(t, "first", report.Results[0].Name)
+}
+
+func TestRunManifestTransferFileBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		size int
+	}{
+		{name: "exact-chunk", size: 4096},
+		{name: "one-less", size: 4095},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			fixture := filepath.Join(directory, "fixture")
+			want := make([]byte, tc.size)
+			for idx := range want {
+				want[idx] = byte(idx)
+			}
+			require.NoError(t, os.WriteFile(fixture, want, 0o600))
+			manifestPath := filepath.Join(directory, "manifest.yaml")
+			require.NoError(t, os.WriteFile(manifestPath, []byte("version: 1\nname: files\nfiles:\n  - source: fixture\n    destination: /tmp/fixture\n"), 0o600))
+
+			runtime := &manifestRuntime{}
+			report := lab.RunManifest(runtime, manifestPath)
+			require.True(t, report.Success, "report = %#v", report)
+
+			var transferred []byte
+			for _, command := range runtime.Commands {
+				if !strings.HasPrefix(command, "echo '") {
+					continue
+				}
+				encoded := strings.TrimPrefix(command, "echo '")
+				encoded = strings.TrimSuffix(encoded, "' | base64 -d >> '/tmp/fixture'")
+				chunk, err := base64.StdEncoding.DecodeString(encoded)
+				require.NoError(t, err)
+				transferred = append(transferred, chunk...)
+			}
+			require.Equal(t, want, transferred)
+		})
+	}
+}
+
+func TestTruncateOutputBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		size int
+		want int
+	}{
+		{name: "under-limit", size: 8191, want: 8191},
+		{name: "exact-limit", size: 8192, want: 8192},
+		{name: "over-limit", size: 8193, want: 8192},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := strings.Repeat("x", tc.size)
+			got := lab.TruncateOutput(input)
+			if tc.size <= 8192 {
+				require.Len(t, got, tc.want)
+			} else {
+				require.True(t, len(got) > tc.want, "truncated output must include notice")
+				require.Contains(t, got, "truncated")
+				require.Contains(t, got, "(8193 bytes total)")
+			}
+		})
+	}
+}

@@ -487,17 +487,35 @@ func (m *application) ensureUp() error {
 	return m.up()
 }
 
+type staleSupervisorDecision int
+
+const (
+	staleSupervisorAbsent staleSupervisorDecision = iota
+	staleSupervisorCurrent
+	staleSupervisorStale
+)
+
+func classifyStaleSupervisor(resp *response, callErr error) staleSupervisorDecision {
+	if callErr != nil {
+		return staleSupervisorAbsent
+	}
+	if resp.Protocol == supervisorProtocolVersion {
+		return staleSupervisorCurrent
+	}
+	return staleSupervisorStale
+}
+
 // shutdownStaleSupervisor checks for a running lab supervisor. If one exists
 // with the current protocol version it returns the status response. If a stale
 // (wrong-version) supervisor is running, it sends "down" and polls until the
 // socket goes away. Returns nil when no stale supervisor remains.
 func (m *application) shutdownStaleSupervisor() (*response, error) {
-	response, err := m.call(request{Action: "status"})
-	if err != nil {
+	resp, err := m.call(request{Action: "status"})
+	switch classifyStaleSupervisor(resp, err) {
+	case staleSupervisorAbsent:
 		return nil, nil
-	}
-	if response.Protocol == supervisorProtocolVersion {
-		return response, nil
+	case staleSupervisorCurrent:
+		return resp, nil
 	}
 	staleResponse, staleErr := m.call(request{Action: "down"})
 	if staleErr != nil {

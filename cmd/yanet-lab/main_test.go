@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -275,4 +276,31 @@ func TestValidatePublicFile(t *testing.T) {
 	require.NoError(t, validatePublicFile(path))
 	require.NoError(t, os.Chmod(path, 0o600))
 	require.Error(t, validatePublicFile(path))
+}
+
+func TestEnsureSSHKeyRejectsAsymmetricState(t *testing.T) {
+	directory := t.TempDir()
+	pubPath := filepath.Join(directory, "id_ed25519.pub")
+	require.NoError(t, os.WriteFile(pubPath, []byte("ssh-ed25519 AAAA"), 0o644))
+	_, err := ensureSSHKey(directory)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "private key missing")
+}
+
+func TestClassifyStaleSupervisor(t *testing.T) {
+	cases := []struct {
+		name     string
+		resp     *response
+		callErr  error
+		expected staleSupervisorDecision
+	}{
+		{name: "no supervisor", resp: nil, callErr: errors.New("connect: connection refused"), expected: staleSupervisorAbsent},
+		{name: "current version", resp: &response{Protocol: supervisorProtocolVersion}, callErr: nil, expected: staleSupervisorCurrent},
+		{name: "stale version", resp: &response{Protocol: supervisorProtocolVersion + 1}, callErr: nil, expected: staleSupervisorStale},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, classifyStaleSupervisor(tc.resp, tc.callErr))
+		})
+	}
 }
