@@ -84,10 +84,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}-${{ matrix.unbtver }}
+          key: ${{ runner.os }}-${{ matrix.unbtver }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.unbtver }}
-            ${{ runner.os }}-cargo-${{ matrix.unbtver }}
+            ${{ runner.os }}-${{ matrix.unbtver }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-${{ matrix.unbtver }}-cargo-
 
       - name: Install packaging tools
         run: |
@@ -107,9 +107,10 @@ jobs:
         with:
           path: |
             ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-${{ matrix.unbtver }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ matrix.unbtver }}
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            ${{ env.cache_name }}-${{ runner.os }}-go-
       - name: Install Go Protobuf Plugins
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest

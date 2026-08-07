@@ -36,7 +36,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-24.04
+          key: ${{ runner.os }}-24.04-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-24.04-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-24.04-cargo-
 
       - name: Install packaging tools
         run: |
@@ -59,9 +62,10 @@ jobs:
         with:
           path: |
             ${{ env.modcache }}
-          key: deb-build-24.04-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-24.04
+          key: deb-build-24.04-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
-            deb-build-24.04-${{ runner.os }}-go-24.04
+            deb-build-24.04-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            deb-build-24.04-${{ runner.os }}-go-
 
       - name: Install Go Protobuf Plugins
         run: |
