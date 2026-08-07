@@ -17,17 +17,18 @@ import (
 )
 
 type manifestRuntime struct {
-	Actual          [][]byte
-	CaptureErr      error
-	Commands        []string
-	Unfiltered      bool
-	failStep        int
-	stepCount       int
-	startYANETArgs  []string
-	failRestore     bool
-	failStartYANET  bool
-	failWaitReady   bool
-	waitReadyCalled bool
+	Actual           [][]byte
+	CaptureErr       error
+	Commands         []string
+	Unfiltered       bool
+	failStep         int
+	stepCount        int
+	startYANETArgs   []string
+	failRestore      bool
+	failStartYANET   bool
+	failWaitReady    bool
+	waitReadyCalled  bool
+	restoredSnapshot string
 }
 
 func (m *manifestRuntime) CommonConfigCommands() []string { return nil }
@@ -44,7 +45,8 @@ func (m *manifestRuntime) ExecuteCommandWithTimeout(string, time.Duration) (stri
 }
 func (m *manifestRuntime) ExecuteCommands(...string) ([]string, error) { return nil, nil }
 func (m *manifestRuntime) ResetConnections()                           {}
-func (m *manifestRuntime) RestoreClean(string) error {
+func (m *manifestRuntime) RestoreClean(snapshot string) error {
+	m.restoredSnapshot = snapshot
 	if m.failRestore {
 		return errors.New("restore failed")
 	}
@@ -159,6 +161,35 @@ func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 	require.Equal(t, want, transferred)
 }
 
+func TestRunManifestTransfersMultiChunkFiles(t *testing.T) {
+	directory := t.TempDir()
+	fixture := filepath.Join(directory, "fixture")
+	want := make([]byte, 4096*3+1)
+	for idx := range want {
+		want[idx] = byte(idx)
+	}
+	require.NoError(t, os.WriteFile(fixture, want, 0o600))
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte("version: 1\nname: files\nfiles:\n  - source: fixture\n    destination: /tmp/fixture\n"), 0o600))
+
+	runtime := &manifestRuntime{}
+	report := lab.RunManifest(runtime, manifestPath)
+	require.True(t, report.Success, "report = %#v", report)
+
+	var transferred []byte
+	for _, command := range runtime.Commands {
+		if !strings.HasPrefix(command, "echo '") {
+			continue
+		}
+		encoded := strings.TrimPrefix(command, "echo '")
+		encoded = strings.TrimSuffix(encoded, "' | base64 -d >> '/tmp/fixture'")
+		chunk, err := base64.StdEncoding.DecodeString(encoded)
+		require.NoError(t, err)
+		transferred = append(transferred, chunk...)
+	}
+	require.Equal(t, want, transferred)
+}
+
 func TestRunManifestRejectsOversizedFiles(t *testing.T) {
 	directory := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(directory, "fixture"), make([]byte, 64*1024+1), 0o600))
@@ -209,6 +240,41 @@ func TestRunManifestComparesMalformedIPFramesExactly(t *testing.T) {
 
 	require.False(t, report.Success)
 	require.Contains(t, report.Results[0].Error, "packet mismatch")
+}
+
+func TestRunManifestEvaluatesExpectedPacket(t *testing.T) {
+	tests := []struct {
+		name       string
+		actual     [][]byte
+		captureErr error
+		wantOK     bool
+		wantError  string
+	}{
+		{name: "match", actual: [][]byte{{0, 1, 2, 3}}, wantOK: true},
+		{name: "capture error", captureErr: errors.New("capture timeout"), wantError: "capture timeout"},
+		{name: "too many actual", actual: [][]byte{{0, 1}, {2, 3}}, wantError: "exactly one"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			expected := []byte{0, 1, 2, 3}
+			writePacket(t, filepath.Join(directory, "input.pcap"), expected)
+			writePacket(t, filepath.Join(directory, "expected.pcap"), expected)
+			manifestPath := filepath.Join(directory, "manifest.yaml")
+			manifest := "version: 1\nname: probe\nprobes:\n  - name: packet\n    ingress: 0\n    egress: 1\n    send: {pcap: input.pcap}\n    expect: {pcap: expected.pcap}\n"
+			require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+			runtime := &manifestRuntime{Actual: tc.actual, CaptureErr: tc.captureErr}
+			report := lab.RunManifest(runtime, manifestPath)
+
+			if tc.wantOK {
+				require.True(t, report.Success, "expected success, got %#v", report)
+			} else {
+				require.False(t, report.Success)
+				require.Contains(t, report.Results[0].Error, tc.wantError)
+			}
+		})
+	}
 }
 
 func TestRunManifestRejectsNonEthernetPCAP(t *testing.T) {
@@ -385,6 +451,7 @@ func TestRunManifestBootCallsStartYANET(t *testing.T) {
 	}
 	require.Equal(t, "interfaces: []", runtime.startYANETArgs[0], "dataplane config forwarded to StartYANET")
 	require.Equal(t, "route: {configs: {}}", runtime.startYANETArgs[1], "controlplane config forwarded to StartYANET")
+	require.Equal(t, "preyanet", runtime.restoredSnapshot, "boot must restore pre-YANET snapshot, not the operator baseline")
 }
 
 func TestRunManifestBootFailsOnStartYANETError(t *testing.T) {

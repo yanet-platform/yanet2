@@ -259,10 +259,10 @@ func copySerialInput(destination io.Writer, source io.Reader) error {
 	for {
 		count, err := source.Read(buffer)
 		if count > 0 {
-			for i, value := range buffer[:count] {
+			for idx, value := range buffer[:count] {
 				if value == 0x1d {
-					if i > 0 {
-						if _, writeErr := destination.Write(buffer[:i]); writeErr != nil {
+					if idx > 0 {
+						if _, writeErr := destination.Write(buffer[:idx]); writeErr != nil {
 							return writeErr
 						}
 					}
