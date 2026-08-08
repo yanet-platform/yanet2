@@ -58,8 +58,8 @@ sudo apt update
 sudo apt install golang-go
 
 # Install Go modules
-GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
 
 # Install Rust (self update disable need only for rustup installed from apt)
 rustup set auto-self-update disable
@@ -81,8 +81,8 @@ https_proxy=socks5://127.0.0.1:8080 /home/moonug/rustup-init
 #+end_src
 
 #+begin_src shell
-https_proxy=socks5://127.0.0.1:8080 GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-https_proxy=socks5://127.0.0.1:8080 GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+https_proxy=socks5://127.0.0.1:8080 GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+https_proxy=socks5://127.0.0.1:8080 GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
 #+end_src
 #+begin_src shell
 tar xf just-1.40.0-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin/

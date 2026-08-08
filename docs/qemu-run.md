@@ -224,8 +224,8 @@ apt-get install -y \
 apt-get install -y golang-go
 
 # Install Go modules
-GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
 
 # Install Rust (self update disable need only for rustup installed from apt)
 rustup set auto-self-update disable

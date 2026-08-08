@@ -23,6 +23,7 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/go-modcache/**"
       - ".github/actions/protoc-plugins/**"
+      - "tests/functional/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -46,6 +47,7 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/go-modcache/**"
       - ".github/actions/protoc-plugins/**"
+      - "tests/functional/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.

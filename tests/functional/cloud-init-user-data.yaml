@@ -167,12 +167,6 @@ runcmd:
     systemctl daemon-reload
     systemctl disable getty.target
     systemctl enable serial-getty@ttyS0.service
-  # Configure Go environment
-  - mkdir -p /root/go
-  - export GOPATH=/root/go
-  - export PATH=$PATH:$GOPATH/bin
-  - GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-  - GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
   # Configure Rust
   - rustup set auto-self-update disable
   - rustup install stable
