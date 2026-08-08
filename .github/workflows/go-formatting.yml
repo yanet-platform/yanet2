@@ -5,10 +5,14 @@ on:
     branches: [main, master]
     paths:
       - "controlplane/**/*.go"
+      - "go.mod"
+      - ".github/workflows/go-formatting.yml"
   pull_request:
     branches: [main, master]
     paths:
       - "controlplane/**/*.go"
+      - "go.mod"
+      - ".github/workflows/go-formatting.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -21,12 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # gofmt only reformats source text. It resolves no imports and never
+      # touches GOMODCACHE, so this job needs no module cache.
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
-          cache: true
-          cache-dependency-path: controlplane/go.sum
+          go-version-file: go.mod
+          cache: false
 
       - name: Check gofmt
         run: |
