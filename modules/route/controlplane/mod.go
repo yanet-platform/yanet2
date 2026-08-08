@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	agentName = "route"
+	moduleType = "route"
+	agentName  = moduleType
 )
 
 // Option configures the RouteModule constructor.
@@ -99,7 +100,7 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 
 // Name returns the module name.
 func (m *RouteModule) Name() string {
-	return agentName
+	return moduleType
 }
 
 // Endpoint returns the gRPC endpoint for the route module shim.

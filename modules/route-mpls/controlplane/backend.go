@@ -59,5 +59,5 @@ func (m *backend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHand
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(name)
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }

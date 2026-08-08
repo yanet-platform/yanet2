@@ -73,6 +73,9 @@ func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
 }
 
 const (
+	// moduleType is the registered shared-memory type for fwstate configs.
+	moduleType = "fwstate"
+
 	// defaultListEntriesBatchSize is the batch size used when the caller
 	// sends zero in the request.
 	defaultListEntriesBatchSize uint32 = 100
@@ -433,7 +436,7 @@ func (m *FWStateService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
 
-	if err := m.agent.DeleteModuleConfig(name); err != nil {
+	if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
 		return nil, status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
 	}
 

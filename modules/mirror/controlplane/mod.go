@@ -10,7 +10,10 @@ import (
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
 
-const agentName = "mirror"
+const (
+	moduleType = "mirror"
+	agentName  = moduleType
+)
 
 // Option configures the MirrorModule constructor.
 type Option func(*moduleOptions)
@@ -77,7 +80,7 @@ func NewMirrorModule(cfg *Config, options ...Option) (*MirrorModule, error) {
 }
 
 func (m *MirrorModule) Name() string {
-	return agentName
+	return moduleType
 }
 
 func (m *MirrorModule) Endpoint() string {

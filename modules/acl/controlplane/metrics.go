@@ -87,7 +87,7 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 		return []*commonpb.Metric{}, nil
 	}
 
-	positions := dpConfig.AllModulePositions("acl")
+	positions := dpConfig.AllModulePositions(moduleType)
 
 	names, read := metrics.Query(tags,
 		metrics.WithStructuralCounters(aclStructuralCounters),
@@ -114,7 +114,7 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 				pos.Pipeline,
 				pos.Function,
 				pos.Chain,
-				"acl",
+				moduleType,
 				configName,
 				names,
 			)

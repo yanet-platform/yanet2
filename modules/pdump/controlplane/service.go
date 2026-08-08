@@ -22,7 +22,10 @@ import (
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
-const errMsgConfigNameRequired = "module config name is required"
+const (
+	errMsgConfigNameRequired = "module config name is required"
+	moduleType               = "pdump"
+)
 
 // PdumpService provides packet capture functionality through a gRPC interface.
 // It manages packet capture configurations and ring buffers.
@@ -249,7 +252,7 @@ func (m *PdumpService) DeleteConfig(
 
 	// Delete the module config from the data plane if it exists.
 	if config.FFIModule != nil {
-		if err := m.agent.DeleteModuleConfig(name); err != nil {
+		if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 		}
 		config.Free()

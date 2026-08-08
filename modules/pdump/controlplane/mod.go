@@ -66,7 +66,7 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentAttach("pdump", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentAttach(moduleType, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -83,7 +83,7 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 }
 
 func (m *PdumpModule) Name() string {
-	return "pdump"
+	return moduleType
 }
 
 func (m *PdumpModule) Endpoint() string {

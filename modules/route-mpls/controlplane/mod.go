@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	agentName = "route-mpls"
+	moduleType = "route-mpls"
+	agentName  = moduleType
 )
 
 // Option configures the RouteMPLSModule constructor.
@@ -81,7 +82,7 @@ func NewRouteMPLSModule(cfg *Config, options ...Option) (*RouteMPLSModule, error
 
 // Name returns the module name.
 func (m *RouteMPLSModule) Name() string {
-	return agentName
+	return moduleType
 }
 
 // Endpoint returns the gRPC endpoint for the route-mpls module.

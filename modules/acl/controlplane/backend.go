@@ -35,7 +35,7 @@ func (m *backend) UpdateModule(handle ModuleHandle) error {
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(name)
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }
 
 func (m *backend) MemoryBytes() uint64 {

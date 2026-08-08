@@ -316,8 +316,8 @@ func (m *Agent) DeletePipeline(name string) error {
 	return nil
 }
 
-func (m *Agent) DeleteModuleConfig(configName string) error {
-	cTypeName := C.CString(m.name)
+func (m *Agent) DeleteModuleConfig(moduleType, configName string) error {
+	cTypeName := C.CString(moduleType)
 	defer C.free(unsafe.Pointer(cTypeName))
 
 	cConfigName := C.CString(configName)
@@ -331,7 +331,12 @@ func (m *Agent) DeleteModuleConfig(configName string) error {
 		&cErr,
 	)
 	if result != 0 {
-		return fmt.Errorf("failed to delete module config %q: %w", configName, cerrors.FromC(unsafe.Pointer(cErr)))
+		return fmt.Errorf(
+			"failed to delete module config type %q name %q: %w",
+			moduleType,
+			configName,
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	return nil
 }

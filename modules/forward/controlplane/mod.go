@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	agentName   = "forward"
+	moduleType  = "forward"
+	agentName   = moduleType
 	serviceName = "modules.forward.controlplane.forwardpb.v1.ForwardService"
 )
 
@@ -83,7 +84,7 @@ func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
 }
 
 func (m *ForwardModule) Name() string {
-	return agentName
+	return moduleType
 }
 
 func (m *ForwardModule) Endpoint() string {

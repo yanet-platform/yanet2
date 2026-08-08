@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	agentName   = "blackhole"
 	moduleName  = "blackhole"
+	agentName   = moduleName
 	serviceName = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService"
 )
 

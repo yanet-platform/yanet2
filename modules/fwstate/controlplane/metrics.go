@@ -124,7 +124,7 @@ func (m *FWStateService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]
 		return []*commonpb.Metric{}, nil
 	}
 
-	positions := dpConfig.AllModulePositions("fwstate")
+	positions := dpConfig.AllModulePositions(moduleType)
 
 	names, read := metrics.Query(tags,
 		metrics.WithStructuralCounters(fwstateStructuralCounters),
@@ -150,7 +150,7 @@ func (m *FWStateService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]
 				pos.Pipeline,
 				pos.Function,
 				pos.Chain,
-				"fwstate",
+				moduleType,
 				configName,
 				names,
 			)

@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	agentName   = "acl"
+	moduleType  = "acl"
+	agentName   = moduleType
 	serviceName = "modules.acl.controlplane.aclpb.v1.ACLService"
 )
 
@@ -107,7 +108,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 }
 
 func (m *ACLModule) Name() string {
-	return "acl"
+	return moduleType
 }
 
 func (m *ACLModule) Endpoint() string {

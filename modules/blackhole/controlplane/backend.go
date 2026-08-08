@@ -36,5 +36,5 @@ func (m *backend) UpdateModule(name string) (ModuleHandle, error) {
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(name)
+	return m.agent.DeleteModuleConfig(moduleName, name)
 }

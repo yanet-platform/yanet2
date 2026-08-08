@@ -154,14 +154,14 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(name)
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }
 
 func (m *backend) ModuleCounters(name string, counterNames []string) []CounterView {
 	dpConfig := m.agent.DPConfig()
 
 	var views []CounterView
-	for pos := range dpConfig.AllModulePositions(agentName) {
+	for pos := range dpConfig.AllModulePositions(moduleType) {
 		if pos.ModuleName != name {
 			continue
 		}
@@ -171,7 +171,7 @@ func (m *backend) ModuleCounters(name string, counterNames []string) []CounterVi
 			pos.Pipeline,
 			pos.Function,
 			pos.Chain,
-			agentName,
+			moduleType,
 			name,
 			counterNames,
 		)

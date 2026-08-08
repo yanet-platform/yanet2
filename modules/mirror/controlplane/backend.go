@@ -39,5 +39,5 @@ func (m *backend) UpdateModule(name string, rules []cmirror.MirrorRule) (ModuleH
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(name)
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }
