@@ -11,6 +11,16 @@ export DEB_LDFLAGS_MAINT_APPEND = -fno-lto
 # Enable all hardening options
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
+# Pin the DWARF source path so it does not carry the package version.
+#
+# Ubuntu's fixfilepath feature maps the build directory to
+# /usr/src/<source>-<version>, and the CI build script gives every commit a
+# distinct +dev version. ccache hashes that mapped directory into both its
+# manifest and result keys, so a version-bearing path makes every key unique
+# and no cache entry is ever reused. Turning the feature off instead would
+# leave a relative path, which DWARF forbids for DW_AT_comp_dir.
+export DEB_BUILD_DEBUGPATH = /usr/src/yanet2
+
 # Set parallel build options
 export DEB_BUILD_OPTIONS = parallel=$(shell nproc)
 

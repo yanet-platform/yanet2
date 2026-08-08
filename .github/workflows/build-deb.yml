@@ -65,7 +65,6 @@ jobs:
           key: ${{ runner.os }}-deb-ccache-${{ matrix.unbtver }}
           max-size: 2G
           verbose: 2
-          create-symlink: true
 
       - name: update apt (act hack)
         if: ${{ env.ACT }}
