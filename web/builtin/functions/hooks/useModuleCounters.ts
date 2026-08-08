@@ -40,7 +40,7 @@ export const useModuleCounters = (
 
         try {
             const response = await API.counters.byTags({
-                tags: [{ key: 'module_type', value: '*' }],
+                tags: [{ key: 'kind', value: 'module' }],
                 query: ['rx'],
             });
             const grouped = groupCounterPacketsAndBytes(

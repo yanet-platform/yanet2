@@ -140,7 +140,7 @@ export const useDeviceCounters = (
             const response = await API.counters.byTags({
                 tags: [
                     { key: 'device', value: '*' },
-                    { key: 'pipeline', value: '' },
+                    { key: 'kind', value: 'device' },
                 ],
                 query: DEVICE_COUNTER_FIELDS.map(({ name }) => name),
             });

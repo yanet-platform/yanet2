@@ -1612,10 +1612,13 @@ yanet_get_module_counters(
 		{.key = "function", .value = function_name},
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name}
+		{.key = "module_name", .value = module_name},
+		// Select module-kind storages only; relation counters live on
+		// module_object_link-kind storages that share these six tags.
+		{.key = "kind", .value = "module"}
 	};
 	return yanet_get_counters_by_tags(
-		dp_config, tags, 6, query, query_count, NULL
+		dp_config, tags, 7, query, query_count, NULL
 	);
 }
 
@@ -1887,7 +1890,7 @@ yanet_get_chain_counters(
 		{.key = "pipeline", .value = pipeline_name},
 		{.key = "function", .value = function_name},
 		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = ""}
+		{.key = "kind", .value = "chain"}
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 5, NULL, -1, NULL);
 }
@@ -1903,7 +1906,7 @@ yanet_get_function_counters(
 		{.key = "device", .value = device_name},
 		{.key = "pipeline", .value = pipeline_name},
 		{.key = "function", .value = function_name},
-		{.key = "chain", .value = ""}
+		{.key = "kind", .value = "function"}
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 4, NULL, -1, NULL);
 }
@@ -1917,7 +1920,7 @@ yanet_get_pipeline_counters(
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
 		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = ""}
+		{.key = "kind", .value = "pipeline"}
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 3, NULL, -1, NULL);
 }
@@ -1928,7 +1931,7 @@ yanet_get_device_counters(
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = ""}
+		{.key = "kind", .value = "device"}
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 2, NULL, -1, NULL);
 }

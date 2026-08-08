@@ -50,7 +50,7 @@ export const useFunctionRefCounters = (
                     tags: [
                         { key: 'pipeline', value: pipelineName },
                         { key: 'function', value: '*' },
-                        { key: 'chain', value: '' },
+                        { key: 'kind', value: 'function' },
                     ],
                     query: ['input'],
                 });
@@ -72,7 +72,7 @@ export const useFunctionRefCounters = (
                 const response = await API.counters.byTags({
                     tags: [
                         { key: 'pipeline', value: pipelineName },
-                        { key: 'function', value: '' },
+                        { key: 'kind', value: 'pipeline' },
                     ],
                     query: ['input'],
                 });

@@ -321,24 +321,26 @@ fn by_tags_request(tags: Vec<(&'static str, String)>) -> CountersByTagsRequest {
 fn tags_request(mode: Option<ModeCmd>, by_tags: ByTagsCmd) -> CountersByTagsRequest {
     match mode {
         None => by_tags.into(),
-        Some(ModeCmd::Device(cmd)) => by_tags_request(vec![("device", cmd.device_name), ("pipeline", String::new())]),
+        Some(ModeCmd::Device(cmd)) => {
+            by_tags_request(vec![("device", cmd.device_name), ("kind", "device".to_string())])
+        }
         Some(ModeCmd::Pipeline(cmd)) => by_tags_request(vec![
             ("device", cmd.device_name),
             ("pipeline", cmd.pipeline_name),
-            ("function", String::new()),
+            ("kind", "pipeline".to_string()),
         ]),
         Some(ModeCmd::Function(cmd)) => by_tags_request(vec![
             ("device", cmd.device_name),
             ("pipeline", cmd.pipeline_name),
             ("function", cmd.function_name),
-            ("chain", String::new()),
+            ("kind", "function".to_string()),
         ]),
         Some(ModeCmd::Chain(cmd)) => by_tags_request(vec![
             ("device", cmd.device_name),
             ("pipeline", cmd.pipeline_name),
             ("function", cmd.function_name),
             ("chain", cmd.chain_name),
-            ("module_type", String::new()),
+            ("kind", "chain".to_string()),
         ]),
         Some(ModeCmd::Module(cmd)) => by_tags_request(vec![
             ("device", cmd.device_name),
@@ -347,6 +349,7 @@ fn tags_request(mode: Option<ModeCmd>, by_tags: ByTagsCmd) -> CountersByTagsRequ
             ("chain", cmd.chain_name),
             ("module_type", cmd.module_type),
             ("module_name", cmd.module_name),
+            ("kind", "module".to_string()),
         ]),
         Some(ModeCmd::Perf(..)) | Some(ModeCmd::Workers) | Some(ModeCmd::Ports) => unreachable!(),
     }

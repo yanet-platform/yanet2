@@ -161,7 +161,7 @@ const useTagCounterSeries = (
 
 const PIPELINE_TAGS: CounterTag[] = [
     { key: 'pipeline', value: '*' },
-    { key: 'function', value: '' },
+    { key: 'kind', value: 'pipeline' },
 ];
 
 /**
@@ -176,7 +176,7 @@ export const usePipelineCounters = (
 
 const FUNCTION_TAGS: CounterTag[] = [
     { key: 'function', value: '*' },
-    { key: 'chain', value: '' },
+    { key: 'kind', value: 'function' },
 ];
 
 /**

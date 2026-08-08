@@ -63,6 +63,7 @@ export const useModuleRuleCounters = <T extends { id: string }>(
                 tags: [
                     { key: 'module_type', value: moduleType },
                     { key: 'module_name', value: configName },
+                    { key: 'kind', value: 'module' },
                 ],
                 query: counterNames,
             });

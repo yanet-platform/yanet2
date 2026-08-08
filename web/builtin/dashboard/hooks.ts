@@ -24,7 +24,7 @@ export const useWorkerCount = (deviceNames: string[]): number | null => {
                 const resp = await API.counters.byTags({
                     tags: [
                         { key: 'device', value: firstDevice },
-                        { key: 'pipeline', value: '' },
+                        { key: 'kind', value: 'device' },
                     ],
                     query: ['input_rx'],
                 });
