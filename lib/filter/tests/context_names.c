@@ -22,6 +22,7 @@ FILTER_COMPILER_DECLARE(sign_small_compile, device, vlan, port_src, port_dst);
 FILTER_COMPILER_DECLARE(
 	sign_large_compile, device, vlan, port_src, port_dst, proto_range
 );
+FILTER_COMPILER_DECLARE(sign_net6_compile, net6_src, net6_dst);
 
 #define CTX_NAMES_ARENA_SIZE (1 << 24)
 
@@ -95,6 +96,7 @@ static int
 build_filter(
 	const struct filter_compiler *compiler,
 	struct memory_context *mctx,
+	const char *name,
 	struct filter *filter
 ) {
 	struct filter_rule_builder b1;
@@ -115,7 +117,46 @@ build_filter(
 
 	const struct filter_rule *rule_ptrs[2] = {&r1, &r2};
 
-	return filter_init(filter, compiler, rule_ptrs, 2, mctx, NULL);
+	return filter_init(filter, compiler, rule_ptrs, 2, mctx, name, NULL);
+}
+
+static struct net6
+net6_cidr(const uint8_t addr[NET6_LEN], int prefix_len) {
+	struct net6 net;
+	memcpy(net.addr, addr, NET6_LEN);
+	memset(net.mask, 0, NET6_LEN);
+	for (int idx = 0; idx < prefix_len; ++idx) {
+		net.mask[idx / 8] |= 0x80 >> (idx % 8);
+	}
+	return net;
+}
+
+// Builds a net6_src/net6_dst filter from real IPv6 prefixes, driving the
+// hi/lo lpm split inside init_net6 that collect_net6_range feeds.
+static int
+build_net6_filter(
+	struct memory_context *mctx, const char *name, struct filter *filter
+) {
+	const uint8_t dst_prefix[NET6_LEN] = {0xfe, 0x80};
+	const uint8_t src_prefix[NET6_LEN] = {0x2a, 0x02, 0x06, 0xb8};
+
+	struct filter_rule_builder b1;
+	builder_init(&b1);
+	builder_add_net6_dst(&b1, net6_cidr(dst_prefix, 64));
+	builder_add_net6_src(&b1, net6_cidr(src_prefix, 32));
+	struct filter_rule r1 = build_rule(&b1);
+
+	struct filter_rule_builder b2;
+	builder_init(&b2);
+	builder_add_net6_dst(&b2, net6_cidr(dst_prefix, 128));
+	builder_add_net6_src(&b2, net6_cidr(src_prefix, 48));
+	struct filter_rule r2 = build_rule(&b2);
+
+	const struct filter_rule *rule_ptrs[2] = {&r1, &r2};
+
+	return filter_init(
+		filter, sign_net6_compile, rule_ptrs, 2, mctx, name, NULL
+	);
 }
 
 // Shared per-case fixture: a root memory_context over a fresh block
@@ -166,7 +207,7 @@ test_leaf_named_after_attribute(void *arena) {
 
 	struct filter filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(sign_small_compile, &fx.mctx, &filter),
+		build_filter(sign_small_compile, &fx.mctx, "filter", &filter),
 		"failed to build small filter"
 	);
 
@@ -199,13 +240,23 @@ test_leaf_names_survive_signature_change(void *arena) {
 
 	struct filter small_filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(sign_small_compile, &fx.mctx, &small_filter),
+		build_filter(
+			sign_small_compile,
+			&fx.mctx,
+			"small_filter",
+			&small_filter
+		),
 		"failed to build small filter"
 	);
 
 	struct filter large_filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(sign_large_compile, &fx.mctx, &large_filter),
+		build_filter(
+			sign_large_compile,
+			&fx.mctx,
+			"large_filter",
+			&large_filter
+		),
 		"failed to build large filter"
 	);
 
@@ -258,7 +309,7 @@ check_no_sibling_collision(
 
 	struct filter filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(compiler, &fx.mctx, &filter),
+		build_filter(compiler, &fx.mctx, "filter", &filter),
 		"failed to build %s filter",
 		label
 	);
@@ -304,7 +355,7 @@ test_leaf_parents_registry_and_payload(void *arena) {
 
 	struct filter filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(sign_small_compile, &fx.mctx, &filter),
+		build_filter(sign_small_compile, &fx.mctx, "filter", &filter),
 		"failed to build small filter"
 	);
 
@@ -350,7 +401,7 @@ test_no_index_shaped_names(void *arena) {
 
 	struct filter filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(sign_large_compile, &fx.mctx, &filter),
+		build_filter(sign_large_compile, &fx.mctx, "filter", &filter),
 		"failed to build large filter"
 	);
 
@@ -378,7 +429,7 @@ test_teardown_leaves_nothing_behind(void *arena) {
 
 	struct filter filter;
 	TEST_ASSERT_SUCCESS(
-		build_filter(sign_large_compile, &fx.mctx, &filter),
+		build_filter(sign_large_compile, &fx.mctx, "filter", &filter),
 		"failed to build large filter"
 	);
 
@@ -389,6 +440,73 @@ test_teardown_leaves_nothing_behind(void *arena) {
 	);
 	TEST_ASSERT_SUCCESS(
 		fixture_check_balance(&fx), "leak freeing the large filter"
+	);
+	fixture_fini(&fx);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a net6_src/net6_dst filter has no sibling collision between
+// the hi and lo lpm contexts collect_net6_range creates for each attribute.
+static int
+test_net6_no_sibling_collision(void *arena) {
+	struct ctx_names_fixture fx;
+	TEST_ASSERT_SUCCESS(
+		fixture_init(&fx, arena), "failed to init root memory context"
+	);
+
+	struct filter filter;
+	TEST_ASSERT_SUCCESS(
+		build_net6_filter(&fx.mctx, "filter", &filter),
+		"failed to build net6 filter"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		no_duplicate_siblings(&filter.memory_context),
+		"sibling name collision under the net6 filter"
+	);
+
+	filter_free(&filter, sign_net6_compile);
+	TEST_ASSERT_SUCCESS(
+		fixture_check_balance(&fx), "leak freeing the net6 filter"
+	);
+	fixture_fini(&fx);
+	return TEST_SUCCESS;
+}
+
+// Verifies that two filters built under one shared parent context, as ACL
+// and friends do for their per-signature filters, do not collide as long as
+// filter_init is given distinct names.
+static int
+test_two_filters_one_context(void *arena) {
+	struct ctx_names_fixture fx;
+	TEST_ASSERT_SUCCESS(
+		fixture_init(&fx, arena), "failed to init root memory context"
+	);
+
+	struct filter filter_a;
+	TEST_ASSERT_SUCCESS(
+		build_filter(
+			sign_small_compile, &fx.mctx, "filter_a", &filter_a
+		),
+		"failed to build filter_a"
+	);
+	struct filter filter_b;
+	TEST_ASSERT_SUCCESS(
+		build_filter(
+			sign_small_compile, &fx.mctx, "filter_b", &filter_b
+		),
+		"failed to build filter_b"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		no_duplicate_siblings(&fx.mctx),
+		"sibling name collision between filter_a and filter_b"
+	);
+
+	filter_free(&filter_b, sign_small_compile);
+	filter_free(&filter_a, sign_small_compile);
+	TEST_ASSERT_SUCCESS(
+		fixture_check_balance(&fx), "leak freeing the two filters"
 	);
 	fixture_fini(&fx);
 	return TEST_SUCCESS;
@@ -413,6 +531,8 @@ main() {
 		{"no_index_shaped_names", test_no_index_shaped_names},
 		{"teardown_leaves_nothing_behind",
 		 test_teardown_leaves_nothing_behind},
+		{"net6_no_sibling_collision", test_net6_no_sibling_collision},
+		{"two_filters_one_context", test_two_filters_one_context},
 	};
 
 	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {

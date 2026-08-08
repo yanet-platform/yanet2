@@ -97,14 +97,14 @@ nat64_module_config_data_init(
 
 	// Initialize LPM structures
 	LOG(DEBUG, "Initializing v4_to_v6 LPM");
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
+	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
 		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
 		goto error_lpm_v4;
 	}
 	LOG(DEBUG, "v4_to_v6 LPM initialized successfully");
 
 	LOG(DEBUG, "Initializing v6_to_v4 LPM");
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
+	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
 		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
 		goto error_lpm_v6;
 	}
@@ -112,7 +112,9 @@ nat64_module_config_data_init(
 
 	// Initialize v6 prefixes LPM
 	LOG(DEBUG, "Initializing v6_prefixes LPM");
-	if (lpm_init(&config->prefixes.v6_prefixes, memory_context)) {
+	if (lpm_init(
+		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
+	    )) {
 		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
 		goto error_lpm_prefixes;
 	}

@@ -76,10 +76,10 @@ decap_module_config_data_init(
 	struct decap_module_config *config,
 	struct memory_context *memory_context
 ) {
-	if (lpm_init(&config->prefixes4, memory_context)) {
+	if (lpm_init(&config->prefixes4, memory_context, "prefixes4")) {
 		return -1;
 	}
-	if (lpm_init(&config->prefixes6, memory_context)) {
+	if (lpm_init(&config->prefixes6, memory_context, "prefixes6")) {
 		goto error_lpm_v6;
 	}
 

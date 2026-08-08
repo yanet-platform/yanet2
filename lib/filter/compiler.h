@@ -125,6 +125,7 @@ filter_init(
 	const struct filter_rule **rules,
 	uint32_t rule_count,
 	struct memory_context *memory_context,
+	const char *name,
 	yanet_error **err
 ) {
 	if (filter_compiler->lookup_count == 0) {
@@ -172,7 +173,7 @@ filter_init(
 	memset(filter, 0, sizeof(struct filter));
 
 	if (memory_context_init_from(
-		    &filter->memory_context, memory_context, "filter"
+		    &filter->memory_context, memory_context, name
 	    )) {
 		yanet_error_add(
 			err,

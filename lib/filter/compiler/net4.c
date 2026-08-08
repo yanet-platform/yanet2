@@ -134,7 +134,7 @@ collect_net4_values(
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context)) {
+	if (lpm_init(lpm, memory_context, "lpm")) {
 		goto error_lpm;
 	}
 	struct range_index range_index;

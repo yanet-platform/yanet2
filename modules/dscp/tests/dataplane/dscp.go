@@ -9,6 +9,8 @@ package dscp_test
 #include "lib/dataplane/pipeline/econtext.h"
 #include "modules/dscp/dataplane/config.h"
 
+#include <stdlib.h>
+
 uint8_t dscp_mark_never = DSCP_MARK_NEVER;
 uint8_t dscp_mark_default = DSCP_MARK_DEFAULT;
 uint8_t dscp_mark_always = DSCP_MARK_ALWAYS;
@@ -57,8 +59,13 @@ func buildLPMs(
 	lpm4 *C.struct_lpm,
 	lpm6 *C.struct_lpm,
 ) {
-	C.lpm_init(lpm4, memCtx)
-	C.lpm_init(lpm6, memCtx)
+	lpm4Name := C.CString("lpm_v4")
+	C.lpm_init(lpm4, memCtx, lpm4Name)
+	C.free(unsafe.Pointer(lpm4Name))
+
+	lpm6Name := C.CString("lpm_v6")
+	C.lpm_init(lpm6, memCtx, lpm6Name)
+	C.free(unsafe.Pointer(lpm6Name))
 
 	for _, prefix := range prefixes {
 		if prefix.Addr().Is4() {

@@ -121,8 +121,10 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 }
 
 static inline int
-lpm_init(struct lpm *lpm, struct memory_context *memory_context) {
-	memory_context_init_from(&lpm->memory_context, memory_context, "lpm");
+lpm_init(
+	struct lpm *lpm, struct memory_context *memory_context, const char *name
+) {
+	memory_context_init_from(&lpm->memory_context, memory_context, name);
 	lpm->pages = NULL;
 	lpm->page_count = 0;
 	return lpm_new_page(lpm, NULL);

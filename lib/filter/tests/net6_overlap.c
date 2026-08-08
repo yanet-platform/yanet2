@@ -101,7 +101,7 @@ main() {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net6_compile, rule_ptrs, 3, &mctx, NULL
+		&filter, sign_net6_compile, rule_ptrs, 3, &mctx, "filter", NULL
 	);
 	assert(res == 0);
 

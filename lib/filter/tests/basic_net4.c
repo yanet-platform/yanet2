@@ -132,7 +132,13 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	// Initialize filter with all 20 rules
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net4_compile, rule_ptrs, 20, &memory_context, NULL
+		&filter,
+		sign_net4_compile,
+		rule_ptrs,
+		20,
+		&memory_context,
+		"filter",
+		NULL
 	);
 	assert(res == 0);
 
@@ -201,6 +207,7 @@ main() {
 		&action_ptr,
 		1,
 		&memory_context,
+		"filter",
 		NULL
 	);
 	assert(res == 0);
@@ -245,6 +252,7 @@ main() {
 		&action2_ptr,
 		1,
 		&memory_context,
+		"filter",
 		NULL
 	);
 	assert(res == 0);

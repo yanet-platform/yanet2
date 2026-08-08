@@ -604,6 +604,7 @@ main(int argc, char **argv) {
 			rule_ptrs,
 			config.num_rules,
 			&memory_context,
+			"filter",
 			NULL
 		);
 		break;
@@ -614,6 +615,7 @@ main(int argc, char **argv) {
 			rule_ptrs,
 			config.num_rules,
 			&memory_context,
+			"filter",
 			NULL
 		);
 		break;
@@ -624,6 +626,7 @@ main(int argc, char **argv) {
 			rule_ptrs,
 			config.num_rules,
 			&memory_context,
+			"filter",
 			NULL
 		);
 		break;

@@ -351,6 +351,7 @@ acl_module_init_l2(
 		filter_rule_ptrs,
 		acl_rule_count,
 		&cp_module->memory_context,
+		"filter_vlan",
 		err
 	);
 	if (rc) {
@@ -385,6 +386,7 @@ acl_module_init_ip4(
 		filter_rule_ptrs,
 		acl_rule_count,
 		&cp_module->memory_context,
+		"filter_ip4",
 		err
 	);
 	if (rc) {
@@ -419,6 +421,7 @@ acl_module_init_ip4_port(
 		filter_rule_ptrs,
 		acl_rule_count,
 		&cp_module->memory_context,
+		"filter_ip4_port",
 		err
 	);
 	if (rc) {
@@ -453,6 +456,7 @@ acl_module_init_ip6(
 		filter_rule_ptrs,
 		acl_rule_count,
 		&cp_module->memory_context,
+		"filter_ip6",
 		err
 	);
 	if (rc) {
@@ -487,6 +491,7 @@ acl_module_init_ip6_port(
 		filter_rule_ptrs,
 		acl_rule_count,
 		&cp_module->memory_context,
+		"filter_ip6_port",
 		err
 	);
 	if (rc) {

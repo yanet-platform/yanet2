@@ -128,10 +128,10 @@ route_module_config_data_init(
 	struct route_module_config *config,
 	struct memory_context *memory_context
 ) {
-	if (lpm_init(&config->lpm_v4, memory_context)) {
+	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
 		return -1;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context)) {
+	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
 		lpm_free(&config->lpm_v4);
 		return -1;
 	}

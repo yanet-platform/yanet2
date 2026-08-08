@@ -71,7 +71,7 @@ test_overlapping_prefixes(void) {
 	memory_context_init(&mctx, "lpm_overlap", &ba);
 
 	struct lpm tree;
-	if (lpm_init(&tree, &mctx)) {
+	if (lpm_init(&tree, &mctx, "lpm")) {
 		free(arena);
 		return -1;
 	}
@@ -127,7 +127,7 @@ main(int argc, char **argv) {
 	memory_context_init(&mctx, "lpm", &ba);
 
 	struct lpm lpm;
-	if (lpm_init(&lpm, &mctx)) {
+	if (lpm_init(&lpm, &mctx, "lpm")) {
 		fprintf(stdout, "could not initialize lpm\n");
 		return -1;
 	}

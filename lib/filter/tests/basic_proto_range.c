@@ -76,6 +76,7 @@ test_proto_1(void *memory) {
 		rule_ptrs,
 		2,
 		&memory_context,
+		"filter",
 		NULL
 	);
 	assert(res == 0);

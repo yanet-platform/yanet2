@@ -88,7 +88,13 @@ check_single_attribute(void *memory) {
 	// setup filter
 	struct filter filter;
 	int init_result = filter_init(
-		&filter, sign_port_src_compile, rules, 3, &memory_context, NULL
+		&filter,
+		sign_port_src_compile,
+		rules,
+		3,
+		&memory_context,
+		"filter",
+		NULL
 	);
 	assert(init_result == 0);
 

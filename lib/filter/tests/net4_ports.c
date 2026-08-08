@@ -86,6 +86,7 @@ test(void *memory) {
 		action_ptrs,
 		2,
 		&memory_context,
+		"filter",
 		NULL
 	);
 	assert(res == 0);

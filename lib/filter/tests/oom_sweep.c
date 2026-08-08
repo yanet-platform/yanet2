@@ -206,7 +206,7 @@ sweep_compile(
 	filter_test_oom_armed = 1;
 
 	int rc = filter_init(
-		filter, compiler, rule_ptrs, rule_count, mctx, NULL
+		filter, compiler, rule_ptrs, rule_count, mctx, "filter", NULL
 	);
 
 	filter_test_oom_armed = 0;

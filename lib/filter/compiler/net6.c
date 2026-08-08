@@ -64,6 +64,7 @@ collect_net6_range(
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
 	struct lpm *lpm,
+	const char *lpm_name,
 	struct range_index *ri
 ) {
 	struct range_collector collector;
@@ -102,7 +103,7 @@ collect_net6_range(
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context)) {
+	if (lpm_init(lpm, memory_context, lpm_name)) {
 		goto error_lpm;
 	}
 
@@ -710,6 +711,7 @@ init_net6(
 		    get_net6,
 		    net6_get_hi_part,
 		    &net6->hi,
+		    "lpm_hi",
 		    &ri_hi
 	    )) {
 		goto error_hi;
@@ -723,6 +725,7 @@ init_net6(
 		    get_net6,
 		    net6_get_lo_part,
 		    &net6->lo,
+		    "lpm_lo",
 		    &ri_lo
 	    )) {
 		goto error_lo;
@@ -980,6 +983,7 @@ filter_net6_share_init(
 		    get_net6,
 		    net6_get_hi_part,
 		    &out->hi,
+		    is_src ? "net6_share_src_hi" : "net6_share_dst_hi",
 		    &ri
 	    )) {
 		yanet_error_add(
@@ -998,6 +1002,7 @@ filter_net6_share_init(
 		    get_net6,
 		    net6_get_lo_part,
 		    &out->lo,
+		    is_src ? "net6_share_src_lo" : "net6_share_dst_lo",
 		    &ri
 	    )) {
 		yanet_error_add(

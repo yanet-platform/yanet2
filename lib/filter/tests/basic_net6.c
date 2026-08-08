@@ -142,7 +142,13 @@ test1(void *memory) {
 	// init filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx, NULL
+		&filter,
+		sign_net6_dst_compile,
+		rule_ptrs,
+		1,
+		&mctx,
+		"filter",
+		NULL
 	);
 	assert(res == 0);
 
@@ -293,7 +299,13 @@ test2(void *memory) {
 	// init filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx, NULL
+		&filter,
+		sign_net6_dst_compile,
+		rule_ptrs,
+		1,
+		&mctx,
+		"filter",
+		NULL
 	);
 	assert(res == 0);
 
@@ -512,7 +524,7 @@ test3(void *memory) {
 	// init filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net6_compile, rule_ptrs, 2, &mctx, NULL
+		&filter, sign_net6_compile, rule_ptrs, 2, &mctx, "filter", NULL
 	);
 	assert(res == 0);
 
@@ -718,13 +730,25 @@ test_share(void *memory) {
 
 	struct filter filter_a;
 	res = filter_init(
-		&filter_a, sign_net6_compile, rule_ptrs_a, 2, &mctx, NULL
+		&filter_a,
+		sign_net6_compile,
+		rule_ptrs_a,
+		2,
+		&mctx,
+		"filter_a",
+		NULL
 	);
 	assert(res == 0);
 
 	struct filter filter_b;
 	res = filter_init(
-		&filter_b, sign_net6_compile, rule_ptrs_b, 2, &mctx, NULL
+		&filter_b,
+		sign_net6_compile,
+		rule_ptrs_b,
+		2,
+		&mctx,
+		"filter_b",
+		NULL
 	);
 	assert(res == 0);
 

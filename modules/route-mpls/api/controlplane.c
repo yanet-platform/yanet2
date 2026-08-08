@@ -198,6 +198,7 @@ route_mpls_module_init_ip4(
 		filter_rule_ptrs,
 		route_mpls_rule_count,
 		&cp_module->memory_context,
+		"filter_ip4",
 		err
 	);
 	if (rc) {
@@ -232,6 +233,7 @@ route_mpls_module_init_ip6(
 		filter_rule_ptrs,
 		route_mpls_rule_count,
 		&cp_module->memory_context,
+		"filter_ip6",
 		err
 	);
 	if (rc) {

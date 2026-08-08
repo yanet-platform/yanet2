@@ -86,7 +86,13 @@ test_src_dst_ports(void *memory) {
 	// init filter
 	struct filter f;
 	res = filter_init(
-		&f, sign_ports_compile, action_ptrs, 2, &memory_context, NULL
+		&f,
+		sign_ports_compile,
+		action_ptrs,
+		2,
+		&memory_context,
+		"filter",
+		NULL
 	);
 	assert(res == 0);
 
@@ -133,7 +139,13 @@ src_dst_ports(void *memory) {
 
 	struct filter f;
 	res = filter_init(
-		&f, sign_ports_compile, action_ptrs, 3, &memory_context, NULL
+		&f,
+		sign_ports_compile,
+		action_ptrs,
+		3,
+		&memory_context,
+		"filter",
+		NULL
 	);
 	assert(res == 0);
 
@@ -198,7 +210,13 @@ test_any_port(void *memory) {
 
 	struct filter f;
 	res = filter_init(
-		&f, sign_ports_compile, action_ptrs, 3, &memory_context, NULL
+		&f,
+		sign_ports_compile,
+		action_ptrs,
+		3,
+		&memory_context,
+		"filter",
+		NULL
 	);
 	assert(res == 0);
 

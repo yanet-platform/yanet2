@@ -44,13 +44,15 @@ nat64_test_config(struct cp_module **cp_module) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
+	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
 		goto error_config;
 	}
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
+	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
 		goto error_lpm_v4;
 	}
-	if (lpm_init(&config->prefixes.v6_prefixes, memory_context)) {
+	if (lpm_init(
+		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
+	    )) {
 		goto error_lpm_v6;
 	}
 

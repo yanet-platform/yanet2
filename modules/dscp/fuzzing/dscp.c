@@ -36,10 +36,10 @@ dscp_test_config(struct cp_module **cp_module) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
-	if (lpm_init(&config->lpm_v4, memory_context)) {
+	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
 		goto error_lpm_v4;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context)) {
+	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
 		goto error_lpm_v6;
 	}
 
