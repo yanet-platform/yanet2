@@ -327,7 +327,7 @@ cp_config_counter_storage_registry_lookup_device(
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = ""}
+		{.key = "kind", .value = "device"}
 	};
 	return get_one(registry, tags, 2);
 }
@@ -357,10 +357,7 @@ cp_config_counter_storage_registry_lookup_pipeline(
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
 		{.key = "pipeline", .value = pipeline_name},
-		{
-			.key = "function",
-			.value = "",
-		}
+		{.key = "kind", .value = "pipeline"}
 	};
 	return get_one(registry, tags, 3);
 }
@@ -397,7 +394,7 @@ cp_config_counter_storage_registry_lookup_function(
 			.key = "function",
 			.value = function_name,
 		},
-		{.key = "chain", .value = ""}
+		{.key = "kind", .value = "function"}
 	};
 	return get_one(registry, tags, 4);
 }
@@ -438,7 +435,7 @@ cp_config_counter_storage_registry_lookup_chain(
 			.value = function_name,
 		},
 		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = ""}
+		{.key = "kind", .value = "chain"}
 	};
 	return get_one(registry, tags, 5);
 }
@@ -484,9 +481,10 @@ cp_config_counter_storage_registry_lookup_module(
 		},
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name}
+		{.key = "module_name", .value = module_name},
+		{.key = "kind", .value = "module"}
 	};
-	return get_one(registry, tags, 6);
+	return get_one(registry, tags, 7);
 }
 
 int
@@ -523,9 +521,10 @@ cp_config_counter_storage_registry_lookup_object(
 ) {
 	struct counter_tag tags[] = {
 		{.key = "object_type", .value = object_type},
-		{.key = "object_name", .value = object_name}
+		{.key = "object_name", .value = object_name},
+		{.key = "kind", .value = "object"}
 	};
-	return get_one(registry, tags, 2);
+	return get_one(registry, tags, 3);
 }
 
 int
