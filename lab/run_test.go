@@ -350,6 +350,14 @@ func TestWithoutEthernetPadding(t *testing.T) {
 		ip := []byte{0x45, 0x00, 0x00, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 		return append(header, ip...)
 	}
+	buildQinQ := func() []byte {
+		header := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+		header = append(header, 0x88, 0xa8, 0x00, 0x64) // outer VLAN (QinQ)
+		header = append(header, 0x81, 0x00, 0x00, 0x64) // inner VLAN
+		header = append(header, 0x08, 0x00)
+		ip := []byte{0x45, 0x00, 0x00, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		return append(header, ip...)
+	}
 	buildIPv6 := func() []byte {
 		header := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 		header = append(header, 0x86, 0xdd)
@@ -367,6 +375,7 @@ func TestWithoutEthernetPadding(t *testing.T) {
 		{name: "untagged ipv4", packet: buildIPv4(0), want: 34},
 		{name: "single vlan ipv4", packet: buildIPv4(1), want: 38},
 		{name: "stacked vlan ipv4", packet: buildIPv4(2), want: 42},
+		{name: "qinq ipv4", packet: buildQinQ(), want: 42},
 		{name: "ipv6", packet: buildIPv6(), want: 54},
 		{name: "short packet", packet: []byte{0, 1}, want: 2},
 	}
@@ -398,7 +407,7 @@ func TestRunManifestBootFailsOnRestoreError(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(directory, "manifest.yaml")
-	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\n"
+	manifest := "version: 1\nname: boot-test\nboot:\n  dataplane: dataplane.yaml\nsteps:\n  - name: after-boot\n    argv: [\"true\"]\n"
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -408,6 +417,7 @@ func TestRunManifestBootFailsOnRestoreError(t *testing.T) {
 	require.Len(t, report.Results, 1)
 	require.Equal(t, "boot", report.Results[0].Kind)
 	require.Contains(t, report.Results[0].Error, "restore failed")
+	require.Equal(t, 0, runtime.stepCount, "steps must not execute after boot failure")
 }
 
 func writePacketWithLinkType(t *testing.T, path string, linkType layers.LinkType, packet []byte) {

@@ -287,6 +287,14 @@ func TestEnsureSSHKeyRejectsAsymmetricState(t *testing.T) {
 	require.Contains(t, err.Error(), "private key missing")
 }
 
+func TestEnsureSSHKeyRejectsMissingPub(t *testing.T) {
+	directory := t.TempDir()
+	keyPath := filepath.Join(directory, "id_ed25519")
+	require.NoError(t, os.WriteFile(keyPath, []byte("PRIVATE KEY"), 0o600))
+	_, err := ensureSSHKey(directory)
+	require.Error(t, err)
+}
+
 func TestClassifyStaleSupervisor(t *testing.T) {
 	cases := []struct {
 		name     string
