@@ -282,7 +282,7 @@ func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
 		portID := strconv.FormatUint(uint64(port.PortID), 10)
 		for _, counter := range port.Counters {
 			metrics = append(metrics, commonpb.NewMetricCounter(
-				"yanet_port_counter_value",
+				"port_counter_value",
 				counter.Value,
 				&commonpb.Label{Name: "port_id", Value: portID},
 				&commonpb.Label{Name: "port_name", Value: port.PortName},
@@ -304,21 +304,21 @@ func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
 		}
 
 		metrics = append(metrics,
-			commonpb.NewMetricCounter("yanet_worker_iterations", worker.Iterations, labels...),
-			commonpb.NewMetricCounter("yanet_worker_rx_packets", worker.RxPackets, labels...),
-			commonpb.NewMetricCounter("yanet_worker_rx_bytes", worker.RxBytes, labels...),
-			commonpb.NewMetricCounter("yanet_worker_tx_packets", worker.TxPackets, labels...),
-			commonpb.NewMetricCounter("yanet_worker_tx_bytes", worker.TxBytes, labels...),
-			commonpb.NewMetricCounter("yanet_worker_remote_rx_packets", worker.RemoteRxPackets, labels...),
-			commonpb.NewMetricCounter("yanet_worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
-			commonpb.NewMetricCounter("yanet_worker_local_tx_drops", worker.LocalTxDrops, labels...),
-			commonpb.NewMetricCounter("yanet_worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
-			commonpb.NewMetricCounter("yanet_worker_drops", worker.Drops, labels...),
+			commonpb.NewMetricCounter("worker_iterations", worker.Iterations, labels...),
+			commonpb.NewMetricCounter("worker_rx_packets", worker.RxPackets, labels...),
+			commonpb.NewMetricCounter("worker_rx_bytes", worker.RxBytes, labels...),
+			commonpb.NewMetricCounter("worker_tx_packets", worker.TxPackets, labels...),
+			commonpb.NewMetricCounter("worker_tx_bytes", worker.TxBytes, labels...),
+			commonpb.NewMetricCounter("worker_remote_rx_packets", worker.RemoteRxPackets, labels...),
+			commonpb.NewMetricCounter("worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
+			commonpb.NewMetricCounter("worker_local_tx_drops", worker.LocalTxDrops, labels...),
+			commonpb.NewMetricCounter("worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
+			commonpb.NewMetricCounter("worker_drops", worker.Drops, labels...),
 		)
 
 		if len(worker.RxBursts) > 0 {
 			metrics = append(metrics, makeHistogram(
-				"yanet_worker_rx_bursts",
+				"worker_rx_bursts",
 				worker.RxBursts,
 				labels...,
 			))
