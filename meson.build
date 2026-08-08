@@ -124,7 +124,10 @@ fuzzing_targets = {}
 libdpdk_default_options = [
   'platform=' + get_option('dpdk_platform'),
   'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
-  'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
+  # An empty enable_apps means "build every app", so any app a disable list
+  # fails to name is still built. The glob also covers apps added upstream
+  # later, and nothing outside subprojects/ uses any of them.
+  'disable_apps=*',
   'enable_apps=',
   'disable_libs=bitratestats,cfgfile,flow_classify,gpudev,gro,gso,kni,jobstats,latencystats,metrics,node,pdump,pipeline,port,power,table,vhost',
   'enable_driver_sdk=true',
