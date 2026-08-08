@@ -1,5 +1,12 @@
 name: Rust Check
 
+# Cargo caches here are shared and written from main only.
+#
+# Check and clippy compile dependencies in the same metadata mode, so one
+# entry serves both, while test compiles them fully and needs its own. A
+# cache written on a pull-request ref is readable only from that same pull
+# request, so saving one there costs repository quota and buys nothing.
+
 on:
   push:
     branches: ["main"]
@@ -43,15 +50,10 @@ jobs:
         with:
           toolchain: stable
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-check-
+          shared-key: rust-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/apt-packages
         with:
           packages: protobuf-compiler
@@ -66,15 +68,10 @@ jobs:
         with:
           toolchain: stable
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-
+          shared-key: rust-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/apt-packages
         with:
           packages: protobuf-compiler
@@ -90,15 +87,10 @@ jobs:
           toolchain: stable
           components: clippy
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-clippy-
+          shared-key: rust-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/apt-packages
         with:
           packages: protobuf-compiler
