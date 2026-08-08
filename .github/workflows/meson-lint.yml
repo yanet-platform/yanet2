@@ -9,7 +9,8 @@ on:
       - 'meson_options.txt'
       - '.github/workflows/meson-lint.yml'
   pull_request:
-    branches: [main]
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
     paths:
       - '**/meson.build'
       - '**/meson.options'

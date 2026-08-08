@@ -23,7 +23,8 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/go-modcache/**"
   pull_request:
-    branches: ["main"]
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
     paths:
       - "**.h"
       - "**.c"

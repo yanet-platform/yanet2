@@ -8,7 +8,8 @@ on:
       - "go.mod"
       - ".github/workflows/go-formatting.yml"
   pull_request:
-    branches: [main, master]
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
     paths:
       - "**/*.go"
       - "go.mod"

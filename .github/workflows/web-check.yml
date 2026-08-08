@@ -12,7 +12,8 @@ on:
       - "package-lock.json"
       - ".github/workflows/web-check.yml"
   pull_request:
-    branches: ["main"]
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
     paths:
       - "web/**"
       - "modules/**/web/**"

@@ -17,7 +17,8 @@ on:
       - ".github/workflows/rust-check.yml"
       - ".github/actions/apt-packages/**"
   pull_request:
-    branches: ["main"]
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
     paths:
       - "**.rs"
       - "**/Cargo.toml"
