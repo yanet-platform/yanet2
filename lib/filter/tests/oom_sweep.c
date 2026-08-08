@@ -294,6 +294,7 @@ sweep_signature(
 			name,
 			fail_at
 		);
+		size_t free_before = block_allocator_free_size(&allocator);
 
 		struct filter failed_filter;
 		int frc = sweep_compile(
@@ -309,6 +310,14 @@ sweep_signature(
 			-1,
 			"%s: injecting a failure at call %ld did not produce "
 			"a clean OOM",
+			name,
+			fail_at
+		);
+		SWEEP_ASSERT_EQUAL(
+			block_allocator_free_size(&allocator),
+			free_before,
+			"%s: injecting a failure at call %ld leaked arena "
+			"bytes",
 			name,
 			fail_at
 		);

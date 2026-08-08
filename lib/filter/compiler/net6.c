@@ -654,8 +654,6 @@ merge_net6_range(
 	return 0;
 
 error_registry:
-	value_registry_fini(registry);
-
 error_net_registry:
 	value_registry_fini(&net_registry);
 

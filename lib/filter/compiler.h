@@ -30,6 +30,7 @@ typedef void (*filter_lookup_free_func)(
 );
 
 struct filter_lookup_handler {
+	const char *name;
 	filter_lookup_init_func init;
 	filter_lookup_free_func free;
 };
@@ -43,12 +44,29 @@ static inline void
 filter_free(
 	struct filter *filter, const struct filter_compiler *filter_compiler
 ) {
+	// Calling value_registry_fini below clears the registry's
+	// memory_context, so capture each leaf's attribute context now,
+	// before any teardown runs.
+	struct memory_context *attr_ctx[MAX_ATTRIBUTES];
+	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
+		struct filter_vertex *v =
+			filter->v + filter_compiler->lookup_count + i;
+		attr_ctx[i] =
+			v->registry.memory_context != NULL
+				? ADDR_OF(&v->registry.memory_context->parent)
+				: NULL;
+	}
+
 	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
 		struct filter_vertex *v =
 			filter->v + filter_compiler->lookup_count + i;
 		if (v->data != NULL) {
+			// Free against the attribute context the payload was
+			// allocated from (see filter_init), not the
+			// registry's own context, which value_registry_fini
+			// below releases on its own.
 			filter_compiler->lookups[i].free(
-				ADDR_OF(&v->data), &filter->memory_context
+				ADDR_OF(&v->data), attr_ctx[i]
 			);
 		}
 		SET_OFFSET_OF(&v->data, NULL);
@@ -58,6 +76,19 @@ filter_free(
 	}
 	for (size_t i = 1; i < filter_compiler->lookup_count; ++i) {
 		value_table_free(&filter->v[i].table);
+	}
+	// Release each leaf's own attribute context back into the filter
+	// context, now that the registry and payload it parented are gone.
+	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
+		if (attr_ctx[i] == NULL) {
+			continue;
+		}
+		memory_context_fini(attr_ctx[i]);
+		memory_bfree(
+			&filter->memory_context,
+			attr_ctx[i],
+			sizeof(*attr_ctx[i])
+		);
 	}
 	if (filter_compiler->lookup_count == 1) {
 		struct filter_vertex *v0 = filter->v;
@@ -155,31 +186,52 @@ filter_init(
 	     ++lookup_idx) {
 		struct filter_vertex *v =
 			filter->v + filter_compiler->lookup_count + lookup_idx;
-		char name[64];
-		snprintf(
-			name,
-			sizeof(name),
-			"registry[%zu]",
-			(size_t)(filter_compiler->lookup_count + lookup_idx)
+
+		// Each leaf gets its own attribute context, named after the
+		// attribute, so the registry and the attribute's payload
+		// below can be siblings instead of one nesting under the
+		// other's teardown-sensitive context.
+		struct memory_context *attr_ctx =
+			(struct memory_context *)memory_balloc(
+				&filter->memory_context,
+				sizeof(struct memory_context)
+			);
+		if (attr_ctx == NULL) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to init attribute "
+				"context for lookup %zu",
+				(size_t)lookup_idx
+			);
+			goto init_failed;
+		}
+		memory_context_init_from(
+			attr_ctx,
+			&filter->memory_context,
+			filter_compiler->lookups[lookup_idx].name
 		);
-		if (value_registry_init(
-			    &v->registry, &filter->memory_context, name
-		    )) {
+
+		if (value_registry_init(&v->registry, attr_ctx, "registry")) {
 			yanet_error_add(
 				err,
 				"out of memory: failed to init registry for "
 				"lookup %zu",
 				(size_t)lookup_idx
 			);
+			memory_context_fini(attr_ctx);
+			memory_bfree(
+				&filter->memory_context,
+				attr_ctx,
+				sizeof(*attr_ctx)
+			);
 			goto init_failed;
 		}
 		v->data = NULL;
+		// The attribute context must outlive the registry it
+		// parents, so the attribute receives it directly rather than
+		// the registry's own context.
 		if (filter_compiler->lookups[lookup_idx].init(
-			    &v->registry,
-			    &v->data,
-			    rules,
-			    rule_count,
-			    &filter->memory_context
+			    &v->registry, &v->data, rules, rule_count, attr_ctx
 		    )) {
 			yanet_error_add(
 				err,
@@ -222,9 +274,30 @@ filter_init(
 		goto init_finish;
 	}
 
+	// Each entry first_leaf[n] holds the attribute name of the first leaf
+	// reachable from vertex n, computed bottom-up from the leaves filled
+	// by the loop above. It gives every inner node a name derived from
+	// its own subtree instead of its heap index.
+	const char *first_leaf[2 * MAX_ATTRIBUTES];
+	for (uint64_t lookup_idx = 0;
+	     lookup_idx < filter_compiler->lookup_count;
+	     ++lookup_idx) {
+		first_leaf[filter_compiler->lookup_count + lookup_idx] =
+			filter_compiler->lookups[lookup_idx].name;
+	}
+	for (size_t idx = filter_compiler->lookup_count - 1; idx >= 1; --idx) {
+		first_leaf[idx] = first_leaf[2 * idx];
+	}
+
 	for (size_t idx = filter_compiler->lookup_count - 1; idx >= 2; --idx) {
 		char name[64];
-		snprintf(name, sizeof(name), "registry[%zu]", idx);
+		snprintf(
+			name,
+			sizeof(name),
+			"merge(%s,%s)",
+			first_leaf[2 * idx],
+			first_leaf[2 * idx + 1]
+		);
 		// The function merge_and_collect_registry only populates an
 		// already-initialised registry. The loop above initialised one
 		// only for leaf attributes, so this inner-node registry needs
@@ -244,7 +317,11 @@ filter_init(
 		}
 		char table_name[64];
 		snprintf(
-			table_name, sizeof(table_name), "merge-table[%zu]", idx
+			table_name,
+			sizeof(table_name),
+			"merge-table(%s,%s)",
+			first_leaf[2 * idx],
+			first_leaf[2 * idx + 1]
 		);
 		if (merge_and_collect_registry(
 			    &filter->memory_context,

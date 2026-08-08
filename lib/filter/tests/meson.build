@@ -81,6 +81,16 @@ test_filter_memory = executable('memory',
 )
 test('memory', test_filter_memory, suite: ['filter'])
 
+# test memory_context node naming
+test_filter_context_names = executable('context_names',
+  ['context_names.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('context_names', test_filter_context_names, suite: ['filter'])
+
 # test vlan
 test_filter_vlan = executable('basic_vlan',
   ['basic_vlan.c'],

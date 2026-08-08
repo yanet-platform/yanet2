@@ -9,6 +9,7 @@
 
 #define FILTER_ATTR_LOOKUP_HANDLER(name)                                       \
 	{                                                                      \
+		#name,                                                         \
 		name##_attr_init,                                              \
 		name##_attr_free,                                              \
 	}
