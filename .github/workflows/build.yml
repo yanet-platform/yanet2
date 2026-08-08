@@ -1,4 +1,5 @@
 name: Build YANET
+# Probe commit for the stacked-branch trigger check. Never merged.
 
 on:
   push:
