@@ -50,6 +50,7 @@ cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
 make lint-go                  # stylelint + golangci-lint modernize (lint/style/, .golangci.yml)
 make lint/comments            # pure-run comment separator lint
+make lint/clang-syntax        # clang -fsyntax-only sweep; needs a configured build/ (meson setup)
 make lint-commit              # commit-subject convention check (lint/commit/)
 make proto-go                 # generate *.pb.go via protoc (needed before go lint locally)
 make hooks                    # install the git hooks (run once per clone)

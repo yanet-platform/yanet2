@@ -2,6 +2,9 @@ CARGO ?= cargo
 RULESYNC ?= npx --yes rulesync@16.8.0
 RULESYNC_GENERATE_ARGS := generate --targets claudecode,codexcli --features subagents
 
+# Compile database consumed by lint/clang-syntax.
+COMPILE_DB ?= build/compile_commands.json
+
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
 BINDIR ?= $(PREFIX)/bin
@@ -114,6 +117,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	proto-go \
 	lint-go \
 	lint/comments \
+	lint/clang-syntax \
 	lint-commit \
 	ai/agents \
 	lint/agents \
@@ -183,6 +187,39 @@ lint-go:
 lint/comments:
 	go test ./lint/comment/cmd/commentlint/
 	go run ./lint/comment/cmd/commentlint/
+
+# Reparses the configured build's compile database with clang -fsyntax-only.
+#
+# Every C job in CI builds with gcc, so a construct gcc accepts and clang
+# rejects otherwise only surfaces overnight in the fuzzing workflow. This
+# is front-end only, no codegen, so replaying it here costs seconds and
+# needs no extra toolchain beyond the clang already on the job's image.
+lint/clang-syntax:
+	@command -v clang >/dev/null 2>&1 || { echo "ERROR: clang not found (install: apt install clang)"; exit 1; }
+	@command -v jq >/dev/null 2>&1 || { echo "ERROR: jq not found (install: apt install jq)"; exit 1; }
+	@test -f "$(COMPILE_DB)" || { echo "ERROR: $(COMPILE_DB) not found (run 'meson setup build' first)"; exit 1; }
+	@set -e; \
+	tmpdir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	dir=$$(jq -r '.[0].directory' "$(COMPILE_DB)"); \
+	jq -r '.[] | select(.file | endswith(".c")) | select(.file | contains("subprojects/") | not) | .command' "$(COMPILE_DB)" > "$$tmpdir/commands.txt"; \
+	awk '{ \
+			out = "clang"; started = 0; skip = 0; \
+			for (i = 1; i <= NF; i++) { \
+				tok = $$i; \
+				if (!started) { if (tok ~ /^-/) started = 1; else continue } \
+				if (skip) { skip = 0; continue } \
+				if (tok == "-c" || tok == "-MD") continue; \
+				if (tok == "-o" || tok == "-MF" || tok == "-MQ") { skip = 1; continue } \
+				out = out " " tok; \
+			} \
+			print out " -fsyntax-only"; \
+		}' "$$tmpdir/commands.txt" > "$$tmpdir/awk_out.txt"; \
+	sort -u "$$tmpdir/awk_out.txt" > "$$tmpdir/cmds.txt"; \
+	test -s "$$tmpdir/cmds.txt" || { echo "ERROR: no translation units extracted from $(COMPILE_DB)"; exit 1; }; \
+	n=$$(wc -l < "$$tmpdir/cmds.txt"); \
+	echo "clang-syntax: parsing $$n translation units with $$(clang --version | head -1)"; \
+	(cd "$$dir" && xargs -a "$$tmpdir/cmds.txt" -d '\n' -P "$$(nproc)" -I{} sh -c '{}')
 
 lint-commit:
 	lint/commit/commitlint_test.sh

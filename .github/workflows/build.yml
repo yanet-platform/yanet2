@@ -148,7 +148,7 @@ jobs:
 
       - uses: ./.github/actions/apt-packages
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -191,6 +191,9 @@ jobs:
           make go-cache-clean
           meson setup build -Dbuildtype=release
           make dataplane cli
+
+      - name: Clang syntax sweep
+        run: make lint/clang-syntax
 
       - name: Build and run tests (release)
         run: make test-only
