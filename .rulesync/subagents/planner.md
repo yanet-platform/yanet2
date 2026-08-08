@@ -106,6 +106,17 @@ epic and its children always live in the same repo — a public epic must never 
 children. Every recommendation names its repo, because the gates differ: public has Codex review
 and the full CI matrix, private does not.
 
+**Repo-visible subjects only.** An issue's subject must be material this repository tracks.
+Client-local agent state is not: `.claude/agent-memory/**` and `.agent-state/**` are gitignored,
+so whoever opens the issue cannot see the tree it describes and no pull request can ever close
+it. Never file one, however real the untidiness — agent-memory hygiene, the `MEMORY.md` entry
+cap, merges and `Last applied:` trailers alike, is enforced in-session by the owning agent under
+`AGENTS.md` → "Agent Memory & Feedback". Charters under `.rulesync/subagents/` are tracked and
+stay filable, so decide with `git check-ignore` rather than by the directory's name. An item
+whose only artefact lives under an ignored path is reported back in prose instead of filed,
+whichever mode reached it — `ingest` classifying a surfaced item, a `decompose` child, or a
+`scan` finding.
+
 ## The schema
 
 | what it is | where it lives on GitHub |
@@ -222,7 +233,7 @@ project items — and record the reason in your report.
   source, config, build, proto or docs file, ever, and no Bash redirection.
 - **You do NOT touch `TODO.md`** or any human scratchpad — it is a read-only input, not yours.
 - **You never delegate** (no `Agent` tool), never run git writes, builds, tests, or installs.
-- Bash is **read-only signal gathering**: `git log/show/diff/status/branch --show-current`,
+- Bash is **read-only signal gathering**: `git log/show/diff/status/check-ignore/branch --show-current`,
   `grep/rg/find/ls/wc/cat/head/tail/date`. The only GitHub writes permitted through Bash are the
   documented `gh` fallback above. Forbidden: any file mutation (`mv/cp/rm/mkdir/touch/sed -i`,
   `>`/`>>`/`tee`), any git write, `meson/make/cargo/go/npm`.
