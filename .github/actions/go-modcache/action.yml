@@ -1,0 +1,43 @@
+name: 'Go module cache (restore)'
+description: >-
+  Restore the shared Go module cache under one key common to every Linux job,
+  so the same modules are stored once. These jobs turn setup-go's own cache
+  off and manage GOMODCACHE by hand because that cache bundles the build
+  cache with the module cache under a key no job can discriminate
+  (actions/setup-go#358). Restore-only: exactly one job saves under this key,
+  see the "Save Go module cache" step in build.yml.
+
+outputs:
+  path:
+    description: 'Resolved GOMODCACHE directory'
+    value: ${{ steps.resolve.outputs.path }}
+  key:
+    description: 'Exact cache key for the current go.sum/go.mod'
+    value: ${{ steps.resolve.outputs.key }}
+  cache-hit:
+    description: 'True only on an exact-key match, false on a restore-keys fallback or a miss'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the module cache location
+      id: resolve
+      shell: bash
+      env:
+        CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+      run: |
+        set -euo pipefail
+        path=$(go env GOMODCACHE)
+        echo "path=$path" >>"$GITHUB_OUTPUT"
+        echo "key=$CACHE_KEY" >>"$GITHUB_OUTPUT"
+
+    - name: Restore the module cache
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.resolve.outputs.path }}
+        key: ${{ steps.resolve.outputs.key }}
+        restore-keys: |
+          ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}-
+          ${{ runner.os }}-go-mod-

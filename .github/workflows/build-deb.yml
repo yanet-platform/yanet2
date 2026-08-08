@@ -48,8 +48,6 @@ jobs:
       matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
 
     runs-on: ubuntu-${{ matrix.unbtver }}
-    env:
-      cache_name: deb-build-${{ matrix.unbtver }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,19 +96,8 @@ jobs:
           go-version: "1.24.x"
           cache: false
           check-latest: true
-      # https://github.com/actions/setup-go/issues/358
-      - name: Get Go environment
-        run: |
-          echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
-      - name: Set up go cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
-          restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
-            ${{ env.cache_name }}-${{ runner.os }}-go-
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
       - name: Install Go Protobuf Plugins
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest

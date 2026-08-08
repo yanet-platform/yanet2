@@ -16,6 +16,7 @@ on:
       - "**/Cargo.lock"
       - ".github/workflows/build.yml"
       - ".github/actions/apt-packages/**"
+      - ".github/actions/go-modcache/**"
   pull_request:
     branches: ["main"]
     paths:
@@ -31,6 +32,7 @@ on:
       - "**/Cargo.lock"
       - ".github/workflows/build.yml"
       - ".github/actions/apt-packages/**"
+      - ".github/actions/go-modcache/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.
@@ -40,8 +42,6 @@ concurrency:
 jobs:
   build-asan-test:
     runs-on: ubuntu-24.04
-    env:
-      cache_name: build-asan-test
 
     steps:
       - uses: actions/checkout@v4
@@ -66,19 +66,8 @@ jobs:
           cache: false
           check-latest: true
 
-      - name: Get Go environment
-        run: |
-          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
-
-      - name: Set up go cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
-          restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
-            ${{ env.cache_name }}-${{ runner.os }}-go-
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
 
       - name: Install Go Protobuf Plugins
         run: |
@@ -100,8 +89,6 @@ jobs:
 
   build-tsan-test:
     runs-on: ubuntu-24.04
-    env:
-      cache_name: build-tsan-test
 
     steps:
       - uses: actions/checkout@v4
@@ -126,19 +113,8 @@ jobs:
           cache: false
           check-latest: true
 
-      - name: Get Go environment
-        run: |
-          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
-
-      - name: Set up go cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
-          restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
-            ${{ env.cache_name }}-${{ runner.os }}-go-
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
 
       - name: Install Go Protobuf Plugins
         run: |
@@ -154,8 +130,6 @@ jobs:
 
   build-release-artifacts:
     runs-on: ubuntu-24.04
-    env:
-      cache_name: build-release-artifacts
 
     steps:
       - uses: actions/checkout@v4
@@ -197,19 +171,9 @@ jobs:
           cache: false
           check-latest: true
 
-      - name: Get Go environment
-        run: |
-          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
-
-      - name: Set up go cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
-          restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
-            ${{ env.cache_name }}-${{ runner.os }}-go-
+      - name: Restore Go module cache
+        id: go-modcache
+        uses: ./.github/actions/go-modcache
 
       - name: Install Go Protobuf Plugins
         run: |
@@ -228,6 +192,19 @@ jobs:
       - name: Show meson test log
         if: always()
         run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      # This job is the designated writer of the shared Go module cache key:
+      # its `make test-only` resolves the whole module list, unlike tsan's
+      # suite, which never invokes `go test` and would freeze a partial
+      # cache under the exact key. Saving here rather than via the cache
+      # action's post step avoids publishing a half-populated cache when an
+      # earlier step fails the job.
+      - name: Save Go module cache
+        if: steps.go-modcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.go-modcache.outputs.path }}
+          key: ${{ steps.go-modcache.outputs.key }}
 
       - name: Verify binaries before upload
         run: |
