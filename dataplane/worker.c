@@ -53,6 +53,7 @@
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
+#include "lib/dataplane/worker/round.h"
 
 #include "common/data_pipe.h"
 #include "logging/log.h"
@@ -323,27 +324,14 @@ worker_write(
 
 static void
 worker_loop_round(struct dataplane_worker *worker) {
-	// Initialize current worker time
-	// on the start of loop round
-	{
-		struct dp_worker *dp_worker = worker->dp_worker;
-		dp_worker->current_time =
-			dataplane_time_ns_fn(&dp_worker->clock);
-	}
-
 	struct cp_config *cp_config = worker->instance->cp_config;
-	// Acquire the generation pointer, paired with the release-publish
-	// in cp_config_gen_install.
-	struct cp_config_gen *cp_config_gen =
-		ATOMIC_ADDR_OF(&cp_config->cp_config_gen);
-	struct config_gen_ectx *config_gen_ectx = cp_config_gen_worker_ectx(
-		cp_config_gen, worker->dp_worker->idx
+	struct worker_round round = worker_round_prepare(
+		worker->dp_worker,
+		cp_config,
+		tsc_clock_get_time_ns(&worker->dp_worker->clock)
 	);
-
-	__atomic_store_n(
-		&worker->dp_worker->gen, cp_config_gen->gen, __ATOMIC_RELEASE
-	);
-	*worker->dp_worker->iterations += 1;
+	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
+	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 
 	// No configuration has been installed yet (startup). Drain the NIC
 	// RX ring into a throwaway stack front so packets that arrived

@@ -40,5 +40,3 @@ tsc_clock_get_time_ns(struct tsc_clock *clock) {
 	return clock->real_time_ns +
 	       tsc_clock_ticks_to_ns(tsc, clock->tsc_to_ns_mult);
 }
-
-dataplane_time_ns_fn_t dataplane_time_ns_fn = tsc_clock_get_time_ns;

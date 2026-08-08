@@ -1,4 +1,8 @@
+#include "api/agent.h"
+#include "common/memory_address.h"
 #include "common/test_assert.h"
+#include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 
@@ -34,6 +38,8 @@ main(void) {
 	{
 		struct dataplane_ut *ut = dataplane_ut_new(&cfg);
 		TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
+		shm = dataplane_ut_shm(ut);
+		TEST_ASSERT_NOT_NULL(shm, "dataplane_ut_shm returned NULL");
 
 		// Time setter / getter round-trip.
 		dataplane_ut_set_time_ns(ut, 12345ULL);
@@ -41,6 +47,38 @@ main(void) {
 			(long)dataplane_ut_get_time_ns(ut),
 			(long)12345ULL,
 			"get_time_ns must echo set_time_ns"
+		);
+
+		struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
+		struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+		struct dp_worker *dp_worker = ADDR_OF(workers);
+		struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+		struct cp_config_gen *cp_config_gen =
+			ADDR_OF(&cp_config->cp_config_gen);
+		uint64_t iterations = *dp_worker->iterations;
+
+		// The harness round uses shared preparation for mock time,
+		// generation publication and iteration count.
+		struct packet_list empty;
+		packet_list_init(&empty);
+		struct dataplane_ut_round_result result;
+		dataplane_ut_run(ut, 0, &empty, &result);
+		TEST_ASSERT_EQUAL(
+			(long)dp_worker->current_time,
+			(long)12345ULL,
+			"mock time must reach the worker round"
+		);
+		TEST_ASSERT_EQUAL(
+			(long)*dp_worker->iterations,
+			(long)(iterations + 1),
+			"one valid harness round must increment iterations once"
+		);
+		uint64_t published_gen =
+			__atomic_load_n(&dp_worker->gen, __ATOMIC_ACQUIRE);
+		TEST_ASSERT_EQUAL(
+			(long)published_gen,
+			(long)cp_config_gen->gen,
+			"harness round must publish its generation"
 		);
 
 		// Mbuf factory yields a usable mbuf.
@@ -52,9 +90,6 @@ main(void) {
 
 		// Empty-input round must complete cleanly and yield empty
 		// output and drop lists.
-		struct packet_list empty;
-		packet_list_init(&empty);
-		struct dataplane_ut_round_result result;
 		dataplane_ut_run(ut, 0, &empty, &result);
 		TEST_ASSERT_EQUAL(
 			(long)packet_list_count(&result.output),
@@ -100,6 +135,11 @@ main(void) {
 	{
 		struct dataplane_ut *ut = dataplane_ut_new(&cfg);
 		TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
+		struct dp_config *dp_config =
+			yanet_shm_dp_config(dataplane_ut_shm(ut), 0);
+		struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+		struct dp_worker *dp_worker = ADDR_OF(workers);
+		uint64_t iterations = *dp_worker->iterations;
 
 		struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(ut);
 		TEST_ASSERT_NOT_NULL(
@@ -131,6 +171,11 @@ main(void) {
 			(long)packet_list_count(&result.drop),
 			1L,
 			"an out-of-range worker_idx must drop the input packet"
+		);
+		TEST_ASSERT_EQUAL(
+			(long)*dp_worker->iterations,
+			(long)iterations,
+			"an out-of-range worker_idx must not prepare a round"
 		);
 
 		struct packet *dropped;

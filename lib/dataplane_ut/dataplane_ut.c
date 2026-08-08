@@ -27,6 +27,7 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
+#include "lib/dataplane/worker/round.h"
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
@@ -493,16 +494,11 @@ dataplane_ut_run(
 	struct dp_worker **workers = ADDR_OF(&ut->dp_config->workers);
 	struct dp_worker *dp_worker = ADDR_OF(&workers[worker_idx]);
 
-	// Mirror worker_loop_round housekeeping: time, gen, iterations.
-	dp_worker->current_time = ut->mock_time_ns;
-
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&ut->cp_config->cp_config_gen);
-	struct config_gen_ectx *config_gen_ectx =
-		cp_config_gen_worker_ectx(cp_config_gen, worker_idx);
-
-	__atomic_store_n(&dp_worker->gen, cp_config_gen->gen, __ATOMIC_RELEASE);
-	*dp_worker->iterations += 1;
+	struct worker_round round = worker_round_prepare(
+		dp_worker, ut->cp_config, ut->mock_time_ns
+	);
+	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
+	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 
 	struct packet_front packet_front;
 	packet_front_init(&packet_front);
