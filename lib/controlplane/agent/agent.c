@@ -1933,6 +1933,20 @@ yanet_get_device_counters(
 	return yanet_get_counters_by_tags(dp_config, tags, 2, NULL, -1, NULL);
 }
 
+struct counter_handle_list *
+yanet_get_object_counters(
+	struct dp_config *dp_config,
+	const char *object_type,
+	const char *object_name
+) {
+	struct counter_tag tags[] = {
+		{.key = "object_type", .value = object_type},
+		{.key = "object_name", .value = object_name},
+		{.key = "kind", .value = "object"}
+	};
+	return yanet_get_counters_by_tags(dp_config, tags, 3, NULL, -1, NULL);
+}
+
 struct counter_handle *
 yanet_get_counter(struct counter_handle_list *counters, uint64_t idx) {
 	if (idx >= counters->count) {

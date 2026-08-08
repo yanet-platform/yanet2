@@ -74,6 +74,13 @@ yanet_get_module_counters(
 );
 
 struct counter_handle_list *
+yanet_get_object_counters(
+	struct dp_config *dp_config,
+	const char *object_type,
+	const char *object_name
+);
+
+struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config);
 
 // Counters of a single DPDK port.

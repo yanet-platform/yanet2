@@ -669,6 +669,26 @@ func (m *DPConfig) ModuleCounters(
 	return m.encodeCounters(counters)
 }
 
+// ObjectCounters returns the counters of an object identified by its type
+// and name.
+func (m *DPConfig) ObjectCounters(
+	objectType string,
+	objectName string,
+) []CounterInfo {
+	cObjectType := C.CString(objectType)
+	defer C.free(unsafe.Pointer(cObjectType))
+	cObjectName := C.CString(objectName)
+	defer C.free(unsafe.Pointer(cObjectName))
+	counters := C.yanet_get_object_counters(m.ptr, cObjectType, cObjectName)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
 // CounterTag is a (key, value) predicate against a counter's tag set.
 // Value semantics follow the C API: an empty string requires the tag to
 // be absent, "*" requires the tag to be present with any value, and any
