@@ -21,8 +21,15 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 # leave a relative path, which DWARF forbids for DW_AT_comp_dir.
 export DEB_BUILD_DEBUGPATH = /usr/src/yanet2
 
-# Set parallel build options
-export DEB_BUILD_OPTIONS = parallel=$(shell nproc)
+# Fall back to nproc for parallel jobs when the caller supplies none.
+#
+# The dpkg-buildpackage tool exports DEB_BUILD_OPTIONS with a parallel
+# value defaulting to the processor count (absent -j, -J, or parallel=)
+# before debian/rules runs, so this fallback only takes effect when
+# debian/rules is invoked directly.
+ifeq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+export DEB_BUILD_OPTIONS += parallel=$(shell nproc)
+endif
 
 # Meson build directory
 BUILDDIR = build
