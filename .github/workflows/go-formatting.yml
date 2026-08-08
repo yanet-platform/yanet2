@@ -4,13 +4,13 @@ on:
   push:
     branches: [main, master]
     paths:
-      - "controlplane/**/*.go"
+      - "**/*.go"
       - "go.mod"
       - ".github/workflows/go-formatting.yml"
   pull_request:
     branches: [main, master]
     paths:
-      - "controlplane/**/*.go"
+      - "**/*.go"
       - "go.mod"
       - ".github/workflows/go-formatting.yml"
 
@@ -35,7 +35,7 @@ jobs:
 
       - name: Check gofmt
         run: |
-          cd controlplane
+          set -euo pipefail
           # Find Go files that are not properly formatted
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
