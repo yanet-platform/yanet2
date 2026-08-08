@@ -7,6 +7,11 @@ on:
       - "**.h"
       - "**.c"
       - "**/meson.build"
+      - "meson_options.txt"
+      - "subprojects/**"
+      - ".gitmodules"
+      # Protoc-generated Go is a build product, not a tracked file.
+      - "**.proto"
       - "**.go"
       - "go.mod"
       - "go.sum"
@@ -23,6 +28,11 @@ on:
       - "**.h"
       - "**.c"
       - "**/meson.build"
+      - "meson_options.txt"
+      - "subprojects/**"
+      - ".gitmodules"
+      # Protoc-generated Go is a build product, not a tracked file.
+      - "**.proto"
       - "**.go"
       - "go.mod"
       - "go.sum"
