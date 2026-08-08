@@ -22,6 +22,7 @@ on:
       - ".github/workflows/build.yml"
       - ".github/actions/apt-packages/**"
       - ".github/actions/go-modcache/**"
+      - ".github/actions/protoc-plugins/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -44,6 +45,7 @@ on:
       - ".github/workflows/build.yml"
       - ".github/actions/apt-packages/**"
       - ".github/actions/go-modcache/**"
+      - ".github/actions/protoc-plugins/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.
@@ -81,9 +83,7 @@ jobs:
         uses: ./.github/actions/go-modcache
 
       - name: Install Go Protobuf Plugins
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        uses: ./.github/actions/protoc-plugins
 
       - name: Build YANET (sanitize)
         run: |
@@ -128,9 +128,7 @@ jobs:
         uses: ./.github/actions/go-modcache
 
       - name: Install Go Protobuf Plugins
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        uses: ./.github/actions/protoc-plugins
 
       - name: Run TSAN tests
         run: make test-tsan
@@ -183,9 +181,7 @@ jobs:
         uses: ./.github/actions/go-modcache
 
       - name: Install Go Protobuf Plugins
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        uses: ./.github/actions/protoc-plugins
 
       - name: Build YANET (release)
         run: |

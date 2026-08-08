@@ -9,6 +9,7 @@ on:
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
+      - '.github/actions/protoc-plugins/**'
   pull_request:
     paths:
       - '**/*.go'
@@ -16,6 +17,7 @@ on:
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
+      - '.github/actions/protoc-plugins/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -54,10 +56,8 @@ jobs:
         with:
           packages: protobuf-compiler libpcap-dev
 
-      - name: Install Go protobuf plugins
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+      - name: Install Go Protobuf Plugins
+        uses: ./.github/actions/protoc-plugins
 
       - name: Generate protobuf Go sources
         run: make proto-go

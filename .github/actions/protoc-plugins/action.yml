@@ -1,0 +1,20 @@
+name: 'Install Go Protobuf Plugins'
+description: >-
+  Install protoc-gen-go and protoc-gen-go-grpc at versions pinned here rather
+  than at @latest, since an unpinned plugin can pick a newer Go directive
+  than the job's pinned toolchain and drag in a second Go download mid-job.
+  GOTOOLCHAIN=local turns that mismatch into a loud install failure instead.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install pinned protoc-gen-go and protoc-gen-go-grpc
+      shell: bash
+      env:
+        GOTOOLCHAIN: local
+        PROTOC_GEN_GO_VERSION: v1.36.11
+        PROTOC_GEN_GO_GRPC_VERSION: v1.6.1
+      run: |
+        set -euo pipefail
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}

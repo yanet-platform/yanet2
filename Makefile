@@ -162,8 +162,8 @@ proto-breaking:
 
 proto-go:
 	@command -v protoc >/dev/null 2>&1 || { echo "ERROR: protoc not found (install protobuf-compiler)"; exit 1; }
-	@command -v protoc-gen-go >/dev/null 2>&1 || { echo "ERROR: protoc-gen-go not found (go install google.golang.org/protobuf/cmd/protoc-gen-go@latest)"; exit 1; }
-	@command -v protoc-gen-go-grpc >/dev/null 2>&1 || { echo "ERROR: protoc-gen-go-grpc not found (go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest)"; exit 1; }
+	@command -v protoc-gen-go >/dev/null 2>&1 || { echo "ERROR: protoc-gen-go not found (go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11)"; exit 1; }
+	@command -v protoc-gen-go-grpc >/dev/null 2>&1 || { echo "ERROR: protoc-gen-go-grpc not found (go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1)"; exit 1; }
 	@set -e; protos=$$(find . \
 		\( -path './subprojects' -o -path './build*' -o -type d -name '.?*' \) -prune \
 		-o -name '*.proto' -print \
