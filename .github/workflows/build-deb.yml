@@ -2,7 +2,19 @@ name: Build DEB Packages
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
+    # Keep this list identical to the pull_request paths-ignore below.
+    paths-ignore:
+      - "web/**"
+      - "modules/**/web/**"
+      - "devices/**/web/**"
+      - "operators/**/web/**"
+      - "package.json"
+      - "package-lock.json"
+      - "**.md"
+      - ".claude/**"
+      - "docs/**"
   pull_request:
     branches: ["**"]
     paths-ignore:
@@ -23,8 +35,10 @@ on:
         default: false
 
 concurrency:
-  # The run_id fallback keeps non-PR runs from cancelling each other.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # Pushes key on the ref, so a newer push supersedes an older one still
+  # running. A manual dispatch keys on its run id instead, so two explicit
+  # packaging runs (e.g. a 22.04 build alongside a default one) never collide.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -65,6 +79,7 @@ jobs:
           key: ${{ runner.os }}-deb-ccache-${{ matrix.unbtver }}
           max-size: 2G
           verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: update apt (act hack)
         if: ${{ env.ACT }}
