@@ -13,4 +13,4 @@ RUN apt-get update -y \
     && rm -rf /tmp/*.deb /var/lib/apt/lists/*
 
 ENTRYPOINT ["yanet-controlplane"]
-CMD ["-c", "/etc/yanet2/controlplane-default.yaml"]
+CMD ["-c", "/etc/yanet2/controlplane.d/default.yaml"]

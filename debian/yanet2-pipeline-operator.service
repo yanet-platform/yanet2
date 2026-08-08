@@ -1,7 +1,7 @@
 [Unit]
 Description=yanet2 pipeline operator
-After=yanet2-controlplane.service
-Wants=yanet2-controlplane.service
+After=yanet2-controlplane.target
+Wants=yanet2-controlplane.target
 StartLimitBurst=3600000
 StartLimitIntervalSec=0
 

@@ -18,7 +18,7 @@ import (
 // xcfg.CheckKnownKeys walks the reflected struct shape directly instead,
 // which is unaffected by that re-decode.
 func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
-	data, err := os.ReadFile("../etc/yanet/controlplane-default.yaml")
+	data, err := os.ReadFile("../etc/yanet/controlplane.d/default.yaml")
 	require.NoError(t, err)
 	require.NoError(t, xcfg.CheckKnownKeys[yncp.Config](data))
 }

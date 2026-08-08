@@ -29,7 +29,7 @@ const etcYanet2Prefix = "/etc/yanet2/"
 // Each is installed by a meson install_data rule, not copied by hand in
 // the root Makefile.
 var shippedConfigPaths = []string{
-	"controlplane/etc/yanet/controlplane-default.yaml",
+	"controlplane/etc/yanet/controlplane.d/default.yaml",
 	"dataplane.yaml",
 	"operators/bird-adapter/etc/yanet/bird-adapter-default.yaml",
 	"operators/pipeline/etc/yanet/yanet-pipeline-operator-default.yaml",
@@ -136,15 +136,33 @@ func Test_ShippedEtcYanet2PathsAreInstalled(t *testing.T) {
 	}
 }
 
+// Test_ControlplaneTemplateConfigIsInstalled verifies that the config the
+// controlplane template unit executes is installed for the default instance.
+//
+// The template resolves its config path from the instance name, so renaming
+// the shipped file or changing its install_dir breaks the packaged service
+// while every check that walks config contents stays green.
+func Test_ControlplaneTemplateConfigIsInstalled(t *testing.T) {
+	data, err := os.ReadFile("../../debian/yanet2-controlplane@.service")
+	require.NoError(t, err)
+
+	match := regexp.MustCompile(`(?m)^ExecStart=.* -c (\S+)$`).FindStringSubmatch(string(data))
+	require.Len(t, match, 2, "no ExecStart config path in the controlplane template unit")
+
+	configPath := strings.ReplaceAll(match[1], "%i", "default")
+	require.True(t, isInstalled(loadInstalledPatterns(t), strings.TrimPrefix(configPath, "/")),
+		"%q is not listed in any debian/*.install manifest", configPath)
+}
+
 // Test_CommentedOutPathsAreNotFlagged pins the distinction between walking
 // parsed YAML values and scanning raw text.
 //
-// controlplane-default.yaml carries commented-out TLS and auth examples
+// controlplane.d/default.yaml carries commented-out TLS and auth examples
 // naming /etc/yanet2 paths, none of which are installed. A raw-text scan
 // would flag them. The node walk must not, since a commented-out path was
 // never parsed as a value.
 func Test_CommentedOutPathsAreNotFlagged(t *testing.T) {
-	data, err := os.ReadFile("../../controlplane/etc/yanet/controlplane-default.yaml")
+	data, err := os.ReadFile("../../controlplane/etc/yanet/controlplane.d/default.yaml")
 	require.NoError(t, err)
 
 	var doc yaml.Node

@@ -1,0 +1,8 @@
+[Unit]
+Description=yanet2 controlplane instances
+# Operators order against this target, so it carries the dataplane ordering
+# an empty target would otherwise drop.
+After=yanet2-dataplane.service
+
+[Install]
+WantedBy=multi-user.target

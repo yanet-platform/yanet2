@@ -1,0 +1,5 @@
+# Retry the conffile move on every upgrade instead of pinning a prior version.
+#
+# Versions are derived from the git commit count, so the version this rename
+# lands in is unknowable here. The move is a no-op once the old file is gone.
+mv_conffile /etc/yanet2/controlplane-default.yaml /etc/yanet2/controlplane.d/default.yaml
