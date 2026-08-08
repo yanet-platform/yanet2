@@ -6,7 +6,7 @@
 #include "config.h"
 #include "dataplane.h"
 #include "logging/log.h"
-#include "yanet_build_config.h"
+#include "yanet_build_stamp.h"
 
 static void
 print_version(void) {

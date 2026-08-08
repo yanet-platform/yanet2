@@ -21,39 +21,57 @@ endif
 # The aarch64 branch appends its own ISA flag to yanet_project_args
 # further down, once the DPDK subproject() has resolved its ISA baseline.
 
+# Stable config: changes only when a build option changes, so it stays a
+# widely-included header without dragging per-build values into every
+# translation unit's ccache manifest.
 yanet_conf = configuration_data()
 yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
 yanet_conf.set('ENABLE_TRACE_LOG', get_option('trace').enabled())
 yanet_conf.set('MBUF_MAX_SIZE', get_option('mbuf_max_size'))
 
+build_cfg = 'yanet_build_config.h'
+configure_file(output: build_cfg, configuration: yanet_conf)
+
+# Volatile config: version/commit/timestamp change on essentially every
+# build. Kept out of yanet_build_config.h and included only by the version
+# banner, so it does not poison ccache manifests across the rest of the tree.
+yanet_stamp = configuration_data()
+
 # Version and build info
 yanet_version = get_option('version') == '' ? meson.project_version() : get_option('version')
 
 cc = meson.get_compiler('c')
-yanet_conf.set_quoted('YANET_VERSION', yanet_version)
-yanet_conf.set_quoted('YANET_COMPILER_ID', cc.get_id())
-yanet_conf.set_quoted('YANET_COMPILER_VERSION', cc.version())
-yanet_conf.set_quoted('YANET_BUILD_TYPE', get_option('buildtype'))
+yanet_stamp.set_quoted('YANET_VERSION', yanet_version)
+yanet_stamp.set_quoted('YANET_COMPILER_ID', cc.get_id())
+yanet_stamp.set_quoted('YANET_COMPILER_VERSION', cc.version())
+yanet_stamp.set_quoted('YANET_BUILD_TYPE', get_option('buildtype'))
 
 # Git commit (if available)
 git = find_program('git', required: false)
 if git.found()
     git_commit = run_command(git, 'rev-parse', '--short', 'HEAD', check: false)
     if git_commit.returncode() == 0
-        yanet_conf.set_quoted('YANET_GIT_COMMIT', git_commit.stdout().strip())
+        yanet_stamp.set_quoted('YANET_GIT_COMMIT', git_commit.stdout().strip())
     else
-        yanet_conf.set_quoted('YANET_GIT_COMMIT', 'unknown')
+        yanet_stamp.set_quoted('YANET_GIT_COMMIT', 'unknown')
     endif
 else
-    yanet_conf.set_quoted('YANET_GIT_COMMIT', 'unknown')
+    yanet_stamp.set_quoted('YANET_GIT_COMMIT', 'unknown')
 endif
 
-# Build date
-build_date = run_command('date', '-u', '+%Y-%m-%d %H:%M:%S', check: true)
-yanet_conf.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
+# Build date. Honours SOURCE_DATE_EPOCH (set by debhelper) for reproducible
+# builds, falling back to the wall clock otherwise.
+build_date = run_command(
+    'sh', '-c',
+    'if [ -n "$SOURCE_DATE_EPOCH" ]; then ' +
+    'date -u -d "@$SOURCE_DATE_EPOCH" +"%Y-%m-%d %H:%M:%S"; ' +
+    'else date -u +"%Y-%m-%d %H:%M:%S"; fi',
+    check: true,
+)
+yanet_stamp.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
 
-build_cfg = 'yanet_build_config.h'
-configure_file(output: build_cfg, configuration: yanet_conf)
+build_stamp = 'yanet_build_stamp.h'
+configure_file(output: build_stamp, configuration: yanet_stamp)
 
 dataplane_only = get_option('dataplane_only')
 
