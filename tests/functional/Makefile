@@ -128,7 +128,7 @@ define run_qemu
 		-device intel-iommu,intremap=on,device-iotlb=on \
 		-device ioh3420,id=pcie.1,chassis=1 \
 		-device ioh3420,id=pcie.2,chassis=2 \
-		-drive file=$(QEMU_IMAGE),if=virtio,format=qcow2 $(1) \
+		-drive file=$(QEMU_IMAGE),if=virtio,format=qcow2,discard=unmap,detect-zeroes=unmap $(1) \
 		-netdev user,id=net0 \
 		-device virtio-net-pci,netdev=net0,mac=AA:BB:CC:DD:CA:B0 \
 		-netdev stream,id=net1,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_0.sock \

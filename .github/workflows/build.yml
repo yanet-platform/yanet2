@@ -411,6 +411,11 @@ jobs:
               exit $QEMU_EXIT_CODE
           fi
 
+          # Watch file length: actions/cache restores the image dense, so disk
+          # size roughly doubles on every cache hit even with no real regrowth.
+          echo "=== yanet-test.qcow2 size ==="
+          qemu-img info yanet-test.qcow2 || true
+
         timeout-minutes: 130
 
       - name: Run functional tests

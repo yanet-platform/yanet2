@@ -40,40 +40,23 @@ network:
 
 packages:
   - qemu-guest-agent
-  - meson
-  - clang
-  - clang-format-19
-  - clang-tidy-19
-  - git
-  - just
   - jq
   - make
   - python3-pyelftools
   - libnuma-dev
   - libpcap-dev
   - libyaml-dev
-  - protobuf-compiler
-  - rustup
   - gdb
-  - gdbserver
-  - lldb
-  - lcov
-  - golang-go
-  - linux-headers-generic
-  - linux-image-extra-virtual
   - kmod
   - procps
   - util-linux
   - tcpdump
-  - tshark
   - vim-tiny
   - iputils-ping
   - net-tools
 
 runcmd:
   - exec &> /var/log/cloud-init-output.log
-  - apt-get update -y
-  - apt-get install -y linux-modules-extra-$(uname -r) --no-install-recommends
 
   # 1. Disable snap (- ~10s)
   - |
@@ -167,9 +150,6 @@ runcmd:
     systemctl daemon-reload
     systemctl disable getty.target
     systemctl enable serial-getty@ttyS0.service
-  # Configure Rust
-  - rustup set auto-self-update disable
-  - rustup install stable
   # Configure hugepages
   - echo 'vm.nr_hugepages = 192' >> /etc/sysctl.conf
   - sysctl -p
@@ -196,6 +176,15 @@ runcmd:
   - echo 'export TERM=xterm' >> /root/.bashrc
   # Add ubuntu user to necessary groups
   - usermod -aG sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev ubuntu
+  # Reclaim disk before the image is cached. This only returns freed blocks to
+  # the qcow2 because run_qemu opens the drive with discard=unmap — remove that
+  # option and the image quietly grows back with every check still green.
+  - |
+    apt-get purge -y snapd 2>/dev/null || true
+    apt-get autoremove -y --purge 2>/dev/null || true
+    apt-get clean 2>/dev/null || true
+    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+    fstrim -av 2>/dev/null || true
   # Signal VM is fully ready
   - echo "YANET VM FULLY READY - $(date)" > /dev/ttyS0
   - echo "Autologin configured for ubuntu user" > /dev/ttyS0
