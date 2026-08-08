@@ -91,9 +91,9 @@ Second, `reserved` is appropriate for field numbers that were removed from a pac
 
 ## What the Gate Enforces
 
-`buf breaking` runs on every pull request, comparing the branch against `main` using the `PACKAGE` breaking-change category configured in `buf.yaml`. The `PACKAGE` ruleset catches wire-incompatible changes at the package, file, message, field, enum, and RPC level — covering all cases described above. Critically, it is additive-only for existing packages: it blocks deleting fields, enum values, messages, RPCs, and services (via the `*_NO_DELETE` rules) in addition to catching type and number changes, so the only safe in-place evolution of a frozen `.v1` package is adding new elements. For the full rule taxonomy, see the [buf breaking overview](https://buf.build/docs/breaking/overview).
+`buf breaking` runs on every pull request, comparing the branch against its base using the `PACKAGE` breaking-change category configured in `buf.yaml`. The `PACKAGE` ruleset catches wire-incompatible changes at the package, file, message, field, enum, and RPC level — covering all cases described above. Critically, it is additive-only for existing packages: it blocks deleting fields, enum values, messages, RPCs, and services (via the `*_NO_DELETE` rules) in addition to catching type and number changes, so the only safe in-place evolution of a frozen `.v1` package is adding new elements. For the full rule taxonomy, see the [buf breaking overview](https://buf.build/docs/breaking/overview).
 
-In CI (`proto-lint.yml`), the `buf-breaking` job runs only on pull requests (not on direct pushes to `main`), comparing against `https://github.com/yanet-platform/yanet2.git#branch=main`.
+In CI (`proto-lint.yml`), the `buf-breaking` job runs only on pull requests (not on direct pushes to `main`), comparing against the pull request's own base branch. For an ordinary pull request that base is `main`. For one opened against another branch it is that branch, so the parent's breaking changes are not reported against the child.
 
 ## Documented Exclusions and Rule Exceptions
 
@@ -136,7 +136,7 @@ make proto-lint
 make proto-breaking
 ```
 
-`make proto-lint` also runs the custom Go-based `protolint` tool that checks `go_package` alignment across all protos. `make proto-breaking` invokes `buf breaking --against ".git#branch=main"` — run it on a feature branch to catch issues before opening a PR.
+`make proto-lint` also runs the custom Go-based `protolint` tool that checks `go_package` alignment across all protos. `make proto-breaking` invokes `buf breaking --against ".git#branch=main"` — run it on a feature branch to catch issues before opening a PR. It always compares against `main`, so for a pull request opened against another branch, point it at that branch instead to match what CI will check.
 
 ## PR Author Checklist
 

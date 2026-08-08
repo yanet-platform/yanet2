@@ -44,8 +44,21 @@ jobs:
         with:
           setup_only: true
 
+      # Comparing against the base branch rather than main keeps a stacked pull
+      # request from being blamed for its parent's breaking changes.
       - name: Run buf breaking
-        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Buf reads the fragment as a comma-separated option list, so a comma
+          # in the branch name would arrive as extra options, not as the name.
+          case "${BASE_REF}" in
+            *,*)
+              echo "::error::base branch name contains a comma: ${BASE_REF}"
+              exit 1
+              ;;
+          esac
+          buf breaking --against "https://github.com/${{ github.repository }}.git#branch=${BASE_REF}"
 
   protolint:
     name: Custom protolint linter
