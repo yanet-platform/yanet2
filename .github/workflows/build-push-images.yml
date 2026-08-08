@@ -44,7 +44,7 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends devscripts equivs
+          sudo apt-get install -y --no-install-recommends devscripts
 
       - uses: actions/setup-go@v5
         with:
