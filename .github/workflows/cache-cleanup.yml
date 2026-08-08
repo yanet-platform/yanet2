@@ -4,10 +4,14 @@ name: Actions cache cleanup
 # to LRU-evict live entries: superseded ccache-action generations (it never
 # prunes its own timestamped keys) and caches left on already-merged or
 # closed PR refs.
+#
+# Superseded generations pile up through the working day faster than a
+# once-daily sweep clears them, so the sweep runs hourly to match the rate
+# they appear.
 
 on:
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -15,6 +19,14 @@ on:
         required: false
         default: true
         type: boolean
+
+# The hourly cron and a manual dispatch must never overlap: a losing sweep
+# would select caches the winner already deleted, so every one of its
+# delete calls fails and the every-delete-failed guard turns the run red.
+# Let a running sweep finish rather than cancelling it mid delete-loop.
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: false
 
 permissions:
   actions: write
