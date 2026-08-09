@@ -2,6 +2,7 @@ package framework
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -58,6 +59,14 @@ type QEMUManager struct {
 	instanceID       string
 	sshPort          int
 	serialReaderDone chan struct{}
+	// processExit is closed when the QEMU process for the current Start()
+	// call has exited. WaitForReady selects on it to fail immediately instead
+	// of waiting for the readiness timeout. Each Start() creates a fresh channel.
+	processExit chan struct{}
+	// processExitMsg holds a human-readable classification of the process exit
+	// (exit code, signal, core dump) written by the supervisor goroutine before
+	// closing processExit. Safe to read after processExit is closed.
+	processExitMsg string
 	// TemplateOverlay is an optional path to a qcow2 overlay that already
 	// contains a reusable VM snapshot. When set, Start() copies it instead
 	// of creating a blank overlay, then boots with -loadvm TemplateSnapshotName.
@@ -130,10 +139,13 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 	return q, nil
 }
 
-// BootedSnapshotName is the name of the QEMU snapshot saved after a
-// clean boot. When a pool VM's overlay contains this snapshot, Start()
-// restores it instantly via -loadvm instead of waiting ~44s for boot.
-const BootedSnapshotName = "booted"
+const (
+	// BootedSnapshotName is the name of the QEMU snapshot saved after a
+	// clean boot. When a pool VM's overlay contains this snapshot, Start()
+	// restores it instantly via -loadvm instead of waiting ~44s for boot.
+	BootedSnapshotName    = "booted"
+	bootedTemplateVersion = "v2"
+)
 
 // OverlayHasSnapshot returns true if the given qcow2 image contains a
 // snapshot with the given name.
@@ -332,22 +344,54 @@ func (q *QEMUManager) Start() (bool, error) {
 	// Create stderr pipe for logging
 	stderr, err := q.Command.StderrPipe()
 	if err != nil {
+		_ = logWriter.Close()
 		return false, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	// Start goroutine to capture stderr for logging
-	go q.captureStderr(stderr, logWriter)
+	// Initialise process-supervision state for this start after all setup that
+	// can fail without starting a process has succeeded.
+	q.processExit = make(chan struct{})
+	q.processExitMsg = ""
 
 	// Start QEMU process
+	exitCh := q.processExit
 	if err := q.Command.Start(); err != nil {
+		_ = stderr.Close()
+		_ = logWriter.Close()
+		q.processExitMsg = fmt.Sprintf("start failed: %v", err)
+		close(exitCh)
 		return false, fmt.Errorf("failed to start QEMU: %w", err)
 	}
+
+	// Start goroutine to capture stderr for logging.
+	go q.captureStderr(stderr, logWriter)
+
+	// Supervise the QEMU process: call Wait exactly once and signal its exit.
+	// WaitForReady selects on processExit so a dead QEMU fails immediately
+	// instead of waiting for the readiness timeout. The command and channel
+	// are captured here so a later Start() replacing q.Command cannot cause
+	// a double wait or close the wrong channel.
+	cmd := q.Command
+	go func() {
+		waitErr := cmd.Wait()
+		q.processExitMsg = classifyProcessExit(cmd, waitErr)
+		q.log.Debugf("QEMU process exited: %s", q.processExitMsg)
+		close(exitCh)
+	}()
 
 	// Wait a bit and check if process is still running
 	time.Sleep(1 * time.Second)
 
+	select {
+	case <-exitCh:
+		logContent, _ := os.ReadFile(logFile)
+		logContentQ, _ := os.ReadFile(qemuLogfile)
+		return false, fmt.Errorf("QEMU exited early (%s). Log content: %s; QEMU log content: %s", q.processExitMsg, string(logContent), string(logContentQ))
+	default:
+	}
+
 	// Check if process exited with error
-	if q.Command.Process == nil || q.Command.Process.Pid == 0 || (q.Command.ProcessState != nil && q.Command.ProcessState.Exited()) {
+	if q.Command.Process == nil || q.Command.Process.Pid == 0 {
 		// Read log file to see what went wrong
 		logContent, _ := os.ReadFile(logFile)
 		logContentQ, _ := os.ReadFile(qemuLogfile)
@@ -367,7 +411,6 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 
 	q.log.Debugf("QEMU process started with PID: %d", q.Command.Process.Pid)
-	q.log.Debugf("QEMU process state: %v", q.Command.ProcessState)
 
 	if err := q.connectToMonitor(); err != nil {
 		logContent, _ := os.ReadFile(logFile)
@@ -382,10 +425,10 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 	q.log.Debugf("Successfully connected to serial console at %s", q.SerialPath)
 
-	// When booting from snapshot, the VM is already at the shell prompt.
-	// Send \n\n to flush the prompt through the scanner: first \n
-	// triggers the prompt output, second \n terminates that output
-	// with a newline so the scanner can detect "root@yanet-vm:~#".
+	// When booting from snapshot, the restored shell produces no output
+	// until prompted. Poke the console once so the prompt-aware scanner
+	// receives it. During cold boot the prompt arrives naturally and no
+	// writes are needed.
 	if fromSnapshot {
 		if stdin := q.GetStdin(); stdin != nil {
 			_, _ = stdin.Write([]byte("\n\n"))
@@ -436,17 +479,38 @@ func (q *QEMUManager) Stop() error {
 		q.serialConn = nil
 	}
 
-	// Kill QEMU process if running (unless VM should be kept alive for debugging)
+	// Kill QEMU process if still running (unless VM should be kept alive).
+	// If the process already exited on its own, skip Kill and drain the
+	// supervisor goroutine so it cannot write to a closed log file after
+	// WorkDir cleanup.
 	if ShouldKeepVMAlive() {
-		q.log.Infof("Keeping VM alive (PID: %d) for manual debugging", q.Command.Process.Pid)
+		if q.Command != nil && q.Command.Process != nil {
+			q.log.Infof("Keeping VM alive (PID: %d) for manual debugging", q.Command.Process.Pid)
+		}
 		q.log.Infof("Serial console socket: %s", q.SerialPath)
 		q.log.Infof("To connect: socat - UNIX-CONNECT:%s", q.SerialPath)
 		q.log.Infof("SSH: ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p %d", q.sshPort)
 	} else {
-		if q.Command != nil && q.Command.Process != nil {
-			if err := q.Command.Process.Kill(); err != nil {
-				errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
+		alreadyExited := false
+		if q.processExit != nil {
+			select {
+			case <-q.processExit:
+				alreadyExited = true
+			default:
 			}
+		}
+		if !alreadyExited && q.Command != nil && q.Command.Process != nil {
+			if err := q.Command.Process.Kill(); err != nil {
+				// "process already finished" is not an error here.
+				if !strings.Contains(err.Error(), "process already finished") {
+					errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
+				}
+			}
+		}
+		// Wait for the supervisor goroutine to finish so it does not race
+		// with WorkDir cleanup below.
+		if q.processExit != nil {
+			<-q.processExit
 		}
 	}
 
@@ -512,7 +576,33 @@ func (q *QEMUManager) getSerialLog() *zap.SugaredLogger {
 	return q.serialLog.Load().(*zap.SugaredLogger)
 }
 
-// captureStderr captures QEMU stderr for logging
+// classifyProcessExit turns an exec.Cmd exit error into a stable diagnostic
+// string distinguishing normal exit, non-zero exit code, and signal death
+// (including core-dump state).
+func classifyProcessExit(cmd *exec.Cmd, waitErr error) string {
+	if waitErr == nil {
+		return fmt.Sprintf("exit code %d", cmd.ProcessState.ExitCode())
+	}
+	if exitErr, ok := waitErr.(*exec.ExitError); ok {
+		ps := exitErr.ProcessState
+		msg := fmt.Sprintf("exit code %d", ps.ExitCode())
+		if ws, ok := ps.Sys().(syscall.WaitStatus); ok {
+			if ws.Signaled() {
+				sig := ws.Signal()
+				msg = fmt.Sprintf("killed by signal %d (%s)", sig, sig)
+				if ws.CoreDump() {
+					msg += " (core dumped)"
+				}
+			}
+		}
+		return msg
+	}
+	return waitErr.Error()
+}
+
+// captureStderr captures QEMU stderr into the per-VM log file and mirrors
+// every line through the harness logger so the retained test.log carries
+// QEMU diagnostics without requiring a separate artifact upload.
 func (q *QEMUManager) captureStderr(stderr io.ReadCloser, logWriter *os.File) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -533,6 +623,7 @@ func (q *QEMUManager) captureStderr(stderr io.ReadCloser, logWriter *os.File) {
 		if _, err := logWriter.WriteString("STDERR: " + line + "\n"); err != nil {
 			q.log.Errorf("Failed to write stderr to log file: %v", err)
 		}
+		q.log.Debugf("QEMU stderr: %s", line)
 	}
 	if err := scanner.Err(); err != nil {
 		q.log.Errorf("Error reading stderr: %v", err)
@@ -682,6 +773,42 @@ func (q *QEMUManager) connectToSerial() error {
 	return fmt.Errorf("failed to connect to serial console after 10 attempts")
 }
 
+// shellPromptMarker is the autologin bash prompt that does not end with a
+// newline. The scanner split function detects it so readiness works without
+// writing periodic newlines into the serial console during boot.
+const shellPromptMarker = "root@yanet-vm:~#"
+
+// promptAwareSplit is a bufio.SplitFunc that emits normal newline-terminated
+// lines and also emits the unterminated shell prompt as soon as it arrives,
+// so the reader detects readiness directly from received bytes.
+func promptAwareSplit(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	// Check for the shell prompt marker anywhere in the buffer, even without
+	// a trailing newline. This is what makes readiness detection reliable
+	// during cold boot: the prompt arrives as a bare token at the end of
+	// serial output with no terminator.
+	if idx := bytes.Index(data, []byte(shellPromptMarker)); idx >= 0 {
+		end := idx + len(shellPromptMarker)
+		// Return everything up to and including the prompt as one token.
+		return end, data[:end], nil
+	}
+	// Normal newline-terminated line.
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	// Not enough data yet and not at EOF.
+	if !atEOF {
+		return 0, nil, nil
+	}
+	// At EOF with remaining non-prompt data: return it as a final token.
+	if len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
 // readSerial is the serial reader goroutine for one VM slot.
 //
 // Invariant: exactly one readSerial goroutine is active per VM slot at any
@@ -705,31 +832,11 @@ func (q *QEMUManager) readSerial() {
 	done := q.serialReaderDone
 
 	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	scanner.Split(promptAwareSplit)
 	readyOnce := false
 
 	defer close(done)
-
-	// The bash prompt (root@yanet-vm:~#) does not end with a newline,
-	// so bufio.Scanner cannot detect it as a complete line. Send periodic
-	// newlines to flush the prompt: bash responds to \n with a new prompt
-	// preceded by \n, which the scanner can then match.
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-readySig:
-				return
-			case <-done:
-				return
-			case <-ticker.C:
-				if _, err := conn.Write([]byte("\n")); err != nil {
-					q.log.Debugf("serial flush goroutine exiting: %v", err)
-					return
-				}
-			}
-		}
-	}()
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -748,7 +855,7 @@ func (q *QEMUManager) readSerial() {
 		}
 
 		// Detect readiness exactly once; keep reading after signalling.
-		if !readyOnce && strings.Contains(line, "root@yanet-vm:~#") {
+		if !readyOnce && strings.Contains(line, shellPromptMarker) {
 			readyOnce = true
 			q.setVMReady(true)
 			q.log.Debug("VM is ready!")
@@ -821,6 +928,9 @@ func (q *QEMUManager) WaitForReady(timeout time.Duration) error {
 	case <-q.readySignal:
 		q.log.Debug("Got ready signal")
 		return nil
+	case <-q.processExit:
+		logContent, _ := os.ReadFile(filepath.Join(q.WorkDir, "qemu-output.log"))
+		return fmt.Errorf("QEMU process exited before VM became ready (%s). stderr: %s", q.processExitMsg, string(logContent))
 	case <-time.After(timeout):
 		return fmt.Errorf("VM did not become ready within %v", timeout)
 	}
@@ -1035,18 +1145,14 @@ func (q *QEMUManager) SaveBootedOverlay() (string, error) {
 	return q.SaveSnapshotOverlay(BootedSnapshotName)
 }
 
-// BootedImagePath returns the path to the booted snapshot image that
-// should be placed next to the base image. For example, if the base
-// image is "/path/to/yanet-test.qcow2", the booted image will be
-// "/path/to/yanet-test-booted.qcow2".
+// BootedImagePath returns the versioned path to the booted snapshot image.
 func BootedImagePath(baseImagePath string) string {
-	return SnapshotImagePath(baseImagePath, BootedSnapshotName)
+	return SnapshotImagePath(baseImagePath, BootedSnapshotName+"-"+bootedTemplateVersion)
 }
 
-// BaselineImagePath returns the path to the cached baseline snapshot image
-// placed next to the base image.
+// BaselineImagePath returns the versioned path to the cached baseline snapshot.
 func BaselineImagePath(baseImagePath string) string {
-	return SnapshotImagePath(baseImagePath, "baseline")
+	return SnapshotImagePath(baseImagePath, "baseline-"+baselineTemplateVersion)
 }
 
 // SnapshotImagePath returns the path to the cached image containing the

@@ -39,7 +39,7 @@ type poolResult struct {
 }
 
 func guestPathsForTemplate(snapshotName string) GuestPaths {
-	if snapshotName == "baseline" {
+	if snapshotName != BootedSnapshotName {
 		// Baseline templates are captured after PrepareLocalStorage, so their
 		// binaries and configuration live in guest tmpfs rather than on 9P.
 		return LocalGuestPaths()
@@ -214,13 +214,16 @@ func (p *VMPool) validateBootedTemplate() error {
 	valFW.cli = cli
 
 	p.log.Infof("Starting validation VM from booted template...")
+	defer valFW.Stop() //nolint:errcheck
 	if _, err := valFW.Start(); err != nil {
 		return fmt.Errorf("validation VM start failed: %w", err)
 	}
-	defer valFW.Stop() //nolint:errcheck
 
 	if err := valMgr.WaitForReady(VMReadyTimeout()); err != nil {
 		return fmt.Errorf("validation VM not ready after start: %w", err)
+	}
+	if err := valFW.thawRootFilesystem(); err != nil {
+		return fmt.Errorf("validation VM filesystem thaw failed after start: %w", err)
 	}
 
 	for i := 1; i <= 3; i++ {
@@ -234,29 +237,19 @@ func (p *VMPool) validateBootedTemplate() error {
 		if err := valMgr.RestoreBooted(); err != nil {
 			return fmt.Errorf("cycle %d: restore failed: %w", i, err)
 		}
+		if err := valFW.thawRootFilesystem(); err != nil {
+			return fmt.Errorf("cycle %d: filesystem thaw failed: %w", i, err)
+		}
 
 		// Remount 9P and run a simple smoke command.
 		if err := valFW.Mount9P(); err != nil {
 			p.log.Debugf("validation mount 9P (non-fatal): %v", err)
 		}
 
-		// Write-test: a read-only EXT4 remount (from a corrupt snapshot) would
-		// pass a plain "echo ok" but fail any disk write.
-		if err := guestWriteTest(valFW); err != nil {
-			return fmt.Errorf("cycle %d: write-test failed: %w", i, err)
-		}
 		p.log.Infof("Validation cycle %d/3 passed", i)
 	}
 
 	return nil
-}
-
-// guestWriteTest verifies the guest root filesystem is writable by creating
-// and removing a file on the root EXT4 partition (not /tmp, which may be
-// tmpfs). A read-only remount from a corrupt snapshot fails here.
-func guestWriteTest(fw *TestFramework) error {
-	_, err := fw.ExecuteCommandWithTimeout("echo ok > /.yanet_health && rm -f /.yanet_health", 30*time.Second)
-	return err
 }
 
 // startAllFromTemplate starts all slots from the given cached template.
@@ -283,18 +276,13 @@ func (p *VMPool) startAllFromTemplate(templateOverlay string, snapshotName strin
 		return firstErr
 	}
 
-	// Verify the guest filesystem is writable. A corrupt cached template
-	// (EXT4 journal abort → read-only remount) would pass boot but fail
-	// every downstream write. Catch it here so the caller can discard the
-	// bad cache and re-bootstrap instead of failing the whole test suite.
-	// Wait for VM0 readiness first — fw.Start() launches QEMU but does not
-	// block until the shell prompt appears; ExecuteCommandWithTimeout
-	// returns "VM not ready" on an unready VM.
-	if err := p.vms[0].manager.WaitForReady(VMReadyTimeout()); err != nil {
-		return fmt.Errorf("VM0 not ready after start from template: %w", err)
-	}
-	if err := guestWriteTest(p.vms[0].fw); err != nil {
-		return fmt.Errorf("guest filesystem health check failed (cached template may be corrupt): %w", err)
+	for i, entry := range p.vms {
+		if err := entry.manager.WaitForReady(VMReadyTimeout()); err != nil {
+			return fmt.Errorf("VM%d not ready after start from template: %w", i, err)
+		}
+		if err := entry.fw.thawRootFilesystem(); err != nil {
+			return fmt.Errorf("VM%d filesystem thaw failed after start from template: %w", i, err)
+		}
 	}
 
 	for i := range p.vms {
@@ -317,11 +305,9 @@ func (p *VMPool) bootstrapTemplate() error {
 		return fmt.Errorf("VM0 not ready during bootstrap: %w", err)
 	}
 
-	// Quiesce guest filesystem before snapshotting: cloud-init and login motd
-	// scripts (e.g. check-new-release) may still be writing to disk. savevm
-	// without quiescing captures mid-write EXT4 state and corrupts the cached
-	// image — the journal aborts on restore and the filesystem goes read-only.
-	quiesceCmd := "cloud-init status --wait 2>/dev/null; pkill -f update-notifier 2>/dev/null; pkill -f check-new-release 2>/dev/null; sync; sleep 1; sync"
+	// Wait for cloud-init to finish before snapshotting. It disables the guest
+	// maintenance writers during image preparation.
+	quiesceCmd := "cloud-init status --wait 2>/dev/null; sync"
 	if _, err := vm0.fw.ExecuteCommandWithTimeout(quiesceCmd, 60*time.Second); err != nil {
 		p.log.Warnf("Guest quiesce before savevm returned error (non-fatal): %v", err)
 	}
@@ -332,11 +318,21 @@ func (p *VMPool) bootstrapTemplate() error {
 		p.log.Warnf("Failed to unmount 9P before snapshot (non-fatal): %v", err)
 	}
 
+	if err := vm0.fw.freezeRootFilesystem(); err != nil {
+		_ = vm0.fw.Stop()
+		return fmt.Errorf("failed to freeze filesystem before booted snapshot: %w", err)
+	}
+
 	// Save the booted snapshot and get the overlay path.
 	overlayPath, err := vm0.manager.SaveBootedOverlay()
+	thawErr := vm0.fw.thawRootFilesystem()
 	if err != nil {
 		_ = vm0.fw.Stop()
 		return fmt.Errorf("failed to save booted snapshot: %w", err)
+	}
+	if thawErr != nil {
+		_ = vm0.fw.Stop()
+		return fmt.Errorf("failed to thaw filesystem after booted snapshot: %w", thawErr)
 	}
 
 	// Cache the overlay as the canonical template before stopping VM0

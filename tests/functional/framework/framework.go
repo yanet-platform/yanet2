@@ -1402,6 +1402,30 @@ func (f *TestFramework) Unmount9P() error {
 	return nil
 }
 
+func (f *TestFramework) freezeRootFilesystem() error {
+	_, err := f.ExecuteCommandWithTimeout("fsfreeze -f /", 30*time.Second)
+	return err
+}
+
+// thawRootFilesystem resumes the root filesystem and verifies that it accepts
+// writes. The write probe also makes thaw a no-op for snapshots that were
+// created before filesystem freezing was added.
+func (f *TestFramework) thawRootFilesystem() error {
+	thawErr := func() error {
+		_, err := f.ExecuteCommandWithTimeout("fsfreeze -u /", 30*time.Second)
+		return err
+	}()
+
+	_, writeErr := f.ExecuteCommandWithTimeout("echo ok > /.yanet_health && rm -f /.yanet_health", 30*time.Second)
+	if writeErr != nil {
+		if thawErr != nil {
+			return fmt.Errorf("filesystem thaw failed: %v; write probe failed: %w", thawErr, writeErr)
+		}
+		return fmt.Errorf("filesystem write probe failed after thaw: %w", writeErr)
+	}
+	return nil
+}
+
 // PrepareLocalStorage copies all YANET binaries, CLI tools, configs and
 // scripts from 9P mounts to /tmp/yanet/ inside the guest. After this
 // call, YANET can be started from local tmpfs paths so that no process
@@ -1516,9 +1540,17 @@ func (f *TestFramework) SaveSnapshot(name string) error {
 	if err := f.Unmount9P(); err != nil {
 		return fmt.Errorf("pre-savevm unmount failed: %w", err)
 	}
+	if err := f.freezeRootFilesystem(); err != nil {
+		return fmt.Errorf("pre-savevm filesystem freeze failed: %w", err)
+	}
 	if err := f.qemu.SaveSnapshot(name); err != nil {
+		_ = f.thawRootFilesystem()
 		_ = f.Mount9P()
 		return err
+	}
+	if err := f.thawRootFilesystem(); err != nil {
+		_ = f.Mount9P()
+		return fmt.Errorf("post-savevm filesystem thaw failed: %w", err)
 	}
 	if err := f.Mount9P(); err != nil {
 		return fmt.Errorf("post-savevm remount failed: %w", err)
@@ -1535,9 +1567,16 @@ func (f *TestFramework) SaveSnapshotKeepUnmounted(name string) error {
 	if err := f.Unmount9P(); err != nil {
 		return fmt.Errorf("pre-savevm unmount failed: %w", err)
 	}
+	if err := f.freezeRootFilesystem(); err != nil {
+		return fmt.Errorf("pre-savevm filesystem freeze failed: %w", err)
+	}
 	if err := f.qemu.SaveSnapshot(name); err != nil {
+		_ = f.thawRootFilesystem()
 		_ = f.Mount9P()
 		return err
+	}
+	if err := f.thawRootFilesystem(); err != nil {
+		return fmt.Errorf("post-savevm filesystem thaw failed: %w", err)
 	}
 	// ninepmounted remains false — caller knows 9P is unmounted.
 	f.log.Infof("Snapshot %q saved (9P unmounted, ready for pool use)", name)
@@ -1593,6 +1632,9 @@ func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
 	}
 	if err := f.qemu.WaitForReady(30 * time.Second); err != nil {
 		return fmt.Errorf("VM did not respond within 30s after restoring %q: %w", snapshot, err)
+	}
+	if err := f.thawRootFilesystem(); err != nil {
+		return fmt.Errorf("failed to thaw filesystem after restoring %q: %w", snapshot, err)
 	}
 
 	if err := f.Mount9P(); err != nil {
@@ -1781,6 +1823,9 @@ func (f *TestFramework) RestoreBooted() error {
 	// Restore via monitor + serial reconnect.
 	if err := f.qemu.RestoreBooted(); err != nil {
 		return fmt.Errorf("TestFramework.RestoreBooted: %w", err)
+	}
+	if err := f.thawRootFilesystem(); err != nil {
+		return fmt.Errorf("failed to thaw filesystem after booted restore: %w", err)
 	}
 
 	// Remount 9P for test access to binaries and config files.

@@ -1,6 +1,6 @@
 # Test configuration
 QEMU_IMAGE := yanet-test.qcow2
-BOOTED_TEMPLATE := yanet-test-booted.qcow2
+BOOTED_TEMPLATE := yanet-test-booted-v2.qcow2
 
 UBUNTU_IMAGE := ubuntu-24.04-minimal-cloudimg-amd64.img
 UBUNTU_URL := https://cloud-images.ubuntu.com/minimal/releases/noble/release/$(UBUNTU_IMAGE)
@@ -30,9 +30,9 @@ all: test
 
 
 # Prepare test environment: base image only.
-# The booted template overlay (yanet-test-booted.qcow2) is created automatically
+# The versioned booted template overlay is created automatically
 # on the first 'make test-main' run if it does not already exist.
-# To force recreation of the booted template: rm yanet-test-booted.qcow2
+# To force recreation of snapshot templates: make clean
 prepare-vm: check-deps $(QEMU_IMAGE)
 	@echo "Test environment ready"
 
@@ -70,6 +70,7 @@ endif
 clean:
 	@echo "Cleaning test artifacts..."
 	rm -f $(QEMU_IMAGE)
+	rm -f yanet-test-booted*.qcow2 yanet-test-baseline*.qcow2
 	rm -f $(CLOUD_INIT_AUTOLOGIN_ISO)
 	rm -f qemu_debug.log qemu.log test_output*.log test_run.log
 	rm -rf /tmp/yanet-test-vm
