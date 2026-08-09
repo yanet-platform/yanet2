@@ -14,6 +14,7 @@ sources = files(
   'pipeline_round.c',
   'worker.c',
   'counters.c',
+  'tx_pipe.c',
 )
 
 lib_worker_dp = static_library(

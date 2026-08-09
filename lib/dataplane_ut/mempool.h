@@ -3,6 +3,7 @@
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +26,10 @@ static int
 test_pool_enqueue(struct rte_mempool *mp, void *const *obj_table, unsigned n) {
 	for (unsigned idx = 0; idx < n; idx++) {
 		free((char *)obj_table[idx] - mp->header_size);
+	}
+
+	if (mp->pool_data != NULL) {
+		*(uint64_t *)mp->pool_data -= n;
 	}
 
 	return 0;
@@ -51,6 +56,11 @@ test_pool_dequeue(struct rte_mempool *mp, void **obj_table, unsigned n) {
 
 		rte_pktmbuf_init(mp, NULL, obj_table[idx], 0);
 	}
+
+	if (mp->pool_data != NULL) {
+		*(uint64_t *)mp->pool_data += n;
+	}
+
 	return 0;
 }
 
@@ -69,7 +79,10 @@ static const struct rte_mempool_ops test_pool_ops = {
 	.get_count = test_pool_get_count,
 };
 
-struct rte_mempool *
+// Test-only mock mempool backed directly by malloc/free (see test_pool_ops
+// above), used in place of a real DPDK pool where no hugepage-backed memory
+// is available.
+static inline struct rte_mempool *
 test_mempool_create(void) {
 	rte_mempool_ops_table.num_ops = 0;
 	rte_mempool_register_ops(&test_pool_ops);
@@ -86,6 +99,32 @@ test_mempool_create(void) {
 		mp->header_size += 64 - (mp->header_size % 64);
 	}
 	mp->private_data_size = private_data_size;
+	// Outstanding-object counter, incremented/decremented by
+	// test_pool_dequeue/test_pool_enqueue - get_count() is a fixed stub and
+	// cannot serve this purpose.
+	mp->pool_data = calloc(1, sizeof(uint64_t));
 	rte_pktmbuf_pool_init(mp, NULL);
 	return mp;
+}
+
+// Release a mempool created by test_mempool_create(). NULL-safe.
+//
+// Do NOT call rte_mempool_free — the test pool is not a real DPDK pool and
+// has no backing memory to tear down that way.
+static inline void
+test_mempool_free(struct rte_mempool *mp) {
+	if (mp == NULL) {
+		return;
+	}
+	free(mp->pool_data);
+	free(mp);
+}
+
+// Report the number of objects currently dequeued and not yet returned.
+static inline uint64_t
+test_mempool_outstanding(const struct rte_mempool *mp) {
+	if (mp->pool_data == NULL) {
+		return 0;
+	}
+	return *(const uint64_t *)mp->pool_data;
 }

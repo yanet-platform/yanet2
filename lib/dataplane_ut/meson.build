@@ -12,6 +12,7 @@ dependencies = [
 
 sources = files(
   'dataplane_ut.c',
+  'tx_pipe.c',
 )
 
 lib_dataplane_ut = static_library(
