@@ -32,7 +32,7 @@ static inline int
 value_collector_init(
 	struct value_collector *collector, struct memory_context *memory_context
 ) {
-	collector->memory_context = memory_context;
+	SET_OFFSET_OF(&collector->memory_context, memory_context);
 	// zero-initialized array
 	collector->use_map = NULL;
 	collector->chunk_count = 0;
@@ -43,6 +43,8 @@ value_collector_init(
 
 static inline void
 value_collector_fini(struct value_collector *collector) {
+	struct memory_context *memory_context =
+		ADDR_OF(&collector->memory_context);
 	uint32_t **use_map = ADDR_OF(&collector->use_map);
 
 	if (use_map != NULL) {
@@ -51,7 +53,7 @@ value_collector_fini(struct value_collector *collector) {
 			uint32_t *chunk = ADDR_OF(&use_map[chunk_idx]);
 			if (chunk != NULL) {
 				memory_bfree(
-					collector->memory_context,
+					memory_context,
 					chunk,
 					VALUE_COLLECTOR_CHUNK_SIZE *
 						sizeof(uint32_t)
@@ -60,7 +62,7 @@ value_collector_fini(struct value_collector *collector) {
 			}
 		}
 		memory_bfree(
-			collector->memory_context,
+			memory_context,
 			use_map,
 			collector->chunk_count * sizeof(uint32_t *)
 		);
@@ -80,6 +82,8 @@ value_collector_reset(struct value_collector *collector) {
  */
 static inline int
 value_collector_check(struct value_collector *collector, uint32_t value) {
+	struct memory_context *memory_context =
+		ADDR_OF(&collector->memory_context);
 	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
 	uint32_t **use_map = ADDR_OF(&collector->use_map);
 
@@ -87,8 +91,7 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		uint32_t new_chunk_count = chunk_idx + 1;
 
 		uint32_t **new_use_map = (uint32_t **)memory_balloc(
-			collector->memory_context,
-			new_chunk_count * sizeof(uint32_t *)
+			memory_context, new_chunk_count * sizeof(uint32_t *)
 		);
 
 		if (new_use_map == NULL) {
@@ -108,7 +111,7 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		}
 
 		memory_bfree(
-			collector->memory_context,
+			memory_context,
 			use_map,
 			collector->chunk_count * sizeof(uint32_t *)
 		);
@@ -121,7 +124,7 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 	uint32_t *chunk = ADDR_OF(&use_map[chunk_idx]);
 	if (chunk == NULL) {
 		chunk = (uint32_t *)memory_balloc(
-			collector->memory_context,
+			memory_context,
 			VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
 		);
 
@@ -193,7 +196,7 @@ value_registry_init(
 	struct memory_context *memory_context = (struct memory_context *)
 		memory_balloc(parent_context, sizeof(*memory_context));
 	if (memory_context == NULL) {
-		registry->memory_context = NULL;
+		SET_OFFSET_OF(&registry->memory_context, NULL);
 		return -1;
 	}
 	memory_context_init_from(memory_context, parent_context, name);
@@ -206,11 +209,11 @@ value_registry_init(
 			ADDR_OF(&memory_context->parent);
 		memory_context_fini(memory_context);
 		memory_bfree(parent, memory_context, sizeof(*memory_context));
-		registry->memory_context = NULL;
+		SET_OFFSET_OF(&registry->memory_context, NULL);
 		return -1;
 	}
 
-	registry->memory_context = memory_context;
+	SET_OFFSET_OF(&registry->memory_context, memory_context);
 
 	registry->ranges = NULL;
 	registry->range_count = 0;
@@ -224,6 +227,8 @@ value_registry_init(
  */
 static inline int
 value_registry_start(struct value_registry *registry) {
+	struct memory_context *memory_context =
+		ADDR_OF(&registry->memory_context);
 	value_collector_reset(&registry->collector);
 
 	struct value_range *ranges = ADDR_OF(&registry->ranges);
@@ -234,7 +239,7 @@ value_registry_start(struct value_registry *registry) {
 
 		struct value_range *new_ranges =
 			(struct value_range *)memory_balloc(
-				registry->memory_context,
+				memory_context,
 				new_capacity * sizeof(struct value_range)
 			);
 
@@ -253,7 +258,7 @@ value_registry_start(struct value_registry *registry) {
 		SET_OFFSET_OF(&registry->ranges, new_ranges);
 
 		memory_bfree(
-			registry->memory_context,
+			memory_context,
 			ranges,
 			sizeof(struct value_range) * old_capacity
 		);
@@ -303,7 +308,7 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 		struct value_range *range =
 			ADDR_OF(&registry->ranges) + registry->range_count - 1;
 		if (value_range_append(
-			    registry->memory_context, range, value
+			    ADDR_OF(&registry->memory_context), range, value
 		    )) {
 			return -1;
 		}
@@ -322,7 +327,8 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 // back NULL and every other field is untouched.
 static inline void
 value_registry_fini(struct value_registry *registry) {
-	struct memory_context *memory_context = registry->memory_context;
+	struct memory_context *memory_context =
+		ADDR_OF(&registry->memory_context);
 	if (memory_context == NULL) {
 		return;
 	}
@@ -361,7 +367,7 @@ value_registry_fini(struct value_registry *registry) {
 	struct memory_context *parent = ADDR_OF(&memory_context->parent);
 	memory_context_fini(memory_context);
 	memory_bfree(parent, memory_context, sizeof(*memory_context));
-	registry->memory_context = NULL;
+	SET_OFFSET_OF(&registry->memory_context, NULL);
 }
 
 static inline uint32_t

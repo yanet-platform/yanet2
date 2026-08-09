@@ -51,10 +51,11 @@ filter_free(
 	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
 		struct filter_vertex *v =
 			filter->v + filter_compiler->lookup_count + i;
-		attr_ctx[i] =
-			v->registry.memory_context != NULL
-				? ADDR_OF(&v->registry.memory_context->parent)
-				: NULL;
+		struct memory_context *registry_ctx =
+			ADDR_OF(&v->registry.memory_context);
+		attr_ctx[i] = registry_ctx != NULL
+				      ? ADDR_OF(&registry_ctx->parent)
+				      : NULL;
 	}
 
 	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
