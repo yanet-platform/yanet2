@@ -70,36 +70,15 @@ var fwstateStructuralCounters = []string{
 //   - grpc_method:   RPC name (gRPC metrics)
 //   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
 func (m *FWStateService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
-	result := m.collectMapStats()
-
 	dpMetrics, err := m.collectDataplaneMetrics(tags)
 	if err != nil {
 		return nil, err
 	}
-	result = append(result, dpMetrics...)
+	result := dpMetrics
 	if m.metrics != nil {
 		result = append(result, m.metrics.Collect()...)
 	}
 	return metrics.Filter(result, tags), nil
-}
-
-// collectMapStats emits gauge metrics derived from the per-config map
-// statistics (GetMapsStats) for both IPv4 and IPv6 address families.
-func (m *FWStateService) collectMapStats() []*commonpb.Metric {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now()
-
-	var result []*commonpb.Metric
-	for name, config := range m.configs {
-		mapsStats := config.GetMapsStats()
-
-		result = append(result, collectMapStatsForAF(name, "ipv4", now, mapsStats.IPv4)...)
-		result = append(result, collectMapStatsForAF(name, "ipv6", now, mapsStats.IPv6)...)
-	}
-
-	return result
 }
 
 // collectDataplaneMetrics emits per-config packet/byte counters read from the

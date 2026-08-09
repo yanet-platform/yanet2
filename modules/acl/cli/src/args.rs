@@ -1,7 +1,13 @@
+use core::time::Duration;
 use std::path::PathBuf;
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;
+
+/// Parse duration from string (e.g., "60s", "5m", "1h")
+fn parse_duration(s: &str) -> Result<Duration, String> {
+    humantime::parse_duration(s).map_err(|e| e.to_string())
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Parser)]
@@ -33,6 +39,87 @@ pub struct UpdateCmd {
     /// Path to the ruleset YAML file
     #[arg(required = true, long = "rules", value_name = "PATH")]
     pub rules: PathBuf,
+
+    /// Name of the standalone fwstate-map (kind V4) this config borrows from.
+    ///
+    /// Allowed for any stateful ruleset (CREATE_STATE or CHECK_STATE);
+    /// required when the ruleset uses ACTION_KIND_CREATE_STATE.
+    #[arg(long = "map-name-v4", value_name = "NAME")]
+    pub map_name_v4: Option<String>,
+
+    /// Name of the standalone fwstate-map (kind V6) this config borrows from.
+    ///
+    /// Same requirement contract as --map-name-v4.
+    #[arg(long = "map-name-v6", value_name = "NAME")]
+    pub map_name_v6: Option<String>,
+
+    /// Source IPv6 address (e.g., "2001:db8::1")
+    #[arg(long)]
+    pub src_addr: Option<String>,
+
+    /// Destination MAC address (e.g., "00:11:22:33:44:55")
+    #[arg(long)]
+    pub dst_ether: Option<String>,
+
+    /// Multicast IPv6 address (e.g., "ff02::1")
+    #[arg(long)]
+    pub dst_addr_multicast: Option<String>,
+
+    /// Multicast port
+    #[arg(long)]
+    pub port_multicast: Option<u32>,
+
+    /// Unicast IPv6 address (e.g., "2001:db8::2")
+    #[arg(long)]
+    pub dst_addr_unicast: Option<String>,
+
+    /// Unicast port
+    #[arg(long)]
+    pub port_unicast: Option<u32>,
+
+    /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h")
+    #[arg(long, value_parser = parse_duration)]
+    pub tcp_syn_ack: Option<Duration>,
+
+    /// TCP SYN timeout (e.g., "60s", "5m", "1h")
+    #[arg(long, value_parser = parse_duration)]
+    pub tcp_syn: Option<Duration>,
+
+    /// TCP FIN timeout (e.g., "60s", "5m", "1h")
+    #[arg(long, value_parser = parse_duration)]
+    pub tcp_fin: Option<Duration>,
+
+    /// TCP established timeout (e.g., "60s", "5m", "1h")
+    #[arg(long, value_parser = parse_duration)]
+    pub tcp: Option<Duration>,
+
+    /// UDP timeout (e.g., "60s", "5m", "1h")
+    #[arg(long, value_parser = parse_duration)]
+    pub udp: Option<Duration>,
+
+    /// Default timeout (e.g., "60s", "5m", "1h")
+    #[arg(long, value_parser = parse_duration)]
+    pub default: Option<Duration>,
+}
+
+impl UpdateCmd {
+    /// Returns true when any synchronization flag is set.
+    ///
+    /// Drives whether a SyncConfig is built for the update request.
+    pub fn has_sync_flags(&self) -> bool {
+        self.src_addr.is_some()
+            || self.dst_ether.is_some()
+            || self.dst_addr_multicast.is_some()
+            || self.port_multicast.is_some()
+            || self.dst_addr_unicast.is_some()
+            || self.port_unicast.is_some()
+            || self.tcp_syn_ack.is_some()
+            || self.tcp_syn.is_some()
+            || self.tcp_fin.is_some()
+            || self.tcp.is_some()
+            || self.udp.is_some()
+            || self.default.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Parser)]

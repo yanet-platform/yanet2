@@ -18,10 +18,35 @@ service FWStateService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
   // List all FWState configurations across instances
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
-  // Link FWState configuration to ACL configurations
-  rpc LinkFWState(LinkFWStateRequest) returns (LinkFWStateResponse);
-  // Get statistics for FWState maps
-  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+}
+
+// Kind identifies the address family of a standalone fwstate-map object.
+enum Kind {
+  V4 = 0;
+  V6 = 1;
+}
+
+// FWStateMapService manages standalone named fwstate-map objects.
+//
+// Each fwstate-map is a pure data container holding a single fwtable for one
+// address family (v4 or v6). It has no dataplane module of its own; module
+// configs (fwstate sync, ACL) reference fwtables by name and the
+// controlplane resolves the names to concrete table addresses at publish
+// time. A consumer that needs both families references two named objects.
+service FWStateMapService {
+  // CreateMap creates a new named fwstate-map for one address family.
+  rpc CreateMap(CreateMapRequest) returns (CreateMapResponse);
+  // DeleteMap removes a named fwstate-map, refusing if any consumer still
+  // references it.
+  rpc DeleteMap(DeleteMapRequest) returns (DeleteMapResponse);
+  // ListMaps returns the names of all registered fwstate-map objects.
+  rpc ListMaps(ListMapsRequest) returns (ListMapsResponse);
+  // GetMapStats returns statistics for the single fwtable of a named
+  // fwstate-map.
+  rpc GetMapStats(GetMapStatsRequest) returns (GetMapStatsResponse);
+  // InsertLayer inserts a new layer into the fwtable chain of a named
+  // fwstate-map.
+  rpc InsertLayer(InsertLayerRequest) returns (InsertLayerResponse);
   // Bidirectional stream for listing map entries.
   rpc ListEntries(stream ListEntriesRequest) returns (stream ListEntriesResponse);
 }
@@ -34,8 +59,17 @@ service MetricsService {
 
 message UpdateConfigRequest {
   string name = 1;
-  MapConfig map_config = 2;
   SyncConfig sync_config = 3;
+  // fwtable_name_v4 references a standalone fwstate-map (kind V4) by name.
+  //
+  // The service resolves the name to the concrete v4 fwtable address at
+  // publish time and attaches it to the sync config.
+  string fwtable_name_v4 = 4;
+  // fwtable_name_v6 references a standalone fwstate-map (kind V6) by name.
+  //
+  // The service resolves the name to the concrete v6 fwtable address at
+  // publish time and attaches it to the sync config.
+  string fwtable_name_v6 = 5;
 }
 
 message UpdateConfigResponse {}
@@ -47,9 +81,13 @@ message ShowConfigRequest {
 
 message ShowConfigResponse {
   string name = 1;
-  repeated string linked_acls = 2;
-  MapConfig map_config = 3;
   SyncConfig sync_config = 4;
+  // fwtable_name_v4 is the name of the standalone fwstate-map (kind V4) this
+  // config references.
+  string fwtable_name_v4 = 5;
+  // fwtable_name_v6 is the name of the standalone fwstate-map (kind V6) this
+  // config references.
+  string fwtable_name_v6 = 6;
 }
 
 message DeleteConfigRequest { string name = 1; }
@@ -59,13 +97,6 @@ message DeleteConfigResponse {}
 message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
-
-message LinkFWStateRequest {
-  string fwstate_name = 1;
-  repeated string acl_config_names = 2;
-}
-
-message LinkFWStateResponse {}
 
 message GetStatsRequest { string name = 1; }
 
@@ -115,13 +146,12 @@ message FwStateEntry {
 }
 
 message ListEntriesRequest {
-  string config_name = 1;   // Config to iterate
-  bool is_ipv6 = 2;         // false = fw4state, true = fw6state
-  uint32 layer_index = 3;   // Which layer to iterate (0 = active)
-  bool include_expired = 4; // Whether to include expired entries
-  Direction direction = 5;  // Direction for this read
-  uint32 batch_size = 6;    // Number of entries to return in this batch
-  int64 index = 7;          // Cursor position from previous response (0 on first)
+  string map_name = 1;      // Named fwstate-map to iterate
+  uint32 layer_index = 2;   // Which layer to iterate (0 = active)
+  bool include_expired = 3; // Whether to include expired entries
+  Direction direction = 4;  // Direction for this read
+  uint32 batch_size = 5;    // Number of entries to return in this batch
+  int64 index = 6;          // Cursor position from previous response (0 on first)
 }
 
 message ListEntriesResponse {
@@ -129,12 +159,6 @@ message ListEntriesResponse {
   bool has_more = 2;     // false when cursor reached the end
   int64 index = 3;       // Updated cursor position for next request
   uint64 generation = 4; // Config generation for consistency detection
-}
-
-// Map configuration for fwstate
-message MapConfig {
-  uint32 index_size = 1;
-  uint32 extra_bucket_count = 2;
 }
 
 // Firewall state synchronization configuration
@@ -154,3 +178,38 @@ message SyncConfig {
   uint64 udp = 11;        // UDP timeout in nanoseconds;
   uint64 default = 12;    // Default timeout in nanoseconds;
 }
+
+message CreateMapRequest {
+  string name = 1;
+  // kind selects the address family of the fwtable this map owns.
+  Kind kind = 2;
+  uint32 index_size = 3;
+  uint32 extra_bucket_count = 4;
+  uint32 worker_count = 5;
+}
+
+message CreateMapResponse {}
+
+message DeleteMapRequest { string name = 1; }
+
+message DeleteMapResponse {}
+
+message ListMapsRequest {}
+
+message ListMapsResponse { repeated string maps = 1; }
+
+message GetMapStatsRequest { string name = 1; }
+
+message GetMapStatsResponse { MapStats stats = 1; }
+
+message InsertLayerRequest {
+  string name = 1;
+  // kind is the address family of the map (redundant with the stored kind
+  // but kept for request symmetry with CreateMap).
+  Kind kind = 2;
+  uint32 index_size = 3;
+  uint32 extra_bucket_count = 4;
+  uint32 worker_count = 5;
+}
+
+message InsertLayerResponse {}

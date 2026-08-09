@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -109,6 +110,87 @@ func TestValidateSyncPorts(t *testing.T) {
 
 			require.Error(t, err)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
+// TestUpdateConfigValidation verifies the request validation logic in
+// UpdateConfig.
+//
+// These tests exercise the validation paths only (no shared memory): every
+// case fails before reaching the map resolution and CGO publish step.
+func TestUpdateConfigValidation(t *testing.T) {
+	validSyncConfig := &fwstatepb.SyncConfig{
+		SrcAddr:          &commonpb.IPAddress{Addr: make([]byte, 16)},
+		DstEther:         commonpb.NewMACAddressEUI48([6]byte{1, 2, 3, 4, 5, 6}),
+		DstAddrMulticast: &commonpb.IPAddress{Addr: make([]byte, 16)},
+		PortMulticast:    9999,
+	}
+
+	cases := []struct {
+		name     string
+		req      *fwstatepb.UpdateConfigRequest
+		wantCode codes.Code
+	}{
+		{
+			name: "empty name rejected",
+			req: &fwstatepb.UpdateConfigRequest{
+				SyncConfig:    validSyncConfig,
+				FwtableNameV4: "some-map-v4",
+				FwtableNameV6: "some-map-v6",
+			},
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "empty fwtable_name_v4 rejected",
+			req: &fwstatepb.UpdateConfigRequest{
+				Name:          "cfg1",
+				SyncConfig:    validSyncConfig,
+				FwtableNameV6: "some-map-v6",
+			},
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "empty fwtable_name_v6 rejected",
+			req: &fwstatepb.UpdateConfigRequest{
+				Name:          "cfg1",
+				SyncConfig:    validSyncConfig,
+				FwtableNameV4: "some-map-v4",
+			},
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "nil sync_config rejected",
+			req: &fwstatepb.UpdateConfigRequest{
+				Name:          "cfg1",
+				FwtableNameV4: "some-map-v4",
+				FwtableNameV6: "some-map-v6",
+			},
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "map service not configured rejected",
+			req: &fwstatepb.UpdateConfigRequest{
+				Name:          "cfg1",
+				SyncConfig:    validSyncConfig,
+				FwtableNameV4: "some-map-v4",
+				FwtableNameV6: "some-map-v6",
+			},
+			wantCode: codes.FailedPrecondition,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Service with nil agent and nil mapService — only
+			// validation paths are exercised, no CGO calls.
+			svc := &FWStateService{
+				configs: map[string]*FwStateConfig{},
+				log:     zap.NewNop(),
+			}
+			_, err := svc.UpdateConfig(t.Context(), tc.req)
+			require.Error(t, err)
+			require.Equal(t, tc.wantCode, status.Code(err))
 		})
 	}
 }

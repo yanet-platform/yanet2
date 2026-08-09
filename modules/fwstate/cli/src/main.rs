@@ -1,13 +1,14 @@
 use core::{fmt, net::Ipv6Addr};
 use std::collections::HashMap;
 
-use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
+use args::{DeleteCmd, DirectionArg, EntriesCmd, MapCmd, MapKind, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, IpAddress, MacAddress, Metric as ProtoMetric};
 use fwstatepb::{
-    DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
-    ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    CreateMapRequest, DeleteConfigRequest, DeleteMapRequest, Direction, GetMapStatsRequest, InsertLayerRequest,
+    ListConfigsRequest, ListEntriesRequest, ListMapsRequest, ShowConfigRequest, UpdateConfigRequest,
+    fw_state_map_service_client::FwStateMapServiceClient, fw_state_service_client::FwStateServiceClient,
     metrics_service_client::MetricsServiceClient,
 };
 use tabled::Tabled;
@@ -38,6 +39,10 @@ const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateSer
 /// The fully-qualified gRPC service name for the metrics service.
 const METRICS_SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.MetricsService";
 
+/// The fully-qualified gRPC service name for the fwstate-map management
+/// service.
+const MAP_SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateMapService";
+
 /// FWState module CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -64,6 +69,7 @@ fn parse_ipv6(s: &str) -> Result<IpAddress, String> {
 pub struct FWStateService {
     service: Service<FwStateServiceClient<LayeredChannel>>,
     metrics: Service<MetricsServiceClient<LayeredChannel>>,
+    map_service: Service<FwStateMapServiceClient<LayeredChannel>>,
 }
 
 impl FWStateService {
@@ -79,8 +85,13 @@ impl FWStateService {
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         });
+        let map_service = Service::new(&conn, MAP_SERVICE_NAME, |channel| {
+            FwStateMapServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
 
-        Ok(Self { service, metrics })
+        Ok(Self { service, metrics, map_service })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -157,28 +168,23 @@ impl FWStateService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        // First, fetch the current config to merge with new values
+        // Fetch the current config to use its sync config and referenced
+        // map names as the merge base. The server requires both a v4 and a
+        // v6 fwtable name on every update, so map names omitted from the
+        // command are carried forward from the current config.
         let current_request = ShowConfigRequest {
             name: cmd.config_name.clone(),
             ok_if_not_found: true,
         };
         let current_response = self.service.client().show_config(current_request).await;
-        let (mut map_config, mut sync_config) = match current_response {
-            Ok(resp) => {
-                let msg = resp.into_inner();
-                (msg.map_config.unwrap_or_default(), msg.sync_config.unwrap_or_default())
-            }
-            _ => (Default::default(), Default::default()),
+        let current = match current_response {
+            Ok(resp) => Some(resp.into_inner()),
+            _ => None,
         };
 
-        // Update map config fields if provided
-        if let Some(index_size) = cmd.index_size {
-            map_config.index_size = index_size;
-        }
-
-        if let Some(extra_bucket_count) = cmd.extra_bucket_count {
-            map_config.extra_bucket_count = extra_bucket_count;
-        }
+        let mut sync_config = current.as_ref().and_then(|r| r.sync_config.clone()).unwrap_or_default();
+        let mut fwtable_name_v4 = current.as_ref().map(|r| r.fwtable_name_v4.clone()).unwrap_or_default();
+        let mut fwtable_name_v6 = current.as_ref().map(|r| r.fwtable_name_v6.clone()).unwrap_or_default();
 
         // Update only the fields that were provided
         if let Some(ref src_addr) = cmd.src_addr {
@@ -235,10 +241,19 @@ impl FWStateService {
             sync_config.default = default.as_nanos() as u64;
         }
 
+        // Override the referenced maps only when the flag is present.
+        if let Some(ref v4) = cmd.map_name_v4 {
+            fwtable_name_v4 = v4.clone();
+        }
+        if let Some(ref v6) = cmd.map_name_v6 {
+            fwtable_name_v6 = v6.clone();
+        }
+
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            map_config: Some(map_config),
             sync_config: Some(sync_config),
+            fwtable_name_v4,
+            fwtable_name_v6,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         self.service
@@ -252,39 +267,82 @@ impl FWStateService {
         Ok(())
     }
 
-    pub async fn link_fwstate(&mut self, cmd: LinkCmd) -> Result<(), Error> {
-        let request = LinkFwStateRequest {
-            fwstate_name: cmd.config_name.clone(),
-            acl_config_names: cmd.acl_configs.clone(),
+    pub async fn create_map(&mut self, cmd: args::MapCreateCmd) -> Result<(), Error> {
+        let kind = match cmd.kind {
+            MapKind::V4 => fwstatepb::Kind::V4,
+            MapKind::V6 => fwstatepb::Kind::V6,
         };
-        log::trace!("LinkFwStateRequest: {request:?}");
-        self.service
+        let request = CreateMapRequest {
+            name: cmd.name.clone(),
+            kind: kind as i32,
+            index_size: cmd.index_size,
+            extra_bucket_count: cmd.extra_bucket_count,
+            worker_count: cmd.worker_count,
+        };
+        log::trace!("CreateMapRequest: {request:?}");
+        self.map_service
             .client()
-            .link_fw_state(request)
+            .create_map(request)
             .await
-            .map_err(self.service.status("link"))?;
+            .map_err(self.map_service.status("create map"))?;
 
-        output::success(
-            "link",
-            format_args!(
-                "Linked fwstate {} to ACL config(s) {}.",
-                cmd.config_name,
-                cmd.acl_configs.join(", ")
-            ),
+        output::success("create map", format_args!("Created fwstate-map {}.", cmd.name));
+
+        Ok(())
+    }
+
+    pub async fn delete_map(&mut self, cmd: args::MapDeleteCmd) -> Result<(), Error> {
+        let request = DeleteMapRequest { name: cmd.name.clone() };
+        log::trace!("DeleteMapRequest: {request:?}");
+        self.map_service
+            .client()
+            .delete_map(request)
+            .await
+            .map_err(self.map_service.status("delete map"))?;
+
+        output::success("delete map", format_args!("Deleted fwstate-map {}.", cmd.name));
+
+        Ok(())
+    }
+
+    pub async fn list_maps(&mut self) -> Result<(), Error> {
+        let request = ListMapsRequest {};
+        let response = self
+            .map_service
+            .client()
+            .list_maps(request)
+            .await
+            .map_err(self.map_service.status("list maps"))?
+            .into_inner();
+
+        output::data(
+            || &response.maps,
+            || {
+                if response.maps.is_empty() {
+                    output::empty(format_args!("No fwstate-maps found."));
+                    return;
+                }
+
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response.maps)
+                        .expect("fwstate-map list JSON serialization must not fail")
+                );
+            },
         );
 
         Ok(())
     }
 
-    pub async fn get_stats(&mut self, cmd: StatsCmd) -> Result<(), Error> {
-        let request = GetStatsRequest { name: cmd.config_name.clone() };
-        log::trace!("GetStatsRequest: {request:?}");
+    pub async fn get_map_stats(&mut self, cmd: args::MapStatsCmd) -> Result<(), Error> {
+        let request = GetMapStatsRequest { name: cmd.name.clone() };
+        log::trace!("GetMapStatsRequest: {request:?}");
         let response = self
-            .service
+            .map_service
             .client()
-            .get_stats(request)
+            .get_map_stats(request)
             .await
-            .map_err(self.service.status("stats"))?
+            .map_err(self.map_service.status("map stats"))?
             .into_inner();
 
         output::data(
@@ -292,9 +350,35 @@ impl FWStateService {
             || {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&response).expect("fwstate stats JSON serialization must not fail")
+                    serde_json::to_string_pretty(&response)
+                        .expect("fwstate-map stats JSON serialization must not fail")
                 );
             },
+        );
+
+        Ok(())
+    }
+
+    pub async fn insert_map_layer(&mut self, cmd: args::MapInsertLayerCmd) -> Result<(), Error> {
+        // The map's kind is fixed at creation; the request field is kept for
+        // proto symmetry with CreateMap and ignored by the server, so default it.
+        let request = InsertLayerRequest {
+            name: cmd.name.clone(),
+            kind: fwstatepb::Kind::V4 as i32,
+            index_size: cmd.index_size,
+            extra_bucket_count: cmd.extra_bucket_count,
+            worker_count: cmd.worker_count,
+        };
+        log::trace!("InsertLayerRequest: {request:?}");
+        self.map_service
+            .client()
+            .insert_layer(request)
+            .await
+            .map_err(self.map_service.status("insert layer"))?;
+
+        output::success(
+            "insert layer",
+            format_args!("Inserted layer into fwstate-map {}.", cmd.name),
         );
 
         Ok(())
@@ -310,8 +394,7 @@ impl FWStateService {
         let stream = ReceiverStream::new(rx);
 
         let initial_req = ListEntriesRequest {
-            config_name: cmd.config_name.clone(),
-            is_ipv6: cmd.ipv6,
+            map_name: cmd.map_name.clone(),
             layer_index: cmd.layer,
             include_expired: cmd.include_expired,
             direction: direction as i32,
@@ -320,14 +403,14 @@ impl FWStateService {
         };
         tx.send(initial_req)
             .await
-            .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
+            .map_err(|err| self.map_service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
 
         let mut response_stream = self
-            .service
+            .map_service
             .client()
             .list_entries(stream)
             .await
-            .map_err(self.service.status("list entries"))?
+            .map_err(self.map_service.status("list entries"))?
             .into_inner();
 
         let limit = cmd.count;
@@ -339,7 +422,7 @@ impl FWStateService {
         while let Some(resp) = response_stream
             .message()
             .await
-            .map_err(self.service.status("list entries"))?
+            .map_err(self.map_service.status("list entries"))?
         {
             for entry in &resp.entries {
                 if limit > 0 && total >= limit {
@@ -374,24 +457,20 @@ impl FWStateService {
             }
 
             let next_req = ListEntriesRequest {
-                config_name: cmd.config_name.clone(),
-                is_ipv6: cmd.ipv6,
+                map_name: cmd.map_name.clone(),
                 layer_index: cmd.layer,
                 include_expired: cmd.include_expired,
                 direction: direction as i32,
                 batch_size: cmd.batch,
                 index: resp.index,
             };
-            tx.send(next_req)
-                .await
-                .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
+            tx.send(next_req).await.map_err(|err| {
+                self.map_service.status("list entries")(Status::internal(format!("send error: {err}")))
+            })?;
         }
 
         if total == 0 {
-            output::empty(format_args!(
-                "No firewall state entries found for '{}'.",
-                cmd.config_name
-            ));
+            output::empty(format_args!("No firewall state entries found for '{}'.", cmd.map_name));
         }
 
         Ok(())
@@ -730,10 +809,15 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
-        ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
         ModeCmd::Entries(cmd) => service.list_entries(cmd, format).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
+        ModeCmd::Map(cmd) => match cmd {
+            MapCmd::Create(cmd) => service.create_map(cmd).await,
+            MapCmd::Delete(cmd) => service.delete_map(cmd).await,
+            MapCmd::List => service.list_maps().await,
+            MapCmd::Stats(cmd) => service.get_map_stats(cmd).await,
+            MapCmd::InsertLayer(cmd) => service.insert_map_layer(cmd).await,
+        },
     }
 }
 
@@ -766,6 +850,22 @@ fn config_candidates() -> Vec<CompletionCandidate> {
                 .accept_compressed(CompressionEncoding::Gzip)
         },
         async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
+}
+
+/// Completion candidates for a map `--name` argument: the standalone
+/// fwstate-map objects the map service currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn map_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            FwStateMapServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_maps(ListMapsRequest {}).await?.into_inner().maps),
     )
 }
 

@@ -1,3 +1,4 @@
+subdir('objects')
 subdir('dataplane')
 
 if not dataplane_only

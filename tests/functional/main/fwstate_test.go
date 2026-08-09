@@ -40,9 +40,11 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 1. Configure fwstate module with maps and sync settings.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWState + " map create --kind v4 --name fwstate0-map-v4 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
+			framework.CLIFWState + " map create --kind v6 --name fwstate0-map-v6 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
 			framework.CLIFWState + " update --name fwstate0" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate0-map-v4" +
+				" --map-name-v6 fwstate0-map-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-ether 33:33:00:00:00:01" +
 				" --dst-addr-multicast ff02::1" +
@@ -57,8 +59,13 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 2. Link fwstate to an ACL config so the dataplane module is active.
 	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_fw --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate0 --acl acl_fw",
+			framework.CLIACL + " update --name acl_fw" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate0-map-v4 --map-name-v6 fwstate0-map-v6" +
+				" --src-addr 2001:db8::100 --dst-ether 33:33:00:00:00:01" +
+				" --dst-addr-multicast ff02::1 --port-multicast 9999" +
+				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
+				" --udp 30s --default 16s",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
@@ -90,7 +97,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 4. Forward listing: verify exact entries.
 	fw.Run("Forward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate0-map-v4 --batch 100 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "list-entries forward failed")
 		t.Log("Forward listing output:\n", output)
@@ -106,7 +113,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 5. Forward listing with JSON: parse and verify key fields.
 	fw.Run("Forward_listing_json", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --format json",
+			framework.CLIFWState + " entries --name fwstate0-map-v4 --batch 100 --direction forward --include-expired --format json",
 		)
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON output:\n", output)
@@ -165,7 +172,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 6. Backward listing from last entry: verify all entries present.
 	fw.Run("Backward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction backward --index 4294967295 --include-expired",
+			framework.CLIFWState + " entries --name fwstate0-map-v4 --batch 100 --direction backward --index 4294967295 --include-expired",
 		)
 		require.NoError(t, err, "list-entries backward failed")
 		require.NotEmpty(t, output, "backward listing returned empty output")
@@ -179,7 +186,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 7. Pagination: read with batch=1, verify all entries are still returned.
 	fw.Run("Pagination", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 1 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate0-map-v4 --batch 1 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "list-entries with batch=1 failed")
 		t.Log("Pagination output:\n", output)
@@ -190,12 +197,12 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		}
 	})
 
-	// 8. Config not found: request entries from a non-existent config.
+	// 8. Map not found: request entries from a non-existent map.
 	fw.Run("Config_not_found", func(fw *framework.TestFramework, t *testing.T) {
 		_, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name nonexistent --batch 10",
 		)
-		require.Error(t, err, "should fail for non-existent config")
+		require.Error(t, err, "should fail for non-existent map")
 	})
 
 	// 9. CheckState: return traffic passes through ACL because forward state exists.
@@ -238,22 +245,22 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 11. Stats: verify total_elements matches the number of injected entries.
 	fw.Run("Stats_after_entries", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate0",
+			framework.CLIFWState + " map stats --name fwstate0-map-v4",
 		)
 		require.NoError(t, err, "stats command failed")
 		t.Log("Stats output:\n", output)
 
 		var stats struct {
-			IPv4Stats struct {
+			Stats struct {
 				TotalElements int `json:"total_elements"`
 				IndexSize     int `json:"index_size"`
 				LayerCount    int `json:"layer_count"`
-			} `json:"ipv4_stats"`
+			} `json:"stats"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(output), &stats), "stats should be valid JSON")
-		require.Equal(t, 1024, stats.IPv4Stats.IndexSize)
-		require.Equal(t, 1, stats.IPv4Stats.LayerCount)
-		require.Equal(t, 3, stats.IPv4Stats.TotalElements, "should have exactly 3 state entries")
+		require.Equal(t, 1024, stats.Stats.IndexSize)
+		require.Equal(t, 1, stats.Stats.LayerCount)
+		require.Equal(t, 3, stats.Stats.TotalElements, "should have exactly 3 state entries")
 	})
 
 	// === IPv6 tests ===
@@ -282,7 +289,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 13. IPv6 forward listing: verify entries were created.
 	fw.Run("IPv6_forward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv6 --batch 100 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate0-map-v6 --batch 100 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "IPv6 list-entries forward failed")
 		t.Log("IPv6 forward listing output:\n", output)
@@ -331,18 +338,18 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 16. IPv6 stats: verify total_elements.
 	fw.Run("IPv6_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate0",
+			framework.CLIFWState + " map stats --name fwstate0-map-v6",
 		)
 		require.NoError(t, err, "stats command failed")
 		t.Log("Stats output:\n", output)
 
 		var stats struct {
-			IPv6Stats struct {
+			Stats struct {
 				TotalElements int `json:"total_elements"`
-			} `json:"ipv6_stats"`
+			} `json:"stats"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(output), &stats), "stats should be valid JSON")
-		require.Equal(t, 3, stats.IPv6Stats.TotalElements, "should have exactly 3 IPv6 state entries")
+		require.Equal(t, 3, stats.Stats.TotalElements, "should have exactly 3 IPv6 state entries")
 	})
 }
 
@@ -372,9 +379,11 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 	// 1. Configure fwstate + ACL (reuse existing config from TestFWStateListEntries)
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWState + " map create --kind v4 --name fwstate_udp-map-v4 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
+			framework.CLIFWState + " map create --kind v6 --name fwstate_udp-map-v6 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
 			framework.CLIFWState + " update --name fwstate_udp" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate_udp-map-v4" +
+				" --map-name-v6 fwstate_udp-map-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-ether 33:33:00:00:00:01" +
 				" --dst-addr-multicast ff02::1" +
@@ -388,8 +397,13 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 
 	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_udp --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate_udp --acl acl_udp",
+			framework.CLIACL + " update --name acl_udp" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate_udp-map-v4 --map-name-v6 fwstate_udp-map-v6" +
+				" --src-addr 2001:db8::100 --dst-ether 33:33:00:00:00:01" +
+				" --dst-addr-multicast ff02::1 --port-multicast 9999" +
+				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
+				" --udp 30s --default 16s",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_udp,fwstate:fwstate_udp,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
@@ -419,7 +433,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 	// 3. Verify state was created with correct ports via entries listing.
 	fw.Run("Verify_UDP_state_entries", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_udp --batch 100 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate_udp-map-v4 --batch 100 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "list-entries forward failed")
 		t.Log("UDP entries output:\n", output)
@@ -618,9 +632,11 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 1. Configure fwstate module.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWState + " map create --kind v4 --name fwstate_ext-map-v4 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
+			framework.CLIFWState + " map create --kind v6 --name fwstate_ext-map-v6 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
 			framework.CLIFWState + " update --name fwstate_ext" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate_ext-map-v4" +
+				" --map-name-v6 fwstate_ext-map-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-ether 33:33:00:00:00:01" +
 				" --dst-addr-multicast ff02::1" +
@@ -635,8 +651,13 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 2. Link fwstate to ACL with the sync frame allow rule.
 	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_ext --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate_ext --acl acl_ext",
+			framework.CLIACL + " update --name acl_ext" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate_ext-map-v4 --map-name-v6 fwstate_ext-map-v6" +
+				" --src-addr 2001:db8::100 --dst-ether 33:33:00:00:00:01" +
+				" --dst-addr-multicast ff02::1 --port-multicast 9999" +
+				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
+				" --udp 30s --default 16s",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_ext,fwstate:fwstate_ext,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
@@ -647,18 +668,18 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 3. Verify no state entries exist initially.
 	fw.Run("Verify_empty_state", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate_ext",
+			framework.CLIFWState + " map stats --name fwstate_ext-map-v4",
 		)
 		require.NoError(t, err, "stats command failed")
 		t.Log("Initial stats:\n", output)
 
 		var stats struct {
-			IPv4Stats struct {
+			Stats struct {
 				TotalElements int `json:"total_elements"`
-			} `json:"ipv4_stats"`
+			} `json:"stats"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(output), &stats))
-		require.Equal(t, 0, stats.IPv4Stats.TotalElements, "should start with 0 state entries")
+		require.Equal(t, 0, stats.Stats.TotalElements, "should start with 0 state entries")
 	})
 
 	// 4. Send an external sync frame and verify it is dropped.
@@ -685,7 +706,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 5. Verify that the external sync frame created a state entry.
 	fw.Run("Verify_state_created", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate_ext-map-v4 --batch 100 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "list-entries forward failed")
 		t.Log("Entries after external sync:\n", output)
@@ -698,7 +719,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 6. Verify the state entry is marked as external via JSON listing.
 	fw.Run("Verify_state_is_external", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired --format json",
+			framework.CLIFWState + " entries --name fwstate_ext-map-v4 --batch 100 --direction forward --include-expired --format json",
 		)
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON entries:\n", output)
@@ -742,17 +763,17 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 7. Verify stats show exactly 1 entry.
 	fw.Run("Verify_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate_ext",
+			framework.CLIFWState + " map stats --name fwstate_ext-map-v4",
 		)
 		require.NoError(t, err, "stats command failed")
 		t.Log("Stats after external sync:\n", output)
 
 		var stats struct {
-			IPv4Stats struct {
+			Stats struct {
 				TotalElements int `json:"total_elements"`
-			} `json:"ipv4_stats"`
+			} `json:"stats"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(output), &stats))
-		require.Equal(t, 1, stats.IPv4Stats.TotalElements, "should have exactly 1 state entry")
+		require.Equal(t, 1, stats.Stats.TotalElements, "should have exactly 1 state entry")
 	})
 }

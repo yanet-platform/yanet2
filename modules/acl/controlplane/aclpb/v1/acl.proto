@@ -3,6 +3,8 @@ syntax = "proto3";
 package modules.acl.controlplane.aclpb.v1;
 
 import "common/filterpb/v1/filter.proto";
+import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/macaddr.proto";
 import "common/commonpb/v1/metric.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1;aclpb";
@@ -29,6 +31,25 @@ service MetricsService {
 message UpdateConfigRequest {
   string name = 1;
   repeated Rule rules = 2;
+  // fwtable_name_v4 references a standalone fwstate-map (kind V4) that this
+  // ACL config borrows its v4 state table from.
+  //
+  // Required iff any rule uses ACTION_KIND_CREATE_STATE or
+  // ACTION_KIND_CHECK_STATE: the ACL dataplane reads the borrowed table to
+  // look up or write firewall state. Otherwise the field is ignored.
+  string fwtable_name_v4 = 3;
+  // fwtable_name_v6 references a standalone fwstate-map (kind V6) that this
+  // ACL config borrows its v6 state table from.
+  //
+  // Same requirement contract as fwtable_name_v4.
+  string fwtable_name_v6 = 4;
+  // sync_config carries the synchronization parameters the ACL dataplane
+  // uses for CREATE_STATE sync packets.
+  //
+  // Required iff any rule uses ACTION_KIND_CREATE_STATE; otherwise ignored.
+  // Field numbers mirror fwstate's SyncConfig so the two stay wire-compatible
+  // without a cross-module proto import.
+  SyncConfig sync_config = 5;
 }
 
 message UpdateConfigResponse {}
@@ -38,7 +59,37 @@ message ShowConfigRequest { string name = 1; }
 message ShowConfigResponse {
   string name = 1;
   repeated Rule rules = 2;
-  string fwstate_name = 3;
+  // fwtable_name_v4 is the standalone fwstate-map (kind V4) this ACL config
+  // references.
+  string fwtable_name_v4 = 3;
+  // fwtable_name_v6 is the standalone fwstate-map (kind V6) this ACL config
+  // references.
+  string fwtable_name_v6 = 4;
+  // sync_config is the synchronization parameters this ACL config uses.
+  SyncConfig sync_config = 5;
+}
+
+// SyncConfig mirrors modules.fwstate.controlplane.fwstatepb.v1.SyncConfig.
+//
+// The C-level coupling through lib/fwstate/config.h already exists, so the
+// wire-format duplication is honest: ACL copies these parameters into the
+// same struct fwstate_sync_config the C API consumes. Field numbers and
+// types are kept identical to the fwstate proto to stay wire-compatible.
+message SyncConfig {
+  common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source address.
+  common.commonpb.v1.MACAddress dst_ether = 2;         // Destination MAC address.
+  common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address.
+  uint32 port_multicast = 4;                           // Multicast port.
+  common.commonpb.v1.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address.
+  uint32 port_unicast = 6;                             // Unicast port.
+
+  // Connection timeouts.
+  uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds.
+  uint64 tcp_syn = 8;     // TCP SYN timeout in nanoseconds.
+  uint64 tcp_fin = 9;     // TCP FIN timeout in nanoseconds.
+  uint64 tcp = 10;        // TCP established timeout in nanoseconds.
+  uint64 udp = 11;        // UDP timeout in nanoseconds.
+  uint64 default = 12;    // Default timeout in nanoseconds.
 }
 
 message Rule {

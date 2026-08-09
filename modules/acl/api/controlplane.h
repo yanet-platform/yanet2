@@ -19,6 +19,7 @@ enum acl_rule_action_kind {
 
 struct agent;
 struct cp_module;
+struct fwstate_sync_config;
 
 struct cp_module *
 acl_module_config_init(
@@ -55,22 +56,22 @@ struct acl_rule {
 	enum filter_ip_fragment fragment;
 };
 
+// Compile rules into the ACL config and link the named firewall-state
+// map objects.
+//
+// fw4_name and fw6_name name standalone fwstate_map_v4 / fwstate_map_v6
+// objects the module borrows its fwtables from. Either may be NULL or
+// empty, in which case no link is declared. sync_config is copied by
+// value when non-NULL.
 int
 acl_module_config_update(
 	struct cp_module *cp_module,
 	struct acl_rule *rules,
 	uint32_t rule_count,
+	const char *fw4_name,
+	const char *fw6_name,
+	const struct fwstate_sync_config *sync_config,
 	yanet_error **err
-);
-
-void
-acl_module_config_set_fwstate_config(
-	struct cp_module *cp_module, struct cp_module *fwstate_cp_module
-);
-
-void
-acl_module_config_transfer_fwstate_config(
-	struct cp_module *new_cp_module, struct cp_module *old_cp_module
 );
 
 struct acl_config_info {

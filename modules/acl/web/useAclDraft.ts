@@ -1,24 +1,30 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
-import { toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
-import type { Rule } from '@yanet/core/api/acl';
+import { toaster, compareNatural, warnConfigsUnknown, syncConfigToFormFields, formFieldsToSyncConfig } from '@yanet/core/utils';
+import type { Rule, SyncConfig } from '@yanet/core/api/acl';
+import { ActionKind } from '@yanet/core/api/acl';
 import {
     aclDraftReducer,
     initialAclDraftState,
 } from './draftReducer';
-import type { AclDraftAction } from './draftReducer';
+import type { AclDraftAction, AclMapSyncDraft } from './draftReducer';
 import { useConfigPersistence, type ConfigPersistenceDispatch } from '@yanet/core/components/draft/useConfigPersistence';
 
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];
-const EMPTY_FWSTATE_NAME = '';
+const EMPTY_MAP_SYNC: AclMapSyncDraft = { mapName: '', sync: syncConfigToFormFields(undefined) };
 
-const aclUpdateConfig = (name: string, rules: Rule[]): Promise<unknown> =>
-    API.acl.updateConfig({ name, rules });
+// Report whether any rule uses ACTION_KIND_CREATE_STATE — the action that
+// drives fwstate sync packet emission and therefore requires map_name +
+// sync_config on the wire. Mirrors the server-side validation contract.
+const rulesNeedCreateState = (rules: Rule[]): boolean =>
+    rules.some((rule) => (rule.actions ?? []).some((action) => action.kind === ActionKind.ACTION_KIND_CREATE_STATE));
 
-const aclDeleteConfig = (name: string): Promise<unknown> =>
-    API.acl.deleteConfig({ name });
+const mapSyncFromWire = (mapName: string | undefined, syncConfig: SyncConfig | undefined): AclMapSyncDraft => ({
+    mapName: mapName ?? '',
+    sync: syncConfigToFormFields(syncConfig),
+});
 
 export interface UseAclDraftResult {
     draftConfigs: string[];
@@ -28,7 +34,8 @@ export interface UseAclDraftResult {
     draftRules: (configName: string) => Rule[];
     draftRuleIds: (configName: string) => string[];
     serverRules: (configName: string) => Rule[];
-    fwstateName: (configName: string) => string;
+    draftMapSync: (configName: string) => AclMapSyncDraft;
+    serverMapSync: (configName: string) => AclMapSyncDraft;
     isDirty: (configName: string) => boolean;
     anyDirty: boolean;
     dispatchDraft: (action: AclDraftAction) => void;
@@ -51,6 +58,11 @@ export const useAclDraft = (): UseAclDraftResult => {
     const [loadFailed, setLoadFailed] = useState(false);
     const { write: writeCache } = useConfigListCache('acl');
 
+    // Mirror the draft map+sync into a ref so the stable updateConfig wrapper
+    // can read the latest values without churning its identity.
+    const draftMapSyncRef = useRef(state.draftMapSync);
+    useEffect(() => { draftMapSyncRef.current = state.draftMapSync; }, [state.draftMapSync]);
+
     const dispatchDraft = useCallback((action: AclDraftAction): void => {
         rawDispatch(action);
     }, []);
@@ -66,9 +78,13 @@ export const useAclDraft = (): UseAclDraftResult => {
 
             const configs = await loadKnownConfigs(
                 names,
-                async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string }> => {
+                async (name): Promise<{ name: string; rules: Rule[]; mapSync: AclMapSyncDraft }> => {
                     const resp = await API.acl.showConfig({ name });
-                    return { name, rules: resp.rules ?? [], fwstateName: resp.fwstate_name ?? '' };
+                    return {
+                        name,
+                        rules: resp.rules ?? [],
+                        mapSync: mapSyncFromWire(resp.map_name, resp.sync_config),
+                    };
                 },
                 { onDropped: warnConfigsUnknown('acl-configs-unknown', 'ACL') },
             );
@@ -91,9 +107,31 @@ export const useAclDraft = (): UseAclDraftResult => {
         load();
     }, [load]);
 
+    // Build the wire UpdateConfigRequest. map_name is sent whenever the
+    // draft carries one so a CHECK_STATE-only ruleset keeps borrowing the
+    // standalone map; sync_config is sent only for CREATE_STATE, which is
+    // the only action that emits sync packets.
+    const updateConfig = useCallback(async (name: string, rules: Rule[]): Promise<unknown> => {
+        const mapSync = draftMapSyncRef.current[name];
+        const needsCreateState = rulesNeedCreateState(rules);
+        const mapName = mapSync?.mapName;
+        if (mapName) {
+            return API.acl.updateConfig({
+                name,
+                rules,
+                map_name: mapName,
+                sync_config: needsCreateState ? formFieldsToSyncConfig(mapSync.sync) : undefined,
+            });
+        }
+        return API.acl.updateConfig({ name, rules });
+    }, []);
+
+    const deleteConfig = useCallback((name: string): Promise<unknown> =>
+        API.acl.deleteConfig({ name }), []);
+
     const { saveConfig, commitDeleteConfig, discardConfig } = useConfigPersistence<Rule>({
-        updateConfig: aclUpdateConfig,
-        deleteConfig: aclDeleteConfig,
+        updateConfig,
+        deleteConfig,
         toastKeyPrefix: 'acl-save',
         rollbackActionType: 'DISCARD_CONFIG',
         rawDispatch: rawDispatch as ConfigPersistenceDispatch,
@@ -110,8 +148,10 @@ export const useAclDraft = (): UseAclDraftResult => {
 
     const serverRulesFor = useCallback((configName: string): Rule[] =>
         state.server[configName] ?? EMPTY_RULES, [state.server]);
-    const fwstateNameFor = useCallback((configName: string): string =>
-        state.serverFwStateName[configName] ?? EMPTY_FWSTATE_NAME, [state.serverFwStateName]);
+    const draftMapSyncFor = useCallback((configName: string): AclMapSyncDraft =>
+        state.draftMapSync[configName] ?? EMPTY_MAP_SYNC, [state.draftMapSync]);
+    const serverMapSyncFor = useCallback((configName: string): AclMapSyncDraft =>
+        state.serverMapSync[configName] ?? EMPTY_MAP_SYNC, [state.serverMapSync]);
 
     const isDirty = useCallback((configName: string): boolean =>
         state.dirty.has(configName), [state.dirty]);
@@ -130,7 +170,8 @@ export const useAclDraft = (): UseAclDraftResult => {
         draftRules: draftRulesFor,
         draftRuleIds: draftRuleIdsFor,
         serverRules: serverRulesFor,
-        fwstateName: fwstateNameFor,
+        draftMapSync: draftMapSyncFor,
+        serverMapSync: serverMapSyncFor,
         isDirty,
         anyDirty,
         dispatchDraft,

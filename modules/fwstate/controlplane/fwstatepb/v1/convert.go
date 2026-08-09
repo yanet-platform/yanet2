@@ -5,23 +5,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
-func (m *MapConfig) ToC() cfwstate.MapConfig {
-	if m == nil {
-		return cfwstate.MapConfig{}
-	}
-	return cfwstate.MapConfig{
-		IndexSize:        m.GetIndexSize(),
-		ExtraBucketCount: m.GetExtraBucketCount(),
-	}
-}
-
-func FromCMapConfig(cfg cfwstate.MapConfig) *MapConfig {
-	return &MapConfig{
-		IndexSize:        cfg.IndexSize,
-		ExtraBucketCount: cfg.ExtraBucketCount,
-	}
-}
-
 func (m *SyncConfig) ToC() cfwstate.SyncConfig {
 	if m == nil {
 		return cfwstate.SyncConfig{}

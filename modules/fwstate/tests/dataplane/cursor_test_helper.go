@@ -1,13 +1,26 @@
 package fwstate
 
 /*
+#include "common/container_of.h"
+#include "common/memory.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
+#include "modules/fwstate/objects/fwstate_map_object.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
 #include "lib/fwstate/types.h"
-#include "common/memory.h"
+
+// fwstate_test_resolve_map_object resolves a layer's fwmap from a
+// standalone fwstate-map object's table.
+static inline fwmap_t *
+fwstate_test_resolve_map_object(
+	struct cp_object *cp_object, uint32_t layer_index
+) {
+	fwtable_t *table = fwstate_map_object_table(cp_object);
+	fwmap_t *head = ADDR_OF(&table->head);
+	return fwstate_resolve_map(head, layer_index);
+}
 */
 import "C"
 
@@ -35,15 +48,14 @@ type CursorResult struct {
 
 // insertFw4Entry inserts a single IPv4 fwstate entry into the active layer.
 func insertFw4Entry(
-	cpModule *C.struct_cp_module,
+	mapObject *C.struct_cp_object,
 	proto uint16, srcPort uint16, dstPort uint16,
 	srcAddr uint32, dstAddr uint32,
 	srcFlags uint8, dstFlags uint8,
 	createdAt uint64, updatedAt uint64,
 	ttlNs uint64,
 ) error {
-	// Resolve the active IPv4 map (layer 0)
-	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(false), C.uint32_t(0))
+	fwmap := C.fwstate_test_resolve_map_object(mapObject, C.uint32_t(0))
 	if fwmap == nil {
 		return fmt.Errorf("failed to resolve IPv4 map")
 	}
@@ -74,24 +86,23 @@ func insertFw4Entry(
 
 // readCursorForward reads entries in the forward direction using the cursor API.
 func readCursorForward(
-	cpModule *C.struct_cp_module,
+	mapObject *C.struct_cp_object,
 	isIPv6 bool, layerIndex uint32,
 	index int64, includeExpired bool,
 	now uint64, count uint32,
 ) ([]CursorResult, int64, error) {
+	fwmap := C.fwstate_test_resolve_map_object(mapObject, C.uint32_t(layerIndex))
+	if fwmap == nil {
+		return nil, 0, fmt.Errorf("fwstate_test_resolve_map_object returned nil")
+	}
+
 	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_init(
-		cpModule, &cursor,
-		C.bool(isIPv6), C.uint32_t(layerIndex),
+	rc := C.fwstate_cursor_init(
+		fwmap, &cursor,
 		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
-		return nil, 0, fmt.Errorf("fwstate_config_cursor_init failed: %d", rc)
-	}
-
-	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))
-	if fwmap == nil {
-		return nil, 0, fmt.Errorf("fwstate_config_resolve_map returned nil")
+		return nil, 0, fmt.Errorf("fwstate_cursor_init failed: %d", rc)
 	}
 
 	buf := make([]C.fwstate_cursor_entry_t, count)
@@ -126,24 +137,23 @@ func readCursorForward(
 
 // readCursorBackward reads entries in the backward direction using the cursor API.
 func readCursorBackward(
-	cpModule *C.struct_cp_module,
+	mapObject *C.struct_cp_object,
 	isIPv6 bool, layerIndex uint32,
 	index int64, includeExpired bool,
 	now uint64, count uint32,
 ) ([]CursorResult, int64, error) {
+	fwmap := C.fwstate_test_resolve_map_object(mapObject, C.uint32_t(layerIndex))
+	if fwmap == nil {
+		return nil, 0, fmt.Errorf("fwstate_test_resolve_map_object returned nil")
+	}
+
 	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_init(
-		cpModule, &cursor,
-		C.bool(isIPv6), C.uint32_t(layerIndex),
+	rc := C.fwstate_cursor_init(
+		fwmap, &cursor,
 		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
-		return nil, 0, fmt.Errorf("fwstate_config_cursor_init failed: %d", rc)
-	}
-
-	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))
-	if fwmap == nil {
-		return nil, 0, fmt.Errorf("fwstate_config_resolve_map returned nil")
+		return nil, 0, fmt.Errorf("fwstate_cursor_init failed: %d", rc)
 	}
 
 	buf := make([]C.fwstate_cursor_entry_t, count)

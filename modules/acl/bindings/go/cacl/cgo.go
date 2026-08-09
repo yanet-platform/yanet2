@@ -7,6 +7,7 @@ package cacl
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
 //
 //#include "api/agent.h"
+//#include "lib/fwstate/config.h"
 //#include "modules/acl/api/controlplane.h"
 import "C"
 

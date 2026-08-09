@@ -3,11 +3,13 @@ package cfwstate
 //#cgo CFLAGS: -I../../../../../
 //#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/modules/fwstate/api -lfwstate_cp
+//#cgo LDFLAGS: -L../../../../../build/modules/fwstate/objects -lfwstate_objects
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
 //#include "common/numutils.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
+//#include "modules/fwstate/objects/fwstate_map_object.h"
 //#include "lib/fwstate/config.h"
 //#include "lib/fwstate/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
@@ -61,14 +63,6 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 
 func (m *ModuleConfig) Generation() uint64 {
 	return m.generation
-}
-
-func (m *ModuleConfig) PropagateConfig(old *ModuleConfig) {
-	C.fwstate_module_config_propogate(m.asRawPtr(), old.asRawPtr())
-}
-
-func (m *ModuleConfig) DetachMaps() {
-	C.fwstate_module_config_detach_maps(m.asRawPtr())
 }
 
 // Free releases the underlying C memory.

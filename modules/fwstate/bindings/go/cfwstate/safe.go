@@ -1,15 +1,21 @@
 package cfwstate
 
+//#include <stdlib.h>
+//#include "common/container_of.h"
+//#include "common/memory.h"
 //#include "lib/fwstate/config.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
-//#include "common/numutils.h"
+//#include "modules/fwstate/dataplane/config.h"
 import "C"
 
 import (
 	"encoding/binary"
 	"fmt"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // TTL48Max is the largest TTL (ns) storable in fw_state_value::last_ttl.
@@ -18,11 +24,6 @@ const TTL48Max = uint64(C.FWSTATE_TTL48_MAX)
 // maxCursorBatch caps the allocation made by readEntries regardless of the
 // caller-supplied count, providing a defence-in-depth limit at the binding layer.
 const maxCursorBatch uint32 = 10000
-
-type MapConfig struct {
-	IndexSize        uint32
-	ExtraBucketCount uint32
-}
 
 // SyncConfig stores fwstate synchronization settings for C API calls.
 type SyncConfig struct {
@@ -75,6 +76,31 @@ func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 	return cSyncConfig
 }
 
+// NewCSyncConfig allocates a heap C struct fwstate_sync_config populated
+// from sync.
+//
+// The caller owns the returned pointer and must release it with
+// [FreeCSyncConfig] once the C side no longer references it. Returns nil
+// on allocation failure.
+func NewCSyncConfig(sync SyncConfig) unsafe.Pointer {
+	cSyncConfig := sync.toC()
+	ptr := C.calloc(1, C.sizeof_struct_fwstate_sync_config)
+	if ptr == nil {
+		return nil
+	}
+	*(*C.struct_fwstate_sync_config)(ptr) = cSyncConfig
+	return ptr
+}
+
+// FreeCSyncConfig releases a pointer previously returned by
+// [NewCSyncConfig]. Safe to call with nil.
+func FreeCSyncConfig(ptr unsafe.Pointer) {
+	if ptr == nil {
+		return
+	}
+	C.free(ptr)
+}
+
 // StateKey stores a cursor key with address bytes as plain Go data.
 type StateKey struct {
 	Proto   uint32
@@ -119,75 +145,44 @@ type CursorEntry struct {
 	Expired bool
 }
 
-// OutdatedLayers represents a handle to outdated layers that need to be freed.
-type OutdatedLayers struct {
-	ptr unsafe.Pointer
-}
-
-// CreateMaps creates firewall state maps.
-func (m *ModuleConfig) CreateMaps(
-	mapConfig MapConfig,
-	workerCount uint16,
-) error {
-	mapConfigChanged := false
-	mapsStats := m.GetMapsStats()
-	currentIndexSize := max(mapsStats.IPv4.IndexSize, mapsStats.IPv6.IndexSize)
-	currentExtraBucketCount := max(mapsStats.IPv4.ExtraBucketCount, mapsStats.IPv6.ExtraBucketCount)
-	mapsExist := currentIndexSize != 0
-	requestedIndexSize := uint32(C.align_up_pow2(C.uint64_t(mapConfig.IndexSize)))
-	requestedExtraBucketCount := uint32(C.align_up_pow2(C.uint64_t(mapConfig.ExtraBucketCount)))
-
-	if requestedIndexSize != 0 && requestedIndexSize != currentIndexSize {
-		mapConfigChanged = true
-		currentIndexSize = mapConfig.IndexSize
+// SetModuleConfig configures a fwstate sync config in one call: links the
+// named v4/v6 fwstate-map objects and copies the sync parameters.
+//
+// fw4Name and fw6Name are the object names of standalone fwstate_map_v4 /
+// fwstate_map_v6 objects. Either may be empty, in which case no link is
+// declared and the dataplane resolves a NULL fwtable for that family.
+// Returns an error only on C-side link failure.
+func SetModuleConfig(cp ffi.ModuleConfig, fw4Name, fw6Name string, sync SyncConfig) error {
+	cSyncPtr := NewCSyncConfig(sync)
+	if cSyncPtr == nil {
+		return fmt.Errorf("failed to allocate fwstate sync config")
 	}
-	if requestedExtraBucketCount != 0 && requestedExtraBucketCount != currentExtraBucketCount {
-		mapConfigChanged = true
-		currentExtraBucketCount = mapConfig.ExtraBucketCount
-	}
-	if mapsExist {
-		if !mapConfigChanged {
-			return nil
-		}
+	defer FreeCSyncConfig(cSyncPtr)
 
-		if rc, cErr := C.fwstate_config_insert_new_layer(
-			m.asRawPtr(),
-			C.uint32_t(currentIndexSize),
-			C.uint32_t(currentExtraBucketCount),
-			C.uint16_t(workerCount),
-		); rc != 0 {
-			return fmt.Errorf("failed to insert new layer: error code=%d, cErr=%v", rc, cErr)
-		}
-
-		m.generation++
-		return nil
+	var fw4CStr *C.char
+	if fw4Name != "" {
+		fw4CStr = C.CString(fw4Name)
+		defer C.free(unsafe.Pointer(fw4CStr))
 	}
 
-	if rc, cErr := C.fwstate_config_create_maps(
-		m.asRawPtr(),
-		C.uint32_t(currentIndexSize),
-		C.uint32_t(currentExtraBucketCount),
-		C.uint16_t(workerCount),
-	); rc != 0 {
-		return fmt.Errorf("failed to create maps: error code=%d, cErr=%v", rc, cErr)
+	var fw6CStr *C.char
+	if fw6Name != "" {
+		fw6CStr = C.CString(fw6Name)
+		defer C.free(unsafe.Pointer(fw6CStr))
 	}
 
-	m.generation++
+	var cErr *C.yanet_error
+	rc := C.fwstate_module_config_set(
+		(*C.struct_cp_module)(cp.AsRawPtr()),
+		fw4CStr,
+		fw6CStr,
+		(*C.struct_fwstate_sync_config)(cSyncPtr),
+		&cErr,
+	)
+	if rc != 0 {
+		return fmt.Errorf("failed to set fwstate module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
 	return nil
-}
-
-// SetSyncConfig sets the synchronization configuration.
-func (m *ModuleConfig) SetSyncConfig(req SyncConfig) {
-	cSyncConfig := req.toC()
-	C.fwstate_module_config_set_sync_config(m.asRawPtr(), &cSyncConfig)
-}
-
-// GetMapsStats retrieves IPv4 and IPv6 map stats.
-func (m *ModuleConfig) GetMapsStats() MapsStats {
-	return MapsStats{
-		IPv4: mapStatsFromC(C.fwstate_config_get_map_stats(m.asRawPtr(), C.bool(false))),
-		IPv6: mapStatsFromC(C.fwstate_config_get_map_stats(m.asRawPtr(), C.bool(true))),
-	}
 }
 
 // GetSyncConfig retrieves the sync configuration from fwstate module.
@@ -196,32 +191,13 @@ func (m *ModuleConfig) GetSyncConfig() SyncConfig {
 	return newSyncConfigFromC(&cSyncConfig)
 }
 
-// GetMapConfig retrieves the map configuration from fwstate module.
-func (m *ModuleConfig) GetMapConfig() MapConfig {
-	stats := m.GetMapsStats()
-	indexSize := stats.IPv4.IndexSize
-	extraBucketCount := stats.IPv4.ExtraBucketCount
-	if indexSize == 0 {
-		indexSize = stats.IPv6.IndexSize
-		extraBucketCount = stats.IPv6.ExtraBucketCount
+// fwmapStatsOrZero returns stats for the given head fwmap, or zero stats
+// when head is nil (no map attached).
+func fwmapStatsOrZero(head *C.fwmap_t) C.struct_fwmap_stats {
+	if head == nil {
+		return C.struct_fwmap_stats{}
 	}
-
-	return MapConfig{
-		IndexSize:        indexSize,
-		ExtraBucketCount: extraBucketCount,
-	}
-}
-
-// FreeOutdatedLayers frees outdated layers after successful UpdateModules.
-func (m *ModuleConfig) FreeOutdatedLayers(outdated *OutdatedLayers) {
-	if outdated == nil || outdated.ptr == nil {
-		return
-	}
-	C.fwstate_outdated_layers_free(
-		(*C.fwstate_outdated_layers_t)(outdated.ptr),
-		m.asRawPtr(),
-	)
-	outdated.ptr = nil
+	return C.fwmap_get_stats(head)
 }
 
 func mapStatsFromC(stats C.struct_fwmap_stats) MapStats {
@@ -234,104 +210,6 @@ func mapStatsFromC(stats C.struct_fwmap_stats) MapStats {
 		MaxDeadline:      uint64(stats.max_deadline),
 		MemoryUsed:       uint64(stats.memory_used),
 	}
-}
-
-// ReadForward reads up to count entries in the forward direction.
-func (m *ModuleConfig) ReadForward(
-	isIPv6 bool,
-	layerIndex uint32,
-	index int64,
-	includeExpired bool,
-	now uint64,
-	count uint32,
-) ([]CursorEntry, int64, bool, error) {
-	return m.readEntries(isIPv6, layerIndex, index, includeExpired, now, count, false)
-}
-
-// ReadBackward reads up to count entries in the backward direction.
-func (m *ModuleConfig) ReadBackward(
-	isIPv6 bool,
-	layerIndex uint32,
-	index int64,
-	includeExpired bool,
-	now uint64,
-	count uint32,
-) ([]CursorEntry, int64, bool, error) {
-	return m.readEntries(isIPv6, layerIndex, index, includeExpired, now, count, true)
-}
-
-func (m *ModuleConfig) readEntries(
-	isIPv6 bool,
-	layerIndex uint32,
-	index int64,
-	includeExpired bool,
-	now uint64,
-	count uint32,
-	backward bool,
-) ([]CursorEntry, int64, bool, error) {
-	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_init(
-		m.asRawPtr(), &cursor,
-		C.bool(isIPv6), C.uint32_t(layerIndex),
-		C.int64_t(index), C.bool(includeExpired),
-	)
-	if rc != 0 {
-		return nil, 0, false, fmt.Errorf("failed to create cursor: map or layer not found")
-	}
-
-	fwmap := C.fwstate_config_resolve_map(
-		m.asRawPtr(), C.bool(isIPv6), C.uint32_t(layerIndex),
-	)
-	if fwmap == nil {
-		return nil, 0, false, fmt.Errorf("failed to resolve map")
-	}
-
-	if count == 0 {
-		return nil, int64(cursor.key_pos), false, nil
-	}
-	if count > maxCursorBatch {
-		count = maxCursorBatch
-	}
-
-	buf := make([]C.fwstate_cursor_entry_t, count)
-	var cEntries *C.fwstate_cursor_entry_t
-	if len(buf) > 0 {
-		cEntries = &buf[0]
-	}
-
-	var n C.uint32_t
-	if backward {
-		n = C.fwstate_cursor_read_backward(fwmap, &cursor, C.uint64_t(now), cEntries, C.uint32_t(count))
-	} else {
-		n = C.fwstate_cursor_read_forward(fwmap, &cursor, C.uint64_t(now), cEntries, C.uint32_t(count))
-	}
-
-	entries := make([]CursorEntry, 0, n)
-	for idx := range n {
-		entry := buf[idx]
-		val := (*C.struct_fw_state_value)(entry.value)
-
-		stateKey := convertCKey(entry.key, isIPv6)
-		stateValue := stateValueFromC(val)
-
-		entries = append(entries, CursorEntry{
-			Key:     stateKey,
-			Value:   stateValue,
-			Idx:     uint32(entry.idx),
-			Expired: bool(entry.expired),
-		})
-	}
-
-	newIndex := int64(cursor.key_pos)
-	keyLimit := fwmap.key_cursor
-	hasMore := false
-	if backward {
-		hasMore = newIndex > -1
-	} else {
-		hasMore = newIndex < int64(keyLimit)
-	}
-
-	return entries, newIndex, hasMore, nil
 }
 
 func convertCKey(ptr unsafe.Pointer, isIPv6 bool) StateKey {
@@ -368,35 +246,6 @@ func stateValueFromC(value *C.struct_fw_state_value) StateValue {
 		PacketsBackward: uint64(value.packets_backward),
 		PacketsForward:  uint64(value.packets_forward),
 	}
-}
-
-// TrimStaleLayers trims stale layers from both IPv4 and IPv6 maps.
-//
-// On failure, the returned handle is non-nil only when at least one layer
-// was actually collected and unlinked before the failure; that handle must
-// still be freed after the new config is published. A nil handle with an
-// error means nothing was collected and the chain is untouched. Stale
-// layers that were not collected stay linked and are retried on the next
-// trim.
-func (m *ModuleConfig) TrimStaleLayers(now uint64) (*OutdatedLayers, error) {
-	var outdated *C.fwstate_outdated_layers_t
-	rc, cErr := C.fwstate_config_trim_stale_layers(m.asRawPtr(), C.uint64_t(now), &outdated)
-
-	var handle *OutdatedLayers
-	if outdated != nil {
-		// A non-nil handle means layers may have been unlinked on success
-		// and were unlinked on failure, so readers paging by layer_index
-		// must observe a possible topology shift. Over-reporting a shift
-		// is benign, under-reporting is not.
-		handle = &OutdatedLayers{ptr: unsafe.Pointer(outdated)}
-		m.generation++
-	}
-
-	if rc != 0 {
-		return handle, fmt.Errorf("failed to trim stale layers: error code=%d, cErr=%v", rc, cErr)
-	}
-
-	return handle, nil
 }
 
 func htons(v uint16) uint16 {

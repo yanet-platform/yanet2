@@ -2,9 +2,7 @@ package fwstate
 
 import (
 	"context"
-	"io"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -14,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
@@ -65,7 +64,8 @@ func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
 	opts = append(opts, grpcmetrics.WithServiceFilter(
 		func(service string) bool {
 			return service == FWStateServiceName ||
-				service == FWStateMetricsServiceName
+				service == FWStateMetricsServiceName ||
+				service == FWStateMapServiceName
 		},
 	))
 	opts = append(opts, extra...)
@@ -75,19 +75,6 @@ func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
 const (
 	// moduleType is the registered shared-memory type for fwstate configs.
 	moduleType = "fwstate"
-
-	// defaultListEntriesBatchSize is the batch size used when the caller
-	// sends zero in the request.
-	defaultListEntriesBatchSize uint32 = 100
-
-	// maxListEntriesBatchSize caps the number of entries fetched per
-	// ListEntries round-trip to prevent unbounded allocation under the
-	// service mutex.
-	maxListEntriesBatchSize uint32 = 10000
-
-	// maxSyncPort is the highest value accepted for port_multicast and
-	// port_unicast, matching the width of the C-side uint16 port field.
-	maxSyncPort uint32 = 65535
 )
 
 // FWStateServiceName and MetricsServiceName are the fully-qualified gRPC
@@ -101,57 +88,15 @@ var (
 	FWStateMetricsServiceName = fwstatepb.MetricsService_ServiceDesc.ServiceName
 )
 
-// clampBatchSize returns a batch size that is within the allowed range:
-// zero is replaced with defaultListEntriesBatchSize, and values above
-// maxListEntriesBatchSize are clamped to maxListEntriesBatchSize.
-func clampBatchSize(n uint32) uint32 {
-	if n == 0 {
-		return defaultListEntriesBatchSize
-	}
-	if n > maxListEntriesBatchSize {
-		return maxListEntriesBatchSize
-	}
-	return n
-}
-
-// ACLServiceProvider is the interface through which the fwstate service drives
-// ACL config lifecycle. Implementations must be safe for concurrent use.
-type ACLServiceProvider interface {
-	// LinkedConfigNames returns ACL config names linked to the given fwstate
-	// config. Implementations lock internally.
-	LinkedConfigNames(fwstateConfigName string) []string
-
-	// RelinkConfigs rebuilds all ACL configs currently linked to fwstateConfig
-	// and invokes publish with their FFI handles. publish is called even when
-	// there are no linked configs (with nil) so the caller can still publish
-	// its own configs atomically.
-	RelinkConfigs(
-		fwstateConfig *FwStateConfig,
-		publish func(linkedFFI []ffi.ModuleConfig) error,
-	) error
-
-	// LinkConfigs links the given explicit list of ACL config names to
-	// fwstateConfig and invokes publish with their FFI handles so the caller
-	// can publish the combined update atomically.
-	LinkConfigs(
-		names []string,
-		fwstateConfig *FwStateConfig,
-		publish func(linkedFFI []ffi.ModuleConfig) error,
-	) error
-}
-
 // FWStateService implements the gRPC service for FWState management.
 type FWStateService struct {
 	fwstatepb.UnimplementedFWStateServiceServer
 
-	mu          sync.Mutex
-	agent       *ffi.Agent
-	configs     map[string]*FwStateConfig
-	aclProvider ACLServiceProvider
-	metrics     *grpcmetrics.ServerMetrics
-
-	// Pending outdated layers to be freed after successful UpdateModules
-	pendingOutdatedLayers []*OutdatedLayers
+	mu         sync.Mutex
+	agent      *ffi.Agent
+	configs    map[string]*FwStateConfig
+	mapService *FWStateMapService
+	metrics    *grpcmetrics.ServerMetrics
 
 	log *zap.Logger
 }
@@ -160,9 +105,13 @@ type FWStateService struct {
 //
 // When the WithMetrics option is supplied, gRPC call metrics are collected and
 // exposed through the module's MetricsService.
+//
+// mapService resolves fwtable_name_v4 / fwtable_name_v6 references to
+// concrete fwtable addresses in UpdateConfig and must be non-nil for that
+// RPC to succeed.
 func NewFWStateService(
 	agent *ffi.Agent,
-	aclProvider ACLServiceProvider,
+	mapService *FWStateMapService,
 	options ...Option,
 ) *FWStateService {
 	opts := newOptions()
@@ -171,10 +120,10 @@ func NewFWStateService(
 	}
 
 	m := &FWStateService{
-		agent:       agent,
-		configs:     make(map[string]*FwStateConfig),
-		aclProvider: aclProvider,
-		log:         opts.Log,
+		agent:      agent,
+		configs:    map[string]*FwStateConfig{},
+		mapService: mapService,
+		log:        opts.Log,
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -201,8 +150,6 @@ func labeler(fullMethod string, req any) metrics.Labels {
 		return metrics.Labels{"config": r.GetName()}
 	case *fwstatepb.ShowConfigRequest:
 		return metrics.Labels{"config": r.GetName()}
-	case *fwstatepb.GetStatsRequest:
-		return metrics.Labels{"config": r.GetName()}
 	default:
 		return nil
 	}
@@ -217,19 +164,51 @@ func (m *FWStateService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
+	fwtableNameV4 := req.GetFwtableNameV4()
+	fwtableNameV6 := req.GetFwtableNameV6()
+	if fwtableNameV4 == "" || fwtableNameV6 == "" {
+		return nil, status.Error(codes.InvalidArgument, "fwtable_name_v4 and fwtable_name_v6 are required")
+	}
+
 	// Get fwstate configuration from req
 	if req.SyncConfig == nil {
 		return nil, status.Error(codes.InvalidArgument, "sync_config is required")
-	}
-	if req.MapConfig == nil {
-		return nil, status.Error(codes.InvalidArgument, "map_config is required")
 	}
 	if err := validateSyncPorts(req.SyncConfig); err != nil {
 		return nil, err
 	}
 
-	m.log.Debug("update fwstate config", zap.String("config", name))
+	if m.mapService == nil {
+		return nil, status.Error(codes.FailedPrecondition, "map service is not configured")
+	}
 
+	m.log.Debug("update fwstate config",
+		zap.String("config", name),
+		zap.String("fwtable_v4", fwtableNameV4),
+		zap.String("fwtable_v6", fwtableNameV6),
+	)
+
+	if err := m.doUpdateConfig(req, name, fwtableNameV4, fwtableNameV6); err != nil {
+		return nil, err
+	}
+	return &fwstatepb.UpdateConfigResponse{}, nil
+}
+
+// doUpdateConfig performs the full sync config update under m.mu, linking
+// the named v4 and v6 fwstate-map objects.
+//
+// The merged cfwstate.SetModuleConfig links the named objects (resolved by
+// the dataplane at ectx build time) and copies the sync parameters in a
+// single call. The sync config never owns the fwtable memory: the maps
+// stay owned and freed solely by the standalone fwstate-map objects.
+//
+// Caller must NOT hold m.mu; this method acquires it.
+func (m *FWStateService) doUpdateConfig(
+	req *fwstatepb.UpdateConfigRequest,
+	name string,
+	fwtableNameV4 string,
+	fwtableNameV6 string,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -238,151 +217,55 @@ func (m *FWStateService) UpdateConfig(
 	newConfig, err := NewFWStateModuleConfig(m.agent, name)
 	if err != nil {
 		m.log.Error("failed to create fwstate config",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
+			zap.String("config", name), zap.Error(err))
+		return status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
 	}
+
+	// Read the previous sync config directly so ToCWithDefaults can inherit
+	// unspecified fields from the prior generation.
+	var oldSync cfwstate.SyncConfig
 	if oldConfig != nil {
-		newConfig.PropagateConfig(oldConfig)
-
-		// Trim stale layers from the transferred configuration.
-		// Layers with expired deadlines are collected and added to the
-		// pending list; they are freed after successful UpdateModules.
-		now := uint64(time.Now().UnixNano())
-		outdatedLayers, err := newConfig.TrimStaleLayers(now)
-		if outdatedLayers != nil {
-			m.pendingOutdatedLayers = append(m.pendingOutdatedLayers, outdatedLayers)
-		}
-		if err != nil {
-			if outdatedLayers == nil {
-				// Nothing was collected, so nothing was unlinked: the chain
-				// is untouched and it is safe to abort the update.
-				newConfig.DetachMaps()
-				newConfig.Free()
-				m.log.Error("failed to trim stale fwstate layers",
-					zap.String("config", name),
-					zap.Error(err),
-				)
-				return nil, status.Errorf(codes.Internal, "failed to trim stale fwstate layers: %v", err)
-			}
-
-			// Partial trim: some layers were collected and are already
-			// pending, so continuing lets the upcoming successful publish
-			// free them and relieve the memory pressure that caused the
-			// failure. The layers that were not collected stay linked in
-			// the chain and are retried on the next update. Aborting here
-			// would prevent exactly the publish that frees memory.
-			m.log.Warn("trimmed stale layers only partially",
-				zap.String("config", name),
-				zap.Error(err),
-			)
-		}
+		oldSync = oldConfig.ModuleConfig.GetSyncConfig()
 	}
 
-	// Set sync config
-	newConfig.SetSyncConfig(req.SyncConfig)
-
-	// Validate sync config after setting
-	syncConfig := newConfig.GetSyncConfig()
-	if err := validateSyncConfig(syncConfig); err != nil {
-		newConfig.DetachMaps()
+	// Resolve the merged sync config (request plus inherited defaults)
+	// and validate it before touching the C config.
+	mergedSync := req.SyncConfig.ToCWithDefaults(oldSync)
+	if err := validateSyncConfig(fwstatepb.FromCSyncConfig(mergedSync)); err != nil {
 		newConfig.Free()
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+		return status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}
 
-	dpConfig := m.agent.DPConfig()
-
-	if err = newConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount())); err != nil {
-		newConfig.DetachMaps() // in order not to pull them out from under the feet of another module
+	// Link the named v4/v6 fwstate-map objects and stamp the merged sync
+	// config in a single fwstate_module_config_set call. The dataplane
+	// resolves the fwtables at ectx build time via per-worker object ectx.
+	if err := cfwstate.SetModuleConfig(newConfig.AsFFIModule(), fwtableNameV4, fwtableNameV6, mergedSync); err != nil {
 		newConfig.Free()
-		m.log.Error("failed to create fwstate maps", zap.String("config", name), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to create fwstate maps: %v", err)
+		m.log.Error("failed to set fwstate module config",
+			zap.String("config", name), zap.Error(err))
+		return status.Errorf(codes.Internal, "failed to set fwstate module config: %v", err)
 	}
+	newConfig.SetFwtableNameV4(fwtableNameV4)
+	newConfig.SetFwtableNameV6(fwtableNameV6)
 
 	m.log.Debug("update fwstate module config", zap.String("config", name))
 
-	// Rebuild all linked ACL configs against the new fwstate config and publish
-	// both atomically.
-	//
-	// RelinkConfigs holds each linked ACL config name's lock for the entire
-	// window, so it never blocks a read or a compile on an unrelated name.
-	if err := m.aclProvider.RelinkConfigs(newConfig, func(linkedFFI []ffi.ModuleConfig) error {
-		return m.agent.UpdateModules(append(linkedFFI, newConfig.AsFFIModule()))
-	}); err != nil {
-		newConfig.DetachMaps()
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{newConfig.AsFFIModule()}); err != nil {
 		newConfig.Free()
-		m.log.Error("failed to relink ACL configs", zap.String("config", name), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to relink ACL configs: %v", err)
+		m.log.Error("failed to publish fwstate config",
+			zap.String("config", name), zap.Error(err))
+		return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 	}
-
-	// Drain pending outdated layers after successful UpdateModules
-	// This is safe because dataplane now uses the new configuration
-	for _, pending := range m.pendingOutdatedLayers {
-		newConfig.FreeOutdatedLayers(pending)
-	}
-	m.pendingOutdatedLayers = nil
 
 	if oldConfig != nil {
-		oldConfig.DetachMaps()
 		oldConfig.Free()
 	}
 
 	m.configs[name] = newConfig
 
 	m.log.Info("successfully updated FWState module", zap.String("config", name))
-
-	return &fwstatepb.UpdateConfigResponse{}, nil
-}
-
-func (m *FWStateService) LinkFWState(
-	ctx context.Context,
-	req *fwstatepb.LinkFWStateRequest,
-) (*fwstatepb.LinkFWStateResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	fwstateName := req.GetFwstateName()
-	if fwstateName == "" {
-		return nil, status.Error(codes.InvalidArgument, "fwstate name is required")
-	}
-
-	aclConfigNames := req.GetAclConfigNames()
-	if len(aclConfigNames) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one ACL config name is required")
-	}
-
-	// Check for duplicates in ACL config names
-	seen := make(map[string]bool)
-	for _, name := range aclConfigNames {
-		if seen[name] {
-			return nil, status.Errorf(codes.InvalidArgument, "duplicate ACL config name: %q", name)
-		}
-		seen[name] = true
-	}
-
-	// Check that fwstate config exists
-	fwstateConfig, ok := m.configs[fwstateName]
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "FWState config %q not found", fwstateName)
-	}
-
-	// Link the given ACL configs to this fwstate and publish both atomically.
-	// LinkConfigs holds each named ACL config's lock for the entire window,
-	// so it never blocks a read or a compile on an unrelated name.
-	if err := m.aclProvider.LinkConfigs(aclConfigNames, fwstateConfig, func(linkedFFI []ffi.ModuleConfig) error {
-		return m.agent.UpdateModules(append(linkedFFI, fwstateConfig.AsFFIModule()))
-	}); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to link ACL configs: %v", err)
-	}
-
-	m.log.Info("successfully linked FWState to ACL configs",
-		zap.String("fwstate", fwstateName),
-		zap.Strings("acl_configs", aclConfigNames),
-	)
-
-	return &fwstatepb.LinkFWStateResponse{}, nil
+	return nil
 }
 
 func (m *FWStateService) ShowConfig(
@@ -405,15 +288,11 @@ func (m *FWStateService) ShowConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	// LinkedConfigNames is self-locking: a brief RLock, never blocked behind
-	// an in-flight ACL compile.
-	linkedACLs := m.aclProvider.LinkedConfigNames(name)
-
 	response := &fwstatepb.ShowConfigResponse{
-		Name:       name,
-		MapConfig:  config.GetMapConfig(),
-		SyncConfig: config.GetSyncConfig(),
-		LinkedAcls: linkedACLs,
+		Name:          name,
+		FwtableNameV4: config.FwtableNameV4(),
+		FwtableNameV6: config.FwtableNameV6(),
+		SyncConfig:    config.GetSyncConfig(),
 	}
 
 	return response, nil
@@ -454,11 +333,15 @@ func (m *FWStateService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
 
-	if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
+	if err := m.agent.DeleteModule(moduleType, name); err != nil {
 		return nil, status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
 	}
 
 	m.log.Info("successfully deleted FWState module config", zap.String("name", name))
+
+	// The sync config only links the maps by name, so Free releases the
+	// config struct itself; the standalone fwstate-map objects stay owned
+	// by the map service.
 	config.Free()
 
 	delete(m.configs, name)
@@ -466,184 +349,24 @@ func (m *FWStateService) DeleteConfig(
 	return &fwstatepb.DeleteConfigResponse{}, nil
 }
 
-func (m *FWStateService) GetStats(
-	ctx context.Context,
-	req *fwstatepb.GetStatsRequest,
-) (*fwstatepb.GetStatsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
-	config, ok := m.configs[name]
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-
-	// Get stats for both IPv4 and IPv6 maps
-	mapsStats := config.GetMapsStats()
-
-	response := &fwstatepb.GetStatsResponse{
-		Ipv4Stats: &fwstatepb.MapStats{
-			IndexSize:        uint32(mapsStats.IPv4.IndexSize),
-			ExtraBucketCount: uint32(mapsStats.IPv4.ExtraBucketCount),
-			MaxChainLength:   uint32(mapsStats.IPv4.MaxChainLength),
-			LayerCount:       uint32(mapsStats.IPv4.LayerCount),
-			TotalElements:    uint64(mapsStats.IPv4.TotalElements),
-			MaxDeadline:      uint64(mapsStats.IPv4.MaxDeadline),
-			MemoryUsed:       uint64(mapsStats.IPv4.MemoryUsed),
-			Note:             "Statistics are currently shown for the first layer only",
-		},
-		Ipv6Stats: &fwstatepb.MapStats{
-			IndexSize:        uint32(mapsStats.IPv6.IndexSize),
-			ExtraBucketCount: uint32(mapsStats.IPv6.ExtraBucketCount),
-			MaxChainLength:   uint32(mapsStats.IPv6.MaxChainLength),
-			LayerCount:       uint32(mapsStats.IPv6.LayerCount),
-			TotalElements:    uint64(mapsStats.IPv6.TotalElements),
-			MaxDeadline:      uint64(mapsStats.IPv6.MaxDeadline),
-			MemoryUsed:       uint64(mapsStats.IPv6.MemoryUsed),
-			Note:             "Statistics are currently shown for the first layer only",
-		},
-	}
-
-	return response, nil
-}
-
-func (m *FWStateService) ListEntries(
-	stream grpc.BidiStreamingServer[fwstatepb.ListEntriesRequest, fwstatepb.ListEntriesResponse],
-) error {
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		configName := req.GetConfigName()
-		if configName == "" {
-			return status.Error(codes.InvalidArgument, "config_name is required")
-		}
-
-		count := clampBatchSize(req.GetBatchSize())
-
-		m.mu.Lock()
-		config, ok := m.configs[configName]
-		if !ok {
-			m.mu.Unlock()
-			return status.Errorf(codes.NotFound, "config %q not found", configName)
-		}
-
-		now := uint64(time.Now().UnixNano())
-		backward := req.GetDirection() == fwstatepb.Direction_BACKWARD
-
-		var entries []CursorEntry
-		var newIndex int64
-		var hasMore bool
-
-		if backward {
-			entries, newIndex, hasMore, err = config.ReadBackward(
-				req.GetIsIpv6(), req.GetLayerIndex(),
-				req.GetIndex(), req.GetIncludeExpired(),
-				now, count,
-			)
-		} else {
-			entries, newIndex, hasMore, err = config.ReadForward(
-				req.GetIsIpv6(), req.GetLayerIndex(),
-				req.GetIndex(), req.GetIncludeExpired(),
-				now, count,
-			)
-		}
-		generation := config.Generation()
-		m.mu.Unlock()
-
-		if err != nil {
-			return status.Errorf(codes.Internal, "cursor read failed: %v", err)
-		}
-
-		pbEntries := make([]*fwstatepb.FwStateEntry, 0, len(entries))
-		for idx := range entries {
-			pbEntries = append(pbEntries, fwstatepb.FromCursorEntry(entries[idx]))
-		}
-
-		resp := &fwstatepb.ListEntriesResponse{
-			Entries:    pbEntries,
-			HasMore:    hasMore,
-			Index:      newIndex,
-			Generation: generation,
-		}
-
-		if err := stream.Send(resp); err != nil {
-			return err
-		}
-	}
-}
-
 // validateSyncPorts rejects sync config ports that do not fit into the
 // C-side uint16 port field.
 //
-// A zero port means "unset / keep current" and is allowed here. The
-// required-destination-pair check in validateSyncConfig rejects a request
-// that leaves both destinations unset.
+// Thin wrapper over [fwstatepb.SyncConfig.ValidatePorts] that returns a
+// gRPC status error so the handler can return it directly.
 func validateSyncPorts(cfg *fwstatepb.SyncConfig) error {
-	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
-		return status.Errorf(codes.InvalidArgument, "port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
-	}
-	if portUnicast := cfg.GetPortUnicast(); portUnicast > maxSyncPort {
-		return status.Errorf(codes.InvalidArgument, "port_unicast %d exceeds maximum allowed value %d", portUnicast, maxSyncPort)
+	if err := cfg.ValidatePorts(); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	return nil
 }
 
-// validateSyncConfig validates that required sync config fields are set
+// validateSyncConfig returns a plain error when the merged sync config is
+// missing required fields or carries invalid timeouts.
+//
+// The caller wraps it with a gRPC status. Delegates to
+// [fwstatepb.SyncConfig.Validate] so FWState and ACL share one validation
+// path.
 func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
-	var missing []string
-
-	// Check src_addr (16 bytes for IPv6)
-	if len(cfg.GetSrcAddr().GetAddr()) != 16 || isAllZeroBytes(cfg.GetSrcAddr().GetAddr()) {
-		missing = append(missing, "src_addr")
-	}
-
-	// Check dst_ether (6 bytes for MAC)
-	dstEther := cfg.GetDstEther()
-	if dstEther == nil {
-		missing = append(missing, "dst_ether")
-	} else {
-		eui := dstEther.EUI48()
-		if isAllZeroBytes(eui[:]) {
-			missing = append(missing, "dst_ether")
-		}
-	}
-
-	// Check that at least one destination pair is configured
-	hasMulticast := len(cfg.GetDstAddrMulticast().GetAddr()) == 16 && !isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) && cfg.PortMulticast != 0
-	hasUnicast := len(cfg.GetDstAddrUnicast().GetAddr()) == 16 && !isAllZeroBytes(cfg.GetDstAddrUnicast().GetAddr()) && cfg.PortUnicast != 0
-
-	if !hasMulticast && !hasUnicast {
-		missing = append(missing, "dst_addr_multicast+port_multicast or dst_addr_unicast+port_unicast")
-	}
-
-	if len(missing) > 0 {
-		return status.Errorf(codes.InvalidArgument, "missing required sync config fields: %v", missing)
-	}
-
-	if err := cfg.ValidateTimeouts(); err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid sync config timeouts: %v", err)
-	}
-
-	return nil
-}
-
-// isAllZeroBytes checks if all bytes in the slice are zero
-func isAllZeroBytes(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
+	return cfg.Validate()
 }

@@ -1,9 +1,10 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
-import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '@yanet/core/components';
 import { useConfigListCache, useListNavigation, usePageContribution } from '@yanet/core/hooks';
+import { API } from '@yanet/core/api';
+import { toaster, compareNatural, validateSyncConfigFormFields } from '@yanet/core/utils';
 import { useAclDraft } from './useAclDraft';
 import type { Rule } from '@yanet/core/api/acl';
 import { ActionKind } from '@yanet/core/api/acl';
@@ -15,6 +16,7 @@ import type { RuleDrawerHandle } from './RuleDrawer';
 import YamlIO, { type ImportMode } from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
+import MapSyncPanel from './MapSyncPanel';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '@yanet/core/components';
 import { useRulePageState } from '@yanet/core/components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '@yanet/core/components/command-palette';
@@ -34,7 +36,7 @@ const AclPage: React.FC = () => {
         draftRules,
         draftRuleIds,
         serverRules,
-        fwstateName,
+        draftMapSync,
         isDirty,
         anyDirty,
         dispatchDraft,
@@ -52,7 +54,6 @@ const AclPage: React.FC = () => {
     const [deleteConfigTarget, setDeleteConfigTarget] = useState<string | null>(null);
     const [bulkDeleteConfig, setBulkDeleteConfig] = useState<string | null>(null);
     const [bulkDeleteRuleIds, setBulkDeleteRuleIds] = useState<string[]>([]);
-    const navigate = useNavigate();
 
     const {
         currentConfig,
@@ -123,10 +124,44 @@ const AclPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    const currentFwStateName = fwstateName(currentConfig);
     const rawRules: Rule[] = draftRules(currentConfig);
     const rawIds: string[] = draftRuleIds(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules, rawIds), [rawRules, rawIds]);
+
+    // fwstate-map names for the config-level map selector. Managed by the
+    // FWState page; fetched once after the initial config load completes.
+    const [maps, setMaps] = useState<string[]>([]);
+    useEffect(() => {
+        if (loading) return;
+        let mounted = true;
+        API.fwstate.listMaps()
+            .then((res) => {
+                if (!mounted) return;
+                setMaps((res.maps ?? []).slice().sort((a, b) => compareNatural(a, b)));
+            })
+            .catch((err) => {
+                toaster.error('acl-maps-load', 'Failed to load fwstate-maps', err);
+            });
+        return () => { mounted = false; };
+    }, [loading]);
+
+    const currentMapSync = draftMapSync(currentConfig);
+    // CREATE_STATE drives the server-side requirement for map_name + sync_config
+    // (the ACL dataplane reads the borrowed maps and sync_config to emit
+    // CREATE_STATE sync packets). CHECK_STATE alone does not.
+    const hasCreateState = useMemo(
+        () => rawRules.some((rule) => (rule.actions ?? []).some((action) =>
+            action.kind === ActionKind.ACTION_KIND_CREATE_STATE)),
+        [rawRules],
+    );
+    // The map+sync panel is relevant when a CREATE_STATE rule is present (the
+    // fields are required) or when a map is already selected (editable).
+    const showMapSync = hasCreateState || Boolean(currentMapSync.mapName);
+
+    const setMapSync = useCallback((next: typeof currentMapSync): void => {
+        if (!currentConfig) return;
+        dispatchDraft({ type: 'SET_MAP_SYNC', configName: currentConfig, mapSync: next });
+    }, [currentConfig, dispatchDraft]);
 
     const { rates } = useAclRuleCounters(currentConfig, allItems, enabledCounterNames, !paused);
 
@@ -241,12 +276,25 @@ const AclPage: React.FC = () => {
         updateParams({ [QP_CONFIG]: target || null });
     }, [currentConfig, draftRules, dispatchDraft, updateParams]);
 
-    const handleOpenLinkedFwstate = useCallback((): void => {
-        if (!currentFwStateName) {
-            return;
+    // Validate config-level map + sync before opening the save-diff modal.
+    //
+    // map_name + sync_config are required iff any rule uses CREATE_STATE and
+    // forbidden otherwise (the save path drops them when not needed). Surface
+    // the requirement here so the user gets a clear error before the server
+    // rejects the UpdateConfig call.
+    const handleSavePressValidated = useCallback((): void => {
+        if (hasCreateState) {
+            if (!currentMapSync.mapName) {
+                toaster.error('acl-save-validate', 'A +state rule requires a fwstate-map. Select one under "FWState map & sync".');
+                return;
+            }
+            if (!validateSyncConfigFormFields(currentMapSync.sync)) {
+                toaster.error('acl-save-validate', 'Invalid FWState sync fields. Check addresses, ports, and timeouts.');
+                return;
+            }
         }
-        navigate(`/modules/fwstate?config=${encodeURIComponent(currentFwStateName)}`);
-    }, [currentFwStateName, navigate]);
+        handleSavePress();
+    }, [currentMapSync, hasCreateState, handleSavePress]);
 
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
@@ -262,7 +310,7 @@ const AclPage: React.FC = () => {
         }
         list.push(...buildDraftCommands({
             currentIsDirty,
-            onSave: () => handleSavePress(),
+            onSave: () => handleSavePressValidated(),
             onDiscard: () => { closeDrawer(); handleDiscard(); },
         }));
         list.push(...buildConfigCommands({
@@ -285,16 +333,6 @@ const AclPage: React.FC = () => {
                 onSelect: () => setPaused(p => !p),
             });
         }
-        if (currentFwStateName) {
-            list.push({
-                id: '__open_fwstate',
-                icon: '↗',
-                label: 'Open linked FWState',
-                sub: currentFwStateName,
-                keywords: 'fwstate open link navigate',
-                onSelect: () => handleOpenLinkedFwstate(),
-            });
-        }
         list.push({
             id: '__clear_search',
             icon: '✕',
@@ -304,10 +342,10 @@ const AclPage: React.FC = () => {
         });
         return list;
     }, [
-        canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet,
-        enabledCounterNames, paused, currentFwStateName,
-        openAdd, handleSavePress, handleDiscard, closeDrawer,
-        handleTabSelect, handleOpenDeleteConfig, handleSearchChange, handleOpenLinkedFwstate,
+        loading, currentIsDirty, currentConfig, draftConfigs, dirtySet,
+        enabledCounterNames, paused,
+        openAdd, handleSavePressValidated, handleDiscard, closeDrawer,
+        handleTabSelect, handleOpenDeleteConfig, handleSearchChange,
     ]);
 
     const rowAdapter = useMemo((): RowAdapter<RuleItem> => ({
@@ -330,11 +368,6 @@ const AclPage: React.FC = () => {
         placeholder: 'Search rules or run an action…',
     }), [commands, rowAdapter]);
     usePageContribution(contribution);
-
-    const hasStatefulRules = useMemo(() =>
-        rawRules.some((rule) => (rule.actions ?? []).some((action) =>
-            action.kind === ActionKind.ACTION_KIND_CHECK_STATE || action.kind === ActionKind.ACTION_KIND_CREATE_STATE,
-        )), [rawRules]);
 
     const pageHeader = (
         <CommandPaletteHeader
@@ -399,13 +432,11 @@ const AclPage: React.FC = () => {
                         ) : (
                             <>
                                 <div className="yn-toolbar-bordered">
-                                    {currentFwStateName && (
-                                        <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
-                                            FWState: {currentFwStateName}
-                                        </Button>
+                                    {hasCreateState && !currentMapSync.mapName && (
+                                        <Label theme="danger">+state rule needs a fwstate-map</Label>
                                     )}
-                                    {!currentFwStateName && hasStatefulRules && (
-                                        <Label theme="warning">Stateful rules without FWState</Label>
+                                    {currentMapSync.mapName && (
+                                        <Label theme="success" size="s">map: {currentMapSync.mapName}</Label>
                                     )}
                                     <div style={{ flex: 1 }} />
                                     <div style={{ flexBasis: 320, flexShrink: 1 }}>
@@ -421,6 +452,15 @@ const AclPage: React.FC = () => {
                                     <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
                                 </div>
 
+                                {showMapSync && (
+                                    <MapSyncPanel
+                                        value={currentMapSync}
+                                        maps={maps}
+                                        required={hasCreateState}
+                                        onChange={setMapSync}
+                                    />
+                                )}
+
                                 <div className="yn-content">
                                     <RuleTable
                                         items={visibleItems}
@@ -430,7 +470,7 @@ const AclPage: React.FC = () => {
                                         onSelectionChange={setSelectedIds}
                                         onEditRule={openEdit}
                                         currentIsDirty={currentIsDirty}
-                                        onSave={handleSavePress}
+                                        onSave={handleSavePressValidated}
                                         onDiscard={handleDiscard}
                                         onDeleteConfig={handleOpenDeleteConfig}
                                         rates={rates}

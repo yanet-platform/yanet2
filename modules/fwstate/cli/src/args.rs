@@ -1,6 +1,6 @@
 use core::time::Duration;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use clap_complete::engine::ArgValueCandidates;
 use commonpb::pb::Metric;
 use ync::metrics::{self, Kind};
@@ -8,6 +8,30 @@ use ync::metrics::{self, Kind};
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {
     humantime::parse_duration(s).map_err(|e| e.to_string())
+}
+
+/// Highest value accepted for `--worker-count`.
+///
+/// Matches the width of the C-side `uint16` parameter of
+/// `fwstate_map_create_maps` (see `maxWorkerCount` in
+/// `modules/fwstate/controlplane/map_service.go`). The proto field is a
+/// `uint32`, so the bound is enforced here to give an immediate, clear error
+/// instead of a round-trip to the server.
+const MAX_WORKER_COUNT: u32 = 65535;
+
+/// Parse and validate `worker_count`.
+///
+/// Rejects zero and values exceeding the C-side `uint16` range, mirroring the
+/// server-side `validateWorkerCount` check.
+fn parse_worker_count(s: &str) -> Result<u32, String> {
+    let value: u32 = s.parse().map_err(|err: core::num::ParseIntError| err.to_string())?;
+    if value == 0 {
+        return Err("worker_count must be greater than zero".to_string());
+    }
+    if value > MAX_WORKER_COUNT {
+        return Err(format!("worker_count {value} exceeds maximum {MAX_WORKER_COUNT}"));
+    }
+    Ok(value)
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -21,14 +45,28 @@ pub enum ModeCmd {
     Update(UpdateCmd),
     /// Show fwstate configuration
     Show(ShowCmd),
-    /// Link fwstate configuration to ACL configurations
-    Link(LinkCmd),
-    /// Get statistics for fwstate maps
-    Stats(StatsCmd),
-    /// List entries from fwstate map
+    /// List entries from a fwstate-map
     Entries(EntriesCmd),
     /// Show fwstate metrics
     Metrics(MetricsCmd),
+    /// Manage standalone named fwstate-map objects
+    #[command(subcommand)]
+    Map(MapCmd),
+}
+
+/// Subcommands for the standalone named fwstate-map object.
+#[derive(Debug, Clone, Subcommand)]
+pub enum MapCmd {
+    /// Create a new named fwstate-map for one address family
+    Create(MapCreateCmd),
+    /// Delete a named fwstate-map (refuses if still referenced)
+    Delete(MapDeleteCmd),
+    /// List all named fwstate-map objects
+    List,
+    /// Get statistics for a named fwstate-map
+    Stats(MapStatsCmd),
+    /// Insert a new layer into a named fwstate-map's chain
+    InsertLayer(MapInsertLayerCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -46,36 +84,23 @@ pub struct ShowCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct LinkCmd {
-    /// FWState config name to link
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
-    pub config_name: String,
-
-    /// ACL config names to link (can be specified multiple times)
-    #[arg(long = "acl", required = true, num_args = 1..)]
-    pub acl_configs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct StatsCmd {
-    /// FWState config name to get statistics for
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
-    pub config_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// FWState config name to operate on
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// Size of the hash table index for firewall state maps
-    #[arg(long)]
-    pub index_size: Option<u32>,
+    /// Name of the standalone fwstate-map (kind V4) this config references.
+    ///
+    /// The config resolves the map by name at publish time. When omitted on
+    /// an update the currently referenced v4 map is preserved.
+    #[arg(long = "map-name-v4")]
+    pub map_name_v4: Option<String>,
 
-    /// Number of extra buckets for collision handling
-    #[arg(long)]
-    pub extra_bucket_count: Option<u32>,
+    /// Name of the standalone fwstate-map (kind V6) this config references.
+    ///
+    /// Same semantics as --map-name-v4 for the v6 family.
+    #[arg(long = "map-name-v6")]
+    pub map_name_v6: Option<String>,
 
     /// Source IPv6 address (e.g., "2001:db8::1")
     #[arg(long)]
@@ -132,15 +157,18 @@ pub enum DirectionArg {
     Backward,
 }
 
+/// Address family of a standalone fwstate-map.
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum MapKind {
+    V4,
+    V6,
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct EntriesCmd {
-    /// FWState config name
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
-    pub config_name: String,
-
-    /// Use IPv6 map instead of IPv4
-    #[arg(long, short = '6')]
-    pub ipv6: bool,
+    /// Name of the fwstate-map to iterate
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::map_candidates))]
+    pub map_name: String,
 
     /// Layer index to iterate (0 = active layer)
     #[arg(long, default_value = "0")]
@@ -200,4 +228,92 @@ pub struct MetricsCmd {
     /// Show only metrics matching this category
     #[arg(long, short, value_enum)]
     pub name: Option<MetricName>,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapCreateCmd {
+    /// Name of the fwstate-map to create
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
+
+    /// Address family of the map
+    #[arg(long, short = 'k', value_enum)]
+    pub kind: MapKind,
+
+    /// Size of the hash table index (0 = server default)
+    #[arg(long)]
+    pub index_size: u32,
+
+    /// Number of extra buckets for collision handling (0 = server default)
+    #[arg(long)]
+    pub extra_bucket_count: u32,
+
+    /// Number of workers (1..=65535, matches the C-side uint16 range)
+    #[arg(long, value_parser = parse_worker_count)]
+    pub worker_count: u32,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapDeleteCmd {
+    /// Name of the fwstate-map to delete
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapStatsCmd {
+    /// Name of the fwstate-map to get statistics for
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapInsertLayerCmd {
+    /// Name of the fwstate-map to insert the layer into
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
+
+    /// Size of the hash table index (0 = server default)
+    #[arg(long)]
+    pub index_size: u32,
+
+    /// Number of extra buckets for collision handling (0 = server default)
+    #[arg(long)]
+    pub extra_bucket_count: u32,
+
+    /// Number of workers (1..=65535, matches the C-side uint16 range)
+    #[arg(long, value_parser = parse_worker_count)]
+    pub worker_count: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_worker_count;
+
+    #[test]
+    fn worker_count_accepts_minimum() {
+        assert_eq!(1, parse_worker_count("1").unwrap());
+    }
+
+    #[test]
+    fn worker_count_accepts_maximum() {
+        assert_eq!(65535, parse_worker_count("65535").unwrap());
+    }
+
+    #[test]
+    fn worker_count_rejects_zero() {
+        let err = parse_worker_count("0").unwrap_err();
+        assert!(err.contains("must be greater than zero"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn worker_count_rejects_above_uint16() {
+        let err = parse_worker_count("65536").unwrap_err();
+        assert!(err.contains("exceeds maximum 65535"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn worker_count_rejects_non_numeric() {
+        assert!(parse_worker_count("abc").is_err());
+    }
 }

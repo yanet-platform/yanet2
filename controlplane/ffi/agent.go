@@ -51,6 +51,34 @@ func (m ModuleConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
+// ObjectConfig is a Go wrapper around a C cp_object pointer, representing a
+// named shared-memory object accounted in a control-plane configuration
+// generation but carrying no dataplane handler of its own.
+//
+// Like ModuleConfig it is an opaque bridge between CGo contexts; each object
+// package creates its own typed wrapper that returns an ObjectConfig via
+// AsFFIObject for agent.UpdateObjects.
+type ObjectConfig struct {
+	ptr *C.struct_cp_object
+}
+
+// NewObjectConfig wraps a raw C pointer into an ObjectConfig.
+//
+// The pointer must originate from an object-specific C constructor that
+// returns a valid cp_object pointer. The caller is responsible for ensuring
+// the pointer's validity and lifetime.
+func NewObjectConfig(ptr unsafe.Pointer) ObjectConfig {
+	return ObjectConfig{
+		ptr: (*C.struct_cp_object)(ptr),
+	}
+}
+
+// AsRawPtr returns the underlying C pointer as unsafe.Pointer for passing
+// across CGo package boundaries.
+func (m ObjectConfig) AsRawPtr() unsafe.Pointer {
+	return unsafe.Pointer(m.ptr)
+}
+
 // ShmDeviceConfig is a Go wrapper around a C cp_device pointer, representing
 // a device's shared memory configuration.
 //
@@ -128,6 +156,39 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 	)
 	if rc != 0 {
 		return fmt.Errorf("failed to update modules: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return nil
+}
+
+// UpdateObjects atomically upserts the given shared-memory objects into a new
+// control-plane configuration generation and blocks until every dataplane
+// worker has advanced to it.
+//
+// Mirrors UpdateModules for cp_object-registered entities (e.g. standalone
+// fwstate-map tables) that carry no dataplane handler of their own.
+func (m *Agent) UpdateObjects(objects []ObjectConfig) error {
+	if len(objects) == 0 {
+		return fmt.Errorf("no objects provided")
+	}
+
+	configs := make([]*C.struct_cp_object, len(objects))
+	for idx, object := range objects {
+		if object.ptr == nil {
+			return fmt.Errorf("object config at index %d is nil", idx)
+		}
+		configs[idx] = (*C.struct_cp_object)(object.AsRawPtr())
+	}
+
+	var cErr *C.yanet_error
+	rc := C.agent_update_objects(
+		(*C.struct_agent)(m.AsRawPtr()),
+		C.size_t(len(objects)),
+		&configs[0],
+		&cErr,
+	)
+	if rc != 0 {
+		return fmt.Errorf("failed to update objects: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -316,8 +377,11 @@ func (m *Agent) DeletePipeline(name string) error {
 	return nil
 }
 
-func (m *Agent) DeleteModuleConfig(moduleType, configName string) error {
-	cTypeName := C.CString(moduleType)
+// DeleteModule removes a module config from the dataplane by type name and
+// config name. This is the general form of DeleteModuleConfig that supports
+// type strings different from the agent's own name (e.g. "fwstate-map").
+func (m *Agent) DeleteModule(typeName string, configName string) error {
+	cTypeName := C.CString(typeName)
 	defer C.free(unsafe.Pointer(cTypeName))
 
 	cConfigName := C.CString(configName)
@@ -333,8 +397,39 @@ func (m *Agent) DeleteModuleConfig(moduleType, configName string) error {
 	if result != 0 {
 		return fmt.Errorf(
 			"failed to delete module config type %q name %q: %w",
-			moduleType,
+			typeName,
 			configName,
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
+	}
+	return nil
+}
+
+func (m *Agent) DeleteModuleConfig(configName string) error {
+	return m.DeleteModule(m.name, configName)
+}
+
+// DeleteObject removes a named shared-memory object from the dataplane by
+// type and name (e.g. ("fwstate_map_v4", "default")).
+func (m *Agent) DeleteObject(objectType, objectName string) error {
+	cObjectType := C.CString(objectType)
+	defer C.free(unsafe.Pointer(cObjectType))
+
+	cObjectName := C.CString(objectName)
+	defer C.free(unsafe.Pointer(cObjectName))
+
+	var cErr *C.yanet_error
+	result := C.agent_delete_object(
+		(*C.struct_agent)(m.AsRawPtr()),
+		cObjectType,
+		cObjectName,
+		&cErr,
+	)
+	if result != 0 {
+		return fmt.Errorf(
+			"failed to delete object type %q name %q: %w",
+			objectType,
+			objectName,
 			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}

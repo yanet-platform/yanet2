@@ -1,20 +1,14 @@
 #pragma once
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "lib/errors/errors.h"
-#include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
 
 struct agent;
 struct cp_module;
 struct fwstate_sync_config;
-struct layermap_list;
-
-// Opaque handle for outdated layers that need to be freed
-typedef struct fwstate_outdated_layers fwstate_outdated_layers_t;
 
 struct cp_module *
 fwstate_module_config_new(
@@ -22,87 +16,23 @@ fwstate_module_config_new(
 );
 
 void
-fwstate_module_config_propogate(
-	struct cp_module *new_cp_module, struct cp_module *old_cp_module
-);
-
-void
 fwstate_module_config_free(struct cp_module *cp_module);
 
-void
-fwstate_module_config_detach_maps(struct cp_module *cp_module);
-
-// Create firewall state maps for the configuration
+// Configure a fwstate sync config and link the named fwstate-map objects.
+//
+// fw4_name and fw6_name are the names of standalone fwstate_map_v4 /
+// fwstate_map_v6 objects the module borrows its fwtables from. Either may
+// be NULL or empty, in which case no link is declared and the dataplane
+// resolves a NULL fwtable for that family. Returns 0 on success or -1 on
+// error.
 int
-fwstate_config_create_maps(
+fwstate_module_config_set(
 	struct cp_module *cp_module,
-	uint32_t index_size,
-	uint32_t extra_bucket_count,
-	uint16_t worker_count
+	const char *fw4_name,
+	const char *fw6_name,
+	const struct fwstate_sync_config *sync_config,
+	yanet_error **err
 );
-
-// Insert new layer to existing firewall state maps
-int
-fwstate_config_insert_new_layer(
-	struct cp_module *cp_module,
-	uint32_t index_size,
-	uint32_t extra_bucket_count,
-	uint16_t worker_count
-);
-
-void
-fwstate_module_config_set_sync_config(
-	struct cp_module *cp_module, struct fwstate_sync_config *sync_config
-);
-
-struct fwmap_stats
-fwstate_config_get_map_stats(const struct cp_module *cp_module, bool is_ipv6);
 
 struct fwstate_sync_config
 fwstate_config_get_sync_config(const struct cp_module *cp_module);
-
-// Trims stale layers from both the IPv4 and IPv6 maps.
-//
-// Returns 0 when both maps were fully trimmed, or -1 with errno set when
-// trimming stopped early because a bookkeeping-node allocation failed. On
-// success *outdated is always non-NULL, though it holds no layers when
-// nothing was stale. On failure it is non-NULL only when at least one layer
-// was collected, which marks a genuine partial trim. It is NULL when the
-// outdated-layers structure itself cannot be allocated, and when trimming
-// failed before collecting anything - in both cases the layer chain is left
-// untouched. Collected layers must still be released with
-// fwstate_outdated_layers_free after the new config is published, regardless
-// of the return value.
-int
-fwstate_config_trim_stale_layers(
-	struct cp_module *cp_module,
-	uint64_t now,
-	fwstate_outdated_layers_t **outdated
-);
-
-// Free outdated layers after successful UpdateModules
-void
-fwstate_outdated_layers_free(
-	fwstate_outdated_layers_t *outdated, struct cp_module *cp_module
-);
-
-// Resolve a specific layer's map pointer from the config.
-// Returns NULL if maps don't exist or layer_index is out of range.
-fwmap_t *
-fwstate_config_resolve_map(
-	const struct cp_module *cp_module, bool is_ipv6, uint32_t layer_index
-);
-
-// Construct a cursor for a specific layer.
-// Copies timeouts from the current config into the cursor.
-// Sets key_pos from the provided `index` parameter.
-// Returns 0 on success, -1 if map/layer cannot be resolved.
-int
-fwstate_config_cursor_init(
-	struct cp_module *cp_module,
-	fwstate_cursor_t *cursor,
-	bool is_ipv6,
-	uint32_t layer_index,
-	int64_t index,
-	bool include_expired
-);

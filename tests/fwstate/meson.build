@@ -60,6 +60,19 @@ if not get_option('b_sanitize').contains('thread')
   )
 endif
 
+layermap_trim_oom_test = executable(
+  'layermap_trim_oom_test',
+  ['layermap_trim_oom_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('layermap_trim_oom',
+  layermap_trim_oom_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)
+
 fwstate_cursor_test = executable(
   'fwstate_cursor_test',
   ['fwstate_cursor_test.c'],
@@ -82,6 +95,47 @@ sync_endian_test = executable(
 )
 test('sync_endian',
   sync_endian_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)
+
+fwstate_map_registry_test = executable(
+  'fwstate_map_registry_test',
+  ['fwstate_map_registry_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_common_dep,
+    lib_errors_dep,
+    lib_config_cp_dep,
+    lib_config_dp_dep,
+    lib_fwstate_objects_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('fwstate_map_registry',
+  fwstate_map_registry_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)
+
+fwstate_map_consumer_lifetime_test = executable(
+  'fwstate_map_consumer_lifetime_test',
+  ['fwstate_map_consumer_lifetime_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_common_dep,
+    lib_errors_dep,
+    lib_config_cp_dep,
+    lib_config_dp_dep,
+    lib_fwstate_dep,
+    lib_fwstate_objects_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('fwstate_map_consumer_lifetime',
+  fwstate_map_consumer_lifetime_test,
   timeout: 15,
   suite: ['fwstate'],
 )

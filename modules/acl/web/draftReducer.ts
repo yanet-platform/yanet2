@@ -1,4 +1,5 @@
 import type { Rule } from '@yanet/core/api/acl';
+import type { SyncConfigFormFields } from '@yanet/core/utils';
 
 /** Monotonically increasing counter for generating stable tmp- ids. */
 let tmpIdCounter = 0;
@@ -7,10 +8,23 @@ const nextTmpId = (): string => `tmp-${++tmpIdCounter}`;
 /** Assign stable server ids to a rules array. */
 const serverIds = (rules: Rule[]): string[] => rules.map((_, idx) => `srv-${idx}`);
 
+/**
+ * Config-level map + sync draft, edited alongside rules.
+ *
+ * `mapName` references the standalone fwstate-map; `sync` holds the form-level
+ * sync-config fields. Both are required on save iff any rule uses
+ * ACTION_KIND_CREATE_STATE; the save path strips them otherwise.
+ */
+export interface AclMapSyncDraft {
+    mapName: string;
+    sync: SyncConfigFormFields;
+}
+
 export interface AclDraftState {
     server: Record<string, Rule[]>;
-    serverFwStateName: Record<string, string>;
+    serverMapSync: Record<string, AclMapSyncDraft>;
     draft: Record<string, Rule[]>;
+    draftMapSync: Record<string, AclMapSyncDraft>;
     /**
      * Stable row ids parallel to draft[configName].
      * server-loaded rules: "srv-N"; locally-added rules: "tmp-N".
@@ -26,8 +40,9 @@ export interface AclDraftState {
 
 export const initialAclDraftState: AclDraftState = {
     server: {},
-    serverFwStateName: {},
+    serverMapSync: {},
     draft: {},
+    draftMapSync: {},
     draftIds: {},
     serverConfigs: [],
     localOnlyConfigs: [],
@@ -36,11 +51,12 @@ export const initialAclDraftState: AclDraftState = {
 };
 
 export type AclDraftAction =
-    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwstateName: string }> }
+    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; mapSync: AclMapSyncDraft }> }
     | { type: 'ADD_RULE'; configName: string; rule: Rule }
     | { type: 'UPDATE_RULE_AT_INDEX'; configName: string; index: number; rule: Rule }
     | { type: 'REMOVE_RULES'; configName: string; indices: number[] }
     | { type: 'REPLACE_ALL_RULES'; configName: string; rules: Rule[] }
+    | { type: 'SET_MAP_SYNC'; configName: string; mapSync: AclMapSyncDraft }
     | { type: 'ADD_CONFIG'; configName: string }
     | { type: 'DELETE_CONFIG'; configName: string }
     | { type: 'DISCARD_CONFIG'; configName: string }
@@ -53,18 +69,22 @@ export const aclDraftReducer = (
     switch (action.type) {
         case 'LOAD_ALL_CONFIGS': {
             const newServer: Record<string, Rule[]> = { ...state.server };
-            const newServerFwStateName: Record<string, string> = { ...state.serverFwStateName };
+            const newServerMapSync: Record<string, AclMapSyncDraft> = { ...state.serverMapSync };
             const newDraft: Record<string, Rule[]> = { ...state.draft };
+            const newDraftMapSync: Record<string, AclMapSyncDraft> = { ...state.draftMapSync };
             const newDraftIds: Record<string, string[]> = { ...state.draftIds };
             const serverConfigs: string[] = [];
             // Use reference equality to detect whether the user has local edits:
-            // if draft[name] === server[name] the config was never mutated locally,
-            // so it is safe to fast-forward to the new server snapshot.
-            for (const { name, rules, fwstateName } of action.configs) {
+            // if draft[name] === server[name] (and the map+sync draft is still
+            // the server snapshot) the config was never mutated locally, so it
+            // is safe to fast-forward to the new server snapshot.
+            for (const { name, rules, mapSync } of action.configs) {
                 newServer[name] = rules;
-                newServerFwStateName[name] = fwstateName;
-                if (state.draft[name] === state.server[name]) {
+                newServerMapSync[name] = mapSync;
+                if (state.draft[name] === state.server[name]
+                    && state.draftMapSync[name] === state.serverMapSync[name]) {
                     newDraft[name] = rules;
+                    newDraftMapSync[name] = mapSync;
                     newDraftIds[name] = serverIds(rules);
                 }
                 serverConfigs.push(name);
@@ -80,8 +100,9 @@ export const aclDraftReducer = (
             return {
                 ...state,
                 server: newServer,
-                serverFwStateName: newServerFwStateName,
+                serverMapSync: newServerMapSync,
                 draft: newDraft,
+                draftMapSync: newDraftMapSync,
                 draftIds: newDraftIds,
                 serverConfigs,
                 dirty: nextDirty,
@@ -147,6 +168,16 @@ export const aclDraftReducer = (
             };
         }
 
+        case 'SET_MAP_SYNC': {
+            const nextDirty = new Set(state.dirty);
+            nextDirty.add(action.configName);
+            return {
+                ...state,
+                draftMapSync: { ...state.draftMapSync, [action.configName]: action.mapSync },
+                dirty: nextDirty,
+            };
+        }
+
         case 'ADD_CONFIG': {
             if (
                 state.serverConfigs.includes(action.configName)
@@ -189,6 +220,7 @@ export const aclDraftReducer = (
 
         case 'DISCARD_CONFIG': {
             const serverRules = state.server[action.configName];
+            const serverMapSync = state.serverMapSync[action.configName];
             const pendingDeleteConfigs = new Set(state.pendingDeleteConfigs);
             pendingDeleteConfigs.delete(action.configName);
             const nextDirty = new Set(state.dirty);
@@ -196,10 +228,12 @@ export const aclDraftReducer = (
             if (serverRules === undefined) {
                 // Local-only config: discard means remove it entirely.
                 const { [action.configName]: _d, ...draftRest } = state.draft;
+                const { [action.configName]: _dm, ...draftMapSyncRest } = state.draftMapSync;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;
                 return {
                     ...state,
                     draft: draftRest,
+                    draftMapSync: draftMapSyncRest,
                     draftIds: draftIdsRest,
                     localOnlyConfigs: state.localOnlyConfigs.filter(n => n !== action.configName),
                     pendingDeleteConfigs,
@@ -209,6 +243,7 @@ export const aclDraftReducer = (
             return {
                 ...state,
                 draft: { ...state.draft, [action.configName]: serverRules },
+                draftMapSync: { ...state.draftMapSync, [action.configName]: serverMapSync },
                 draftIds: { ...state.draftIds, [action.configName]: serverIds(serverRules) },
                 pendingDeleteConfigs,
                 dirty: nextDirty,
@@ -217,6 +252,7 @@ export const aclDraftReducer = (
 
         case 'MARK_SAVED': {
             const savedRules = state.draft[action.configName];
+            const savedMapSync = state.draftMapSync[action.configName];
             const wasPendingDelete = state.pendingDeleteConfigs.has(action.configName);
             const pendingDeleteConfigs = new Set(state.pendingDeleteConfigs);
             pendingDeleteConfigs.delete(action.configName);
@@ -227,14 +263,16 @@ export const aclDraftReducer = (
                 // Config was pending deletion (or never had a draft entry) and is now
                 // gone from the server.
                 const { [action.configName]: _s, ...serverRest } = state.server;
-                const { [action.configName]: _f, ...fwStateNameRest } = state.serverFwStateName;
+                const { [action.configName]: _sm, ...serverMapSyncRest } = state.serverMapSync;
                 const { [action.configName]: _d, ...draftRest } = state.draft;
+                const { [action.configName]: _dm, ...draftMapSyncRest } = state.draftMapSync;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;
                 return {
                     ...state,
                     server: serverRest,
-                    serverFwStateName: fwStateNameRest,
+                    serverMapSync: serverMapSyncRest,
                     draft: draftRest,
+                    draftMapSync: draftMapSyncRest,
                     draftIds: draftIdsRest,
                     serverConfigs: state.serverConfigs.filter(n => n !== action.configName),
                     localOnlyConfigs: state.localOnlyConfigs.filter(n => n !== action.configName),
@@ -248,7 +286,7 @@ export const aclDraftReducer = (
             return {
                 ...state,
                 server: { ...state.server, [action.configName]: savedRules },
-                serverFwStateName: state.serverFwStateName,
+                serverMapSync: { ...state.serverMapSync, [action.configName]: savedMapSync },
                 serverConfigs: state.serverConfigs.includes(action.configName)
                     ? state.serverConfigs
                     : [...state.serverConfigs, action.configName],

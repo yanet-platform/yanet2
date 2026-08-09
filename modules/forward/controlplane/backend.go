@@ -48,7 +48,7 @@ func (m *backend) UpdateModule(name string, rules []cforward.ForwardRule) (Modul
 }
 
 func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(moduleType, name)
+	return m.agent.DeleteModule(moduleType, name)
 }
 
 func (m *backend) ModuleCounters(name string, counterNames []string) []CounterView {

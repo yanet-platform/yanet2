@@ -1,10 +1,32 @@
 import { createService, type CallOptions } from './client';
 
 // Types matching aclpb/acl.proto and filterpb/filter.proto exactly.
-// No Action.counter, no keep_state, no MapConfig, no SyncConfig, no DUMP kind.
+// No Action.counter, no keep_state, no DUMP kind.
 
 import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
+import type { IPAddressWire } from '../utils/netip';
 export type { IPNet, VlanRange, Device, ListConfigsResponse };
+
+// SyncConfig mirrors modules.fwstate.controlplane.fwstatepb.v1.SyncConfig.
+//
+// The proto deliberately duplicates the message (the C-level coupling through
+// lib/fwstate/config.h already exists), so the wire-format duplication is
+// mirrored here rather than imported cross-module. Field numbers and types
+// stay identical to the fwstate proto.
+export interface SyncConfig {
+    src_addr?: IPAddressWire;
+    dst_ether?: { addr: string };
+    dst_addr_multicast?: IPAddressWire;
+    port_multicast?: number;
+    dst_addr_unicast?: IPAddressWire;
+    port_unicast?: number;
+    tcp_syn_ack?: number;
+    tcp_syn?: number;
+    tcp_fin?: number;
+    tcp?: number;
+    udp?: number;
+    default?: number;
+}
 
 export interface PortRange {
     from?: number;
@@ -58,12 +80,21 @@ export interface ShowConfigRequest {
 export interface ShowConfigResponse {
     name?: string;
     rules?: Rule[];
-    fwstate_name?: string;
+    // Name of the standalone fwstate-map this ACL config references.
+    map_name?: string;
+    // Synchronization parameters for CREATE_STATE sync packets.
+    sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigRequest {
     name?: string;
     rules?: Rule[];
+    // References the standalone fwstate-map by name. Required when any rule
+    // uses ACTION_KIND_CREATE_STATE; allowed for CHECK_STATE-only rulesets
+    // that borrow the map to read state.
+    map_name?: string;
+    // Required iff any rule uses ACTION_KIND_CREATE_STATE; otherwise ignored.
+    sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigResponse {}

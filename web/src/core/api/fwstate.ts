@@ -2,11 +2,6 @@ import { createService, createStreamingService, type CallOptions, type StreamCal
 import type { MACAddress } from './neighbours';
 import type { IPAddressWire } from '../utils/netip';
 
-export interface MapConfig {
-    index_size?: number;
-    extra_bucket_count?: number;
-}
-
 export interface SyncConfig {
     src_addr?: IPAddressWire;
     dst_ether?: MACAddress;
@@ -24,18 +19,13 @@ export interface SyncConfig {
 
 export interface ShowConfigResponse {
     name?: string;
-    linked_acls?: string[];
-    map_config?: MapConfig;
     sync_config?: SyncConfig;
+    // Name of the standalone fwstate-map this config references.
+    map_name?: string;
 }
 
 import type { ListConfigsResponse } from './shared';
 export type { ListConfigsResponse };
-
-export interface LinkFWStateRequest {
-    fwstate_name?: string;
-    acl_config_names?: string[];
-}
 
 export interface MapStats {
     index_size?: number;
@@ -106,8 +96,11 @@ export interface ShowConfigRequest {
 
 export interface UpdateConfigRequest {
     name?: string;
-    map_config?: MapConfig;
     sync_config?: SyncConfig;
+    // References the standalone fwstate-map by name. Required: the server
+    // resolves the named map's v4/v6 offsets and attaches them to the sync
+    // config. This is the only way to supply the map pair.
+    map_name?: string;
 }
 
 export interface DeleteConfigRequest {
@@ -118,8 +111,40 @@ export interface GetStatsRequest {
     name?: string;
 }
 
+// FWStateMapService request/response types. The map service is a separate
+// gRPC service (FWStateMapService) managing standalone named fwstate-map
+// objects. GetMapStats reuses the same MapStats / GetStatsResponse shape as
+// FWStateService.GetStats since both are wire-identical.
+
+export interface CreateMapRequest {
+    name?: string;
+    index_size?: number;
+    extra_bucket_count?: number;
+    worker_count?: number;
+}
+
+export interface DeleteMapRequest {
+    name?: string;
+}
+
+export interface ListMapsResponse {
+    maps?: string[];
+}
+
+export interface GetMapStatsRequest {
+    name?: string;
+}
+
+export interface InsertLayerRequest {
+    name?: string;
+    index_size?: number;
+    extra_bucket_count?: number;
+    worker_count?: number;
+}
+
 const fwStateService = createService('modules.fwstate.controlplane.fwstatepb.v1.FWStateService');
 const fwStateStreamingService = createStreamingService('modules.fwstate.controlplane.fwstatepb.v1.FWStateService');
+const fwStateMapService = createService('modules.fwstate.controlplane.fwstatepb.v1.FWStateMapService');
 
 export const fwstate = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> =>
@@ -134,9 +159,6 @@ export const fwstate = {
     deleteConfig: (request: DeleteConfigRequest, options?: CallOptions): Promise<void> =>
         fwStateService.callWithBody<void>('DeleteConfig', request, options),
 
-    linkFWState: (request: LinkFWStateRequest, options?: CallOptions): Promise<void> =>
-        fwStateService.callWithBody<void>('LinkFWState', request, options),
-
     getStats: (request: GetStatsRequest, options?: CallOptions): Promise<GetStatsResponse> =>
         fwStateService.callWithBody<GetStatsResponse>('GetStats', request, options),
 
@@ -147,4 +169,19 @@ export const fwstate = {
     ): void => {
         fwStateStreamingService.stream<ListEntriesResponse>('ListEntries', request, callbacks, signal);
     },
+
+    createMap: (request: CreateMapRequest, options?: CallOptions): Promise<void> =>
+        fwStateMapService.callWithBody<void>('CreateMap', request, options),
+
+    deleteMap: (request: DeleteMapRequest, options?: CallOptions): Promise<void> =>
+        fwStateMapService.callWithBody<void>('DeleteMap', request, options),
+
+    listMaps: (options?: CallOptions): Promise<ListMapsResponse> =>
+        fwStateMapService.call<ListMapsResponse>('ListMaps', options),
+
+    getMapStats: (request: GetMapStatsRequest, options?: CallOptions): Promise<GetStatsResponse> =>
+        fwStateMapService.callWithBody<GetStatsResponse>('GetMapStats', request, options),
+
+    insertLayer: (request: InsertLayerRequest, options?: CallOptions): Promise<void> =>
+        fwStateMapService.callWithBody<void>('InsertLayer', request, options),
 };

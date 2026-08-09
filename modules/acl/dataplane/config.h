@@ -5,6 +5,7 @@
 #include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
 #include "lib/fwstate/config.h"
+#include "lib/fwstate/fwtable.h"
 
 #define ACTION_ALLOW 0
 #define ACTION_DENY 1
@@ -14,6 +15,9 @@
 #define ACTION_LOG 5
 
 #define ACL_MAX_ACTIONS 8
+
+// Sentinel for "no object link at this slot", mirroring fwstate's.
+#define ACL_OBJECT_LINK_NONE UINT64_MAX
 
 struct acl_target {
 	// FIXME: use dynamic allocation
@@ -34,7 +38,11 @@ struct acl_module_config {
 	uint64_t target_count;
 	struct acl_target *targets;
 
-	struct fwstate_config fwstate_cfg;
+	// Object link indices for the v4 and v6 fwtables, resolved at ectx
+	// build time into per-worker object_ectx entries.
+	uint64_t v4_object_link_idx;
+	uint64_t v6_object_link_idx;
+	struct fwstate_sync_config sync_config;
 
 	// Metrics
 	uint64_t compilation_time_ns;
@@ -56,12 +64,6 @@ struct acl_module_config {
 	uint64_t sync_sent_counter_id;
 
 	// Shared v6 half-address classification for the two v6 filters.
-	//
-	// Built only when both filter_ip6 and filter_ip6_port compiled
-	// non-empty, so a single union trie walk classifies the address
-	// halves for both of them. Left all-zero, including a NULL
-	// net6_share_src.remap_hi_a, when there is no shared classification
-	// to use.
 	struct net6_share_dir net6_share_src;
 	struct net6_share_dir net6_share_dst;
 };

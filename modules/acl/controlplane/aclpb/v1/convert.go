@@ -6,7 +6,73 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
+
+// ToC converts the proto SyncConfig to the [cfwstate.SyncConfig] value the
+// C API consumes.
+//
+// Field numbers and types mirror modules.fwstate's SyncConfig so the two
+// stay wire-compatible; the C-level coupling is via lib/fwstate/config.h.
+func (m *SyncConfig) ToC() cfwstate.SyncConfig {
+	if m == nil {
+		return cfwstate.SyncConfig{}
+	}
+	var cfg cfwstate.SyncConfig
+	copy(cfg.SrcAddr[:], m.GetSrcAddr().GetAddr())
+	if dstEther := m.GetDstEther(); dstEther != nil {
+		eui := dstEther.EUI48()
+		copy(cfg.DstEther[:], eui[:])
+	}
+	copy(cfg.DstAddrMulticast[:], m.GetDstAddrMulticast().GetAddr())
+	copy(cfg.DstAddrUnicast[:], m.GetDstAddrUnicast().GetAddr())
+	cfg.PortMulticast = uint16(m.GetPortMulticast())
+	cfg.PortUnicast = uint16(m.GetPortUnicast())
+	cfg.TcpSynAck = m.GetTcpSynAck()
+	cfg.TcpSyn = m.GetTcpSyn()
+	cfg.TcpFin = m.GetTcpFin()
+	cfg.Tcp = m.GetTcp()
+	cfg.Udp = m.GetUdp()
+	cfg.Default = m.GetDefault()
+	return cfg
+}
+
+// Validate reports whether the sync config is publishable, delegating to
+// the shared fwstatepb validation so ACL and FWState enforce identical
+// port, required-field, and timeout constraints.
+//
+// Runs against the proto field values before ToC truncates ports to
+// uint16, so out-of-range ports are rejected rather than silently wrapped.
+func (m *SyncConfig) Validate() error {
+	return m.toFWStateSyncConfig().Validate()
+}
+
+// toFWStateSyncConfig builds the equivalent fwstatepb SyncConfig.
+//
+// The two proto messages mirror each other field-for-field (identical
+// field numbers and types, coupled through lib/fwstate/config.h); this
+// copy preserves the uint32 port values before any C-level truncation so
+// the shared validation can reject out-of-range ports.
+func (m *SyncConfig) toFWStateSyncConfig() *fwstatepb.SyncConfig {
+	if m == nil {
+		return nil
+	}
+	return &fwstatepb.SyncConfig{
+		SrcAddr:          m.SrcAddr,
+		DstEther:         m.DstEther,
+		DstAddrMulticast: m.DstAddrMulticast,
+		PortMulticast:    m.PortMulticast,
+		DstAddrUnicast:   m.DstAddrUnicast,
+		PortUnicast:      m.PortUnicast,
+		TcpSynAck:        m.TcpSynAck,
+		TcpSyn:           m.TcpSyn,
+		TcpFin:           m.TcpFin,
+		Tcp:              m.Tcp,
+		Udp:              m.Udp,
+		Default:          m.Default,
+	}
+}
 
 // ToActions converts proto actions into backend cacl.AclAction values.
 //

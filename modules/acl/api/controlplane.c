@@ -9,8 +9,7 @@
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 #include "logging/log.h"
-#include "modules/fwstate/api/fwstate_cp.h"
-#include "modules/fwstate/dataplane/config.h"
+#include "modules/fwstate/objects/fwstate_map_object.h"
 
 #include "common/container_of.h"
 
@@ -107,8 +106,10 @@ acl_module_config_init(
 	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
 	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
 
-	// Initialize fwstate_cfg with NULL pointers
-	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
+	// Initialize object link indices and sync_config to zero
+	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
+	config->v6_object_link_idx = ACL_OBJECT_LINK_NONE;
+	memset(&config->sync_config, 0, sizeof(config->sync_config));
 
 	// Register module-level counters
 	struct {
@@ -185,8 +186,8 @@ acl_module_config_free(struct cp_module *cp_module) {
 
 	cp_module_fini(cp_module);
 
-	// Note: We don't destroy fwstate_cfg maps here because they're owned by
-	// the fwstate module. We only stored offsets to them.
+	// Note: We don't destroy fwtable maps here because they're owned by
+	// the fwstate-map objects.
 	memory_bfree(
 		&agent->memory_context,
 		cp_module,
@@ -623,6 +624,9 @@ acl_module_config_update(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t rule_count,
+	const char *fw4_name,
+	const char *fw6_name,
+	const struct fwstate_sync_config *sync_config,
 	yanet_error **err
 ) {
 	struct acl_module_config *config =
@@ -811,6 +815,37 @@ acl_module_config_update(
 				   1000000000LL +
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
 
+	// Link fwstate-map objects and copy sync configuration.
+	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
+	config->v6_object_link_idx = ACL_OBJECT_LINK_NONE;
+	if (sync_config != NULL) {
+		config->sync_config = *sync_config;
+	}
+
+	if (fw4_name != NULL && fw4_name[0] != '\0') {
+		if (cp_module_link_object(
+			    cp_module,
+			    FWSTATE_MAP_V4_OBJECT_TYPE,
+			    fw4_name,
+			    &config->v4_object_link_idx,
+			    err
+		    )) {
+			goto error_rule_ptrs;
+		}
+	}
+
+	if (fw6_name != NULL && fw6_name[0] != '\0') {
+		if (cp_module_link_object(
+			    cp_module,
+			    FWSTATE_MAP_V6_OBJECT_TYPE,
+			    fw6_name,
+			    &config->v6_object_link_idx,
+			    err
+		    )) {
+			goto error_rule_ptrs;
+		}
+	}
+
 	if (rule_count > 0) {
 		free(filter_rule_ptrs);
 	}
@@ -839,50 +874,6 @@ error_target:
 
 error:
 	return -1;
-}
-
-void
-acl_module_config_set_fwstate_config(
-	struct cp_module *cp_module, struct cp_module *fwstate_cp_module
-) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	struct fwstate_module_config *fwstate_config = container_of(
-		fwstate_cp_module, struct fwstate_module_config, cp_module
-	);
-
-	config->fwstate_cfg.sync_config = fwstate_config->cfg.sync_config;
-	EQUATE_OFFSET(
-		&config->fwstate_cfg.fw4state, &fwstate_config->cfg.fw4state
-	);
-	EQUATE_OFFSET(
-		&config->fwstate_cfg.fw6state, &fwstate_config->cfg.fw6state
-	);
-}
-
-void
-acl_module_config_transfer_fwstate_config(
-	struct cp_module *new_cp_module, struct cp_module *old_cp_module
-) {
-	struct acl_module_config *new_config = container_of(
-		new_cp_module, struct acl_module_config, cp_module
-	);
-
-	struct acl_module_config *old_config = container_of(
-		old_cp_module, struct acl_module_config, cp_module
-	);
-
-	new_config->fwstate_cfg.sync_config =
-		old_config->fwstate_cfg.sync_config;
-	EQUATE_OFFSET(
-		&new_config->fwstate_cfg.fw4state,
-		&old_config->fwstate_cfg.fw4state
-	);
-	EQUATE_OFFSET(
-		&new_config->fwstate_cfg.fw6state,
-		&old_config->fwstate_cfg.fw6state
-	);
 }
 
 void

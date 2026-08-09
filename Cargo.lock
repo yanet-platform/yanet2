@@ -3113,6 +3113,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "humantime",
  "log",
  "prost",
  "prost-types",

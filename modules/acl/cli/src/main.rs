@@ -1,3 +1,4 @@
+use core::net::Ipv6Addr;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
@@ -272,6 +273,21 @@ impl ACLConfig {
     }
 }
 
+/// Display view of an ACL config returned by the show command.
+///
+/// `fwtable_name_v4`, `fwtable_name_v6`, and `sync_config` are omitted when
+/// absent.
+#[derive(Debug, Serialize)]
+struct ShowConfig {
+    rules: Vec<aclpb::Rule>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fwtable_name_v4: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fwtable_name_v6: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sync_config: Option<aclpb::SyncConfig>,
+}
+
 /// ACL module CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -289,6 +305,17 @@ pub struct Cmd {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
+
+/// Parse IPv6 address string into an `IpAddress` proto message.
+fn parse_ipv6(s: &str) -> Result<commonpb::IpAddress, String> {
+    let addr = s.parse::<Ipv6Addr>().map_err(|err| err.to_string())?;
+    Ok(commonpb::IpAddress { addr: addr.octets().to_vec() })
+}
+
+/// Parse a MAC address string into a `MACAddress` proto message.
+fn parse_mac(s: &str) -> Result<commonpb::MacAddress, String> {
+    s.parse::<commonpb::MacAddress>().map_err(|err| err.to_string())
+}
 
 pub struct ACLService {
     service: Service<AclServiceClient<LayeredChannel>>,
@@ -358,10 +385,23 @@ impl ACLService {
         output::data(
             || &response,
             || {
-                let config = ACLConfig { rules: response.rules.clone() };
+                let display = ShowConfig {
+                    rules: response.rules.clone(),
+                    fwtable_name_v4: if response.fwtable_name_v4.is_empty() {
+                        None
+                    } else {
+                        Some(response.fwtable_name_v4.clone())
+                    },
+                    fwtable_name_v6: if response.fwtable_name_v6.is_empty() {
+                        None
+                    } else {
+                        Some(response.fwtable_name_v6.clone())
+                    },
+                    sync_config: response.sync_config.clone(),
+                };
                 print!(
                     "{}",
-                    serde_yaml::to_string(&config).expect("ACL config YAML serialization must not fail")
+                    serde_yaml::to_string(&display).expect("ACL config YAML serialization must not fail")
                 );
 
                 if response.rules.is_empty() {
@@ -398,9 +438,64 @@ impl ACLService {
             )
         })?;
         let rule_count = config.rules.len();
+
+        // CREATE_STATE populates a borrowed state map and therefore needs a
+        // v4 and v6 fwstate-map plus a SyncConfig. Any other ruleset
+        // (including CHECK_STATE, which only reads state) forwards whatever
+        // the caller provided without error: a stateful ruleset may reference
+        // a map it does not populate.
+        let needs_create_state = config.rules.iter().any(|rule| {
+            rule.actions
+                .iter()
+                .any(|action| action.kind == aclpb::ActionKind::CreateState as i32)
+        });
+        let map_name_v4 = cmd.map_name_v4.clone().filter(|name| !name.is_empty());
+        let map_name_v6 = cmd.map_name_v6.clone().filter(|name| !name.is_empty());
+        let has_sync = cmd.has_sync_flags();
+
+        let (fwtable_name_v4, fwtable_name_v6, sync_config) = if needs_create_state {
+            let fwtable_name_v4 = map_name_v4.ok_or_else(|| {
+                self.service.invalid(
+                    "update",
+                    "--map-name-v4 is required when the ruleset uses ACTION_KIND_CREATE_STATE",
+                )
+            })?;
+            let fwtable_name_v6 = map_name_v6.ok_or_else(|| {
+                self.service.invalid(
+                    "update",
+                    "--map-name-v6 is required when the ruleset uses ACTION_KIND_CREATE_STATE",
+                )
+            })?;
+            if !has_sync {
+                return Err(self.service.invalid(
+                    "update",
+                    "the sync flags are required when the ruleset uses ACTION_KIND_CREATE_STATE",
+                ));
+            }
+            let sync = self
+                .build_sync_config(&cmd)
+                .map_err(|err| self.service.invalid("update", err))?;
+            (fwtable_name_v4, fwtable_name_v6, Some(sync))
+        } else {
+            let fwtable_name_v4 = map_name_v4.unwrap_or_default();
+            let fwtable_name_v6 = map_name_v6.unwrap_or_default();
+            let sync_config = if has_sync {
+                Some(
+                    self.build_sync_config(&cmd)
+                        .map_err(|err| self.service.invalid("update", err))?,
+                )
+            } else {
+                None
+            };
+            (fwtable_name_v4, fwtable_name_v6, sync_config)
+        };
+
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
+            fwtable_name_v4,
+            fwtable_name_v6,
+            sync_config,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self
@@ -418,6 +513,52 @@ impl ACLService {
         );
 
         Ok(())
+    }
+
+    /// Build a SyncConfig from the synchronization flags of an update command.
+    ///
+    /// Returns the underlying parse error so the caller can attach the service
+    /// error context; this also keeps the `Err` variant smaller than `Ok`.
+    fn build_sync_config(&self, cmd: &UpdateCmd) -> Result<aclpb::SyncConfig, String> {
+        // Only provided fields are set; unset fields keep proto defaults.
+        let mut sync = aclpb::SyncConfig::default();
+        if let Some(ref src_addr) = cmd.src_addr {
+            sync.src_addr = Some(parse_ipv6(src_addr)?);
+        }
+        if let Some(ref dst_ether) = cmd.dst_ether {
+            sync.dst_ether = Some(parse_mac(dst_ether)?);
+        }
+        if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
+            sync.dst_addr_multicast = Some(parse_ipv6(dst_addr_multicast)?);
+        }
+        if let Some(port_multicast) = cmd.port_multicast {
+            sync.port_multicast = port_multicast;
+        }
+        if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
+            sync.dst_addr_unicast = Some(parse_ipv6(dst_addr_unicast)?);
+        }
+        if let Some(port_unicast) = cmd.port_unicast {
+            sync.port_unicast = port_unicast;
+        }
+        if let Some(tcp_syn_ack) = cmd.tcp_syn_ack {
+            sync.tcp_syn_ack = tcp_syn_ack.as_nanos() as u64;
+        }
+        if let Some(tcp_syn) = cmd.tcp_syn {
+            sync.tcp_syn = tcp_syn.as_nanos() as u64;
+        }
+        if let Some(tcp_fin) = cmd.tcp_fin {
+            sync.tcp_fin = tcp_fin.as_nanos() as u64;
+        }
+        if let Some(tcp) = cmd.tcp {
+            sync.tcp = tcp.as_nanos() as u64;
+        }
+        if let Some(udp) = cmd.udp {
+            sync.udp = udp.as_nanos() as u64;
+        }
+        if let Some(default) = cmd.default {
+            sync.default = default.as_nanos() as u64;
+        }
+        Ok(sync)
     }
 
     pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {

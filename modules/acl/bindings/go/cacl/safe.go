@@ -10,7 +10,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 // Action kind constants mirror the C ACL_RULE_ACTION_KIND_* enum values.
@@ -60,9 +60,18 @@ type AclConfigInfo struct {
 	FilterRuleCountVlan    uint64
 }
 
-// UpdateRules compiles the given rules into C structures and pushes them into
-// shared memory.
-func (m *ModuleConfig) UpdateRules(rules []AclRule) error {
+// Update compiles the given rules into C structures, links the named
+// fwstate-map objects, attaches the optional sync configuration, and pushes
+// the config into shared memory.
+//
+// Pass empty fw4Name/fw6Name when the ruleset references no state tables.
+// Pass nil syncConfig for a CHECK_STATE-only ruleset (reads state but emits
+// no sync packets).
+func (m *ModuleConfig) Update(
+	rules []AclRule,
+	fw4Name, fw6Name string,
+	syncConfig *cfwstate.SyncConfig,
+) error {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
@@ -76,11 +85,32 @@ func (m *ModuleConfig) UpdateRules(rules []AclRule) error {
 		cRulesPtr = &cRules[0]
 	}
 
+	var fw4CStr *C.char
+	if fw4Name != "" {
+		fw4CStr = C.CString(fw4Name)
+		defer C.free(unsafe.Pointer(fw4CStr))
+	}
+
+	var fw6CStr *C.char
+	if fw6Name != "" {
+		fw6CStr = C.CString(fw6Name)
+		defer C.free(unsafe.Pointer(fw6CStr))
+	}
+
+	var cSyncPtr unsafe.Pointer
+	if syncConfig != nil {
+		cSyncPtr = cfwstate.NewCSyncConfig(*syncConfig)
+		defer cfwstate.FreeCSyncConfig(cSyncPtr)
+	}
+
 	var cErr *C.yanet_error
 	rc := C.acl_module_config_update(
 		m.asRawPtr(),
 		cRulesPtr,
 		C.uint32_t(len(cRules)),
+		fw4CStr,
+		fw6CStr,
+		(*C.struct_fwstate_sync_config)(cSyncPtr),
 		&cErr,
 	)
 	if rc != 0 {
@@ -88,16 +118,6 @@ func (m *ModuleConfig) UpdateRules(rules []AclRule) error {
 	}
 
 	return nil
-}
-
-// SetFwStateConfig links the given fwstate module config to this ACL config.
-func (m *ModuleConfig) SetFwStateConfig(fw ffi.ModuleConfig) {
-	C.acl_module_config_set_fwstate_config(m.asRawPtr(), (*C.struct_cp_module)(fw.AsRawPtr()))
-}
-
-// TransferFwStateConfig copies the fwstate pointer from old into this config.
-func (m *ModuleConfig) TransferFwStateConfig(old ffi.ModuleConfig) {
-	C.acl_module_config_transfer_fwstate_config(m.asRawPtr(), (*C.struct_cp_module)(old.AsRawPtr()))
 }
 
 // GetInfo returns compiled configuration metadata for this ACL module.

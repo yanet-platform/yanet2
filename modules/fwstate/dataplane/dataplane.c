@@ -9,8 +9,7 @@
 
 #include "common/memory_address.h"
 #include "dataplane/module/module.h"
-#include "fwstate/fwmap_typed.h"
-#include "fwstate/layermap.h"
+#include "fwstate/fwtable.h"
 #include "fwstate/types.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
@@ -18,6 +17,7 @@
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
 #include "logging/log.h"
+#include "modules/fwstate/objects/fwstate_map_object.h"
 
 #include "config.h"
 
@@ -176,7 +176,7 @@ fwstate_build_value(
 // Process IPv4 state sync frame
 static void
 fwstate_process_sync_v4(
-	fwmap4_t fw4state,
+	fwtable_t *fw4table,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
@@ -199,8 +199,8 @@ fwstate_process_sync_v4(
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
-	int64_t result = fwmap4_put(
-		fw4state, worker_idx, now, state.ttl, &key, &state.value, &lock
+	int64_t result = fwtable_insert(
+		fw4table, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
 	if (result < 0) {
@@ -219,7 +219,7 @@ fwstate_process_sync_v4(
 // Process IPv6 state sync frame
 static void
 fwstate_process_sync_v6(
-	fwmap6_t fw6state,
+	fwtable_t *fw6table,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
@@ -242,8 +242,8 @@ fwstate_process_sync_v6(
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
-	int64_t result = fwmap6_put(
-		fw6state, worker_idx, now, state.ttl, &key, &state.value, &lock
+	int64_t result = fwtable_insert(
+		fw6table, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
 	if (result < 0) {
@@ -271,9 +271,30 @@ fwstate_handle_packets(
 		cp_module
 	);
 
-	struct fwstate_config *fwstate_config = &fwstate_module->cfg;
-	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
-	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
+	struct fwstate_sync_config *sync_config = &fwstate_module->sync_config;
+
+	fwtable_t *fw4table = NULL;
+	fwtable_t *fw6table = NULL;
+	if (fwstate_module->v4_object_link_idx != FWSTATE_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, fwstate_module->v4_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			fw4table = fwstate_map_object_table(cp_obj);
+		}
+	}
+	if (fwstate_module->v6_object_link_idx != FWSTATE_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, fwstate_module->v6_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			fw6table = fwstate_map_object_table(cp_obj);
+		}
+	}
 
 	uint64_t now = dp_worker->current_time;
 
@@ -315,9 +336,7 @@ fwstate_handle_packets(
 		// FIXME: accumulate multiple internal sync frames into one
 		// packet before pushing to packet_front->output
 
-		if (!is_fw_state_sync_packet(
-			    packet, &fwstate_config->sync_config
-		    )) {
+		if (!is_fw_state_sync_packet(packet, sync_config)) {
 			// Not a sync packet, pass through
 			passthrough_cnt[0] += 1;
 			passthrough_cnt[1] += packet_to_mbuf(packet)->pkt_len;
@@ -373,24 +392,24 @@ fwstate_handle_packets(
 
 			if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
 				fwstate_process_sync_v4(
-					fwmap4_from_raw(fw4state),
+					fw4table,
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts,
+					&sync_config->timeouts,
 					sync_v4_inserted_cnt,
 					sync_v4_insert_failed_cnt
 				);
 			} else if (sync_frame->addr_type ==
 				   FW_STATE_ADDR_TYPE_IP6) {
 				fwstate_process_sync_v6(
-					fwmap6_from_raw(fw6state),
+					fw6table,
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts,
+					&sync_config->timeouts,
 					sync_v6_inserted_cnt,
 					sync_v6_insert_failed_cnt
 				);
@@ -406,9 +425,7 @@ fwstate_handle_packets(
 			packet_front_drop(packet_front, packet);
 		} else {
 			rte_memcpy(
-				ipv6_hdr->src_addr,
-				fwstate_config->sync_config.src_addr,
-				16
+				ipv6_hdr->src_addr, sync_config->src_addr, 16
 			);
 			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 				mbuf, struct rte_udp_hdr *, udp_offset

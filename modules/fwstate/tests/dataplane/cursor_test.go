@@ -42,14 +42,14 @@ func ipToUint32(s string) uint32 {
 func TestCursorForwardRead(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_fwd", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
 	// Insert 5 IPv4 entries with distinct ports.
 	for i := range 5 {
-		err := insertFw4Entry(cpModule,
+		err := insertFw4Entry(module.MapObjectV4(),
 			protoTCP, uint16(1000+i), 80,
 			ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
 			flagACK, flagACK,
@@ -58,7 +58,7 @@ func TestCursorForwardRead(t *testing.T) {
 		require.NoError(t, err, "insert entry %d", i)
 	}
 
-	results, newIdx, err := readCursorForward(cpModule,
+	results, newIdx, err := readCursorForward(module.MapObjectV4(),
 		false, 0, 0, true, now, 10,
 	)
 	require.NoError(t, err)
@@ -77,13 +77,13 @@ func TestCursorForwardRead(t *testing.T) {
 func TestCursorBackwardRead(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_bwd", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
 	for i := range 5 {
-		err := insertFw4Entry(cpModule,
+		err := insertFw4Entry(module.MapObjectV4(),
 			protoTCP, uint16(2000+i), 443,
 			ipToUint32("10.0.0.1"), ipToUint32("192.168.0.2"),
 			flagACK, flagACK,
@@ -92,7 +92,7 @@ func TestCursorBackwardRead(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	results, newIdx, err := readCursorBackward(cpModule,
+	results, newIdx, err := readCursorBackward(module.MapObjectV4(),
 		false, 0, math.MaxUint32, true, now, 10,
 	)
 	require.NoError(t, err)
@@ -111,13 +111,13 @@ func TestCursorBackwardRead(t *testing.T) {
 func TestCursorExpiredFiltering(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_exp", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
 	// Insert TCP entry (120s TTL).
-	err := insertFw4Entry(cpModule,
+	err := insertFw4Entry(module.MapObjectV4(),
 		protoTCP, 3000, 80,
 		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
 		flagACK, flagACK,
@@ -126,7 +126,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	require.NoError(t, err)
 
 	// Insert UDP entry (30s TTL).
-	err = insertFw4Entry(cpModule,
+	err = insertFw4Entry(module.MapObjectV4(),
 		protoUDP, 3001, 53,
 		ipToUint32("10.0.0.2"), ipToUint32("192.168.0.1"),
 		0, 0,
@@ -135,7 +135,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	require.NoError(t, err)
 
 	// Insert TCP entry (120s TTL).
-	err = insertFw4Entry(cpModule,
+	err = insertFw4Entry(module.MapObjectV4(),
 		protoTCP, 3002, 443,
 		ipToUint32("10.0.0.3"), ipToUint32("192.168.0.1"),
 		flagACK, flagACK,
@@ -147,7 +147,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	readNow := now + uint64(31e9)
 
 	// With include_expired=false, should skip the UDP entry.
-	results, _, err := readCursorForward(cpModule,
+	results, _, err := readCursorForward(module.MapObjectV4(),
 		false, 0, 0, false, readNow, 10,
 	)
 	require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	}
 
 	// With include_expired=true, should return all 3.
-	results, _, err = readCursorForward(cpModule,
+	results, _, err = readCursorForward(module.MapObjectV4(),
 		false, 0, 0, true, readNow, 10,
 	)
 	require.NoError(t, err)
@@ -167,15 +167,15 @@ func TestCursorExpiredFiltering(t *testing.T) {
 func TestCursorKeyDataCorrectness(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_key", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
 	srcAddr := ipToUint32("172.16.5.10")
 	dstAddr := ipToUint32("10.20.30.40")
 
-	err := insertFw4Entry(cpModule,
+	err := insertFw4Entry(module.MapObjectV4(),
 		protoTCP, 12345, 8080,
 		srcAddr, dstAddr,
 		flagSYN, 0,
@@ -183,7 +183,7 @@ func TestCursorKeyDataCorrectness(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	results, _, err := readCursorForward(cpModule,
+	results, _, err := readCursorForward(module.MapObjectV4(),
 		false, 0, 0, true, now, 1,
 	)
 	require.NoError(t, err)
@@ -200,12 +200,12 @@ func TestCursorKeyDataCorrectness(t *testing.T) {
 func TestCursorValueDataCorrectness(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_val", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
-	err := insertFw4Entry(cpModule,
+	err := insertFw4Entry(module.MapObjectV4(),
 		protoTCP, 9000, 80,
 		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
 		flagACK, flagACK,
@@ -213,7 +213,7 @@ func TestCursorValueDataCorrectness(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	results, _, err := readCursorForward(cpModule,
+	results, _, err := readCursorForward(module.MapObjectV4(),
 		false, 0, 0, true, now, 1,
 	)
 	require.NoError(t, err)
@@ -228,13 +228,13 @@ func TestCursorValueDataCorrectness(t *testing.T) {
 func TestCursorInvalidLayer(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_inv", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
 	// layer_index=99 should fail.
-	_, _, err := readCursorForward(cpModule,
+	_, _, err := readCursorForward(module.MapObjectV4(),
 		false, 99, 0, true, now, 10,
 	)
 	require.Error(t, err)
@@ -243,14 +243,14 @@ func TestCursorInvalidLayer(t *testing.T) {
 func TestCursorPaging(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_page", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	now := uint64(GetCurrentTime())
 
 	// Insert 10 entries.
 	for i := range 10 {
-		err := insertFw4Entry(cpModule,
+		err := insertFw4Entry(module.MapObjectV4(),
 			protoTCP, uint16(6000+i), 80,
 			ipToUint32("10.0.0.1")+uint32(i), ipToUint32("192.168.0.1"),
 			flagACK, flagACK,
@@ -264,7 +264,7 @@ func TestCursorPaging(t *testing.T) {
 
 	var idx int64
 	for {
-		results, newIdx, err := readCursorForward(cpModule,
+		results, newIdx, err := readCursorForward(module.MapObjectV4(),
 			false, 0, idx, true, now, 3,
 		)
 		require.NoError(t, err)

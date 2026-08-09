@@ -517,7 +517,15 @@ func testACLMbufLeak(t *testing.T, fw *framework.TestFramework) {
 
 	fw.Run("Configure", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_mbufleak --rules /mnt/yanet2/tests/functional/testdata/acl-mbuf-leak.yaml",
+			framework.CLIFWState + " map create --kind v4 --name acl_mbufleak-map-v4 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
+			framework.CLIFWState + " map create --kind v6 --name acl_mbufleak-map-v6 --index-size 1024 --extra-bucket-count 64 --worker-count 1",
+			framework.CLIACL + " update --name acl_mbufleak" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl-mbuf-leak.yaml" +
+				" --map-name-v4 acl_mbufleak-map-v4 --map-name-v6 acl_mbufleak-map-v6" +
+				" --src-addr 2001:db8::100 --dst-ether 33:33:00:00:00:01" +
+				" --dst-addr-multicast ff02::1 --port-multicast 9999" +
+				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
+				" --udp 30s --default 16s",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_mbufleak,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}

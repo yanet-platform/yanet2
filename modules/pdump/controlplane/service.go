@@ -252,7 +252,7 @@ func (m *PdumpService) DeleteConfig(
 
 	// Delete the module config from the data plane if it exists.
 	if config.FFIModule != nil {
-		if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
+		if err := m.agent.DeleteModule(moduleType, name); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 		}
 		config.Free()

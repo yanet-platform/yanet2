@@ -5,13 +5,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "config.h"
-
 #define FW_STATE_ADDR_TYPE_IP4 4
 #define FW_STATE_ADDR_TYPE_IP6 6
 
 #define FW_STATE_SYNC_THRESHOLD (uint64_t)8e9 // nanoseconds
 #define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
+
+// Max TTL (ns) storable in fw_state_value::last_ttl.
+#define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
+
+struct fwstate_timeouts {
+	uint64_t tcp_syn_ack; // default
+	uint64_t tcp_syn;     // default
+	uint64_t tcp_fin;     // default
+	uint64_t tcp;	      // default (120)
+	uint64_t udp;	      // 30
+	uint64_t default_;    // 16
+};
 
 /**
  * Common header shared by all fw_state key types.

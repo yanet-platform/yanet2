@@ -11,13 +11,17 @@
 #include <rte_ip.h>
 #include <rte_udp.h>
 
+#include "common/container_of.h"
+#include "controlplane/agent/agent.h"
 #include "counters/counters.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
+#include "lib/fwstate/fwtable.h"
 #include "lib/fwstate/types.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/dataplane/dataplane.h"
+#include "modules/fwstate/objects/fwstate_map_object.h"
 
 #include "lib/fuzzing/fuzzing.h"
 
@@ -26,6 +30,52 @@ extern void
 set_tsc_freq(void);
 
 static struct fuzzing_params fuzz_params = {0};
+
+// Minimal agent used to drive fwstate_map_object_config_new.
+//
+// The fuzz target never publishes modules to a real agent, but the
+// fwstate-map API allocates through agent->memory_context. We use a
+// static agent whose memory_context shares fuzz_params' block
+// allocator, mirroring how production wires a named fwstate-map owner.
+static struct agent fuzz_agent;
+
+// Initialize a fwmap_config_t for the fuzz target, selecting v4 or v6
+// key sizes and callbacks based on the kind.
+static void
+fwstate_init_config_for_fuzz(
+	fwmap_config_t *config,
+	enum fwtable_kind kind,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+) {
+	if (index_size == 0) {
+		index_size = 1024 * 1024;
+	}
+	if (extra_bucket_count == 0) {
+		extra_bucket_count = 1024;
+	}
+
+	if (kind == FWTABLE_KIND_V6) {
+		config->key_size = sizeof(struct fw6_state_key);
+		config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW6;
+		config->copy_key_fn_id = FWMAP_COPY_KEY_FW6;
+	} else {
+		config->key_size = sizeof(struct fw4_state_key);
+		config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
+		config->copy_key_fn_id = FWMAP_COPY_KEY_FW4;
+	}
+
+	config->value_size = sizeof(struct fw_state_value);
+	config->update_value_fn_id = FWMAP_UPDATE_VALUE_FWSTATE;
+	config->promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE;
+	config->hash_seed = 0;
+	config->hash_fn_id = FWMAP_HASH_FNV1A;
+	config->worker_count = worker_count;
+	config->index_size = index_size;
+	config->extra_bucket_count = extra_bucket_count;
+	config->rand_fn_id = FWMAP_RAND_DEFAULT;
+}
 
 static int
 fwstate_test_config(struct cp_module **cp_module) {
@@ -118,63 +168,68 @@ fwstate_test_config(struct cp_module **cp_module) {
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 
-	// Create fw4state and fw6state maps
-	fwmap_config_t fw4config = {
-		.key_size = sizeof(struct fw4_state_key),
-		.value_size = sizeof(struct fw_state_value),
-		.hash_seed = 0,
-		.worker_count = 1,
-		.hash_fn_id = FWMAP_HASH_FNV1A,
-		.key_equal_fn_id = FWMAP_KEY_EQUAL_FW4,
-		.rand_fn_id = FWMAP_RAND_DEFAULT,
-		.copy_key_fn_id = FWMAP_COPY_KEY_FW4,
-		.update_value_fn_id = FWMAP_UPDATE_VALUE_FWSTATE,
-		.promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE,
-		.index_size = 1024,
-		.extra_bucket_count = 64,
-	};
-	fwmap_t *fw4state =
-		fwmap_new(&fw4config, &config->cp_module.memory_context);
-	if (!fw4state) {
-		return -ENOMEM;
-	}
-	SET_OFFSET_OF(&config->cfg.fw4state, fw4state);
+	// Allocate persistent fwstate-map objects, one v4 and one v6.
+	// The fuzz target bypasses cp_object_init (which needs a real
+	// dp_config to resolve the object type) and directly allocates the
+	// fwtable — the fuzzer only exercises the dataplane hot path.
+	memset(&fuzz_agent, 0, sizeof(fuzz_agent));
+	memory_context_init_from(
+		&fuzz_agent.memory_context, &fuzz_params.mctx, "fuzz-agent"
+	);
 
-	fwmap_config_t fw6config = {
-		.key_size = sizeof(struct fw6_state_key),
-		.value_size = sizeof(struct fw_state_value),
-		.hash_seed = 0,
-		.worker_count = 1,
-		.hash_fn_id = FWMAP_HASH_FNV1A,
-		.key_equal_fn_id = FWMAP_KEY_EQUAL_FW6,
-		.rand_fn_id = FWMAP_RAND_DEFAULT,
-		.copy_key_fn_id = FWMAP_COPY_KEY_FW6,
-		.update_value_fn_id = FWMAP_UPDATE_VALUE_FWSTATE,
-		.promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE,
-		.index_size = 1024,
-		.extra_bucket_count = 64,
-	};
-	fwmap_t *fw6state =
-		fwmap_new(&fw6config, &config->cp_module.memory_context);
-	if (!fw6state) {
+	static struct fwstate_map_object v4_map_obj;
+	static struct fwstate_map_object v6_map_obj;
+	struct fwstate_map_object *v4_map = &v4_map_obj;
+	struct fwstate_map_object *v6_map = &v6_map_obj;
+	memset(v4_map, 0, sizeof(*v4_map));
+	memset(v6_map, 0, sizeof(*v6_map));
+
+	fwmap_config_t fw4_cfg;
+	fwstate_init_config_for_fuzz(&fw4_cfg, FWTABLE_KIND_V4, 1024, 64, 1);
+	if (fwtable_insert_layer_cp(
+		    &v4_map->table, &fw4_cfg, &fuzz_agent.memory_context
+	    )) {
 		return -ENOMEM;
 	}
-	SET_OFFSET_OF(&config->cfg.fw6state, fw6state);
+
+	fwmap_config_t fw6_cfg;
+	fwstate_init_config_for_fuzz(&fw6_cfg, FWTABLE_KIND_V6, 1024, 64, 1);
+	if (fwtable_insert_layer_cp(
+		    &v6_map->table, &fw6_cfg, &fuzz_agent.memory_context
+	    )) {
+		return -ENOMEM;
+	}
+
+	// Wire the object links into the module ectx so the handler can
+	// resolve the fwtables via object_link_get_address.
+	config->v4_object_link_idx = 0;
+	config->v6_object_link_idx = 1;
+
+	static struct object_ectx v4_oectx;
+	static struct object_ectx v6_oectx;
+	static struct module_object_link_ectx links[2];
+
+	SET_OFFSET_OF(&v4_oectx.cp_object, &v4_map->cp_object);
+	SET_OFFSET_OF(&v6_oectx.cp_object, &v6_map->cp_object);
+	SET_OFFSET_OF(&links[0].object_ectx, &v4_oectx);
+	SET_OFFSET_OF(&links[1].object_ectx, &v6_oectx);
+	fuzz_params.module_ectx.object_link_count = 2;
+	SET_OFFSET_OF(&fuzz_params.module_ectx.object_links, &links[0]);
 
 	// Configure sync settings
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};
-	memcpy(config->cfg.sync_config.dst_addr_multicast, multicast_addr, 16);
-	config->cfg.sync_config.port_multicast = rte_cpu_to_be_16(9999);
+	memcpy(config->sync_config.dst_addr_multicast, multicast_addr, 16);
+	config->sync_config.port_multicast = rte_cpu_to_be_16(9999);
 
-	// Set imeouts
-	config->cfg.sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
-	config->cfg.sync_config.timeouts.tcp_syn = 120000000000ULL;
-	config->cfg.sync_config.timeouts.tcp_fin = 120000000000ULL;
-	config->cfg.sync_config.timeouts.tcp = 120000000000ULL;
-	config->cfg.sync_config.timeouts.udp = 30000000000ULL;
-	config->cfg.sync_config.timeouts.default_ = 16000000000ULL;
+	// Set timeouts
+	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
+	config->sync_config.timeouts.tcp_syn = 120000000000ULL;
+	config->sync_config.timeouts.tcp_fin = 120000000000ULL;
+	config->sync_config.timeouts.tcp = 120000000000ULL;
+	config->sync_config.timeouts.udp = 30000000000ULL;
+	config->sync_config.timeouts.default_ = 16000000000ULL;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;

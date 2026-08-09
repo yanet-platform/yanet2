@@ -14,3 +14,4 @@ export * from './yaml';
 export * from './ranges';
 export * from './interpolation';
 export * from './keyboard';
+export * from './fwstateSync';

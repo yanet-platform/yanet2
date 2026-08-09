@@ -9,15 +9,24 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
+	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
+
+// noopMapConsumer is a minimal MapConsumer that reports no consumers.
+type noopMapConsumer struct{}
+
+func (noopMapConsumer) ConfigsUsingMap(string) []string { return nil }
 
 // Memory sizes for the fwstate functional harness.
 const (
@@ -45,6 +54,7 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 		Devices:       []string{"port0"},
 		Modules:       []string{"fwstate", "forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)
@@ -58,16 +68,30 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 	return h, agent
 }
 
-// configureFWState creates and publishes a fwstate module config with sync
-// enabled for syncMulticastAddr:syncPort, one worker, 1024-entry maps.
+// configureFWState creates and publishes two named fwstate-map objects (one
+// v4, one v6) plus a fwstate module config that references them by name,
+// with sync enabled for syncMulticastAddr:syncPort, one worker, 1024-entry
+// tables.
 func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 	t.Helper()
+
+	mapCfgV4, err := cfwstate.NewMapObjectConfig(agent, name+"-map-v4", cfwstate.KindV4)
+	require.NoError(t, err)
+	t.Cleanup(mapCfgV4.Free)
+	require.NoError(t, mapCfgV4.CreateMap(1024, 64, 1))
+	require.NoError(t, agent.UpdateObjects([]ffi.ObjectConfig{mapCfgV4.AsFFIObject()}))
+
+	mapCfgV6, err := cfwstate.NewMapObjectConfig(agent, name+"-map-v6", cfwstate.KindV6)
+	require.NoError(t, err)
+	t.Cleanup(mapCfgV6.Free)
+	require.NoError(t, mapCfgV6.CreateMap(1024, 64, 1))
+	require.NoError(t, agent.UpdateObjects([]ffi.ObjectConfig{mapCfgV6.AsFFIObject()}))
 
 	modCfg, err := cfwstate.NewModuleConfig(agent, name)
 	require.NoError(t, err)
 	t.Cleanup(modCfg.Free)
 
-	modCfg.SetSyncConfig(cfwstate.SyncConfig{
+	require.NoError(t, cfwstate.SetModuleConfig(modCfg.AsFFIModule(), name+"-map-v4", name+"-map-v6", cfwstate.SyncConfig{
 		DstAddrMulticast: [16]byte{
 			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
 		},
@@ -78,12 +102,7 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 		Tcp:           uint64(120e9),
 		Udp:           uint64(30e9),
 		Default:       uint64(16e9),
-	})
-
-	require.NoError(t, modCfg.CreateMaps(cfwstate.MapConfig{
-		IndexSize:        1024,
-		ExtraBucketCount: 64,
-	}, 1))
+	}))
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
 }
@@ -308,4 +327,64 @@ func TestFWStateSyncPacketOOBGuard(t *testing.T) {
 		require.Len(t, rawResult.Output, 1, "multi-segment internal sync must be passed through post-fix")
 		require.Empty(t, rawResult.Drop, "multi-segment internal sync must not be dropped post-fix")
 	})
+}
+
+// validSyncConfigPB returns a SyncConfig that passes validateSyncConfig.
+func validSyncConfigPB() *fwstatepb.SyncConfig {
+	nonZero16 := []byte{
+		0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+	}
+	return &fwstatepb.SyncConfig{
+		SrcAddr:          &commonpb.IPAddress{Addr: nonZero16},
+		DstEther:         commonpb.NewMACAddressEUI48([6]byte{0x33, 0x33, 0, 0, 0, 1}),
+		DstAddrMulticast: &commonpb.IPAddress{Addr: nonZero16},
+		PortMulticast:    syncPort,
+	}
+}
+
+// TestShowConfigReturnsFwtableNames verifies that ShowConfig reports the
+// fwtable names of the standalone fwstate-maps the sync config references.
+func TestShowConfigReturnsFwtableNames(t *testing.T) {
+	_, agent := setupFWStateHarness(t)
+
+	mapService := fwstate.NewFWStateMapService(agent, noopMapConsumer{}, fwstate.WithMapLog(zap.NewNop()))
+	fwstateService := fwstate.NewFWStateService(
+		agent,
+		mapService,
+		fwstate.WithLog(zap.NewNop()),
+	)
+	mapService.SetSyncConsumer(fwstateService)
+
+	_, err := mapService.CreateMap(t.Context(), &fwstatepb.CreateMapRequest{
+		Name:             "m1-v4",
+		Kind:             fwstatepb.Kind_V4,
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+		WorkerCount:      1,
+	})
+	require.NoError(t, err)
+
+	_, err = mapService.CreateMap(t.Context(), &fwstatepb.CreateMapRequest{
+		Name:             "m1-v6",
+		Kind:             fwstatepb.Kind_V6,
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+		WorkerCount:      1,
+	})
+	require.NoError(t, err)
+
+	_, err = fwstateService.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name:          "cfg1",
+		FwtableNameV4: "m1-v4",
+		FwtableNameV6: "m1-v6",
+		SyncConfig:    validSyncConfigPB(),
+	})
+	require.NoError(t, err)
+
+	resp, err := fwstateService.ShowConfig(t.Context(), &fwstatepb.ShowConfigRequest{Name: "cfg1"})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "m1-v4", resp.GetFwtableNameV4())
+	require.Equal(t, "m1-v6", resp.GetFwtableNameV6())
+	require.Equal(t, "cfg1", resp.GetName())
 }

@@ -48,6 +48,7 @@ type ACLModule struct {
 	aclService            *ACLService
 	metricsService        *MetricsService
 	fwstateService        *fwstate.FWStateService
+	fwstateMapService     *fwstate.FWStateMapService
 	fwstateMetricsService *fwstate.MetricsService
 	log                   *zap.Logger
 }
@@ -86,13 +87,20 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 
 	metricsService := NewMetricsService(aclService)
 
-	aclAdapter := NewACLAdapter(aclService)
+	aclMapConsumer := NewACLMapConsumer(aclService)
+	fwstateMapService := fwstate.NewFWStateMapService(
+		agent,
+		aclMapConsumer,
+		fwstate.WithMapLog(log),
+		fwstate.WithMapMetrics(fwstate.NewMapMetricsFactory()),
+	)
 	fwstateService := fwstate.NewFWStateService(
 		agent,
-		aclAdapter,
+		fwstateMapService,
 		fwstate.WithLog(log),
 		fwstate.WithMetrics(fwstate.NewMetricsFactory()),
 	)
+	fwstateMapService.SetSyncConsumer(fwstateService)
 	fwstateMetricsService := fwstate.NewMetricsService(fwstateService)
 
 	return &ACLModule{
@@ -102,6 +110,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 		aclService:            aclService,
 		metricsService:        metricsService,
 		fwstateService:        fwstateService,
+		fwstateMapService:     fwstateMapService,
 		fwstateMetricsService: fwstateMetricsService,
 		log:                   log,
 	}, nil
@@ -120,6 +129,7 @@ func (m *ACLModule) ServicesNames() []string {
 		serviceName,
 		aclpb.MetricsService_ServiceDesc.ServiceName,
 		fwstate.FWStateServiceName,
+		fwstate.FWStateMapServiceName,
 		fwstate.FWStateMetricsServiceName,
 	}
 }
@@ -128,6 +138,7 @@ func (m *ACLModule) RegisterService(server *grpc.Server) {
 	aclpb.RegisterACLServiceServer(server, m.aclService)
 	aclpb.RegisterMetricsServiceServer(server, m.metricsService)
 	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
+	fwstatepb.RegisterFWStateMapServiceServer(server, m.fwstateMapService)
 	fwstatepb.RegisterMetricsServiceServer(server, m.fwstateMetricsService)
 }
 
@@ -140,12 +151,10 @@ func (m *ACLModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 	if si := m.fwstateService.UnaryServerInterceptor(); si != nil {
 		interceptors = append(interceptors, si)
 	}
+	if si := m.fwstateMapService.UnaryServerInterceptor(); si != nil {
+		interceptors = append(interceptors, si)
+	}
 	return interceptors
-}
-
-// ACLAdapter returns an adapter for fwstate module integration.
-func (m *ACLModule) ACLAdapter() *ACLAdapter {
-	return NewACLAdapter(m.aclService)
 }
 
 func (m *ACLModule) Close() error {

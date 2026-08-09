@@ -134,9 +134,9 @@ func TestFWStateInternalPacket(t *testing.T) {
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
+	result := xerror.Unwrap(module.HandlePackets(pkt))
 
 	// Internal packets should be in output
 	require.NotEmpty(t, result.Output, "Internal packet should be forwarded")
@@ -150,9 +150,9 @@ func TestFWStateExternalPacket(t *testing.T) {
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
+	result := xerror.Unwrap(module.HandlePackets(pkt))
 
 	// External packets should be dropped
 	require.Empty(t, result.Output, "External packet should not be forwarded")
@@ -187,9 +187,9 @@ func TestFWStateNonSyncPacket(t *testing.T) {
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
+	result := xerror.Unwrap(module.HandlePackets(pkt))
 
 	// Non-sync packets should pass through
 	require.NotEmpty(t, result.Output, "Non-sync packet should pass through")
@@ -204,16 +204,16 @@ func TestFWStateStateCreation(t *testing.T) {
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
+	result := xerror.Unwrap(module.HandlePackets(pkt))
 
 	// Verify packet was processed
 	require.NotEmpty(t, result.Output, "Internal packet should be forwarded")
 
 	// Check that state was created
 	// For IPv6: src=2001:db8::1, dst=2001:db8::2, proto=TCP, src_port=12345, dst_port=9999
-	stateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	stateExists := CheckStateExists(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateExists, "State should exist after processing sync packet")
 }
 
@@ -221,23 +221,23 @@ func TestFWStateStateCreation(t *testing.T) {
 func TestFWStateLayerInsertionOldStateVisible(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_layer_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	// Create initial state in the first layer
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	result1 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	result1 := xerror.Unwrap(module.HandlePackets(pkt1))
 	require.NotEmpty(t, result1.Output, "First packet should be forwarded")
 
 	// Verify initial state exists
-	stateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	stateExists := CheckStateExists(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateExists, "Initial state should exist")
 
 	// Insert new layer
-	InsertNewLayer(cpModule)
+	module.InsertNewLayer()
 
 	// Old state should still be visible through the new layer
-	stateStillExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	stateStillExists := CheckStateExists(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateStillExists, "Old state should be visible after layer insertion")
 }
 
@@ -245,28 +245,28 @@ func TestFWStateLayerInsertionOldStateVisible(t *testing.T) {
 func TestFWStateLayerInsertionNewStateOverridesOld(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_layer_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	// Create initial state with specific deadline
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	result1 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	result1 := xerror.Unwrap(module.HandlePackets(pkt1))
 	require.NotEmpty(t, result1.Output, "First packet should be forwarded")
 
 	// Get initial deadline
-	oldDeadline := GetStateDeadline(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	oldDeadline := GetStateDeadline(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.Greater(t, oldDeadline, uint64(0), "Initial state should have deadline")
 
 	// Insert new layer
-	InsertNewLayer(cpModule)
+	module.InsertNewLayer()
 
 	// Add same state to new layer (should override old one)
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	result2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
+	result2 := xerror.Unwrap(module.HandlePackets(pkt2))
 	require.NotEmpty(t, result2.Output, "Second packet should be forwarded")
 
 	// New deadline should be different (newer)
-	newDeadline := GetStateDeadline(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	newDeadline := GetStateDeadline(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.Greater(t, newDeadline, oldDeadline, "New state should have newer deadline")
 }
 
@@ -274,42 +274,42 @@ func TestFWStateLayerInsertionNewStateOverridesOld(t *testing.T) {
 func TestFWStateTrimStaleLayers(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_trim_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	// Create state in first layer with short TTL
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	result1 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	result1 := xerror.Unwrap(module.HandlePackets(pkt1))
 	require.NotEmpty(t, result1.Output)
 
 	// Insert new layer
-	InsertNewLayer(cpModule)
+	module.InsertNewLayer()
 
 	// Add different state to new layer
 	pkt2 := createSyncPacket(t, layers.IPProtocolUDP, WithPorts(54321, 8888), WithAddrs("2001:db8::3", "2001:db8::4"))
-	result2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
+	result2 := xerror.Unwrap(module.HandlePackets(pkt2))
 	require.NotEmpty(t, result2.Output)
 
 	// Check layer count before trim
-	_, layerCountBefore := GetLayerCount(cpModule)
+	layerCountBefore := GetLayerCount(module.MapObjectV6())
 	require.Equal(t, uint32(2), layerCountBefore, "Should have 2 layers before trim")
 
 	// Simulate time passing (beyond TTL of old layer)
 	futureTime := GetCurrentTime() + 200e9 // 200 seconds in the future
 
 	// Trim stale layers
-	require.NoError(t, TrimStaleLayers(cpModule, futureTime))
+	module.TrimStaleLayers(futureTime)
 
 	// Check layer count after trim
-	_, layerCountAfter := GetLayerCount(cpModule)
+	layerCountAfter := GetLayerCount(module.MapObjectV6())
 	require.Equal(t, uint32(1), layerCountAfter, "Should have 1 layer after trim")
 
 	// New state should still exist
-	newStateExists := CheckStateExists(cpModule, layers.IPProtocolUDP, 54321, 8888, "2001:db8::3", "2001:db8::4")
+	newStateExists := CheckStateExists(module.MapObjectV6(), layers.IPProtocolUDP, 54321, 8888, "2001:db8::3", "2001:db8::4")
 	require.True(t, newStateExists, "New state should still exist after trim")
 
 	// Old state should not exist (layer was trimmed)
-	oldStateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	oldStateExists := CheckStateExists(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.False(t, oldStateExists, "Old state should not exist after trim")
 }
 
@@ -331,25 +331,25 @@ func TestFWStateTrimStaleLayers(t *testing.T) {
 func TestFWStateUpdateAccumulatesFlags(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_acc_flags_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	const synBit = 0x02 // FWSTATE_SYN, src nibble
 	const ackBit = 0x08 // FWSTATE_ACK, src nibble
 
 	pktSyn := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(synBit))
-	_, err := fwstateHandlePackets(cpModule, storage, pktSyn)
+	_, err := module.HandlePackets(pktSyn)
 	require.NoError(t, err)
 
-	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	snap1 := GetStateValue(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap1.Found, "state must exist after first sync")
 	require.Equal(t, uint8(synBit), snap1.FlagsRaw, "after first sync only SYN must be set")
 
 	pktAck := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit))
-	_, err = fwstateHandlePackets(cpModule, storage, pktAck)
+	_, err = module.HandlePackets(pktAck)
 	require.NoError(t, err)
 
-	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	snap2 := GetStateValue(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found, "state must still exist after second sync")
 	require.Equalf(t, uint8(synBit|ackBit), snap2.FlagsRaw,
 		"flags must accumulate via OR across updates in the same layer (got 0x%02x, want 0x%02x)",
@@ -367,24 +367,24 @@ func TestFWStateUpdateAccumulatesFlags(t *testing.T) {
 func TestFWStateUpdateAccumulatesPacketCounters(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_acc_counters_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	const forwardCount = 3
 	const backwardCount = 2
 
 	for range forwardCount {
 		pkt := createSyncPacket(t, layers.IPProtocolTCP, WithFib(0))
-		_, err := fwstateHandlePackets(cpModule, storage, pkt)
+		_, err := module.HandlePackets(pkt)
 		require.NoError(t, err)
 	}
 	for range backwardCount {
 		pkt := createSyncPacket(t, layers.IPProtocolTCP, WithFib(1))
-		_, err := fwstateHandlePackets(cpModule, storage, pkt)
+		_, err := module.HandlePackets(pkt)
 		require.NoError(t, err)
 	}
 
-	snap := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	snap := GetStateValue(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap.Found, "state must exist after sync frames")
 
 	require.Equalf(t, uint64(forwardCount), snap.PacketsForward,
@@ -402,14 +402,14 @@ func TestFWStateUpdateAccumulatesPacketCounters(t *testing.T) {
 func TestFWStateUpdatePreservesCreatedAt(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_created_at_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
-	_, err := fwstateHandlePackets(cpModule, storage, pkt1)
+	_, err := module.HandlePackets(pkt1)
 	require.NoError(t, err)
 
-	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	snap1 := GetStateValue(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap1.Found)
 	createdAt := snap1.CreatedAt
 	require.Greater(t, createdAt, uint64(0))
@@ -419,10 +419,10 @@ func TestFWStateUpdatePreservesCreatedAt(t *testing.T) {
 	// which is monotonic — but we rely on observable difference only for
 	// updated_at, not for the test assertion itself.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	_, err = fwstateHandlePackets(cpModule, storage, pkt2)
+	_, err = module.HandlePackets(pkt2)
 	require.NoError(t, err)
 
-	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	snap2 := GetStateValue(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
 
 	require.Equal(t, createdAt, snap2.CreatedAt,
@@ -437,26 +437,26 @@ func TestFWStateUpdatePreservesCreatedAt(t *testing.T) {
 func TestFWStateMergeFromStaleLayer(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_merge_stale_test", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule, storage := fwstateModuleConfig(memCtx)
-	defer fwstateCounterStorageFree(storage)
+	module := fwstateModuleConfig(memCtx)
+	defer module.Free()
 
 	const synBit = 0x02
 	const ackBit = 0x08
 
 	// Populate stale layer with SYN + 1 forward packet.
 	pkt1 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(synBit), WithFib(0))
-	_, err := fwstateHandlePackets(cpModule, storage, pkt1)
+	_, err := module.HandlePackets(pkt1)
 	require.NoError(t, err)
 
 	// Push that layer down, allocate a new active layer.
-	InsertNewLayer(cpModule)
+	module.InsertNewLayer()
 
 	// Insert into the fresh active layer with ACK + 1 backward packet.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit), WithFib(1))
-	_, err = fwstateHandlePackets(cpModule, storage, pkt2)
+	_, err = module.HandlePackets(pkt2)
 	require.NoError(t, err)
 
-	snap := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	snap := GetStateValue(module.MapObjectV6(), layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap.Found, "merged state must be visible from active layer")
 	require.Equalf(t, uint8(synBit|ackBit), snap.FlagsRaw,
 		"flags must be merged across layers (got 0x%02x, want 0x%02x)",

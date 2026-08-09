@@ -19,6 +19,40 @@ typedef struct fwstate_cursor_entry {
 	bool expired;
 } fwstate_cursor_entry_t;
 
+/// Walk `layer_index` hops down the `head` chain.
+///
+/// Returns `head` when layer_index is 0. Returns NULL if head is NULL or the
+/// chain is shorter than layer_index.
+static inline fwmap_t *
+fwstate_resolve_map(fwmap_t *head, uint32_t layer_index) {
+	for (uint32_t idx = 0; idx < layer_index; idx++) {
+		if (head == NULL) {
+			return NULL;
+		}
+		head = (fwmap_t *)ADDR_OF(&head->next);
+	}
+	return head;
+}
+
+/// Initialize a cursor for iteration over `map`.
+///
+/// Sets `key_pos` from `index` and stores `include_expired`. Returns 0 on
+/// success, -1 if `map` is NULL.
+static inline int
+fwstate_cursor_init(
+	fwmap_t *map,
+	fwstate_cursor_t *cursor,
+	int64_t index,
+	bool include_expired
+) {
+	if (map == NULL) {
+		return -1;
+	}
+	cursor->key_pos = index;
+	cursor->include_expired = include_expired;
+	return 0;
+}
+
 static inline int
 fwstate_cursor_read_entry(
 	fwmap_t *map,

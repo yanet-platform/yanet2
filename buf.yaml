@@ -26,3 +26,5 @@ breaking:
     - PACKAGE
   ignore:
     - modules/balancer2
+    - modules/fwstate
+    - modules/acl

@@ -16,7 +16,9 @@
 #include "fwstate/lookup.h"
 #include "fwstate/sync.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "logging/log.h"
+#include "modules/fwstate/objects/fwstate_map_object.h"
 
 #include <filter/query.h>
 
@@ -154,10 +156,30 @@ acl_handle_packets(
 	const bool net6_share =
 		net6_share_dir_is_built(&acl_config->net6_share_src);
 
-	struct fwstate_config *fwstate_config = &acl_config->fwstate_cfg;
-	struct fwstate_sync_config *sync_config = &fwstate_config->sync_config;
-	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
-	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
+	fwtable_t *fw4table = NULL;
+	fwtable_t *fw6table = NULL;
+	if (acl_config->v4_object_link_idx != ACL_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, acl_config->v4_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			fw4table = fwstate_map_object_table(cp_obj);
+		}
+	}
+	if (acl_config->v6_object_link_idx != ACL_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, acl_config->v6_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			fw6table = fwstate_map_object_table(cp_obj);
+		}
+	}
+	struct fwstate_sync_config *sync_config = &acl_config->sync_config;
+	fwtable_t *state_table = NULL;
 
 	struct counter_storage *counter_storage =
 		ADDR_OF_NONNULL(&module_ectx->counter_storage);
@@ -444,6 +466,8 @@ acl_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+			state_table = fw4table;
+
 			if (ip4_result[ip4_idx] < action) {
 				action = ip4_result[ip4_idx];
 			}
@@ -460,6 +484,8 @@ acl_handle_packets(
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+			state_table = fw6table;
+
 			if (ip6_result[ip6_idx] < action) {
 				action = ip6_result[ip6_idx];
 			}
@@ -514,8 +540,7 @@ acl_handle_packets(
 				}
 				case ACTION_CHECK_STATE: {
 					if (fwstate_check_state(
-						    fw4state,
-						    fw6state,
+						    state_table,
 						    packet,
 						    now,
 						    &push_sync_packet

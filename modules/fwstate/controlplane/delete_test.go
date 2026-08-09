@@ -7,11 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
-	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
 const (
@@ -20,29 +19,6 @@ const (
 	deleteTestAgentMem = 16 * datasize.MB
 	fwstateModuleType  = "fwstate"
 )
-
-type deleteTestACLProvider struct {
-	aclConfig ffi.ModuleConfig
-}
-
-func (m deleteTestACLProvider) LinkedConfigNames(string) []string {
-	return nil
-}
-
-func (m deleteTestACLProvider) RelinkConfigs(
-	_ *fwstate.FwStateConfig,
-	publish func([]ffi.ModuleConfig) error,
-) error {
-	return publish([]ffi.ModuleConfig{m.aclConfig})
-}
-
-func (m deleteTestACLProvider) LinkConfigs(
-	_ []string,
-	_ *fwstate.FwStateConfig,
-	publish func([]ffi.ModuleConfig) error,
-) error {
-	return publish([]ffi.ModuleConfig{m.aclConfig})
-}
 
 func newDeleteTestHarness(
 	testingTB testing.TB,
@@ -91,7 +67,8 @@ func newACLDeleteTestConfig(
 	config, err := cacl.NewModuleConfig(agent, name)
 	require.NoError(testingTB, err)
 	testingTB.Cleanup(config.Free)
-	require.NoError(testingTB, config.UpdateRules(nil))
+	require.NoError(testingTB, config.Update(nil, "", "", nil))
+	require.NoError(testingTB, agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
 
 	return config
 }
@@ -100,18 +77,15 @@ func TestFWStateDeleteKeepsSameNamedACLConfig(t *testing.T) {
 	const configName = "shared-name"
 
 	_, agent := newDeleteTestHarness(t, []string{"acl", "fwstate"}, "acl")
-	aclConfig := newACLDeleteTestConfig(t, agent, configName)
+	newACLDeleteTestConfig(t, agent, configName)
 
-	service := fwstate.NewFWStateService(agent, deleteTestACLProvider{
-		aclConfig: aclConfig.AsFFIModule(),
-	})
-	_, err := service.UpdateConfig(t.Context(), validDeleteTestUpdateRequest(configName))
+	fwConfig, err := fwstate.NewFWStateModuleConfig(agent, configName)
 	require.NoError(t, err)
+	t.Cleanup(fwConfig.Free)
+	require.NoError(t, cfwstate.SetModuleConfig(fwConfig.AsFFIModule(), "", "", cfwstate.SyncConfig{}))
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwConfig.AsFFIModule()}))
 
-	_, err = service.DeleteConfig(t.Context(), &fwstatepb.DeleteConfigRequest{
-		Name: configName,
-	})
-	require.NoError(t, err)
+	require.NoError(t, agent.DeleteModule(fwstateModuleType, configName))
 
 	configs := agent.DPConfig().CPConfigs()
 	require.True(t, hasCPConfig(configs, "acl", configName))
@@ -125,28 +99,9 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 	config, err := fwstate.NewFWStateModuleConfig(agent, configName)
 	require.NoError(t, err)
 	t.Cleanup(config.Free)
-	require.NoError(t, config.CreateMaps(&fwstatepb.MapConfig{
-		IndexSize:        1024,
-		ExtraBucketCount: 64,
-	}, 1))
+	require.NoError(t, cfwstate.SetModuleConfig(config.AsFFIModule(), "", "", cfwstate.SyncConfig{}))
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
 
-	require.NoError(t, agent.DeleteModuleConfig(fwstateModuleType, configName))
+	require.NoError(t, agent.DeleteModule(fwstateModuleType, configName))
 	require.False(t, hasCPConfig(agent.DPConfig().CPConfigs(), fwstateModuleType, configName))
-}
-
-func validDeleteTestUpdateRequest(name string) *fwstatepb.UpdateConfigRequest {
-	return &fwstatepb.UpdateConfigRequest{
-		Name: name,
-		SyncConfig: &fwstatepb.SyncConfig{
-			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			DstEther:         commonpb.NewMACAddressEUI48([6]byte{1, 2, 3, 4, 5, 6}),
-			DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			PortMulticast:    9999,
-		},
-		MapConfig: &fwstatepb.MapConfig{
-			IndexSize:        1024,
-			ExtraBucketCount: 64,
-		},
-	}
 }
