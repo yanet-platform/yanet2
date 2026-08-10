@@ -115,6 +115,18 @@ func TestEmitCounterMetricsKnownCounters(t *testing.T) {
 			packets:     2,
 			wantNames:   []string{"fwstate_sync_v6_insert_failed_entries"},
 		},
+		{
+			name:        "fwstate_sync_v4_suppressed one-dimensional entries",
+			counterName: "fwstate_sync_v4_suppressed",
+			packets:     8,
+			wantNames:   []string{"fwstate_sync_v4_suppressed_entries"},
+		},
+		{
+			name:        "fwstate_sync_v6_suppressed one-dimensional entries",
+			counterName: "fwstate_sync_v6_suppressed",
+			packets:     9,
+			wantNames:   []string{"fwstate_sync_v6_suppressed_entries"},
+		},
 	}
 
 	for _, tc := range cases {

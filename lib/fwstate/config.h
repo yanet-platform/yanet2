@@ -44,6 +44,14 @@ struct fwstate_sync_config {
 	uint16_t port_unicast;
 
 	struct fwstate_timeouts timeouts;
+
+	// Sync suppression window in nanoseconds. A sync frame for an already
+	// alive entry whose new expiry deadline lands within this window of the
+	// entry's current deadline is discarded (the fwmap record is left
+	// untouched), debouncing refreshes for frequently touched sessions.
+	// Every entry TTL is inflated by this value so the effective keep-alive
+	// never falls below the configured timeout. Zero disables suppression.
+	uint64_t sync_suppress_timeout;
 };
 
 struct fwstate_config {

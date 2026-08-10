@@ -52,6 +52,7 @@ var fwstateStructuralCounters = []string{
 	"fwstate_sync", "fwstate_passthrough",
 	"fwstate_sync_v4_inserted", "fwstate_sync_v6_inserted",
 	"fwstate_sync_v4_insert_failed", "fwstate_sync_v6_insert_failed",
+	"fwstate_sync_v4_suppressed", "fwstate_sync_v6_suppressed",
 	"fwstate_external_dropped", "fwstate_internal_forwarded",
 	"rx", "tx", "drop", "pending_input", "pending_output",
 }
@@ -225,6 +226,14 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 	case "fwstate_sync_v6_insert_failed":
 		return []*commonpb.Metric{
 			commonpb.NewMetricCounter("fwstate_sync_v6_insert_failed_entries", packets, baseLabels...),
+		}
+	case "fwstate_sync_v4_suppressed":
+		return []*commonpb.Metric{
+			commonpb.NewMetricCounter("fwstate_sync_v4_suppressed_entries", packets, baseLabels...),
+		}
+	case "fwstate_sync_v6_suppressed":
+		return []*commonpb.Metric{
+			commonpb.NewMetricCounter("fwstate_sync_v6_suppressed_entries", packets, baseLabels...),
 		}
 	case "fwstate_external_dropped":
 		return []*commonpb.Metric{

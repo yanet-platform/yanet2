@@ -45,6 +45,7 @@ func (m *SyncConfig) ToC() cfwstate.SyncConfig {
 	cfg.Tcp = m.GetTcp()
 	cfg.Udp = m.GetUdp()
 	cfg.Default = m.GetDefault()
+	cfg.SyncSuppressTimeout = m.GetSyncSuppressTimeout()
 	return cfg
 }
 
@@ -92,24 +93,31 @@ func (m *SyncConfig) ToCWithDefaults(current cfwstate.SyncConfig) cfwstate.SyncC
 	if cfg.Default == 0 {
 		cfg.Default = current.Default
 	}
+	// sync_suppress_timeout is optional: a request that omits it (nil, e.g.
+	// from a client unaware of the field) inherits the current window, while
+	// an explicit value — including zero, the documented disable — overrides.
+	if m.SyncSuppressTimeout == nil {
+		cfg.SyncSuppressTimeout = current.SyncSuppressTimeout
+	}
 
 	return cfg
 }
 
 func FromCSyncConfig(cfg cfwstate.SyncConfig) *SyncConfig {
 	return &SyncConfig{
-		SrcAddr:          &commonpb.IPAddress{Addr: append([]byte(nil), cfg.SrcAddr[:]...)},
-		DstEther:         commonpb.NewMACAddressEUI48(cfg.DstEther),
-		DstAddrMulticast: &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrMulticast[:]...)},
-		PortMulticast:    uint32(cfg.PortMulticast),
-		DstAddrUnicast:   &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrUnicast[:]...)},
-		PortUnicast:      uint32(cfg.PortUnicast),
-		TcpSynAck:        cfg.TcpSynAck,
-		TcpSyn:           cfg.TcpSyn,
-		TcpFin:           cfg.TcpFin,
-		Tcp:              cfg.Tcp,
-		Udp:              cfg.Udp,
-		Default:          cfg.Default,
+		SrcAddr:             &commonpb.IPAddress{Addr: append([]byte(nil), cfg.SrcAddr[:]...)},
+		DstEther:            commonpb.NewMACAddressEUI48(cfg.DstEther),
+		DstAddrMulticast:    &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrMulticast[:]...)},
+		PortMulticast:       uint32(cfg.PortMulticast),
+		DstAddrUnicast:      &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrUnicast[:]...)},
+		PortUnicast:         uint32(cfg.PortUnicast),
+		TcpSynAck:           cfg.TcpSynAck,
+		TcpSyn:              cfg.TcpSyn,
+		TcpFin:              cfg.TcpFin,
+		Tcp:                 cfg.Tcp,
+		Udp:                 cfg.Udp,
+		Default:             cfg.Default,
+		SyncSuppressTimeout: &cfg.SyncSuppressTimeout,
 	}
 }
 

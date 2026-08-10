@@ -139,12 +139,16 @@ is_fw_state_sync_packet(
 // Build fw_state_value from sync frame
 // Uses fib field to determine direction: 0 = forward (INGRESS), 1 = backward
 // (EGRESS)
+//
+// The entry TTL is inflated by sync_suppress_timeout so that a refresh skipped
+// by suppression still leaves at least the configured timeout of remaining
+// life. See fwstate_should_suppress_sync for the matching debounce check.
 static inline struct fwstate
 fwstate_build_value(
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts_config
+	const struct fwstate_sync_config *sync_config
 ) {
 	struct fwstate state = {
 		.value.external = is_external,
@@ -166,24 +170,60 @@ fwstate_build_value(
 	}
 
 	state.ttl = fwstate_entry_ttl(
-		sync_frame->proto, state.value.flags.raw, timeouts_config
-	);
+			    sync_frame->proto,
+			    state.value.flags.raw,
+			    &sync_config->timeouts
+		    ) +
+		    sync_config->sync_suppress_timeout;
 	fwstate_value_set_last_ttl(&state.value, state.ttl);
 
 	return state;
 }
 
-// Process IPv4 state sync frame
-static void
+// Decide whether an incoming sync frame should be suppressed.
+//
+// Returns true when the existing entry is still alive and the new frame only
+// marginally extends its expiry deadline — within sync_suppress_timeout of the
+// current one — i.e. the refresh carries no useful lifetime change.
+//
+// A frame whose new deadline does not extend the current one (a shorter TTL,
+// e.g. a FIN/RST tearing down an established entry) is never suppressed, so the
+// state transition is applied. Likewise a frame that extends the deadline past
+// the window (e.g. SYN progressing to established) is applied. Zero suppress
+// disables the feature and this helper returns false.
+static inline bool
+fwstate_should_suppress_sync(
+	uint64_t current_deadline,
+	uint64_t now,
+	uint64_t new_ttl,
+	uint64_t suppress_timeout
+) {
+	if (suppress_timeout == 0) {
+		return false;
+	}
+	uint64_t new_expiry = now + new_ttl;
+	if (new_expiry < current_deadline) {
+		return false;
+	}
+	return (new_expiry - current_deadline) < suppress_timeout;
+}
+
+// Process IPv4 state sync frame.
+//
+// Returns true when the frame was applied (or a put was attempted), false when
+// it was suppressed by the suppression window. Callers use the return value to
+// decide whether a fully-suppressed internal packet should still be forwarded.
+static bool
 fwstate_process_sync_v4(
 	fwmap4_t fw4state,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts,
+	const struct fwstate_sync_config *sync_config,
 	uint64_t *inserted_cnt,
-	uint64_t *insert_failed_cnt
+	uint64_t *insert_failed_cnt,
+	uint64_t *suppressed_cnt
 ) {
 	struct fw4_state_key key = {
 		.hdr.proto = sync_frame->proto,
@@ -195,7 +235,53 @@ fwstate_process_sync_v4(
 
 	// Build proper value structure
 	struct fwstate state =
-		fwstate_build_value(sync_frame, is_external, now, timeouts);
+		fwstate_build_value(sync_frame, is_external, now, sync_config);
+
+	// Sync suppression: probe the live entry without taking a write lock.
+	// The read lock is released before the put, so the probe is a hint and
+	// a benign TOCTOU window remains (at worst a redundant refresh or a
+	// missed suppression, neither of which is a correctness invariant).
+	if (sync_config->sync_suppress_timeout > 0) {
+		struct fw_state_value *existing = NULL;
+		rwlock_t *get_lock = NULL;
+		uint64_t current_deadline = 0;
+		bool from_stale = false;
+		int64_t found = fwmap4_get_value_and_deadline(
+			fw4state,
+			now,
+			&key,
+			&existing,
+			&get_lock,
+			&current_deadline,
+			&from_stale
+		);
+		// Snapshot the stored flags while the read lock is still held:
+		// reading existing->flags after the unlock would race a
+		// concurrent put rewriting the value. Stale-layer hits carry no
+		// lock and are never suppressible, so their flags are not read.
+		uint8_t existing_flags = 0;
+		if (found >= 0 && !from_stale && existing != NULL) {
+			existing_flags = existing->flags.raw;
+		}
+		if (get_lock != NULL) {
+			rwlock_read_unlock(get_lock);
+		}
+		// Never suppress when the entry lives in a stale layer (it must
+		// be promoted), nor when the frame carries flag bits the entry
+		// has not yet seen — a handshake/teardown transition must
+		// always reach the merge path even at an unchanged deadline.
+		if (found >= 0 && !from_stale &&
+		    (state.value.flags.raw & ~existing_flags) == 0 &&
+		    fwstate_should_suppress_sync(
+			    current_deadline,
+			    now,
+			    state.ttl,
+			    sync_config->sync_suppress_timeout
+		    )) {
+			suppressed_cnt[0] += 1;
+			return false;
+		}
+	}
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
@@ -214,19 +300,21 @@ fwstate_process_sync_v4(
 	if (lock) {
 		rwlock_write_unlock(lock);
 	}
+	return true;
 }
 
-// Process IPv6 state sync frame
-static void
+// Process IPv6 state sync frame. See fwstate_process_sync_v4 for semantics.
+static bool
 fwstate_process_sync_v6(
 	fwmap6_t fw6state,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts,
+	const struct fwstate_sync_config *sync_config,
 	uint64_t *inserted_cnt,
-	uint64_t *insert_failed_cnt
+	uint64_t *insert_failed_cnt,
+	uint64_t *suppressed_cnt
 ) {
 	struct fw6_state_key key = {
 		.hdr.proto = sync_frame->proto,
@@ -238,7 +326,49 @@ fwstate_process_sync_v6(
 
 	// Build proper value structure
 	struct fwstate state =
-		fwstate_build_value(sync_frame, is_external, now, timeouts);
+		fwstate_build_value(sync_frame, is_external, now, sync_config);
+
+	if (sync_config->sync_suppress_timeout > 0) {
+		struct fw_state_value *existing = NULL;
+		rwlock_t *get_lock = NULL;
+		uint64_t current_deadline = 0;
+		bool from_stale = false;
+		int64_t found = fwmap6_get_value_and_deadline(
+			fw6state,
+			now,
+			&key,
+			&existing,
+			&get_lock,
+			&current_deadline,
+			&from_stale
+		);
+		// Snapshot the stored flags while the read lock is still held:
+		// reading existing->flags after the unlock would race a
+		// concurrent put rewriting the value. Stale-layer hits carry no
+		// lock and are never suppressible, so their flags are not read.
+		uint8_t existing_flags = 0;
+		if (found >= 0 && !from_stale && existing != NULL) {
+			existing_flags = existing->flags.raw;
+		}
+		if (get_lock != NULL) {
+			rwlock_read_unlock(get_lock);
+		}
+		// Never suppress when the entry lives in a stale layer (it must
+		// be promoted), nor when the frame carries flag bits the entry
+		// has not yet seen — a handshake/teardown transition must
+		// always reach the merge path even at an unchanged deadline.
+		if (found >= 0 && !from_stale &&
+		    (state.value.flags.raw & ~existing_flags) == 0 &&
+		    fwstate_should_suppress_sync(
+			    current_deadline,
+			    now,
+			    state.ttl,
+			    sync_config->sync_suppress_timeout
+		    )) {
+			suppressed_cnt[0] += 1;
+			return false;
+		}
+	}
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
@@ -257,6 +387,7 @@ fwstate_process_sync_v6(
 	if (lock) {
 		rwlock_write_unlock(lock);
 	}
+	return true;
 }
 
 void
@@ -302,6 +433,12 @@ fwstate_handle_packets(
 	uint64_t *sync_v6_insert_failed_cnt = counter_get_address(
 		fwstate_module->sync_v6_insert_failed_counter_id,
 		counter_storage
+	);
+	uint64_t *sync_v4_suppressed_cnt = counter_get_address(
+		fwstate_module->sync_v4_suppressed_counter_id, counter_storage
+	);
+	uint64_t *sync_v6_suppressed_cnt = counter_get_address(
+		fwstate_module->sync_v6_suppressed_counter_id, counter_storage
 	);
 	uint64_t *external_dropped_cnt = counter_get_address(
 		fwstate_module->external_dropped_counter_id, counter_storage
@@ -359,6 +496,12 @@ fwstate_handle_packets(
 		size_t frame_count =
 			udp_payload_len / sizeof(struct fw_state_sync_frame);
 
+		// Whether any frame in this packet was actually applied (not
+		// suppressed). A fully-suppressed internal packet carries no
+		// new state for peers either, so it is dropped instead of
+		// forwarded to spare downstream and inter-firewall bandwidth.
+		bool any_applied = false;
+
 		// Process each sync frame in the packet
 		for (size_t idx = 0; idx < frame_count; ++idx) {
 			struct fw_state_sync_frame *sync_frame =
@@ -371,40 +514,45 @@ fwstate_handle_packets(
 						      )
 				);
 
+			bool applied = true;
 			if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
-				fwstate_process_sync_v4(
+				applied = fwstate_process_sync_v4(
 					fwmap4_from_raw(fw4state),
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts,
+					&fwstate_config->sync_config,
 					sync_v4_inserted_cnt,
-					sync_v4_insert_failed_cnt
+					sync_v4_insert_failed_cnt,
+					sync_v4_suppressed_cnt
 				);
 			} else if (sync_frame->addr_type ==
 				   FW_STATE_ADDR_TYPE_IP6) {
-				fwstate_process_sync_v6(
+				applied = fwstate_process_sync_v6(
 					fwmap6_from_raw(fw6state),
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts,
+					&fwstate_config->sync_config,
 					sync_v6_inserted_cnt,
-					sync_v6_insert_failed_cnt
+					sync_v6_insert_failed_cnt,
+					sync_v6_suppressed_cnt
 				);
 			}
+			any_applied = any_applied || applied;
 		}
 
 		// Drop external packets (from other firewalls) after
 		// processing. Pass through internal packets (from our ACL) to
-		// reach other firewalls.
+		// reach other firewalls, unless every frame was suppressed — in
+		// that case the packet holds no new state and is dropped.
 		if (is_external) {
 			external_dropped_cnt[0] += 1;
 			external_dropped_cnt[1] += mbuf->pkt_len;
 			packet_front_drop(packet_front, packet);
-		} else {
+		} else if (any_applied) {
 			rte_memcpy(
 				ipv6_hdr->src_addr,
 				fwstate_config->sync_config.src_addr,
@@ -419,6 +567,8 @@ fwstate_handle_packets(
 			internal_forwarded_cnt[0] += 1;
 			internal_forwarded_cnt[1] += mbuf->pkt_len;
 			packet_front_output(packet_front, packet);
+		} else {
+			packet_front_drop(packet_front, packet);
 		}
 	}
 }

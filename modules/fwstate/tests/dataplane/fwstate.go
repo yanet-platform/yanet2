@@ -106,6 +106,22 @@ func fwstateCounterStorageFree(storage *C.struct_counter_storage) {
 	C.fwstate_test_counter_storage_free(storage)
 }
 
+// SetSyncSuppressTimeout sets the sync suppression window (nanoseconds) on a
+// module config produced by fwstateModuleConfig. Zero disables suppression.
+func SetSyncSuppressTimeout(cpModule *C.struct_cp_module, ns uint64) {
+	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
+	m.cfg.sync_config.sync_suppress_timeout = C.uint64_t(ns)
+}
+
+// SetSyncTCPTimeouts overrides the TCP established (tcp) and teardown
+// (tcp_fin) timeouts so a test can distinguish an established refresh from a
+// shorter-TTL state transition.
+func SetSyncTCPTimeouts(cpModule *C.struct_cp_module, tcp, tcpFin uint64) {
+	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
+	m.cfg.sync_config.timeouts.tcp = C.uint64_t(tcp)
+	m.cfg.sync_config.timeouts.tcp_fin = C.uint64_t(tcpFin)
+}
+
 func fwstateHandlePackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()

@@ -235,6 +235,10 @@ impl FWStateService {
             sync_config.default = default.as_nanos() as u64;
         }
 
+        if let Some(suppress) = cmd.sync_suppress_timeout {
+            sync_config.sync_suppress_timeout = Some(suppress.as_nanos() as u64);
+        }
+
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             map_config: Some(map_config),

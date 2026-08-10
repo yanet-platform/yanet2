@@ -83,6 +83,12 @@ fwstate_test_config(struct cp_module **cp_module) {
 		{"fwstate_sync_v6_insert_failed",
 		 1,
 		 &config->sync_v6_insert_failed_counter_id},
+		{"fwstate_sync_v4_suppressed",
+		 1,
+		 &config->sync_v4_suppressed_counter_id},
+		{"fwstate_sync_v6_suppressed",
+		 1,
+		 &config->sync_v6_suppressed_counter_id},
 		{"fwstate_external_dropped",
 		 2,
 		 &config->external_dropped_counter_id},
@@ -175,6 +181,11 @@ fwstate_test_config(struct cp_module **cp_module) {
 	config->cfg.sync_config.timeouts.tcp = 120000000000ULL;
 	config->cfg.sync_config.timeouts.udp = 30000000000ULL;
 	config->cfg.sync_config.timeouts.default_ = 16000000000ULL;
+
+	// Exercise the suppression path under fuzzing: a fixed window means
+	// repeated frames for the same 5-tuple probe the fwmap without a write
+	// lock and may be discarded, covering the new code path.
+	config->cfg.sync_config.sync_suppress_timeout = 8000000000ULL;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;

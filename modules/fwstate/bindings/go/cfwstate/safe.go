@@ -26,18 +26,19 @@ type MapConfig struct {
 
 // SyncConfig stores fwstate synchronization settings for C API calls.
 type SyncConfig struct {
-	SrcAddr          [16]byte
-	DstEther         [6]byte
-	DstAddrMulticast [16]byte
-	DstAddrUnicast   [16]byte
-	PortMulticast    uint16
-	PortUnicast      uint16
-	TcpSynAck        uint64
-	TcpSyn           uint64
-	TcpFin           uint64
-	Tcp              uint64
-	Udp              uint64
-	Default          uint64
+	SrcAddr             [16]byte
+	DstEther            [6]byte
+	DstAddrMulticast    [16]byte
+	DstAddrUnicast      [16]byte
+	PortMulticast       uint16
+	PortUnicast         uint16
+	TcpSynAck           uint64
+	TcpSyn              uint64
+	TcpFin              uint64
+	Tcp                 uint64
+	Udp                 uint64
+	Default             uint64
+	SyncSuppressTimeout uint64
 }
 
 func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
@@ -54,6 +55,7 @@ func newSyncConfigFromC(cCfg *C.struct_fwstate_sync_config) SyncConfig {
 	syncCfg.Tcp = uint64(cCfg.timeouts.tcp)
 	syncCfg.Udp = uint64(cCfg.timeouts.udp)
 	syncCfg.Default = uint64(cCfg.timeouts.default_)
+	syncCfg.SyncSuppressTimeout = uint64(cCfg.sync_suppress_timeout)
 	return syncCfg
 }
 
@@ -71,6 +73,7 @@ func (m SyncConfig) toC() C.struct_fwstate_sync_config {
 	cSyncConfig.timeouts.tcp = C.uint64_t(m.Tcp)
 	cSyncConfig.timeouts.udp = C.uint64_t(m.Udp)
 	cSyncConfig.timeouts.default_ = C.uint64_t(m.Default)
+	cSyncConfig.sync_suppress_timeout = C.uint64_t(m.SyncSuppressTimeout)
 
 	return cSyncConfig
 }

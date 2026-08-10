@@ -466,3 +466,142 @@ func TestFWStateMergeFromStaleLayer(t *testing.T) {
 	require.Equalf(t, uint64(1), snap.PacketsBackward,
 		"packets_backward from active layer must be summed in (got %d)", snap.PacketsBackward)
 }
+
+// TestFWStateSyncSuppression verifies the sync suppression debounce:
+// configured with a large suppress window, the first sync frame creates the
+// entry and is forwarded, while an immediately following frame for the same
+// 5-tuple is suppressed (entry untouched) and its packet is dropped instead of
+// forwarded.
+func TestFWStateSyncSuppression(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_suppress_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+
+	// 60s window: any second frame arriving within the test's real-time span
+	// is well inside the window and must be suppressed.
+	const suppressNs = uint64(60e9)
+	SetSyncSuppressTimeout(cpModule, suppressNs)
+
+	// First frame: entry does not exist yet, so it is applied and forwarded.
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
+	res1 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	require.NotEmpty(t, res1.Output, "first frame must be forwarded")
+	require.Empty(t, res1.Drop, "first frame must not be dropped")
+
+	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap1.Found, "state must exist after first frame")
+	require.Greater(t, snap1.Deadline, uint64(0))
+
+	// Second frame, same 5-tuple, arrives immediately: within the window, so
+	// the fwmap record is left untouched and the packet is dropped (no peer
+	// refresh needed).
+	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
+	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
+	require.Empty(t, res2.Output, "suppressed frame must not be forwarded")
+	require.NotEmpty(t, res2.Drop, "suppressed frame must be dropped")
+
+	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap2.Found)
+	require.Equal(t, snap1.UpdatedAt, snap2.UpdatedAt,
+		"updated_at must not change when the frame is suppressed")
+	require.Equal(t, snap1.Deadline, snap2.Deadline,
+		"deadline must not change when the frame is suppressed")
+}
+
+// TestFWStateSyncSuppressionDisabled verifies that with a zero suppress window
+// (the default) every frame refreshes the entry and is forwarded, i.e. the
+// feature is off.
+func TestFWStateSyncSuppressionDisabled(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_suppress_off_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+	// suppress left at its default of 0 (disabled)
+
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
+	res1 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	require.NotEmpty(t, res1.Output, "first frame must be forwarded")
+	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap1.Found)
+
+	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
+	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
+	require.NotEmpty(t, res2.Output, "second frame must be forwarded when suppression is off")
+	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap2.Found)
+	require.GreaterOrEqual(t, snap2.UpdatedAt, snap1.UpdatedAt,
+		"updated_at must advance when the frame is applied")
+}
+
+// TestFWStateSyncSuppressionAllowsShorterTTL verifies that a frame carrying a
+// shorter TTL (a teardown transition such as FIN) is applied even when it
+// arrives inside the suppress window, instead of being suppressed and leaving
+// the entry on its longer established deadline.
+func TestFWStateSyncSuppressionAllowsShorterTTL(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_suppress_ttl_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+
+	// Established TTL much longer than the FIN TTL, so the FIN's new expiry
+	// lands below the current deadline and must not be suppressed.
+	SetSyncTCPTimeouts(cpModule, 120e9, 10e9)
+	SetSyncSuppressTimeout(cpModule, 60e9)
+
+	// Established frame (no flags): entry created on the long TTL.
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
+	res1 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	require.NotEmpty(t, res1.Output, "established frame must be forwarded")
+	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap1.Found)
+
+	// FIN frame immediately after: shorter TTL must be applied, not
+	// suppressed, so the deadline shrinks toward the FIN timeout.
+	const finBit = 0x01 // FWSTATE_FIN, src nibble
+	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(finBit))
+	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
+	require.NotEmpty(t, res2.Output, "FIN frame must be forwarded, not suppressed")
+
+	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap2.Found)
+	require.Less(t, snap2.Deadline, snap1.Deadline,
+		"FIN (shorter TTL) must shrink the deadline instead of being suppressed")
+}
+
+// TestFWStateSyncSuppressionAppliesFlagChanges verifies that a frame carrying
+// a flag bit the entry has not yet seen is applied even when its TTL is
+// identical to the current one (so the deadline predicate alone would
+// suppress it). In the default test config tcp_syn == tcp_syn_ack, so a SYN
+// followed by an ACK has the same deadline; the ACK must still merge.
+func TestFWStateSyncSuppressionAppliesFlagChanges(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_suppress_flags_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+
+	// Default test config sets tcp_syn == tcp_syn_ack, so both frames below
+	// pick the same TTL.
+	SetSyncSuppressTimeout(cpModule, 60e9)
+
+	const synBit = 0x02 // FWSTATE_SYN, src nibble
+	const ackBit = 0x08 // FWSTATE_ACK, src nibble
+
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(synBit))
+	xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt1))
+	snap1 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap1.Found)
+	require.Equal(t, uint8(synBit), snap1.FlagsRaw)
+
+	// ACK frame, same TTL, within the window: must not be suppressed because
+	// it carries a new flag bit that the merge path must record.
+	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit))
+	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
+	require.NotEmpty(t, res2.Output, "flag-changing frame must be forwarded, not suppressed")
+
+	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, snap2.Found)
+	require.Equalf(t, uint8(synBit|ackBit), snap2.FlagsRaw,
+		"ACK must merge into flags even at an unchanged TTL within the window (got 0x%02x)",
+		snap2.FlagsRaw)
+}

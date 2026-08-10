@@ -124,6 +124,12 @@ pub struct UpdateCmd {
     /// Default timeout (e.g., "60s", "5m", "1h")
     #[arg(long, value_parser = parse_duration)]
     pub default: Option<Duration>,
+
+    /// Sync suppression window: skip redundant state-sync refreshes whose
+    /// new expiry lands within this window of the current one (e.g., "8s").
+    /// "0s" disables suppression.
+    #[arg(long, value_parser = parse_duration)]
+    pub sync_suppress_timeout: Option<Duration>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]

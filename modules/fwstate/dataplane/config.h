@@ -21,6 +21,8 @@ struct fwstate_module_config {
 	uint64_t sync_v6_inserted_counter_id;
 	uint64_t sync_v4_insert_failed_counter_id;
 	uint64_t sync_v6_insert_failed_counter_id;
+	uint64_t sync_v4_suppressed_counter_id;
+	uint64_t sync_v6_suppressed_counter_id;
 	uint64_t external_dropped_counter_id;
 	uint64_t internal_forwarded_counter_id;
 };

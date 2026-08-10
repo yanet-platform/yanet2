@@ -4,7 +4,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
+
+const cfwstateTTL48Max = cfwstate.TTL48Max
+
+// u64Ptr is a convenience for setting optional uint64 proto fields in tests.
+func u64Ptr(v uint64) *uint64 { return &v }
 
 func TestValidateSyncConfigTimeouts(t *testing.T) {
 	valid := &SyncConfig{
@@ -30,4 +37,28 @@ func TestValidateSyncConfigTimeouts(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "tcp_syn")
 	require.Contains(t, err.Error(), "udp")
+}
+
+// TestValidateSyncConfigTimeoutsSuppressOverflow verifies that a suppress
+// window large enough to push an otherwise-valid timeout past the 48-bit
+// last_ttl limit is rejected, since the dataplane stores the inflated
+// (timeout + suppress) value.
+func TestValidateSyncConfigTimeoutsSuppressOverflow(t *testing.T) {
+	// A suppress window that by itself fits, but added to the default timeout
+	// overflows the 48-bit field.
+	overflowing := &SyncConfig{
+		Tcp:                 cfwstateTTL48Max,
+		SyncSuppressTimeout: u64Ptr(1),
+	}
+	err := overflowing.ValidateTimeouts()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tcp+sync_suppress_timeout")
+
+	// The same timeout with no suppress, or with a window that still fits, is
+	// accepted.
+	require.NoError(t, (&SyncConfig{Tcp: cfwstateTTL48Max}).ValidateTimeouts())
+	require.NoError(t, (&SyncConfig{
+		Tcp:                 120e9,
+		SyncSuppressTimeout: u64Ptr(8e9),
+	}).ValidateTimeouts())
 }

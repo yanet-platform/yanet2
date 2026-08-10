@@ -153,4 +153,14 @@ message SyncConfig {
   uint64 tcp = 10;        // TCP established timeout in nanoseconds;
   uint64 udp = 11;        // UDP timeout in nanoseconds;
   uint64 default = 12;    // Default timeout in nanoseconds;
+
+  // Sync suppression window in nanoseconds. A sync frame for an alive entry
+  // whose new expiry lands within this window of the current one is discarded
+  // (the fwmap record is left untouched), debouncing refreshes for busy
+  // sessions. Every entry TTL is inflated by this value so the effective
+  // keep-alive never drops below the configured timeout. Zero disables it.
+  //
+  // Optional so that clients unaware of the field (an older web form) can omit
+  // it and keep the current window, while an explicit zero disables it.
+  optional uint64 sync_suppress_timeout = 13;
 }
