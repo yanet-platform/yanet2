@@ -58,6 +58,8 @@
 #include "common/data_pipe.h"
 #include "logging/log.h"
 
+#include <limits.h>
+
 #include <rte_ethdev.h>
 
 static void
@@ -405,6 +407,12 @@ dataplane_worker_init(
 	worker->queue_id = queue_id;
 	worker->config = *config;
 
+	// The worker struct comes from an unzeroed malloc, so a NULL stack must
+	// be set here to mark the default-stack case that dataplane_worker_stop
+	// must not free.
+	worker->stack = NULL;
+	worker->stack_size = 0;
+
 	struct dp_config *dp_config = worker->instance->dp_config;
 	struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
 		&dp_config->memory_context, sizeof(struct dp_worker)
@@ -557,6 +565,92 @@ error_mempool:
 	return -1;
 }
 
+// Smallest power of two not less than value.
+//
+// Values above 2^63 have no representable power-of-two result, so they clamp
+// to 2^63, which every caller then rejects as oversized. Zero and one return 1.
+static inline uint64_t
+round_up_pow2(uint64_t value) {
+	if (value <= 1) {
+		return 1;
+	}
+	if (value > (1ull << 63)) {
+		return 1ull << 63;
+	}
+	return 1ull << (64 - __builtin_clzll(value - 1));
+}
+
+// Allocate the worker thread stack from the instance's NUMA-local dp zone.
+//
+// A zero configured size keeps the OS default stack and leaves the attribute
+// untouched. Otherwise the size is clamped to PTHREAD_STACK_MIN, rounded up to
+// a power of two so the buddy allocator returns a block aligned to its own size
+// (page/hugepage aligned, as pthread_attr_setstack requires), and pinned to the
+// worker instance dp memory. The allocation is recorded on the worker so
+// dataplane_worker_stop can free the exact block after the join.
+//
+// Under sanitizer builds the allocator's red zones offset the block off its
+// page boundary, so pthread_attr_setstack rejects it and the worker fails to
+// start gracefully; a custom stack therefore requires a non-sanitized build.
+static int
+dataplane_worker_setup_stack(
+	struct dataplane_worker *worker, pthread_attr_t *attr
+) {
+	if (worker->config.stack_size == 0) {
+		return 0;
+	}
+
+	struct dp_config *dp_config = worker->instance->dp_config;
+
+	size_t stack_size = worker->config.stack_size;
+	if (stack_size < (size_t)PTHREAD_STACK_MIN) {
+		stack_size = (size_t)PTHREAD_STACK_MIN;
+	}
+	stack_size = round_up_pow2(stack_size);
+
+	if (stack_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
+		LOG(ERROR,
+		    "worker core=%u stack size %zu exceeds maximum %zu",
+		    worker->config.core_id,
+		    stack_size,
+		    (size_t)MEMORY_BLOCK_ALLOCATOR_MAX_SIZE);
+		return -1;
+	}
+
+	void *stack = memory_balloc(&dp_config->memory_context, stack_size);
+	if (stack == NULL) {
+		LOG(ERROR,
+		    "failed to allocate %zu-byte stack for worker core=%u from "
+		    "instance %u dp zone",
+		    stack_size,
+		    worker->config.core_id,
+		    worker->config.instance_id);
+		return -1;
+	}
+
+	int rc = pthread_attr_setstack(attr, stack, stack_size);
+	if (rc != 0) {
+		LOG(ERROR,
+		    "failed to set stack for worker core=%u: %s",
+		    worker->config.core_id,
+		    strerror(rc));
+		memory_bfree(&dp_config->memory_context, stack, stack_size);
+		return -1;
+	}
+
+	worker->stack = stack;
+	worker->stack_size = stack_size;
+
+	LOG(INFO,
+	    "worker core=%u uses a %zu-byte numa-local stack from instance %u "
+	    "dp zone",
+	    worker->config.core_id,
+	    stack_size,
+	    worker->config.instance_id);
+
+	return 0;
+}
+
 int
 dataplane_worker_start(struct dataplane_worker *worker) {
 
@@ -593,6 +687,11 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);
 
+	if (dataplane_worker_setup_stack(worker, &wrk_th_attr) != 0) {
+		pthread_attr_destroy(&wrk_th_attr);
+		return -1;
+	}
+
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	CPU_SET(worker->config.core_id, &mask);
@@ -611,4 +710,17 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 void
 dataplane_worker_stop(struct dataplane_worker *worker) {
 	pthread_join(worker->thread_id, NULL);
+
+	// The join guarantees the thread no longer touches its stack, so the
+	// NUMA-local block can be returned to the instance dp zone.
+	if (worker->stack != NULL) {
+		struct dp_config *dp_config = worker->instance->dp_config;
+		memory_bfree(
+			&dp_config->memory_context,
+			worker->stack,
+			worker->stack_size
+		);
+		worker->stack = NULL;
+		worker->stack_size = 0;
+	}
 }

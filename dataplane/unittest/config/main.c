@@ -91,6 +91,19 @@ test_valid_config(void) {
 	check_instance(config->instances + 1, 1, 512, 128);
 	check_instance(config->instances + 2, 0, 123, 124);
 
+	assert(config->device_count == 2);
+	assert(config->devices[0].worker_count == 1);
+	struct dataplane_device_worker_config *worker =
+		config->devices[0].workers;
+	assert(worker->core_id == 4);
+	assert(worker->instance_id == 0);
+	assert(worker->rx_queue_len == 1024);
+	assert(worker->tx_queue_len == 512);
+	assert(worker->stack_size == 2097152);
+
+	// The second worker omits stack_size, so it stays the unset default.
+	assert(config->devices[1].workers[0].stack_size == 0);
+
 	assert(config->connection_count == 2);
 	assert(config->connections[0].src_device_id == 0);
 	assert(config->connections[0].dst_device_id == 1);

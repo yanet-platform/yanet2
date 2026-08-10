@@ -70,6 +70,14 @@ struct dataplane_worker {
 
 	pthread_t thread_id;
 
+	// NUMA-local thread stack from the instance dp zone, or NULL.
+	//
+	// Set only when the worker config requests a custom stack size. The
+	// matching size passed to memory_balloc is kept in stack_size so
+	// dataplane_worker_stop can free the exact block after the join.
+	void *stack;
+	size_t stack_size;
+
 	// FIXME port_id and device_id could be inherited from device
 	uint16_t port_id;
 	uint16_t queue_id;
