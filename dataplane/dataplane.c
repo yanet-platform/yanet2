@@ -727,6 +727,22 @@ dataplane_init(
 		}
 	}
 
+	// Reject a workerless instance before any instance is marked ready,
+	// so a later instance failing this check cannot leave an earlier one
+	// advertised in shared memory with no dataplane left to serve it.
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		struct dp_config *dp_config =
+			dataplane->instances[instance_idx].dp_config;
+		if (dp_config->worker_count == 0) {
+			LOG(ERROR,
+			    "instance %u has no workers configured",
+			    instance_idx);
+			return -1;
+		}
+	}
+
 	// init dataplane instances
 	for (uint32_t instance_idx = 0;
 	     instance_idx < dataplane->instance_count;

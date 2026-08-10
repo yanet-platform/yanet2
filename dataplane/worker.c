@@ -397,6 +397,17 @@ dataplane_worker_init(
 	    config->core_id,
 	    config->instance_id,
 	    device->port_id);
+
+	if (config->instance_id >= dataplane->instance_count) {
+		LOG(ERROR,
+		    "worker core=%u references instance=%u but only %u "
+		    "instances are configured",
+		    config->core_id,
+		    config->instance_id,
+		    dataplane->instance_count);
+		return -1;
+	}
+
 	worker->dataplane = dataplane;
 	worker->instance = dataplane->instances + config->instance_id;
 	worker->device = device;
