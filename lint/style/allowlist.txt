@@ -295,7 +295,6 @@ testpkg:controlplane/internal/xgrpc/method_test.go:xgrpc:1  # legacy: migrate to
 testpkg:devices/plain/controlplane/service_test.go:plain:1  # legacy: migrate to the external test package
 testpkg:devices/trafgen/controlplane/service_test.go:trafgen:1  # legacy: migrate to the external test package
 testpkg:devices/vlan/controlplane/service_test.go:vlan:1  # legacy: migrate to the external test package
-testpkg:modules/acl/controlplane/service_test.go:acl:1  # legacy: migrate to the external test package
 testpkg:modules/blackhole/controlplane/service_test.go:blackhole:1  # legacy: migrate to the external test package
 testpkg:modules/decap/controlplane/service_test.go:decap:1  # legacy: migrate to the external test package
 testpkg:modules/dscp/controlplane/service_test.go:dscp:1  # legacy: migrate to the external test package

@@ -1,4 +1,4 @@
-package acl
+package acl_test
 
 import (
 	"context"
@@ -6,17 +6,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
+	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
@@ -41,7 +47,7 @@ func waitOnChan(t *testing.T, ch <-chan struct{}, msg string) {
 	}
 }
 
-// fakeHandle is an in-memory implementation of ModuleHandle for tests.
+// fakeHandle is an in-memory implementation of acl.ModuleHandle for tests.
 type fakeHandle struct {
 	mu          sync.Mutex
 	name        string
@@ -64,6 +70,22 @@ func (m *fakeHandle) FreeCount() int {
 	defer m.mu.Unlock()
 
 	return m.freeCount
+}
+
+// Name returns the config name assigned when the handle was allocated.
+func (m *fakeHandle) Name() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.name
+}
+
+// Rules returns a copy of the rules passed to UpdateRules.
+func (m *fakeHandle) Rules() []cacl.AclRule {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return append([]cacl.AclRule(nil), m.rules...)
 }
 
 func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
@@ -94,7 +116,7 @@ func (m *fakeHandle) GetInfo() *cacl.AclConfigInfo {
 	}
 }
 
-// fakeBackend is an in-memory implementation of Backend for tests.
+// fakeBackend is an in-memory implementation of acl.Backend for tests.
 type fakeBackend struct {
 	mu           sync.Mutex
 	modules      map[string]*fakeHandle
@@ -102,7 +124,9 @@ type fakeBackend struct {
 	publishCalls int
 	newModuleErr error
 	deleteErr    error
+	deleteCalls  int
 	memoryBytes  uint64
+	dpConfig     *ffi.DPConfig
 }
 
 type updateBlock struct {
@@ -115,6 +139,14 @@ type updateBlock struct {
 type blockingUpdateBackend struct {
 	*fakeBackend
 
+	blockMu   sync.Mutex
+	nextBlock *updateBlock
+}
+
+// blockingDPConfigBackend pauses one DPConfig call after metrics capture its
+// metadata snapshot, allowing deletion to race with metric collection.
+type blockingDPConfigBackend struct {
+	*fakeBackend
 	blockMu   sync.Mutex
 	nextBlock *updateBlock
 }
@@ -138,7 +170,7 @@ func (m *blockingUpdateBackend) blockNextUpdate() (<-chan struct{}, func()) {
 	})
 }
 
-func (m *blockingUpdateBackend) UpdateModule(handle ModuleHandle) error {
+func (m *blockingUpdateBackend) UpdateModule(handle acl.ModuleHandle) error {
 	m.blockMu.Lock()
 	block := m.nextBlock
 	m.nextBlock = nil
@@ -152,6 +184,41 @@ func (m *blockingUpdateBackend) UpdateModule(handle ModuleHandle) error {
 	return m.fakeBackend.UpdateModule(handle)
 }
 
+func newBlockingDPConfigBackend(dpConfig *ffi.DPConfig) *blockingDPConfigBackend {
+	backend := newFakeBackend(0)
+	backend.dpConfig = dpConfig
+	return &blockingDPConfigBackend{fakeBackend: backend}
+}
+
+func (m *blockingDPConfigBackend) blockNextDPConfig() (<-chan struct{}, func()) {
+	m.blockMu.Lock()
+	defer m.blockMu.Unlock()
+
+	block := &updateBlock{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m.nextBlock = block
+
+	return block.entered, sync.OnceFunc(func() {
+		close(block.release)
+	})
+}
+
+func (m *blockingDPConfigBackend) DPConfig() *ffi.DPConfig {
+	m.blockMu.Lock()
+	block := m.nextBlock
+	m.nextBlock = nil
+	m.blockMu.Unlock()
+
+	if block != nil {
+		close(block.entered)
+		<-block.release
+	}
+
+	return m.fakeBackend.DPConfig()
+}
+
 func newFakeBackend(memoryBytes uint64) *fakeBackend {
 	return &fakeBackend{
 		modules:     map[string]*fakeHandle{},
@@ -159,7 +226,71 @@ func newFakeBackend(memoryBytes uint64) *fakeBackend {
 	}
 }
 
-func (m *fakeBackend) NewModule(name string) (ModuleHandle, error) {
+func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi.Agent) {
+	testingTB.Helper()
+
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(128 * datasize.MB),
+		DPMemory:      uint64(64 * datasize.MB),
+		WorkerCount:   1,
+		Devices:       []string{"port0"},
+		Modules:       []string{"acl"},
+		DevicesToLoad: []string{"plain"},
+	})
+	require.NoError(testingTB, err)
+	testingTB.Cleanup(harness.Free)
+
+	agent, err := harness.SharedMemory().AgentAttach(
+		"acl-metrics-snapshot",
+		0,
+		64*datasize.MB,
+	)
+	require.NoError(testingTB, err)
+	testingTB.Cleanup(func() { _ = agent.CleanUp() })
+
+	moduleNames := []string{"acl0", "a", "b", "c", "d"}
+	moduleConfigs := make([]ffi.ModuleConfig, 0, len(moduleNames))
+	for _, name := range moduleNames {
+		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name)
+		require.NoError(testingTB, moduleErr)
+		testingTB.Cleanup(moduleConfig.Free)
+		require.NoError(testingTB, moduleConfig.UpdateRules(nil))
+		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
+	}
+	require.NoError(testingTB, agent.UpdateModules(moduleConfigs))
+
+	require.NoError(testingTB, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "function0",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name: "chain0",
+				Modules: func() []ffi.ChainModuleConfig {
+					modules := make([]ffi.ChainModuleConfig, 0, len(moduleNames))
+					for _, name := range moduleNames {
+						modules = append(modules, ffi.ChainModuleConfig{
+							Type: "acl",
+							Name: name,
+						})
+					}
+					return modules
+				}(),
+			},
+		}},
+	}))
+	require.NoError(testingTB, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "pipeline0",
+		Functions: []string{"function0"},
+	}))
+	require.NoError(testingTB, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:  "port0",
+		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
+	}}))
+
+	return harness, agent
+}
+
+func (m *fakeBackend) NewModule(name string) (acl.ModuleHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -168,7 +299,6 @@ func (m *fakeBackend) NewModule(name string) (ModuleHandle, error) {
 	}
 
 	h := &fakeHandle{name: name}
-	m.modules[name] = h
 	m.created = append(m.created, h)
 	return h, nil
 }
@@ -182,10 +312,13 @@ func (m *fakeBackend) CreatedHandles() []*fakeHandle {
 	return append([]*fakeHandle(nil), m.created...)
 }
 
-func (m *fakeBackend) UpdateModule(_ ModuleHandle) error {
+func (m *fakeBackend) UpdateModule(handle acl.ModuleHandle) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if unwrapped := unwrapFakeHandle(handle); unwrapped != nil {
+		m.modules[unwrapped.Name()] = unwrapped
+	}
 	m.publishCalls++
 	return nil
 }
@@ -198,6 +331,7 @@ func (m *fakeBackend) DeleteModule(name string) error {
 		return m.deleteErr
 	}
 
+	m.deleteCalls++
 	delete(m.modules, name)
 	return nil
 }
@@ -207,7 +341,10 @@ func (m *fakeBackend) MemoryBytes() uint64 {
 }
 
 func (m *fakeBackend) DPConfig() *ffi.DPConfig {
-	return nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.dpConfig
 }
 
 // PublishCalls returns the number of UpdateModule calls observed.
@@ -224,6 +361,41 @@ func (m *fakeBackend) SetNewModuleErr(err error) {
 	defer m.mu.Unlock()
 
 	m.newModuleErr = err
+}
+
+// ModuleCount returns the number of currently registered module handles.
+func (m *fakeBackend) ModuleCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return len(m.modules)
+}
+
+func unwrapFakeHandle(handle acl.ModuleHandle) *fakeHandle {
+	switch typedHandle := handle.(type) {
+	case *fakeHandle:
+		return typedHandle
+	case *compileBlockingHandle:
+		return unwrapFakeHandle(typedHandle.ModuleHandle)
+	default:
+		return nil
+	}
+}
+
+func assertAllHandlesFreed(t *testing.T, backend *fakeBackend) {
+	t.Helper()
+
+	for idx, handle := range backend.CreatedHandles() {
+		assert.Equal(t, 1, handle.FreeCount(), "allocated handle %d must be freed exactly once", idx)
+	}
+}
+
+// DeleteCalls returns the number of successful DeleteModule calls.
+func (m *fakeBackend) DeleteCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.deleteCalls
 }
 
 // compileBlock synchronizes one blocked compile with the test: entered
@@ -293,7 +465,7 @@ func (m *compileBlockingBackend) entryOrder() []string {
 	return append([]string(nil), m.entries...)
 }
 
-func (m *compileBlockingBackend) NewModule(name string) (ModuleHandle, error) {
+func (m *compileBlockingBackend) NewModule(name string) (acl.ModuleHandle, error) {
 	handle, err := m.fakeBackend.NewModule(name)
 	if err != nil {
 		return nil, err
@@ -305,7 +477,7 @@ func (m *compileBlockingBackend) NewModule(name string) (ModuleHandle, error) {
 // compileBlockingHandle records and optionally blocks its UpdateRules call
 // before delegating to the wrapped fakeHandle.
 type compileBlockingHandle struct {
-	ModuleHandle
+	acl.ModuleHandle
 	backend *compileBlockingBackend
 	name    string
 }
@@ -320,13 +492,51 @@ func (m *compileBlockingHandle) UpdateRules(rules []cacl.AclRule) error {
 	return m.ModuleHandle.UpdateRules(rules)
 }
 
-func newTestService(b Backend) *ACLService {
-	return NewACLService(b)
+func newTestService(b acl.Backend) *acl.ACLService {
+	return acl.NewACLService(b)
 }
 
-// TestConvertRulesCounter verifies that the counter field from a proto Rule
-// is correctly propagated to the corresponding AclRule.
-func TestConvertRulesCounter(t *testing.T) {
+func testLabeler(_ string, req any) metrics.Labels {
+	switch request := req.(type) {
+	case *aclpb.UpdateConfigRequest:
+		return metrics.Labels{"config": request.GetName()}
+	case *aclpb.DeleteConfigRequest:
+		return metrics.Labels{"config": request.GetName()}
+	case *aclpb.ShowConfigRequest:
+		return metrics.Labels{"config": request.GetName()}
+	default:
+		return nil
+	}
+}
+
+func findMetricWithLabels(all []*commonpb.Metric, name string, want map[string]string) *commonpb.Metric {
+	for _, metric := range all {
+		if metric.GetName() != name {
+			continue
+		}
+
+		labels := map[string]string{}
+		for _, label := range metric.GetLabels() {
+			labels[label.GetName()] = label.GetValue()
+		}
+
+		matches := true
+		for key, value := range want {
+			if labels[key] != value {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return metric
+		}
+	}
+
+	return nil
+}
+
+// TestUpdateConfigCounter verifies that a rule counter reaches the backend.
+func TestUpdateConfigCounter(t *testing.T) {
 	tests := []struct {
 		name     string
 		rules    []*aclpb.Rule
@@ -368,11 +578,20 @@ func TestConvertRulesCounter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := convertRules(tc.rules)
+			backend := newFakeBackend(0)
+			svc := newTestService(backend)
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: tc.rules,
+			})
 			require.NoError(t, err)
-			require.Len(t, got, len(tc.wantCnts))
+
+			created := backend.CreatedHandles()
+			require.Len(t, created, 1)
+			handle := created[0]
+			require.Len(t, handle.Rules(), len(tc.wantCnts))
 			for idx, want := range tc.wantCnts {
-				assert.Equal(t, want, got[idx].Counter)
+				assert.Equal(t, want, handle.Rules()[idx].Counter)
 			}
 		})
 	}
@@ -435,7 +654,10 @@ func TestUpdateConfig_ErrorPropagation(t *testing.T) {
 	// The original config must still be present and unchanged.
 	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "acl0"})
 	require.NoError(t, err)
-	assert.True(t, rulesEqual(initialRules, resp.Rules), "config rules must not have changed after failed update")
+	require.Len(t, resp.Rules, len(initialRules))
+	for idx := range initialRules {
+		assert.True(t, proto.Equal(initialRules[idx], resp.Rules[idx]), "config rules must not have changed after failed update")
+	}
 }
 
 // TestUpdateConfig_RejectsEmptyRuleset verifies that an empty ruleset is
@@ -462,7 +684,8 @@ func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, codes.InvalidArgument, status.Code(err))
 			assert.Equal(t, 0, b.PublishCalls(), "backend must not be asked to publish")
-			assert.Empty(t, b.modules, "no module must be created")
+			assert.Len(t, b.CreatedHandles(), 0, "backend must not allocate a module")
+			assert.Equal(t, 0, b.ModuleCount(), "no module must be created")
 		})
 	}
 }
@@ -470,9 +693,11 @@ func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
 // TestConvertRules_RejectsUnknownActionKind ensures unrecognized action kinds
 // become a client error rather than silently mapping to ALLOW.
 func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
-	_, err := convertRules([]*aclpb.Rule{{
-		Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(999)}},
-	}})
+	svc := newTestService(newFakeBackend(0))
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  "acl0",
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(999)}}}},
+	})
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
@@ -503,32 +728,23 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 }
 
 // TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports
-// codes.NotFound for a config name that was never applied, and that the
-// rejected name is not interned into svc.configs: a client that misspells a
-// delete repeatedly must not grow the map.
+// codes.NotFound for a config name that was never applied and does not call
+// the backend.
 func TestDeleteConfig_UnknownConfig(t *testing.T) {
-	svc := newTestService(newFakeBackend(0))
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
 
 	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
-
-	svc.mu.RLock()
-	_, ok := svc.configs["missing"]
-	svc.mu.RUnlock()
-	assert.False(t, ok, "an unknown delete target must not create an entry")
+	assert.Equal(t, 0, backend.DeleteCalls(), "an unknown target must not reach the backend")
 }
 
 // TestDeleteConfig_LiveNameTombstones verifies that deleting a name with a
-// live published config still succeeds and leaves the entry in svc.configs
-// with published set to nil, rather than removing the entry outright. That
-// tombstone is what lets a later UpdateConfig of the same name reuse the
-// entry instead of racing a fresh one into existence. It also verifies that
-// a second delete of the now-tombstoned name reports codes.NotFound: the
-// existence-only fast-path pre-check lets the tombstoned name through since
-// its entry is still present, and the locked path's own check of published
-// is what actually rejects it.
+// live published config succeeds, removes the backend module, and makes a
+// second delete return NotFound.
 func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
-	svc := newTestService(newFakeBackend(0))
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
 
 	name := "acl0"
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
@@ -539,26 +755,19 @@ func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
 
 	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
 	require.NoError(t, err)
-
-	svc.mu.RLock()
-	entry, ok := svc.configs[name]
-	svc.mu.RUnlock()
-	require.True(t, ok, "the entry for a deleted live name must be retained as a tombstone")
-	assert.Nil(t, entry.published, "a tombstoned entry must have published set to nil")
+	assert.Equal(t, 0, backend.ModuleCount(), "delete must remove the backend module")
+	assert.Equal(t, 1, backend.DeleteCalls())
 
 	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
-	require.Equal(t, codes.NotFound, status.Code(err), "deleting an already-tombstoned name must report NotFound")
+	require.Equal(t, codes.NotFound, status.Code(err), "deleting an already-deleted name must report NotFound")
 }
 
 // TestDeleteConfig_WaitsBehindInFlightCreate verifies that a DeleteConfig
-// racing an UpdateConfig that is creating a brand-new name waits behind the
-// name's lock instead of returning NotFound while the create's compile is
-// still in flight. In that window the entry already exists but published is
-// still nil, so a pre-check keyed on liveness rather than existence would
-// return NotFound immediately instead of serializing behind the create and
-// then acting on its result. This test forces exactly that window with
-// compileBlockingBackend and asserts the delete only resolves after the
-// create publishes, then removes the config the create just published.
+// racing an UpdateConfig that is creating a brand-new name waits for the
+// create to finish instead of returning NotFound while compilation is in
+// flight. This test forces that window with compileBlockingBackend and
+// asserts that the delete resolves after the create publishes, then removes
+// the config it just published.
 func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
 	backend := newCompileBlockingBackend(0)
 	svc := newTestService(backend)
@@ -609,11 +818,8 @@ func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
 		t.Fatal("DeleteConfig did not finish after the racing create released its compile")
 	}
 
-	svc.mu.RLock()
-	entry, ok := svc.configs[name]
-	svc.mu.RUnlock()
-	require.True(t, ok, "the entry created by the racing update must survive the delete as a tombstone")
-	assert.Nil(t, entry.published, "the delete must have tombstoned the config the racing create just published")
+	assert.Equal(t, 0, backend.ModuleCount(), "the racing delete must remove the published module")
+	assert.Equal(t, 1, backend.DeleteCalls(), "the racing delete must reach the backend once")
 
 	assert.Equal(t, 1, backend.PublishCalls(), "the create must have published its module before the delete could act on it")
 
@@ -623,11 +829,9 @@ func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
 }
 
 // TestUpdateConfig_ResurrectsThroughTombstone verifies that Update, Delete,
-// then Update of the same name reuses the entry DeleteConfig tombstoned
-// instead of racing a fresh one into existence: Show returns the
-// resurrected rules, List reports the name exactly once, and every handle
-// the fakeBackend produced along the way is freed exactly once, except the
-// one still live at the end.
+// then Update of the same name restores the config: Show returns the
+// resurrected rules, List reports the name exactly once, and cleanup frees
+// every handle the fakeBackend produced exactly once.
 func TestUpdateConfig_ResurrectsThroughTombstone(t *testing.T) {
 	backend := newFakeBackend(0)
 	svc := newTestService(backend)
@@ -649,23 +853,22 @@ func TestUpdateConfig_ResurrectsThroughTombstone(t *testing.T) {
 
 	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: name})
 	require.NoError(t, err)
-	assert.True(t, rulesEqual(newRules, resp.Rules), "Show must return the resurrected config's rules")
+	require.Len(t, resp.Rules, len(newRules))
+	for idx := range newRules {
+		assert.True(t, proto.Equal(newRules[idx], resp.Rules[idx]), "Show must return the resurrected config's rules")
+	}
 
 	listResp, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{name}, listResp.Configs, "List must report the resurrected name exactly once")
 
-	svc.mu.RLock()
-	liveHandle := svc.configs[name].published.acl
-	svc.mu.RUnlock()
-
-	for _, h := range backend.CreatedHandles() {
-		if h == liveHandle {
-			assert.Equal(t, 0, h.FreeCount(), "the live handle must not have been freed")
-			continue
-		}
-		assert.Equal(t, 1, h.FreeCount(), "every superseded or deleted handle must be freed exactly once")
-	}
+	require.Len(t, backend.CreatedHandles(), 2)
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+	require.NoError(t, err)
+	listResp, err = svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, listResp.Configs)
+	assertAllHandlesFreed(t, backend)
 }
 
 // TestUpdateConfig_ConcurrentRace exercises UpdateConfig and ShowConfig under
@@ -690,12 +893,12 @@ func TestUpdateConfig_ConcurrentRace(t *testing.T) {
 	require.NoError(t, wg.Wait())
 }
 
-// TestMetrics_DoesNotWaitForUpdateConfig verifies that a config update holding
-// ACLService.mu cannot stall metrics collection.
+// TestMetrics_DoesNotWaitForUpdateConfig verifies that metrics collection is
+// not stalled by a blocked backend update.
 func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
 	backend := newBlockingUpdateBackend(0)
-	svc := NewACLService(backend, WithMetrics(grpcmetrics.NewFactory(
-		grpcmetrics.WithLabeler(labeler),
+	svc := acl.NewACLService(backend, acl.WithMetrics(grpcmetrics.NewFactory(
+		grpcmetrics.WithLabeler(testLabeler),
 	)))
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
@@ -766,7 +969,9 @@ func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
 }
 
 func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
-	svc := newTestService(newFakeBackend(0))
+	_, agent := newMetricsSnapshotHarness(t)
+	backend := newBlockingDPConfigBackend(agent.DPConfig())
+	svc := newTestService(backend)
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "acl0",
@@ -774,37 +979,79 @@ func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	beforeDelete := svc.metricsState.load()
-	info, ok := beforeDelete.configInfo("acl0")
-	require.True(t, ok)
-	assert.Equal(t, uint64(42), info.CompilationTimeNs)
-	assert.Equal(t, uint64(7), info.FilterRuleCountIp4)
+	dpConfigEntered, releaseDPConfig := backend.blockNextDPConfig()
+	t.Cleanup(releaseDPConfig)
 
-	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{
-		Name: "acl0",
-	})
+	type metricsResult struct {
+		metrics []*commonpb.Metric
+		err     error
+	}
+	metricsDone := make(chan metricsResult, 1)
+	go func() {
+		collected, metricsErr := svc.Metrics()
+		metricsDone <- metricsResult{metrics: collected, err: metricsErr}
+	}()
+
+	select {
+	case <-dpConfigEntered:
+	case <-time.After(metricsConcurrencyTestTimeout):
+		releaseDPConfig()
+		t.Fatal("Metrics did not reach the blocked dataplane config")
+	}
+
+	if _, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "acl0"}); err != nil {
+		releaseDPConfig()
+		t.Fatalf("DeleteConfig failed while Metrics was blocked: %v", err)
+	}
+	releaseDPConfig()
+
+	var result metricsResult
+	select {
+	case result = <-metricsDone:
+	case <-time.After(metricsConcurrencyTestTimeout):
+		releaseDPConfig()
+		t.Fatal("Metrics did not finish after the dataplane config was released")
+	}
+	require.NoError(t, result.err)
+	compilationTime := findMetricWithLabels(
+		result.metrics,
+		"acl_compilation_time_ns",
+		map[string]string{"config": "acl0"},
+	)
+	require.NotNil(t, compilationTime)
+	assert.Equal(t, float64(42), compilationTime.GetGauge())
+	ruleCount := findMetricWithLabels(
+		result.metrics,
+		"acl_filter_rule_count_ip4",
+		map[string]string{"config": "acl0"},
+	)
+	require.NotNil(t, ruleCount)
+	assert.Equal(t, float64(7), ruleCount.GetGauge())
+
+	afterDelete, err := svc.Metrics()
 	require.NoError(t, err)
-
-	afterDelete := svc.metricsState.load()
-	assert.False(t, afterDelete.containsConfig("acl0"))
-	assert.True(t, beforeDelete.containsConfig("acl0"), "published snapshots must remain immutable")
+	assert.Nil(t, findMetricWithLabels(
+		afterDelete,
+		"acl_compilation_time_ns",
+		map[string]string{"config": "acl0"},
+	))
+	assert.NotNil(t, findMetricWithLabels(
+		result.metrics,
+		"acl_compilation_time_ns",
+		map[string]string{"config": "acl0"},
+	), "a returned metrics snapshot must remain immutable")
 }
 
 // TestMetricsSnapshotOrderingSurvivesConcurrentBarrage verifies that once a
 // concurrent barrage of UpdateConfig and DeleteConfig calls across several
-// config names has fully joined, the metrics snapshot's config-name set
-// equals the configs map's key set exactly. Because publishMetricsSnapshotLocked
-// only ever runs inside the same mu.Lock section that installs the map
-// mutation it reflects, every publish is totally ordered with the mutations:
-// the snapshot published by the last critical section to run is necessarily
-// the last one published, so it must match the final map state. Before that
-// fix, a snapshot computed from an earlier map state (for example a delete
-// of one name) could publish after a snapshot computed from a later state
-// (an update of a different name), overwriting the newer one and leaving
-// the equality checked here false — the exact interleaving this test guards
-// against, without pinning any particular schedule.
+// config names has fully joined, the public metrics snapshot's config-name
+// set equals the ListConfigs result exactly. Concurrent updates and deletes
+// must not publish a stale snapshot after a later mutation. The test checks
+// the settled state without relying on a particular scheduling interleaving.
 func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
+	_, agent := newMetricsSnapshotHarness(t)
 	backend := newFakeBackend(0)
+	backend.dpConfig = agent.DPConfig()
 	svc := newTestService(backend)
 
 	names := []string{"a", "b", "c", "d"}
@@ -824,24 +1071,29 @@ func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
 	}
 	require.NoError(t, wg.Wait())
 
-	svc.mu.RLock()
-	wantNames := make(map[string]struct{}, len(svc.configs))
-	for name, entry := range svc.configs {
-		if entry.published == nil {
-			continue
-		}
+	listResponse, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	wantNames := make(map[string]struct{}, len(listResponse.Configs))
+	for _, name := range listResponse.Configs {
 		wantNames[name] = struct{}{}
 	}
-	svc.mu.RUnlock()
 
-	snapshot := svc.metricsState.load()
-	gotNames := make(map[string]struct{}, len(snapshot.configInfos))
-	for name := range snapshot.configInfos {
-		gotNames[name] = struct{}{}
+	collected, err := svc.Metrics()
+	require.NoError(t, err)
+	gotNames := map[string]struct{}{}
+	for _, metric := range collected {
+		if metric.GetName() != "acl_compilation_time_ns" {
+			continue
+		}
+		for _, label := range metric.GetLabels() {
+			if label.GetName() == "config" {
+				gotNames[label.GetValue()] = struct{}{}
+			}
+		}
 	}
 
 	assert.Equal(t, wantNames, gotNames,
-		"metrics snapshot config set must match the configs map exactly after the barrage settles")
+		"public metrics config set must match ListConfigs after the barrage settles")
 }
 
 // TestUpdateConfig_CompilesInParallel verifies that UpdateConfig calls for
@@ -928,8 +1180,11 @@ func TestShowAndListConfigs_DoNotWaitForCompile(t *testing.T) {
 	select {
 	case result := <-showDone:
 		require.NoError(t, result.err)
-		assert.True(t, rulesEqual(initialRules, result.resp.Rules),
-			"ShowConfig must return the old published state while a compile is in flight")
+		require.Len(t, result.resp.Rules, len(initialRules))
+		for idx := range initialRules {
+			assert.True(t, proto.Equal(initialRules[idx], result.resp.Rules[idx]),
+				"ShowConfig must return the old published state while a compile is in flight")
+		}
 	case <-time.After(concurrencyWaitTimeout):
 		t.Fatal("ShowConfig waited for the in-flight compile")
 	}
@@ -1017,12 +1272,15 @@ func TestUpdateConfig_SameNameSerializes(t *testing.T) {
 
 	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "a"})
 	require.NoError(t, err)
-	assert.True(t, rulesEqual(rulesB, resp.Rules))
+	require.Len(t, resp.Rules, len(rulesB))
+	for idx := range rulesB {
+		assert.True(t, proto.Equal(rulesB[idx], resp.Rules[idx]))
+	}
 }
 
 // TestUpdateAndDeleteConfig_NoDoubleFree verifies that concurrent
 // UpdateConfig and DeleteConfig calls racing on the same name never free a
-// handle twice and never leave a handle still referenced from configs freed.
+// handle twice or free a handle that remains active.
 func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
 	backend := newFakeBackend(0)
 	svc := newTestService(backend)
@@ -1050,34 +1308,23 @@ func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
 	}
 	require.NoError(t, wg.Wait())
 
-	svc.mu.RLock()
-	entry := svc.configs[name]
-	svc.mu.RUnlock()
-
-	hasLive := entry.published != nil
-	var liveHandle ModuleHandle
-	if hasLive {
-		liveHandle = entry.published.acl
+	listResp, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	if len(listResp.Configs) > 0 {
+		require.Equal(t, []string{name}, listResp.Configs)
+		_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+		require.NoError(t, err)
 	}
-
-	for _, h := range backend.CreatedHandles() {
-		if hasLive && h == liveHandle {
-			assert.Equal(t, 0, h.FreeCount(), "the live handle must not have been freed")
-			continue
-		}
-		assert.Equal(t, 1, h.FreeCount(), "every replaced or deleted handle must be freed exactly once")
-	}
+	assertAllHandlesFreed(t, backend)
 }
 
 // TestRelinkConfigs_ConcurrentWithUpdateOfSharedName verifies that
-// ACLAdapter.RelinkConfigs racing an UpdateConfig call on one of its linked
-// names completes without deadlock and leaves both configs present with a
-// handle from one of the two racing operations, never a freed-but-still-
-// referenced handle.
+// ACLAdapter.RelinkConfigs racing an UpdateConfig call on one linked name
+// completes without deadlock and refreshes the non-racing b handle safely.
 func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
 	backend := newFakeBackend(0)
 	svc := newTestService(backend)
-	adapter := NewACLAdapter(svc)
+	adapter := acl.NewACLAdapter(svc)
 
 	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
 	publish := func(_ []ffi.ModuleConfig) error { return nil }
@@ -1091,10 +1338,15 @@ func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
 	}
 
 	require.NoError(t, adapter.LinkConfigs([]string{"a", "b"}, fwstateConfig, publish))
-
-	svc.mu.RLock()
-	handleB0 := svc.configs["b"].published.acl
-	svc.mu.RUnlock()
+	createdAfterLink := backend.CreatedHandles()
+	var linkedB *fakeHandle
+	for _, handle := range createdAfterLink {
+		if handle.Name() == "b" && handle.FreeCount() == 0 {
+			require.Nil(t, linkedB, "only one b handle may remain owned after linking")
+			linkedB = handle
+		}
+	}
+	require.NotNil(t, linkedB, "LinkConfigs must leave b owned by the adapter")
 
 	var wg errgroup.Group
 	wg.Go(func() error {
@@ -1118,76 +1370,99 @@ func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
 		t.Fatal("RelinkConfigs racing an UpdateConfig on a shared name deadlocked")
 	}
 
-	svc.mu.RLock()
-	entryA := svc.configs["a"]
-	entryB := svc.configs["b"]
-	svc.mu.RUnlock()
-
-	require.NotNil(t, entryA.published, "config \"a\" must survive the race")
-	require.NotNil(t, entryB.published, "config \"b\" must survive the race")
-	assert.NotNil(t, entryA.published.acl)
-	assert.True(t, entryB.published.acl != handleB0, "RelinkConfigs must have installed a fresh handle for \"b\"")
-
-	for _, h := range backend.CreatedHandles() {
-		if h == entryA.published.acl || h == entryB.published.acl {
-			assert.Equal(t, 0, h.FreeCount(), "a still-referenced handle must not be freed")
-			continue
+	var refreshedB *fakeHandle
+	for _, handle := range backend.CreatedHandles() {
+		if handle.Name() == "b" && handle.FreeCount() == 0 {
+			require.Nil(t, refreshedB, "only one b handle may remain owned after relinking")
+			refreshedB = handle
 		}
-		assert.Equal(t, 1, h.FreeCount(), "every replaced handle must be freed exactly once")
 	}
+	require.NotNil(t, refreshedB, "RelinkConfigs must leave a refreshed b handle owned")
+	assert.NotSame(t, linkedB, refreshedB)
+	assert.Equal(t, 1, linkedB.FreeCount(), "RelinkConfigs must free the prior b handle once")
+
+	listResp, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"a", "b"}, listResp.Configs)
+
+	for _, name := range []string{"a", "b"} {
+		_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
+		require.NoError(t, err)
+	}
+	assertAllHandlesFreed(t, backend)
 }
 
 // TestACLAdapterLinkConfigs_UnknownName verifies that LinkConfigs with an
-// unknown name in the list fails without interning an entry for it, and
-// without disturbing an already-live name also present in the list.
+// unknown name in the list fails without allocating a backend module for it,
+// and without disturbing an already-live name also present in the list.
 func TestACLAdapterLinkConfigs_UnknownName(t *testing.T) {
 	backend := newFakeBackend(0)
 	svc := newTestService(backend)
-	adapter := NewACLAdapter(svc)
+	adapter := acl.NewACLAdapter(svc)
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "a",
 		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
 	})
 	require.NoError(t, err)
+	createdBefore := backend.CreatedHandles()
+	require.Len(t, createdBefore, 1)
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
 
 	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
 	publish := func(_ []ffi.ModuleConfig) error { return nil }
 
 	err = adapter.LinkConfigs([]string{"a", "missing"}, fwstateConfig, publish)
 	require.Error(t, err)
-
-	svc.mu.RLock()
-	_, ok := svc.configs["missing"]
-	svc.mu.RUnlock()
-	assert.False(t, ok, "an unknown name in a LinkConfigs request must not create an entry")
-}
-
-// TestACLAdapterLinkConfigs_TombstonedName verifies that LinkConfigs with a
-// tombstoned name in the list — one whose entry exists but whose published
-// config was deleted — reports a not-found error. checkLinkable's
-// existence-only pre-check lets the tombstoned name through since its entry
-// is still present, and createLinkedHandles' own check of published, under
-// the name's lock, is what actually rejects it.
-func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
-	backend := newFakeBackend(0)
-	svc := newTestService(backend)
-	adapter := NewACLAdapter(svc)
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:  "a",
-		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-	})
-	require.NoError(t, err)
+	createdAfter := backend.CreatedHandles()
+	require.Len(t, createdAfter, len(createdBefore), "an unknown name must not allocate a handle")
+	assert.Equal(t, 0, createdAfter[0].FreeCount(), "the live \"a\" handle must remain owned by the service")
 
 	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
 	require.NoError(t, err)
+	assertAllHandlesFreed(t, backend)
+}
+
+// TestACLAdapterLinkConfigs_TombstonedName verifies retained-name linking
+// failure frees every temporary handle and preserves the live config.
+func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
+	backend := newFakeBackend(0)
+	svc := newTestService(backend)
+	adapter := acl.NewACLAdapter(svc)
+
+	for _, name := range []string{"a", "deleted"} {
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+			Name:  name,
+			Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+		})
+		require.NoError(t, err)
+	}
+	createdBefore := backend.CreatedHandles()
+	require.Len(t, createdBefore, 2)
+
+	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "deleted"})
+	require.NoError(t, err)
+	assert.Equal(t, 0, createdBefore[0].FreeCount(), "the live \"a\" handle must remain owned")
+	assert.Equal(t, 1, createdBefore[1].FreeCount(), "the deleted handle must be freed once")
 
 	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
 	publish := func(_ []ffi.ModuleConfig) error { return nil }
 
-	err = adapter.LinkConfigs([]string{"a"}, fwstateConfig, publish)
+	err = adapter.LinkConfigs([]string{"a", "deleted"}, fwstateConfig, publish)
 	require.ErrorContains(t, err, "not found")
+
+	createdAfter := backend.CreatedHandles()
+	require.Len(t, createdAfter, len(createdBefore)+1)
+	temporary := createdAfter[len(createdBefore)]
+	assert.Equal(t, "a", temporary.Name())
+	assert.Equal(t, 1, temporary.FreeCount(), "the temporary live handle must be freed once")
+	assert.Equal(t, 0, createdAfter[0].FreeCount(), "the original live handle must remain owned")
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
+	require.NoError(t, err)
+	assertAllHandlesFreed(t, backend)
 }
 
 // TestACLAdapterLinkConfigs_DuplicateName verifies that a name repeated in
@@ -1197,7 +1472,7 @@ func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
 func TestACLAdapterLinkConfigs_DuplicateName(t *testing.T) {
 	backend := newFakeBackend(0)
 	svc := newTestService(backend)
-	adapter := NewACLAdapter(svc)
+	adapter := acl.NewACLAdapter(svc)
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "a",
@@ -1205,7 +1480,8 @@ func TestACLAdapterLinkConfigs_DuplicateName(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	createdBefore := len(backend.CreatedHandles())
+	createdBefore := backend.CreatedHandles()
+	require.Len(t, createdBefore, 1)
 
 	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
 
@@ -1218,18 +1494,14 @@ func TestACLAdapterLinkConfigs_DuplicateName(t *testing.T) {
 	err = adapter.LinkConfigs([]string{"a", "a"}, fwstateConfig, publish)
 	require.NoError(t, err)
 
-	assert.Equal(t, createdBefore+1, len(backend.CreatedHandles()), "a duplicated name must create exactly one handle")
+	createdAfter := backend.CreatedHandles()
+	require.Len(t, createdAfter, len(createdBefore)+1, "a duplicated name must create exactly one handle")
 	assert.Equal(t, 1, publishedCount, "a duplicated name must publish exactly one module config")
 
-	svc.mu.RLock()
-	liveHandle := svc.configs["a"].published.acl
-	svc.mu.RUnlock()
+	assert.Equal(t, 1, createdAfter[0].FreeCount(), "the superseded handle must be freed once")
+	assert.Equal(t, 0, createdAfter[1].FreeCount(), "the linked handle must remain owned")
 
-	for _, h := range backend.CreatedHandles() {
-		if h == liveHandle {
-			assert.Equal(t, 0, h.FreeCount(), "the live handle must not have been freed")
-			continue
-		}
-		assert.Equal(t, 1, h.FreeCount(), "every superseded handle must be freed exactly once")
-	}
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
+	require.NoError(t, err)
+	assertAllHandlesFreed(t, backend)
 }
