@@ -87,6 +87,21 @@ type aclConfig struct {
 	fwstateName string
 }
 
+// Rules returns the rules held by the config.
+func (m *aclConfig) Rules() []*aclpb.Rule {
+	return m.rules
+}
+
+// Handle returns the module handle held by the config.
+func (m *aclConfig) Handle() ModuleHandle {
+	return m.acl
+}
+
+// FwStateName returns the linked fwstate config name.
+func (m *aclConfig) FwStateName() string {
+	return m.fwstateName
+}
+
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
@@ -138,6 +153,26 @@ type configEntry struct {
 	// An updateMu holder may read its own entry's published field without
 	// m.mu, since it is the only possible writer while updateMu is held.
 	published *aclConfig
+}
+
+// LockUpdate acquires the entry's update lock.
+func (m *configEntry) LockUpdate() {
+	m.updateMu.Lock()
+}
+
+// UnlockUpdate releases the entry's update lock.
+func (m *configEntry) UnlockUpdate() {
+	m.updateMu.Unlock()
+}
+
+// Published returns the config currently published for the entry.
+func (m *configEntry) Published() *aclConfig {
+	return m.published
+}
+
+// Publish stores the config currently published for the entry.
+func (m *configEntry) Publish(config *aclConfig) {
+	m.published = config
 }
 
 // ACLService implements the gRPC ACL service.
@@ -244,14 +279,13 @@ func (m *ACLService) hasEntry(name string) bool {
 // withEntry fetches or creates the entry for name, holds its updateMu for
 // the duration of fn, then returns fn's error.
 //
-// updateMu is locked and unlocked only here and in withEntries, nowhere
-// else in the package. That is what makes mutation serialization for a
-// name exhaustive: grep the package for updateMu.Lock( and
-// updateMu.Unlock( and every match resolves to one of these two helpers.
+// Every mutation path acquires and releases the entry lock through the
+// LockUpdate and UnlockUpdate receiver methods. Keeping that pair here makes
+// serialization exhaustive, including backend work and C compilation.
 func (m *ACLService) withEntry(name string, fn func(*configEntry) error) error {
 	entry := m.entry(name)
-	entry.updateMu.Lock()
-	defer entry.updateMu.Unlock()
+	entry.LockUpdate()
+	defer entry.UnlockUpdate()
 
 	return fn(entry)
 }
@@ -265,10 +299,9 @@ func (m *ACLService) withEntry(name string, fn func(*configEntry) error) error {
 // deadlocks between two calls that share some names but list them in a
 // different order.
 //
-// updateMu is locked and unlocked only here and in withEntry, nowhere else
-// in the package. That is what makes mutation serialization for a name
-// exhaustive: grep the package for updateMu.Lock( and updateMu.Unlock( and
-// every match resolves to one of these two helpers.
+// Every multi-name mutation acquires and releases entry locks through the
+// LockUpdate and UnlockUpdate receiver methods. Sorted acquisition and reverse
+// release preserve the consistent order that prevents deadlocks.
 func (m *ACLService) withEntries(names []string, fn func(map[string]*configEntry) error) error {
 	seen := make(map[string]struct{}, len(names))
 	sorted := make([]string, 0, len(names))
@@ -285,13 +318,13 @@ func (m *ACLService) withEntries(names []string, fn func(map[string]*configEntry
 	locked := make([]*configEntry, len(sorted))
 	for idx, name := range sorted {
 		e := m.entry(name)
-		e.updateMu.Lock()
+		e.LockUpdate()
 		locked[idx] = e
 		entries[name] = e
 	}
 	defer func() {
 		for _, e := range slices.Backward(locked) {
-			e.updateMu.Unlock()
+			e.UnlockUpdate()
 		}
 	}()
 
@@ -452,9 +485,9 @@ func (m *ACLService) UpdateConfig(
 
 	var resp *aclpb.UpdateConfigResponse
 	err := m.withEntry(name, func(entry *configEntry) error {
-		oldConfig := entry.published
+		oldConfig := entry.Published()
 
-		if oldConfig != nil && rulesEqual(oldConfig.rules, req.Rules) {
+		if oldConfig != nil && rulesEqual(oldConfig.Rules(), req.Rules) {
 			resp = &aclpb.UpdateConfigResponse{}
 			return nil
 		}
@@ -476,11 +509,11 @@ func (m *ACLService) UpdateConfig(
 
 		fwstateName := ""
 		if oldConfig != nil {
-			fwstateName = oldConfig.fwstateName
+			fwstateName = oldConfig.FwStateName()
 		}
 
 		if fwstateName != "" {
-			handle.TransferFwStateConfig(oldConfig.acl.AsFFIModule())
+			handle.TransferFwStateConfig(oldConfig.Handle().AsFFIModule())
 			m.log.Info("transferred fwstate config for ACL module", zap.String("config", name))
 		}
 
@@ -490,11 +523,11 @@ func (m *ACLService) UpdateConfig(
 		}
 
 		m.mu.Lock()
-		entry.published = &aclConfig{
+		entry.Publish(&aclConfig{
 			rules:       req.Rules,
 			acl:         handle,
 			fwstateName: fwstateName,
-		}
+		})
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
 
@@ -525,14 +558,18 @@ func (m *ACLService) ShowConfig(
 	}
 
 	entry, ok := m.configs[name]
-	if !ok || entry.published == nil {
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	}
+	config := entry.Published()
+	if config == nil {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	response := &aclpb.ShowConfigResponse{
 		Name:        name,
-		Rules:       entry.published.rules,
-		FwstateName: entry.published.fwstateName,
+		Rules:       config.Rules(),
+		FwstateName: config.FwStateName(),
 	}
 
 	return response, nil
@@ -550,7 +587,7 @@ func (m *ACLService) ListConfigs(
 	}
 
 	for name, entry := range m.configs {
-		if entry.published == nil {
+		if entry.Published() == nil {
 			continue
 		}
 		response.Configs = append(response.Configs, name)
@@ -583,12 +620,12 @@ func (m *ACLService) DeleteConfig(
 	}
 
 	err := m.withEntry(name, func(entry *configEntry) error {
-		config := entry.published
+		config := entry.Published()
 		if config == nil {
 			return status.Errorf(codes.NotFound, "config %q not found", name)
 		}
 
-		if config.acl != nil {
+		if config.Handle() != nil {
 			if err := m.backend.DeleteModule(name); err != nil {
 				return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
 			}
@@ -596,7 +633,7 @@ func (m *ACLService) DeleteConfig(
 		}
 
 		m.mu.Lock()
-		entry.published = nil
+		entry.Publish(nil)
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
 

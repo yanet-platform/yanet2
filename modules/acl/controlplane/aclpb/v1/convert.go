@@ -15,7 +15,7 @@ import (
 func ToActions(protoActions []*Action) ([]cacl.AclAction, error) {
 	out := make([]cacl.AclAction, len(protoActions))
 	for idx, action := range protoActions {
-		kind, err := action.toCAclKind()
+		kind, err := action.ToCAclKind()
 		if err != nil {
 			return nil, fmt.Errorf("action %d: %w", idx, err)
 		}
@@ -33,7 +33,7 @@ func FromActions(actions []cacl.AclAction) []*Action {
 	result := make([]*Action, len(actions))
 	for idx, a := range actions {
 		result[idx] = &Action{}
-		result[idx].setFromCAclKind(a.Kind)
+		result[idx].SetFromCAclKind(a.Kind)
 	}
 
 	return result
@@ -109,13 +109,13 @@ func FromRules(rules []cacl.AclRule) []*Rule {
 	return out
 }
 
-// setFromCAclKind sets m.Kind to the proto enum value corresponding
+// SetFromCAclKind sets m.Kind to the proto enum value corresponding
 // to the given cacl action kind.
 //
 // Unrecognized cacl kinds map to ActionKind_ACTION_KIND_PASS (the proto
 // zero value). FromActions does not surface an error in this direction
 // because input comes from a typed Go value, not the wire.
-func (m *Action) setFromCAclKind(kind uint32) {
+func (m *Action) SetFromCAclKind(kind uint32) {
 	switch kind {
 	case uint32(cacl.ActionAllow):
 		m.Kind = ActionKind_ACTION_KIND_PASS
@@ -155,8 +155,8 @@ func ipNetToProto(n filter.IPNet) *filterpb.IPNet {
 	return &filterpb.IPNet{Addr: addrBytes, Mask: maskBytes}
 }
 
-// toCAclKind maps the proto kind enum to the cacl action kind.
-func (m *Action) toCAclKind() (uint32, error) {
+// ToCAclKind maps the proto kind enum to the cacl action kind.
+func (m *Action) ToCAclKind() (uint32, error) {
 	switch m.GetKind() {
 	case ActionKind_ACTION_KIND_PASS:
 		return uint32(cacl.ActionAllow), nil
