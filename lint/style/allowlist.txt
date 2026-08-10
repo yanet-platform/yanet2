@@ -35,8 +35,6 @@
 
 barenew:common/go/grpcmetrics/grpcmetrics.go:New:1  # legacy: rename to a descriptive constructor name
 barenew:common/go/xbackoff/backoff.go:New:1  # legacy: rename to a descriptive constructor name
-logger:modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing:1  # legacy: migrate to the options pattern
-logger:modules/pdump/controlplane/service.go:NewPdumpService:1  # legacy: migrate to the options pattern
 loggerlast:common/go/readiness/readiness.go:options.Log:1  # legacy: move the *zap.Logger field to the end of the struct
 loggerlast:controlplane/gateway/gateway.go:gatewayOptions.Log:1  # legacy: move the *zap.Logger field to the end of the struct
 loggerlast:controlplane/internal/auth/sshkey/authenticator.go:authenticatorOptions.Log:1  # legacy: move the *zap.Logger field to the end of the struct

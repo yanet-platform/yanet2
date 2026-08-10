@@ -98,9 +98,39 @@ func (e *errorCallbackContext) Close() {
 
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
+	log *zap.Logger
 }
 
-func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
+// ModuleConfigOption configures a pdump module configuration.
+type ModuleConfigOption func(*moduleConfigOptions)
+
+type moduleConfigOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleConfigOptions() *moduleConfigOptions {
+	return &moduleConfigOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithModuleConfigLog sets the logger for a pdump module configuration.
+func WithModuleConfigLog(log *zap.Logger) ModuleConfigOption {
+	return func(o *moduleConfigOptions) {
+		o.Log = log
+	}
+}
+
+func NewModuleConfig(
+	agent *ffi.Agent,
+	name string,
+	options ...ModuleConfigOption,
+) (*ModuleConfig, error) {
+	opts := newModuleConfigOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -113,6 +143,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 
 	return &ModuleConfig{
 		ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+		log: opts.Log,
 	}, nil
 }
 
@@ -198,7 +229,7 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.Logger) error {
+func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
 	var workerCount C.uint64_t
 
 	errCtx := newErrorCallbackContext()
@@ -221,13 +252,14 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.Logger) error {
 	rings := unsafe.Slice(addr, workerCount)
 	for idx := range rings {
 		dataPtr := C.pdump_module_config_addr_of(&rings[idx].data)
+		log := m.log.With(zap.Int("ringIdx", idx))
 		worker := &workerArea{
 			writeIdx:    (*uint64)(&(rings[idx].write_idx)),
 			readableIdx: (*uint64)(&(rings[idx].readable_idx)),
 			readIdx:     0,
 			data:        unsafe.Slice((*byte)(dataPtr), rings[idx].size),
 			mask:        uint64(rings[idx].mask),
-			log:         log.With(zap.Int("ringIdx", idx)),
+			log:         log,
 		}
 		ring.workers = append(ring.workers, worker)
 	}

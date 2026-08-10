@@ -71,7 +71,7 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := NewPdumpService(agent, log)
+	service := NewPdumpService(agent, WithPdumpServiceLog(log))
 
 	return &PdumpModule{
 		cfg:     cfg,

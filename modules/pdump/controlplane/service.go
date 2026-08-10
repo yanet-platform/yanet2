@@ -68,13 +68,38 @@ type ringReader struct {
 	DoneCh chan bool
 }
 
-// NewPdumpService initializes a new packet capture service with the specified agent and logger.
-func NewPdumpService(agent *ffi.Agent, log *zap.Logger) *PdumpService {
+// PdumpServiceOption configures a packet capture service.
+type PdumpServiceOption func(*pdumpServiceOptions)
+
+type pdumpServiceOptions struct {
+	Log *zap.Logger
+}
+
+func newPdumpServiceOptions() *pdumpServiceOptions {
+	return &pdumpServiceOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithPdumpServiceLog sets the logger for a packet capture service.
+func WithPdumpServiceLog(log *zap.Logger) PdumpServiceOption {
+	return func(o *pdumpServiceOptions) {
+		o.Log = log
+	}
+}
+
+// NewPdumpService initializes a new packet capture service.
+func NewPdumpService(agent *ffi.Agent, options ...PdumpServiceOption) *PdumpService {
+	opts := newPdumpServiceOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &PdumpService{
 		agent:   agent,
 		configs: map[string]*pdumpConfig{},
 		quitCh:  make(chan bool),
-		log:     log,
+		log:     opts.Log,
 	}
 }
 
@@ -289,7 +314,7 @@ func (m *PdumpService) transferConfigParameters(
 	}
 
 	m.log.Debug("setup ring", zap.String("module", name))
-	if err := ffiConfig.SetupRing(oldConfig.Ring, m.log); err != nil {
+	if err := ffiConfig.SetupRing(oldConfig.Ring); err != nil {
 		return fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
 	}
 
@@ -333,7 +358,7 @@ func (m *PdumpService) updateModuleConfig(
 
 	modConfig := m.configs[name]
 
-	ffiConfig, err := NewModuleConfig(m.agent, name)
+	ffiConfig, err := NewModuleConfig(m.agent, name, WithModuleConfigLog(m.log))
 	if err != nil {
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
