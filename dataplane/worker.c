@@ -416,9 +416,12 @@ dataplane_worker_init(
 
 	// Gets are never concurrent: the PMD rx-ring prefill happens in
 	// dpdk_port_start(), strictly before this worker thread is created,
-	// and every later get is this worker's own. Puts are multi-producer:
-	// a consumer worker on another core frees mbufs drawn from this
-	// pool.
+	// and every later get is this worker's own. Puts stay single-producer
+	// too: a consumer worker on another core only ever decrements the
+	// refcount pin worker_tx_pipe_push() holds on every segment, and
+	// worker_tx_pipe_reclaim() performs the actual mempool put back on
+	// this pool's owning worker once every segment's pin is the last
+	// reference left.
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,
 		num_mbufs,
@@ -430,7 +433,7 @@ dataplane_worker_init(
 		rte_pktmbuf_init,
 		NULL,
 		config->instance_id,
-		MEMPOOL_F_SC_GET
+		MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET
 	);
 	if (worker->rx_mempool == NULL) {
 		LOG(ERROR, "failed to create worker rx pool %s", mempool_name);
