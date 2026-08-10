@@ -28,7 +28,7 @@ func TestConfigureTemplateSetsGuestPathsForSelectedSnapshot(t *testing.T) {
 		},
 		{
 			name:             "versioned baseline",
-			snapshotName:     "baseline-nat44-v3",
+			snapshotName:     "baseline-custom-v3",
 			expectedPaths:    LocalGuestPaths(),
 			expectedCommands: []string{"/tmp/yanet/forward.yaml", "/tmp/yanet/config/route0.yaml"},
 		},
