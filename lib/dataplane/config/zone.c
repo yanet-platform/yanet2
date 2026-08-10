@@ -1,5 +1,7 @@
 #include "zone.h"
 
+#include <sched.h>
+#include <time.h>
 #include <unistd.h>
 
 struct dp_config *
@@ -11,21 +13,45 @@ dp_config_nextk(struct dp_config *current, uint32_t k) {
 	return current;
 }
 
+// Number of sched_yield iterations tried before falling back to nanosleep.
+#define DP_CONFIG_GEN_ACK_YIELD_ITERS 1024
+
+// Fixed nanosleep interval used once the yield phase is exhausted.
+#define DP_CONFIG_GEN_ACK_SLEEP_NS UINT64_C(1000000)
+
+// Waits for a single worker to acknowledge gen.
+//
+// Backs off from sched_yield to a fixed-interval nanosleep, without ever
+// giving up.
+static void
+dp_config_wait_for_worker_gen(struct dp_worker *worker, uint64_t gen) {
+	for (unsigned iters = 0; iters < DP_CONFIG_GEN_ACK_YIELD_ITERS;
+	     ++iters) {
+		if (__atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE) >= gen) {
+			return;
+		}
+		sched_yield();
+	}
+
+	static const struct timespec sleep_ts = {
+		.tv_sec = (time_t)(DP_CONFIG_GEN_ACK_SLEEP_NS / 1000000000ULL),
+		.tv_nsec = (long)(DP_CONFIG_GEN_ACK_SLEEP_NS % 1000000000ULL),
+	};
+	for (;;) {
+		if (__atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE) >= gen) {
+			return;
+		}
+		nanosleep(&sleep_ts, NULL);
+	}
+}
+
 void
 dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
-	uint64_t idx = 0;
-	do {
+	for (uint64_t idx = 0; idx < dp_config->worker_count; ++idx) {
 		struct dp_worker *worker = ADDR_OF(workers + idx);
-		uint64_t worker_gen =
-			__atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE);
-		if (worker_gen < gen) {
-			// TODO cpu yield
-			continue;
-		}
-
-		++idx;
-	} while (idx < dp_config->worker_count);
+		dp_config_wait_for_worker_gen(worker, gen);
+	}
 }
 
 bool

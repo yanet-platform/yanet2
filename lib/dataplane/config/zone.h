@@ -201,5 +201,11 @@ dp_config_lookup_object(
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
 
+// Waits for every worker of dp_config to acknowledge generation gen.
+//
+// This is the grace period cp_config_gen_install needs before it may
+// reclaim the generation gen superseded. Blocks with no timeout, by
+// design: an early return would let an owner reclaim memory an
+// unacknowledged worker may still dereference.
 void
 dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen);
