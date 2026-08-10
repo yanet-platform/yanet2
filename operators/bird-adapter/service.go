@@ -61,6 +61,24 @@ type adapterServiceOptions struct {
 	Log *zap.Logger
 }
 
+type methodLogOption func(*methodLogOptions)
+
+type methodLogOptions struct {
+	Log *zap.Logger
+}
+
+func newMethodLogOptions() *methodLogOptions {
+	return &methodLogOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+func withMethodLog(log *zap.Logger) methodLogOption {
+	return func(o *methodLogOptions) {
+		o.Log = log
+	}
+}
+
 func newAdapterServiceOptions() *adapterServiceOptions {
 	return &adapterServiceOptions{
 		Log: zap.NewNop(),
@@ -180,7 +198,14 @@ func (m *AdapterService) SetupConfig(
 	}
 
 	// And then add dynamic routes, if any.
-	if err := m.processBirdImport(conn, cfg, name, mplsV4Src, mplsV6Src, clientLog); err != nil {
+	if err := m.processBirdImport(
+		conn,
+		cfg,
+		name,
+		mplsV4Src,
+		mplsV6Src,
+		withMethodLog(clientLog),
+	); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to setup bird import reader: %w ", err)
 	}
@@ -298,8 +323,14 @@ func (m *AdapterService) processBirdImport(
 	name string,
 	mplsV4Src netip.Addr,
 	mplsV6Src netip.Addr,
-	clientLog *zap.Logger,
+	options ...methodLogOption,
 ) error {
+	opts := newMethodLogOptions()
+	for _, o := range options {
+		o(opts)
+	}
+	clientLog := opts.Log
+
 	// streamCtx governs this specific import's gRPC stream and BIRD reader.
 	// Cancelled via the holder's Close on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -429,7 +460,7 @@ func (m *AdapterService) processBirdImport(
 	m.imports[name] = holder
 
 	// Launch goroutine for BIRD reading and stream lifecycle management.
-	go m.runBirdImportLoop(streamCtx, holder, client, log)
+	go m.runBirdImportLoop(streamCtx, holder, client, withMethodLog(log))
 
 	return nil
 }
@@ -442,8 +473,14 @@ func (m *AdapterService) runBirdImportLoop(
 	ctx context.Context,
 	holder *importHolder,
 	client routepb.RouteServiceClient,
-	log *zap.Logger,
+	options ...methodLogOption,
 ) {
+	opts := newMethodLogOptions()
+	for _, o := range options {
+		o(opts)
+	}
+	log := opts.Log
+
 	defer func() { // Cleanup on exit
 		log.Info("BIRD import loop cleanup: closing connection and cancelling context")
 		holder.Close()
@@ -478,7 +515,7 @@ func (m *AdapterService) runBirdImportLoop(
 
 		if !streamActive {
 			log.Info("attempting to re-establish BIRD route update stream")
-			if !m.reconnectStream(ctx, client, holder, log) {
+			if !m.reconnectStream(ctx, client, holder, withMethodLog(log)) {
 				log.Info("stream reconnection aborted, terminating BIRD import loop")
 				return // Reconnect failed due to ctx / quitCh
 			}
@@ -535,8 +572,14 @@ func (m *AdapterService) reconnectStream(
 	ctx context.Context,
 	client routepb.RouteServiceClient,
 	holder *importHolder,
-	log *zap.Logger,
+	options ...methodLogOption,
 ) bool {
+	opts := newMethodLogOptions()
+	for _, o := range options {
+		o(opts)
+	}
+	log := opts.Log
+
 	log.Info("attempting to re-establish BIRD route update stream with exponential backoff")
 
 	ticker := backoff.NewTicker(&backoff.ExponentialBackOff{
