@@ -10,6 +10,7 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -58,8 +59,14 @@ func startGRPCStub(t *testing.T, server ynpb.GatewayServer) string {
 	grpcServer := grpc.NewServer()
 	ynpb.RegisterGatewayServer(grpcServer, server)
 
-	go func() { _ = grpcServer.Serve(listener) }()
-	t.Cleanup(grpcServer.Stop)
+	var wg errgroup.Group
+	wg.Go(func() error {
+		return grpcServer.Serve(listener)
+	})
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		_ = wg.Wait()
+	})
 
 	return listener.Addr().String()
 }

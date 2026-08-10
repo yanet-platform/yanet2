@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/stretchr/testify/require"
@@ -106,11 +107,15 @@ func TestServiceRunner_registerClosesGatewayClientConnection(t *testing.T) {
 
 	gatewayServer := grpc.NewServer()
 	ynpb.RegisterGatewayServer(gatewayServer, gatewayService)
-	t.Cleanup(gatewayServer.Stop)
 
-	go func() {
-		_ = gatewayServer.Serve(trackingListener)
-	}()
+	var wg errgroup.Group
+	wg.Go(func() error {
+		return gatewayServer.Serve(trackingListener)
+	})
+	t.Cleanup(func() {
+		gatewayServer.Stop()
+		_ = wg.Wait()
+	})
 
 	serviceRunner := NewServiceRunner(&fakeService{}, trackingListener.Addr().String(), nil)
 

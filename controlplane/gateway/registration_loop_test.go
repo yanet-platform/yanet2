@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -65,10 +64,14 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 	t.Cleanup(func() { _ = gw.Close() })
 
 	ctx, cancel := context.WithCancel(t.Context())
+	wg, wgContext := errgroup.WithContext(ctx)
+	defer func() {
+		cancel()
+		require.ErrorIs(t, wg.Wait(), context.Canceled)
+	}()
 
-	group, groupContext := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		return gw.Run(groupContext)
+	wg.Go(func() error {
+		return gw.Run(wgContext)
 	})
 
 	connection, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -113,8 +116,8 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 		loopedBackendAddr,
 		gateway.WithLoopInterval(20*time.Millisecond),
 	)
-	group.Go(func() error {
-		return registrationLoop.Run(groupContext)
+	wg.Go(func() error {
+		return registrationLoop.Run(wgContext)
 	})
 
 	// Vacuity guard: both services must actually reach the registry as
@@ -160,9 +163,8 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 	// looped service must survive many further sweep ticks, because its
 	// registration loop keeps refreshing the last-seen timestamp.
 	require.Never(t, func() bool {
-		response, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		response, listErr := client.ListServices(ctx, &ynpb.ListServicesRequest{})
 		if listErr != nil {
-			assert.NoError(t, listErr)
 			return true
 		}
 		_, found := findRegisteredService(response, loopedServiceName)
@@ -184,7 +186,4 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 	// satisfied by a transient blip that later re-appears.
 	_, oneShotStillFound := findRegisteredService(finalResponse, oneShotServiceName)
 	require.False(t, oneShotStillFound, "one-shot registration must remain evicted")
-
-	cancel()
-	require.ErrorIs(t, group.Wait(), context.Canceled)
 }
