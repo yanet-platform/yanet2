@@ -52,6 +52,10 @@ dp_load_module(
 		return -1;
 	}
 	struct module *module = loader();
+	if (module == NULL) {
+		LOG(ERROR, "module constructor %s returned NULL", loader_name);
+		return -1;
+	}
 
 	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
 	if (mem_array_expand_exp(
@@ -61,7 +65,7 @@ dp_load_module(
 		    &dp_config->module_count
 	    )) {
 		LOG(ERROR, "failed to allocate memory for module %s", name);
-		// FIXME: free module
+		free(module);
 		return -1;
 	}
 
@@ -89,6 +93,10 @@ dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 		return -1;
 	}
 	struct device *device = loader();
+	if (device == NULL) {
+		LOG(ERROR, "device constructor %s returned NULL", loader_name);
+		return -1;
+	}
 
 	struct dp_device *dp_devices = ADDR_OF(&dp_config->dp_devices);
 	if (mem_array_expand_exp(
@@ -98,7 +106,7 @@ dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 		    &dp_config->device_count
 	    )) {
 		LOG(ERROR, "failed to allocate memory for device %s", name);
-		// FIXME: free device
+		free(device);
 		return -1;
 	}
 
