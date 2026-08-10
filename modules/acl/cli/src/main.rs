@@ -289,6 +289,7 @@ pub struct Cmd {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
+const METRICS_SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.MetricsService";
 
 pub struct ACLService {
     service: Service<AclServiceClient<LayeredChannel>>,
@@ -305,7 +306,7 @@ impl ACLService {
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         });
-        let metrics = Service::new(&conn, SERVICE_NAME, |channel| {
+        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, |channel| {
             MetricsServiceClient::new(channel)
                 .max_decoding_message_size(256 * 1024 * 1024)
                 .max_encoding_message_size(256 * 1024 * 1024)
