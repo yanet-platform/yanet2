@@ -138,6 +138,8 @@ struct dp_config {
 
 	struct cp_config *cp_config;
 
+	// Both fields are filled in by dataplane_worker_init during dataplane
+	// startup and stay unchanged afterwards.
 	uint64_t worker_count;
 	struct dp_worker **workers;
 

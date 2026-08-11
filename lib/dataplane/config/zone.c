@@ -47,8 +47,11 @@ dp_config_wait_for_worker_gen(struct dp_worker *worker, uint64_t gen) {
 
 void
 dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
-	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
-	for (uint64_t idx = 0; idx < dp_config->worker_count; ++idx) {
+	// The loop bound and the array it indexes come from one observation.
+	struct dp_worker *const *workers = ADDR_OF(&dp_config->workers);
+	const uint64_t worker_count = dp_config->worker_count;
+
+	for (uint64_t idx = 0; idx < worker_count; ++idx) {
 		struct dp_worker *worker = ADDR_OF(workers + idx);
 		dp_config_wait_for_worker_gen(worker, gen);
 	}
