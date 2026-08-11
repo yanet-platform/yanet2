@@ -1,9 +1,72 @@
 #include "config.h"
 
+#include <ctype.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <yaml.h>
 
 #include "common/strutils.h"
+
+static void
+print_scalar(const char *value, size_t length) {
+	fputc('\'', stderr);
+	for (size_t idx = 0; idx < length; ++idx) {
+		unsigned char character = (unsigned char)value[idx];
+		switch (character) {
+		case '\\':
+			fputs("\\\\", stderr);
+			break;
+		case '\'':
+			fputs("\\'", stderr);
+			break;
+		case '\0':
+			fputs("\\0", stderr);
+			break;
+		default:
+			if (isprint(character)) {
+				fputc(character, stderr);
+			} else {
+				fprintf(stderr, "\\x%02x", character);
+			}
+			break;
+		}
+	}
+	fputc('\'', stderr);
+}
+
+static int
+parse_unsigned(
+	const char *field,
+	const char *value,
+	size_t length,
+	uint64_t max,
+	uint64_t *result
+) {
+	char *end = NULL;
+	const char *first = value;
+	while (isspace((unsigned char)*first)) {
+		++first;
+	}
+
+	errno = 0;
+	uintmax_t parsed = strtoumax(value, &end, 10);
+
+	if (*first == '-' || value == end || end != value + length ||
+	    errno == ERANGE || parsed > max) {
+		fprintf(stderr, "invalid %s value ", field);
+		print_scalar(value, length);
+		fprintf(stderr,
+			" (length %zu): expected an unsigned integer in range "
+			"0..%" PRIu64 "\n",
+			length,
+			max);
+		return -1;
+	}
+
+	*result = (uint64_t)parsed;
+	return 0;
+}
 
 static int
 resolve_connections(struct dataplane_config *config) {
@@ -91,6 +154,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 	yaml_parser_t parser;
 	yaml_event_t event;
+	int event_live = 0;
 	if (!yaml_parser_initialize(&parser)) {
 		return -1;
 	}
@@ -112,9 +176,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	struct dataplane_connection_config *connection = NULL;
 
 	char *start = NULL;
-	char *end = NULL;
+	size_t scalar_length = 0;
+	uint64_t value = 0;
 
-	yaml_parser_parse(&parser, &event);
+	if (!yaml_parser_parse(&parser, &event)) {
+		goto error;
+	}
+	event_live = 1;
 	while (event.type != YAML_STREAM_END_EVENT) {
 
 		switch (event.type) {
@@ -134,7 +202,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 		case YAML_SCALAR_EVENT:
 			start = (char *)event.data.scalar.value;
-			end = start + event.data.scalar.length;
+			scalar_length = event.data.scalar.length;
 
 			switch (state) {
 			case state_dataplane_storage:
@@ -144,9 +212,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_dataplane;
 				break;
 			case state_dataplane_dpdk_memory:
-				dataplane->dpdk_memory =
-					strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "dataplane.dpdk_memory",
+					    start,
+					    scalar_length,
+					    UINT64_MAX,
+					    &dataplane->dpdk_memory
+				    ) != 0) {
 					goto error;
 				}
 				state = state_dataplane;
@@ -183,22 +255,38 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 			// handle new instance
 			case state_instance_numa_id:
-				instance->numa_idx = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "instances.numa_id",
+					    start,
+					    scalar_length,
+					    UINT16_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				instance->numa_idx = (uint16_t)value;
 				state = state_instance;
 				break;
 			case state_instance_dp_memory:
-				instance->dp_memory = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "instances.dp_memory",
+					    start,
+					    scalar_length,
+					    UINT64_MAX,
+					    &instance->dp_memory
+				    ) != 0) {
 					goto error;
 				}
 				state = state_instance;
 				break;
 			case state_instance_cp_memory:
-				instance->cp_memory = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "instances.cp_memory",
+					    start,
+					    scalar_length,
+					    UINT64_MAX,
+					    &instance->cp_memory
+				    ) != 0) {
 					goto error;
 				}
 				state = state_instance;
@@ -223,24 +311,39 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_device;
 				break;
 			case state_device_mtu:
-				device->mtu = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "devices.mtu",
+					    start,
+					    scalar_length,
+					    UINT32_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				device->mtu = (uint32_t)value;
 				state = state_device;
 				break;
 			case state_device_max_lro_packet_size:
-				device->max_lro_packet_size =
-					strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "devices.max_lro_packet_size",
+					    start,
+					    scalar_length,
+					    UINT64_MAX,
+					    &device->max_lro_packet_size
+				    ) != 0) {
 					goto error;
 				}
 
 				state = state_device;
 				break;
 			case state_device_rss_hash:
-				device->rss_hash = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "devices.rss_hash",
+					    start,
+					    scalar_length,
+					    UINT64_MAX,
+					    &device->rss_hash
+				    ) != 0) {
 					goto error;
 				}
 
@@ -248,42 +351,72 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 
 			case state_worker_core_id:
-				worker->core_id = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "workers.core_id",
+					    start,
+					    scalar_length,
+					    UINT16_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				worker->core_id = (uint16_t)value;
 
 				state = state_worker;
 				break;
 			case state_worker_instance_id:
-				worker->instance_id = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "workers.instance_id",
+					    start,
+					    scalar_length,
+					    UINT16_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				worker->instance_id = (uint16_t)value;
 
 				state = state_worker;
 				break;
 			case state_worker_rx_queue_len:
-				worker->rx_queue_len = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "workers.rx_queue_len",
+					    start,
+					    scalar_length,
+					    UINT16_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				worker->rx_queue_len = (uint16_t)value;
 
 				state = state_worker;
 				break;
 			case state_worker_tx_queue_len:
-				worker->tx_queue_len = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "workers.tx_queue_len",
+					    start,
+					    scalar_length,
+					    UINT16_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				worker->tx_queue_len = (uint16_t)value;
 
 				state = state_worker;
 				break;
 			case state_worker_num_mbufs:
-				worker->num_mbufs = strtol(start, &end, 10);
-				if (*end != '\0') {
+				if (parse_unsigned(
+					    "workers.num_mbufs",
+					    start,
+					    scalar_length,
+					    UINT32_MAX,
+					    &value
+				    ) != 0) {
 					goto error;
 				}
+				worker->num_mbufs = (uint32_t)value;
 
 				state = state_worker;
 				break;
@@ -561,9 +694,14 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 		}
 
 		yaml_event_delete(&event);
-		yaml_parser_parse(&parser, &event);
+		event_live = 0;
+		if (!yaml_parser_parse(&parser, &event)) {
+			goto error;
+		}
+		event_live = 1;
 	}
 	yaml_event_delete(&event);
+	event_live = 0;
 
 	if (resolve_connections(dataplane) != 0) {
 		goto error;
@@ -576,6 +714,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	return 0;
 
 error:
+	if (event_live) {
+		yaml_event_delete(&event);
+	}
 	dataplane_config_free(dataplane);
 
 err_alloc_config:
