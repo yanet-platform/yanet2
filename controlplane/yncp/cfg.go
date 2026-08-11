@@ -1,6 +1,8 @@
 package yncp
 
 import (
+	"errors"
+
 	"go.uber.org/zap/zapcore"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
@@ -27,6 +29,17 @@ type Config struct {
 
 func (m *Config) Default() {
 	*m = *DefaultConfig()
+}
+
+// Validate rejects a document that clears the defaulted gateway block, be it
+// a bare "gateway:" key or an explicit "gateway: null", either of which
+// yaml.v3 decodes into a nil Gateway rather than leaving the default intact.
+func (m *Config) Validate() error {
+	if m.Gateway == nil {
+		return errors.New("gateway: must not be empty or null")
+	}
+
+	return nil
 }
 
 func DefaultConfig() *Config {
