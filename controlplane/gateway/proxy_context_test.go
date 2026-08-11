@@ -103,9 +103,9 @@ func startCancelProbeGateway(t *testing.T) (gatewayAddr string, entered chan str
 	t.Helper()
 
 	cfg := gateway.DefaultConfig()
-	cfg.Server.Endpoint = reserveTCPAddr(t)
+	listener := gateway.NewTestListener(t)
 
-	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()))
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -123,7 +123,7 @@ func startCancelProbeGateway(t *testing.T) (gatewayAddr string, entered chan str
 	// unblocks instead of deadlocking the run-group wait.
 	backendAddr, entered, results := newCancelProbeServer(t)
 
-	registerConn, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	registerConn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = registerConn.Close() })
 
@@ -138,7 +138,7 @@ func startCancelProbeGateway(t *testing.T) (gatewayAddr string, entered chan str
 		return regErr == nil
 	}, 5*time.Second, 50*time.Millisecond, "failed to register the fake module backend with the gateway")
 
-	return cfg.Server.Endpoint, entered, results
+	return listener.Addr().String(), entered, results
 }
 
 // TestGateway_ProxiedRPC_ClientCancelPropagatesToBackendCtx verifies that

@@ -82,6 +82,7 @@ type gatewayOptions struct {
 	Services []serviceEntry
 	Log      *zap.Logger
 	LogLevel *zap.AtomicLevel
+	Listener net.Listener
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -121,6 +122,18 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 	}
 }
 
+// WithListener hands the Gateway an already-open listener to serve instead
+// of binding cfg.Server.Endpoint itself.
+//
+// Run serves this listener directly and never calls net.Listen. The server
+// closes it when it stops, and closing it again is a harmless net.ErrClosed
+// — close it yourself only if Run never runs.
+func WithListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.Listener = listener
+	}
+}
+
 // Gateway is the Gateway API to YANET modules.
 //
 // It is a gRPC server that acts as a proxy for each YANET module's
@@ -135,6 +148,7 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 type Gateway struct {
 	cfg              *Config
 	server           *grpc.Server
+	listener         net.Listener
 	services         []Service
 	serviceRunners   []*ServiceRunner
 	registry         *BackendRegistry
@@ -150,6 +164,15 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	}
 	log := opts.Log
 	registry := NewBackendRegistry()
+
+	// endpoint is what the gateway's own loopback dial, TLS SNI host, and
+	// out-of-process service registration target. It follows the injected
+	// listener's real address when one is supplied, and cfg.Server.Endpoint
+	// otherwise, without ever mutating cfg, which the caller owns.
+	endpoint := cfg.Server.Endpoint
+	if opts.Listener != nil {
+		endpoint = opts.Listener.Addr().String()
+	}
 
 	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log))
 	if err != nil {
@@ -319,12 +342,12 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	//
 	// Out-of-process module backends (from the Register RPC) each get their
 	// own connection via RegisterBackend in the registration loop.
-	creds, err := TransportCredentials(cfg.Server.TLS, cfg.Server.Endpoint)
+	creds, err := TransportCredentials(cfg.Server.TLS, endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
 	}
 
-	loopback, err := dialBackend(cfg.Server.Endpoint, creds)
+	loopback, err := dialBackend(endpoint, creds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
@@ -361,7 +384,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			}
 		} else {
 			// Out-of-process: wrap in a ServiceRunner.
-			runner := NewServiceRunner(entry.service, cfg.Server.Endpoint, cfg.Server.TLS, WithServiceRunnerLog(log))
+			runner := NewServiceRunner(entry.service, endpoint, cfg.Server.TLS, WithServiceRunnerLog(log))
 			serviceRunners = append(serviceRunners, runner)
 		}
 
@@ -371,6 +394,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	return &Gateway{
 		cfg:              cfg,
 		server:           server,
+		listener:         opts.Listener,
 		services:         services,
 		serviceRunners:   serviceRunners,
 		registry:         registry,
@@ -406,9 +430,13 @@ func (m *Gateway) Close() error {
 func (m *Gateway) Run(ctx context.Context) error {
 	m.log.Info("starting gRPC gateway")
 
-	listener, err := net.Listen("tcp", m.cfg.Server.Endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
+	listener := m.listener
+	if listener == nil {
+		var err error
+		listener, err = net.Listen("tcp", m.cfg.Server.Endpoint)
+		if err != nil {
+			return fmt.Errorf("failed to initialize gRPC listener: %w", err)
+		}
 	}
 
 	m.log.Info("exposing gRPC gateway", zap.Stringer("addr", listener.Addr()))

@@ -2,7 +2,6 @@ package gateway_test
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -17,20 +16,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
-
-// reserveTCPAddr reserves and immediately releases an ephemeral TCP port so a
-// server that binds it later gets a concrete, otherwise-unused endpoint.
-func reserveTCPAddr(t *testing.T) string {
-	t.Helper()
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	addr := listener.Addr().String()
-	require.NoError(t, listener.Close())
-
-	return addr
-}
 
 // findRegisteredService looks up a service by name in a ListServices
 // response, returning the entry and whether it was found.
@@ -55,11 +40,11 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 	t.Parallel()
 
 	cfg := gateway.DefaultConfig()
-	cfg.Server.Endpoint = reserveTCPAddr(t)
+	listener := gateway.NewTestListener(t)
 	cfg.Registry.TTL = xcfg.MustNonZero(time.Second)
 	cfg.Registry.SweepInterval = xcfg.MustNonZero(25 * time.Millisecond)
 
-	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()))
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -74,7 +59,7 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 		return gw.Run(wgContext)
 	})
 
-	connection, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = connection.Close() })
 
@@ -87,14 +72,18 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 
 	loopedServiceName := "test.LoopedService"
 	oneShotServiceName := "test.OneShotService"
-	loopedBackendAddr := reserveTCPAddr(t)
-	oneShotBackendAddr := reserveTCPAddr(t)
+	// These are registry keys only: registration records the address
+	// without ever connecting to it, and nothing in this test calls a
+	// method that would dial either one. TEST-NET-1 (RFC 5737) addresses
+	// stand in as self-evidently unreachable values.
+	loopedBackendAddr := "192.0.2.1:0"
+	oneShotBackendAddr := "192.0.2.2:0"
 
 	constantBackOff := func() backoff.BackOff {
 		return backoff.NewConstantBackOff(10 * time.Millisecond)
 	}
 
-	oneShotRegistrar, err := gateway.NewGatewayRegistrar(cfg.Server.Endpoint, nil,
+	oneShotRegistrar, err := gateway.NewGatewayRegistrar(listener.Addr().String(), nil,
 		gateway.WithBackOff(constantBackOff),
 		gateway.WithMaxElapsedTime(time.Second),
 	)
@@ -103,7 +92,7 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 
 	require.NoError(t, oneShotRegistrar.RegisterServices(t.Context(), []string{oneShotServiceName}, oneShotBackendAddr))
 
-	loopedRegistrar, err := gateway.NewGatewayRegistrar(cfg.Server.Endpoint, nil,
+	loopedRegistrar, err := gateway.NewGatewayRegistrar(listener.Addr().String(), nil,
 		gateway.WithBackOff(constantBackOff),
 		gateway.WithMaxElapsedTime(time.Second),
 	)

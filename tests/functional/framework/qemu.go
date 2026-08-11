@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -275,20 +276,10 @@ func (q *QEMUManager) Start() (bool, error) {
 		args = append(args, "-loadvm", templateSnapshot)
 	}
 
-	// Network interface configuration. SSH forwarding is added in
-	// keep-alive mode for manual debugging.
-	netdev := "user,id=net0"
-	if ShouldKeepVMAlive() {
-		// Get a random free port for SSH forwarding to support multiple VMs
-		var err error
-		q.sshPort, err = getFreePort()
-		if err != nil {
-			return false, fmt.Errorf("failed to get free port for SSH forwarding: %w", err)
-		}
-		q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", q.sshPort)
-		netdev += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:22", q.sshPort)
-	}
-	args = append(args, "-netdev", netdev)
+	// Network interface configuration. SSH forwarding, when enabled, is
+	// added over the monitor once the monitor and serial consoles are
+	// connected, instead of baked into this netdev.
+	args = append(args, "-netdev", "user,id=net0")
 
 	args = append(args,
 		"-device", "virtio-net-pci,netdev=net0,mac=AA:BB:CC:DD:CA:B0",
@@ -437,7 +428,68 @@ func (q *QEMUManager) Start() (bool, error) {
 
 	go q.readSerial()
 
+	// The monitor gives no reply until a client has also connected to the
+	// serial socket, so the forward is added only now that both consoles
+	// are wired up.
+	if ShouldKeepVMAlive() {
+		q.addSSHHostForward()
+	}
+
 	return fromSnapshot, nil
+}
+
+// addSSHHostForward asks the QEMU monitor to add a hostfwd rule for SSH,
+// leaving port 0 for the kernel to assign. QEMU binds and holds that port
+// itself, so no other process can race for it the way it could with a port
+// picked ahead of time on the host.
+//
+// A failed hostfwd_add is local to the monitor command and never takes the
+// VM down, so failure here only logs a warning: YANET_KEEP_VM_ALIVE exists
+// to leave a VM for a human to inspect, and killing that VM because a
+// debug convenience could not get a port would defeat its purpose.
+func (q *QEMUManager) addSSHHostForward() {
+	resp, err := q.SendMonitorCommand("hostfwd_add net0 tcp:127.0.0.1:0-:22")
+	if err != nil {
+		q.log.Warnf("Keep VM alive mode: hostfwd_add failed: %v; SSH access will be unavailable", err)
+		return
+	}
+	if resp != "" {
+		q.log.Warnf("Keep VM alive mode: hostfwd_add returned an error: %s; SSH access will be unavailable", resp)
+		return
+	}
+
+	info, err := q.SendMonitorCommand("info usernet")
+	if err != nil {
+		q.log.Warnf("Keep VM alive mode: info usernet failed: %v; SSH access will be unavailable", err)
+		return
+	}
+	port, err := parseUsernetSSHPort(info)
+	if err != nil {
+		q.log.Warnf("Keep VM alive mode: could not determine the forwarded SSH port: %v; SSH access will be unavailable", err)
+		return
+	}
+
+	q.sshPort = port
+	q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", q.sshPort)
+}
+
+// parseUsernetSSHPort extracts the host-side port of the guest-port-22
+// hostfwd row from "info usernet" output, tolerating other forwards being
+// listed alongside it. Row format:
+//
+//	Protocol[State]    FD  Source Address  Port   Dest. Address  Port RecvQ SendQ
+//	TCP[HOST_FORWARD]  12       127.0.0.1 43007       10.0.2.15    22     0     0
+func parseUsernetSSHPort(output string) (int, error) {
+	for line := range strings.SplitSeq(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 6 || !strings.HasPrefix(fields[0], "TCP[") || fields[5] != "22" {
+			continue
+		}
+		if port, err := strconv.Atoi(fields[3]); err == nil {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no SSH (guest port 22) host forward found in %q", output)
 }
 
 // Stop performs graceful termination of the QEMU virtual machine and comprehensive
@@ -489,7 +541,9 @@ func (q *QEMUManager) Stop() error {
 		}
 		q.log.Infof("Serial console socket: %s", q.SerialPath)
 		q.log.Infof("To connect: socat - UNIX-CONNECT:%s", q.SerialPath)
-		q.log.Infof("SSH: ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p %d", q.sshPort)
+		if q.sshPort != 0 {
+			q.log.Infof("SSH: ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p %d", q.sshPort)
+		}
 	} else {
 		alreadyExited := false
 		if q.processExit != nil {
@@ -710,18 +764,16 @@ func (q *QEMUManager) readUntilMonitorPrompt() (string, error) {
 			raw.Write(buf[:n])
 			// Strip readline escape sequences before checking for the prompt.
 			cleaned := stripMonitorEscapes(raw.String())
-			// The cleaned output contains:
-			//   "(qemu) <echoed-command>\n<output>\n(qemu) "
-			// We need the SECOND "(qemu)" prompt (end of response), not the
-			// first one which is just the command echo prefix.
-			// Count prompt occurrences: we need at least 2.
+			// One prompt, at the end, is the normal shape — e.g. the banner read
+			// in connectToMonitor, itself exactly one prompt. Two prompts appear
+			// when connectToMonitor's banner drain times out: the queued banner
+			// prompt survives into the next command's reply. Wait for either
+			// shape.
 			count := strings.Count(cleaned, "(qemu)")
 			if count >= 2 {
 				break
 			}
-			// Fallback: single prompt means no readline echo (e.g. banner drain).
 			if count == 1 && strings.HasSuffix(strings.TrimRight(cleaned, " \n"), "(qemu)") {
-				// Only one prompt and it is at the end -- we're done.
 				break
 			}
 		}
@@ -730,25 +782,28 @@ func (q *QEMUManager) readUntilMonitorPrompt() (string, error) {
 		}
 	}
 
-	// Extract content between first and last "(qemu)" prompt.
 	cleaned := stripMonitorEscapes(raw.String())
 	first := strings.Index(cleaned, "(qemu)")
 	last := strings.LastIndex(cleaned, "(qemu)")
 	if first >= 0 && last > first {
-		// Content between prompts = command echo + newline + actual output.
-		between := cleaned[first+len("(qemu)") : last]
-		// Strip the echoed command (first line) to get only the actual output.
-		lines := strings.SplitN(strings.TrimLeft(between, " \r\n"), "\n", 2)
-		if len(lines) > 1 {
-			return strings.TrimSpace(lines[1]), nil
-		}
-		return "", nil
+		// Two prompts: content is between them, command echo + output.
+		return stripEchoLine(cleaned[first+len("(qemu)") : last]), nil
 	}
 	if first >= 0 {
-		result := cleaned[first+len("(qemu)"):]
-		return strings.TrimSpace(result), nil
+		// One prompt, at the end: content is what precedes it.
+		return stripEchoLine(cleaned[:first]), nil
 	}
 	return strings.TrimSpace(cleaned), nil
+}
+
+// stripEchoLine drops the first line of s, the readline echo of the typed
+// command, and returns the remaining trimmed output.
+func stripEchoLine(s string) string {
+	lines := strings.SplitN(strings.TrimLeft(s, " \r\n"), "\n", 2)
+	if len(lines) > 1 {
+		return strings.TrimSpace(lines[1])
+	}
+	return ""
 }
 
 // connectToSerial connects to QEMU serial console via unix socket
@@ -1194,21 +1249,6 @@ func isKVMEnabled() bool {
 		return true
 	}
 	return false
-}
-
-// getFreePort asks the kernel for a free open port that is ready to use.
-func getFreePort() (int, error) {
-	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-
-	l, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
 // checkForExistingVM checks if there's already a running QEMU process with the given VM name.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -73,18 +74,22 @@ func TestNewGateway_DeclaredKindsWired(t *testing.T) {
 	require.Equal(t, BackendKindInProcess, kinds["test.InProcessService"], "WithService must yield in-process kind")
 }
 
-// freeTCPAddr reserves and immediately releases an ephemeral TCP port so a
-// server that binds it later gets a concrete, otherwise-unused endpoint.
-func freeTCPAddr(t *testing.T) string {
+// NewTestListener opens an ephemeral loopback TCP listener for a test to
+// pass into WithListener or hold open to occupy a port, registering a
+// cleanup that closes it.
+//
+// It hands back the open listener rather than closing it and returning a
+// bare address, which would let another process grab that port first — the
+// TOCTOU this helper avoids. Cleanup tolerates an already-closed listener.
+func NewTestListener(t *testing.T) net.Listener {
 	t.Helper()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
-	addr := listener.Addr().String()
-	require.NoError(t, listener.Close())
+	t.Cleanup(func() { _ = listener.Close() })
 
-	return addr
+	return listener
 }
 
 // blockingReadinessService is a fake Service whose Watch handler blocks on
@@ -159,9 +164,9 @@ func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultConfig()
-	cfg.Server.Endpoint = freeTCPAddr(t)
+	listener := NewTestListener(t)
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()), WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -172,7 +177,7 @@ func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 		return gw.Run(ctx)
 	})
 
-	conn, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -202,9 +207,9 @@ func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultConfig()
-	cfg.Server.Endpoint = freeTCPAddr(t)
+	listener := NewTestListener(t)
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()), WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -223,7 +228,7 @@ func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
 		return resp.GetScopes()[0].GetState() == readinesspb.State_STATE_READY
 	}, 5*time.Second, 50*time.Millisecond, "gateway did not become ready")
 
-	conn, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -278,6 +283,26 @@ func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
 	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
 }
 
+// TestGateway_Run_BindsOwnListenerWhenNoneInjected verifies that Run falls
+// back to binding cfg.Server.Endpoint itself when constructed without
+// WithListener, by pointing the endpoint at an address a held-open
+// NewTestListener keeps occupied for the whole test, so the bind
+// deterministically fails rather than racing another process for the port.
+func TestGateway_Run_BindsOwnListenerWhenNoneInjected(t *testing.T) {
+	t.Parallel()
+
+	occupied := NewTestListener(t)
+
+	cfg := DefaultConfig()
+	cfg.Server.Endpoint = occupied.Addr().String()
+
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	require.ErrorContains(t, gw.Run(t.Context()), "failed to initialize gRPC listener")
+}
+
 // TestGateway_Director_RegistryMissCarriesReasonTrailer verifies that a
 // NotFound for a service the registry has no backend for keeps the exact
 // "unknown service" message and also carries the errorReasonMetadataKey
@@ -289,9 +314,9 @@ func TestGateway_Director_RegistryMissCarriesReasonTrailer(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultConfig()
-	cfg.Server.Endpoint = freeTCPAddr(t)
+	listener := NewTestListener(t)
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	gw, err := NewGateway(cfg, WithLog(zap.NewNop()), WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -302,7 +327,7 @@ func TestGateway_Director_RegistryMissCarriesReasonTrailer(t *testing.T) {
 		return gw.Run(ctx)
 	})
 
-	conn, err := grpc.NewClient(cfg.Server.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -367,7 +392,7 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 		_ = gatewayGroup.Wait()
 	})
 
-	backendAddr := freeTCPAddr(t)
+	backendAddr := filepath.Join(t.TempDir(), "runner.sock")
 	runner := NewServiceRunner(
 		&blockingReadinessService{endpoint: backendAddr},
 		gatewayListener.Addr().String(),
@@ -387,7 +412,7 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 		t.Fatal("service runner did not become ready")
 	}
 
-	conn, err := grpc.NewClient(backendAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("unix://"+backendAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
