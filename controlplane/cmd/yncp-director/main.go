@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/logging/clog"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	"github.com/yanet-platform/yanet2/controlplane/yncp"
@@ -64,7 +65,14 @@ func run(cmd Cmd) error {
 	}
 	defer log.Sync()
 
-	director, err := yncp.NewDirector(cfg, yncp.WithLog(log), yncp.WithAtomicLogLevel(&atomicLevel))
+	clog.Attach(log)
+	clog.SetLevel(atomicLevel.Level())
+
+	director, err := yncp.NewDirector(cfg,
+		yncp.WithLog(log),
+		yncp.WithAtomicLogLevel(&atomicLevel),
+		yncp.WithLogLevelObserver(clog.SetLevel),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create director: %w", err)
 	}

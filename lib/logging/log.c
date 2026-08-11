@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <strings.h>
@@ -8,6 +9,10 @@
 #include "log.h"
 
 static const char *__log_color_reset = LOG_RESET; // NOLINT
+
+static log_sink_fn __log_sink = NULL;	  // NOLINT
+static void *__log_sink_ctx = NULL;	  // NOLINT
+static __thread int __log_sink_depth = 0; // NOLINT
 
 struct logger {
 	uint8_t enable;
@@ -59,9 +64,14 @@ log_color_reset(void) {
 	return __log_color_reset;
 }
 
+// The control plane can flip a level at runtime while a worker thread
+// concurrently reads it through LOG(), so every access to loggers[].enable
+// goes through a relaxed atomic: nothing else is ordered against the gate,
+// a momentarily stale read is by design, and relaxed still compiles to a
+// plain load on the architectures this runs on.
 inline uint8_t
 log_enabled(enum log_id lid) {
-	return loggers[lid].enable;
+	return __atomic_load_n(&loggers[lid].enable, __ATOMIC_RELAXED);
 }
 
 /**
@@ -70,19 +80,19 @@ log_enabled(enum log_id lid) {
  */
 inline void
 log_enable_id(enum log_id lid) {
-	loggers[lid].enable = 1;
+	__atomic_store_n(&loggers[lid].enable, 1, __ATOMIC_RELAXED);
 }
 
 inline void
 log_disable_id(enum log_id lid) {
-	loggers[lid].enable = 0;
+	__atomic_store_n(&loggers[lid].enable, 0, __ATOMIC_RELAXED);
 }
 
 inline void
 log_reset(void) {
 	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);
 	     idx++) {
-		loggers[idx].enable = 0;
+		__atomic_store_n(&loggers[idx].enable, 0, __ATOMIC_RELAXED);
 	}
 }
 
@@ -92,7 +102,9 @@ log_enable_name(const char *log_name) {
 	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);
 	     idx++) {
 		if (strcasecmp(loggers[idx].name, log_name) == 0) {
-			loggers[idx].enable = 1;
+			__atomic_store_n(
+				&loggers[idx].enable, 1, __ATOMIC_RELAXED
+			);
 			lid = (enum log_id)idx;
 			break;
 		}
@@ -113,21 +125,66 @@ log_enable_name(const char *log_name) {
 	// enable leveled logs
 	switch (lid) {
 	case TRACE:
-		loggers[TRACE].enable = 1;
+		__atomic_store_n(&loggers[TRACE].enable, 1, __ATOMIC_RELAXED);
 		// fallthrough
 	case DEBUG:
-		loggers[DEBUG].enable = 1;
+		__atomic_store_n(&loggers[DEBUG].enable, 1, __ATOMIC_RELAXED);
 		// fallthrough
 	case INFO:
-		loggers[INFO].enable = 1;
+		__atomic_store_n(&loggers[INFO].enable, 1, __ATOMIC_RELAXED);
 		// fallthrough
 	case WARN:
-		loggers[WARN].enable = 1;
+		__atomic_store_n(&loggers[WARN].enable, 1, __ATOMIC_RELAXED);
 		// fallthrough
 	case ERROR:
-		loggers[ERROR].enable = 1;
+		__atomic_store_n(&loggers[ERROR].enable, 1, __ATOMIC_RELAXED);
 		// fallthrough
 	default:
 		break;
 	}
+}
+
+void
+log_set_sink(log_sink_fn sink, void *ctx) {
+	__log_sink = sink;
+	__log_sink_ctx = ctx;
+}
+
+void
+log_write(enum log_id level, const char *file, int line, const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	log_sink_fn sink = __log_sink;
+	void *sink_ctx = __log_sink_ctx;
+
+	// A sink calling back into LOG() on the same thread would otherwise
+	// recurse forever, so a reentrant call falls back to the stderr path
+	// below instead of the sink.
+	if (sink != NULL && __log_sink_depth == 0) {
+		char msg[1024];
+		vsnprintf(msg, sizeof(msg), fmt, args);
+		va_end(args);
+
+		__log_sink_depth++;
+		sink(level, file, line, msg, sink_ctx);
+		__log_sink_depth--;
+		return;
+	}
+
+	// Locking the stream keeps the three calls below atomic, so a
+	// concurrent stderr writer cannot split the prefix from the message.
+	flockfile(stderr);
+	fprintf(stderr,
+		"%s [%s%-5s%s][%s:%d]: ",
+		log_fmt_timestamp(),
+		log_color(level),
+		log_name(level),
+		log_color_reset(),
+		file,
+		line);
+	vfprintf(stderr, fmt, args);
+	fputc('\n', stderr);
+	funlockfile(stderr);
+	va_end(args);
 }

@@ -151,7 +151,7 @@ benchmark_multiworker_throughput(size_t num_workers) {
 	LOG(INFO, "  Total updates: %zu", num_updates);
 	LOG(INFO, "  Update throughput: %.2f ops/sec", updates_per_sec);
 	LOG(INFO, "  Avg update latency: %.2f µs", avg_update_latency_us);
-	LOG(INFO, "");
+	LOG(INFO, "%s", "");
 }
 
 // Benchmark 2: Contention and Fairness
@@ -266,7 +266,7 @@ benchmark_contention(void) {
 	    (double)max_time / 1000.0,
 	    avg_time / 1000.0);
 	LOG(INFO, "  Fairness index: %.3f (1.0 = perfect)", fairness);
-	LOG(INFO, "");
+	LOG(INFO, "%s", "");
 }
 
 // Benchmark 3: Latency Distribution
@@ -331,7 +331,7 @@ benchmark_latency_distribution(void) {
 	LOG(INFO, "  P95 latency: %lu µs", p95);
 	LOG(INFO, "  P99 latency: %lu µs", p99);
 	LOG(INFO, "  Max latency: %lu µs", max_lat);
-	LOG(INFO, "");
+	LOG(INFO, "%s", "");
 }
 
 // Benchmark 4: Reader/Writer Thread Interaction
@@ -523,7 +523,7 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	    avg_update_lat,
 	    max_update_lat);
 	LOG(INFO, "  Read/Update ratio: %.2f:1", (double)reads / updates);
-	LOG(INFO, "");
+	LOG(INFO, "%s", "");
 }
 
 // Main Benchmark Runner
@@ -534,7 +534,7 @@ main(void) {
 
 	LOG(INFO, "=== RCU Performance Benchmark Suite ===");
 	LOG(INFO, "BENCH_WORKERS: %d", BENCH_WORKERS);
-	LOG(INFO, "");
+	LOG(INFO, "%s", "");
 
 	const size_t arena_size = 1 << 20;
 	void *arena = malloc(arena_size);

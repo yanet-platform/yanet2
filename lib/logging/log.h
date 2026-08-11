@@ -3,7 +3,17 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// The meson-generated header is absent for cgo compilation of Go packages
+// reaching this file, which runs without a configured build directory.
+// Only ENABLE_TRACE_LOG is consumed below, so its absence just leaves trace
+// logging disabled, matching a default meson configuration.
+#if defined(__has_include)
+#if __has_include("yanet_build_config.h")
 #include "yanet_build_config.h"
+#endif
+#else
+#include "yanet_build_config.h"
+#endif
 
 #define LOG_RED "\x1b[31m"
 #define LOG_GREEN "\x1b[32m"
@@ -35,15 +45,13 @@ enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX }; // NOLINT
 #define LOG(log_level, fmt_, ...)                                              \
 	do {                                                                   \
 		if (log_enabled(log_level)) {                                  \
-			fprintf(stderr,                                        \
-				"%s [%s%-5s%s][%s:%d]: " fmt_ "\n",            \
-				log_fmt_timestamp(),                           \
-				log_color(log_level),                          \
-				log_name(log_level),                           \
-				log_color_reset(),                             \
+			log_write(                                             \
+				log_level,                                     \
 				__FILE_NAME__,                                 \
 				__LINE__,                                      \
-				##__VA_ARGS__);                                \
+				fmt_,                                          \
+				##__VA_ARGS__                                  \
+			);                                                     \
 		}                                                              \
 	} while (0)
 
@@ -61,6 +69,25 @@ enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX }; // NOLINT
 #define LOG_TRACE(...) (void)(0)
 #define LOG_TRACEX(...) (void)(0)
 #endif // ENABLE_TRACE_LOG
+
+// Sink hook: receives the bare formatted message, no timestamp, level name
+// or color, so a process embedding this library can route log lines through
+// its own logger instead of stderr. The message is truncated beyond 1024
+// bytes, unlike the unbounded stderr path.
+typedef void (*log_sink_fn)(
+	enum log_id level,
+	const char *file,
+	int line,
+	const char *msg,
+	void *ctx
+);
+
+void
+log_set_sink(log_sink_fn sink, void *ctx);
+
+void
+log_write(enum log_id level, const char *file, int line, const char *fmt, ...)
+	__attribute__((format(printf, 4, 5)));
 
 const char *
 log_fmt_timestamp(void);

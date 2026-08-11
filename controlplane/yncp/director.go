@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 	"github.com/yanet-platform/yanet2/controlplane/builtin"
@@ -20,8 +21,9 @@ import (
 const dataplaneReadyTimeout = 60 * time.Second
 
 type options struct {
-	Log      *zap.Logger
-	LogLevel *zap.AtomicLevel
+	Log              *zap.Logger
+	LogLevel         *zap.AtomicLevel
+	LogLevelObserver func(zapcore.Level)
 }
 
 func newOptions() *options {
@@ -48,6 +50,17 @@ func WithLog(log *zap.Logger) DirectorOption {
 func WithAtomicLogLevel(level *zap.AtomicLevel) DirectorOption {
 	return func(o *options) {
 		o.LogLevel = level
+	}
+}
+
+// WithLogLevelObserver registers a function called with the new level every
+// time the logging RPC changes it, alongside the atomic Go level.
+//
+// This is how the director drives lib/logging's C gate from a runtime
+// level change without this package depending on cgo itself.
+func WithLogLevelObserver(observer func(zapcore.Level)) DirectorOption {
+	return func(o *options) {
+		o.LogLevelObserver = observer
 	}
 }
 
@@ -113,7 +126,10 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 	gatewayOptions := []gateway.GatewayOption{
 		gateway.WithBuiltinService(
-			builtin.NewLogging(opts.LogLevel, builtin.WithLoggingLog(log)),
+			builtin.NewLogging(opts.LogLevel,
+				builtin.WithLoggingLog(log),
+				builtin.WithLoggingLevelObserver(opts.LogLevelObserver),
+			),
 		),
 		gateway.WithBuiltinService(
 			builtin.NewInspect(cfg.Gateway.InstanceID, shm),

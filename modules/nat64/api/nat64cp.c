@@ -61,8 +61,6 @@ error_init:
 
 void
 nat64_module_config_free(struct cp_module *cp_module) {
-	LOG(DEBUG, "Starting cleanup of NAT64 module '%s'", cp_module->name);
-
 	struct nat64_module_config *config =
 		container_of(cp_module, struct nat64_module_config, cp_module);
 
@@ -75,17 +73,11 @@ nat64_module_config_free(struct cp_module *cp_module) {
 
 	cp_module_fini(cp_module);
 
-	LOG(DEBUG,
-	    "Freeing main config structure: size=%zu bytes, address=%p",
-	    sizeof(struct nat64_module_config),
-	    (void *)config);
 	memory_bfree(
 		&agent->memory_context,
 		config,
 		sizeof(struct nat64_module_config)
 	);
-
-	LOG(DEBUG, "Completed cleanup of NAT64 module config");
 }
 
 int
@@ -93,32 +85,24 @@ nat64_module_config_data_init(
 	struct nat64_module_config *config,
 	struct memory_context *memory_context
 ) {
-	LOG(DEBUG, "Starting nat64_module_config_data_init");
-
 	// Initialize LPM structures
-	LOG(DEBUG, "Initializing v4_to_v6 LPM");
 	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
 		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
 		goto error_lpm_v4;
 	}
-	LOG(DEBUG, "v4_to_v6 LPM initialized successfully");
 
-	LOG(DEBUG, "Initializing v6_to_v4 LPM");
 	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
 		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
 		goto error_lpm_v6;
 	}
-	LOG(DEBUG, "v6_to_v4 LPM initialized successfully");
 
 	// Initialize v6 prefixes LPM
-	LOG(DEBUG, "Initializing v6_prefixes LPM");
 	if (lpm_init(
 		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
 	    )) {
 		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
 		goto error_lpm_prefixes;
 	}
-	LOG(DEBUG, "v6_prefixes LPM initialized successfully");
 
 	// Initialize other fields
 	config->mappings.count = 0;
@@ -148,35 +132,16 @@ nat64_module_config_data_destroy(
 	struct nat64_module_config *config,
 	struct memory_context *memory_context
 ) {
-	LOG(DEBUG,
-	    "Freeing v4_to_v6 LPM table at %p",
-	    (void *)&config->mappings.v4_to_v6);
 	lpm_free(&config->mappings.v4_to_v6);
-
-	LOG(DEBUG,
-	    "Freeing v6_to_v4 LPM table at %p",
-	    (void *)&config->mappings.v6_to_v4);
 	lpm_free(&config->mappings.v6_to_v4);
-
-	LOG(DEBUG,
-	    "Freeing v6_prefixes LPM table at %p",
-	    (void *)&config->prefixes.v6_prefixes);
 	lpm_free(&config->prefixes.v6_prefixes);
 
 	if (config->mappings.list) {
 		struct ip4to6 *mapping_list = ADDR_OF(&config->mappings.list);
 		size_t mappings_size =
 			sizeof(struct ip4to6) * config->mappings.count;
-		LOG(DEBUG,
-		    "Freeing mappings list: count=%zu, size=%zu bytes, "
-		    "address=%p",
-		    config->mappings.count,
-		    mappings_size,
-		    (void *)mapping_list);
 
 		memory_bfree(memory_context, mapping_list, mappings_size);
-	} else {
-		LOG(DEBUG, "No mappings list to free");
 	}
 
 	if (config->prefixes.prefixes) {
@@ -184,16 +149,8 @@ nat64_module_config_data_destroy(
 			sizeof(struct nat64_prefix) * config->prefixes.count;
 		struct nat64_prefix *prefixes =
 			ADDR_OF(&config->prefixes.prefixes);
-		LOG(DEBUG,
-		    "Freeing prefixes array: count=%zu, size=%zu bytes, "
-		    "address=%p",
-		    config->prefixes.count,
-		    prefixes_size,
-		    (void *)prefixes);
 
 		memory_bfree(memory_context, prefixes, prefixes_size);
-	} else {
-		LOG(DEBUG, "No prefixes array to free");
 	}
 }
 
@@ -311,7 +268,7 @@ nat64_module_config_add_prefix(
 
 	LOG(DEBUG,
 	    "Added prefix "
-	    "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
+	    "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
 	    prefix[0],
 	    prefix[1],
 	    prefix[2],

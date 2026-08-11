@@ -18,15 +18,17 @@ import (
 type Logging struct {
 	ynpb.UnimplementedLoggingServer
 
-	atom *zap.AtomicLevel
-	log  *zap.Logger
+	atom     *zap.AtomicLevel
+	observer func(zapcore.Level)
+	log      *zap.Logger
 }
 
 // LoggingOption configures the Logging constructor.
 type LoggingOption func(*loggingOptions)
 
 type loggingOptions struct {
-	Log *zap.Logger
+	Observer func(zapcore.Level)
+	Log      *zap.Logger
 }
 
 func newLoggingOptions() *loggingOptions {
@@ -42,6 +44,17 @@ func WithLoggingLog(log *zap.Logger) LoggingOption {
 	}
 }
 
+// WithLoggingLevelObserver registers a function called with the new level
+// every time UpdateLevel changes it, in addition to the atomic Go level.
+//
+// This is how a runtime level change also reaches lib/logging's C gate,
+// without this package importing the cgo-based clog package.
+func WithLoggingLevelObserver(observer func(zapcore.Level)) LoggingOption {
+	return func(o *loggingOptions) {
+		o.Observer = observer
+	}
+}
+
 // NewLogging creates a new Logging service.
 func NewLogging(level *zap.AtomicLevel, options ...LoggingOption) *Logging {
 	opts := newLoggingOptions()
@@ -50,8 +63,9 @@ func NewLogging(level *zap.AtomicLevel, options ...LoggingOption) *Logging {
 	}
 
 	return &Logging{
-		atom: level,
-		log:  opts.Log,
+		atom:     level,
+		observer: opts.Observer,
+		log:      opts.Log,
 	}
 }
 
@@ -83,7 +97,23 @@ func (m *Logging) UpdateLevel(
 		return nil, fmt.Errorf("failed to convert logging level: %w", err)
 	}
 
-	m.atom.SetLevel(level)
+	// The observer drives an external gate that must never be stricter
+	// than zap, even momentarily, or a line it drops never reaches zap
+	// to be re-filtered. zapcore.Level orders from most to least verbose,
+	// so widening the level (a numerically smaller value) applies the
+	// observer before the atomic level. Narrowing keeps the old order,
+	// since a temporarily loose gate only costs some extra formatting.
+	if level < m.atom.Level() {
+		if m.observer != nil {
+			m.observer(level)
+		}
+		m.atom.SetLevel(level)
+	} else {
+		m.atom.SetLevel(level)
+		if m.observer != nil {
+			m.observer(level)
+		}
+	}
 	m.log.Info("updated log level", zap.Stringer("level", level))
 
 	return &ynpb.UpdateLevelResponse{}, nil
