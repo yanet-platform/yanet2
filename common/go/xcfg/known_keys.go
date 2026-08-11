@@ -12,19 +12,28 @@ import (
 
 var yamlNodeType = reflect.TypeFor[yaml.Node]()
 
+var yamlUnmarshalerType = reflect.TypeFor[yaml.Unmarshaler]()
+
 // mergeTag is the resolved tag yaml.v3 assigns to a "<<" merge key.
 const mergeTag = "!!merge"
 
 // CheckKnownKeys reports every YAML mapping key in data that has no matching
 // field in T.
 //
-// Unlike WithKnownFields, it walks the parsed node tree directly against T's
-// reflected shape instead of driving yaml.v3's own strict decoder, so it
-// keeps working across a field whose type implements UnmarshalYAML by
-// re-decoding through a fresh, non-strict decoder — the case
-// WithKnownFields is blind to. All unknown keys are collected into one
-// error, each as a dotted path rooted at the document.
+// It walks the parsed node tree directly against T's reflected shape
+// instead of driving yaml.v3's own strict decoder, so it keeps working
+// across a field whose type implements UnmarshalYAML by re-decoding
+// through a fresh, non-strict decoder. WithKnownFields runs the same walk
+// as part of Decode. All unknown keys are collected into one error, each
+// as a dotted path rooted at the document.
 func CheckKnownKeys[T any](data []byte) error {
+	return checkKnownKeys(data, reflect.TypeFor[T]())
+}
+
+// checkKnownKeys drives the same walk as CheckKnownKeys against a
+// reflect.Type, letting Decode reuse it for a destination value's runtime
+// type without a type parameter.
+func checkKnownKeys(data []byte, t reflect.Type) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return fmt.Errorf("failed to parse yaml document: %w", err)
@@ -34,7 +43,7 @@ func CheckKnownKeys[T any](data []byte) error {
 	}
 
 	var unknown []string
-	walkKnownKeys(doc.Content[0], reflect.TypeFor[T](), "", &unknown, map[*yaml.Node]bool{})
+	walkKnownKeys(doc.Content[0], t, "", &unknown, map[*yaml.Node]bool{})
 	if len(unknown) == 0 {
 		return nil
 	}
@@ -68,6 +77,9 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]stri
 		t = t.Elem()
 	}
 	if t.Kind() == reflect.Interface || t == yamlNodeType {
+		return
+	}
+	if isOpaqueToWalk(t) {
 		return
 	}
 
@@ -151,6 +163,27 @@ func joinPath(path, key string) string {
 		return key
 	}
 	return path + "." + key
+}
+
+// isOpaqueToWalk reports whether t is a struct with no exported fields
+// whose pointer implements yaml.Unmarshaler.
+//
+// Such a type decodes entirely through its own method rather than the
+// default struct decoder, so the walk has no field set to check a mapping's
+// keys against and must leave them unreported. The implements-Unmarshaler
+// half of the check keeps a plain struct that only has unexported fields
+// and no custom decoding — which really does drop every key silently —
+// reported as unknown.
+func isOpaqueToWalk(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	for idx := range t.NumField() {
+		if t.Field(idx).IsExported() {
+			return false
+		}
+	}
+	return reflect.PointerTo(t).Implements(yamlUnmarshalerType)
 }
 
 // fieldSet maps a YAML key name to the Go type that decodes it.

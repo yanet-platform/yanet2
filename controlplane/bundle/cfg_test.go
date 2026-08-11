@@ -1,0 +1,73 @@
+package bundle_test
+
+import (
+	"testing"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/controlplane/bundle"
+	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
+)
+
+// Test_Decode_OnlyListedModulesArePresent asserts that decoding a document
+// listing only two modules leaves the other eight nil, that the listed ones
+// carry the instance_id given in the document, and that a listed module
+// omitting an optional field keeps its DefaultConfig value.
+func Test_Decode_OnlyListedModulesArePresent(t *testing.T) {
+	var cfg bundle.ModulesConfig
+	err := xcfg.Decode([]byte(`
+route:
+  instance_id: 2
+acl:
+  instance_id: 3
+`), &cfg)
+	require.NoError(t, err)
+
+	require.NotNil(t, cfg.Route)
+	require.NotNil(t, cfg.ACL)
+	require.Nil(t, cfg.RouteMPLS)
+	require.Nil(t, cfg.Decap)
+	require.Nil(t, cfg.DSCP)
+	require.Nil(t, cfg.Forward)
+	require.Nil(t, cfg.Mirror)
+	require.Nil(t, cfg.NAT64)
+	require.Nil(t, cfg.Pdump)
+	require.Nil(t, cfg.Blackhole)
+
+	require.Equal(t, uint32(2), cfg.Route.InstanceID.Unwrap())
+	require.Equal(t, uint32(3), cfg.ACL.InstanceID.Unwrap())
+
+	require.Equal(t, "/dev/hugepages/yanet", cfg.Route.MemoryPath.Unwrap())
+}
+
+// Test_NewBundle_EmptyConfig_NoServicesNoAgents asserts that a bundle built
+// from all-nil module and device config attaches no agent: it constructs no
+// service at all, so it never reaches ffi.AttachSharedMemory.
+func Test_NewBundle_EmptyConfig_NoServicesNoAgents(t *testing.T) {
+	b, err := bundle.NewBundle(bundle.ModulesConfig{}, bundle.DevicesConfig{})
+	require.NoError(t, err)
+	require.Empty(t, b.Services())
+}
+
+// Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule is a
+// positive control for the nil-skip in buildServices: a single configured
+// module still reaches its constructor and a bad memory_path surfaces as an
+// error naming that module, proving the skip isn't silently dropping every
+// module.
+func Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule(t *testing.T) {
+	cfg := bundle.ModulesConfig{
+		Decap: &decap.Config{
+			InstanceID:         xcfg.NewRequired(uint32(0)),
+			MemoryPath:         xcfg.MustNonEmptyString("/nonexistent/path/for/bundle/cfg/test"),
+			MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
+			Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
+			GatewayEndpoint:    xcfg.MustNonEmptyString("[::1]:8080"),
+		},
+	}
+
+	_, err := bundle.NewBundle(cfg, bundle.DevicesConfig{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decap module")
+}

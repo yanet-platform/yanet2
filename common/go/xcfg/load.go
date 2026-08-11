@@ -36,14 +36,11 @@ func newOptions() *options {
 // WithKnownFields rejects YAML documents that contain keys not present in
 // the destination type.
 //
-// Without this option an unknown key is silently dropped, which lets typos
-// and renamed fields go unnoticed and leaves the corresponding field at its
-// default value. With this option such a key becomes a decode error, so a
-// stale or misspelled key in a deployed config fails loudly at startup
-// instead of silently keeping a default that may be wrong for the
-// environment. Strictness does not propagate into a field whose type
-// implements a custom UnmarshalYAML that decodes via node.Decode, because
-// yaml.v3 creates a fresh, non-strict decoder for that call.
+// Without this option an unknown key is silently dropped, letting typos and
+// renamed fields go unnoticed while the corresponding field silently keeps
+// its default. With this option such a key becomes a decode error, including
+// for a key nested under a field whose type implements a custom
+// UnmarshalYAML — see CheckKnownKeys for the mechanism.
 func WithKnownFields() Option {
 	return func(o *options) {
 		o.KnownFields = true
@@ -86,6 +83,10 @@ func Decode(buf []byte, dst any, options ...Option) error {
 		dec := yaml.NewDecoder(bytes.NewReader(buf))
 		dec.KnownFields(true)
 		if err := dec.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+
+		if err := checkKnownKeys(buf, reflect.TypeOf(dst)); err != nil {
 			return err
 		}
 	} else {

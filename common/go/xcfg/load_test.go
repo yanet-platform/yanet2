@@ -2,9 +2,11 @@ package xcfg
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func Test_Load_Valid(t *testing.T) {
@@ -273,6 +275,58 @@ func Test_Decode_KnownFields_StillValidates(t *testing.T) {
 	var pathErr *PathError
 	require.ErrorAs(t, err, &pathErr)
 	require.Equal(t, "path", pathErr.Path)
+}
+
+// customUnmarshalInner mirrors a module Config's UnmarshalYAML: it
+// re-decodes through a plain alias, which is the shape yaml.v3's own
+// KnownFields decoder cannot see through.
+type customUnmarshalInner struct {
+	Addr NonEmptyString `yaml:"addr"`
+}
+
+func (m *customUnmarshalInner) UnmarshalYAML(node *yaml.Node) error {
+	type plain customUnmarshalInner
+	return node.Decode((*plain)(m))
+}
+
+func Test_Decode_KnownFields_ReachesCustomUnmarshalYAML(t *testing.T) {
+	// An unknown key nested under a field whose type implements
+	// UnmarshalYAML via node.Decode must still be caught with
+	// WithKnownFields, and must still be silently ignored without it.
+	type Config struct {
+		Name  NonEmptyString       `yaml:"name"`
+		Inner customUnmarshalInner `yaml:"inner"`
+	}
+
+	input := []byte("name: foo\ninner:\n  addr: bar\n  bogus: true\n")
+
+	var lenient Config
+	require.NoError(t, Decode(input, &lenient))
+
+	var strict Config
+	err := Decode(input, &strict, WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "inner.bogus")
+}
+
+func Test_LoadConfig_KnownFields_ReachesCustomUnmarshalYAML(t *testing.T) {
+	// LoadConfig delegates to Decode, so the same reflection-walk coverage
+	// must hold when driven through a file path rather than an in-memory
+	// buffer.
+	type Config struct {
+		Name  NonEmptyString       `yaml:"name"`
+		Inner customUnmarshalInner `yaml:"inner"`
+	}
+
+	path := t.TempDir() + "/config.yaml"
+	require.NoError(t, os.WriteFile(path, []byte("name: foo\ninner:\n  addr: bar\n  bogus: true\n"), 0o600))
+
+	_, err := LoadConfig[Config](path)
+	require.NoError(t, err)
+
+	_, err = LoadConfig[Config](path, WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "inner.bogus")
 }
 
 func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {

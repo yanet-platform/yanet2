@@ -106,6 +106,7 @@ logging:
   level: debug
 
 gateway:
+  instance_id: 0
   server:
     endpoint: "0.0.0.0:8080"
   auth:
@@ -113,28 +114,42 @@ gateway:
 
 modules:
   route:
-    link_map:
-      kni0: 01:00.0
+    instance_id: 0
     memory_requirements: 8MB
   route-mpls:
+    instance_id: 0
     memory_requirements: 8MB
   decap:
+    instance_id: 0
     memory_requirements: 8MB
   dscp:
+    instance_id: 0
     memory_requirements: 8MB
   forward:
+    instance_id: 0
     memory_requirements: 8MB
   nat64:
+    instance_id: 0
     memory_requirements: 8MB
   pdump:
+    instance_id: 0
     memory_requirements: 8MB
   acl:
+    instance_id: 0
     memory_requirements: 16MB
+  mirror:
+    instance_id: 0
+    memory_requirements: 8MB
+  blackhole:
+    instance_id: 0
+    memory_requirements: 8MB
 
 devices:
   plain:
+    instance_id: 0
     memory_requirements: 8MB
   vlan:
+    instance_id: 0
     memory_requirements: 8MB
 `
 }

@@ -1,8 +1,6 @@
 package bundle
 
 import (
-	"fmt"
-
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
@@ -51,69 +49,4 @@ type DevicesConfig struct {
 	Vlan *vlan.Config `yaml:"vlan"`
 	// Trafgen is the configuration for the traffic generator device.
 	Trafgen *trafgen.Config `yaml:"trafgen"`
-}
-
-// DefaultModulesConfig returns the default config for the bundled modules.
-func DefaultModulesConfig() ModulesConfig {
-	return ModulesConfig{
-		Route:     route.DefaultConfig(),
-		RouteMPLS: route_mpls.DefaultConfig(),
-		Decap:     decap.DefaultConfig(),
-		DSCP:      dscp.DefaultConfig(),
-		Forward:   forward.DefaultConfig(),
-		Mirror:    mirror.DefaultConfig(),
-		NAT64:     nat64.DefaultConfig(),
-		Pdump:     pdump.DefaultConfig(),
-		ACL:       acl.DefaultConfig(),
-		Blackhole: blackhole.DefaultConfig(),
-	}
-}
-
-// DefaultDevicesConfig returns the default config for the bundled devices.
-func DefaultDevicesConfig() DevicesConfig {
-	return DevicesConfig{
-		Plain:   plain.DefaultConfig(),
-		Vlan:    vlan.DefaultConfig(),
-		Trafgen: trafgen.DefaultConfig(),
-	}
-}
-
-// Validate validates the modules config.
-func (m *ModulesConfig) Validate() error {
-	if m.Route == nil {
-		return fmt.Errorf("route module is not configured")
-	}
-	if m.Decap == nil {
-		return fmt.Errorf("decap module is not configured")
-	}
-	if m.DSCP == nil {
-		return fmt.Errorf("dscp module is not configured")
-	}
-	if m.Forward == nil {
-		return fmt.Errorf("forward module is not configured")
-	}
-	if m.Mirror == nil {
-		return fmt.Errorf("mirror module is not configured")
-	}
-	if m.NAT64 == nil {
-		return fmt.Errorf("nat64 module is not configured")
-	}
-	if m.ACL == nil {
-		return fmt.Errorf("acl module is not configured")
-	}
-	if m.Blackhole == nil {
-		return fmt.Errorf("blackhole module is not configured")
-	}
-	return nil
-}
-
-// Validate validates the devices config.
-func (m *DevicesConfig) Validate() error {
-	if m.Plain == nil {
-		return fmt.Errorf("plain device is not configured")
-	}
-	if m.Vlan == nil {
-		return fmt.Errorf("vlan device is not configured")
-	}
-	return nil
 }

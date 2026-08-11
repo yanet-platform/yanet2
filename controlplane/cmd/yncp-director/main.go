@@ -53,7 +53,7 @@ func main() {
 }
 
 func run(cmd Cmd) error {
-	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath)
+	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath, xcfg.WithKnownFields())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

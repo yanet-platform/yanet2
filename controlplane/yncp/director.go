@@ -77,7 +77,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 	log.Debug("waiting for dataplane shared memory",
 		zap.String("path", cfg.MemoryPath),
-		zap.Uint32("instance_id", cfg.Gateway.InstanceID),
+		zap.Uint32("instance_id", cfg.Gateway.InstanceID.Unwrap()),
 	)
 	waitCtx, cancel := context.WithTimeout(context.Background(), dataplaneReadyTimeout)
 	defer cancel()
@@ -91,7 +91,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 			}
 			shm = attached
 		}
-		if !shm.DataplaneReady(cfg.Gateway.InstanceID) {
+		if !shm.DataplaneReady(cfg.Gateway.InstanceID.Unwrap()) {
 			return errors.New("dataplane shared memory not ready")
 		}
 		return nil
@@ -103,7 +103,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		)
 	}
 	log.Info("dataplane shared memory ready",
-		zap.Uint32("instance_id", cfg.Gateway.InstanceID),
+		zap.Uint32("instance_id", cfg.Gateway.InstanceID.Unwrap()),
 	)
 
 	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, bundle.WithLog(log))
@@ -116,22 +116,22 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 			builtin.NewLogging(opts.LogLevel, builtin.WithLoggingLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewInspect(cfg.Gateway.InstanceID, shm),
+			builtin.NewInspect(cfg.Gateway.InstanceID.Unwrap(), shm),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewPipeline(cfg.Gateway.InstanceID, shm, builtin.WithPipelineLog(log)),
+			builtin.NewPipeline(cfg.Gateway.InstanceID.Unwrap(), shm, builtin.WithPipelineLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewFunction(cfg.Gateway.InstanceID, shm, builtin.WithFunctionLog(log)),
+			builtin.NewFunction(cfg.Gateway.InstanceID.Unwrap(), shm, builtin.WithFunctionLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewCounters(cfg.Gateway.InstanceID, shm, builtin.WithCountersLog(log)),
+			builtin.NewCounters(cfg.Gateway.InstanceID.Unwrap(), shm, builtin.WithCountersLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewDevice(cfg.Gateway.InstanceID, shm),
+			builtin.NewDevice(cfg.Gateway.InstanceID.Unwrap(), shm),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewMemory(cfg.Gateway.InstanceID, shm),
+			builtin.NewMemory(cfg.Gateway.InstanceID.Unwrap(), shm),
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),

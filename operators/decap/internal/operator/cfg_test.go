@@ -12,12 +12,9 @@ import (
 )
 
 // Test_ShippedDefaultConfig_NoUnknownKeys guards the shipped default config
-// against a key that matches no field in Config.
-//
-// FunctionConfig.UnmarshalYAML re-decodes through a fresh, non-strict
-// yaml.v3 decoder, so xcfg.WithKnownFields cannot see a stray key inside a
-// functions entry. xcfg.CheckKnownKeys walks the reflected struct shape
-// directly instead, which is unaffected by that re-decode.
+// against a key that matches no field in Config, including one nested
+// inside a functions entry whose FunctionConfig.UnmarshalYAML re-decodes
+// through a fresh yaml.v3 decoder.
 func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 	data, err := os.ReadFile("../../etc/yanet/yanet-decap-operator-default.yaml")
 	require.NoError(t, err)

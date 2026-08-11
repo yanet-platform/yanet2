@@ -107,8 +107,6 @@ maplit:operators/route/internal/discovery/neigh/neigh.go:newOptions:map[string]s
 private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg:1  # legacy: encapsulate behind an exported method or field
 private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg:2  # legacy: encapsulate behind an exported method or field
 private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.services:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/bundle/bundle.go:buildServices:factory.name:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/bundle/bundle.go:buildServices:factory.new:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/gateway.go:Gateway.Run:runner.module:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/gateway.go:NewGateway:entry.kind:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/gateway.go:NewGateway:entry.kind:2  # legacy: encapsulate behind an exported method or field

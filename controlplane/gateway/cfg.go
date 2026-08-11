@@ -22,7 +22,9 @@ const defaultRegistrySweepInterval = 30 * time.Second
 // Config is the configuration for the gateway.
 type Config struct {
 	// InstanceID specifies which dataplane instance this gateway serves.
-	InstanceID uint32 `yaml:"instance_id"`
+	//
+	// Required: it must be set explicitly, even to 0.
+	InstanceID xcfg.Required[uint32] `yaml:"instance_id"`
 	// Server is the configuration for the gateway server.
 	Server ServerConfig `yaml:"server"`
 	// Auth is the configuration for authentication and authorization.

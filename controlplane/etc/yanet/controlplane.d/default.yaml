@@ -10,6 +10,9 @@ logging:
 # communicate with dataplane.
 memory_path: &memory_path /dev/hugepages/yanet
 gateway:
+  # Which dataplane instance this gateway serves. Required, 0 is a valid
+  # value but must be written down.
+  instance_id: 0
   server:
     endpoint: &gateway_endpoint "[::1]:8080"
     http_endpoint: "[::1]:8081"
@@ -50,21 +53,81 @@ gateway:
     ttl: 5m
     # How often the eviction check runs.
     sweep_interval: 30s
+# A module listed below is started and attaches an agent to the named
+# dataplane instance; a module left out is not started at all.
+# instance_id is mandatory for every listed module.
 modules:
   route:
+    instance_id: 0
     # MemoryPath is the path to the shared-memory file that is used
     # to communicate with the dataplane.
     memory_path: *memory_path
     # Memory requirements for a single FIB-push transaction.
     memory_requirements: 16MB
     endpoint: "[::1]:0"
+  route-mpls:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
   decap:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  dscp:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  forward:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  mirror:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  nat64:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  pdump:
+    instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint
   acl:
+    instance_id: 0
     memory_path: *memory_path
     memory_requirements: 8GB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  blackhole:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 4MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+devices:
+  plain:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  vlan:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint

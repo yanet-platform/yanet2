@@ -266,3 +266,26 @@ another_free_key: value
 `
 	require.NoError(t, xcfg.CheckKnownKeys[knownKeysInlineMap]([]byte(input)))
 }
+
+type requiredWrappedInner struct {
+	A string `yaml:"a"`
+	B string `yaml:"b"`
+}
+
+type requiredWrapped struct {
+	Sub xcfg.Required[requiredWrappedInner] `yaml:"sub"`
+}
+
+func Test_CheckKnownKeys_UnexportedStructWithUnmarshalYAMLNotFlagged(t *testing.T) {
+	// Required[T] has only unexported fields but decodes a mapping through
+	// its own UnmarshalYAML — the walk must not report the mapping's keys
+	// as unknown just because Required[T] has no exported field set of its
+	// own.
+	input := "sub:\n  a: x\n  b: y\n"
+	require.NoError(t, xcfg.CheckKnownKeys[requiredWrapped]([]byte(input)))
+
+	var out requiredWrapped
+	require.NoError(t, yaml.Unmarshal([]byte(input), &out))
+	require.Equal(t, "x", out.Sub.Unwrap().A)
+	require.Equal(t, "y", out.Sub.Unwrap().B)
+}

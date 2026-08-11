@@ -54,11 +54,11 @@ func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
 	}
 
 	log.Debug("mapping shared memory",
-		zap.Uint32("instance_id", cfg.InstanceID),
+		zap.Uint32("instance_id", cfg.InstanceID.Unwrap()),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentAttach("nat64", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentAttach("nat64", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}

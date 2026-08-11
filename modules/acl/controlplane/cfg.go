@@ -1,6 +1,8 @@
 package acl
 
 import (
+	"gopkg.in/yaml.v3"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
@@ -8,7 +10,9 @@ import (
 // Config represents ACL module configuration
 type Config struct {
 	// InstanceID specifies which dataplane instance this module serves.
-	InstanceID uint32 `yaml:"instance_id"`
+	//
+	// Required: a listed module must set it explicitly, even to 0.
+	InstanceID xcfg.Required[uint32] `yaml:"instance_id"`
 	// MemoryPath is the path to the shared memory file
 	MemoryPath xcfg.NonEmptyString `yaml:"memory_path"`
 	// MemoryRequirements specifies memory requirements for the module
@@ -27,4 +31,15 @@ func DefaultConfig() *Config {
 		Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
 		GatewayEndpoint:    xcfg.MustNonEmptyString("[::1]:8080"),
 	}
+}
+
+// UnmarshalYAML seeds Config with DefaultConfig before decoding, so a listed
+// module that omits an optional field keeps its default.
+//
+// The plain alias drops Config's own UnmarshalYAML method so node.Decode
+// does not recurse into this method.
+func (m *Config) UnmarshalYAML(node *yaml.Node) error {
+	*m = *DefaultConfig()
+	type plain Config
+	return node.Decode((*plain)(m))
 }
