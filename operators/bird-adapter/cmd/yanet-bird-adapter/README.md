@@ -55,9 +55,11 @@ bird:
   source_v6: "::1"
 ```
 
-The `bird` block is applied automatically at startup. Set `name: ""` to
-disable it — a bare `name:` (YAML null) does not, since it leaves the
-shipped default in place. There is no separate bootstrap step.
+The `bird` block is applied automatically at startup when present. Older
+configuration files may omit the block — the server then starts bare and
+expects the client subcommand to configure it later. Set `name: ""` to
+disable a present block — a bare `name:` (YAML null) does not, since it leaves
+the shipped default in place. There is no separate bootstrap step.
 
 ### Reconfigure at Runtime
 

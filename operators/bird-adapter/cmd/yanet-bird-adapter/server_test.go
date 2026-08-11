@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,13 +16,70 @@ import (
 //
 // With strict parsing enabled a stale or renamed key in the shipped YAML
 // would break every fresh install, so this test loads the conffile through
-// xcfg.WithKnownFields() and requires it to decode to exactly
-// DefaultServerConfig(). That also catches the Go defaults silently
-// drifting away from the shipped conffile.
+// xcfg.WithKnownFields() and requires it to decode to the server defaults plus
+// its explicitly present BIRD block. That also catches the Go defaults
+// silently drifting away from the shipped conffile.
 func Test_ShippedDefaultConfig_MatchesServerConfig(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[ServerConfig]("../../etc/yanet/bird-adapter-default.yaml", xcfg.WithKnownFields())
 	require.NoError(t, err)
-	require.Equal(t, DefaultServerConfig(), cfg)
+
+	expected := DefaultServerConfig()
+	expectedBIRD := BIRDConfig{}
+	expectedBIRD.Default()
+	expected.BIRD = xcfg.NewOptional(expectedBIRD)
+	require.Equal(t, expected, cfg)
+}
+
+// Test_LoadConfig_BIRDBlockSemantics covers absent and present startup BIRD
+// configuration, including nested defaults and explicit disabling.
+func Test_LoadConfig_BIRDBlockSemantics(t *testing.T) {
+	defaultBIRD := BIRDConfig{}
+	defaultBIRD.Default()
+	partialBIRD := defaultBIRD
+	partialBIRD.Name = "route1"
+	emptyNameBIRD := defaultBIRD
+	emptyNameBIRD.Name = ""
+
+	tests := []struct {
+		name     string
+		config   []byte
+		wantBIRD *BIRDConfig
+	}{
+		{
+			name: "old-style config without bird block",
+			config: []byte(`logging:
+  level: info
+listen_addr: "localhost:50051"
+route_operator_endpoint: "[::1]:8080"
+`),
+		},
+		{
+			name:     "present block gets nested defaults",
+			config:   []byte("bird:\n  name: route1\n"),
+			wantBIRD: &partialBIRD,
+		},
+		{
+			name:     "empty name disables import",
+			config:   []byte("bird:\n  name: \"\"\n"),
+			wantBIRD: &emptyNameBIRD,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "server.yaml")
+			require.NoError(t, os.WriteFile(configPath, tc.config, 0o600))
+
+			cfg, err := xcfg.LoadConfig[ServerConfig](configPath, xcfg.WithKnownFields())
+			require.NoError(t, err)
+			if tc.wantBIRD == nil {
+				require.Nil(t, cfg.BIRD.Unwrap())
+				return
+			}
+
+			require.Equal(t, tc.wantBIRD, cfg.BIRD.Unwrap())
+		})
+	}
 }
 
 // Test_BIRDConfig_Validate asserts that an empty name disables the startup

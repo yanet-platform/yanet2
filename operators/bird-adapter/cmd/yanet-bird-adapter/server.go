@@ -61,7 +61,7 @@ type ServerConfig struct {
 	// gateway that proxies it.
 	RouteOperatorEndpoint string `yaml:"route_operator_endpoint"`
 	// BIRD configures the BIRD import applied at startup.
-	BIRD BIRDConfig `yaml:"bird"`
+	BIRD xcfg.Optional[BIRDConfig] `yaml:"bird"`
 }
 
 func (m *ServerConfig) Default() {
@@ -76,15 +76,6 @@ func DefaultServerConfig() *ServerConfig {
 		},
 		ListenAddr:            "localhost:50051",
 		RouteOperatorEndpoint: "[::1]:8080",
-		BIRD: BIRDConfig{
-			Name: "route0",
-			Sockets: []string{
-				"/var/run/bird/yanet-master4.sock",
-				"/var/run/bird/yanet-master6.sock",
-			},
-			SourceV4: netip.MustParseAddr("127.0.0.1"),
-			SourceV6: netip.MustParseAddr("::1"),
-		},
 	}
 }
 
@@ -98,6 +89,18 @@ type BIRDConfig struct {
 	Sockets  []string   `yaml:"sockets"`
 	SourceV4 netip.Addr `yaml:"source_v4"`
 	SourceV6 netip.Addr `yaml:"source_v6"`
+}
+
+func (m *BIRDConfig) Default() {
+	*m = BIRDConfig{
+		Name: "route0",
+		Sockets: []string{
+			"/var/run/bird/yanet-master4.sock",
+			"/var/run/bird/yanet-master6.sock",
+		},
+		SourceV4: netip.MustParseAddr("127.0.0.1"),
+		SourceV6: netip.MustParseAddr("::1"),
+	}
 }
 
 // Validate checks that the config is structurally sound.
@@ -160,11 +163,13 @@ func runServer() error {
 		return nil
 	})
 
-	// Apply the configured startup BIRD import.
-	wg.Go(func() error {
-		runStartupImport(ctx, log, adapterService, cfg.BIRD, cfg.Logging.Level.String())
-		return nil
-	})
+	if startupConfig := cfg.BIRD.Unwrap(); startupConfig != nil {
+		// Apply the configured startup BIRD import.
+		wg.Go(func() error {
+			runStartupImport(ctx, log, adapterService, *startupConfig, cfg.Logging.Level.String())
+			return nil
+		})
+	}
 
 	// Wait for interrupt signal
 	wg.Go(func() error {
