@@ -83,3 +83,4 @@ echo y | debuild --preserve-envvar=PATH -us -uc -b 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/
+./scripts/verify-deb-artifacts.sh outdeb

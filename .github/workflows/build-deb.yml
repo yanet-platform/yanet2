@@ -104,6 +104,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts
+      - name: Test Debian artifact verifier
+        run: ./scripts/test-verify-deb-artifacts.sh
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
@@ -124,6 +126,7 @@ jobs:
         with:
           name: debs-${{ matrix.unbtver }}
           path: |
+            outdeb/*.changes
             outdeb/*.deb
             outdeb/*.ddeb
 
@@ -133,17 +136,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
+      - name: Verify downloaded packages
+        run: ./scripts/verify-deb-artifacts.sh artifacts
+
       - name: Flatten artifacts
         run: |
           mkdir -p outdeb
-          find artifacts -type f -name "*.deb" -exec cp {} outdeb/ \;
+          find artifacts -type f \( -name "*.changes" -o -name "*.deb" -o -name "*.ddeb" \) -exec cp {} outdeb/ \;
+          ./scripts/verify-deb-artifacts.sh outdeb
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: outdeb/*
+          files: |
+            outdeb/*.deb
+            outdeb/*.ddeb
