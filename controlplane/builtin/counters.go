@@ -313,7 +313,7 @@ func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
 			commonpb.NewMetricCounter("worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
 			commonpb.NewMetricCounter("worker_local_tx_drops", worker.LocalTxDrops, labels...),
 			commonpb.NewMetricCounter("worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
-			commonpb.NewMetricCounter("worker_drops", worker.Drops, labels...),
+			commonpb.NewMetricCounter("worker_disposed", worker.Drops, labels...),
 		)
 
 		if len(worker.RxBursts) > 0 {
