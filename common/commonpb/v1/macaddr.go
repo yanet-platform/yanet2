@@ -32,18 +32,22 @@ func (m *MACAddress) AsLogValue() any {
 	return net.HardwareAddr(eui48[:]).String()
 }
 
+// macAddressJSON is the JSON wire shape shared by MarshalJSON and
+// UnmarshalJSON.
+type macAddressJSON struct {
+	Addr string `json:"addr"`
+}
+
 // MarshalJSON serializes addr as a human-readable MAC address string.
 func (m *MACAddress) MarshalJSON() ([]byte, error) {
 	eui48 := m.EUI48()
-	return fmt.Appendf(nil, `{"addr":"%s"}`, net.HardwareAddr(eui48[:])), nil
+	return json.Marshal(macAddressJSON{Addr: net.HardwareAddr(eui48[:]).String()})
 }
 
 // UnmarshalJSON accepts addr as a MAC address string in various EUI-48
 // formats.
 func (m *MACAddress) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Addr string `json:"addr"`
-	}
+	var raw macAddressJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}

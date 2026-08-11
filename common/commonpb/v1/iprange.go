@@ -86,21 +86,25 @@ func (m *IPRange) AsLogValue() any {
 	return fmt.Sprintf("[%s, %s]", start.String(), end.String())
 }
 
+// ipRangeJSON is the JSON wire shape shared by MarshalJSON and
+// UnmarshalJSON.
+type ipRangeJSON struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
 // MarshalJSON serializes the range as human-readable IP address strings.
 func (m *IPRange) MarshalJSON() ([]byte, error) {
 	start, end, err := m.ToRange()
 	if err != nil {
 		return nil, err
 	}
-	return fmt.Appendf(nil, `{"start":"%s","end":"%s"}`, start.String(), end.String()), nil
+	return json.Marshal(ipRangeJSON{Start: start.String(), End: end.String()})
 }
 
 // UnmarshalJSON accepts start and end as IPv4 or IPv6 address strings.
 func (m *IPRange) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Start string `json:"start"`
-		End   string `json:"end"`
-	}
+	var raw ipRangeJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
