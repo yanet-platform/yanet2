@@ -1665,20 +1665,11 @@ cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
 	return tags;
 }
 
-// Free a per-instance snapshot array as produced by fill_counter_handle.
-static void
-free_counter_values(uint64_t **values, uint64_t instance_count) {
-	if (values == NULL) {
-		return;
-	}
-	for (uint64_t i = 0; i < instance_count; ++i) {
-		free(values[i]);
-	}
-	free(values);
-}
-
 // Copy one already-described counter's per-worker value snapshot into
 // newly allocated memory, stashed behind the handle's opaque value array.
+//
+// The pointer array and every worker's value block live in one allocation:
+// the pointer array first, then each worker's values back to back.
 //
 // The caller guarantees the per-worker storages stay alive for the
 // duration of this call.
@@ -1689,19 +1680,23 @@ counter_handle_copy_values(
 	uint64_t worker_count,
 	uint64_t idx
 ) {
-	uint64_t **values = calloc(worker_count, sizeof(*values));
-	if (values == NULL) {
+	size_t ptr_array_size = worker_count * sizeof(uint64_t *);
+
+	uint8_t *base =
+		malloc(ptr_array_size +
+		       worker_count * dst->size * sizeof(uint64_t));
+	if (base == NULL) {
 		return -1;
 	}
+
+	uint64_t **values = (uint64_t **)base;
+	uint64_t *value_blocks = (uint64_t *)(base + ptr_array_size);
 	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
 		if (dst->size == 0) {
+			values[w_idx] = NULL;
 			continue;
 		}
-		values[w_idx] = malloc(dst->size * sizeof(uint64_t));
-		if (values[w_idx] == NULL) {
-			free_counter_values(values, worker_count);
-			return -1;
-		}
+		values[w_idx] = value_blocks + w_idx * dst->size;
 		struct counter_value_handle *handle =
 			counter_get_value_handle(idx, worker_storages[w_idx]);
 		memcpy(values[w_idx],
@@ -2309,10 +2304,10 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 			}
 			free(handles[i].tags);
 		}
-		// Each counter owns its own per-worker snapshot array.
-		free_counter_values(
-			handles[i].values, counters->instance_count
-		);
+		// This pointer is the base of the single allocation that also
+		// holds every worker's value block, so freeing it here
+		// reclaims all of it.
+		free(handles[i].values);
 	}
 	free(counters);
 }
