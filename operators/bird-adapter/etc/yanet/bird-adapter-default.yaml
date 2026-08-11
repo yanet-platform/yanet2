@@ -11,3 +11,13 @@ listen_addr: "localhost:50051"
 # gRPC endpoint serving the route operator's RouteService for RIB updates.
 # Connect directly to the route operator or to the gateway that proxies it.
 route_operator_endpoint: "[::1]:8080"
+
+# BIRD import applied at startup. An empty name disables it, leaving the
+# server bare until the client subcommand configures it at runtime.
+bird:
+  name: route0
+  sockets:
+    - /var/run/bird/yanet-master4.sock
+    - /var/run/bird/yanet-master6.sock
+  source_v4: "127.0.0.1"
+  source_v6: "::1"

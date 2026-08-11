@@ -131,43 +131,77 @@ func (m *AdapterService) SetupConfig(
 	ctx context.Context,
 	req *adapterpb.SetupConfigRequest,
 ) (*adapterpb.SetupConfigResponse, error) {
-	name := req.GetName()
+	if req.GetConfig() == nil {
+		return nil, fmt.Errorf("no import config provided")
+	}
+
 	mplsV4Src, err := req.GetSourceV4().ToAddr()
 	if err != nil {
 		return nil, fmt.Errorf("invalid v4 source (bytes=%x): %w", req.GetSourceV4().GetAddr(), err)
-	}
-	if !mplsV4Src.Is4() {
-		return nil, fmt.Errorf("v4 source %q is not an IPv4 address", mplsV4Src)
 	}
 	mplsV6Src, err := req.GetSourceV6().ToAddr()
 	if err != nil {
 		return nil, fmt.Errorf("invalid v6 source (bytes=%x): %w", req.GetSourceV6().GetAddr(), err)
 	}
-	if !mplsV6Src.Is6() || mplsV6Src.Is4In6() {
-		return nil, fmt.Errorf("v6 source %q is not a pure IPv6 address", mplsV6Src)
-	}
-	logLevelStr := req.GetConfig().GetLogLevel()
-
-	m.log.Info("setting up the configuration",
-		zap.String("name", name),
-		zap.String("log_level", logLevelStr),
-	)
 
 	cfg := bird.DefaultConfig()
 	req.GetConfig().ToConfig(cfg)
+
+	if err := m.SetupImport(ImportParams{
+		Name:     req.GetName(),
+		Config:   cfg,
+		SourceV4: mplsV4Src,
+		SourceV6: mplsV6Src,
+		LogLevel: req.GetConfig().GetLogLevel(),
+	}); err != nil {
+		return nil, err
+	}
+
+	return &adapterpb.SetupConfigResponse{}, nil
+}
+
+// ImportParams describes a single BIRD import to set up.
+type ImportParams struct {
+	Name     string
+	Config   *bird.Config
+	SourceV4 netip.Addr
+	SourceV6 netip.Addr
+	LogLevel string
+}
+
+// SetupImport configures and starts a BIRD import, bypassing SetupConfig's
+// protobuf decoding.
+//
+// It takes no context.Context: processBirdImport derives the import's
+// stream from context.Background() so it outlives whatever call started it,
+// and a caller context here would misleadingly suggest otherwise.
+func (m *AdapterService) SetupImport(params ImportParams) error {
+	if !params.SourceV4.Is4() {
+		return fmt.Errorf("v4 source %q is not an IPv4 address", params.SourceV4)
+	}
+	if !params.SourceV6.Is6() || params.SourceV6.Is4In6() {
+		return fmt.Errorf("v6 source %q is not a pure IPv6 address", params.SourceV6)
+	}
+
+	m.log.Info("setting up the configuration",
+		zap.String("name", params.Name),
+		zap.String("log_level", params.LogLevel),
+	)
+
+	cfg := params.Config
 	if len(cfg.Sockets) == 0 {
 		// We do not need this connection if there is no background stream for import
-		return nil, fmt.Errorf("no export sockets provided")
+		return fmt.Errorf("no export sockets provided")
 	}
 
 	// Create per-client logger based on requested log level
 	var clientLog *zap.Logger
-	if logLevelStr != "" {
+	if params.LogLevel != "" {
 		var level zapcore.Level
-		if err := level.UnmarshalText([]byte(logLevelStr)); err != nil {
+		if err := level.UnmarshalText([]byte(params.LogLevel)); err != nil {
 			m.log.Warn("invalid log level, using nop logger",
-				zap.String("name", name),
-				zap.String("log_level", logLevelStr),
+				zap.String("name", params.Name),
+				zap.String("log_level", params.LogLevel),
 				zap.Error(err),
 			)
 			clientLog = zap.NewNop()
@@ -181,7 +215,7 @@ func (m *AdapterService) SetupConfig(
 				level: level,
 			}
 
-			clientLog = zap.New(filteredCore).Named(name)
+			clientLog = zap.New(filteredCore).Named(params.Name)
 		}
 	} else {
 		// No log level specified, use nop logger
@@ -194,23 +228,23 @@ func (m *AdapterService) SetupConfig(
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to the route operator endpoint: %w", err)
+		return fmt.Errorf("failed to connect to the route operator endpoint: %w", err)
 	}
 
 	// And then add dynamic routes, if any.
 	if err := m.processBirdImport(
 		conn,
 		cfg,
-		name,
-		mplsV4Src,
-		mplsV6Src,
+		params.Name,
+		params.SourceV4,
+		params.SourceV6,
 		withMethodLog(clientLog),
 	); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("failed to setup bird import reader: %w ", err)
+		return fmt.Errorf("failed to setup bird import reader: %w ", err)
 	}
 
-	return &adapterpb.SetupConfigResponse{}, nil
+	return nil
 }
 
 var errStreamClosed = fmt.Errorf("stream closed")

@@ -44,9 +44,9 @@ func init() {
 
 var clientCmd = &cobra.Command{
 	Use:   "client",
-	Short: "Configure the BIRD adapter server",
-	Long: `Send configuration to the BIRD adapter gRPC server.
-This command connects to the adapter server and configures BIRD route import.`,
+	Short: "Reconfigure a running BIRD adapter server",
+	Long: `Send a BIRD import configuration to an already-running BIRD adapter server.
+Use this for runtime reconfiguration — the server also applies a startup import from its own YAML config.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runClient(); err != nil {
 			fmt.Printf("ERROR: %v\n", err)

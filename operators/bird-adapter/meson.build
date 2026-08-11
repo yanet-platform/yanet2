@@ -1,14 +1,4 @@
 install_data(
-    'etc/yanet/yanet2-bird-adapter-bootstrap.service',
-    install_dir: '/usr/lib/systemd/system',
-)
-
-install_data(
-    'etc/yanet/bird-adapter-bootstrap.env',
-    install_dir: '/etc/yanet2',
-)
-
-install_data(
     'etc/yanet/bird-adapter-default.yaml',
     install_dir: '/etc/yanet2',
 )

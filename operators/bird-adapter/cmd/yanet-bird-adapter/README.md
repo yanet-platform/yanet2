@@ -25,10 +25,10 @@ CLI for configuring the server:
 - Sends import configuration to the server
 - Specifies paths to BIRD Unix sockets
 
-### Adapter Service ([`modules/route/bird-adapter/service.go`](../../modules/route/bird-adapter/service.go:1))
+### Adapter Service ([`service.go`](../../service.go:1))
 Import logic:
-- Reads routes from BIRD via [`bird.Export`](../../modules/route/internal/discovery/bird/export.go:1)
-- Streams updates to route service via [`FeedRIB`](../../modules/route/controlplane/service.go:305)
+- Reads routes from BIRD via [`bird.Export`](../../internal/bird/export.go:1)
+- Streams updates to route service via [`FeedRIB`](../../../route/internal/operator/service_route.go:332)
 - Automatically reconnects on errors
 - Manages sessions for stale route cleanup
 
@@ -46,9 +46,23 @@ logging:
   level: info
 listen_addr: "localhost:50051"
 route_operator_endpoint: "[::1]:8080"
+bird:
+  name: route0
+  sockets:
+    - /var/run/bird/yanet-master4.sock
+    - /var/run/bird/yanet-master6.sock
+  source_v4: "127.0.0.1"
+  source_v6: "::1"
 ```
 
-### Configure Import
+The `bird` block is applied automatically at startup. Set `name: ""` to
+disable it — a bare `name:` (YAML null) does not, since it leaves the
+shipped default in place. There is no separate bootstrap step.
+
+### Reconfigure at Runtime
+
+The `client` subcommand reconfigures an already-running server, for example
+to switch to a different set of BIRD sockets without a restart:
 
 ```bash
 yanet-bird-adapter client \
@@ -71,7 +85,7 @@ Parses BIRD binary export format:
 
 ## Route Management
 
-After import, use [`route` CLI](../../modules/route/cli/route/src/main.rs:1):
+After import, use [`route` CLI](../../../../modules/route/cli/route/src/main.rs:1):
 
 ```bash
 # Show imported routes
