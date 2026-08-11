@@ -35,6 +35,7 @@ You (the architect) drive this. You never write the code — that was already de
 - **PR body**: capitalized, period-ended bullets; high-level (no symbol names, no code-level detail); `Closes #<n>.` when applicable. No `## Summary` header, no `Test plan` section.
 - **One logical change = one PR.** Out-of-scope prerequisites get their own PR first (see special cases).
 - **NEVER merge with an unaddressed review finding** — read PR-level reviews, inline Codex comments, AND plain Codex issue comments; fix or reply to every one. An empty review list isn't proof Codex reviewed: confirm Codex's completion signal (Phase 5 step 3) before merging.
+- **NEVER merge a PR tied to a `needs-architect` issue.** The label means the decomposition was never validated, so the change may be solving the wrong problem in the wrong shape — and since such work is usually split across several PRs, the gate covers every issue the PR references or advances, not only one it closes. Phase 6 states the check. On a hit, STOP: leave the PR open, green and ready to merge, and report the PR, the issue number and the flag. The merge verb that invoked this skill ("create and merge", "влей в main") does NOT lift the block — it is a generic publish ask, not an acknowledgement of the flag. Only an informed human instruction lifts it: one given after the user has been told the flag is there, or one that names the override outright. Record that authorization in the run report.
 - **Never delete a branch (local or remote) until `merge_pull_request` (or `gh pr merge`, for the admin-bypass case) reports MERGED** — a failed merge on a torn-down branch auto-closes the PR.
 
 ### MCP is not a git substitute
@@ -90,10 +91,11 @@ Verify the branch first. Commit with a conventional scoped subject, high-level b
 
 ### Phase 6 — Merge (only if "merge" was authorized)
 
+- **Precondition — the `needs-architect` gate** (see non-negotiables): collect every issue this PR names anywhere in its body — a `#<n>` under any keyword or none, `Closes`, `Part of`, `Addresses part of`, a bare mention — plus the tracked issue the work was started under whether or not the body names it, then read each one's labels with `issue_read` method `get_labels` against the repo the PR lives in, since the label exists in both `yanet2` and `yanet2-private`. A failed label read is ambiguous, since `get_labels` returns the same "Could not resolve to an Issue" error for a number that is a pull request and for one that does not exist, so settle it with `issue_read` method `get` on that number: a success whose `html_url` contains `/pull/` is a pull request and not a hit, and anything else, a 404 included, is a block rather than a pass. Blocking on a merely mentioned issue is the intended conservative default, since one line from the user lifts it. Unlifted hit → do not merge, report it and stop. The block clears on its own if the label is gone from the issue by the time you read it.
 - **Single-commit PR** → `merge_pull_request` with `merge_method: squash`.
 - **Multi-commit, deliberately structured history** → `merge_method: rebase` (preserve it).
 - **Multi-commit where extras are review fixups** → `merge_method: squash` WITH an explicit clean `commit_title`/`commit_message`: `commit_title: "<type>(<scope>): <title> (#N)"`, `commit_message: "<high-level or empty>"`. Never let GitHub's default squash body (a bullet list of every intermediate commit) land — the user calls that "каша" and it is a convention violation.
-- **Ruleset bypass needed** → `merge_pull_request` has no admin-bypass equivalent, so a merge blocked by main's ruleset (unresolved threads, missing approval) fails and that failure is the signal. Fall back to `gh pr merge --admin` with the SAME strategy and message rules as above — a fixup-squash still needs `--subject "<type>(<scope>): <title> (#N)" --body "<high-level or empty>"` — and record why the bypass was needed.
+- **Ruleset bypass needed** → `merge_pull_request` has no admin-bypass equivalent, so a merge blocked by main's ruleset (unresolved threads, missing approval) fails and that failure is the signal. Fall back to `gh pr merge --admin` with the SAME strategy and message rules as above — a fixup-squash still needs `--subject "<type>(<scope>): <title> (#N)" --body "<high-level or empty>"` — and record why the bypass was needed. Never use it on a `needs-architect` block: that is not a ruleset failure and only the user lifts it.
 - Updating the branch with newer main before merge → REBASE + force-with-lease, never `git merge origin/main`.
 
 ### Phase 7 — Cleanup (from the MAIN checkout)
@@ -116,4 +118,4 @@ Detailed recipes live in `references/branching-and-recovery.md`:
 
 ## End of run
 
-Report to the user: PR number(s) and state (open / merged), any review findings addressed, any flakes you re-ran, and (if "create a PR" not "merge") that CI is green and it's ready to merge on their word.
+Report to the user: PR number(s) and state (open / merged), any review findings addressed, any flakes you re-ran, any `needs-architect` block you hit (the PR, the issue and whether the user lifted it), and (if "create a PR" not "merge") that CI is green and it's ready to merge on their word.
