@@ -1,6 +1,7 @@
 package xcfg
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,6 +70,16 @@ func Test_NonEmptyString_NullYAMLCaughtByValidate(t *testing.T) {
 	// Validate() catches this instead.
 	require.NoError(t, yaml.Unmarshal([]byte("v:"), &out))
 	require.Error(t, out.V.Validate())
+}
+
+func Test_NonEmptyString_MarshalJSON(t *testing.T) {
+	type doc struct {
+		V NonEmptyString `json:"v"`
+	}
+
+	buf, err := json.Marshal(doc{V: MustNonEmptyString("hello")})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"v":"hello"}`, string(buf))
 }
 
 func Test_NonEmptyString_YAMLRoundTrip(t *testing.T) {

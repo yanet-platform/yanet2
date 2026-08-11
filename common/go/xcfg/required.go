@@ -46,9 +46,8 @@ func (m Required[T]) MarshalYAML() (any, error) {
 
 // MarshalJSON implements json.Marshaler.
 //
-// Without it, zap.Any's reflect-based encoding sees only the unexported
-// fields and renders every Required the same regardless of its value. This
-// delegates to the wrapped value so it logs the same as an unwrapped T.
+// Without it, config dumps reach a reflect-based JSON encoder that finds
+// no exported field and renders any value as "{}".
 func (m Required[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m.v)
 }

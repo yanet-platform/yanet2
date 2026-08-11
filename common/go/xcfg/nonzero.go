@@ -1,6 +1,7 @@
 package xcfg
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -59,6 +60,14 @@ func (m NonZero[T]) Validate() error {
 // MarshalYAML implements yaml.Marshaler for round-trip serialization.
 func (m NonZero[T]) MarshalYAML() (any, error) {
 	return m.v, nil
+}
+
+// MarshalJSON implements json.Marshaler.
+//
+// Without it, config dumps reach a reflect-based JSON encoder that finds
+// no exported field and renders any value as "{}".
+func (m NonZero[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(m.v)
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler, rejecting zero values.

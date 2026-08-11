@@ -1,6 +1,7 @@
 package xcfg
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,6 +66,16 @@ func Test_NonZero_NullYAMLCaughtByValidate(t *testing.T) {
 	}
 	require.NoError(t, yaml.Unmarshal([]byte("v:"), &out))
 	require.Error(t, out.V.Validate())
+}
+
+func Test_NonZero_MarshalJSON(t *testing.T) {
+	type doc struct {
+		V NonZero[int] `json:"v"`
+	}
+
+	buf, err := json.Marshal(doc{V: MustNonZero(42)})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"v":42}`, string(buf))
 }
 
 func Test_NonZero_YAMLRoundTrip(t *testing.T) {
