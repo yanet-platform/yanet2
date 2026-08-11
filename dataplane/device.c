@@ -2,6 +2,7 @@
 #include "dataplane.h"
 
 #include <pthread.h>
+#include <string.h>
 
 #include "common/strutils.h"
 #include "dpdk.h"
@@ -129,6 +130,9 @@ dataplane_device_init(
 		errno = ENOMEM;
 		return -1;
 	}
+	memset(device->workers,
+	       0,
+	       sizeof(struct dataplane_worker) * config->worker_count);
 
 	for (device->worker_count = 0;
 	     device->worker_count < config->worker_count;

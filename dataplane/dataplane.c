@@ -190,10 +190,19 @@ dataplane_create_devices(
 	struct dataplane_device_config *device_configs
 ) {
 
-	dataplane->device_count = device_count;
+	dataplane->device_count = 0;
+
 	dataplane->devices = (struct dataplane_device *)malloc(
-		sizeof(struct dataplane_device) * dataplane->device_count
+		sizeof(struct dataplane_device) * device_count
 	);
+	if (dataplane->devices == NULL) {
+		LOG(ERROR, "failed to allocate 'devices'");
+		return -1;
+	}
+	memset(dataplane->devices,
+	       0,
+	       sizeof(struct dataplane_device) * device_count);
+	dataplane->device_count = device_count;
 
 	/*
 	 * Scan device list for yanet_ring devices. Such device consists of

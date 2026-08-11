@@ -400,6 +400,8 @@ dataplane_worker_init(
 	    config->instance_id,
 	    device->port_id);
 
+	worker->thread_started = false;
+
 	if (config->instance_id >= dataplane->instance_count) {
 		LOG(ERROR,
 		    "worker core=%u references instance=%u but only %u "
@@ -626,10 +628,17 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 		return -1;
 	}
 
+	worker->thread_started = true;
+
 	return 0;
 }
 
 void
 dataplane_worker_stop(struct dataplane_worker *worker) {
+	if (!worker->thread_started) {
+		return;
+	}
+
 	pthread_join(worker->thread_id, NULL);
+	worker->thread_started = false;
 }

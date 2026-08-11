@@ -2,6 +2,7 @@
 
 #include <pthread.h>
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "config.h"
@@ -69,6 +70,8 @@ struct dataplane_worker {
 	struct dp_worker *dp_worker;
 
 	pthread_t thread_id;
+	// Gates the join: false unless a thread was created and not yet reaped.
+	bool thread_started;
 
 	// FIXME port_id and device_id could be inherited from device
 	uint16_t port_id;
