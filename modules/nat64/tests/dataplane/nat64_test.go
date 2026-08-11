@@ -15,6 +15,8 @@ const (
 	ipProtoFragment = 44
 	ipProtoNone     = 59
 	ipProtoICMPv6   = 58
+	ipProtoUDP      = 17
+	ipProtoTCP      = 6
 
 	icmpv6DstUnreach        = 1
 	icmpv6DstUnreachNoRoute = 0
@@ -96,6 +98,13 @@ func putICMPv6Header(buf []byte, icmpType, code uint8) []byte {
 	return binary.BigEndian.AppendUint32(buf, 0) // reserved/dataun
 }
 
+func putICMPv6Error(buf, embedded []byte) []byte {
+	buf = putEther(buf)
+	buf = putIPv6(buf, uint16(8+len(embedded)), ipProtoICMPv6, nat64Mappings[0].IP6, outerDstIP6())
+	buf = putICMPv6Header(buf, icmpv6DstUnreach, icmpv6DstUnreachNoRoute)
+	return append(buf, embedded...)
+}
+
 // TestICMPv6EmbeddedFragTruncatedDropped ports
 // test_nat64_icmpv6_embedded_frag_oob: an ICMPv6 error whose embedded IPv6
 // header claims a Fragment header (payload_len=1) but the packet ends one
@@ -153,10 +162,64 @@ func TestICMPv6EmbeddedExtTruncatedCountedMalformed(t *testing.T) {
 	require.EqualValues(t, 1, nat64MalformedPackets(mc))
 }
 
+func TestICMPv6EmbeddedICMPv6TruncatedCountedMalformed(t *testing.T) {
+	memCtx := testutils.NewMemoryContext(t.Name(), 4*datasize.MB)
+	defer memCtx.Free()
+	mc := nat64ModuleConfig(nat64Prefix, nat64Mappings, memCtx)
+
+	// A complete Hop-by-Hop header reaches the embedded ICMPv6 guard.
+	embedded := putIPv6(nil, 12, ipProtoHopopts, nat64Mappings[0].IP6, nat64Mappings[1].IP6)
+	embedded = append(embedded, ipProtoICMPv6, 0, 0, 0, 0, 0, 0, 0)
+	embedded = append(embedded, icmpv6EchoRequest, 0, 0, 0)
+	require.Len(t, embedded, 52)
+
+	packet := putICMPv6Error(nil, embedded)
+	result := nat64HandlePackets(t, mc, [][]byte{packet})
+
+	require.Empty(t, result.Output, "truncated embedded ICMPv6 header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded ICMPv6 header")
+	require.EqualValues(t, 1, nat64MalformedPackets(mc))
+}
+
+func TestICMPv6EmbeddedUDPTruncatedCountedMalformed(t *testing.T) {
+	memCtx := testutils.NewMemoryContext(t.Name(), 4*datasize.MB)
+	defer memCtx.Free()
+	mc := nat64ModuleConfig(nat64Prefix, nat64Mappings, memCtx)
+
+	embedded := putIPv6(nil, 4, ipProtoUDP, nat64Mappings[0].IP6, nat64Mappings[1].IP6)
+	embedded = append(embedded, 0, 0, 0, 0)
+	require.Len(t, embedded, 44)
+
+	packet := putICMPv6Error(nil, embedded)
+	result := nat64HandlePackets(t, mc, [][]byte{packet})
+
+	require.Empty(t, result.Output, "truncated embedded UDP header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded UDP header")
+	require.EqualValues(t, 1, nat64MalformedPackets(mc))
+}
+
+func TestICMPv6EmbeddedTCPTruncatedCountedMalformed(t *testing.T) {
+	memCtx := testutils.NewMemoryContext(t.Name(), 4*datasize.MB)
+	defer memCtx.Free()
+	mc := nat64ModuleConfig(nat64Prefix, nat64Mappings, memCtx)
+
+	embedded := putIPv6(nil, 12, ipProtoTCP, nat64Mappings[0].IP6, nat64Mappings[1].IP6)
+	embedded = append(embedded, make([]byte, 12)...)
+	require.Len(t, embedded, 52)
+
+	packet := putICMPv6Error(nil, embedded)
+	result := nat64HandlePackets(t, mc, [][]byte{packet})
+
+	require.Empty(t, result.Output, "truncated embedded TCP header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded TCP header")
+	require.EqualValues(t, 1, nat64MalformedPackets(mc))
+}
+
 // TestICMPv6EmbeddedExtFragTranslated ports
-// test_nat64_icmpv6_embedded_ext_frag_translated, the positive control for
-// the two truncation tests above: a well-formed embedded IPv6 packet with a
-// Hop-by-Hop Options header followed by a Fragment header must translate
+// test_nat64_icmpv6_embedded_ext_frag_translated: positive control for the
+// existing embedded Fragment-header and extension-header truncation cases. A
+// well-formed embedded IPv6 packet with a Hop-by-Hop Options header followed
+// by a Fragment header must translate
 // cleanly, and the Fragment header's identification and offset/flags must
 // survive into the translated embedded IPv4 header untouched by the
 // in-place IPv6-to-IPv4 rewrite that follows it.
