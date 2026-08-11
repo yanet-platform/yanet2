@@ -20,6 +20,36 @@ counters_test = executable(
 
 test('counters_uaf', counters_test, suite: ['lib'])
 
+counters_lock_thread_dep = dependency('threads')
+
+counters_lock_test = executable(
+  'counters_lock_test',
+  ['counters_lock_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+    counters_lock_thread_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test(
+  'counters_lock',
+  counters_lock_test,
+  suite: ['lib'],
+  timeout: 90,
+)
+
 loaded_counts_test = executable(
   'loaded_counts_test',
   ['loaded_counts_test.c'],

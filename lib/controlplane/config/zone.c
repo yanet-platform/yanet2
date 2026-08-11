@@ -90,6 +90,9 @@ cp_config_gen_new_from(
 	new_config_gen->gen = old_config_gen->gen + 1;
 	new_config_gen->config_gen_ectx_count = 0;
 	new_config_gen->config_gen_ectxs = NULL;
+	// Starts pinned by its own eventual current-published status, the
+	// same pin publish later transfers rather than adds to.
+	new_config_gen->refcnt = 1;
 
 	SET_OFFSET_OF(
 		&new_config_gen->dp_config, ADDR_OF(&old_config_gen->dp_config)
@@ -197,6 +200,15 @@ cp_config_gen_free(
 	);
 }
 
+void
+cp_config_gen_release(
+	struct cp_config *cp_config, struct cp_config_gen *config_gen
+) {
+	if (--config_gen->refcnt == 0) {
+		cp_config_gen_free(cp_config, config_gen);
+	}
+}
+
 static inline int
 cp_config_gen_install(
 	struct dp_config *dp_config,
@@ -223,7 +235,13 @@ cp_config_gen_install(
 	// pointer before its contents are fully written.
 	ATOMIC_SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
-	cp_config_gen_free(cp_config, old_config_gen);
+
+	// The new generation already carries the pin it was created with, so
+	// publishing it as current spends that pin rather than adding one.
+	// Dropping the old generation's own matching pin here frees it
+	// immediately, unless an unlocked reader is still pinning it too, in
+	// which case that reader's later release finishes the teardown.
+	cp_config_gen_release(cp_config, old_config_gen);
 
 	return 0;
 }
@@ -868,6 +886,10 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	cp_config_gen->gen = 0;
 	cp_config_gen->config_gen_ectx_count = 0;
 	cp_config_gen->config_gen_ectxs = NULL;
+	// The bootstrap generation is installed directly by its caller
+	// rather than through the publish path, so it starts pinned by its
+	// own current-published status just like every later generation.
+	cp_config_gen->refcnt = 1;
 	SET_OFFSET_OF(
 		&cp_config_gen->dp_config, ADDR_OF(&cp_config->dp_config)
 	);

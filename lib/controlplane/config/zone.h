@@ -57,6 +57,14 @@ struct cp_config_gen {
 	struct cp_pipeline_registry pipeline_registry;
 	struct cp_device_registry device_registry;
 	struct cp_object_registry object_registry;
+
+	// Number of holders pinning this generation alive, read and mutated
+	// only while the config lock is held.
+	//
+	// The currently published generation always counts one holder for
+	// itself, so a pin taken by an unlocked reader keeps a racing update
+	// from tearing the generation down until the pin is released too.
+	uint64_t refcnt;
 };
 
 /*
@@ -228,6 +236,29 @@ cp_config_delete_object(
 
 struct cp_config_gen *
 cp_config_gen_new(struct agent *agent, yanet_error **err);
+
+// Pin the currently published generation for use outside the config lock.
+//
+// MUST be called with the config lock held. Every acquire MUST be matched
+// by exactly one release, no matter how long the unlocked window that
+// follows runs or whether a config update replaces this generation as
+// current during that window.
+static inline struct cp_config_gen *
+cp_config_gen_acquire(struct cp_config *cp_config) {
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	config_gen->refcnt += 1;
+	return config_gen;
+}
+
+// Release a pin, freeing the generation once no pin remains.
+//
+// MUST be called with the config lock held. A generation that lost its
+// current-published status while pinned is freed here instead of at
+// publish time, once its last pin drops.
+void
+cp_config_gen_release(
+	struct cp_config *cp_config, struct cp_config_gen *config_gen
+);
 
 static inline struct cp_module *
 cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {
