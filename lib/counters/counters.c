@@ -517,7 +517,9 @@ counter_storage_pool_fini(
 }
 
 void
-counter_storage_free(struct counter_storage *storage) {
+counter_storage_free_counted(
+	struct counter_storage *storage, uint64_t handle_count
+) {
 	if (storage == NULL) {
 		return;
 	}
@@ -530,13 +532,10 @@ counter_storage_free(struct counter_storage *storage) {
 		ADDR_OF(&storage->memory_context);
 
 	if (ADDR_OF(&storage->counter_value_handles) != NULL) {
-		struct counter_registry *counter_registry =
-			ADDR_OF(&storage->registry);
 		memory_bfree(
 			memory_context,
 			ADDR_OF(&storage->counter_value_handles),
-			sizeof(struct counter_structure_handle *) *
-				counter_registry->count
+			sizeof(struct counter_structure_handle *) * handle_count
 		);
 	}
 
@@ -546,6 +545,16 @@ counter_storage_free(struct counter_storage *storage) {
 	}
 
 	memory_bfree(memory_context, storage, sizeof(struct counter_storage));
+}
+
+void
+counter_storage_free(struct counter_storage *storage) {
+	if (storage == NULL) {
+		return;
+	}
+
+	struct counter_registry *counter_registry = ADDR_OF(&storage->registry);
+	counter_storage_free_counted(storage, counter_registry->count);
 }
 
 void

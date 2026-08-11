@@ -1665,7 +1665,7 @@ cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
 	return tags;
 }
 
-// Free a per-instance snapshot array as produced by fill_counter_handle.
+// Free a per-instance value snapshot array.
 static void
 free_counter_values(uint64_t **values, uint64_t instance_count) {
 	if (values == NULL) {
@@ -1680,11 +1680,9 @@ free_counter_values(uint64_t **values, uint64_t instance_count) {
 // Snapshot a counter's per-worker values into heap memory and stash the
 // result behind the opaque counter_handle.values.
 //
-// Each worker has its own single-instance storage. The caller gathers one
-// storage per worker into worker_storages (a plain C-pointer array). The
-// values are copied out of generation-owned shm while the caller still holds
-// cp_config_lock, so the snapshot (worker_count entries) stays valid across
-// controlplane updates until it is released by yanet_counter_handle_list_free.
+// Used only for the dataplane-owned worker and port counter storages, which
+// are not generation-scoped, so no locking or pinning is needed around this
+// call.
 static int
 fill_counter_handle(
 	struct counter_handle *dst,
@@ -1731,6 +1729,68 @@ fill_counter_handle(
 	return 0;
 }
 
+// Copy one counter's per-worker values into heap memory and hand them to
+// the destination handle.
+//
+// This deliberately runs without the config lock: the caller has already
+// pinned every storage read here and captured the counter metadata while
+// the lock was held.
+static int
+fill_counter_handle_values(
+	struct counter_handle *dst,
+	struct counter_storage **worker_storages,
+	uint64_t worker_count,
+	uint64_t idx
+) {
+	uint64_t **values = calloc(worker_count, sizeof(*values));
+	if (values == NULL) {
+		return -1;
+	}
+	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
+		if (dst->size == 0) {
+			continue;
+		}
+		values[worker_idx] = malloc(dst->size * sizeof(uint64_t));
+		if (values[worker_idx] == NULL) {
+			free_counter_values(values, worker_count);
+			return -1;
+		}
+		struct counter_value_handle *handle = counter_get_value_handle(
+			idx, worker_storages[worker_idx]
+		);
+		memcpy(values[worker_idx],
+		       counter_handle_get_value(handle),
+		       dst->size * sizeof(uint64_t));
+	}
+	dst->values = values;
+	return 0;
+}
+
+// One matched storage's per-worker reference pins, indexed to mirror the
+// match list. A row stays empty until the storage's first matching counter
+// is seen, and it carries the counter count captured under the lock for the
+// final counted release.
+struct pinned_counter_storage {
+	struct counter_storage **workers;
+	uint64_t handle_count;
+};
+
+// Links a matched handle back to its pinned storage row, so the value-copy
+// phase never touches generation-owned state again.
+struct counter_handle_source {
+	struct counter_storage **workers;
+	uint64_t idx;
+};
+
+// Match every counter selected by tags and query, and snapshot its values.
+//
+// The match set and per-handle metadata (name, size, gen, tags) are fixed
+// under the config lock, taking a reference-count pin on each matched
+// storage once per worker so it survives a racing config swap. The
+// value-copy loop, which dominates cost for large result sets, then runs
+// unlocked against the pinned storages. A final brief re-lock drops the
+// pins. This keeps a metrics scrape's allocation storm off the shared
+// spinlock.
 struct counter_handle_list *
 yanet_get_counters_by_tags(
 	struct dp_config *dp_config,
@@ -1786,6 +1846,7 @@ yanet_get_counters_by_tags(
 		worker_count > 0 ? worker_matches[0] : NULL;
 
 	size_t match_count = 0;
+	size_t storage_count = 0;
 	if (matches0 != NULL) {
 		for (size_t i = 0; matches0[i] != NULL; ++i) {
 			struct counter_storage *storage =
@@ -1793,6 +1854,7 @@ yanet_get_counters_by_tags(
 			match_count += counter_registry_match_count(
 				ADDR_OF(&storage->registry), query, query_count
 			);
+			++storage_count;
 		}
 	}
 
@@ -1808,6 +1870,28 @@ yanet_get_counters_by_tags(
 	list->instance_count = worker_count;
 	list->count = match_count;
 
+	// Both declared before the first fallible allocation below, so the
+	// locked error path always sees a well-defined (possibly still-NULL)
+	// pointer to free.
+	struct pinned_counter_storage *pinned = NULL;
+	struct counter_handle_source *sources = NULL;
+
+	if (storage_count > 0) {
+		pinned = calloc(storage_count, sizeof(*pinned));
+		if (pinned == NULL) {
+			yanet_error_add(err, "malloc failed");
+			goto err_list;
+		}
+	}
+
+	if (match_count > 0) {
+		sources = calloc(match_count, sizeof(*sources));
+		if (sources == NULL) {
+			yanet_error_add(err, "malloc failed");
+			goto err_list;
+		}
+	}
+
 	size_t next = 0;
 	for (size_t i = 0; matches0 != NULL && matches0[i] != NULL; ++i) {
 		struct cp_counter_storage *cp_storage = matches0[i];
@@ -1821,41 +1905,46 @@ yanet_get_counters_by_tags(
 			    )) {
 				continue;
 			}
-			struct counter_storage **worker_storages =
-				malloc(worker_count * sizeof(*worker_storages));
-			if (worker_storages == NULL) {
-				yanet_error_add(err, "malloc failed");
-				goto err_list;
+
+			if (pinned[i].workers == NULL) {
+				struct counter_storage **workers =
+					malloc(worker_count * sizeof(*workers));
+				if (workers == NULL) {
+					yanet_error_add(err, "malloc failed");
+					goto err_list;
+				}
+				for (uint64_t w = 0; w < worker_count; ++w) {
+					struct counter_storage *pinned_storage =
+						ADDR_OF(&worker_matches[w][i]
+								 ->storage);
+					pinned_storage->refcnt += 1;
+					workers[w] = pinned_storage;
+				}
+				pinned[i].handle_count = registry->count;
+				pinned[i].workers = workers;
 			}
+
 			if (storage_tags == NULL) {
 				storage_tags =
 					cp_counter_storage_copy_tags(cp_storage
 					);
 				if (storage_tags == NULL) {
-					free(worker_storages);
 					yanet_error_add(err, "malloc failed");
 					goto err_list;
 				}
 			}
-			for (uint64_t worker_idx = 0; worker_idx < worker_count;
-			     ++worker_idx) {
-				worker_storages[worker_idx] = ADDR_OF(
-					&worker_matches[worker_idx][i]->storage
-				);
-			}
-			int fill_result = fill_counter_handle(
-				&list->counters[next++],
-				worker_storages,
-				worker_count,
-				idx,
-				storage_tags,
-				cp_storage->tag_count
+
+			struct counter_handle *dst = &list->counters[next];
+			strtcpy(dst->name, counters[idx].name, sizeof(dst->name)
 			);
-			free(worker_storages);
-			if (fill_result) {
-				yanet_error_add(err, "malloc failed");
-				goto err_list;
-			}
+			dst->size = counters[idx].size;
+			dst->gen = counters[idx].gen;
+			dst->tags = storage_tags;
+			dst->tag_count = cp_storage->tag_count;
+
+			sources[next].workers = pinned[i].workers;
+			sources[next].idx = idx;
+			++next;
 		}
 	}
 
@@ -1864,9 +1953,72 @@ yanet_get_counters_by_tags(
 	}
 	free(worker_matches);
 	cp_config_unlock(cp_config);
+
+	// Value-copy phase: no lock held. Every storage read here was pinned
+	// above, so a racing config update cannot free it out from under
+	// this loop.
+	int fill_failed = 0;
+	for (next = 0; next < match_count; ++next) {
+		if (fill_counter_handle_values(
+			    &list->counters[next],
+			    sources[next].workers,
+			    worker_count,
+			    sources[next].idx
+		    )) {
+			fill_failed = 1;
+			break;
+		}
+	}
+
+	// Drop the pins taken above. A worker's storage may have already been
+	// retired by a racing config update, in which case this is the final
+	// release that frees it, using the counted form, since the owning
+	// registry may already be gone by then. Freeing the pin bookkeeping
+	// waits until after the unlock, to keep this hold as short as the pin
+	// accounting itself.
+	if (storage_count > 0) {
+		cp_config_lock(cp_config);
+		for (size_t i = 0; i < storage_count; ++i) {
+			if (pinned[i].workers == NULL) {
+				continue;
+			}
+			for (uint64_t w = 0; w < worker_count; ++w) {
+				counter_storage_free_counted(
+					pinned[i].workers[w],
+					pinned[i].handle_count
+				);
+			}
+		}
+		cp_config_unlock(cp_config);
+		for (size_t i = 0; i < storage_count; ++i) {
+			free(pinned[i].workers);
+		}
+		free(pinned);
+	}
+	free(sources);
+
+	if (fill_failed) {
+		yanet_error_add(err, "malloc failed");
+		yanet_counter_handle_list_free(list);
+		return NULL;
+	}
+
 	return list;
 
 err_list:
+	if (pinned != NULL) {
+		for (size_t i = 0; i < storage_count; ++i) {
+			if (pinned[i].workers == NULL) {
+				continue;
+			}
+			for (uint64_t w = 0; w < worker_count; ++w) {
+				counter_storage_free(pinned[i].workers[w]);
+			}
+			free(pinned[i].workers);
+		}
+		free(pinned);
+	}
+	free(sources);
 	yanet_counter_handle_list_free(list);
 err_matches:
 	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {

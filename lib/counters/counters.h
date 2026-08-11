@@ -98,6 +98,19 @@ counter_storage_spawn(
 	struct counter_registry *registry
 );
 
+// Free a storage without touching the registry it was spawned from, taking
+// the handle array count explicitly instead. The count must be the registry
+// size the storage was spawned with. Use this when the registry may already
+// be freed, for example after dropping a reference pin taken across an
+// unlocked window.
+void
+counter_storage_free_counted(
+	struct counter_storage *storage, uint64_t handle_count
+);
+
+// Free a storage, deriving the handle array count from its registry.
+// Callers must ensure the registry is still alive, which holds for every
+// caller running inside the retirement context that owns it.
 void
 counter_storage_free(struct counter_storage *storage);
 
