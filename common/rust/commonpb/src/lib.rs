@@ -6,6 +6,7 @@ use core::{
 };
 
 use netip::{Contiguous, IpNetwork, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 #[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
 pub mod pb {
@@ -72,20 +73,20 @@ impl Display for pb::MacAddress {
     }
 }
 
-impl serde::Serialize for pb::MacAddress {
+impl Serialize for pb::MacAddress {
     /// Serializes as the string `Display` renders.
     ///
     /// A message with the upper 16 bits set renders as the literal
     /// `"invalid"`, since that is what `Display` already falls back to.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         serializer.collect_str(self)
     }
 }
 
-impl<'de> serde::Deserialize<'de> for pb::MacAddress {
+impl<'de> Deserialize<'de> for pb::MacAddress {
     /// Parses the string `Serialize` produces, via `FromStr`.
     ///
     /// The literal `"invalid"` a set upper 16 bits serializes to is not
@@ -95,10 +96,10 @@ impl<'de> serde::Deserialize<'de> for pb::MacAddress {
     /// malformed case.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        s.parse::<Self>().map_err(serde::de::Error::custom)
+        s.parse::<Self>().map_err(de::Error::custom)
     }
 }
 
@@ -142,7 +143,7 @@ impl FromStr for pb::IpAddress {
     }
 }
 
-impl serde::Serialize for pb::IpAddress {
+impl Serialize for pb::IpAddress {
     /// Serializes as the plain address string `Display` renders.
     ///
     /// A malformed byte length renders as the literal `"invalid"`, since
@@ -151,13 +152,13 @@ impl serde::Serialize for pb::IpAddress {
     /// through this string is lossy for that one input shape as well.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         serializer.collect_str(self)
     }
 }
 
-impl<'de> serde::Deserialize<'de> for pb::IpAddress {
+impl<'de> Deserialize<'de> for pb::IpAddress {
     /// Parses the string `Serialize` produces, via `FromStr`.
     ///
     /// The literal `"invalid"` a malformed byte length serializes to is
@@ -167,10 +168,10 @@ impl<'de> serde::Deserialize<'de> for pb::IpAddress {
     /// encoding, deliberately, rather than round-tripping.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        s.parse::<Self>().map_err(serde::de::Error::custom)
+        s.parse::<Self>().map_err(de::Error::custom)
     }
 }
 
@@ -231,6 +232,99 @@ impl pb::IpRange {
             }
             _ => Box::new(core::iter::empty()),
         }
+    }
+}
+
+impl From<Contiguous<IpNetwork>> for pb::ContiguousIpNetwork {
+    fn from(net: Contiguous<IpNetwork>) -> Self {
+        pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(net.addr())),
+            prefix_len: u32::from(net.prefix()),
+        }
+    }
+}
+
+impl TryFrom<IpNetwork> for pb::ContiguousIpNetwork {
+    type Error = Box<dyn Error>;
+
+    /// Fails when `net`'s mask is not expressible as a prefix length --
+    /// that contiguity is the whole point of this message.
+    fn try_from(net: IpNetwork) -> Result<Self, Self::Error> {
+        let prefix = net.prefix().ok_or("invalid IP network: mask is not contiguous")?;
+        Ok(pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(net.addr())),
+            prefix_len: u32::from(prefix),
+        })
+    }
+}
+
+impl TryFrom<&pb::ContiguousIpNetwork> for IpNetwork {
+    type Error = Box<dyn Error>;
+
+    /// Masks host bits to `prefix_len` rather than rejecting them.
+    fn try_from(net: &pb::ContiguousIpNetwork) -> Result<Self, Self::Error> {
+        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+        let addr = IpAddr::try_from(addr)?;
+        let prefix_len: u8 = net
+            .prefix_len
+            .try_into()
+            .map_err(|_| format!("invalid prefix length {}: exceeds 255", net.prefix_len))?;
+
+        let result = match addr {
+            IpAddr::V4(v4) => IpNetwork::try_from((v4, prefix_len)),
+            IpAddr::V6(v6) => IpNetwork::try_from((v6, prefix_len)),
+        };
+        result.map_err(|e| format!("invalid prefix length {prefix_len}: {e}").into())
+    }
+}
+
+impl Display for pb::ContiguousIpNetwork {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match IpNetwork::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::ContiguousIpNetwork {
+    type Err = Box<dyn Error>;
+
+    /// Accepts CIDR (`10.0.0.0/24`), explicit-mask (`10.0.0.0/255.255.255.0`),
+    /// and bare-address (`10.0.0.1`) forms -- the last silently promoted to
+    /// a `/32` or `/128` host route -- and rejects a non-contiguous mask.
+    /// Wider than Go's CIDR-only `ParseContiguousIPNetwork`, which
+    /// accepts only the first form.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = Contiguous::<IpNetwork>::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::ContiguousIpNetwork {
+    /// Serializes as the CIDR string `Display` renders.
+    ///
+    /// A malformed message renders as the literal `"invalid"`, since that
+    /// is what `Display` already falls back to. That literal is not itself
+    /// a parseable network, so it deliberately does not deserialize back --
+    /// the same lossy treatment `pb::IpAddress` gives its own malformed
+    /// case.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::ContiguousIpNetwork {
+    /// Parses the string `Serialize` produces, via `FromStr`.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
     }
 }
 
@@ -536,5 +630,164 @@ mod test {
         };
         let cidrs: Vec<Contiguous<IpNetwork>> = range.cidrs().collect();
         assert_eq!(0, cidrs.len());
+    }
+
+    #[test]
+    fn contiguous_ip_network_v4_round_trip() {
+        let net = Contiguous::<IpNetwork>::parse("10.0.0.0/24").unwrap();
+        let msg = pb::ContiguousIpNetwork::from(net);
+        assert_eq!(24, msg.prefix_len);
+        let got = IpNetwork::try_from(&msg).unwrap();
+        assert_eq!(*net, got);
+    }
+
+    #[test]
+    fn contiguous_ip_network_v6_round_trip() {
+        let net = Contiguous::<IpNetwork>::parse("2001:db8::/32").unwrap();
+        let msg = pb::ContiguousIpNetwork::from(net);
+        assert_eq!(32, msg.prefix_len);
+        let got = IpNetwork::try_from(&msg).unwrap();
+        assert_eq!(*net, got);
+    }
+
+    /// `Display` alone would hide a wrong-family or unmasked encoding, so
+    /// this asserts on the raw wire bytes of `addr` instead.
+    #[test]
+    fn contiguous_ip_network_masks_host_bits() {
+        let msg: pb::ContiguousIpNetwork = "10.0.0.1/24".parse().unwrap();
+        assert_eq!(vec![10, 0, 0, 0], msg.addr.as_ref().unwrap().addr);
+        assert_eq!(24, msg.prefix_len);
+    }
+
+    /// Mirrors [`contiguous_ip_network_masks_host_bits`] on the decode side:
+    /// a hand-built message with host bits already set in `addr` still masks
+    /// down to the network base rather than merely echoing them back.
+    #[test]
+    fn contiguous_ip_network_try_from_masks_host_bits_v4() {
+        let msg = pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))),
+            prefix_len: 24,
+        };
+        let got = IpNetwork::try_from(&msg).unwrap();
+        assert_eq!(IpNetwork::parse("10.0.0.0/24").unwrap(), got);
+    }
+
+    #[test]
+    fn contiguous_ip_network_try_from_masks_host_bits_v6() {
+        let msg = pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 1,
+            )))),
+            prefix_len: 32,
+        };
+        let got = IpNetwork::try_from(&msg).unwrap();
+        assert_eq!(IpNetwork::parse("2001:db8::/32").unwrap(), got);
+    }
+
+    #[test]
+    fn contiguous_ip_network_try_from_rejects_non_contiguous_mask() {
+        let net = IpNetwork::parse("192.168.0.1/255.255.0.255").unwrap();
+        assert!(pb::ContiguousIpNetwork::try_from(net).is_err());
+    }
+
+    #[test]
+    fn contiguous_ip_network_try_from_accepts_contiguous_mask() {
+        let net = IpNetwork::parse("192.168.0.0/255.255.255.0").unwrap();
+        let msg = pb::ContiguousIpNetwork::try_from(net).unwrap();
+        assert_eq!(24, msg.prefix_len);
+    }
+
+    #[test]
+    fn contiguous_ip_network_rejects_missing_addr() {
+        let msg = pb::ContiguousIpNetwork { addr: None, prefix_len: 24 };
+        assert!(IpNetwork::try_from(&msg).is_err());
+    }
+
+    #[test]
+    fn contiguous_ip_network_rejects_malformed_addr_length() {
+        let msg = pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress { addr: vec![0u8; 5] }),
+            prefix_len: 8,
+        };
+        assert!(IpNetwork::try_from(&msg).is_err());
+    }
+
+    #[test]
+    fn contiguous_ip_network_rejects_out_of_range_prefix_len_v4() {
+        let msg = pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)))),
+            prefix_len: 33,
+        };
+        assert!(IpNetwork::try_from(&msg).is_err());
+    }
+
+    #[test]
+    fn contiguous_ip_network_rejects_out_of_range_prefix_len_v6() {
+        let msg = pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 0,
+            )))),
+            prefix_len: 129,
+        };
+        assert!(IpNetwork::try_from(&msg).is_err());
+    }
+
+    /// `256` and `288` truncate to a valid `u8` (`0` and `32`), so a
+    /// checked narrowing is needed -- an unchecked `as u8` would silently
+    /// decode `256` as `/0` and `288` as `/32` instead of rejecting them.
+    #[test]
+    fn contiguous_ip_network_rejects_prefix_len_that_truncates_into_range() {
+        let addr = Some(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0))));
+        for prefix_len in [256, 288] {
+            let msg = pb::ContiguousIpNetwork { addr: addr.clone(), prefix_len };
+            assert!(
+                IpNetwork::try_from(&msg).is_err(),
+                "expected error for prefix_len {prefix_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn contiguous_ip_network_display() {
+        let net = Contiguous::<IpNetwork>::parse("10.0.0.0/24").unwrap();
+        let msg = pb::ContiguousIpNetwork::from(net);
+        assert_eq!("10.0.0.0/24", msg.to_string());
+    }
+
+    #[test]
+    fn contiguous_ip_network_display_invalid() {
+        let msg = pb::ContiguousIpNetwork { addr: None, prefix_len: 24 };
+        assert_eq!("invalid", msg.to_string());
+    }
+
+    #[test]
+    fn serde_contiguous_ip_network_v4() {
+        let net = Contiguous::<IpNetwork>::parse("10.0.0.0/24").unwrap();
+        let msg = pb::ContiguousIpNetwork::from(net);
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(r#""10.0.0.0/24""#, json);
+        let got: pb::ContiguousIpNetwork = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, got);
+    }
+
+    #[test]
+    fn serde_contiguous_ip_network_v6() {
+        let net = Contiguous::<IpNetwork>::parse("2001:db8::/32").unwrap();
+        let msg = pb::ContiguousIpNetwork::from(net);
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(r#""2001:db8::/32""#, json);
+        let got: pb::ContiguousIpNetwork = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, got);
+    }
+
+    /// The `"invalid"` literal a malformed message serializes to is not
+    /// itself a parseable network, so deserializing it back is a
+    /// deliberate error rather than a silently reconstructed message.
+    #[test]
+    fn serde_contiguous_ip_network_invalid_does_not_deserialize() {
+        let malformed = pb::ContiguousIpNetwork { addr: None, prefix_len: 24 };
+        let json = serde_json::to_string(&malformed).unwrap();
+        assert_eq!(r#""invalid""#, json);
+        assert!(serde_json::from_str::<pb::ContiguousIpNetwork>(&json).is_err());
     }
 }

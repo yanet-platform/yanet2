@@ -7,12 +7,12 @@ common_proto_files = [
     join_paths(common_proto_dir, 'v1', 'macaddr.proto'),
     join_paths(common_proto_dir, 'v1', 'ipaddr.proto'),
     join_paths(common_proto_dir, 'v1', 'iprange.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipnetwork.proto'),
 ]
 
-# Generate protobuf files. The root include dir is required so that
-# iprange.proto can import ipaddr.proto via the canonical path
-# "common/commonpb/v1/ipaddr.proto", which matches the import path used by
-# consumers outside this directory.
+# Generate protobuf files. The root include dir is required so that protos
+# in this directory can import each other via the canonical path that
+# consumers outside this directory use.
 common_protoc_gen = custom_target(
     'common-protoc',
     output: [
@@ -21,6 +21,7 @@ common_protoc_gen = custom_target(
         'macaddr.pb.go',
         'ipaddr.pb.go',
         'iprange.pb.go',
+        'ipnetwork.pb.go',
     ],
     input: common_proto_files,
     command: [
