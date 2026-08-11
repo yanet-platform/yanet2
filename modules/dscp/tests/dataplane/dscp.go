@@ -10,6 +10,7 @@ package dscp_test
 #include "modules/dscp/dataplane/config.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 uint8_t dscp_mark_never = DSCP_MARK_NEVER;
 uint8_t dscp_mark_default = DSCP_MARK_DEFAULT;
@@ -85,9 +86,15 @@ func buildLPMs(
 }
 
 func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx testutils.MemoryContext) *C.struct_dscp_module_config {
-	m := &C.struct_dscp_module_config{
-		cp_module: C.struct_cp_module{},
+	m := (*C.struct_dscp_module_config)(C.memory_balloc(
+		(*C.struct_memory_context)(memCtx.AsRawPtr()),
+		C.sizeof_struct_dscp_module_config,
+	))
+	if m == nil {
+		panic("failed to allocate dscp module config")
 	}
+	C.memset(unsafe.Pointer(m), 0, C.sizeof_struct_dscp_module_config)
+
 	buildLPMs(prefixes, (*C.struct_memory_context)(memCtx.AsRawPtr()), &m.lpm_v4, &m.lpm_v6)
 
 	m.dscp = C.struct_dscp_config{
