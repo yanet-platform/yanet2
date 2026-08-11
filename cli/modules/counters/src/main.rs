@@ -444,7 +444,7 @@ struct WorkerRow {
     local_tx_drops: String,
     #[tabled(rename = "RemTX Drp")]
     remote_tx_drops: String,
-    #[tabled(rename = "Drops")]
+    #[tabled(rename = "Disposed")]
     drops: String,
 }
 
