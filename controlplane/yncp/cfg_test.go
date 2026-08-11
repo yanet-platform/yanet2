@@ -27,20 +27,20 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet/controlplane.d/default.yaml")
 	require.NoError(t, err)
 
-	require.NotNil(t, cfg.Modules.Route)
-	require.NotNil(t, cfg.Modules.RouteMPLS)
-	require.NotNil(t, cfg.Modules.Decap)
-	require.NotNil(t, cfg.Modules.DSCP)
-	require.NotNil(t, cfg.Modules.Forward)
-	require.NotNil(t, cfg.Modules.Mirror)
-	require.NotNil(t, cfg.Modules.NAT64)
-	require.NotNil(t, cfg.Modules.Pdump)
-	require.NotNil(t, cfg.Modules.ACL)
-	require.NotNil(t, cfg.Modules.Blackhole)
+	require.NotNil(t, cfg.Modules.Route.Unwrap())
+	require.NotNil(t, cfg.Modules.RouteMPLS.Unwrap())
+	require.NotNil(t, cfg.Modules.Decap.Unwrap())
+	require.NotNil(t, cfg.Modules.DSCP.Unwrap())
+	require.NotNil(t, cfg.Modules.Forward.Unwrap())
+	require.NotNil(t, cfg.Modules.Mirror.Unwrap())
+	require.NotNil(t, cfg.Modules.NAT64.Unwrap())
+	require.NotNil(t, cfg.Modules.Pdump.Unwrap())
+	require.NotNil(t, cfg.Modules.ACL.Unwrap())
+	require.NotNil(t, cfg.Modules.Blackhole.Unwrap())
 
-	require.NotNil(t, cfg.Devices.Plain)
-	require.NotNil(t, cfg.Devices.Vlan)
-	require.Nil(t, cfg.Devices.Trafgen)
+	require.NotNil(t, cfg.Devices.Plain.Unwrap())
+	require.NotNil(t, cfg.Devices.Vlan.Unwrap())
+	require.Nil(t, cfg.Devices.Trafgen.Unwrap())
 
 	require.NoError(t, cfg.Gateway.InstanceID.Validate())
 	require.Equal(t, uint32(0), cfg.Gateway.InstanceID.Unwrap())
@@ -62,4 +62,21 @@ func Test_GatewayWithoutInstanceID_FailsValidation(t *testing.T) {
 	err := xcfg.Decode([]byte("gateway: {}\n"), &cfg)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "gateway.instance_id")
+}
+
+// Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields asserts that a key
+// nested inside a module's own block, not just at the document's top level,
+// is rejected when loading through the director's WithKnownFields path.
+func Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields(t *testing.T) {
+	input := "modules:\n  decap:\n" +
+		"    instance_id: 0\n" +
+		"    memory_path: /dev/hugepages/yanet\n" +
+		"    memory_requirements: 16MB\n" +
+		"    endpoint: \"[::1]:0\"\n" +
+		"    gateway_endpoint: \"[::1]:8080\"\n" +
+		"    bogus: z\n"
+	var cfg yncp.Config
+	err := xcfg.Decode([]byte(input), &cfg, xcfg.WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "modules.decap.bogus")
 }

@@ -14,6 +14,13 @@ var yamlNodeType = reflect.TypeFor[yaml.Node]()
 
 var yamlUnmarshalerType = reflect.TypeFor[yaml.Unmarshaler]()
 
+// walkableType is implemented by a wrapper whose keys decode into a
+// different type than the wrapper itself, such as Optional[T], so the walk
+// can check that type's fields instead of stopping at isOpaqueToWalk.
+type walkableType interface {
+	WalkType() reflect.Type
+}
+
 // mergeTag is the resolved tag yaml.v3 assigns to a "<<" merge key.
 const mergeTag = "!!merge"
 
@@ -77,6 +84,10 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]stri
 		t = t.Elem()
 	}
 	if t.Kind() == reflect.Interface || t == yamlNodeType {
+		return
+	}
+	if wt, ok := reflect.Zero(t).Interface().(walkableType); ok {
+		walkKnownKeys(node, wt.WalkType(), path, unknown, visiting)
 		return
 	}
 	if isOpaqueToWalk(t) {

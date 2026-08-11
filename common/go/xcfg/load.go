@@ -20,6 +20,14 @@ type validatable interface {
 	Validate() error
 }
 
+// validatableElem is implemented by a wrapper whose validation lives on the
+// value it wraps rather than on the wrapper itself, such as Optional[T],
+// letting validate recurse into that value under the wrapper's own dotted
+// path instead of stopping at the wrapper's unexported field.
+type validatableElem interface {
+	Elem() reflect.Value
+}
+
 // Option configures LoadConfig and Decode.
 type Option func(*options)
 
@@ -107,7 +115,6 @@ func validate(v reflect.Value, path string) error {
 		v = v.Elem()
 	}
 
-	// Check if the value itself implements validatable.
 	if v.CanAddr() {
 		if val, ok := v.Addr().Interface().(validatable); ok {
 			if err := val.Validate(); err != nil {
@@ -116,6 +123,19 @@ func validate(v reflect.Value, path string) error {
 				}
 				return &PathError{Path: path, Err: err}
 			}
+		}
+
+		// A wrapper whose wrapped value carries the validation recurses
+		// into that value under the same path, rather than being treated
+		// as a plain field with no Validate of its own. Checked after
+		// validatable so a wrapper implementing both still runs its own
+		// Validate.
+		if elemer, ok := v.Addr().Interface().(validatableElem); ok {
+			ev := elemer.Elem()
+			if !ev.IsValid() {
+				return nil
+			}
+			return validate(ev, path)
 		}
 	}
 

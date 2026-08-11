@@ -25,21 +25,21 @@ acl:
 `), &cfg)
 	require.NoError(t, err)
 
-	require.NotNil(t, cfg.Route)
-	require.NotNil(t, cfg.ACL)
-	require.Nil(t, cfg.RouteMPLS)
-	require.Nil(t, cfg.Decap)
-	require.Nil(t, cfg.DSCP)
-	require.Nil(t, cfg.Forward)
-	require.Nil(t, cfg.Mirror)
-	require.Nil(t, cfg.NAT64)
-	require.Nil(t, cfg.Pdump)
-	require.Nil(t, cfg.Blackhole)
+	require.NotNil(t, cfg.Route.Unwrap())
+	require.NotNil(t, cfg.ACL.Unwrap())
+	require.Nil(t, cfg.RouteMPLS.Unwrap())
+	require.Nil(t, cfg.Decap.Unwrap())
+	require.Nil(t, cfg.DSCP.Unwrap())
+	require.Nil(t, cfg.Forward.Unwrap())
+	require.Nil(t, cfg.Mirror.Unwrap())
+	require.Nil(t, cfg.NAT64.Unwrap())
+	require.Nil(t, cfg.Pdump.Unwrap())
+	require.Nil(t, cfg.Blackhole.Unwrap())
 
-	require.Equal(t, uint32(2), cfg.Route.InstanceID.Unwrap())
-	require.Equal(t, uint32(3), cfg.ACL.InstanceID.Unwrap())
+	require.Equal(t, uint32(2), cfg.Route.Unwrap().InstanceID.Unwrap())
+	require.Equal(t, uint32(3), cfg.ACL.Unwrap().InstanceID.Unwrap())
 
-	require.Equal(t, "/dev/hugepages/yanet", cfg.Route.MemoryPath.Unwrap())
+	require.Equal(t, "/dev/hugepages/yanet", cfg.Route.Unwrap().MemoryPath.Unwrap())
 }
 
 // Test_NewBundle_EmptyConfig_NoServicesNoAgents asserts that a bundle built
@@ -58,13 +58,13 @@ func Test_NewBundle_EmptyConfig_NoServicesNoAgents(t *testing.T) {
 // module.
 func Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule(t *testing.T) {
 	cfg := bundle.ModulesConfig{
-		Decap: &decap.Config{
+		Decap: xcfg.NewOptional(decap.Config{
 			InstanceID:         xcfg.NewRequired(uint32(0)),
 			MemoryPath:         xcfg.MustNonEmptyString("/nonexistent/path/for/bundle/cfg/test"),
 			MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
 			Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
 			GatewayEndpoint:    xcfg.MustNonEmptyString("[::1]:8080"),
-		},
+		}),
 	}
 
 	_, err := bundle.NewBundle(cfg, bundle.DevicesConfig{})

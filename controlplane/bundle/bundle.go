@@ -92,93 +92,93 @@ func buildServices(
 	factories := []serviceFactory{
 		{
 			Name:       "route module",
-			Configured: modulesCfg.Route != nil,
+			Configured: modulesCfg.Route.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return route.NewRouteModule(modulesCfg.Route, route.WithLog(log))
+				return route.NewRouteModule(modulesCfg.Route.Unwrap(), route.WithLog(log))
 			},
 		},
 		{
 			Name:       "route mpls module",
-			Configured: modulesCfg.RouteMPLS != nil,
+			Configured: modulesCfg.RouteMPLS.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return route_mpls.NewRouteMPLSModule(modulesCfg.RouteMPLS, route_mpls.WithLog(log))
+				return route_mpls.NewRouteMPLSModule(modulesCfg.RouteMPLS.Unwrap(), route_mpls.WithLog(log))
 			},
 		},
 		{
 			Name:       "decap module",
-			Configured: modulesCfg.Decap != nil,
+			Configured: modulesCfg.Decap.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return decap.NewDecapModule(modulesCfg.Decap, decap.WithLog(log))
+				return decap.NewDecapModule(modulesCfg.Decap.Unwrap(), decap.WithLog(log))
 			},
 		},
 		{
 			Name:       "dscp module",
-			Configured: modulesCfg.DSCP != nil,
+			Configured: modulesCfg.DSCP.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return dscp.NewDSCPModule(modulesCfg.DSCP, dscp.WithLog(log))
+				return dscp.NewDSCPModule(modulesCfg.DSCP.Unwrap(), dscp.WithLog(log))
 			},
 		},
 		{
 			Name:       "forward module",
-			Configured: modulesCfg.Forward != nil,
+			Configured: modulesCfg.Forward.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return forward.NewForwardModule(modulesCfg.Forward, forward.WithLog(log))
+				return forward.NewForwardModule(modulesCfg.Forward.Unwrap(), forward.WithLog(log))
 			},
 		},
 		{
 			Name:       "mirror module",
-			Configured: modulesCfg.Mirror != nil,
+			Configured: modulesCfg.Mirror.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return mirror.NewMirrorModule(modulesCfg.Mirror, mirror.WithLog(log))
+				return mirror.NewMirrorModule(modulesCfg.Mirror.Unwrap(), mirror.WithLog(log))
 			},
 		},
 		{
 			Name:       "nat64 module",
-			Configured: modulesCfg.NAT64 != nil,
+			Configured: modulesCfg.NAT64.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return nat64.NewNAT64Module(modulesCfg.NAT64, nat64.WithLog(log))
+				return nat64.NewNAT64Module(modulesCfg.NAT64.Unwrap(), nat64.WithLog(log))
 			},
 		},
 		{
 			Name:       "pdump module",
-			Configured: modulesCfg.Pdump != nil,
+			Configured: modulesCfg.Pdump.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return pdump.NewPdumpModule(modulesCfg.Pdump, pdump.WithLog(log))
+				return pdump.NewPdumpModule(modulesCfg.Pdump.Unwrap(), pdump.WithLog(log))
 			},
 		},
 		{
 			Name:       "acl module",
-			Configured: modulesCfg.ACL != nil,
+			Configured: modulesCfg.ACL.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return acl.NewACLModule(modulesCfg.ACL, acl.WithModuleLog(log))
+				return acl.NewACLModule(modulesCfg.ACL.Unwrap(), acl.WithModuleLog(log))
 			},
 		},
 		{
 			Name:       "blackhole module",
-			Configured: modulesCfg.Blackhole != nil,
+			Configured: modulesCfg.Blackhole.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return blackhole.NewBlackholeModule(modulesCfg.Blackhole, blackhole.WithLog(log))
+				return blackhole.NewBlackholeModule(modulesCfg.Blackhole.Unwrap(), blackhole.WithLog(log))
 			},
 		},
 		{
 			Name:       "plain device",
-			Configured: devicesCfg.Plain != nil,
+			Configured: devicesCfg.Plain.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return plain.NewDevicePlainDevice(devicesCfg.Plain, plain.WithLog(log))
+				return plain.NewDevicePlainDevice(devicesCfg.Plain.Unwrap(), plain.WithLog(log))
 			},
 		},
 		{
 			Name:       "vlan device",
-			Configured: devicesCfg.Vlan != nil,
+			Configured: devicesCfg.Vlan.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return vlan.NewDeviceVlanDevice(devicesCfg.Vlan, vlan.WithLog(log))
+				return vlan.NewDeviceVlanDevice(devicesCfg.Vlan.Unwrap(), vlan.WithLog(log))
 			},
 		},
 		{
 			Name:       "trafgen device",
-			Configured: devicesCfg.Trafgen != nil,
+			Configured: devicesCfg.Trafgen.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return trafgen.NewTrafgenDevice(devicesCfg.Trafgen, trafgen.WithLog(log))
+				return trafgen.NewTrafgenDevice(devicesCfg.Trafgen.Unwrap(), trafgen.WithLog(log))
 			},
 		},
 	}

@@ -29,20 +29,20 @@ func TestDefaultControlplaneConfig_StartsIntendedSet(t *testing.T) {
 	err := xcfg.Decode([]byte(framework.DefaultControlplaneConfig()), cfg, xcfg.WithKnownFields())
 	require.NoError(t, err)
 
-	require.NotNil(t, cfg.Modules.Route)
-	require.NotNil(t, cfg.Modules.RouteMPLS)
-	require.NotNil(t, cfg.Modules.Decap)
-	require.NotNil(t, cfg.Modules.DSCP)
-	require.NotNil(t, cfg.Modules.Forward)
-	require.NotNil(t, cfg.Modules.NAT64)
-	require.NotNil(t, cfg.Modules.Pdump)
-	require.NotNil(t, cfg.Modules.ACL)
-	require.NotNil(t, cfg.Modules.Mirror)
-	require.NotNil(t, cfg.Modules.Blackhole)
+	require.NotNil(t, cfg.Modules.Route.Unwrap())
+	require.NotNil(t, cfg.Modules.RouteMPLS.Unwrap())
+	require.NotNil(t, cfg.Modules.Decap.Unwrap())
+	require.NotNil(t, cfg.Modules.DSCP.Unwrap())
+	require.NotNil(t, cfg.Modules.Forward.Unwrap())
+	require.NotNil(t, cfg.Modules.NAT64.Unwrap())
+	require.NotNil(t, cfg.Modules.Pdump.Unwrap())
+	require.NotNil(t, cfg.Modules.ACL.Unwrap())
+	require.NotNil(t, cfg.Modules.Mirror.Unwrap())
+	require.NotNil(t, cfg.Modules.Blackhole.Unwrap())
 
-	require.NotNil(t, cfg.Devices.Plain)
-	require.NotNil(t, cfg.Devices.Vlan)
+	require.NotNil(t, cfg.Devices.Plain.Unwrap())
+	require.NotNil(t, cfg.Devices.Vlan.Unwrap())
 	// Trafgen is deliberately absent from the harness config, matching the
 	// shipped default: the harness never relied on it.
-	require.Nil(t, cfg.Devices.Trafgen)
+	require.Nil(t, cfg.Devices.Trafgen.Unwrap())
 }

@@ -1,8 +1,6 @@
 package nat64
 
 import (
-	"gopkg.in/yaml.v3"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
@@ -37,13 +35,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-// UnmarshalYAML seeds Config with DefaultConfig before decoding, so a listed
-// module that omits an optional field keeps its default.
-//
-// The plain alias drops Config's own UnmarshalYAML method so node.Decode
-// does not recurse into this method.
-func (m *Config) UnmarshalYAML(node *yaml.Node) error {
+// Default resets Config to DefaultConfig.
+func (m *Config) Default() {
 	*m = *DefaultConfig()
-	type plain Config
-	return node.Decode((*plain)(m))
 }

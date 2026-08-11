@@ -1,6 +1,7 @@
 package xcfg
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -41,6 +42,15 @@ func (m Required[T]) Validate() error {
 // MarshalYAML implements yaml.Marshaler for round-trip serialization.
 func (m Required[T]) MarshalYAML() (any, error) {
 	return m.v, nil
+}
+
+// MarshalJSON implements json.Marshaler.
+//
+// Without it, zap.Any's reflect-based encoding sees only the unexported
+// fields and renders every Required the same regardless of its value. This
+// delegates to the wrapped value so it logs the same as an unwrapped T.
+func (m Required[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(m.v)
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler, recording that a value was
