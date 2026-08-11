@@ -1233,9 +1233,9 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "netip"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "513b83d6285ebc6b4519a89263bb0bd789e4d2d279f1f99e59034d3138b6f74f"
+checksum = "d2d1ae2988edc6b837fa9c5103d83aa495d5b8a5b423e17f3fbd2beea67b9d74"
 
 [[package]]
 name = "no-std-net"
