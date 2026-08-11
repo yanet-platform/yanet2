@@ -834,10 +834,20 @@ stat_thread(void *arg) {
 int
 dataplane_start(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
-		dataplane_device_start(dataplane, dataplane->devices + dev_idx);
+		if (dataplane_device_start(
+			    dataplane, dataplane->devices + dev_idx
+		    )) {
+			return -1;
+		}
 	}
+
 	pthread_t thread_id;
-	pthread_create(&thread_id, NULL, stat_thread, dataplane);
+	int rc = pthread_create(&thread_id, NULL, stat_thread, dataplane);
+	if (rc != 0) {
+		// The stat thread only feeds xstats counters, so a failure
+		// here degrades observability rather than packet processing.
+		LOG(WARN, "failed to create stat thread: %s", strerror(rc));
+	}
 
 	return 0;
 }

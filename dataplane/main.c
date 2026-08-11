@@ -108,7 +108,11 @@ main(int argc, char **argv) {
 	}
 
 	LOG(INFO, "start dataplane");
-	dataplane_start(&dataplane);
+	rc = dataplane_start(&dataplane);
+	if (rc != 0) {
+		LOG(ERROR, "failed to start dataplane");
+		return -1;
+	}
 
 	// FIXME: infinite sleep effectively
 	LOG(INFO, "wait dataplane");

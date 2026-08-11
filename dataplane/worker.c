@@ -60,6 +60,8 @@
 
 #include <rte_ethdev.h>
 
+#include <string.h>
+
 static void
 worker_read(
 	struct dataplane_worker *worker, struct packet_front *packet_front
@@ -610,11 +612,19 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 
 	pthread_attr_setaffinity_np(&wrk_th_attr, sizeof(cpu_set_t), &mask);
 
-	pthread_create(
+	int rc = pthread_create(
 		&worker->thread_id, &wrk_th_attr, worker_thread_start, worker
 	);
 
 	pthread_attr_destroy(&wrk_th_attr);
+
+	if (rc != 0) {
+		LOG(ERROR,
+		    "failed to create thread for worker core_id=%u: %s",
+		    worker->config.core_id,
+		    strerror(rc));
+		return -1;
+	}
 
 	return 0;
 }
