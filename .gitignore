@@ -149,9 +149,11 @@ deploy/packages/
 # Public skills are whitelisted below, so adding a new private skill needs
 # no change here.
 .agents/skills/*
+!.agents/skills/autopilot
 !.agents/skills/review-change
 !.agents/skills/ship-pr
 .claude/skills/*
+!.claude/skills/autopilot
 !.claude/skills/ship-pr
 
 ### Uncategorized ###
