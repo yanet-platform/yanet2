@@ -23,16 +23,20 @@ Multiple in-flight PRs that ALL append to the same barrel file
   worktree, rebase onto `origin/main`, resolve the barrel conflict (delegate the
   edit — it's code), rerun the affected gates, obtain a fresh full-candidate
   `review-change` approval, re-push, and create a fresh PR through MCP.
-- After `merge_pull_request` succeeds, clean up only through Phase 7's exact-ref
-  procedure: compare the recorded PR head, delete with its expected-old-SHA
-  lease, and verify the exact ref is absent. Never pattern-delete survivors.
+- `merge_pull_request` has no branch-delete parameter, so an MCP merge always
+  leaves both branches for Phase 7. On the `gh` path, `gh pr merge
+  --delete-branch` skips the REMOTE delete when the LOCAL delete errors on a
+  worktree-held branch. After `merge_pull_request` succeeds, clean up only
+  through Phase 7's exact-ref procedure: compare the recorded PR head, delete
+  with its expected-old-SHA lease, and verify the exact ref is absent. Never
+  pattern-delete survivors.
 
 ## Stacked PRs (child depends on parent's unmerged change)
 
 When PR-B's files depend on PR-A's not-yet-merged change:
 
 1. Build each branch in its own worktree. Fork B off A's branch
-   (`git worktree add .agent-state/worktrees/<b> -b <b-branch> <a-branch>`), and
+   (`git worktree add <worktrees>/<b> -b <b-branch> <a-branch>`), and
    populate B's worktree by copying the FINAL intended files so B's
    diff-vs-base is exactly its own slice. Only the first PR usually needs a
    trimmed-file edit via a coder.
@@ -88,7 +92,7 @@ reflog and stop unless they can be verified. Recover only the accidental fix
 
 ```
 git branch recovery/<name> <bad-amended-commit-B>
-git worktree add .agent-state/worktrees/recover-<name> -b <intended-branch>-recover <pre-amend-intended-tip-A>
+git worktree add <worktrees>/recover-<name> -b <intended-branch>-recover <pre-amend-intended-tip-A>
 patch_path=$(mktemp) || exit 1
 trap 'rm -f -- "$patch_path"' EXIT
 if ! git diff --binary <pre-amend-main-tip-M> <bad-amended-commit-B> -- <paths> >"$patch_path"; then
@@ -97,8 +101,8 @@ fi
 if [ ! -s "$patch_path" ]; then
   exit 1
 fi
-git -C .agent-state/worktrees/recover-<name> apply --check "$patch_path" || exit 1
-git -C .agent-state/worktrees/recover-<name> apply --index "$patch_path" || exit 1
+git -C <worktrees>/recover-<name> apply --check "$patch_path" || exit 1
+git -C <worktrees>/recover-<name> apply --index "$patch_path" || exit 1
 rm -f -- "$patch_path" || exit 1
 trap - EXIT
 ```
@@ -107,14 +111,14 @@ Inspect the staged recovery diff, rerun the affected gates, and obtain a fresh
 full-candidate `review-change` approval. Only then amend:
 
 ```
-git -C .agent-state/worktrees/recover-<name> commit --amend --no-edit
+git -C <worktrees>/recover-<name> commit --amend --no-edit
 ```
 
 Prove the committed fingerprint equals the approved one. Stop instead of
 pushing if it differs, otherwise continue:
 
 ```
-git -C .agent-state/worktrees/recover-<name> push --force-with-lease origin HEAD:<intended-branch>
+git -C <worktrees>/recover-<name> push --force-with-lease origin HEAD:<intended-branch>
 ```
 
 Use a new commit instead of `--amend` when that preserves the intended PR

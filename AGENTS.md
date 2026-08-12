@@ -182,7 +182,7 @@ Active modules: `route, acl, balancer2, blackhole, forward, decap, nat64, fwstat
 
 Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` with `go build`). Rust is built separately via Cargo. DPDK is a Meson subproject in `subprojects/dpdk/`. Sanitizer flags are propagated to CGO automatically when using `-Db_sanitize`.
 
-Agent charters are authored once at `.rulesync/subagents/*.md` — `make ai/agents` generates the `.claude/agents/` and `.codex/agents/` trees both clients read.
+Agent charters are authored once at `.rulesync/subagents/*.md` — `make ai/agents` generates the `.claude/agents/` and `.codex/agents/` trees both clients read. Public skills are authored once under `.agents/skills/<name>/`, which Codex reads directly, and the Claude Code tree mirrors them by symlink (`.claude/skills/<name>` → `../../.agents/skills/<name>`).
 
 ## Coding Conventions
 

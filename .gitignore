@@ -154,6 +154,7 @@ deploy/packages/
 !.agents/skills/ship-pr
 .claude/skills/*
 !.claude/skills/autopilot
+!.claude/skills/review-change
 !.claude/skills/ship-pr
 
 ### Uncategorized ###
