@@ -14,6 +14,7 @@
 #include "common/memory_address.h"
 #include "common/strutils.h"
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/config/agent.h"
@@ -473,19 +474,13 @@ dataplane_ut_run(
 		// must still get a well-formed result (output/drop initialized)
 		// and input must end up drained, so packets are neither leaked
 		// nor re-added to a non-empty list by dataplane_ut_run_rounds.
-		struct packet_front packet_front;
-		packet_front_init(&packet_front);
-
-		struct packet *packet;
-		while ((packet = packet_list_pop(input)) != NULL) {
-			packet_front_pending_input(&packet_front, packet);
-		}
-
 		packet_list_init(&result->output);
 		packet_list_init(&result->drop);
 
-		packet_front_drop_pending_input(&packet_front);
-		packet_list_concat(&result->drop, &packet_front.drop);
+		struct packet *packet;
+		while ((packet = packet_list_pop(input)) != NULL) {
+			packet_list_add(&result->drop, packet);
+		}
 		return;
 	}
 
@@ -503,19 +498,33 @@ dataplane_ut_run(
 	struct packet_front packet_front;
 	packet_front_init(&packet_front);
 
-	struct packet *packet;
-	while ((packet = packet_list_pop(input)) != NULL) {
-		packet_front_pending_input(&packet_front, packet);
-	}
-
 	packet_list_init(&result->output);
 	packet_list_init(&result->drop);
 
 	if (config_gen_ectx == NULL) {
 		// No active pipeline: drop everything.
-		packet_front_drop_pending_input(&packet_front);
-		packet_list_concat(&result->drop, &packet_front.drop);
+		struct packet *packet;
+		while ((packet = packet_list_pop(input)) != NULL) {
+			packet_list_add(&result->drop, packet);
+		}
 		return;
+	}
+
+	// Feed input straight onto each packet's target device input entry,
+	// the same way worker_read deposits RX into the pipeline.
+	struct packet *packet;
+	while ((packet = packet_list_pop(input)) != NULL) {
+		struct device_ectx *device_ectx = config_gen_ectx_get_device(
+			config_gen_ectx, packet->tx_device_id
+		);
+		if (device_ectx == NULL) {
+			packet_front_drop(&packet_front, packet);
+			continue;
+		}
+		packet_front_input(
+			&ADDR_OF(&device_ectx->input_pipelines)->schedule,
+			packet
+		);
 	}
 
 	worker_pipeline_round(

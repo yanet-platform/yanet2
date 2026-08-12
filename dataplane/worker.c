@@ -50,6 +50,7 @@
 #include "lib/dataplane/pipeline/pipeline.h"
 #include "lib/dataplane/time/clock.h"
 
+#include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
@@ -64,7 +65,7 @@
 
 static void
 worker_read(
-	struct dataplane_worker *worker, struct packet_front *packet_front
+	struct dataplane_worker *worker, struct config_gen_ectx *config_gen_ectx
 ) {
 	struct worker_read_ctx *ctx = &worker->read_ctx;
 	struct rte_mbuf *mbufs[ctx->read_size];
@@ -93,7 +94,28 @@ worker_read(
 			*(worker->dp_worker->drop_count) += 1;
 			continue;
 		}
-		packet_front_pending_input(packet_front, packet);
+
+		// With no active config there is no device schedule to route
+		// into, so free the mbuf and account it as a drop rather than
+		// letting pre-config traffic accumulate in the NIC RX ring.
+		if (config_gen_ectx == NULL) {
+			rte_pktmbuf_free(mbufs[idx]);
+			*(worker->dp_worker->drop_count) += 1;
+			continue;
+		}
+
+		struct device_ectx *device_ectx = config_gen_ectx_get_device(
+			config_gen_ectx, packet->tx_device_id
+		);
+		if (device_ectx == NULL) {
+			rte_pktmbuf_free(mbufs[idx]);
+			*(worker->dp_worker->drop_count) += 1;
+			continue;
+		}
+		packet_front_input(
+			&ADDR_OF(&device_ectx->input_pipelines)->schedule,
+			packet
+		);
 	}
 }
 
@@ -335,27 +357,24 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
 	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 
-	// No configuration has been installed yet (startup). Drain the NIC
-	// RX ring into a throwaway stack front so packets that arrived
-	// before the first configuration do not accumulate and get
-	// processed stale once a configuration appears.
+	// No configuration has been installed yet (startup). worker_read frees
+	// the RX mbufs itself when handed a NULL config_gen_ectx, so pre-config
+	// traffic does not accumulate and get processed stale once a
+	// configuration appears. worker_write still runs to drain remote rx
+	// pipes and reclaim tx pipes.
 	if (config_gen_ectx == NULL) {
+		worker_read(worker, NULL);
+
 		struct packet_front packet_front;
 		packet_front_init(&packet_front);
 
-		worker_read(worker, &packet_front);
 		worker_write(worker, &packet_front);
-
-		packet_front_drop_pending_input(&packet_front);
-
-		*(worker->dp_worker->drop_count) += packet_front.drop_count;
-		dataplane_drop_packets(worker->dataplane, &packet_front.drop);
 		return;
 	}
 
 	struct packet_front *packet_front = &config_gen_ectx->packet_front;
 
-	worker_read(worker, packet_front);
+	worker_read(worker, config_gen_ectx);
 
 	worker_pipeline_round(
 		worker->dp_worker, cp_config_gen, config_gen_ectx, packet_front

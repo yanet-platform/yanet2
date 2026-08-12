@@ -5127,8 +5127,6 @@ test_nat64_icmp_embedded_overflow(void) {
 	packet_list_cleanup(&pf.input);
 	packet_list_cleanup(&pf.output);
 	packet_list_cleanup(&pf.drop);
-	packet_list_cleanup(&pf.pending_input);
-	packet_list_cleanup(&pf.pending_output);
 
 	return TEST_SUCCESS;
 }
@@ -5762,9 +5760,6 @@ test_nat64_icmp_v4tov6_valid_error_translates(void) {
 		test_params.module_config.stats.malformed_packets
 	);
 
-	packet_list_cleanup(&test_params.packet_front.pending_input);
-	packet_list_cleanup(&test_params.packet_front.pending_output);
-
 	return TEST_SUCCESS;
 }
 
@@ -5873,8 +5868,6 @@ test_nat64_icmp_v4tov6_fuzz_crash_regression(void) {
 	packet_list_cleanup(&pf.input);
 	packet_list_cleanup(&pf.output);
 	packet_list_cleanup(&pf.drop);
-	packet_list_cleanup(&pf.pending_input);
-	packet_list_cleanup(&pf.pending_output);
 
 	return TEST_SUCCESS;
 }

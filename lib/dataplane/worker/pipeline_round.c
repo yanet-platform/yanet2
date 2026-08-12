@@ -14,8 +14,9 @@ worker_pipeline_round(
 	struct config_gen_ectx *config_gen_ectx,
 	struct packet_front *packet_front
 ) {
-	uint64_t device_count =
-		cp_config_gen->device_registry.registry.capacity;
+	(void)cp_config_gen;
+
+	uint64_t device_count = config_gen_ectx->device_count;
 
 	/*
 	 * Force a full traversal on the first iteration.
@@ -23,57 +24,40 @@ worker_pipeline_round(
 	 * Every device, and through it every pipeline, function, chain and
 	 * module, runs once per tick even when no packets arrived, so periodic
 	 * work has a chance to make progress. Later iterations only revisit
-	 * entities that received recirculated packets.
+	 * devices whose input or output entry received packets, whether
+	 * straight from RX or routed in by a module.
 	 */
 	int force_poll = 1;
 
 	while (1) {
-		struct packet *packet;
-
-		int empty = 1;
-
-		// Demux pending traffic into each target device's per-entry
-		// schedule front. A packet whose target device is absent from
-		// this generation (out of range or not configured) cannot be
-		// delivered, so it is dropped rather than stranded.
-		while ((packet = packet_list_pop(&packet_front->pending_input)
-		       ) != NULL) {
-			empty = 0;
-			struct device_ectx *device_ectx =
-				config_gen_ectx_get_device(
-					config_gen_ectx, packet->tx_device_id
-				);
-			if (device_ectx == NULL) {
-				packet_front_drop(packet_front, packet);
-				continue;
+		if (!force_poll) {
+			int has_work = 0;
+			for (uint64_t idx = 0; idx < device_count; ++idx) {
+				struct device_ectx *device_ectx =
+					config_gen_ectx_get_device(
+						config_gen_ectx, idx
+					);
+				if (device_ectx == NULL) {
+					continue;
+				}
+				if (packet_list_first(
+					    &ADDR_OF(&device_ectx
+							      ->input_pipelines)
+						     ->schedule.input
+				    ) != NULL ||
+				    packet_list_first(
+					    &ADDR_OF(&device_ectx
+							      ->output_pipelines
+					    )
+						     ->schedule.input
+				    ) != NULL) {
+					has_work = 1;
+					break;
+				}
 			}
-			packet_front_input(
-				&ADDR_OF(&device_ectx->input_pipelines)
-					 ->schedule,
-				packet
-			);
-		}
-
-		while ((packet = packet_list_pop(&packet_front->pending_output)
-		       ) != NULL) {
-			empty = 0;
-			struct device_ectx *device_ectx =
-				config_gen_ectx_get_device(
-					config_gen_ectx, packet->tx_device_id
-				);
-			if (device_ectx == NULL) {
-				packet_front_drop(packet_front, packet);
-				continue;
+			if (!has_work) {
+				break;
 			}
-			packet_front_input(
-				&ADDR_OF(&device_ectx->output_pipelines)
-					 ->schedule,
-				packet
-			);
-		}
-
-		if (empty && !force_poll) {
-			break;
 		}
 
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
@@ -101,8 +85,8 @@ worker_pipeline_round(
 			/*
 			 * Input entry point processing has no packet
 			 * transmission allowed so drop the whole output.
-			 * The only chance for a packet to be survived is
-			 * being scheduled into pending input/output queues.
+			 * The only chance for a packet to survive is being
+			 * routed into a device entry by a module.
 			 */
 			packet_front_drop_output(schedule);
 

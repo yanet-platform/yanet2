@@ -134,13 +134,13 @@ forward_handle_packets(
 
 			if (target->mode == FORWARD_MODE_IN) {
 				packet->tx_device_id = device_id;
-				packet_front_pending_input(
-					packet_front, packet
+				module_ectx_route_input(
+					module_ectx, packet_front, packet
 				);
 			} else if (target->mode == FORWARD_MODE_OUT) {
 				packet->tx_device_id = device_id;
-				packet_front_pending_output(
-					packet_front, packet
+				module_ectx_route_output(
+					module_ectx, packet_front, packet
 				);
 			} else {
 				packet_front_output(packet_front, packet);

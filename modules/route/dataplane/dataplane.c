@@ -7,6 +7,8 @@
 #include "common/memory.h"
 #include "lib/logging/log.h"
 
+#include "controlplane/config/econtext.h"
+
 #include "dataplane/config/zone.h"
 
 #include "dataplane/module/module.h"
@@ -242,7 +244,7 @@ route_handle_packets(
 				module_ectx, route->counter_id, packet
 			);
 		}
-		packet_front_pending_output(packet_front, packet);
+		module_ectx_route_output(module_ectx, packet_front, packet);
 	}
 }
 

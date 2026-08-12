@@ -5,6 +5,8 @@
 
 #include <filter/query.h>
 
+#include "controlplane/config/econtext.h"
+
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -23,8 +25,9 @@ static void
 mirror_clone(
 	struct dp_worker *worker,
 	struct packet *packet,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front,
-	void (*add)(struct packet_front *, struct packet *),
+	void (*route)(struct module_ectx *, struct packet_front *, struct packet *),
 	uint16_t device_id
 ) {
 	struct packet *clone = worker_clone_packet(worker, packet);
@@ -33,7 +36,7 @@ mirror_clone(
 	}
 
 	clone->tx_device_id = device_id;
-	add(packet_front, clone);
+	route(module_ectx, packet_front, clone);
 }
 
 static void
@@ -147,16 +150,18 @@ mirror_handle_packets(
 					mirror_clone(
 						dp_worker,
 						packet,
+						module_ectx,
 						packet_front,
-						packet_front_pending_input,
+						module_ectx_route_input,
 						device_id
 					);
 				} else if (target->mode == MIRROR_MODE_OUT) {
 					mirror_clone(
 						dp_worker,
 						packet,
+						module_ectx,
 						packet_front,
-						packet_front_pending_output,
+						module_ectx_route_output,
 						device_id
 					);
 				}

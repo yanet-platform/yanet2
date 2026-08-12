@@ -12,9 +12,6 @@
  * module N+1's input.
  */
 struct packet_front {
-	struct packet_list pending_input;
-	struct packet_list pending_output;
-
 	struct packet_list input;
 	struct packet_list output;
 	struct packet_list drop;
@@ -37,8 +34,6 @@ struct packet_front {
 
 static inline void
 packet_front_init(struct packet_front *packet_front) {
-	packet_list_init(&packet_front->pending_input);
-	packet_list_init(&packet_front->pending_output);
 	packet_list_init(&packet_front->input);
 	packet_list_init(&packet_front->output);
 	packet_list_init(&packet_front->drop);
@@ -57,8 +52,8 @@ packet_front_init(struct packet_front *packet_front) {
 
 // Resets a fully-drained front to a clean reusable state.
 //
-// Only valid on a front whose input, output and pending lists have already
-// been drained to empty by a completed worker round. Resets the spent drop
+// Only valid on a front whose input and output lists have already been
+// drained to empty by a completed worker round. Resets the spent drop
 // list (its mbufs were already freed by the caller, so only the head needs
 // resetting) and the stale pending/drop accumulator counters, so the front
 // can be handed to the next round without a full packet_front_init.
@@ -74,18 +69,19 @@ packet_front_recycle(struct packet_front *packet_front) {
 	packet_front->pending_output_bytes = 0;
 }
 
-// Move the whole output, drop and pending lists from src into dst, transferring
-// the counters, and leave src empty.
+// Move the whole output and drop lists from src into dst, transferring the
+// counters, and leave src empty.
 //
-// Zeroing src lets a scratch front be reused across rounds without a separate
-// per-round reset: merge moves every packet and counter out, so nothing stale
-// survives into the next round.
+// Pending packets are routed straight to their target device's schedule, so
+// src never holds pending lists; only the pending tallies are folded into
+// dst so per-level accounting still attributes them to the right entry.
+// Zeroing src lets a scratch front be reused across rounds without a
+// separate per-round reset: merge moves every packet and counter out, so
+// nothing stale survives into the next round.
 static inline void
 packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 	packet_list_concat(&dst->output, &src->output);
 	packet_list_concat(&dst->drop, &src->drop);
-	packet_list_concat(&dst->pending_input, &src->pending_input);
-	packet_list_concat(&dst->pending_output, &src->pending_output);
 
 	dst->pending_input_count += src->pending_input_count;
 	dst->pending_input_bytes += src->pending_input_bytes;
@@ -97,24 +93,6 @@ packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 	dst->drop_bytes += src->drop_bytes;
 
 	packet_front_init(src);
-}
-
-static inline void
-packet_front_pending_input(
-	struct packet_front *packet_front, struct packet *packet
-) {
-	packet_list_add(&packet_front->pending_input, packet);
-	packet_front->pending_input_count += 1;
-	packet_front->pending_input_bytes += packet->data_len;
-}
-
-static inline void
-packet_front_pending_output(
-	struct packet_front *packet_front, struct packet *packet
-) {
-	packet_list_add(&packet_front->pending_output, packet);
-	packet_front->pending_output_count += 1;
-	packet_front->pending_output_bytes += packet->data_len;
 }
 
 static inline void
@@ -201,21 +179,6 @@ packet_front_drop_output(struct packet_front *packet_front) {
 	packet_front->drop_bytes += packet_front->output_bytes;
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
-}
-
-// Move the whole pending_input list into the drop list, transferring the
-// counters.
-//
-// Used by drain paths that discard all pending input (e.g. when no
-// pipeline is configured).
-static inline void
-packet_front_drop_pending_input(struct packet_front *packet_front) {
-	packet_list_concat(&packet_front->drop, &packet_front->pending_input);
-
-	packet_front->drop_count += packet_front->pending_input_count;
-	packet_front->drop_bytes += packet_front->pending_input_bytes;
-	packet_front->pending_input_count = 0;
-	packet_front->pending_input_bytes = 0;
 }
 
 static inline uint64_t
