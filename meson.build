@@ -257,6 +257,7 @@ add_project_arguments(yanet_project_args, language: 'c')
 subdir('common')
 subdir('lib')
 module_test_dirs = []
+subdir('objects')
 subdir('modules')
 subdir('devices')
 subdir('lib/dataplane_ut/tests')
