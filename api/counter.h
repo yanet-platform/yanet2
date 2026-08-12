@@ -102,7 +102,8 @@ struct port_counter_group_list {
 // Collect counters for every DPDK port, grouped per port.
 //
 // The returned list must be released with yanet_port_counter_group_list_free.
-// Returns NULL on allocation failure.
+// Returns NULL on allocation failure or if the per-port counter array
+// offset is not yet published for a nonzero port count.
 struct port_counter_group_list *
 yanet_get_port_counters(struct dp_config *dp_config);
 

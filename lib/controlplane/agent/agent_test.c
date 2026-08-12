@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "api/agent.h"
+#include "api/counter.h"
 #include "common/memory_address.h"
 #include "common/test_assert.h"
 #include "controlplane/config/zone.h"
@@ -194,6 +195,76 @@ test_attach_initialised_segment_succeeds() {
 	return TEST_SUCCESS;
 }
 
+// Verify that yanet_get_port_counters returns NULL rather than faulting
+// when the port count is published but the port counters array offset is
+// not, reproducing the two-store publish race.
+static int
+test_get_port_counters_unpublished_array_returns_null() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	struct cp_config *cp_config = NULL;
+	int rc = dp_storage_init(
+		0,
+		0,
+		storage,
+		TEST_DP_MEMORY,
+		TEST_CP_MEMORY,
+		&dp_config,
+		&cp_config
+	);
+	TEST_ASSERT(rc == 0, "dp_storage_init failed");
+
+	dp_config->port_count = 1;
+
+	struct port_counter_group_list *groups =
+		yanet_get_port_counters(dp_config);
+	TEST_ASSERT_NULL(
+		groups,
+		"yanet_get_port_counters must return NULL when the port "
+		"count is set but the counters array offset is not"
+	);
+
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that yanet_get_port_counters returns a non-NULL, zero-length list
+// for a zero port count instead of treating an unset array offset as an
+// error.
+static int
+test_get_port_counters_zero_port_count_returns_empty_list() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	struct cp_config *cp_config = NULL;
+	int rc = dp_storage_init(
+		0,
+		0,
+		storage,
+		TEST_DP_MEMORY,
+		TEST_CP_MEMORY,
+		&dp_config,
+		&cp_config
+	);
+	TEST_ASSERT(rc == 0, "dp_storage_init failed");
+
+	struct port_counter_group_list *groups =
+		yanet_get_port_counters(dp_config);
+	TEST_ASSERT_NOT_NULL(
+		groups,
+		"yanet_get_port_counters must return a non-NULL list for a "
+		"zero port count"
+	);
+	TEST_ASSERT_EQUAL(groups->port_count, 0, "port count must be zero");
+
+	yanet_port_counter_group_list_free(groups);
+	free(storage);
+	return TEST_SUCCESS;
+}
+
 int
 main() {
 	log_enable_name("error");
@@ -237,6 +308,24 @@ main() {
 	if (test_attach_initialised_segment_succeeds() != TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR, "test_attach_initialised_segment_succeeds failed");
+	}
+
+	++tests_count;
+	if (test_get_port_counters_unpublished_array_returns_null() !=
+	    TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR,
+		    "test_get_port_counters_unpublished_array_returns_null "
+		    "failed");
+	}
+
+	++tests_count;
+	if (test_get_port_counters_zero_port_count_returns_empty_list() !=
+	    TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR,
+		    "test_get_port_counters_zero_port_count_returns_empty_list "
+		    "failed");
 	}
 
 	if (tests_failed != 0) {

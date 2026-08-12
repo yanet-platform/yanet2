@@ -2237,6 +2237,12 @@ yanet_get_port_counters(struct dp_config *dp_config) {
 	uint64_t port_count = dp_config->port_count;
 	struct dp_port_counters *port_counters =
 		ADDR_OF(&dp_config->port_counters);
+	// The count and the array offset publish as separate stores, so a
+	// reader can observe a nonzero count before the offset lands and
+	// would otherwise index off a null base.
+	if (port_count != 0 && port_counters == NULL) {
+		return NULL;
+	}
 
 	struct port_counter_group_list *groups =
 		(struct port_counter_group_list *)malloc(
