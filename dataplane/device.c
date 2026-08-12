@@ -69,7 +69,15 @@ dataplane_device_start(
 	    "start dataplane device id=%u with %d workers",
 	    device->device_id,
 	    device->worker_count);
-	dpdk_port_start(device->port_id);
+	int rc = dpdk_port_start(device->port_id);
+	if (rc) {
+		LOG(ERROR,
+		    "failed to start dataplane device id=%u port=%s: error=%d",
+		    device->device_id,
+		    device->port_name,
+		    rc);
+		return -1;
+	}
 
 	// Query the NIC's RSS hash key and redirection table for later use by
 	// RSS-aware worker-affinity lookups. This is a best-effort query: no
