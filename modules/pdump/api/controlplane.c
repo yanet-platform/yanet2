@@ -101,48 +101,8 @@ pdump_module_config_data_init(
 	return 0;
 }
 
-struct cp_module *
-pdump_module_config_new(
-	struct agent *agent, const char *name, yanet_error **err
-) {
-	struct pdump_module_config *config =
-		(struct pdump_module_config *)memory_balloc(
-			&agent->memory_context,
-			sizeof(struct pdump_module_config)
-		);
-	if (config == NULL) {
-		yanet_error_add(err, "failed to allocate config");
-		return NULL;
-	}
-
-	if (cp_module_init(&config->cp_module, agent, "pdump", name, err)) {
-		yanet_error_add(err, "failed to init module");
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct pdump_module_config)
-		);
-		return NULL;
-	}
-
-	// Initialize the module data
-	if (pdump_module_config_data_init(
-		    config, &config->cp_module.memory_context
-	    )) {
-		yanet_error_add(err, "failed to init config data");
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct pdump_module_config)
-		);
-		return NULL;
-	}
-
-	return &config->cp_module;
-}
-
-void
-pdump_module_config_free(struct cp_module *module) {
+static void
+pdump_module_config_destroy(struct cp_module *module) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 
@@ -187,7 +147,67 @@ pdump_module_config_free(struct cp_module *module) {
 		config,
 		sizeof(struct pdump_module_config)
 	);
-};
+}
+
+struct cp_module *
+pdump_module_config_new(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct pdump_module_config *config =
+		(struct pdump_module_config *)memory_balloc(
+			&agent->memory_context,
+			sizeof(struct pdump_module_config)
+		);
+	if (config == NULL) {
+		yanet_error_add(err, "failed to allocate config");
+		return NULL;
+	}
+
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "pdump",
+		    name,
+		    pdump_module_config_destroy,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to init module");
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct pdump_module_config)
+		);
+		return NULL;
+	}
+
+	// Initialize the module data
+	if (pdump_module_config_data_init(
+		    config, &config->cp_module.memory_context
+	    )) {
+		yanet_error_add(err, "failed to init config data");
+		// Frees directly instead of going through the type destructor.
+		//
+		// A failed configuration-data setup never reaches a state its
+		// own teardown could safely walk. No reference beyond the
+		// caller's own has been taken, and no registry has observed
+		// the module yet, so nothing is lost by freeing the block
+		// here.
+		cp_module_fini(&config->cp_module);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct pdump_module_config)
+		);
+		return NULL;
+	}
+
+	return &config->cp_module;
+}
+
+void
+pdump_module_config_free(struct cp_module *module) {
+	cp_module_release(module);
+}
 
 int
 pdump_module_config_set_filter(

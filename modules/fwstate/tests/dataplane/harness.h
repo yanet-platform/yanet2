@@ -23,6 +23,13 @@ fwstate_handle_packets(
 	struct packet_front *packet_front
 );
 
+// Allocate and zero-initialize a stand-in agent inside the given memory
+// context, ready to pass to a module's own control-plane constructor.
+//
+// Returns NULL on allocation failure.
+struct agent *
+fwstate_test_agent_new(struct memory_context *parent, const char *name);
+
 // Link the module's counter registry and spawn a per-worker counter storage.
 //
 // The dataplane resolves per-worker counter addresses via

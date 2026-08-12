@@ -12,6 +12,24 @@
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
+static void
+dscp_module_config_destroy(struct cp_module *cp_module) {
+	struct dscp_module_config *config =
+		container_of(cp_module, struct dscp_module_config, cp_module);
+
+	dscp_module_config_data_fini(config);
+
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct dscp_module_config)
+	);
+}
+
 struct cp_module *
 dscp_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
@@ -27,7 +45,14 @@ dscp_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "dscp", name, err)) {
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "dscp",
+		    name,
+		    dscp_module_config_destroy,
+		    err
+	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -42,6 +67,13 @@ dscp_module_config_new(
 		    config, &config->cp_module.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
+		// Frees directly instead of going through the type destructor.
+		//
+		// A failed configuration-data setup never reaches a state its
+		// own teardown could safely walk. No reference beyond the
+		// caller's own has been taken, and no registry has observed
+		// the module yet, so nothing is lost by freeing the block
+		// here.
 		cp_module_fini(&config->cp_module);
 		memory_bfree(
 			&agent->memory_context,
@@ -56,21 +88,8 @@ dscp_module_config_new(
 
 void
 dscp_module_config_free(struct cp_module *cp_module) {
-	struct dscp_module_config *config =
-		container_of(cp_module, struct dscp_module_config, cp_module);
-
-	dscp_module_config_data_fini(config);
-
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-
-	cp_module_fini(cp_module);
-
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct dscp_module_config)
-	);
-};
+	cp_module_release(cp_module);
+}
 
 int
 dscp_module_config_data_init(

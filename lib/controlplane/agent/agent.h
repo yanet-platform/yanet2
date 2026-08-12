@@ -37,19 +37,37 @@ struct agent {
 	pid_t pid;
 	uint64_t memory_limit;
 	uint64_t gen;
+	// Count of live generation references to this agent's modules.
+	//
+	// Excludes the initial reference a module construction call holds for
+	// its own creator, since a creator that dies never releases it and
+	// counting it would block reclaim forever. Every place that adds or
+	// removes such a reference keeps this count in step, so it reflects
+	// only references that can outlive the creator.
 	uint64_t loaded_module_count;
 	uint64_t loaded_device_count;
-	// cp_objects this agent owns that still hold a reference from a live
-	// generation.
+	// Count of this agent's shared objects that still hold a reference
+	// from a live generation.
 	//
-	// Mirrors loaded_module_count / loaded_device_count: incremented when
-	// an object is upserted into a generation's registry and decremented
-	// when it retires (its refcount drops to zero in
-	// cp_object_registry_item_free_cb). agent_attach /
-	// agent_free_unused_agents gate reclamation on all three counts being
-	// zero, since agent_cleanup frees the arena wholesale and cannot run
-	// per-object teardown itself.
+	// Follows the same accounting as the device count above: incremented
+	// when a reference is added and decremented when it is dropped and
+	// the object retires. Reclaiming a superseded agent waits for this
+	// and the sibling counts to reach zero, because freeing the arena is
+	// one wholesale operation with no way to tear objects down
+	// individually first.
 	uint64_t loaded_object_count;
+	// Count of this agent's parked-module teardowns currently running
+	// outside the configuration lock.
+	//
+	// Set before the lock is released to run a batch of parked
+	// destructors and cleared once they return. The reclaim guard treats
+	// a nonzero count as a live reference, because those destructors
+	// still touch this agent's arena even though the generation counts
+	// above already read zero for them. A process that dies mid-teardown
+	// leaves this above zero forever, leaking that one superseded arena
+	// rather than risking a destructor running against memory that has
+	// already been freed.
+	uint64_t parked_teardown_count;
 	struct agent *prev;
 	char name[80];
 
@@ -57,6 +75,16 @@ struct agent {
 	struct agent_arena *arenas;
 
 	struct agent_storage *storage;
+
+	// Head of this agent's list of modules parked after their reference
+	// count reached zero.
+	//
+	// Parked entries await destruction until the next construction call
+	// for their module type reclaims them. A control plane can reuse one
+	// agent across more than one service, so this list may mix module
+	// types. Each type's construction reclaims only matching entries,
+	// leaving the rest parked for their own type's turn.
+	struct cp_module *parked_modules;
 };
 
 struct dp_config *

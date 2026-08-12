@@ -5,6 +5,15 @@
 
 #include "common/memory.h"
 
+static void
+blackhole_module_config_destroy(struct cp_module *config) {
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&config->agent);
+
+	cp_module_fini(config);
+	memory_bfree(&agent->memory_context, config, sizeof(*config));
+}
+
 struct cp_module *
 blackhole_module_config_new(
 	struct agent *agent, const char *name, yanet_error **error
@@ -17,7 +26,14 @@ blackhole_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(config, agent, "blackhole", name, error)) {
+	if (cp_module_init(
+		    config,
+		    agent,
+		    "blackhole",
+		    name,
+		    blackhole_module_config_destroy,
+		    error
+	    )) {
 		yanet_error_add(error, "failed to init module");
 		memory_bfree(&agent->memory_context, config, sizeof(*config));
 		return NULL;
@@ -28,9 +44,5 @@ blackhole_module_config_new(
 
 void
 blackhole_module_config_free(struct cp_module *config) {
-	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&config->agent);
-
-	cp_module_fini(config);
-	memory_bfree(&agent->memory_context, config, sizeof(*config));
+	cp_module_release(config);
 }

@@ -18,44 +18,8 @@ FILTER_COMPILER_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
 
 FILTER_COMPILER_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
 
-struct cp_module *
-forward_module_config_init(
-	struct agent *agent, const char *name, yanet_error **err
-) {
-	struct forward_module_config *config =
-		(struct forward_module_config *)memory_balloc(
-			&agent->memory_context,
-			sizeof(struct forward_module_config)
-		);
-	if (config == NULL) {
-		yanet_error_add(err, "failed to allocate config");
-		return NULL;
-	}
-
-	if (cp_module_init(&config->cp_module, agent, "forward", name, err)) {
-		yanet_error_add(err, "failed to init module");
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct forward_module_config)
-		);
-		return NULL;
-	}
-
-	SET_OFFSET_OF(&config->targets, NULL);
-	config->target_count = 0;
-
-	memset(&config->filter_vlan, 0, sizeof(config->filter_vlan));
-
-	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
-
-	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
-
-	return &config->cp_module;
-}
-
-void
-forward_module_config_free(struct cp_module *cp_module) {
+static void
+forward_module_config_destroy(struct cp_module *cp_module) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
@@ -80,6 +44,54 @@ forward_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct forward_module_config)
 	);
+}
+
+struct cp_module *
+forward_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct forward_module_config *config =
+		(struct forward_module_config *)memory_balloc(
+			&agent->memory_context,
+			sizeof(struct forward_module_config)
+		);
+	if (config == NULL) {
+		yanet_error_add(err, "failed to allocate config");
+		return NULL;
+	}
+
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "forward",
+		    name,
+		    forward_module_config_destroy,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to init module");
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct forward_module_config)
+		);
+		return NULL;
+	}
+
+	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
+
+	memset(&config->filter_vlan, 0, sizeof(config->filter_vlan));
+
+	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
+
+	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
+
+	return &config->cp_module;
+}
+
+void
+forward_module_config_free(struct cp_module *cp_module) {
+	cp_module_release(cp_module);
 }
 
 typedef int (*forward_rule_check_func)(const struct forward_rule *forward_rule);

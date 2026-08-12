@@ -72,6 +72,28 @@ loaded_counts_test = executable(
 
 test('loaded_counts', loaded_counts_test, suite: ['lib'])
 
+module_registry_fini_guard_test = executable(
+  'module_registry_fini_guard_test',
+  ['module_registry_fini_guard_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test('module_registry_fini_guard', module_registry_fini_guard_test, suite: ['lib'])
+
 cp_object_test = executable(
   'cp_object_test',
   ['cp_object_test.c'],
@@ -118,3 +140,28 @@ cp_object_gen_test = executable(
 )
 
 test('cp_object_gen', cp_object_gen_test, suite: ['lib'])
+
+parked_modules_test = executable(
+  'parked_modules_test',
+  ['parked_modules_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_module_decap',
+    '-Wl,--export-dynamic-symbol=new_module_decap',
+    '-Wl,--undefined=new_module_forward',
+    '-Wl,--export-dynamic-symbol=new_module_forward',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_decap_cp_dep,
+    lib_forward_cp_dep,
+    libdpdk_dep,
+  ],
+  link_with: [lib_decap_dp, lib_forward_dp],
+  include_directories: yanet_rootdir,
+)
+
+test('parked_modules', parked_modules_test, suite: ['lib'])

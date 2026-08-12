@@ -1,9 +1,11 @@
 #pragma once
 
+#include "common/container_of.h"
 #include "common/memory.h"
 
 #include "counters/counters.h"
 
+#include "controlplane/agent/agent.h"
 #include "controlplane/config/defines.h"
 #include "controlplane/config/registry.h"
 
@@ -92,6 +94,16 @@ struct cp_module {
 	// resolved to per-worker object execution contexts at build time.
 	uint64_t object_count;
 	struct cp_module_object *objects;
+
+	// Link to the next module parked on the same agent's list, once this
+	// module's reference count reaches zero.
+	//
+	// Only the zero-transition handler sets it, and only a later reclaim
+	// for this module's own type reads it. It stays unset until that
+	// transition happens. The parked list's tail refers to itself
+	// instead of ending at null, so a parked entry's link is never null
+	// — which also marks that this module is already parked.
+	struct cp_module *parked_next;
 };
 
 /**
@@ -139,13 +151,19 @@ cp_module_link_object(
 /**
  * Initialize a module configuration structure.
  *
- * Sets up a new module configuration with the specified type and name,
- * initializes counters, and associates it with the given agent.
+ * Sets up counters and associates the module with the given agent. Before
+ * any of that allocates, this reclaims whatever the agent parked for this
+ * type since the last such call, using the destructor supplied here, so a
+ * recreation under memory pressure benefits from the space a parked
+ * instance would free rather than failing before reaching that reclaim.
+ * The destructor is used only for this call and never stored. A different
+ * type sharing the same agent is left for its own next call to collect.
  *
  * @param cp_module Pointer to the module configuration to initialize
  * @param agent Pointer to the controlplane agent owning this module
  * @param module_type Type identifier for the module
  * @param module_name Name identifier for the module
+ * @param destroy Destructor for a parked module of this same type
  * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
@@ -155,6 +173,7 @@ cp_module_init(
 	struct agent *agent,
 	const char *module_type,
 	const char *module_name,
+	cp_module_free_handler destroy,
 	yanet_error **err
 );
 
@@ -167,6 +186,36 @@ cp_module_init(
  */
 void
 cp_module_fini(struct cp_module *cp_module);
+
+// The single handler for a module reference count reaching zero, reached
+// the same way from a registry drop or an explicit release.
+//
+// Parks the module on its agent's list instead of destroying it, because
+// this generic layer does not know the module's type, and an agent can
+// host more than one type at once — as when acl and fwstate share one.
+// The module's own type-specific reclaim destroys it later.
+//
+// Idempotent: once set, a parked entry's link is never null again, so a
+// duplicate transition leaves it in place instead of relinking it. Every
+// caller already holds the configuration lock, so this handler must not
+// take it itself.
+void
+cp_module_registry_item_free_cb(struct registry_item *item, void *data);
+
+// Drop the reference construction took on the caller's behalf.
+//
+// The zero-transition handler runs only when this drop is the last
+// reference, so a caller must not assume the call freed anything: a live
+// or pinned configuration generation may still hold the module. A module
+// parked here is not destroyed on the spot — the next construction call
+// for the same type reclaims it, or it is freed along with the agent's
+// arena.
+//
+// Takes the module's own agent's configuration lock itself, unlike the
+// registry-driven path to the same handler, which already runs under
+// that lock.
+void
+cp_module_release(struct cp_module *cp_module);
 
 struct cp_module_registry {
 	struct memory_context *memory_context;

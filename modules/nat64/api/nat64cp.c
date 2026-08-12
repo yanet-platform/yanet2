@@ -20,47 +20,8 @@
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
-struct cp_module *
-nat64_module_config_create(
-	struct agent *agent, const char *name, yanet_error **err
-) {
-	struct nat64_module_config *config =
-		(struct nat64_module_config *)memory_balloc(
-			&agent->memory_context,
-			sizeof(struct nat64_module_config)
-		);
-	if (config == NULL) {
-		yanet_error_add(err, "failed to allocate config");
-		return NULL;
-	}
-
-	if (cp_module_init(&config->cp_module, agent, "nat64", name, err)) {
-		yanet_error_add(err, "failed to init module");
-		goto error_init;
-	}
-
-	if (nat64_module_config_data_init(
-		    config, &config->cp_module.memory_context
-	    )) {
-		yanet_error_add(err, "failed to init config data");
-		goto error_data;
-	}
-
-	return &config->cp_module;
-
-error_data:
-	cp_module_fini(&config->cp_module);
-error_init:
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct nat64_module_config)
-	);
-	return NULL;
-}
-
-void
-nat64_module_config_free(struct cp_module *cp_module) {
+static void
+nat64_module_config_destroy(struct cp_module *cp_module) {
 	struct nat64_module_config *config =
 		container_of(cp_module, struct nat64_module_config, cp_module);
 
@@ -78,6 +39,65 @@ nat64_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct nat64_module_config)
 	);
+}
+
+struct cp_module *
+nat64_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct nat64_module_config *config =
+		(struct nat64_module_config *)memory_balloc(
+			&agent->memory_context,
+			sizeof(struct nat64_module_config)
+		);
+	if (config == NULL) {
+		yanet_error_add(err, "failed to allocate config");
+		return NULL;
+	}
+
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "nat64",
+		    name,
+		    nat64_module_config_destroy,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to init module");
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct nat64_module_config)
+		);
+		return NULL;
+	}
+
+	if (nat64_module_config_data_init(
+		    config, &config->cp_module.memory_context
+	    )) {
+		yanet_error_add(err, "failed to init config data");
+		// Frees directly instead of going through the type destructor.
+		//
+		// A failed configuration-data setup never reaches a state its
+		// own teardown could safely walk. No reference beyond the
+		// caller's own has been taken, and no registry has observed
+		// the module yet, so nothing is lost by freeing the block
+		// here.
+		cp_module_fini(&config->cp_module);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct nat64_module_config)
+		);
+		return NULL;
+	}
+
+	return &config->cp_module;
+}
+
+void
+nat64_module_config_free(struct cp_module *cp_module) {
+	cp_module_release(cp_module);
 }
 
 int

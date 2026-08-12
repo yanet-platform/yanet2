@@ -70,6 +70,44 @@ FILTER_COMPILER_DECLARE(
 #define ACL_FILTER_NET6_SRC_POS 2
 #define ACL_FILTER_NET6_DST_POS 3
 
+static void
+acl_module_config_destroy(struct cp_module *cp_module) {
+	struct acl_module_config *config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	memory_bfree(
+		&cp_module->memory_context,
+		ADDR_OF(&config->targets),
+		sizeof(struct acl_target) * config->target_count
+	);
+
+	filter_free(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
+	filter_free(&config->filter_ip4, ACL_FILTER_IP4_TAG);
+	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
+	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
+	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+
+	filter_net6_share_dir_free(
+		&cp_module->memory_context, &config->net6_share_src
+	);
+	filter_net6_share_dir_free(
+		&cp_module->memory_context, &config->net6_share_dst
+	);
+
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
+	// Note: We don't destroy fwstate_cfg maps here because they're owned by
+	// the fwstate module. We only stored offsets to them.
+	memory_bfree(
+		&agent->memory_context,
+		cp_module,
+		sizeof(struct acl_module_config)
+	);
+}
+
 struct cp_module *
 acl_module_config_init(
 	struct agent *agent, const char *name, yanet_error **err
@@ -83,7 +121,14 @@ acl_module_config_init(
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "acl", name, err)) {
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "acl",
+		    name,
+		    acl_module_config_destroy,
+		    err
+	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -147,7 +192,20 @@ acl_module_config_init(
 				"failed to register counter '%s'",
 				counters[i].name
 			);
-			acl_module_config_free(&config->cp_module);
+			// Frees directly instead of going through the type
+			// destructor.
+			//
+			// A failed configuration-data setup never reaches a
+			// state its own teardown could safely walk. No
+			// reference beyond the caller's own has been taken, and
+			// no registry has observed the module yet, so nothing
+			// is lost by freeing the block here.
+			cp_module_fini(&config->cp_module);
+			memory_bfree(
+				&agent->memory_context,
+				config,
+				sizeof(struct acl_module_config)
+			);
 			return NULL;
 		}
 		*counters[i].dst = id;
@@ -158,40 +216,7 @@ acl_module_config_init(
 
 void
 acl_module_config_free(struct cp_module *cp_module) {
-	struct acl_module_config *config =
-		container_of(cp_module, struct acl_module_config, cp_module);
-
-	memory_bfree(
-		&cp_module->memory_context,
-		ADDR_OF(&config->targets),
-		sizeof(struct acl_target) * config->target_count
-	);
-
-	filter_free(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
-	filter_free(&config->filter_ip4, ACL_FILTER_IP4_TAG);
-	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
-	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
-	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
-
-	filter_net6_share_dir_free(
-		&cp_module->memory_context, &config->net6_share_src
-	);
-	filter_net6_share_dir_free(
-		&cp_module->memory_context, &config->net6_share_dst
-	);
-
-	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-
-	cp_module_fini(cp_module);
-
-	// Note: We don't destroy fwstate_cfg maps here because they're owned by
-	// the fwstate module. We only stored offsets to them.
-	memory_bfree(
-		&agent->memory_context,
-		cp_module,
-		sizeof(struct acl_module_config)
-	);
+	cp_module_release(cp_module);
 }
 
 typedef int (*acl_rule_check_func)(const struct acl_rule *acl_rule);

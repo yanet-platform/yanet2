@@ -13,38 +13,6 @@
 FILTER_COMPILER_DECLARE(FILTER_IP4_TAG, net4_dst);
 FILTER_COMPILER_DECLARE(FILTER_IP6_TAG, net6_dst);
 
-struct cp_module *
-route_mpls_module_config_new(
-	struct agent *agent, const char *name, yanet_error **err
-) {
-	struct module_config *config = (struct module_config *)memory_balloc(
-		&agent->memory_context, sizeof(struct module_config)
-	);
-	if (config == NULL) {
-		yanet_error_add(err, "failed to allocate config");
-		return NULL;
-	}
-
-	if (cp_module_init(
-		    &config->cp_module, agent, "route-mpls", name, err
-	    )) {
-		yanet_error_add(err, "failed to init module");
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct module_config)
-		);
-		return NULL;
-	}
-
-	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
-	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
-	config->target_count = 0;
-	SET_OFFSET_OF(&config->targets, NULL);
-
-	return &config->cp_module;
-}
-
 static inline uint64_t
 target_memory_size(uint64_t nexthop_map_size) {
 	return sizeof(struct target) + sizeof(uint64_t) * nexthop_map_size;
@@ -90,8 +58,8 @@ route_mpls_module_config_fini(struct module_config *config) {
 	SET_OFFSET_OF(&config->targets, NULL);
 }
 
-void
-route_mpls_module_config_free(struct cp_module *cp_module) {
+static void
+route_mpls_module_config_destroy(struct cp_module *cp_module) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
@@ -104,6 +72,48 @@ route_mpls_module_config_free(struct cp_module *cp_module) {
 	memory_bfree(
 		&agent->memory_context, config, sizeof(struct module_config)
 	);
+}
+
+struct cp_module *
+route_mpls_module_config_new(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct module_config *config = (struct module_config *)memory_balloc(
+		&agent->memory_context, sizeof(struct module_config)
+	);
+	if (config == NULL) {
+		yanet_error_add(err, "failed to allocate config");
+		return NULL;
+	}
+
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "route-mpls",
+		    name,
+		    route_mpls_module_config_destroy,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to init module");
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct module_config)
+		);
+		return NULL;
+	}
+
+	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
+	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
+	config->target_count = 0;
+	SET_OFFSET_OF(&config->targets, NULL);
+
+	return &config->cp_module;
+}
+
+void
+route_mpls_module_config_free(struct cp_module *cp_module) {
+	cp_module_release(cp_module);
 }
 
 typedef int (*route_mpls_rule_check_func)(

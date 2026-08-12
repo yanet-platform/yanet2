@@ -1,15 +1,15 @@
 /*
- * Tests that route_module_config_new does not leak memory when
- * route_module_config_data_init fails due to OOM after cp_module_init
- * succeeds.
+ * Tests that construction does not leak memory when the module's own data
+ * setup fails partway through, at each of its fallible steps.
  *
- * Mechanism: agent_attach carves a private arena of exactly memory_limit
- * bytes from the cp_config allocator. All module allocations draw from
- * this arena.
+ * Attaching an agent carves a private arena of exactly the given byte
+ * limit from the shared allocator, and every allocation the module under
+ * test makes draws from that one arena.
  *
- * Leak detection: block_allocator_free_size must return to its value
- * recorded immediately after agent_attach. Any byte not freed by a
- * cleanup path stays missing from the free list.
+ * The arena's free-byte count must return to its value recorded right
+ * after attach. A byte a cleanup path leaves unfreed stays missing from
+ * that count, and a block freed twice makes the count overshoot instead,
+ * so the same check catches both a leak and a double free.
  */
 
 #include "api/agent.h"
@@ -30,6 +30,15 @@
  * but well below the 32 KB lpm_init page-chunk request.
  */
 #define ROUTE_TEST_MEMORY_LIMIT (16u * 1024u)
+
+/*
+ * 40800 bytes, found empirically: enough for construction plus one
+ * routing table's own setup, but too little for the second table to also
+ * succeed. This size reaches data setup's own error path instead of the
+ * shared type teardown, verifying that path frees the first table
+ * exactly once.
+ */
+#define ROUTE_TEST_SECOND_LPM_LIMIT (40800u)
 
 static int
 run_test(struct yanet_shm *shm) {
@@ -56,6 +65,51 @@ run_test(struct yanet_shm *shm) {
 		(long)after,
 		(long)baseline,
 		"memory leaked after failed create: baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+/*
+ * Same shape as the first test, but sized to fail at the second routing
+ * table's own setup instead of the first.
+ *
+ * This exercises the error path for a partially constructed module,
+ * verifying it frees the first table's memory exactly once rather than
+ * leaving that job to a teardown that would double free it.
+ */
+static int
+run_second_lpm_failure_test(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"route-test-second-lpm",
+		ROUTE_TEST_SECOND_LPM_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_module *cp = route_module_config_new(agent, "probe", &err);
+	TEST_ASSERT_NULL(cp, "create unexpectedly succeeded");
+
+	const char *errmsg = (err != NULL) ? yanet_error_message(err) : "";
+	TEST_ASSERT_STR_CONTAINS(
+		errmsg, "failed to init config data", "wrong failure path"
+	);
+	yanet_error_reset(&err);
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"free list drifted after failed create: baseline=%zu after=%zu",
 		baseline,
 		after
 	);
@@ -98,6 +152,9 @@ main(void) {
 	}
 
 	int res = run_test(shm);
+	if (res == TEST_SUCCESS) {
+		res = run_second_lpm_failure_test(shm);
+	}
 	dataplane_ut_free(ut);
 
 	return (res == TEST_SUCCESS) ? 0 : 1;

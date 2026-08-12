@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "controlplane/config/cp_module.h"
 #include "dataplane/config/zone.h"
 #include "modules/forward/api/controlplane.h"
 #include "modules/forward/dataplane/config.h"
@@ -168,7 +169,17 @@ forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 	return 0;
 
 fail:
-	forward_module_config_free(&config->cp_module);
+	// Frees directly against the harness arena instead of going through
+	// the public free.
+	//
+	// This module configuration was built by hand with no owning agent
+	// and never took the reference construction normally holds, so the
+	// public free's release path would decrement a reference count that
+	// starts at zero and silently wrap instead of freeing anything.
+	cp_module_fini(&config->cp_module);
+	memory_bfree(
+		&fuzz_params.mctx, config, sizeof(struct forward_module_config)
+	);
 	return -EINVAL;
 }
 

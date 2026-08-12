@@ -2320,6 +2320,14 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 
 // Unlocked body shared by agent_free_unused_agents and the agent_attach call
 // site, which already holds cp_config_lock itself.
+//
+// Depends on a precondition it does not itself enforce: within one shared
+// memory instance, a live agent name has at most one process still holding
+// it. Only a reference kind that cannot outlive its owning process may gate
+// this reclaim, since nothing here can tell a dead owner from a live one
+// across a restart. A second live holder of the same name sharing that gate
+// would instead have its arena freed out from under it. Mechanically
+// proving this precondition is tracked separately as issue #2001.
 static void
 agent_free_unused_agents_locked(struct agent *agent) {
 	if (agent == NULL) {
@@ -2331,7 +2339,8 @@ agent_free_unused_agents_locked(struct agent *agent) {
 
 		if (prev_agent->loaded_module_count == 0 &&
 		    prev_agent->loaded_device_count == 0 &&
-		    prev_agent->loaded_object_count == 0) {
+		    prev_agent->loaded_object_count == 0 &&
+		    prev_agent->parked_teardown_count == 0) {
 			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
 			agent_cleanup(prev_agent);
 			continue;

@@ -12,6 +12,24 @@
 
 #include <stdio.h>
 
+// Destroy every parked module of one type, using the caller's destructor
+// for that type.
+//
+// A different type sharing the same parked list is left in place for its
+// own next call. A parked entry already sits at reference count zero, so
+// the destructor runs directly with no further release and nothing here
+// outlives this call. Matching entries are detached under the
+// configuration lock and destroyed outside it, because a type's teardown
+// can run tens of milliseconds and must not hold a lock every update
+// needs. While outside the lock, a teardown is marked in flight so the
+// arena cannot be reclaimed out from under an entry still being destroyed.
+static void
+cp_module_drain_parked(
+	struct agent *agent,
+	const char *module_type,
+	cp_module_free_handler destroy
+);
+
 static int
 cp_module_build_perf_counters(struct cp_module *cp_module, yanet_error **err) {
 	for (size_t counter_idx = 0; counter_idx < MODULE_ECTX_PERF_COUNTERS;
@@ -48,9 +66,21 @@ cp_module_init(
 	struct agent *agent,
 	const char *module_type,
 	const char *module_name,
+	cp_module_free_handler destroy,
 	yanet_error **err
 ) {
 	memset(cp_module, 0, sizeof(struct cp_module));
+
+	// Reclaim this type's parked entries before anything else here
+	// allocates.
+	//
+	// The caller's own wrapper allocation already happened, but a parked
+	// instance can be most of the arena for a large type, so reclaiming
+	// it first can be the difference between success and failure under
+	// pressure. Construction has not registered or parked this instance
+	// anywhere yet, so the walk below cannot observe it — only earlier
+	// instances left behind by a previous release.
+	cp_module_drain_parked(agent, module_type, destroy);
 
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
@@ -160,6 +190,13 @@ cp_module_init(
 	if (cp_module_link_device(cp_module, "", &any_idx, err)) {
 		goto fail;
 	}
+
+	// Take the creator's reference only after construction succeeds.
+	//
+	// A failed construction leaves nothing to unbalance. This reference
+	// is never mirrored into the live-reference count: a dead creator
+	// must not hold it above zero.
+	registry_item_ref(&cp_module->config_item);
 
 	return 0;
 
@@ -291,6 +328,106 @@ cp_module_link_object(
 	return 0;
 }
 
+void
+cp_module_registry_item_free_cb(struct registry_item *item, void *data) {
+	struct cp_module *module =
+		container_of(item, struct cp_module, config_item);
+	struct agent *agent = ADDR_OF(&module->agent);
+	if (agent == NULL) {
+		return;
+	}
+
+	if (ADDR_OF(&module->parked_next) != NULL) {
+		return;
+	}
+
+	struct cp_module *head = ADDR_OF(&agent->parked_modules);
+	SET_OFFSET_OF(&module->parked_next, (head != NULL) ? head : module);
+	SET_OFFSET_OF(&agent->parked_modules, module);
+	(void)data;
+}
+
+void
+cp_module_release(struct cp_module *cp_module) {
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct cp_config *cp_config =
+		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
+
+	if (cp_config != NULL) {
+		cp_config_lock(cp_config);
+	}
+	registry_item_unref(
+		&cp_module->config_item, cp_module_registry_item_free_cb, NULL
+	);
+	if (cp_config != NULL) {
+		cp_config_unlock(cp_config);
+	}
+}
+
+static void
+cp_module_drain_parked(
+	struct agent *agent,
+	const char *module_type,
+	cp_module_free_handler destroy
+) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	cp_config_lock(cp_config);
+
+	// Splice the target type's entries into a local list, leaving the
+	// rest linked in place for their own type's next call.
+	//
+	// A spliced-out tail leaves its former predecessor pointing at itself
+	// as the new end of the list, so a parked entry's link is never null.
+	struct cp_module *owned = NULL;
+	struct cp_module *prev = NULL;
+	struct cp_module *cur = ADDR_OF(&agent->parked_modules);
+
+	while (cur != NULL) {
+		struct cp_module *raw_next = ADDR_OF(&cur->parked_next);
+		struct cp_module *next = (raw_next == cur) ? NULL : raw_next;
+
+		if (!strncmp(cur->type, module_type, sizeof(cur->type))) {
+			if (prev == NULL) {
+				SET_OFFSET_OF(&agent->parked_modules, next);
+			} else {
+				SET_OFFSET_OF(
+					&prev->parked_next,
+					(next != NULL) ? next : prev
+				);
+			}
+			SET_OFFSET_OF(&cur->parked_next, owned);
+			owned = cur;
+		} else {
+			prev = cur;
+		}
+
+		cur = next;
+	}
+
+	if (owned == NULL) {
+		cp_config_unlock(cp_config);
+		return;
+	}
+
+	// Pin the agent's arena for the destroy loop below, still under the
+	// same lock the splice above ran under, so the reclaim guard can never
+	// observe the entries detached but the pin not yet set.
+	agent->parked_teardown_count += 1;
+
+	cp_config_unlock(cp_config);
+
+	while (owned != NULL) {
+		struct cp_module *next = ADDR_OF(&owned->parked_next);
+		destroy(owned);
+		owned = next;
+	}
+
+	cp_config_lock(cp_config);
+	agent->parked_teardown_count -= 1;
+	cp_config_unlock(cp_config);
+}
+
 int
 cp_module_registry_init(
 	struct memory_context *memory_context,
@@ -323,24 +460,57 @@ cp_module_registry_copy(
 	};
 
 	SET_OFFSET_OF(&new_module_registry->memory_context, memory_context);
-	return 0;
-}
 
-static void
-cp_module_registry_item_free_cb(struct registry_item *item, void *data) {
-	struct cp_module *module =
-		container_of(item, struct cp_module, config_item);
-	struct agent *agent = ADDR_OF(&module->agent);
-	if (agent != NULL) {
-		agent->loaded_module_count -= 1;
+	// Mirror each copied item's new generation reference into its own
+	// agent.
+	//
+	// This keeps the per-agent live count tracking references from a
+	// live configuration generation rather than the creator's own hold,
+	// which a dead creator would otherwise never release.
+	for (uint64_t idx = 0; idx < new_module_registry->registry.capacity;
+	     ++idx) {
+		struct cp_module *module =
+			cp_module_registry_get(new_module_registry, idx);
+		if (module == NULL) {
+			continue;
+		}
+		struct agent *agent = ADDR_OF(&module->agent);
+		if (agent != NULL) {
+			agent->loaded_module_count += 1;
+		}
 	}
-	(void)data;
+
+	return 0;
 }
 
 void
 cp_module_registry_fini(struct cp_module_registry *module_registry) {
 	struct memory_context *memory_context =
 		ADDR_OF(&module_registry->memory_context);
+
+	// Mirror each remaining item's dropped generation reference into its
+	// own agent before releasing it.
+	//
+	// The callback this teardown invokes now only parks each item at
+	// zero references instead of adjusting the live count itself, so
+	// this loop mirrors the drop first. The same allocation-failure
+	// guard applies as elsewhere: a registry whose backing storage never
+	// allocated reports a nonzero capacity with nothing to walk.
+	if (ADDR_OF(&module_registry->registry.items) != NULL) {
+		for (uint64_t idx = 0; idx < module_registry->registry.capacity;
+		     ++idx) {
+			struct cp_module *module =
+				cp_module_registry_get(module_registry, idx);
+			if (module == NULL) {
+				continue;
+			}
+			struct agent *agent = ADDR_OF(&module->agent);
+			if (agent != NULL) {
+				agent->loaded_module_count -= 1;
+			}
+		}
+	}
+
 	registry_fini(
 		&module_registry->registry,
 		cp_module_registry_item_free_cb,
@@ -447,11 +617,6 @@ cp_module_registry_upsert(
 		err
 	);
 
-	// Count the module only on its first registry reference, mirroring the
-	// 1->0 transition at which cp_module_registry_item_free_cb decrements;
-	// a re-upsert of an already-referenced instance must not double-count.
-	uint64_t refcnt_before = new_module->config_item.refcnt;
-
 	if (registry_replace(
 		    &module_registry->registry,
 		    cp_module_registry_item_cmp,
@@ -464,9 +629,21 @@ cp_module_registry_upsert(
 		return -1;
 	}
 
-	struct agent *agent = ADDR_OF(&new_module->agent);
-	if (agent != NULL && refcnt_before == 0) {
-		agent->loaded_module_count += 1;
+	// Mirror this upsert's generation-reference changes into each
+	// affected module's own agent.
+	//
+	// Gaining a reference through upsert only ever happens here, and
+	// losing one to a displacing upsert only ever happens here too, so
+	// the per-agent live count must track both in this one place.
+	struct agent *new_agent = ADDR_OF(&new_module->agent);
+	if (new_agent != NULL) {
+		new_agent->loaded_module_count += 1;
+	}
+	if (old_module != NULL) {
+		struct agent *old_agent = ADDR_OF(&old_module->agent);
+		if (old_agent != NULL) {
+			old_agent->loaded_module_count -= 1;
+		}
 	}
 
 	return 0;
@@ -483,14 +660,31 @@ cp_module_registry_delete(
 		.name = name,
 	};
 
-	return registry_replace(
-		&module_registry->registry,
-		cp_module_registry_item_cmp,
-		&cmp_data,
-		NULL,
-		cp_module_registry_item_free_cb,
-		ADDR_OF(&module_registry->memory_context)
-	);
+	struct cp_module *old_module =
+		cp_module_registry_lookup(module_registry, type, name);
+
+	if (registry_replace(
+		    &module_registry->registry,
+		    cp_module_registry_item_cmp,
+		    &cmp_data,
+		    NULL,
+		    cp_module_registry_item_free_cb,
+		    ADDR_OF(&module_registry->memory_context)
+	    )) {
+		return -1;
+	}
+
+	// Mirror the generation reference this delete drops into the removed
+	// module's own agent, matching the decrement upsert performs when it
+	// displaces an entry.
+	if (old_module != NULL) {
+		struct agent *old_agent = ADDR_OF(&old_module->agent);
+		if (old_agent != NULL) {
+			old_agent->loaded_module_count -= 1;
+		}
+	}
+
+	return 0;
 }
 
 size_t

@@ -707,14 +707,19 @@ func TestForward_MinAction(t *testing.T) {
 	dataplaneut.RequireModuleCounter(t, h, path, "ip4lose", 0, 0)
 }
 
-// TestForwardConfigMemoryLeak verifies the block allocator returns memory to
-// the pool when an old forward config generation is freed.
+// TestForwardConfigMemoryLeak verifies the block allocator returns memory once
+// a superseded forward config generation is reclaimed.
 //
-// THE MAGIC: use 8 rules so sizeof(forward_target)*8 = 192 and
-// sizeof(forward_target*)*8 = 64 fall into different block-allocator pools
-// even with ASAN red zones (+128 bytes per allocation). With fewer rules
-// both sizes round up to the same power-of-two pool and the leak is
-// invisible to BlockAllocatorFreeSize.
+// THE MAGIC: 8 rules make sizeof(forward_target)*8 = 192 and
+// sizeof(forward_target*)*8 = 64 land in different block-allocator pools even
+// under ASAN red zones; fewer rules round both into the same pool and hide a
+// leak in either array from BlockAllocatorFreeSize.
+//
+// Releasing a handle only parks it: reclaim happens on the type's next
+// construction, not on release. Each round below publishes and releases one
+// "forward0" generation, and that construction drains the round before it, so
+// from round 1 the arena holds two generations' worth of rules and every
+// round's free byte count must match the last.
 func TestForwardConfigMemoryLeak(t *testing.T) {
 	_, agent, _ := setupForwardHarness(t, []string{"port0"})
 
@@ -727,22 +732,32 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 		}
 	}
 
-	moduleA, err := cforward.NewModuleConfig(agent, "forward0")
-	require.NoError(t, err)
-	require.NoError(t, moduleA.Update(rules))
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{moduleA.AsFFIModule()}))
+	var baseline uint64
+	for round := range 4 {
+		module, err := cforward.NewModuleConfig(agent, "forward0")
+		require.NoErrorf(t, err, "round %d: construct failed", round)
+		require.NoErrorf(t, module.Update(rules), "round %d: update failed", round)
+		require.NoErrorf(
+			t,
+			agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}),
+			"round %d: publish failed", round,
+		)
+		module.Free()
 
-	freeBefore := agent.BlockAllocatorFreeSize()
+		if round == 0 {
+			// Nothing is parked yet for this round's construction to
+			// drain, so this round's shape isn't comparable to later ones.
+			continue
+		}
 
-	moduleB, err := cforward.NewModuleConfig(agent, "forward0")
-	require.NoError(t, err)
-	t.Cleanup(moduleB.Free)
-
-	require.NoError(t, moduleB.Update(rules))
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{moduleB.AsFFIModule()}))
-
-	moduleA.Free()
-
-	freeAfter := agent.BlockAllocatorFreeSize()
-	require.Equal(t, freeBefore, freeAfter)
+		free := agent.BlockAllocatorFreeSize()
+		if round == 1 {
+			baseline = free
+		} else {
+			require.Equalf(
+				t, baseline, free,
+				"round %d: free bytes drifted from the round-1 baseline", round,
+			)
+		}
+	}
 }

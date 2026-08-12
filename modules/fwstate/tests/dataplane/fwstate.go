@@ -31,24 +31,21 @@ import (
 // counter values accumulate. The returned storage must be freed with
 // [fwstateCounterStorageFree] (the caller owns it).
 func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *C.struct_counter_storage) {
-	// Allocate agent in the memory context (it needs to be in the same memory space)
-	agent := (*C.struct_agent)(C.memory_balloc(
-		(*C.struct_memory_context)(memCtx.AsRawPtr()),
-		C.sizeof_struct_agent,
-	))
-	if agent == nil {
-		panic("failed to allocate agent")
-	}
-
-	// Initialize agent's memory_context (similar to dataplane.c:441-448 and mock.c:206-211)
+	// Allocate the stand-in agent through the harness constructor, which zeroes
+	// the whole structure, not just the memory context.
+	//
+	// Every module construction now walks the agent's parked-list head, and an
+	// unzeroed head reads as stale bytes rather than a valid empty list.
 	cStubAgent := C.CString("stub agent")
 	defer C.free(unsafe.Pointer(cStubAgent))
 
-	C.memory_context_init_from(
-		&agent.memory_context,
+	agent := C.fwstate_test_agent_new(
 		(*C.struct_memory_context)(memCtx.AsRawPtr()),
 		cStubAgent,
 	)
+	if agent == nil {
+		panic("failed to allocate agent")
+	}
 
 	// Use the proper API to create the module config
 	cName := C.CString("test")

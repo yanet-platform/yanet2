@@ -49,6 +49,9 @@ fwstate_config_set_defaults(struct fwstate_config *config) {
 	config->sync_config.timeouts.default_ = 16e9; // 16 seconds
 }
 
+static void
+fwstate_module_config_destroy(struct cp_module *cp_module);
+
 struct cp_module *
 fwstate_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
@@ -64,7 +67,12 @@ fwstate_module_config_new(
 	}
 
 	if (cp_module_init(
-		    &config->cp_module, agent, FWSTATE_MODULE_NAME, name, err
+		    &config->cp_module,
+		    agent,
+		    FWSTATE_MODULE_NAME,
+		    name,
+		    fwstate_module_config_destroy,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
@@ -125,7 +133,20 @@ fwstate_module_config_new(
 				"failed to register counter '%s'",
 				counters[i].name
 			);
-			fwstate_module_config_free(&config->cp_module);
+			// Frees directly instead of going through the type
+			// destructor.
+			//
+			// A failed configuration-data setup never reaches a
+			// state its own teardown could safely walk. No
+			// reference beyond the caller's own has been taken, and
+			// no registry has observed the module yet, so nothing
+			// is lost by freeing the block here.
+			cp_module_fini(&config->cp_module);
+			memory_bfree(
+				&agent->memory_context,
+				config,
+				sizeof(struct fwstate_module_config)
+			);
 			return NULL;
 		}
 		*counters[i].dst = id;
@@ -151,8 +172,8 @@ fwstate_module_config_propogate(
 	EQUATE_OFFSET(&new->cfg.fw6state, &old->cfg.fw6state);
 }
 
-void
-fwstate_module_config_free(struct cp_module *cp_module) {
+static void
+fwstate_module_config_destroy(struct cp_module *cp_module) {
 	struct fwstate_module_config *config = container_of(
 		cp_module, struct fwstate_module_config, cp_module
 	);
@@ -169,6 +190,11 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct fwstate_module_config)
 	);
+}
+
+void
+fwstate_module_config_free(struct cp_module *cp_module) {
+	cp_module_release(cp_module);
 }
 
 void

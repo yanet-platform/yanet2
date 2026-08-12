@@ -78,6 +78,9 @@ route_module_config_register_counters(
 	return 0;
 }
 
+static void
+route_module_config_destroy(struct cp_module *cp_module);
+
 struct cp_module *
 route_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
@@ -92,7 +95,14 @@ route_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "route", name, err)) {
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "route",
+		    name,
+		    route_module_config_destroy,
+		    err
+	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -106,6 +116,13 @@ route_module_config_new(
 		    config, &config->cp_module.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
+		// Frees directly instead of going through the type destructor.
+		//
+		// A failed configuration-data setup never reaches a state its
+		// own teardown could safely walk. No reference beyond the
+		// caller's own has been taken, and no registry has observed
+		// the module yet, so nothing is lost by freeing the block
+		// here.
 		cp_module_fini(&config->cp_module);
 		memory_bfree(
 			&agent->memory_context,
@@ -116,7 +133,15 @@ route_module_config_new(
 	}
 
 	if (route_module_config_register_counters(config, err)) {
-		route_module_config_free(&config->cp_module);
+		// Frees directly instead of going through the public free.
+		//
+		// Registering counters is the last construction step, so
+		// configuration data is already fully set up and the type's
+		// own destructor can safely walk it. No reference beyond the
+		// caller's own has been taken and no registry has observed
+		// the module yet, so going through the public free would
+		// only park it instead of destroying it.
+		route_module_config_destroy(&config->cp_module);
 		return NULL;
 	}
 
@@ -178,8 +203,8 @@ route_module_config_data_fini(struct route_module_config *config) {
 	lpm_free(&config->lpm_v4);
 }
 
-void
-route_module_config_free(struct cp_module *cp_module) {
+static void
+route_module_config_destroy(struct cp_module *cp_module) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
 
@@ -194,6 +219,11 @@ route_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct route_module_config)
 	);
+}
+
+void
+route_module_config_free(struct cp_module *cp_module) {
+	cp_module_release(cp_module);
 }
 
 int
