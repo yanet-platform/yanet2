@@ -156,13 +156,12 @@ fuzzing_process_packet(
 	packet->mbuf = mbuf;
 
 	// Create packet front and hand the packet to input the way the
-	// pipeline does: emit to output, then switch it into input so the
-	// input counters modules read for VLA sizing are populated.
+	// pipeline does: push it directly to input so the input counters
+	// modules read for VLA sizing are populated.
 	struct packet_front pf;
 	packet_front_init(&pf);
 	packet->data_len = packet_data_len(packet);
-	packet_front_output(&pf, packet);
-	packet_front_switch(&pf);
+	packet_front_input(&pf, packet);
 
 	// Parse packet
 	if (parse_packet(packet)) {

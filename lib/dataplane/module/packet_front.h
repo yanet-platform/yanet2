@@ -3,21 +3,13 @@
 #include "lib/dataplane/packet/packet.h"
 
 /*
- * The structure enumerated packets processed by pipeline modules.
- * Each module reads a packet from an input list and then writes result to
- * an output list or drop list.
+ * Packets processed by a pipeline stage. A module reads incoming packets
+ * from the input list and writes results to the output or drop list.
  *
- * Before module invocation input and output exchange packets so ouptut of
- * one module connects with input of the following.
- *
- * RX and TX are considered as separated stages of packet processing working
- * before and after pipeline processing.
- *
- * The count/byte counters for the input, output, drop and pending lists
- * live here rather than on the packet lists themselves: they reflect the
- * role a list plays in the front. The input counters are a snapshot taken
- * when output is switched into input; output, drop and pending counters
- * accumulate as packets are emitted.
+ * input is the stage entry list and output the emission list. The entry
+ * push (packet_front_input) sets the input counters directly — the only
+ * switch is the inter-module handoff turning module N's output into
+ * module N+1's input.
  */
 struct packet_front {
 	struct packet_list pending_input;
@@ -126,6 +118,13 @@ packet_front_pending_output(
 }
 
 static inline void
+packet_front_input(struct packet_front *packet_front, struct packet *packet) {
+	packet_list_add(&packet_front->input, packet);
+	packet_front->input_count += 1;
+	packet_front->input_bytes += packet->data_len;
+}
+
+static inline void
 packet_front_output(struct packet_front *packet_front, struct packet *packet) {
 	packet_list_add(&packet_front->output, packet);
 	packet_front->output_count += 1;
@@ -139,6 +138,8 @@ packet_front_drop(struct packet_front *packet_front, struct packet *packet) {
 	packet_front->drop_bytes += packet->data_len;
 }
 
+// Inter-module handoff: move output into input for the next module. Stage
+// entry is by packet_front_input, not a switch.
 static inline void
 packet_front_switch(struct packet_front *packet_front) {
 	packet_list_concat(&packet_front->input, &packet_front->output);
@@ -162,15 +163,29 @@ packet_front_pass(struct packet_front *packet_front) {
 // Move the whole output list of src into dst, transferring the output
 // counters.
 //
-// Used by the single-chain and single-pipeline fast paths that schedule a
-// front on a fresh packet_front; dst->output is empty on entry, so its first
-// packet_front_switch reads the transferred counters.
+// Used by the single-pipeline fast path that schedules a front on a fresh
+// packet_front for a stage that reads output.
 static inline void
 packet_front_take_output(struct packet_front *dst, struct packet_front *src) {
 	packet_list_concat(&dst->output, &src->output);
 
 	dst->output_count = src->output_count;
 	dst->output_bytes = src->output_bytes;
+	src->output_count = 0;
+	src->output_bytes = 0;
+}
+
+// Move src's output list into dst's input, copying src's output counters to
+// dst's input counters.
+//
+// Used by the single-chain fast path that schedules a front on a fresh
+// packet_front so module 0 reads input directly without a prior switch.
+static inline void
+packet_front_take_input(struct packet_front *dst, struct packet_front *src) {
+	packet_list_concat(&dst->input, &src->output);
+
+	dst->input_count = src->output_count;
+	dst->input_bytes = src->output_bytes;
 	src->output_count = 0;
 	src->output_bytes = 0;
 }
@@ -201,11 +216,6 @@ packet_front_drop_pending_input(struct packet_front *packet_front) {
 	packet_front->drop_bytes += packet_front->pending_input_bytes;
 	packet_front->pending_input_count = 0;
 	packet_front->pending_input_bytes = 0;
-}
-
-static inline struct packet_list *
-packet_front_input(struct packet_front *packet_front) {
-	return &packet_front->input;
 }
 
 static inline uint64_t

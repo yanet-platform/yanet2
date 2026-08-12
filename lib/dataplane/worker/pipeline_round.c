@@ -47,7 +47,7 @@ worker_pipeline_round(
 				packet_front_drop(packet_front, packet);
 				continue;
 			}
-			packet_front_output(
+			packet_front_input(
 				&ADDR_OF(&device_ectx->input_pipelines)
 					 ->schedule,
 				packet
@@ -65,7 +65,7 @@ worker_pipeline_round(
 				packet_front_drop(packet_front, packet);
 				continue;
 			}
-			packet_front_output(
+			packet_front_input(
 				&ADDR_OF(&device_ectx->output_pipelines)
 					 ->schedule,
 				packet
@@ -90,7 +90,7 @@ worker_pipeline_round(
 					 ->schedule;
 
 			if (!force_poll &&
-			    packet_list_first(&schedule->output) == NULL) {
+			    packet_list_first(&schedule->input) == NULL) {
 				continue;
 			}
 
@@ -123,7 +123,7 @@ worker_pipeline_round(
 					 ->schedule;
 
 			if (!force_poll &&
-			    packet_list_first(&schedule->output) == NULL) {
+			    packet_list_first(&schedule->input) == NULL) {
 				continue;
 			}
 

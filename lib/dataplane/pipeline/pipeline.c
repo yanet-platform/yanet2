@@ -136,12 +136,21 @@ chain_ectx_process(
 	struct chain_ectx *chain_ectx,
 	struct packet_front *packet_front
 ) {
+	// A chain with no modules is a wire: pass input through to output so
+	// the caller's merge carries the packets onward.
+	if (chain_ectx->length == 0) {
+		packet_front_pass(packet_front);
+		return;
+	}
+
 	uint64_t input_size = packet_front_input_count(packet_front);
 
 	uint64_t tsc_start = rte_rdtsc();
 
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
-		packet_front_switch(packet_front);
+		if (idx > 0) {
+			packet_front_switch(packet_front);
+		}
 
 		struct module_ectx *module_ectx =
 			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
@@ -188,7 +197,7 @@ function_ectx_run_single_chain(
 	struct chain_ectx *chain_ectx = ADDR_OF(chains);
 
 	struct packet_front *schedule = &chain_ectx->schedule;
-	packet_front_take_output(schedule, packet_front);
+	packet_front_take_input(schedule, packet_front);
 
 	chain_ectx_process(dp_worker, chain_ectx, schedule);
 
@@ -211,7 +220,7 @@ function_ectx_run_chains(
 
 		struct chain_ectx *chain_ectx =
 			ADDR_OF(function_ectx->chain_map + map_idx);
-		packet_front_output(&chain_ectx->schedule, packet);
+		packet_front_input(&chain_ectx->schedule, packet);
 
 		packet = packet_list_pop(&packet_front->output);
 	}
@@ -466,8 +475,6 @@ device_ectx_process_entry(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	packet_front_switch(packet_front);
-
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&entry_ectx->counter_packet_rx),
 		packet_front_input_count(packet_front),
