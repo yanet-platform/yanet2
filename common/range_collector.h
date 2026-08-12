@@ -22,9 +22,9 @@ static inline int
 range_collector_init(
 	struct range_collector *collector, struct memory_context *memory_context
 ) {
-	collector->memory_context = memory_context;
+	SET_OFFSET_OF(&collector->memory_context, memory_context);
 
-	if (radix_init(&collector->radix, collector->memory_context)) {
+	if (radix_init(&collector->radix, memory_context)) {
 		return -1;
 	}
 	collector->masks = NULL;
@@ -38,7 +38,7 @@ range_collector_free(struct range_collector *collector, uint8_t key_size) {
 	if (collector->mask_count) {
 		uint64_t capacity = 1 << uint64_log_up(collector->mask_count);
 		memory_bfree(
-			collector->memory_context,
+			ADDR_OF(&collector->memory_context),
 			ADDR_OF(&collector->masks),
 			capacity * key_size
 		);
@@ -56,7 +56,7 @@ range_collector_add_mask(
 	uint8_t *masks = ADDR_OF(&collector->masks);
 
 	if (mem_array_expand_exp(
-		    collector->memory_context,
+		    ADDR_OF(&collector->memory_context),
 		    (void **)&masks,
 		    sizeof(*masks) * key_size,
 		    &collector->mask_count

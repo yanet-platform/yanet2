@@ -63,11 +63,11 @@ remap_table_init(
 	struct memory_context *memory_context,
 	uint32_t capacity
 ) {
-	table->memory_context = memory_context;
+	SET_OFFSET_OF(&table->memory_context, memory_context);
 	table->gen = 1;
 	table->count = 1;
 	struct remap_item **keys = (struct remap_item **)memory_balloc(
-		table->memory_context, sizeof(struct remap_item *)
+		ADDR_OF(&table->memory_context), sizeof(struct remap_item *)
 	);
 
 	if (keys == NULL) {
@@ -75,12 +75,14 @@ remap_table_init(
 	}
 
 	struct remap_item *chunk = (struct remap_item *)memory_balloc(
-		table->memory_context,
+		ADDR_OF(&table->memory_context),
 		sizeof(struct remap_item) * REMAP_TABLE_CHUNK_SIZE
 	);
 	if (chunk == NULL) {
 		memory_bfree(
-			table->memory_context, keys, sizeof(struct remap_item *)
+			ADDR_OF(&table->memory_context),
+			keys,
+			sizeof(struct remap_item *)
 		);
 		return -1;
 	}
@@ -109,7 +111,7 @@ remap_table_free(struct remap_table *table) {
 		struct remap_item *chunk = ADDR_OF(&keys[chunk_idx]);
 		if (chunk != NULL) {
 			memory_bfree(
-				table->memory_context,
+				ADDR_OF(&table->memory_context),
 				chunk,
 				sizeof(struct remap_item) *
 					REMAP_TABLE_CHUNK_SIZE
@@ -118,7 +120,7 @@ remap_table_free(struct remap_table *table) {
 		}
 	}
 	memory_bfree(
-		table->memory_context,
+		ADDR_OF(&table->memory_context),
 		keys,
 		chunk_count * sizeof(struct remap_item *)
 	);
@@ -156,7 +158,7 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 	if (!(table->count % REMAP_TABLE_CHUNK_SIZE)) {
 		struct remap_item *new_chunk =
 			(struct remap_item *)memory_balloc(
-				table->memory_context,
+				ADDR_OF(&table->memory_context),
 				sizeof(struct remap_item) *
 					REMAP_TABLE_CHUNK_SIZE
 			);
@@ -173,12 +175,12 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 
 		struct remap_item **new_keys =
 			(struct remap_item **)memory_balloc(
-				table->memory_context,
+				ADDR_OF(&table->memory_context),
 				new_chunk_count * sizeof(struct remap_item *)
 			);
 		if (new_keys == NULL) {
 			memory_bfree(
-				table->memory_context,
+				ADDR_OF(&table->memory_context),
 				new_chunk,
 				sizeof(struct remap_item) *
 					REMAP_TABLE_CHUNK_SIZE
@@ -197,7 +199,7 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 		SET_OFFSET_OF(&table->keys, new_keys);
 
 		memory_bfree(
-			table->memory_context,
+			ADDR_OF(&table->memory_context),
 			old_keys,
 			old_chunk_count * sizeof(struct remap_item *)
 		);
