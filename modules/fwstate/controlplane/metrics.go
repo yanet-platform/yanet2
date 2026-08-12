@@ -87,8 +87,8 @@ func (m *FWStateService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metri
 // collectMapStats emits gauge metrics derived from the per-config map
 // statistics (GetMapsStats) for both IPv4 and IPv6 address families.
 func (m *FWStateService) collectMapStats() []*commonpb.Metric {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
 
 	now := time.Now()
 
@@ -324,12 +324,7 @@ func collectMapStatsForAF(configName, af string, now time.Time, stats mapStats) 
 // retention snapshots the live fwstate config names and returns a predicate
 // that keeps series whose "config" label is still live (or absent).
 func (m *FWStateService) retention() func(metrics.MetricID) bool {
-	m.mu.Lock()
-	configNames := make(map[string]struct{}, len(m.configs))
-	for name := range m.configs {
-		configNames[name] = struct{}{}
-	}
-	m.mu.Unlock()
+	configNames := m.configNamesSet()
 
 	return func(id metrics.MetricID) bool {
 		config := id.Labels["config"]
@@ -340,4 +335,15 @@ func (m *FWStateService) retention() func(metrics.MetricID) bool {
 		_, ok := configNames[config]
 		return ok
 	}
+}
+
+func (m *FWStateService) configNamesSet() map[string]struct{} {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	configNames := make(map[string]struct{}, len(m.configs))
+	for name := range m.configs {
+		configNames[name] = struct{}{}
+	}
+	return configNames
 }
