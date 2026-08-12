@@ -10,6 +10,7 @@ package packaging_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -186,4 +187,62 @@ func Test_CommentedOutPathsAreNotFlagged(t *testing.T) {
 	rawMatches := regexp.MustCompile(regexp.QuoteMeta(etcYanet2Prefix)).FindAllString(string(data), -1)
 	require.GreaterOrEqual(t, len(rawMatches), len(commentedOutPaths),
 		"expected the commented-out auth/tls examples to still mention /etc/yanet2")
+}
+
+func Test_SetupExampleUsesSourceTreeForwardFlow(t *testing.T) {
+	temporaryRoot := filepath.Join(t.TempDir(), "source tree with spaces")
+	scriptDirectory := filepath.Join(temporaryRoot, "scripts")
+	stubDirectory := filepath.Join(t.TempDir(), "bin")
+	logPath := filepath.Join(t.TempDir(), "calls.log")
+	require.NoError(t, os.MkdirAll(scriptDirectory, 0o755))
+	require.NoError(t, os.MkdirAll(stubDirectory, 0o755))
+
+	script, err := os.ReadFile("../../scripts/setup-example.sh")
+	require.NoError(t, err)
+	scriptPath := filepath.Join(scriptDirectory, "setup-example.sh")
+	require.NoError(t, os.WriteFile(scriptPath, script, 0o755))
+	forwardPath := filepath.Join(temporaryRoot, "forward.yaml")
+	require.NoError(t, os.WriteFile(forwardPath, nil, 0o644))
+	resolvedRoot, err := filepath.EvalSymlinks(temporaryRoot)
+	require.NoError(t, err)
+	resolvedForwardPath := filepath.Join(resolvedRoot, "forward.yaml")
+
+	stub := []byte("#!/bin/sh\nprintf '%s' \"${0##*/}\" >> \"$YANET_TEST_LOG\"\nfor argument do\n    printf '\\t%s' \"$argument\" >> \"$YANET_TEST_LOG\"\ndone\nprintf '\\n' >> \"$YANET_TEST_LOG\"\n")
+	for _, name := range []string{
+		"yanet-cli-forward",
+		"yanet-cli-pipeline",
+		"yanet-cli-function",
+		"yanet-cli-device-plain",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(stubDirectory, name), stub, 0o755))
+	}
+
+	environment := make([]string, 0, len(os.Environ())+2)
+	for _, variable := range os.Environ() {
+		if strings.HasPrefix(variable, "PATH=") {
+			continue
+		}
+		environment = append(environment, variable)
+	}
+	environment = append(environment,
+		"PATH="+stubDirectory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"YANET_TEST_LOG="+logPath,
+	)
+	command := exec.Command(scriptPath)
+	command.Env = environment
+	require.NoError(t, command.Run())
+
+	recorded, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	expected := strings.Join([]string{
+		"yanet-cli-forward\tupdate\t--name=forward0\t--rules\t" + resolvedForwardPath,
+		"yanet-cli-pipeline\tupdate\t--name=dummy",
+		"yanet-cli-function\tupdate\t--name=virt\t--chains\tchain0:10=forward:forward0",
+		"yanet-cli-pipeline\tupdate\t--name=virt\t--functions\tvirt",
+		"yanet-cli-device-plain\tupdate\t--name=virtio_user_kni0\t--input\tvirt:1\t--output\tdummy:1",
+		"yanet-cli-function\tupdate\t--name=phy\t--chains\tchain0:10=forward:forward0",
+		"yanet-cli-pipeline\tupdate\t--name=phy\t--functions\tphy",
+		"yanet-cli-device-plain\tupdate\t--name=01:00.0\t--input\tphy:1\t--output\tdummy:1",
+	}, "\n") + "\n"
+	require.Equal(t, expected, string(recorded))
 }
