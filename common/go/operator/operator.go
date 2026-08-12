@@ -69,11 +69,11 @@ func NewOperator[T any](
 
 	if opts.GRPCServer != nil {
 		server, serviceNames = NewGRPCServer(
-			opts.GRPCServer.cfg,
-			opts.GRPCServer.services,
+			opts.GRPCServer.Config,
+			opts.GRPCServer.Services,
 			WithGRPCLog(log),
 		)
-		endpoint = opts.GRPCServer.cfg.Endpoint.Unwrap()
+		endpoint = opts.GRPCServer.Config.Endpoint.Unwrap()
 	}
 
 	reconciler := NewReconciler(

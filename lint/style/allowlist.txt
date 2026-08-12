@@ -104,9 +104,6 @@ maplit:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:map[byte
 maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)
 maplit:operators/route/internal/discovery/neigh/neigh.go:newOptions:map[string]string:1  # legacy: use T{} instead of make(map...)
-private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg:1  # legacy: encapsulate behind an exported method or field
-private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg:2  # legacy: encapsulate behind an exported method or field
-private:common/go/operator/operator.go:NewOperator:opts.GRPCServer.services:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/gateway.go:Gateway.Run:runner.module:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/gateway.go:NewGateway:entry.kind:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/gateway.go:NewGateway:entry.kind:2  # legacy: encapsulate behind an exported method or field

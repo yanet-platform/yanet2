@@ -10,8 +10,8 @@ import (
 )
 
 type grpcServerOption struct {
-	cfg      *GRPCServerConfig
-	services []ServiceRegistrar
+	Config   *GRPCServerConfig
+	Services []ServiceRegistrar
 }
 
 type options struct {
@@ -89,8 +89,8 @@ func WithGateways(register RegisterConfig, gateways ...GatewayConfig) Option {
 func WithGRPCServer(cfg *GRPCServerConfig, services ...ServiceRegistrar) Option {
 	return func(o *options) {
 		o.GRPCServer = &grpcServerOption{
-			cfg:      cfg,
-			services: services,
+			Config:   cfg,
+			Services: services,
 		}
 	}
 }
