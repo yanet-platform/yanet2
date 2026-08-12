@@ -1,10 +1,13 @@
-name: Send Telegram message on PR
+name: Send Telegram messages on PRs and issues
 on:
   pull_request:
     types: [opened, reopened]
+  issues:
+    types: [opened, reopened, closed]
 
 jobs:
   notify:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     env:
       Message: |
@@ -17,3 +20,18 @@ jobs:
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}/sendMessage" \
           -d "chat_id=${{ vars.TELEGRAM_YANET_CHAT_ID }}" -d "message_thread_id=${{ vars.TELEGRAM_YANET_TOPIC_ID }}"   \
           -d "text=$Message"
+
+  notify_issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    env:
+      Message: |
+        📝 Issue ${{ github.event.action }}:
+        ${{ github.event.issue.title }}
+        URL: ${{ github.event.issue.html_url }}
+    steps:
+      - name: Send issue notification to topic
+        run: |
+          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}/sendMessage" \
+          -d "chat_id=${{ vars.TELEGRAM_YANET_CHAT_ID }}" -d "message_thread_id=${{ vars.TELEGRAM_YANET_TOPIC_ID }}"   \
+          --data-urlencode "text=$Message"
