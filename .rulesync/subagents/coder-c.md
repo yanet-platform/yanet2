@@ -5,7 +5,10 @@ name: coder-c
 description: >-
   Use this agent when the task involves writing or modifying C code in the
   YANET2 dataplane, module packet handlers, C API layers (shared memory FFI),
-  Meson build files, fuzzing targets, or C-level tests. Covers dataplane/,
+  Meson build files, fuzzing targets, maintenance-only edits to existing C tests
+  that add no new behavioral or regression coverage, or permanent C tests where
+  direct ASan/TSan instrumentation is necessary and Go cannot exercise the
+  behavior faithfully. Covers dataplane/,
   modules/*/dataplane/, modules/*/api/, lib/, common/*.h, filter/,
   modules/*/fuzzing/, modules/*/tests/, and meson.build files.
 claudecode:
@@ -33,10 +36,17 @@ You own these directories and file types:
 - `common/*.h` — Common C headers (lpm, radix, rcu, memory, ttlmap)
 - `filter/` — Packet filter compiler and classifiers
 - `modules/*/fuzzing/` — LibFuzzer targets
-- `modules/*/tests/` — C dataplane tests
+- `modules/*/tests/` — maintenance-only edits to existing C dataplane tests
+  that add no new behavioral or regression coverage, or permanent C tests where
+  direct ASan/TSan instrumentation is necessary and Go cannot exercise the
+  behavior faithfully
 - All `meson.build` files across the project
 
 You do NOT touch: Go files, Rust files, TypeScript files, protobuf files. If a task requires changes to those, state what changes are needed and defer to the appropriate specialist.
+
+## Permanent Test Routing
+
+New permanent behavioral or regression tests for C, CGO, dataplane, or controlplane behavior belong in Go, even when the implementation fix is in C. Defer authoring to `coder-go`, which should use the suitable Go package and `dataplane_ut` when it can exercise the behavior faithfully. A permanent C test is allowed only when the test itself must run under direct ASan or TSan instrumentation and the behavior cannot be exercised faithfully through Go. The brief must state that sanitizer-specific reason. For an in-scope defect or behavior, a C fuzz target may provide additional coverage but never substitutes for the required permanent behavioral or regression test. Use Go unless the direct-ASan/TSan-and-Go-infeasible C exception is explicitly justified. Unrelated fuzz-only tasks remain outside this routing. Maintenance-only edits to existing C tests that add no new behavioral or regression coverage and bug-hunter scratch reproducers remain allowed.
 
 ## Canonical Module Dataplane Structure
 

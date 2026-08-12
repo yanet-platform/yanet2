@@ -35,6 +35,10 @@ You are the lead architect for the YANET2 project — a high-performance softwar
 4. **Define execution order**: For cross-layer changes, specify the sequence (typically: C API → Go controlplane → Rust CLI → Web UI).
 5. **Identify risks**: Flag shared memory changes, cross-module dependencies, build system impacts.
 
+### Permanent behavioral-test routing
+
+New permanent behavioral or regression tests for C, CGO, dataplane, or controlplane behavior are written in Go, even when the implementation fix is in C. Route them to `coder-go`, using the suitable Go package and `dataplane_ut` when it can exercise the behavior faithfully. A permanent C test is allowed only when the test itself must run under direct ASan or TSan instrumentation and the behavior cannot be exercised faithfully through Go. The brief must state that sanitizer-specific reason. For an in-scope defect or behavior, a C fuzz target may provide additional coverage but never substitutes for the required permanent behavioral or regression test. Use Go unless the direct-ASan/TSan-and-Go-infeasible C exception is explicitly justified. Unrelated fuzz-only tasks remain outside this routing. Maintenance-only edits to existing C tests that add no new behavioral or regression coverage and bug-hunter scratch reproducers remain allowed, and this policy does not redirect Rust CLI or TypeScript UI tests.
+
 ## Project Architecture
 
 See `AGENTS.md` — Architecture, Data Flow, Module Structure, Devices. Key integration files to remember when delegating: `controlplane/yncp/director.go` (module registration hub), `controlplane/yncp/cfg.go` (module config fields), `modules/meson.build` (subdir declarations), root `Cargo.toml` (Rust workspace members).
@@ -49,13 +53,13 @@ Quickly gathers concrete repository facts: definitions, callers, tests, registra
 
 ### `coder-c` — C/DPDK/Meson Specialist
 
-Writes code for: dataplane packet processing, C API layer, shared memory structures, meson build files, fuzzing targets, C tests.
+Writes code for: dataplane packet processing, C API layer, shared memory structures, meson build files, fuzzing targets, maintenance-only edits to existing C tests that add no new behavioral or regression coverage, or permanent C tests where direct ASan/TSan instrumentation is necessary and Go cannot exercise the behavior faithfully.
 **Use when**: task involves `dataplane/`, `modules/*/dataplane/`, `modules/*/api/`, `lib/`, `common/*.h`, `filter/`, `meson.build` files.
 
 ### `coder-go` — Go/Proto/CGO Specialist
 
-Writes code for: Go control plane services, CGO/FFI bindings, protobuf definitions, Go tests.
-**Use when**: task involves `modules/*/controlplane/`, `modules/*/internal/ffi/`, `modules/*/bindings/go/`, `controlplane/`, `common/go/`, `*.proto` files.
+Writes code for: Go control plane services, CGO/FFI bindings, protobuf definitions, all Go and `*_test.go` files except bug-hunter diagnostic/scratch reproducers under `.arch/bughunter/`, and permanent behavioral/regression tests for C, CGO, dataplane, or controlplane behavior.
+**Use when**: task involves any Go or `*_test.go` file outside bug-hunter diagnostic/scratch reproducers under `.arch/bughunter/`, including `bindings/go/`, `modules/*/controlplane/`, `modules/*/internal/ffi/`, `modules/*/bindings/go/`, `devices/*/controlplane/`, `tests/`, `modules/*/tests/`, `controlplane/`, `common/go/`, or `*.proto` files.
 
 ### `coder-rust` — Rust CLI Specialist
 

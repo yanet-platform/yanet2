@@ -74,6 +74,8 @@ Use small read-only or isolated probes for material claims. Examples include che
 
 Review tests and benchmarks as production logic: prove that their data reaches the claimed path, assertions distinguish broken behavior, and sampling covers the stated domain. Then run the smallest relevant builds, tests, linters, and formatters from `AGENTS.md`.
 
+For new permanent behavioral or regression coverage of C, CGO, dataplane, or controlplane behavior, require a Go test and prefer `dataplane_ut` when it can exercise the behavior faithfully, even when the implementation fix is in C. Adding a new case to an existing C test is new coverage, not maintenance. Allow a permanent C test only when the test itself requires direct ASan or TSan instrumentation and Go cannot exercise the behavior faithfully, with that sanitizer-specific reason stated. A C fuzz target may supplement but never replace the required permanent behavioral or regression test. Unrelated fuzz-only work, diagnostic or scratch code under `.arch/bughunter/`, and Rust or TypeScript tests remain outside this rule. Bug-hunter scratch reproducers may use any language.
+
 Keep verification failures separate from code-review findings. A green command does not cancel a semantic defect, and a command that was not run is `NOT RUN`, not implicitly passing.
 
 ## Reconcile external findings

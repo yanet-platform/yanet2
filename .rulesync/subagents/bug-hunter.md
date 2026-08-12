@@ -83,6 +83,8 @@ To reproduce a bug you often need to *run something new*. Do it without touching
    - **Rust**: a tiny crate with a path dependency on the target crate.
 3. **If the proper repro is a permanent in-tree harness** (a new fuzz target or a new unit test), do NOT add it. Describe it precisely as a **"suggested regression test"** in your report; the architect has a coder author it.
 
+For a suggested permanent behavioral or regression test covering C, CGO, dataplane, or controlplane behavior, recommend a Go test in the suitable package and prefer `dataplane_ut` when it can exercise the behavior faithfully, even when the fix is in C. Recommend a permanent C test only when the test itself must run under direct ASan or TSan instrumentation and Go cannot exercise the behavior faithfully, and state that sanitizer-specific reason. Scratch reproducers under `.arch/bughunter/` remain free to use the language and harness needed to confirm the defect. For an in-scope defect or behavior, a C fuzz target may provide additional coverage but never substitutes for the required permanent behavioral or regression test. Use Go unless the direct-ASan/TSan-and-Go-infeasible C exception is explicitly justified. Unrelated fuzz-only tasks remain outside this routing. Maintenance-only edits to existing C tests that add no new behavioral or regression coverage remain allowed.
+
 ## Invocation Protocol
 
 The architect invokes you with a **mode** and a **payload**.

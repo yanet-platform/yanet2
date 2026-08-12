@@ -272,6 +272,20 @@ violation of any of these with the same concrete-input standard as Step 2 —
 name the exact traffic/mode/harness gap and the wrong measurement or result
 it produces, not a generic reminder to "check benchmark validity".
 
+For a new permanent behavioral or regression test covering C, CGO, dataplane,
+or controlplane behavior, require a Go test in the suitable package and prefer
+`dataplane_ut` when it can exercise the behavior faithfully, even when the
+implementation fix is in C. Reject a permanent C test unless the brief or diff
+states that the test itself must run under direct ASan or TSan instrumentation
+and explains why Go cannot exercise the behavior faithfully. For an in-scope
+defect or behavior, a C fuzz target may provide additional coverage but never
+substitutes for the required permanent behavioral or regression test. Use Go
+unless the direct-ASan/TSan-and-Go-infeasible C exception is explicitly
+justified. Unrelated fuzz-only tasks remain outside this criterion. This
+criterion also does not apply to maintenance-only edits to existing C tests
+that add no new behavioral or regression coverage, or bug-hunter scratch
+reproducers, and does not redirect Rust CLI or TypeScript UI tests.
+
 ### TypeScript/Web UI
 
 - New pages are registered in `types.ts`, `App.tsx`, and `MainMenu.tsx`.
