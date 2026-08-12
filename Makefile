@@ -1,6 +1,6 @@
 CARGO ?= cargo
 RULESYNC ?= npx --yes rulesync@16.8.0
-RULESYNC_GENERATE_ARGS := generate --targets claudecode,codexcli --features subagents
+RULESYNC_GENERATE_ARGS := generate --targets claudecode,codexcli,opencode --features subagents
 
 # Compile database consumed by lint/clang-syntax.
 COMPILE_DB ?= build/compile_commands.json
@@ -225,7 +225,7 @@ lint-commit:
 	lint/commit/commitlint_test.sh
 	lint/commit/commitlint.sh --range origin/main..HEAD
 
-# Generate .claude/agents/*.md and .codex/agents/*.toml from the tracked
+# Generate .claude/agents/*.md, .codex/agents/*.toml, and .opencode/agents/*.md from the tracked
 # source of truth, .rulesync/subagents/*.md.
 #
 # Refuses when the source roster is empty: rulesync's delete:true wipes
@@ -245,7 +245,7 @@ ai/agents:
 		fi
 	$(RULESYNC) $(RULESYNC_GENERATE_ARGS)
 
-# Reports whether .claude/agents/ and .codex/agents/ have drifted from
+# Reports whether .claude/agents/, .codex/agents/, and .opencode/agents/ have drifted from
 # .rulesync/subagents/*.md, without writing to the filesystem.
 #
 # Run by .githooks/post-merge after a pull to warn about stale charters.

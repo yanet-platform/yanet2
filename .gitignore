@@ -143,6 +143,7 @@ deploy/packages/
 
 # Generated from .rulesync/subagents/*.md by 'make ai/agents'.
 .claude/agents
+.opencode/
 
 # Ignore skills by default.
 #
