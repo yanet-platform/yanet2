@@ -677,6 +677,7 @@ cp_config_update_devices(
 	for (uint64_t idx = 0; idx < device_count; ++idx) {
 		if (cp_device_registry_upsert(
 			    &new_config_gen->device_registry,
+			    devices[idx]->type,
 			    devices[idx]->name,
 			    devices[idx],
 			    err
@@ -981,6 +982,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 		}
 		if (cp_device_registry_upsert(
 			    &cp_config_gen->device_registry,
+			    device_config.type,
 			    device_config.name,
 			    cp_device,
 			    err

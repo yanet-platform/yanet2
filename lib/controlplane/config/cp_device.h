@@ -148,12 +148,15 @@ cp_device_registry_get(
 
 struct cp_device *
 cp_device_registry_lookup(
-	struct cp_device_registry *device_registry, const char *name
+	struct cp_device_registry *device_registry,
+	const char *type,
+	const char *name
 );
 
 int
 cp_device_registry_upsert(
 	struct cp_device_registry *device_registry,
+	const char *type,
 	const char *name,
 	struct cp_device *device,
 	yanet_error **err

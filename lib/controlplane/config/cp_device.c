@@ -454,8 +454,30 @@ cp_device_registry_get(
 	return container_of(item, struct cp_device, config_item);
 }
 
+struct cp_device_cmp_data {
+	const char *type;
+	const char *name;
+};
+
 static int
 cp_device_registry_item_cmp(
+	const struct registry_item *item, const void *data
+) {
+	const struct cp_device *device =
+		container_of(item, struct cp_device, config_item);
+	const struct cp_device_cmp_data *cmp_data =
+		(const struct cp_device_cmp_data *)data;
+
+	int cmp = strncmp(device->name, cmp_data->name, sizeof(device->name));
+	if (cmp) {
+		return cmp;
+	}
+
+	return strncmp(device->type, cmp_data->type, sizeof(device->type));
+}
+
+static int
+cp_device_registry_name_cmp(
 	const struct registry_item *item, const void *data
 ) {
 	const struct cp_device *device =
@@ -466,13 +488,19 @@ cp_device_registry_item_cmp(
 
 struct cp_device *
 cp_device_registry_lookup(
-	struct cp_device_registry *device_registry, const char *name
+	struct cp_device_registry *device_registry,
+	const char *type,
+	const char *name
 ) {
+	struct cp_device_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
 	uint64_t index;
 	if (registry_lookup(
 		    &device_registry->registry,
 		    cp_device_registry_item_cmp,
-		    name,
+		    &cmp_data,
 		    &index
 	    )) {
 		return NULL;
@@ -488,12 +516,17 @@ cp_device_registry_lookup(
 int
 cp_device_registry_upsert(
 	struct cp_device_registry *device_registry,
+	const char *type,
 	const char *name,
 	struct cp_device *new_device,
 	yanet_error **err
 ) {
+	struct cp_device_cmp_data cmp_data = {
+		.type = type,
+		.name = name,
+	};
 	struct cp_device *old_device =
-		cp_device_registry_lookup(device_registry, name);
+		cp_device_registry_lookup(device_registry, type, name);
 
 	if (counter_registry_link(
 		    &new_device->counter_registry,
@@ -516,7 +549,7 @@ cp_device_registry_upsert(
 	if (registry_replace(
 		    &device_registry->registry,
 		    cp_device_registry_item_cmp,
-		    name,
+		    &cmp_data,
 		    &new_device->config_item,
 		    cp_device_registry_item_free_cb,
 		    NULL
@@ -539,7 +572,7 @@ cp_device_registry_delete(
 ) {
 	return registry_replace(
 		&device_registry->registry,
-		cp_device_registry_item_cmp,
+		cp_device_registry_name_cmp,
 		name,
 		NULL,
 		cp_device_registry_item_free_cb,
