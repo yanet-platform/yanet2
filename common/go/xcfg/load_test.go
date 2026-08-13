@@ -329,6 +329,50 @@ func Test_LoadConfig_KnownFields_ReachesCustomUnmarshalYAML(t *testing.T) {
 	require.Contains(t, err.Error(), "inner.bogus")
 }
 
+func Test_Decode_KnownFields_TopLevelUnknownReportsOurMessage(t *testing.T) {
+	// A top-level unknown key decodes into a plain field, so yaml.v3's own
+	// strict decoder can see it — it must still lose the race to our walk,
+	// which runs first and names the key and its line instead of a Go type.
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+
+	var cfg Config
+	err := Decode([]byte("name: foo\nbogus_top: true\n"), &cfg, WithKnownFields())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "not found in type")
+	require.Contains(t, err.Error(), "bogus_top")
+	require.Contains(t, err.Error(), "specified at line 2")
+}
+
+func Test_Decode_KnownFields_ReportsRealLineNumber(t *testing.T) {
+	// The offending key sits well below line 1, so a hardcoded 0 or an
+	// off-by-one line count would fail this assertion.
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+		Path NonEmptyString `yaml:"path"`
+	}
+
+	input := "name: foo\npath: /tmp\n\n\nbogus_top: true\n"
+	var cfg Config
+	err := Decode([]byte(input), &cfg, WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "specified at line 5")
+}
+
+func Test_Decode_KnownFields_MultipleUnknownKeysEachReportLine(t *testing.T) {
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+
+	input := "name: foo\nbogus_one: true\nbogus_two: true\n"
+	var cfg Config
+	err := Decode([]byte(input), &cfg, WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `"bogus_one" at line 2`)
+	require.Contains(t, err.Error(), `"bogus_two" at line 3`)
+}
+
 func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {
 	// Verify that LineError from UnmarshalYAML is accessible via
 	// errors.As through the error chain, even when Decode doesn't

@@ -88,13 +88,16 @@ func Decode(buf []byte, dst any, options ...Option) error {
 	}
 
 	if opts.KnownFields {
-		dec := yaml.NewDecoder(bytes.NewReader(buf))
-		dec.KnownFields(true)
-		if err := dec.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+		if err := checkKnownKeys(buf, reflect.TypeOf(dst)); err != nil {
 			return err
 		}
 
-		if err := checkKnownKeys(buf, reflect.TypeOf(dst)); err != nil {
+		// checkKnownKeys runs first so an unknown key always reports through
+		// its operator-facing message rather than yaml.v3's own. This decode
+		// is what actually populates dst.
+		dec := yaml.NewDecoder(bytes.NewReader(buf))
+		dec.KnownFields(true)
+		if err := dec.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 	} else {
