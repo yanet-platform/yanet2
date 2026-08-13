@@ -17,9 +17,8 @@ type Config struct {
 	// transaction.
 	MemoryRequirements xcfg.NonZero[datasize.ByteSize] `yaml:"memory_requirements"`
 
-	Endpoint        xcfg.NonEmptyString `yaml:"endpoint"`
-	GatewayEndpoint xcfg.NonEmptyString `yaml:"gateway_endpoint"`
-	DebugEBPF       bool                `yaml:"debug_ebpf"`
+	Endpoint  xcfg.NonEmptyString `yaml:"endpoint"`
+	DebugEBPF bool                `yaml:"debug_ebpf"`
 }
 
 func DefaultConfig() *Config {
@@ -27,7 +26,6 @@ func DefaultConfig() *Config {
 		MemoryPath:         xcfg.MustNonEmptyString("/dev/hugepages/yanet"),
 		MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
 		Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
-		GatewayEndpoint:    xcfg.MustNonEmptyString("[::1]:8080"),
 		DebugEBPF:          false,
 	}
 }

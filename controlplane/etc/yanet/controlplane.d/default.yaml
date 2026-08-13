@@ -14,7 +14,7 @@ gateway:
   # value but must be written down.
   instance_id: 0
   server:
-    endpoint: &gateway_endpoint "[::1]:8080"
+    endpoint: "[::1]:8080"
     http_endpoint: "[::1]:8081"
     # TLS is optional. When present both gRPC and HTTP listeners use it.
     # The certificate's SubjectAltName must include whatever host the
@@ -75,59 +75,49 @@ modules:
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   dscp:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   forward:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   mirror:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   nat64:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   pdump:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   acl:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 8GB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   blackhole:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 4MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
 devices:
   plain:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint
   vlan:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
     endpoint: "[::1]:0"
-    gateway_endpoint: *gateway_endpoint

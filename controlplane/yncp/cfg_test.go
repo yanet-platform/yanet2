@@ -93,7 +93,6 @@ func Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields(t *testing.T) {
 		"    memory_path: /dev/hugepages/yanet\n" +
 		"    memory_requirements: 16MB\n" +
 		"    endpoint: \"[::1]:0\"\n" +
-		"    gateway_endpoint: \"[::1]:8080\"\n" +
 		"    bogus: z\n"
 	var cfg yncp.Config
 	err := xcfg.Decode([]byte(input), &cfg, xcfg.WithKnownFields())

@@ -19,9 +19,6 @@ type Config struct {
 
 	// Endpoint is the gRPC address the module listens on.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
-	// GatewayEndpoint is the gRPC address of the gateway the module
-	// registers with.
-	GatewayEndpoint xcfg.NonEmptyString `yaml:"gateway_endpoint"`
 }
 
 // DefaultConfig returns default configuration.
@@ -30,7 +27,6 @@ func DefaultConfig() *Config {
 		MemoryPath:         xcfg.MustNonEmptyString("/dev/hugepages/yanet"),
 		MemoryRequirements: xcfg.MustNonZero(4 * datasize.MB),
 		Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
-		GatewayEndpoint:    xcfg.MustNonEmptyString("[::1]:8080"),
 	}
 }
 

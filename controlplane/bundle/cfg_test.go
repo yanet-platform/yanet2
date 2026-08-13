@@ -63,7 +63,6 @@ func Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule(t *testing.T) 
 			MemoryPath:         xcfg.MustNonEmptyString("/nonexistent/path/for/bundle/cfg/test"),
 			MemoryRequirements: xcfg.MustNonZero(16 * datasize.MB),
 			Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
-			GatewayEndpoint:    xcfg.MustNonEmptyString("[::1]:8080"),
 		}),
 	}
 
