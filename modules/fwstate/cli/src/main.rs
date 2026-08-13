@@ -69,6 +69,44 @@ pub struct FWStateService {
     metrics: Service<MetricsServiceClient<LayeredChannel>>,
 }
 
+/// State an `entries` dump carries across its batches and both maps.
+struct DumpState {
+    /// Entries printed so far, which `--count` limits.
+    printed: u32,
+    /// Whether the human-readable header row is already out. Deferred until
+    /// the first entry arrives, so a zero-entry result prints no header.
+    header_printed: bool,
+    /// Config generation the last response reported.
+    generation: Option<u64>,
+}
+
+impl DumpState {
+    fn new() -> Self {
+        Self {
+            printed: 0,
+            header_printed: false,
+            generation: None,
+        }
+    }
+
+    /// Warns when a response reports a different generation than the one
+    /// before it.
+    ///
+    /// A bump means layers were relinked, so the cursor and `--layer` stop
+    /// denoting what they did when the dump began, and the remaining
+    /// entries can repeat or be missed. Rows already printed were accurate
+    /// when read, so the dump goes on and only warns.
+    fn note_generation(&mut self, generation: u64) {
+        match self.generation.replace(generation) {
+            Some(previous) if previous != generation => log::warn!(
+                "fwstate config changed mid-dump (generation {previous} -> {generation}): \
+                 entries may repeat or be missed"
+            ),
+            _ => {}
+        }
+    }
+}
+
 impl FWStateService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
         let conn = Connection::connect(connection).await?;
@@ -314,20 +352,17 @@ impl FWStateService {
         };
 
         let limit = cmd.count;
-        let mut total: u32 = 0;
-        // Deferred until the first entry actually arrives, so a zero-entry
-        // result does not print a header row over an empty table.
-        let mut header_printed = false;
+        let mut state = DumpState::new();
 
         for &is_ipv6 in cmd.ipv6_maps() {
-            if limit > 0 && total >= limit {
+            if limit > 0 && state.printed >= limit {
                 break;
             }
-            self.list_entries_map(&cmd, is_ipv6, direction, format, &mut total, &mut header_printed)
+            self.list_entries_map(&cmd, is_ipv6, direction, format, &mut state)
                 .await?;
         }
 
-        if total == 0 {
+        if state.printed == 0 {
             output::empty(format_args!(
                 "No firewall state entries found for '{}'.",
                 cmd.config_name
@@ -343,8 +378,7 @@ impl FWStateService {
         is_ipv6: bool,
         direction: Direction,
         format: CommonFormat,
-        total: &mut u32,
-        header_printed: &mut bool,
+        state: &mut DumpState,
     ) -> Result<(), Error> {
         let limit = cmd.count;
         let (tx, rx) = mpsc::channel(1);
@@ -376,19 +410,21 @@ impl FWStateService {
             .await
             .map_err(self.service.status("list entries"))?
         {
+            state.note_generation(resp.generation);
+
             for entry in &resp.entries {
-                if limit > 0 && *total >= limit {
+                if limit > 0 && state.printed >= limit {
                     break;
                 }
 
                 match format {
                     CommonFormat::Human => {
-                        if !*header_printed {
+                        if !state.header_printed {
                             println!(
                                 "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
                                 "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
                             );
-                            *header_printed = true;
+                            state.header_printed = true;
                         }
 
                         print_entry(entry);
@@ -401,10 +437,10 @@ impl FWStateService {
                     }
                 }
 
-                *total += 1;
+                state.printed += 1;
             }
 
-            if (limit > 0 && *total >= limit) || !resp.has_more {
+            if (limit > 0 && state.printed >= limit) || !resp.has_more {
                 break;
             }
 
