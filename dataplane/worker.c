@@ -440,6 +440,11 @@ dataplane_worker_init(
 	// Init worker clock
 	int init_clock_result = tsc_clock_init(&dp_worker->clock);
 	if (init_clock_result != 0) {
+		memory_bfree(
+			&dp_config->memory_context,
+			dp_worker,
+			sizeof(struct dp_worker)
+		);
 		return -1;
 	}
 
