@@ -36,6 +36,12 @@ struct acl_module_config {
 
 	struct fwstate_config fwstate_cfg;
 
+	// The fwstate module config that fwstate_cfg's maps were copied from,
+	// held with its own reference via cp_module_acquire/cp_module_release
+	// so the maps outlive a deleted fwstate configuration that this ACL
+	// configuration still points into. NULL when never linked.
+	struct cp_module *fwstate_owner;
+
 	// Metrics
 	uint64_t compilation_time_ns;
 	uint64_t filter_rule_count_ip4;

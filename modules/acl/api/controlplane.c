@@ -99,8 +99,14 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 
 	cp_module_fini(cp_module);
 
-	// Note: We don't destroy fwstate_cfg maps here because they're owned by
-	// the fwstate module. We only stored offsets to them.
+	// fwstate_cfg's maps are not freed here: they are owned by the
+	// fwstate module, and this config only ever stored offsets into
+	// them plus a reference on their owner, dropped below.
+	struct cp_module *fwstate_owner = ADDR_OF(&config->fwstate_owner);
+	if (fwstate_owner != NULL) {
+		cp_module_release(fwstate_owner);
+	}
+
 	memory_bfree(
 		&agent->memory_context,
 		cp_module,
@@ -154,6 +160,7 @@ acl_module_config_init(
 
 	// Initialize fwstate_cfg with NULL pointers
 	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
+	SET_OFFSET_OF(&config->fwstate_owner, NULL);
 
 	// Register module-level counters
 	struct {
@@ -884,6 +891,16 @@ acl_module_config_set_fwstate_config(
 	EQUATE_OFFSET(
 		&config->fwstate_cfg.fw6state, &fwstate_config->cfg.fw6state
 	);
+
+	// Take the new hold before dropping any old one, so relinking to the
+	// same owner never passes through a transient zero refcount.
+	cp_module_acquire(fwstate_cp_module);
+
+	struct cp_module *prev_owner = ADDR_OF(&config->fwstate_owner);
+	if (prev_owner != NULL) {
+		cp_module_release(prev_owner);
+	}
+	SET_OFFSET_OF(&config->fwstate_owner, fwstate_cp_module);
 }
 
 void
@@ -908,6 +925,20 @@ acl_module_config_transfer_fwstate_config(
 		&new_config->fwstate_cfg.fw6state,
 		&old_config->fwstate_cfg.fw6state
 	);
+
+	// Give the receiving config its own hold on the same owner the
+	// source config holds, read from the source rather than assumed, so
+	// both configs keep the owner alive until each releases its own hold.
+	struct cp_module *owner = ADDR_OF(&old_config->fwstate_owner);
+	if (owner != NULL) {
+		cp_module_acquire(owner);
+	}
+
+	struct cp_module *prev_owner = ADDR_OF(&new_config->fwstate_owner);
+	if (prev_owner != NULL) {
+		cp_module_release(prev_owner);
+	}
+	SET_OFFSET_OF(&new_config->fwstate_owner, owner);
 }
 
 void

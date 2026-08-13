@@ -364,6 +364,21 @@ cp_module_release(struct cp_module *cp_module) {
 	}
 }
 
+void
+cp_module_acquire(struct cp_module *cp_module) {
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct cp_config *cp_config =
+		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
+
+	if (cp_config != NULL) {
+		cp_config_lock(cp_config);
+	}
+	registry_item_ref(&cp_module->config_item);
+	if (cp_config != NULL) {
+		cp_config_unlock(cp_config);
+	}
+}
+
 static void
 cp_module_drain_parked(
 	struct agent *agent,

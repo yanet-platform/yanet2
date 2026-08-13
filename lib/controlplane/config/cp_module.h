@@ -217,6 +217,19 @@ cp_module_registry_item_free_cb(struct registry_item *item, void *data);
 void
 cp_module_release(struct cp_module *cp_module);
 
+// Take an external reference on a module configuration, matched later by
+// cp_module_release, so it outlives its own construction lifetime.
+//
+// The caller must already hold a live reference — acquiring on a
+// zero-count configuration does not unpark it, so the next drain of that
+// type destroys it under the new holder.
+//
+// Takes the module's own agent's configuration lock itself. Must not
+// already be held: it is a non-reentrant cross-process spinlock, and
+// nesting it hangs the instance.
+void
+cp_module_acquire(struct cp_module *cp_module);
+
 struct cp_module_registry {
 	struct memory_context *memory_context;
 	struct registry registry;
