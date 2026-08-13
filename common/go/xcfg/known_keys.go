@@ -133,6 +133,11 @@ func walkMappingNode(node *yaml.Node, t reflect.Type, path string, unknown *[]un
 				walkMergeValue(valueNode, t, path, unknown, visiting)
 				continue
 			}
+			// A complex key (a YAML sequence or mapping key) has no scalar
+			// name to check against a field or record as unknown.
+			if keyNode.Kind == yaml.SequenceNode || keyNode.Kind == yaml.MappingNode {
+				continue
+			}
 
 			fieldPath := joinPath(path, keyNode.Value)
 			fieldType, ok := fields[keyNode.Value]

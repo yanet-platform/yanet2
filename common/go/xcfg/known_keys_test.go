@@ -317,6 +317,106 @@ func Test_CheckKnownKeys_OptionalCleanDocumentNotFlagged(t *testing.T) {
 	require.NoError(t, xcfg.CheckKnownKeys[optionalWrapped]([]byte(input)))
 }
 
+// optionalAliasModules mirrors bundle.ModulesConfig: a struct whose fields
+// are Optional[T]-wrapped module configs keyed by module name.
+type optionalAliasModules struct {
+	Decap xcfg.Optional[requiredWrappedInner] `yaml:"decap"`
+}
+
+type optionalAliasConfig struct {
+	Name    string               `yaml:"name"`
+	Modules optionalAliasModules `yaml:"modules"`
+}
+
+// Test_CheckKnownKeys_AliasedMapKeyStillChecked is a regression test for an
+// alias used as a YAML mapping key, mirroring yncp.Config's modules block.
+//
+// An alias key node's Value holds its anchor name rather than the value it
+// resolves to, so the fixture names the anchor after the field it targets
+// (decap) for the walk to match it against Decap's struct field.
+func Test_CheckKnownKeys_AliasedMapKeyStillChecked(t *testing.T) {
+	input := `
+name: &decap decap
+modules:
+  *decap:
+    a: x
+    b: y
+    bogus: z
+`
+	err := xcfg.CheckKnownKeys[optionalAliasConfig]([]byte(input))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "modules.decap.bogus")
+}
+
+// mapAliasConfig mirrors optionalAliasConfig but keys its module map by a
+// map[string]... field instead of a struct field, so an alias used as its
+// key exercises the reflect.Map arm of walkMappingNode instead of the
+// struct arm Test_CheckKnownKeys_AliasedMapKeyStillChecked exercises.
+type mapAliasConfig struct {
+	Name    string                                         `yaml:"name"`
+	Modules map[string]xcfg.Optional[requiredWrappedInner] `yaml:"modules"`
+}
+
+// Test_CheckKnownKeys_AliasedMapKeyInMapField is the map-branch counterpart
+// to Test_CheckKnownKeys_AliasedMapKeyStillChecked.
+//
+// A map key accepts any name, so the alias's anchor name lands directly as
+// the map key rather than needing to match a struct field tag.
+func Test_CheckKnownKeys_AliasedMapKeyInMapField(t *testing.T) {
+	input := `
+name: &n foo
+modules:
+  *n:
+    a: x
+    b: y
+    bogus: z
+`
+	err := xcfg.CheckKnownKeys[mapAliasConfig]([]byte(input))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "modules.n.bogus")
+}
+
+// Test_CheckKnownKeys_NullKeyStillReported pins that a YAML null key (a
+// bare "?" with no scalar value) is still reported as an unknown key named
+// "", rather than silently skipped by the complex-key guard alongside
+// sequence and mapping keys.
+//
+// yaml.v3 drops a null key silently during a real decode, so this walk is
+// the only place left to surface it at all.
+func Test_CheckKnownKeys_NullKeyStillReported(t *testing.T) {
+	input := "? \n: 1\n"
+	err := xcfg.CheckKnownKeys[knownKeysConfig]([]byte(input))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unknown key "" specified at line 1`)
+}
+
+// Test_Decode_ComplexMappingKey_RejectedNotMisreported asserts that a YAML
+// complex key (a sequence or mapping used as a mapping key) is neither
+// reported as an unknown key named "" nor silently accepted.
+//
+// yaml.v3's mappingStruct decodes a struct's key into a string
+// unconditionally, so a complex key can never name a struct field.
+// walkMappingNode's struct branch skips it instead of reporting it as
+// unknown, and yaml.v3's own strict decode still rejects the document
+// because the key cannot unmarshal into that string.
+func Test_Decode_ComplexMappingKey_RejectedNotMisreported(t *testing.T) {
+	input := "? [a, b]\n: 1\n"
+
+	var cfg knownKeysConfig
+	err := xcfg.Decode([]byte(input), &cfg, xcfg.WithKnownFields())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), `unknown key ""`)
+	require.Contains(t, err.Error(), "cannot unmarshal !!seq into string")
+
+	mappingKeyInput := "? {a: 1}\n: 2\n"
+
+	var mappingKeyCfg knownKeysConfig
+	mappingKeyErr := xcfg.Decode([]byte(mappingKeyInput), &mappingKeyCfg, xcfg.WithKnownFields())
+	require.Error(t, mappingKeyErr)
+	require.NotContains(t, mappingKeyErr.Error(), `unknown key ""`)
+	require.Contains(t, mappingKeyErr.Error(), "cannot unmarshal !!map into string")
+}
+
 // Test_Decode_MalformedDocument_SameErrorBothModes asserts that a document
 // yaml.v3 itself cannot parse reports the identical error whether or not
 // WithKnownFields is set, since CheckKnownKeys must not add a wrapping
@@ -333,4 +433,32 @@ func Test_Decode_MalformedDocument_SameErrorBothModes(t *testing.T) {
 	require.Error(t, errStrict)
 	require.Error(t, errLenient)
 	require.Equal(t, errLenient.Error(), errStrict.Error())
+}
+
+type complexMapKeyInner struct {
+	A string `yaml:"a"`
+}
+
+type complexMapKeyConfig struct {
+	Modules map[[2]string]xcfg.Optional[complexMapKeyInner] `yaml:"modules"`
+}
+
+// Test_Decode_ComplexMapKeyUnknownFieldReported pins that an unknown field
+// nested under a complex map key is still reported.
+//
+// A [2]string map key decodes a YAML sequence key with no error from
+// yaml.v3, unlike a struct key or a string-keyed map, so nothing outside
+// this walk ever rejects the document. Skipping a complex key in the map
+// branch the way the struct branch does would let the unknown field escape
+// unreported and the whole document decode silently.
+func Test_Decode_ComplexMapKeyUnknownFieldReported(t *testing.T) {
+	input := `
+modules:
+  ? [x, y]
+  : a: v
+    bogus: z
+`
+	err := xcfg.Decode([]byte(input), new(complexMapKeyConfig), xcfg.WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bogus")
 }
