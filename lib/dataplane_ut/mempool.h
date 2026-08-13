@@ -26,6 +26,7 @@ test_pool_enqueue(struct rte_mempool *mp, void *const *obj_table, unsigned n) {
 	for (unsigned idx = 0; idx < n; idx++) {
 		free((char *)obj_table[idx] - mp->header_size);
 	}
+	*(size_t *)mp->pool_data -= n;
 
 	return 0;
 }
@@ -51,6 +52,8 @@ test_pool_dequeue(struct rte_mempool *mp, void **obj_table, unsigned n) {
 
 		rte_pktmbuf_init(mp, NULL, obj_table[idx], 0);
 	}
+	*(size_t *)mp->pool_data += n;
+
 	return 0;
 }
 
@@ -69,14 +72,19 @@ static const struct rte_mempool_ops test_pool_ops = {
 	.get_count = test_pool_get_count,
 };
 
-struct rte_mempool *
+static inline struct rte_mempool *
 test_mempool_create(void) {
 	rte_mempool_ops_table.num_ops = 0;
 	rte_mempool_register_ops(&test_pool_ops);
 
+	// The outstanding-object counter lives right after the private data,
+	// inside this same allocation, so every caller's plain free(mp) stays
+	// correct instead of leaking a separately-allocated counter.
 	size_t private_data_size = sizeof(struct rte_pktmbuf_pool_private);
 	struct rte_mempool *mp =
-		calloc(1, sizeof(struct rte_mempool) + private_data_size);
+		calloc(1,
+		       sizeof(struct rte_mempool) + private_data_size +
+			       sizeof(size_t));
 	mp->flags |= RTE_MEMPOOL_F_POOL_CREATED;
 	mp->socket_id = 0;
 	mp->cache_size = 0;
@@ -86,6 +94,22 @@ test_mempool_create(void) {
 		mp->header_size += 64 - (mp->header_size % 64);
 	}
 	mp->private_data_size = private_data_size;
+	mp->pool_data =
+		(char *)mp + sizeof(struct rte_mempool) + private_data_size;
 	rte_pktmbuf_pool_init(mp, NULL);
 	return mp;
+}
+
+// Release resources allocated by test_mempool_create().
+static inline void
+test_mempool_free(struct rte_mempool *mp) {
+	// Do NOT call rte_mempool_free — the test pool is not a real DPDK
+	// pool and has no backing memory to tear down that way.
+	free(mp);
+}
+
+// Number of mock-pool objects currently dequeued but not yet enqueued back.
+static inline size_t
+test_mempool_outstanding(const struct rte_mempool *mp) {
+	return *(const size_t *)mp->pool_data;
 }

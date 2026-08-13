@@ -55,8 +55,8 @@
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/dataplane/worker/round.h"
+#include "lib/dataplane/worker/tx_pipe.h"
 
-#include "common/data_pipe.h"
 #include "logging/log.h"
 
 #include <rte_ethdev.h>
@@ -119,40 +119,16 @@ worker_read(
 	}
 }
 
-struct worker_push_ctx {
-	struct worker_tx_pipe *tx_pipe;
-	struct rte_mbuf *mbuf;
-};
-
 static size_t
-worker_connection_push_cb(void **item, size_t count, void *data) {
-	struct worker_push_ctx *push_ctx = (struct worker_push_ctx *)data;
-	struct worker_tx_pipe *tx_pipe = push_ctx->tx_pipe;
-
-	if (count > 0) {
-		uint32_t ref_cnt =
-			rte_mbuf_refcnt_update(push_ctx->mbuf, 1) - 1;
-		memcpy(item, &push_ctx->mbuf, sizeof(struct rte_mbuf *));
-
-		uint32_t ofs = tx_pipe->pending_stop & tx_pipe->pending_mask;
-		tx_pipe->pending_mbufs[ofs].mbuf = push_ctx->mbuf;
-		tx_pipe->pending_mbufs[ofs].ref_cnt = ref_cnt;
-		++tx_pipe->pending_stop;
-
-		return 1;
-	}
-	return 0;
-}
-
-static size_t
-worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
+worker_tx_transmit_cb(struct rte_mbuf **mbufs, size_t count, void *data) {
 	struct dataplane_worker *worker = (struct dataplane_worker *)data;
-	struct rte_mbuf **mbufs = (struct rte_mbuf **)item;
 
 	(*worker->dp_worker->remote_rx_count) += count;
 
+	uint16_t burst_count =
+		count > UINT16_MAX ? UINT16_MAX : (uint16_t)count;
 	size_t written = rte_eth_tx_burst(
-		worker->port_id, worker->queue_id, mbufs, count
+		worker->port_id, worker->queue_id, mbufs, burst_count
 	);
 	*(worker->dp_worker->tx_count) += written;
 
@@ -162,19 +138,7 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 		*(worker->dp_worker->drop_count) += dropped;
 	}
 
-	for (size_t idx = written; idx < count; ++idx) {
-		rte_pktmbuf_free(mbufs[idx]);
-	}
-
-	return count;
-}
-
-static size_t
-worker_connection_free_cb(void **item, size_t count, void *data) {
-	(void)item;
-	(void)data;
-
-	return count;
+	return written;
 }
 
 /*
@@ -193,46 +157,7 @@ worker_send_to_port(struct dataplane_worker *worker, struct packet *packet) {
 	struct worker_tx_pipe *tx_pipe =
 		tx_conn->pipes + packet->hash % tx_conn->count;
 
-	// Backpressure: drop when this pipe's pending ring is full.
-	if (tx_pipe->pending_stop - tx_pipe->pending_start >
-	    tx_pipe->pending_mask) {
-		return -1;
-	}
-
-	struct worker_push_ctx push_ctx = {
-		.tx_pipe = tx_pipe,
-		.mbuf = packet_to_mbuf(packet),
-	};
-
-	if (data_pipe_item_push(
-		    &tx_pipe->pipe, worker_connection_push_cb, &push_ctx
-	    ) != 1) {
-		return -1;
-	}
-
-	return 0;
-}
-
-static void
-worker_tx_pipe_reclaim(struct worker_tx_pipe *tx_pipe) {
-	// Reclaim consumed pipe slots (producer free phase).
-	data_pipe_item_free(&tx_pipe->pipe, worker_connection_free_cb, NULL);
-
-	// Release mbufs whose consumer-side NIC tx has completed. A single
-	// pipe feeds one rx worker and one NIC tx queue, so completion is
-	// FIFO: drain from the head and stop at the first mbuf still held.
-	while (tx_pipe->pending_start < tx_pipe->pending_stop) {
-		uint32_t ofs = tx_pipe->pending_start & tx_pipe->pending_mask;
-		struct worker_pending_mbuf *pending =
-			tx_pipe->pending_mbufs + ofs;
-
-		if (rte_mbuf_refcnt_read(pending->mbuf) > pending->ref_cnt) {
-			break;
-		}
-
-		rte_pktmbuf_free(pending->mbuf);
-		++tx_pipe->pending_start;
-	}
+	return worker_tx_pipe_push(tx_pipe, packet_to_mbuf(packet));
 }
 
 static void
@@ -331,8 +256,8 @@ worker_write(
 
 	// Read incoming mbufs from remote workers and write them to device
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
-		data_pipe_item_pop(
-			ctx->rx_pipes + pipe_idx, worker_rx_pipe_pop_cb, worker
+		worker_tx_pipe_drain(
+			ctx->rx_pipes + pipe_idx, worker_tx_transmit_cb, worker
 		);
 	}
 

@@ -82,22 +82,9 @@ dataplane_worker_connect(
 	}
 
 	struct worker_tx_pipe *tx_pipe = tx_conn->pipes + tx_conn->count;
-	if (data_pipe_init(&tx_pipe->pipe, WORKER_TX_PIPE_SIZE)) {
+	if (worker_tx_pipe_init(tx_pipe)) {
 		return -1;
 	}
-
-	uint32_t pending_capacity =
-		1u << (WORKER_TX_PIPE_SIZE + WORKER_TX_PIPE_PENDING_SHIFT);
-	tx_pipe->pending_mbufs = (struct worker_pending_mbuf *)malloc(
-		sizeof(struct worker_pending_mbuf) * pending_capacity
-	);
-	if (tx_pipe->pending_mbufs == NULL) {
-		data_pipe_fini(&tx_pipe->pipe);
-		return -1;
-	}
-	tx_pipe->pending_mask = pending_capacity - 1;
-	tx_pipe->pending_start = 0;
-	tx_pipe->pending_stop = 0;
 
 	++tx_conn->count;
 

@@ -411,9 +411,7 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 	}
 
 	if (ut->mempool != NULL) {
-		// Do NOT call rte_mempool_free — the test pool is not a real
-		// DPDK pool and has no backing memory to tear down that way.
-		free(ut->mempool);
+		test_mempool_free(ut->mempool);
 		ut->mempool = NULL;
 	}
 
