@@ -1,6 +1,7 @@
 package forward
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -44,7 +45,6 @@ type ForwardModule struct {
 	agent          *cpffi.Agent
 	forwardService *ForwardService
 	metricsService *MetricsService
-	log            *zap.Logger
 }
 
 func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
@@ -67,7 +67,10 @@ func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
 
 	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	forwardService := NewForwardService(NewBackend(agent))
@@ -79,7 +82,6 @@ func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
 		agent:          agent,
 		forwardService: forwardService,
 		metricsService: metricsService,
-		log:            log,
 	}, nil
 }
 
@@ -102,13 +104,5 @@ func (m *ForwardModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *ForwardModule) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

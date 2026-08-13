@@ -95,6 +95,19 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	waitCtx, cancel := context.WithTimeout(context.Background(), dataplaneReadyTimeout)
 	defer cancel()
 	var shm *ffi.SharedMemory
+
+	// The deferred release below covers every failure return from here to
+	// the final success, so a failure path added later does not need its
+	// own copy. shm stays nil if no attach ever succeeded.
+	releaseShm := true
+	defer func() {
+		if releaseShm && shm != nil {
+			if err := shm.Detach(); err != nil {
+				log.Warn("failed to detach shared memory", zap.Error(err))
+			}
+		}
+	}()
+
 	bo := xbackoff.New(100*time.Millisecond, xbackoff.WithMax(2*time.Second))
 	if err := bo.RunContext(waitCtx, func() error {
 		if shm == nil {
@@ -161,6 +174,8 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to create gateway: %w", err)
 	}
 
+	releaseShm = false
+
 	return &Director{
 		cfg:     cfg,
 		shm:     shm,
@@ -171,9 +186,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 // Close closes the YANET controlplane director.
 func (m *Director) Close() error {
-	defer m.shm.Detach()
-
-	return m.gateway.Close()
+	return errors.Join(m.gateway.Close(), m.shm.Detach())
 }
 
 // Run runs the YANET controlplane director.

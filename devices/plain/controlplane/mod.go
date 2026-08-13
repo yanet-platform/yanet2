@@ -1,6 +1,7 @@
 package plain
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -36,7 +37,6 @@ type DevicePlainDevice struct {
 	shm     *ffi.SharedMemory
 	agent   *ffi.Agent
 	service *DevicePlainService
-	log     *zap.Logger
 }
 
 // NewDevicePlainDevice creates a new DevicePlain device instance
@@ -60,7 +60,10 @@ func NewDevicePlainDevice(cfg *Config, options ...Option) (*DevicePlainDevice, e
 
 	agent, err := shm.AgentAttach("plain", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	plainService := NewDevicePlainService(agent)
@@ -70,7 +73,6 @@ func NewDevicePlainDevice(cfg *Config, options ...Option) (*DevicePlainDevice, e
 		shm:     shm,
 		agent:   agent,
 		service: plainService,
-		log:     log,
 	}, nil
 }
 
@@ -92,13 +94,5 @@ func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {
 
 // Close closes the device and releases all resources
 func (m *DevicePlainDevice) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

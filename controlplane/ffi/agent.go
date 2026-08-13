@@ -89,8 +89,10 @@ func (m *Agent) BlockAllocatorFreeSize() uint64 {
 }
 
 func (m *Agent) Close() error {
-	_, err := C.agent_detach(m.ptr)
-	return err
+	if _, err := C.agent_detach(m.ptr); err != nil {
+		return fmt.Errorf("failed to close agent %q: %w", m.name, err)
+	}
+	return nil
 }
 
 func (m *Agent) CleanUp() error {

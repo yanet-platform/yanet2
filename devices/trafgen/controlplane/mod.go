@@ -2,6 +2,7 @@
 package trafgen
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -43,7 +44,6 @@ type TrafgenDevice struct {
 	shm     *ffi.SharedMemory
 	agent   *ffi.Agent
 	service *TrafgenService
-	log     *zap.Logger
 }
 
 // NewTrafgenDevice creates a new TrafgenDevice.
@@ -67,7 +67,10 @@ func NewTrafgenDevice(cfg *Config, options ...Option) (*TrafgenDevice, error) {
 
 	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	service := NewTrafgenService(NewBackend(agent))
@@ -77,7 +80,6 @@ func NewTrafgenDevice(cfg *Config, options ...Option) (*TrafgenDevice, error) {
 		shm:     shm,
 		agent:   agent,
 		service: service,
-		log:     log,
 	}, nil
 }
 
@@ -103,13 +105,5 @@ func (m *TrafgenDevice) RegisterService(server *grpc.Server) {
 
 // Close releases shared memory resources held by the device.
 func (m *TrafgenDevice) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

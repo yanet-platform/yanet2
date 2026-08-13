@@ -2,6 +2,7 @@
 package blackhole
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -42,7 +43,6 @@ type BlackholeModule struct {
 	shm              *ffi.SharedMemory
 	agent            *ffi.Agent
 	blackholeService *BlackholeService
-	log              *zap.Logger
 }
 
 // NewBlackholeModule creates a new BlackholeModule.
@@ -66,7 +66,10 @@ func NewBlackholeModule(cfg *Config, options ...Option) (*BlackholeModule, error
 
 	agent, err := shm.AgentAttach(agentName, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	blackholeService := NewBlackholeService(NewBackend(agent))
@@ -76,7 +79,6 @@ func NewBlackholeModule(cfg *Config, options ...Option) (*BlackholeModule, error
 		shm:              shm,
 		agent:            agent,
 		blackholeService: blackholeService,
-		log:              log,
 	}, nil
 }
 
@@ -102,12 +104,5 @@ func (m *BlackholeModule) RegisterService(server *grpc.Server) {
 
 // Close releases shared memory resources held by the module.
 func (m *BlackholeModule) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach shared memory", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

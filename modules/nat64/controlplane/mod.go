@@ -1,6 +1,7 @@
 package nat64
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -36,7 +37,6 @@ type NAT64Module struct {
 	shm          *ffi.SharedMemory
 	agent        *ffi.Agent
 	nat64Service *NAT64Service
-	log          *zap.Logger
 }
 
 // NewNAT64Module creates a new NAT64 module instance
@@ -60,7 +60,10 @@ func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
 
 	agent, err := shm.AgentAttach("nat64", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	nat64Service := NewNAT64Service(NewBackend(agent), WithNAT64ServiceLog(log))
@@ -70,7 +73,6 @@ func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
 		shm:          shm,
 		agent:        agent,
 		nat64Service: nat64Service,
-		log:          log,
 	}, nil
 }
 
@@ -92,13 +94,5 @@ func (m *NAT64Module) RegisterService(server *grpc.Server) {
 
 // Close closes the module and releases all resources
 func (m *NAT64Module) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

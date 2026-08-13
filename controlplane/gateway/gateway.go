@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -405,6 +406,8 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 
 // Close closes the gateway API.
 func (m *Gateway) Close() error {
+	var errs []error
+
 	for _, service := range m.services {
 		closer, ok := service.(ClosableService)
 		if !ok {
@@ -412,18 +415,15 @@ func (m *Gateway) Close() error {
 		}
 
 		if err := closer.Close(); err != nil {
-			m.log.Warn("failed to close service",
-				zap.String("service", fmt.Sprintf("%T", service)),
-				zap.Error(err),
-			)
+			errs = append(errs, fmt.Errorf("failed to close service %T: %w", service, err))
 		}
 	}
 
 	if err := m.registry.Close(); err != nil {
-		m.log.Warn("failed to close backend registry", zap.Error(err))
+		errs = append(errs, fmt.Errorf("failed to close backend registry: %w", err))
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // Run runs the gateway API until the specified context is canceled.

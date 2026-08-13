@@ -1,6 +1,7 @@
 package vlan
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -36,7 +37,6 @@ type DeviceVlanDevice struct {
 	shm     *ffi.SharedMemory
 	agent   *ffi.Agent
 	service *DeviceVlanService
-	log     *zap.Logger
 }
 
 // NewDeviceVlanDevice creates a new DeviceVlan device instance
@@ -60,7 +60,10 @@ func NewDeviceVlanDevice(cfg *Config, options ...Option) (*DeviceVlanDevice, err
 
 	agent, err := shm.AgentAttach("vlan", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	vlanService := NewDeviceVlanService(agent)
@@ -70,7 +73,6 @@ func NewDeviceVlanDevice(cfg *Config, options ...Option) (*DeviceVlanDevice, err
 		shm:     shm,
 		agent:   agent,
 		service: vlanService,
-		log:     log,
 	}, nil
 }
 
@@ -92,13 +94,5 @@ func (m *DeviceVlanDevice) RegisterService(server *grpc.Server) {
 
 // Close closes the device and releases all resources
 func (m *DeviceVlanDevice) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

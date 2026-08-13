@@ -1,6 +1,7 @@
 package decap
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -37,7 +38,6 @@ type DecapModule struct {
 	shm          *ffi.SharedMemory
 	agent        *ffi.Agent
 	decapService *DecapService
-	log          *zap.Logger
 }
 
 func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
@@ -60,7 +60,10 @@ func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
 
 	agent, err := shm.AgentAttach("decap", cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	decapService := NewDecapService(NewBackend(agent))
@@ -70,7 +73,6 @@ func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
 		shm:          shm,
 		agent:        agent,
 		decapService: decapService,
-		log:          log,
 	}, nil
 }
 
@@ -92,13 +94,5 @@ func (m *DecapModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *DecapModule) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

@@ -47,10 +47,13 @@ func AttachSharedMemory(path string) (*SharedMemory, error) {
 }
 
 // Detach detaches from YANET shared memory segment.
+//
+// Every agent attached to the segment must be closed before detaching,
+// because the mapping is unmapped and a later agent operation would fault.
 func (m *SharedMemory) Detach() error {
 	if m.ptr != nil {
 		if _, err := C.yanet_shm_detach(m.ptr); err != nil {
-			return err
+			return fmt.Errorf("failed to detach shared memory: %w", err)
 		}
 
 		m.ptr = nil

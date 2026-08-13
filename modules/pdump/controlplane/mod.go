@@ -2,6 +2,7 @@ package pdump
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -68,7 +69,10 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 
 	agent, err := shm.AgentAttach(moduleType, cfg.InstanceID.Unwrap(), cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("failed to attach agent to shared memory: %w", err),
+			shm.Detach(),
+		)
 	}
 
 	service := NewPdumpService(agent, WithPdumpServiceLog(log))
@@ -109,13 +113,5 @@ func (m *PdumpModule) Run(ctx context.Context) error {
 
 // Close closes the module.
 func (m *PdumpModule) Close() error {
-	if err := m.agent.Close(); err != nil {
-		m.log.Warn("failed to close shared memory agent", zap.Error(err))
-	}
-
-	if err := m.shm.Detach(); err != nil {
-		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
-	}
-
-	return nil
+	return errors.Join(m.agent.Close(), m.shm.Detach())
 }
