@@ -50,7 +50,7 @@ func CheckKnownKeys[T any](data []byte) error {
 func checkKnownKeys(data []byte, t reflect.Type) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("failed to parse yaml document: %w", err)
+		return err
 	}
 	if len(doc.Content) == 0 {
 		return nil

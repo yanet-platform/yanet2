@@ -316,3 +316,21 @@ func Test_CheckKnownKeys_OptionalCleanDocumentNotFlagged(t *testing.T) {
 	input := "sub:\n  a: x\n  b: y\n"
 	require.NoError(t, xcfg.CheckKnownKeys[optionalWrapped]([]byte(input)))
 }
+
+// Test_Decode_MalformedDocument_SameErrorBothModes asserts that a document
+// yaml.v3 itself cannot parse reports the identical error whether or not
+// WithKnownFields is set, since CheckKnownKeys must not add a wrapping
+// clause the plain decode path lacks.
+func Test_Decode_MalformedDocument_SameErrorBothModes(t *testing.T) {
+	input := "name: foo\n  bogus: bar\n"
+
+	var strict knownKeysConfig
+	errStrict := xcfg.Decode([]byte(input), &strict, xcfg.WithKnownFields())
+
+	var lenient knownKeysConfig
+	errLenient := xcfg.Decode([]byte(input), &lenient)
+
+	require.Error(t, errStrict)
+	require.Error(t, errLenient)
+	require.Equal(t, errLenient.Error(), errStrict.Error())
+}
