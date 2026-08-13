@@ -7,9 +7,19 @@ const nextTmpId = (): string => `tmp-${++tmpIdCounter}`;
 /** Assign stable server ids to a rules array. */
 const serverIds = (rules: Rule[]): string[] => rules.map((_, idx) => `srv-${idx}`);
 
+/** Stored fwstate-map object names backing state lookups, per family. */
+export interface FwtableNames {
+    v4: string;
+    v6: string;
+}
+
+export const EMPTY_FWTABLE_NAMES: FwtableNames = { v4: '', v6: '' };
+
 export interface AclDraftState {
     server: Record<string, Rule[]>;
-    serverFwStateName: Record<string, string>;
+    serverFwtableName: Record<string, FwtableNames>;
+    /** Draft fwstate-map names; diverges from serverFwtableName while edited. */
+    draftFwtableName: Record<string, FwtableNames>;
     /**
      * Emission sync config currently stored on the server, per config name.
      * The web layer carries it along on save instead of editing it.
@@ -31,7 +41,8 @@ export interface AclDraftState {
 
 export const initialAclDraftState: AclDraftState = {
     server: {},
-    serverFwStateName: {},
+    serverFwtableName: {},
+    draftFwtableName: {},
     serverSyncConfig: {},
     draft: {},
     draftIds: {},
@@ -42,11 +53,12 @@ export const initialAclDraftState: AclDraftState = {
 };
 
 export type AclDraftAction =
-    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwstateName: string; syncConfig?: SyncConfig }> }
+    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwtableName: FwtableNames; syncConfig?: SyncConfig }> }
     | { type: 'ADD_RULE'; configName: string; rule: Rule }
     | { type: 'UPDATE_RULE_AT_INDEX'; configName: string; index: number; rule: Rule }
     | { type: 'REMOVE_RULES'; configName: string; indices: number[] }
     | { type: 'REPLACE_ALL_RULES'; configName: string; rules: Rule[] }
+    | { type: 'SET_FWTABLE_NAMES'; configName: string; fwtableName: FwtableNames }
     | { type: 'ADD_CONFIG'; configName: string }
     | { type: 'DELETE_CONFIG'; configName: string }
     | { type: 'DISCARD_CONFIG'; configName: string }
@@ -59,7 +71,8 @@ export const aclDraftReducer = (
     switch (action.type) {
         case 'LOAD_ALL_CONFIGS': {
             const newServer: Record<string, Rule[]> = { ...state.server };
-            const newServerFwStateName: Record<string, string> = { ...state.serverFwStateName };
+            const newServerFwtableName: Record<string, FwtableNames> = { ...state.serverFwtableName };
+            const newDraftFwtableName: Record<string, FwtableNames> = { ...state.draftFwtableName };
             const newServerSyncConfig: Record<string, SyncConfig | undefined> = { ...state.serverSyncConfig };
             const newDraft: Record<string, Rule[]> = { ...state.draft };
             const newDraftIds: Record<string, string[]> = { ...state.draftIds };
@@ -67,9 +80,14 @@ export const aclDraftReducer = (
             // Use reference equality to detect whether the user has local edits:
             // if draft[name] === server[name] the config was never mutated locally,
             // so it is safe to fast-forward to the new server snapshot.
-            for (const { name, rules, fwstateName, syncConfig } of action.configs) {
+            for (const { name, rules, fwtableName, syncConfig } of action.configs) {
                 newServer[name] = rules;
-                newServerFwStateName[name] = fwstateName;
+                newServerFwtableName[name] = fwtableName;
+                // Same reference-equality rule for the map names: an edited
+                // draft object is never the server snapshot object.
+                newDraftFwtableName[name] = state.draftFwtableName[name] === state.serverFwtableName[name]
+                    ? fwtableName
+                    : (state.draftFwtableName[name] ?? fwtableName);
                 newServerSyncConfig[name] = syncConfig;
                 if (state.draft[name] === state.server[name]) {
                     newDraft[name] = rules;
@@ -88,11 +106,22 @@ export const aclDraftReducer = (
             return {
                 ...state,
                 server: newServer,
-                serverFwStateName: newServerFwStateName,
+                serverFwtableName: newServerFwtableName,
+                draftFwtableName: newDraftFwtableName,
                 serverSyncConfig: newServerSyncConfig,
                 draft: newDraft,
                 draftIds: newDraftIds,
                 serverConfigs,
+                dirty: nextDirty,
+            };
+        }
+
+        case 'SET_FWTABLE_NAMES': {
+            const nextDirty = new Set(state.dirty);
+            nextDirty.add(action.configName);
+            return {
+                ...state,
+                draftFwtableName: { ...state.draftFwtableName, [action.configName]: action.fwtableName },
                 dirty: nextDirty,
             };
         }
@@ -169,6 +198,7 @@ export const aclDraftReducer = (
                 ...state,
                 draft: { ...state.draft, [action.configName]: [] },
                 draftIds: { ...state.draftIds, [action.configName]: [] },
+                draftFwtableName: { ...state.draftFwtableName, [action.configName]: EMPTY_FWTABLE_NAMES },
                 localOnlyConfigs: [...state.localOnlyConfigs, action.configName],
                 dirty: nextDirty,
             };
@@ -179,12 +209,14 @@ export const aclDraftReducer = (
             if (isLocalOnly) {
                 const { [action.configName]: _d, ...draftRest } = state.draft;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;
+                const { [action.configName]: _df, ...draftFwtableNameRest } = state.draftFwtableName;
                 const nextDirty = new Set(state.dirty);
                 nextDirty.delete(action.configName);
                 return {
                     ...state,
                     draft: draftRest,
                     draftIds: draftIdsRest,
+                    draftFwtableName: draftFwtableNameRest,
                     localOnlyConfigs: state.localOnlyConfigs.filter(n => n !== action.configName),
                     dirty: nextDirty,
                 };
@@ -219,6 +251,10 @@ export const aclDraftReducer = (
                 ...state,
                 draft: { ...state.draft, [action.configName]: serverRules },
                 draftIds: { ...state.draftIds, [action.configName]: serverIds(serverRules) },
+                draftFwtableName: {
+                    ...state.draftFwtableName,
+                    [action.configName]: state.serverFwtableName[action.configName] ?? EMPTY_FWTABLE_NAMES,
+                },
                 pendingDeleteConfigs,
                 dirty: nextDirty,
             };
@@ -236,14 +272,16 @@ export const aclDraftReducer = (
                 // Config was pending deletion (or never had a draft entry) and is now
                 // gone from the server.
                 const { [action.configName]: _s, ...serverRest } = state.server;
-                const { [action.configName]: _f, ...fwStateNameRest } = state.serverFwStateName;
+                const { [action.configName]: _f, ...fwtableNameRest } = state.serverFwtableName;
+                const { [action.configName]: _df, ...draftFwtableNameRest } = state.draftFwtableName;
                 const { [action.configName]: _sc, ...syncConfigRest } = state.serverSyncConfig;
                 const { [action.configName]: _d, ...draftRest } = state.draft;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;
                 return {
                     ...state,
                     server: serverRest,
-                    serverFwStateName: fwStateNameRest,
+                    serverFwtableName: fwtableNameRest,
+                    draftFwtableName: draftFwtableNameRest,
                     serverSyncConfig: syncConfigRest,
                     draft: draftRest,
                     draftIds: draftIdsRest,
@@ -259,7 +297,10 @@ export const aclDraftReducer = (
             return {
                 ...state,
                 server: { ...state.server, [action.configName]: savedRules },
-                serverFwStateName: state.serverFwStateName,
+                serverFwtableName: {
+                    ...state.serverFwtableName,
+                    [action.configName]: state.draftFwtableName[action.configName] ?? EMPTY_FWTABLE_NAMES,
+                },
                 serverConfigs: state.serverConfigs.includes(action.configName)
                     ? state.serverConfigs
                     : [...state.serverConfigs, action.configName],

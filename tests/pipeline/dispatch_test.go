@@ -123,7 +123,7 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 		},
 		Fragment: filter.FragmentAny,
 	}
-	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, nil)
+	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "", nil)
 	require.NoError(t, err)
 	t.Cleanup(handle.Free)
 	require.NoError(t, backend.UpdateModule(handle))

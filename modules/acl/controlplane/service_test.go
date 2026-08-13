@@ -25,7 +25,6 @@ import (
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
-	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
 
 const metricsConcurrencyTestTimeout = 5 * time.Second
@@ -52,6 +51,8 @@ type fakeHandle struct {
 	mu          sync.Mutex
 	name        string
 	rules       []cacl.AclRule
+	fw4MapName  string
+	fw6MapName  string
 	emitConfig  *cfwstate.SyncEmitConfig
 	freeCount   int
 	transferred bool
@@ -100,15 +101,6 @@ func (m *fakeHandle) EmitConfig() *cfwstate.SyncEmitConfig {
 	defer m.mu.Unlock()
 
 	return m.emitConfig
-}
-
-func (m *fakeHandle) SetFwStateConfig(_ ffi.ModuleConfig) {}
-
-func (m *fakeHandle) TransferFwStateConfig(_ ffi.ModuleConfig) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.transferred = true
 }
 
 func (m *fakeHandle) GetInfo() *cacl.AclConfigInfo {
@@ -251,7 +243,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	moduleNames := []string{"acl0", "a", "b", "c", "d"}
 	moduleConfigs := make([]ffi.ModuleConfig, 0, len(moduleNames))
 	for _, name := range moduleNames {
-		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, nil)
+		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, "", "", nil)
 		require.NoError(testingTB, moduleErr)
 		testingTB.Cleanup(moduleConfig.Free)
 		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
@@ -292,6 +284,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 func (m *fakeBackend) NewModule(
 	name string,
 	rules []cacl.AclRule,
+	fw4MapName, fw6MapName string,
 	emitConfig *cfwstate.SyncEmitConfig,
 ) (acl.ModuleHandle, error) {
 	m.mu.Lock()
@@ -301,7 +294,13 @@ func (m *fakeBackend) NewModule(
 		return nil, m.newModuleErr
 	}
 
-	h := &fakeHandle{name: name, rules: rules, emitConfig: emitConfig}
+	h := &fakeHandle{
+		name:       name,
+		rules:      rules,
+		fw4MapName: fw4MapName,
+		fw6MapName: fw6MapName,
+		emitConfig: emitConfig,
+	}
 	m.created = append(m.created, h)
 	return h, nil
 }
@@ -466,6 +465,7 @@ func (m *compileBlockingBackend) entryOrder() []string {
 func (m *compileBlockingBackend) NewModule(
 	name string,
 	rules []cacl.AclRule,
+	fw4MapName, fw6MapName string,
 	emitConfig *cfwstate.SyncEmitConfig,
 ) (acl.ModuleHandle, error) {
 	block := m.recordEntry(name)
@@ -473,7 +473,7 @@ func (m *compileBlockingBackend) NewModule(
 		close(block.entered)
 		<-block.release
 	}
-	return m.fakeBackend.NewModule(name, rules, emitConfig)
+	return m.fakeBackend.NewModule(name, rules, fw4MapName, fw6MapName, emitConfig)
 }
 
 func newTestService(b acl.Backend) *acl.ACLService {
@@ -1495,232 +1495,5 @@ func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
 		_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
 		require.NoError(t, err)
 	}
-	assertAllHandlesFreed(t, backend)
-}
-
-// TestRelinkConfigs_ConcurrentWithUpdateOfSharedName verifies that
-// ACLAdapter.RelinkConfigs racing an UpdateConfig call on one linked name
-// completes without deadlock and refreshes the non-racing b handle safely.
-func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
-	adapter := acl.NewACLAdapter(svc)
-
-	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
-	publish := func(_ []ffi.ModuleConfig) error { return nil }
-
-	for _, name := range []string{"a", "b"} {
-		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-			Name:  name,
-			Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-		})
-		require.NoError(t, err)
-	}
-
-	require.NoError(t, adapter.LinkConfigs([]string{"a", "b"}, fwstateConfig, publish))
-	createdAfterLink := backend.CreatedHandles()
-	var linkedB *fakeHandle
-	for _, handle := range createdAfterLink {
-		if handle.Name() == "b" && handle.FreeCount() == 0 {
-			require.Nil(t, linkedB, "only one b handle may remain owned after linking")
-			linkedB = handle
-		}
-	}
-	require.NotNil(t, linkedB, "LinkConfigs must leave b owned by the adapter")
-
-	var wg errgroup.Group
-	wg.Go(func() error {
-		return adapter.RelinkConfigs(fwstateConfig, publish)
-	})
-	wg.Go(func() error {
-		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-			Name:  "a",
-			Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}},
-		})
-		return err
-	})
-
-	raceDone := make(chan error, 1)
-	go func() { raceDone <- wg.Wait() }()
-
-	select {
-	case err := <-raceDone:
-		require.NoError(t, err)
-	case <-time.After(concurrencyWaitTimeout):
-		t.Fatal("RelinkConfigs racing an UpdateConfig on a shared name deadlocked")
-	}
-
-	var refreshedB *fakeHandle
-	for _, handle := range backend.CreatedHandles() {
-		if handle.Name() == "b" && handle.FreeCount() == 0 {
-			require.Nil(t, refreshedB, "only one b handle may remain owned after relinking")
-			refreshedB = handle
-		}
-	}
-	require.NotNil(t, refreshedB, "RelinkConfigs must leave a refreshed b handle owned")
-	assert.NotSame(t, linkedB, refreshedB)
-	assert.Equal(t, 1, linkedB.FreeCount(), "RelinkConfigs must free the prior b handle once")
-
-	listResp, err := svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
-	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"a", "b"}, listResp.Configs)
-
-	for _, name := range []string{"a", "b"} {
-		_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: name})
-		require.NoError(t, err)
-	}
-	assertAllHandlesFreed(t, backend)
-}
-
-// TestRelinkConfigs_PreservesSyncConfig verifies that relinking a name to a
-// fwstate config keeps the stored sync config both in the service state and
-// on the refreshed handle, so CREATE_STATE keeps emitting after a relink.
-func TestRelinkConfigs_PreservesSyncConfig(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
-	adapter := acl.NewACLAdapter(svc)
-
-	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
-	publish := func(_ []ffi.ModuleConfig) error { return nil }
-
-	syncCfg := validTestSyncConfig()
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name: "a",
-		Rules: []*aclpb.Rule{
-			{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CREATE_STATE}}},
-		},
-		SyncConfig: syncCfg,
-	})
-	require.NoError(t, err)
-
-	require.NoError(t, adapter.RelinkConfigs(fwstateConfig, publish))
-
-	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "a"})
-	require.NoError(t, err)
-	require.NotNil(t, resp.SyncConfig, "a relink must keep the stored sync config")
-	assert.True(t, proto.Equal(syncCfg, resp.SyncConfig))
-
-	var refreshed *fakeHandle
-	for _, handle := range backend.CreatedHandles() {
-		if handle.Name() == "a" && handle.FreeCount() == 0 {
-			require.Nil(t, refreshed, "only one a handle may remain owned after relinking")
-			refreshed = handle
-		}
-	}
-	require.NotNil(t, refreshed, "RelinkConfigs must leave a refreshed a handle owned")
-	require.NotNil(t, refreshed.EmitConfig(), "the refreshed handle must receive the stored emit config")
-}
-
-// TestACLAdapterLinkConfigs_UnknownName verifies that LinkConfigs with an
-// unknown name in the list fails without allocating a backend module for it,
-// and without disturbing an already-live name also present in the list.
-func TestACLAdapterLinkConfigs_UnknownName(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
-	adapter := acl.NewACLAdapter(svc)
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:  "a",
-		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-	})
-	require.NoError(t, err)
-	createdBefore := backend.CreatedHandles()
-	require.Len(t, createdBefore, 1)
-
-	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
-	require.Equal(t, codes.NotFound, status.Code(err))
-
-	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
-	publish := func(_ []ffi.ModuleConfig) error { return nil }
-
-	err = adapter.LinkConfigs([]string{"a", "missing"}, fwstateConfig, publish)
-	require.Error(t, err)
-	createdAfter := backend.CreatedHandles()
-	require.Len(t, createdAfter, len(createdBefore), "an unknown name must not allocate a handle")
-	assert.Equal(t, 0, createdAfter[0].FreeCount(), "the live \"a\" handle must remain owned by the service")
-
-	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
-	require.NoError(t, err)
-	assertAllHandlesFreed(t, backend)
-}
-
-// TestACLAdapterLinkConfigs_TombstonedName verifies retained-name linking
-// failure frees every temporary handle and preserves the live config.
-func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
-	adapter := acl.NewACLAdapter(svc)
-
-	for _, name := range []string{"a", "deleted"} {
-		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-			Name:  name,
-			Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-		})
-		require.NoError(t, err)
-	}
-	createdBefore := backend.CreatedHandles()
-	require.Len(t, createdBefore, 2)
-
-	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "deleted"})
-	require.NoError(t, err)
-	assert.Equal(t, 0, createdBefore[0].FreeCount(), "the live \"a\" handle must remain owned")
-	assert.Equal(t, 1, createdBefore[1].FreeCount(), "the deleted handle must be freed once")
-
-	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
-	publish := func(_ []ffi.ModuleConfig) error { return nil }
-
-	err = adapter.LinkConfigs([]string{"a", "deleted"}, fwstateConfig, publish)
-	require.ErrorContains(t, err, "not found")
-
-	createdAfter := backend.CreatedHandles()
-	require.Len(t, createdAfter, len(createdBefore)+1)
-	temporary := createdAfter[len(createdBefore)]
-	assert.Equal(t, "a", temporary.Name())
-	assert.Equal(t, 1, temporary.FreeCount(), "the temporary live handle must be freed once")
-	assert.Equal(t, 0, createdAfter[0].FreeCount(), "the original live handle must remain owned")
-
-	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
-	require.NoError(t, err)
-	assertAllHandlesFreed(t, backend)
-}
-
-// TestACLAdapterLinkConfigs_DuplicateName verifies that a name repeated in
-// the LinkConfigs list creates and publishes exactly one handle for it,
-// instead of leaking the handle a naive per-occurrence loop would create
-// and then drop.
-func TestACLAdapterLinkConfigs_DuplicateName(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
-	adapter := acl.NewACLAdapter(svc)
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:  "a",
-		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-	})
-	require.NoError(t, err)
-
-	createdBefore := backend.CreatedHandles()
-	require.Len(t, createdBefore, 1)
-
-	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
-
-	var publishedCount int
-	publish := func(linkedFFI []ffi.ModuleConfig) error {
-		publishedCount = len(linkedFFI)
-		return nil
-	}
-
-	err = adapter.LinkConfigs([]string{"a", "a"}, fwstateConfig, publish)
-	require.NoError(t, err)
-
-	createdAfter := backend.CreatedHandles()
-	require.Len(t, createdAfter, len(createdBefore)+1, "a duplicated name must create exactly one handle")
-	assert.Equal(t, 1, publishedCount, "a duplicated name must publish exactly one module config")
-
-	assert.Equal(t, 1, createdAfter[0].FreeCount(), "the superseded handle must be freed once")
-	assert.Equal(t, 0, createdAfter[1].FreeCount(), "the linked handle must remain owned")
-
-	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "a"})
-	require.NoError(t, err)
 	assertAllHandlesFreed(t, backend)
 }

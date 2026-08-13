@@ -105,6 +105,13 @@ modules:
     memory_path: *memory_path
     memory_requirements: 8GB
     endpoint: "[::1]:0"
+  fwstate:
+    instance_id: 0
+    memory_path: *memory_path
+    # The fwstate-map objects linked by acl and fwstate configs allocate
+    # in this module's agent zone.
+    memory_requirements: 8GB
+    endpoint: "[::1]:0"
   blackhole:
     instance_id: 0
     memory_path: *memory_path

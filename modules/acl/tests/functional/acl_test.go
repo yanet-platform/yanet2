@@ -113,7 +113,7 @@ func applyACLRules(
 ) acl.ModuleHandle {
 	tb.Helper()
 
-	handle, err := backend.NewModule(name, rules, nil)
+	handle, err := backend.NewModule(name, rules, "", "", nil)
 	require.NoError(tb, err)
 	tb.Cleanup(handle.Free)
 
@@ -1822,7 +1822,7 @@ func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
 		),
 	}
 
-	_, err := backend.NewModule("reject4", rules, nil)
+	_, err := backend.NewModule("reject4", rules, "", "", nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "non-contiguous")
 }
@@ -1845,7 +1845,7 @@ func TestACL_RejectsNonBiContiguousIPv6Mask(t *testing.T) {
 		),
 	}
 
-	_, err := backend.NewModule("reject6", rules, nil)
+	_, err := backend.NewModule("reject6", rules, "", "", nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bi-contiguous")
 }

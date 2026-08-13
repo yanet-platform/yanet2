@@ -329,6 +329,29 @@ func (m *FWStateMapService) DeleteMap(
 	return &fwstatemappb.DeleteMapResponse{}, nil
 }
 
+// LookupMap returns the handle of the fwstate-map object registered
+// under name for the given family in the internal registry, or nil when
+// no such object exists.
+//
+// The handle is borrowed from the registry: it stays valid until
+// DeleteMap removes the object, and the caller must not free it. The
+// objects controlplane shares the module's process, so sibling services
+// resolve linked map objects through this lookup instead of walking the
+// shared-memory object registry via the C API.
+func (m *FWStateMapService) LookupMap(
+	name string,
+	kind cfwstate.Kind,
+) *cfwstate.MapObjectConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	fwMap, ok := m.maps[name]
+	if !ok || fwMap.config.Kind() != kind {
+		return nil
+	}
+	return fwMap.config
+}
+
 // ListMaps returns the names of all registered fwstate-map objects.
 func (m *FWStateMapService) ListMaps(
 	ctx context.Context,

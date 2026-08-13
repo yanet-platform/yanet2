@@ -114,12 +114,22 @@ func TestFWStateListEntries(t *testing.T) {
 
 func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 
-	// 1. Configure fwstate module with maps and sync settings.
+	// 1. Create the fwstate-map objects the configs below link by name.
+	fw.Run("Create_state_maps", func(fw *framework.TestFramework, t *testing.T) {
+		commands := []string{
+			framework.CLIFWState + " map create --name fwstate0-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWState + " map create --name fwstate0-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
+		}
+		_, err := fw.ExecuteCommands(commands...)
+		require.NoError(t, err, "fwstate-map creation failed")
+	})
+
+	// 2. Configure fwstate module with map links and sync settings.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFWState + " update --name fwstate0" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate0-v4" +
+				" --map-name-v6 fwstate0-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
@@ -130,16 +140,18 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	// 2. Link fwstate to an ACL config so the dataplane module is active.
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
+	// 3. Wire the ACL config to the same state maps so the dataplane
+	// modules are active.
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_fw --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate0 --acl acl_fw",
+			framework.CLIACL + " update --name acl_fw" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate0-v4 --map-name-v6 fwstate0-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
-		require.NoError(t, err, "fwstate link configuration failed")
+		require.NoError(t, err, "acl state map wiring failed")
 	})
 
 	// 3. Inject packets to create firewall state entries.
@@ -474,12 +486,14 @@ func TestFWStateUDPEndianness(t *testing.T) {
 
 func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 
-	// 1. Configure fwstate + ACL (reuse existing config from TestFWStateListEntries)
+	// 1. Create the fwstate-map objects and configure fwstate.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWState + " map create --name fwstate_udp-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWState + " map create --name fwstate_udp-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 			framework.CLIFWState + " update --name fwstate_udp" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate_udp-v4" +
+				" --map-name-v6 fwstate_udp-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
@@ -490,10 +504,11 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_udp --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate_udp --acl acl_udp",
+			framework.CLIACL + " update --name acl_udp" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate_udp-v4 --map-name-v6 fwstate_udp-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_udp,fwstate:fwstate_udp,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
@@ -719,12 +734,14 @@ func TestFWStateExternalSyncFrame(t *testing.T) {
 
 func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 
-	// 1. Configure fwstate module.
+	// 1. Create the fwstate-map objects and configure the fwstate module.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWState + " map create --name fwstate_ext-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWState + " map create --name fwstate_ext-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 			framework.CLIFWState + " update --name fwstate_ext" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate_ext-v4" +
+				" --map-name-v6 fwstate_ext-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
@@ -735,16 +752,17 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	// 2. Link fwstate to ACL with the sync frame allow rule.
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
+	// 2. Wire the ACL config to the same state maps.
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_ext --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate_ext --acl acl_ext",
+			framework.CLIACL + " update --name acl_ext" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate_ext-v4 --map-name-v6 fwstate_ext-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_ext,fwstate:fwstate_ext,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
-		require.NoError(t, err, "fwstate link configuration failed")
+		require.NoError(t, err, "acl state map wiring failed")
 	})
 
 	// 3. Verify no state entries exist initially.

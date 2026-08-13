@@ -69,7 +69,7 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
 
-	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, syncEmitConfig())
+	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
 	require.NoError(t, err)
 	t.Cleanup(handle.Free)
 
@@ -98,17 +98,17 @@ func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 	// arena (the sizes the net6-share tests proved under ASan).
 	h, agent, backend := setupACLHarnessSized(t, []string{"port0"}, 192*datasize.MB, 48*datasize.MB)
 
-	emitHandle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, syncEmitConfig())
+	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
 	require.NoError(t, err)
-	t.Cleanup(emitHandle.Free)
-	require.NoError(t, backend.UpdateModule(emitHandle))
+	t.Cleanup(handle.Free)
+	require.NoError(t, backend.UpdateModule(handle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
 
 	result, err := h.HandlePackets(syncStatePacket(t))
 	require.NoError(t, err)
 	require.Len(t, result.Output, 2, "the emit config must drive a state-sync frame first")
 
-	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, nil)
+	handle, err = backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", nil)
 	require.NoError(t, err)
 	t.Cleanup(handle.Free)
 

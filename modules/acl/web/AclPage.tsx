@@ -1,7 +1,6 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Button, Icon, Label } from '@gravity-ui/uikit';
+import { Button, Icon, Label, TextInput } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
-import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '@yanet/core/components';
 import { useConfigListCache, useListNavigation, usePageContribution } from '@yanet/core/hooks';
 import { useAclDraft } from './useAclDraft';
@@ -34,7 +33,7 @@ const AclPage: React.FC = () => {
         draftRules,
         draftRuleIds,
         serverRules,
-        fwstateName,
+        fwtableNames,
         isDirty,
         anyDirty,
         dispatchDraft,
@@ -52,7 +51,6 @@ const AclPage: React.FC = () => {
     const [deleteConfigTarget, setDeleteConfigTarget] = useState<string | null>(null);
     const [bulkDeleteConfig, setBulkDeleteConfig] = useState<string | null>(null);
     const [bulkDeleteRuleIds, setBulkDeleteRuleIds] = useState<string[]>([]);
-    const navigate = useNavigate();
 
     const {
         currentConfig,
@@ -123,7 +121,7 @@ const AclPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    const currentFwStateName = fwstateName(currentConfig);
+    const currentFwtableNames = fwtableNames(currentConfig);
     const rawRules: Rule[] = draftRules(currentConfig);
     const rawIds: string[] = draftRuleIds(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules, rawIds), [rawRules, rawIds]);
@@ -241,13 +239,6 @@ const AclPage: React.FC = () => {
         updateParams({ [QP_CONFIG]: target || null });
     }, [currentConfig, draftRules, dispatchDraft, updateParams]);
 
-    const handleOpenLinkedFwstate = useCallback((): void => {
-        if (!currentFwStateName) {
-            return;
-        }
-        navigate(`/modules/fwstate?config=${encodeURIComponent(currentFwStateName)}`);
-    }, [currentFwStateName, navigate]);
-
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
         if (currentConfig) {
@@ -285,16 +276,6 @@ const AclPage: React.FC = () => {
                 onSelect: () => setPaused(p => !p),
             });
         }
-        if (currentFwStateName) {
-            list.push({
-                id: '__open_fwstate',
-                icon: '↗',
-                label: 'Open linked FWState',
-                sub: currentFwStateName,
-                keywords: 'fwstate open link navigate',
-                onSelect: () => handleOpenLinkedFwstate(),
-            });
-        }
         list.push({
             id: '__clear_search',
             icon: '✕',
@@ -305,9 +286,9 @@ const AclPage: React.FC = () => {
         return list;
     }, [
         canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet,
-        enabledCounterNames, paused, currentFwStateName,
+        enabledCounterNames, paused,
         openAdd, handleSavePress, handleDiscard, closeDrawer,
-        handleTabSelect, handleOpenDeleteConfig, handleSearchChange, handleOpenLinkedFwstate,
+        handleTabSelect, handleOpenDeleteConfig, handleSearchChange,
     ]);
 
     const rowAdapter = useMemo((): RowAdapter<RuleItem> => ({
@@ -335,6 +316,18 @@ const AclPage: React.FC = () => {
         rawRules.some((rule) => (rule.actions ?? []).some((action) =>
             action.kind === ActionKind.ACTION_KIND_CHECK_STATE || action.kind === ActionKind.ACTION_KIND_CREATE_STATE,
         )), [rawRules]);
+    const hasStateMap = currentFwtableNames.v4 !== '' || currentFwtableNames.v6 !== '';
+
+    const updateFwtableName = useCallback((family: 'v4' | 'v6', value: string): void => {
+        if (!currentConfig) {
+            return;
+        }
+        dispatchDraft({
+            type: 'SET_FWTABLE_NAMES',
+            configName: currentConfig,
+            fwtableName: { ...currentFwtableNames, [family]: value },
+        });
+    }, [currentConfig, currentFwtableNames, dispatchDraft]);
 
     const pageHeader = (
         <CommandPaletteHeader
@@ -399,14 +392,27 @@ const AclPage: React.FC = () => {
                         ) : (
                             <>
                                 <div className="yn-toolbar-bordered">
-                                    {currentFwStateName && (
-                                        <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
-                                            FWState: {currentFwStateName}
-                                        </Button>
+                                    {!hasStateMap && hasStatefulRules && (
+                                        <Label theme="warning">Stateful rules without a state map</Label>
                                     )}
-                                    {!currentFwStateName && hasStatefulRules && (
-                                        <Label theme="warning">Stateful rules without FWState</Label>
-                                    )}
+                                    <TextInput
+                                        size="m"
+                                        style={{ width: 140 }}
+                                        value={currentFwtableNames.v4}
+                                        onUpdate={(v) => updateFwtableName('v4', v)}
+                                        placeholder="state map v4"
+                                        disabled={!currentConfig}
+                                        hasClear
+                                    />
+                                    <TextInput
+                                        size="m"
+                                        style={{ width: 140 }}
+                                        value={currentFwtableNames.v6}
+                                        onUpdate={(v) => updateFwtableName('v6', v)}
+                                        placeholder="state map v6"
+                                        disabled={!currentConfig}
+                                        hasClear
+                                    />
                                     <div style={{ flex: 1 }} />
                                     <div style={{ flexBasis: 320, flexShrink: 1 }}>
                                         <SearchInput

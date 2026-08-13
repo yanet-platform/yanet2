@@ -21,9 +21,12 @@ func NewBackend(agent *ffi.Agent) Backend {
 func (m *backend) NewModule(
 	name string,
 	rules []cacl.AclRule,
+	fw4MapName, fw6MapName string,
 	emitConfig *cfwstate.SyncEmitConfig,
 ) (ModuleHandle, error) {
-	handle, err := cacl.NewModuleConfig(m.agent, name, rules, emitConfig)
+	handle, err := cacl.NewModuleConfig(
+		m.agent, name, rules, fw4MapName, fw6MapName, emitConfig,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}

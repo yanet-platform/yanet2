@@ -3,11 +3,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     Button,
     Icon,
-    Label,
     SegmentedRadioGroup,
     Select,
     Switch,
-    Table,
     Text,
     TextInput,
     Tooltip,
@@ -15,9 +13,9 @@ import {
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useConfigListCache, useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '@yanet/core/hooks';
-import { API, ApiError, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
+import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstate';
-import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
+import { ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '@yanet/core/utils/netip';
 import { formatBytes, toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
@@ -27,8 +25,8 @@ import '@yanet/core/styles/chrome.scss';
 import './fwstate.scss';
 
 interface DraftConfig {
-    mapIndexSize: number;
-    mapExtraBucketCount: number;
+    mapNameV4: string;
+    mapNameV6: string;
     srcAddr: string;
     dstAddrMulticast: string;
     portMulticast: number;
@@ -38,16 +36,7 @@ interface DraftConfig {
     tcp: string;
     udp: string;
     defaultTimeout: string;
-    linkedAcls: string[];
     isLocalOnly: boolean;
-}
-
-interface AclMeta {
-    name: string;
-    fwstateName: string;
-    ruleCount: number | null;
-    isLoaded: boolean;
-    loadFailed: boolean;
 }
 
 const DEFAULT_NS = {
@@ -110,8 +99,8 @@ const isValidNonzeroIPv6Address = (value: string): boolean => {
 const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>> | null, isLocalOnly: boolean): DraftConfig => {
     const sync = config?.sync_config;
     return {
-        mapIndexSize: config?.map_config?.index_size ?? 1_048_576,
-        mapExtraBucketCount: config?.map_config?.extra_bucket_count ?? 1_024,
+        mapNameV4: config?.map_name_v4 ?? '',
+        mapNameV6: config?.map_name_v6 ?? '',
         srcAddr: ipAddressToString(sync?.src_addr as IPAddressWire | undefined),
         dstAddrMulticast: ipAddressToString(sync?.dst_addr_multicast as IPAddressWire | undefined),
         portMulticast: sync?.port_multicast ?? 0,
@@ -121,7 +110,6 @@ const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>
         tcp: formatDurationNsAsSeconds(sync?.tcp ?? DEFAULT_NS.tcp),
         udp: formatDurationNsAsSeconds(sync?.udp ?? DEFAULT_NS.udp),
         defaultTimeout: formatDurationNsAsSeconds(sync?.default ?? DEFAULT_NS.defaultTimeout),
-        linkedAcls: config?.linked_acls ?? [],
         isLocalOnly,
     };
 };
@@ -267,11 +255,10 @@ const getStatesQueryParamUpdates = (params: URLSearchParams, query: StatesQuery)
     return updates;
 };
 
-type StateSubTab = 'configuration' | 'links' | 'states' | 'statistics';
+type StateSubTab = 'configuration' | 'states' | 'statistics';
 
 const STATE_SUB_TABS: Array<{ id: StateSubTab; label: string }> = [
     { id: 'configuration', label: 'Configuration' },
-    { id: 'links', label: 'Links' },
     { id: 'states', label: 'States' },
     { id: 'statistics', label: 'Statistics' },
 ];
@@ -1044,14 +1031,9 @@ const FWStatePage: React.FC = () => {
     const [activeSubTab, setActiveSubTab] = useState<StateSubTab>(() => getStateSubTab(searchParams));
     const [configs, setConfigs] = useState<Record<string, DraftConfig>>({});
     const [dirtyConfigs, setDirtyConfigs] = useState<Set<string>>(new Set());
-    const [aclMeta, setAclMeta] = useState<AclMeta[]>([]);
     const [stats, setStats] = useState<{ ipv4?: MapStats; ipv6?: MapStats } | null>(null);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
-    const [pendingAclLink, setPendingAclLink] = useState<{
-        aclName: string;
-        linkedFwstateName: string | null;
-    } | null>(null);
 
     const configsRef = useRef(configs);
     const dirtyConfigsRef = useRef(dirtyConfigs);
@@ -1068,7 +1050,6 @@ const FWStatePage: React.FC = () => {
     const current = configs[currentName];
     const canLoadStates = Boolean(currentName && current && !current.isLocalOnly);
     const currentIsDirty = dirtyConfigs.has(currentName);
-    const currentHasLinkedAcls = (current?.linkedAcls.length ?? 0) > 0;
     const anyDirty = dirtyConfigs.size > 0;
 
     const { updateParams } = useSearchParamHelpers(setSearchParams);
@@ -1166,61 +1147,9 @@ const FWStatePage: React.FC = () => {
         }
     }, []);
 
-    const loadAclMeta = useCallback(async (): Promise<void> => {
-        try {
-            const aclListResp = await API.acl.listConfigs();
-            const aclNames = aclListResp.configs ?? [];
-            const baseRows = aclNames.map((name) => ({
-                name,
-                fwstateName: '',
-                ruleCount: null,
-                isLoaded: false,
-                loadFailed: false,
-            }));
-            setAclMeta(baseRows);
-
-            const nextAclMeta = await Promise.all(
-                aclNames.map(async (name): Promise<AclMeta | null> => {
-                    try {
-                        const config = await API.acl.showConfig({ name });
-                        const rules = config.rules ?? [];
-                        return {
-                            name,
-                            fwstateName: config.fwstate_name ?? '',
-                            ruleCount: rules.length,
-                            isLoaded: true,
-                            loadFailed: false,
-                        };
-                    } catch (err) {
-                        if (err instanceof ApiError && err.status === 404) {
-                            return null;
-                        }
-                        return {
-                            name,
-                            fwstateName: '',
-                            ruleCount: null,
-                            isLoaded: true,
-                            loadFailed: true,
-                        };
-                    }
-                })
-            );
-            setAclMeta(nextAclMeta.filter((row): row is AclMeta => row !== null));
-        } catch (err) {
-            toaster.error('fwstate-acl-load', 'Failed to load ACL metadata', err);
-            setAclMeta([]);
-        }
-    }, []);
-
     useEffect(() => {
-        let mounted = true;
-        (async () => {
-            await loadAll();
-            if (!mounted) return;
-            await loadAclMeta();
-        })();
-        return () => { mounted = false; };
-    }, [loadAll, loadAclMeta]);
+        void loadAll();
+    }, [loadAll]);
 
     useEffect(() => {
         const requestId = ++statsRequestIdRef.current;
@@ -1241,59 +1170,18 @@ const FWStatePage: React.FC = () => {
         return Array.from(dirtyConfigs).some((dirtyName) => dirtyName !== name);
     }, [dirtyConfigs]);
 
-    const openLinkAclDialog = useCallback((aclName: string): void => {
-        const aclMetaItem = aclMeta.find((item) => item.name === aclName);
-        setPendingAclLink({
-            aclName,
-            linkedFwstateName: aclMetaItem?.fwstateName ? aclMetaItem.fwstateName : null,
-        });
-    }, [aclMeta]);
+    const { configs: cachedConfigs, write: writeCache } = useConfigListCache('fwstate');
 
-    const handleLinkAcl = useCallback(async (aclName: string): Promise<void> => {
-        if (!currentName) return;
-        if (dirtyConfigs.has(currentName)) {
-            toaster.error('fwstate-dirty-link-current', 'Save or discard this config before linking ACLs.');
-            return;
-        }
-        if (hasOtherDirtyConfigs(currentName)) {
-            toaster.error('fwstate-dirty-link', 'Link blocked: there are unsaved changes in other configs.');
-            return;
-        }
-        const aclNames = new Set(current?.linkedAcls ?? []);
-        aclNames.add(aclName);
-        try {
-            await API.fwstate.linkFWState({ fwstate_name: currentName, acl_config_names: Array.from(aclNames) });
-            await Promise.all([loadAll({ preserveDirty: true }), loadAclMeta()]);
-        } catch (err) {
-            toaster.error('fwstate-link-error', 'Failed to link ACL config', err);
-        }
-    }, [current?.linkedAcls, currentName, dirtyConfigs, hasOtherDirtyConfigs, loadAclMeta, loadAll]);
-
-    const confirmLinkAcl = useCallback(async (): Promise<void> => {
-        if (!pendingAclLink) return;
-        const aclName = pendingAclLink.aclName;
-        setPendingAclLink(null);
-        await handleLinkAcl(aclName);
-    }, [handleLinkAcl, pendingAclLink]);
-
-    const counts = useMemo(() => {
-        const m = new Map<string, number>();
-        configNames.forEach((name) => { m.set(name, configs[name]?.linkedAcls.length ?? 0); });
-        return m;
-    }, [configNames, configs]);
-
-    const { configs: cachedConfigs, counts: cachedCounts, write: writeCache } = useConfigListCache('fwstate');
-
-    // Cache config names and linked-ACL counts so the config tab strip renders
-    // instantly on remount instead of blanking while ListConfigs refetches.
+    // Cache config names so the config tab strip renders instantly on
+    // remount instead of blanking while ListConfigs refetches.
     useEffect(() => {
         if (!loading && configNames.length > 0) {
             writeCache({
                 configs: configNames,
-                counts: Object.fromEntries(configNames.map((name) => [name, configs[name]?.linkedAcls.length ?? 0])),
+                counts: {},
             });
         }
-    }, [loading, configNames, configs, writeCache]);
+    }, [loading, configNames, writeCache]);
 
     const updateCurrent = (patch: Partial<DraftConfig>): void => {
         if (!currentName) return;
@@ -1304,7 +1192,7 @@ const FWStatePage: React.FC = () => {
     const validateCurrent = (): boolean => {
         if (!current) return false;
         const durationFields = [current.tcpSynAck, current.tcpSyn, current.tcpFin, current.tcp, current.udp, current.defaultTimeout];
-        if (current.mapIndexSize < 0 || current.mapExtraBucketCount < 0) return false;
+        if (!current.mapNameV4.trim() || !current.mapNameV6.trim()) return false;
         if (current.portMulticast < 0 || current.portMulticast > 65535) return false;
         if (!isValidNonzeroIPv6Address(current.srcAddr)) return false;
         if (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0) return false;
@@ -1337,10 +1225,8 @@ const FWStatePage: React.FC = () => {
         try {
             await API.fwstate.updateConfig({
                 name: requestName,
-                map_config: {
-                    index_size: current.mapIndexSize,
-                    extra_bucket_count: current.mapExtraBucketCount,
-                },
+                map_name_v4: current.mapNameV4.trim(),
+                map_name_v6: current.mapNameV6.trim(),
                 sync_config: syncConfig,
             });
             toaster.success('fwstate-save', `Config "${requestName}" saved.`);
@@ -1356,7 +1242,7 @@ const FWStatePage: React.FC = () => {
     };
 
     const handleDeleteConfig = async (): Promise<void> => {
-        if (!currentName || (current?.linkedAcls.length ?? 0) > 0) return;
+        if (!currentName) return;
         if (hasOtherDirtyConfigs(currentName)) {
             toaster.error('fwstate-dirty-delete', 'Delete blocked: there are unsaved changes in other configs.');
             return;
@@ -1414,7 +1300,7 @@ const FWStatePage: React.FC = () => {
                 onSelect: () => { void handleSave(); },
             });
         }
-        if (current && !currentHasLinkedAcls) {
+        if (current) {
             list.push({
                 id: '__delete_config',
                 icon: '✕',
@@ -1478,7 +1364,6 @@ const FWStatePage: React.FC = () => {
         current,
         currentName,
         currentIsDirty,
-        currentHasLinkedAcls,
         configNames,
         dirtyConfigs,
         statesQuery,
@@ -1486,7 +1371,6 @@ const FWStatePage: React.FC = () => {
         updateActiveConfig,
         updateActiveSubTab,
         updateStatesQuery,
-        navigate,
         handleOpenAcl,
     ]);
 
@@ -1495,8 +1379,6 @@ const FWStatePage: React.FC = () => {
         placeholder: 'Search FWState actions…',
     }), [commands]);
     usePageContribution(contribution);
-
-    const aclRows = useMemo(() => aclMeta.map((row) => ({ ...row, isLinkedHere: row.fwstateName === currentName })), [aclMeta, currentName]);
 
     const statsRows = useMemo(() => {
         const row = (label: string, getter: (s: MapStats | undefined) => string | number) => ({
@@ -1521,17 +1403,6 @@ const FWStatePage: React.FC = () => {
     const totalStatesV6 = normalizeUnsignedIntToNumber(stats?.ipv6?.total_elements);
     const totalStates = totalStatesV4 + totalStatesV6;
 
-    const aclLinkDialogTitle = pendingAclLink
-        ? pendingAclLink.linkedFwstateName && pendingAclLink.linkedFwstateName !== currentName
-            ? 'Move ACL config'
-            : 'Link ACL config'
-        : '';
-    const aclLinkDialogMessage = pendingAclLink
-        ? pendingAclLink.linkedFwstateName && pendingAclLink.linkedFwstateName !== currentName
-            ? `Move ACL "${pendingAclLink.aclName}" from "${pendingAclLink.linkedFwstateName}" to "${currentName}".`
-            : `Link ACL "${pendingAclLink.aclName}" to FWState "${currentName}".`
-        : '';
-
     const subTabHeaderAction = activeSubTab === 'configuration' ? (
         <>
             <button
@@ -1549,7 +1420,7 @@ const FWStatePage: React.FC = () => {
                 className="yn-table-action-btn yn-table-action-btn--delete"
                 title="Delete config"
                 aria-label="Delete config"
-                disabled={!current || currentHasLinkedAcls}
+                disabled={!current}
                 onClick={() => setDeleteConfigOpen(true)}
             >
                 <TrashIcon />
@@ -1571,9 +1442,8 @@ const FWStatePage: React.FC = () => {
     );
 
     // While a warm cache exists, keep the config tab strip mounted from cached
-    // names and counts so it does not blink on remount; only the body reloads.
+    // names so it does not blink on remount; only the body reloads.
     const tabConfigs = loading ? cachedConfigs : configNames;
-    const tabCounts = loading ? cachedCounts : counts;
 
     if (loading && cachedConfigs.length === 0) {
         return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
@@ -1588,18 +1458,32 @@ const FWStatePage: React.FC = () => {
                 <div className="fwstate-settings-top-row">
                     <div className="fwstate-config-section">
                         <div className="fwstate-config-section__head">
-                            <Text variant="subheader-2">Map sizing</Text>
+                            <Text variant="subheader-2">State maps</Text>
                         </div>
                         <div className="fwstate-field-grid fwstate-field-grid--map">
                             <label className="fwstate-field">
-                                <Text variant="caption-2" color="secondary">Hash index slots</Text>
-                                <TextInput type="number" value={String(current.mapIndexSize)} onUpdate={(v) => updateCurrent({ mapIndexSize: Number(v) })} />
+                                <Text variant="caption-2" color="secondary">IPv4 map name</Text>
+                                <TextInput
+                                    value={current.mapNameV4}
+                                    onUpdate={(mapNameV4) => updateCurrent({ mapNameV4 })}
+                                    error={!current.mapNameV4.trim() ? 'map_name_v4 is required' : undefined}
+                                    placeholder="fwstate-map-v4"
+                                />
                             </label>
                             <label className="fwstate-field">
-                                <Text variant="caption-2" color="secondary">Overflow buckets</Text>
-                                <TextInput type="number" value={String(current.mapExtraBucketCount)} onUpdate={(v) => updateCurrent({ mapExtraBucketCount: Number(v) })} />
+                                <Text variant="caption-2" color="secondary">IPv6 map name</Text>
+                                <TextInput
+                                    value={current.mapNameV6}
+                                    onUpdate={(mapNameV6) => updateCurrent({ mapNameV6 })}
+                                    error={!current.mapNameV6.trim() ? 'map_name_v6 is required' : undefined}
+                                    placeholder="fwstate-map-v6"
+                                />
                             </label>
                         </div>
+                        <p className="fws-link-note">
+                            The state tables live in standalone fwstate-map objects created and sized by the
+                            separate fwstate-map service. Reference an existing v4 and v6 map by name here.
+                        </p>
                     </div>
 
                     <div className="fwstate-config-section">
@@ -1664,44 +1548,6 @@ const FWStatePage: React.FC = () => {
             </div>
         );
     })();
-
-    const linksTab = current && (
-        <section className="fwstate-acl-panel">
-            <div className="fwstate-table-shell fwstate-acl-table-shell">
-                <Table
-                    data={aclRows}
-                    columns={[
-                        { id: 'name', name: 'ACL config', template: (row) => <span className="fwstate-table-cell">{row.name}</span> },
-                        { id: 'fwstate', name: 'Current FWState', template: (row) => row.fwstateName ? <Label theme={row.isLinkedHere ? 'success' : 'warning'} size="s">{row.fwstateName}</Label> : <Label theme="unknown" size="s">{row.isLoaded ? 'unlinked' : 'Loading…'}</Label> },
-                        { id: 'rules', name: 'Rules', template: (row) => <span className="fwstate-mono">{row.ruleCount === null ? (row.isLoaded ? (row.loadFailed ? '—' : 'Loading…') : 'Loading…') : row.ruleCount}</span> },
-                        {
-                            id: 'action',
-                            name: 'Action',
-                            template: (row) => {
-                                if (row.isLinkedHere) return <Button size="s" view="outlined-success" onClick={() => handleOpenAcl(row.name)}>Linked: {row.name}</Button>;
-                                if (!row.isLoaded) return <Button size="s" view="outlined" disabled>Loading…</Button>;
-                                if (row.loadFailed) return <Text color="secondary" className="fwstate-table-cell">Unavailable</Text>;
-                                return (
-                                    <Button
-                                        size="s"
-                                        view="outlined"
-                                        className="fwstate-acl-link-btn"
-                                        onClick={() => openLinkAclDialog(row.name)}
-                                    >
-                                        {row.fwstateName ? 'Move here' : 'Link'}
-                                    </Button>
-                                );
-                            },
-                        },
-                    ]}
-                />
-            </div>
-            <p className="fws-link-note">
-                Linking an ACL routes its <code>+state</code> / <code>?state</code> rule actions into this FWState map.
-                One FWState may back multiple ACL configs.
-            </p>
-        </section>
-    );
 
     const statisticsTab = current && (
         <section className="fws-stats-section">
@@ -1774,7 +1620,6 @@ const FWStatePage: React.FC = () => {
                                 <ConfigTabStrip
                                     configs={tabConfigs}
                                     activeConfig={currentName}
-                                    counts={tabCounts}
                                     dirtyConfigs={dirtyConfigs}
                                     onSelect={updateActiveConfig}
                                     onAddConfig={() => setAddConfigOpen(true)}
@@ -1818,7 +1663,6 @@ const FWStatePage: React.FC = () => {
                                             </div>
                                         </div>
                                         {activeSubTab === 'configuration' && configurationTab}
-                                        {activeSubTab === 'links' && linksTab}
                                         {activeSubTab === 'states' && (
                                             <StatesTabBody
                                                 key={currentName}
@@ -1857,19 +1701,6 @@ const FWStatePage: React.FC = () => {
                 configName={currentName}
                 onClose={() => setDeleteConfigOpen(false)}
                 onConfirm={handleDeleteConfig}
-            />
-
-            <ConfirmDialog
-                open={pendingAclLink !== null}
-                onClose={() => setPendingAclLink(null)}
-                onConfirm={confirmLinkAcl}
-                title={aclLinkDialogTitle}
-                message={aclLinkDialogMessage}
-                secondaryMessage={pendingAclLink?.linkedFwstateName && pendingAclLink.linkedFwstateName !== currentName
-                    ? `This will detach ACL "${pendingAclLink.aclName}" from FWState "${pendingAclLink.linkedFwstateName}".`
-                    : undefined}
-                confirmText={pendingAclLink?.linkedFwstateName && pendingAclLink.linkedFwstateName !== currentName ? 'Move here' : 'Link'}
-                cancelText="Cancel"
             />
         </PageLayout>
     );

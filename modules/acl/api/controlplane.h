@@ -56,7 +56,11 @@ struct acl_rule {
 // afterwards.
 //
 // rules and rule_count describe the ruleset to compile (rule_count may be
-// zero). emit_config is copied by value when non-NULL and drives the
+// zero). fw4_map_name and fw6_map_name name standalone fwstate_map_v4 /
+// fwstate_map_v6 objects whose fwtables the module uses for state
+// lookups. Either may be NULL or empty, in which case no link is
+// declared and CHECK_STATE finds no state for that family.
+// emit_config is copied by value when non-NULL and drives the
 // CREATE_STATE sync frames; NULL leaves the emission config zeroed.
 //
 // Returns NULL with err set on failure; nothing is left allocated.
@@ -66,18 +70,10 @@ acl_module_config_init(
 	const char *name,
 	struct acl_rule *rules,
 	uint32_t rule_count,
+	const char *fw4_map_name,
+	const char *fw6_map_name,
 	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
-);
-
-void
-acl_module_config_set_fwstate_config(
-	struct cp_module *cp_module, struct cp_module *fwstate_cp_module
-);
-
-void
-acl_module_config_transfer_fwstate_config(
-	struct cp_module *new_cp_module, struct cp_module *old_cp_module
 );
 
 struct acl_config_info {

@@ -3,24 +3,8 @@ package fwstatepb
 import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	objfwstate "github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 )
-
-func (m *MapConfig) ToC() cfwstate.MapConfig {
-	if m == nil {
-		return cfwstate.MapConfig{}
-	}
-	return cfwstate.MapConfig{
-		IndexSize:        m.GetIndexSize(),
-		ExtraBucketCount: m.GetExtraBucketCount(),
-	}
-}
-
-func FromCMapConfig(cfg cfwstate.MapConfig) *MapConfig {
-	return &MapConfig{
-		IndexSize:        cfg.IndexSize,
-		ExtraBucketCount: cfg.ExtraBucketCount,
-	}
-}
 
 func (m *SyncConfig) ToC() cfwstate.SyncConfig {
 	if m == nil {
@@ -98,7 +82,7 @@ func FromCSyncConfig(cfg cfwstate.SyncConfig) *SyncConfig {
 	}
 }
 
-func FromCursorKey(key cfwstate.StateKey) *FwStateKey {
+func FromCursorKey(key objfwstate.StateKey) *FwStateKey {
 	return &FwStateKey{
 		Proto:   key.Proto,
 		SrcPort: key.SrcPort,
@@ -108,7 +92,7 @@ func FromCursorKey(key cfwstate.StateKey) *FwStateKey {
 	}
 }
 
-func FromCursorValue(value cfwstate.StateValue) *FwStateValue {
+func FromCursorValue(value objfwstate.StateValue) *FwStateValue {
 	return &FwStateValue{
 		External:        value.External,
 		Flags:           value.Flags,
@@ -119,7 +103,7 @@ func FromCursorValue(value cfwstate.StateValue) *FwStateValue {
 	}
 }
 
-func FromCursorEntry(entry cfwstate.CursorEntry) *FwStateEntry {
+func FromCursorEntry(entry objfwstate.CursorEntry) *FwStateEntry {
 	return &FwStateEntry{
 		Key:     FromCursorKey(entry.Key),
 		Value:   FromCursorValue(entry.Value),

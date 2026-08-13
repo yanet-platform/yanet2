@@ -5,7 +5,7 @@ use core::{
 use std::collections::HashMap;
 
 use args::{
-    DeleteCmd, DirectionArg, EntriesCmd, Family, LinkCmd, MapCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd,
+    DeleteCmd, DirectionArg, EntriesCmd, Family, MapCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd,
 };
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
@@ -14,9 +14,8 @@ use fwstatemappb::{
     CreateMapRequest, DeleteMapRequest, ListMapsRequest, fw_state_map_service_client::FwStateMapServiceClient,
 };
 use fwstatepb::{
-    DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
-    ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
-    metrics_service_client::MetricsServiceClient,
+    DeleteConfigRequest, Direction, GetStatsRequest, ListConfigsRequest, ListEntriesRequest, ShowConfigRequest,
+    UpdateConfigRequest, fw_state_service_client::FwStateServiceClient, metrics_service_client::MetricsServiceClient,
 };
 use tabled::Tabled;
 use tokio::sync::mpsc;
@@ -225,21 +224,21 @@ impl FWStateService {
             ok_if_not_found: true,
         };
         let current_response = self.service.client().show_config(current_request).await;
-        let (mut map_config, mut sync_config) = match current_response {
+        let (mut map_name_v4, mut map_name_v6, mut sync_config) = match current_response {
             Ok(resp) => {
                 let msg = resp.into_inner();
-                (msg.map_config.unwrap_or_default(), msg.sync_config.unwrap_or_default())
+                (msg.map_name_v4, msg.map_name_v6, msg.sync_config.unwrap_or_default())
             }
-            _ => (Default::default(), Default::default()),
+            _ => (String::new(), String::new(), Default::default()),
         };
 
-        // Update map config fields if provided
-        if let Some(index_size) = cmd.index_size {
-            map_config.index_size = index_size;
+        // Update the linked map object names if provided
+        if let Some(map_name) = cmd.map_name_v4 {
+            map_name_v4 = map_name;
         }
 
-        if let Some(extra_bucket_count) = cmd.extra_bucket_count {
-            map_config.extra_bucket_count = extra_bucket_count;
+        if let Some(map_name) = cmd.map_name_v6 {
+            map_name_v6 = map_name;
         }
 
         // Update only the fields that were provided
@@ -287,7 +286,8 @@ impl FWStateService {
 
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            map_config: Some(map_config),
+            map_name_v4,
+            map_name_v6,
             sync_config: Some(sync_config),
         };
         log::trace!("UpdateConfigRequest: {request:?}");
@@ -298,30 +298,6 @@ impl FWStateService {
             .map_err(self.service.status("update"))?;
 
         output::success("update", format_args!("Updated fwstate config {}.", cmd.config_name));
-
-        Ok(())
-    }
-
-    pub async fn link_fwstate(&mut self, cmd: LinkCmd) -> Result<(), Error> {
-        let request = LinkFwStateRequest {
-            fwstate_name: cmd.config_name.clone(),
-            acl_config_names: cmd.acl_configs.clone(),
-        };
-        log::trace!("LinkFwStateRequest: {request:?}");
-        self.service
-            .client()
-            .link_fw_state(request)
-            .await
-            .map_err(self.service.status("link"))?;
-
-        output::success(
-            "link",
-            format_args!(
-                "Linked fwstate {} to ACL config(s) {}.",
-                cmd.config_name,
-                cmd.acl_configs.join(", ")
-            ),
-        );
 
         Ok(())
     }
@@ -888,7 +864,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
         ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
         ModeCmd::Entries(cmd) => service.list_entries(cmd, format).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,

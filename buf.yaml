@@ -32,3 +32,6 @@ breaking:
   ignore_only:
     FIELD_SAME_CARDINALITY:
       - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto
+    # TODO: drop once main carries the fwstate-map object cutover.
+    - modules/acl/controlplane/aclpb/v1/acl.proto
+    - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto

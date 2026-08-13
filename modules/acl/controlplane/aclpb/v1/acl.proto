@@ -33,12 +33,26 @@ service MetricsService {
 message UpdateConfigRequest {
   string name = 1;
   repeated Rule rules = 2;
+  // fwtable_name_v4 references a standalone fwstate-map (kind V4) whose
+  // fwtable this ACL config uses for state lookups.
+  //
+  // A non-empty name always declares a link, whatever the rules use, and
+  // must resolve to a registered object when the config is wired into a
+  // pipeline — an unresolvable name fails the whole config apply. An empty
+  // name declares no link, and state lookups find no state for that
+  // family.
+  string fwtable_name_v4 = 3;
+  // fwtable_name_v6 references a standalone fwstate-map (kind V6) whose
+  // fwtable this ACL config uses for state lookups.
+  //
+  // Same linking contract as fwtable_name_v4.
+  string fwtable_name_v6 = 4;
   // sync_config carries the emission-side synchronization parameters the
   // ACL dataplane uses for CREATE_STATE sync packets.
   //
   // Required when any rule uses ACTION_KIND_CREATE_STATE; otherwise
   // optional.
-  SyncConfig sync_config = 3;
+  SyncConfig sync_config = 5;
 }
 
 message UpdateConfigResponse {}
@@ -48,10 +62,15 @@ message ShowConfigRequest { string name = 1; }
 message ShowConfigResponse {
   string name = 1;
   repeated Rule rules = 2;
-  string fwstate_name = 3;
+  // fwtable_name_v4 is the standalone fwstate-map (kind V4) this ACL config
+  // references.
+  string fwtable_name_v4 = 4;
+  // fwtable_name_v6 is the standalone fwstate-map (kind V6) this ACL config
+  // references.
+  string fwtable_name_v6 = 5;
   // sync_config is the emission-side synchronization parameters this ACL
   // config uses, absent when the config carries none.
-  SyncConfig sync_config = 4;
+  SyncConfig sync_config = 6;
 }
 
 message Rule {

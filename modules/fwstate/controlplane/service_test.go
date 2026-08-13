@@ -130,3 +130,50 @@ func TestValidateSyncConfigMulticastRequired(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// TestUpdateConfigRequiresMapNames checks that a request without both map
+// object names is rejected with InvalidArgument naming the missing field,
+// before any backend or agent state is touched.
+func TestUpdateConfigRequiresMapNames(t *testing.T) {
+	syncConfig := &fwstatepb.SyncConfig{
+		SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		PortMulticast:    9999,
+	}
+
+	cases := []struct {
+		name       string
+		request    *fwstatepb.UpdateConfigRequest
+		wantDetail string
+	}{
+		{
+			name: "missing map_name_v4",
+			request: &fwstatepb.UpdateConfigRequest{
+				Name:       "cfg",
+				MapNameV6:  "maps-v6",
+				SyncConfig: syncConfig,
+			},
+			wantDetail: "map_name_v4",
+		},
+		{
+			name: "missing map_name_v6",
+			request: &fwstatepb.UpdateConfigRequest{
+				Name:       "cfg",
+				MapNameV4:  "maps-v4",
+				SyncConfig: syncConfig,
+			},
+			wantDetail: "map_name_v6",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := NewFWStateService(nil)
+
+			_, err := service.UpdateConfig(t.Context(), tc.request)
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Contains(t, err.Error(), tc.wantDetail)
+		})
+	}
+}

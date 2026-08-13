@@ -136,6 +136,9 @@ modules:
   acl:
     instance_id: 0
     memory_requirements: 16MB
+  fwstate:
+    instance_id: 0
+    memory_requirements: 16MB
   mirror:
     instance_id: 0
     memory_requirements: 8MB
@@ -511,6 +514,7 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 		return fmt.Errorf("failed to prepare local storage: %w", err)
 	}
 	if err := m.configure(prepFW); err != nil {
+		m.dumpMemoryDiagnostics(prepFW)
 		return fmt.Errorf("failed to configure baseline: %w", err)
 	}
 	if err := prepFW.SaveSnapshotKeepUnmounted(baselineSnapshotName); err != nil {
@@ -578,12 +582,12 @@ func (m *baselineSetup) dumpMemoryDiagnostics(fw *TestFramework) {
 		"echo '=== DATAPLANE LOG ===' && cat /tmp/yanet/logs/yanet-dataplane.log",
 		"echo '=== CONTROLPLANE LOG ===' && cat /tmp/yanet/logs/yanet-controlplane.log",
 	}
-	outputs, err := fw.ExecuteCommands(diagCmds...)
-	if err != nil {
-		m.log.Errorf("MEMORY DIAG: error collecting diagnostics: %v", err)
-		return
-	}
+	outputs, errs := fw.ExecuteCommandsSeparately(diagCmds...)
 	for idx, cmd := range diagCmds {
+		if errs[idx] != nil {
+			m.log.Errorf("MEMORY DIAG: %s failed: %v", cmd, errs[idx])
+			continue
+		}
 		m.log.Infof("MEMORY DIAG: %s\n%s\n---", cmd, outputs[idx])
 	}
 }

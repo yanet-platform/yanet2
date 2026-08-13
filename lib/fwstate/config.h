@@ -2,9 +2,6 @@
 
 #include "common/network.h"
 
-// Forward declaration to avoid circular dependency
-typedef struct fwmap fwmap_t;
-
 // Max TTL (ns) storable in fw_state_value::last_ttl.
 #define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
 
@@ -74,9 +71,4 @@ struct fwstate_sync_emit_config {
 	 * Same convention as port_multicast - converted by the controlplane.
 	 */
 	uint16_t port_unicast;
-};
-
-struct fwstate_config {
-	fwmap_t *fw4state; // IPv4 state map
-	fwmap_t *fw6state; // IPv6 state map
 };

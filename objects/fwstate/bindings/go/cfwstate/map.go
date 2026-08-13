@@ -137,6 +137,12 @@ func (m *MapObjectConfig) Generation() uint64 {
 	return uint64(C.fwstate_map_v4_object_generation(m.ptr))
 }
 
+// CPObjectPtr returns the raw cp_object pointer, for CGO consumers such
+// as tests that need to reach the object's fwtable directly.
+func (m *MapObjectConfig) CPObjectPtr() unsafe.Pointer {
+	return unsafe.Pointer(m.ptr)
+}
+
 // NewMapObjectConfig creates a new standalone fwstate-map object for the
 // given address family.
 //

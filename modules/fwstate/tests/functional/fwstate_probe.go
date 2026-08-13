@@ -1,31 +1,28 @@
 package fwstate_test
 
-//#cgo CFLAGS: -I../../../../
-//#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
+//#cgo CFLAGS: -I../../../../ -I../../../../lib
 //#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
 //
 //#include <string.h>
 //
 //#include "lib/fwstate/fwmap.h"
 //#include "lib/fwstate/types.h"
-//#include "modules/fwstate/api/fwstate_cp.h"
 //
 // // yanet_test_fwstate_insert_ipv6 inserts one synthetic TCP state entry
-// // directly into the module's live IPv6 map, using the same insert path
-// // the dataplane's own sync-frame handler uses, but without going through
-// // a worker round: this test package never drives packet processing, so a
-// // second publish would otherwise block forever waiting for a round
-// // nothing here drives.
+// // directly into a map object's live IPv6 layer, using the same insert
+// // path the dataplane's own sync-frame handler uses, but without going
+// // through a worker round: this test package never drives packet
+// // processing, so a second publish after one has run would otherwise
+// // block forever waiting for a round nothing here drives.
 // static int
 // yanet_test_fwstate_insert_ipv6(
-// 	struct cp_module *cp_module,
+// 	fwmap_t *map,
 // 	uint64_t now,
 // 	const uint8_t *src_addr,
 // 	const uint8_t *dst_addr,
 // 	uint16_t src_port,
 // 	uint16_t dst_port
 // ) {
-// 	fwmap_t *map = fwstate_config_resolve_map(cp_module, true, 0);
 // 	if (map == NULL) {
 // 		return -1;
 // 	}
@@ -56,22 +53,22 @@ import (
 )
 
 // errInsertFailed reports that the underlying insert call could not
-// resolve the target map: the config has no IPv6 maps yet.
+// resolve the target map: the map object has no IPv6 layer yet.
 var errInsertFailed = errors.New("fwstate: failed to resolve ipv6 map for insert")
 
 // insertFWStateIPv6Entry inserts one synthetic TCP state entry directly
-// into the given module's live IPv6 map.
+// into the given map object's active IPv6 layer.
 //
-// The pointer must be the unsafe.Pointer a *cfwstate.ModuleConfig exposes
-// via AsFFIModule().AsRawPtr(). The addresses must each be 16 bytes.
+// The pointer must be the fwmap handle a *objfwstate.MapObjectConfig
+// exposes via ResolveMap(0). The addresses must each be 16 bytes.
 func insertFWStateIPv6Entry(
-	modPtr unsafe.Pointer,
+	fwmapPtr unsafe.Pointer,
 	now uint64,
 	srcAddr, dstAddr [16]byte,
 	srcPort, dstPort uint16,
 ) error {
 	rc := C.yanet_test_fwstate_insert_ipv6(
-		(*C.struct_cp_module)(modPtr),
+		(*C.fwmap_t)(fwmapPtr),
 		C.uint64_t(now),
 		(*C.uint8_t)(&srcAddr[0]),
 		(*C.uint8_t)(&dstAddr[0]),

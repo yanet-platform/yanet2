@@ -1,11 +1,6 @@
 import { createService, createStreamingService, type CallOptions, type StreamCallbacks } from './client';
 import type { IPAddressWire } from '../utils/netip';
 
-export interface MapConfig {
-    index_size?: number;
-    extra_bucket_count?: number;
-}
-
 export interface SyncConfig {
     src_addr?: IPAddressWire;
     dst_addr_multicast?: IPAddressWire;
@@ -20,18 +15,13 @@ export interface SyncConfig {
 
 export interface ShowConfigResponse {
     name?: string;
-    linked_acls?: string[];
-    map_config?: MapConfig;
+    map_name_v4?: string;
+    map_name_v6?: string;
     sync_config?: SyncConfig;
 }
 
 import type { ListConfigsResponse } from './shared';
 export type { ListConfigsResponse };
-
-export interface LinkFWStateRequest {
-    fwstate_name?: string;
-    acl_config_names?: string[];
-}
 
 export interface MapStats {
     index_size?: number;
@@ -102,7 +92,8 @@ export interface ShowConfigRequest {
 
 export interface UpdateConfigRequest {
     name?: string;
-    map_config?: MapConfig;
+    map_name_v4?: string;
+    map_name_v6?: string;
     sync_config?: SyncConfig;
 }
 
@@ -129,9 +120,6 @@ export const fwstate = {
 
     deleteConfig: (request: DeleteConfigRequest, options?: CallOptions): Promise<void> =>
         fwStateService.callWithBody<void>('DeleteConfig', request, options),
-
-    linkFWState: (request: LinkFWStateRequest, options?: CallOptions): Promise<void> =>
-        fwStateService.callWithBody<void>('LinkFWState', request, options),
 
     getStats: (request: GetStatsRequest, options?: CallOptions): Promise<GetStatsResponse> =>
         fwStateService.callWithBody<GetStatsResponse>('GetStats', request, options),

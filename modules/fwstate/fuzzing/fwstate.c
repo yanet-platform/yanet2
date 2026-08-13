@@ -15,6 +15,7 @@
 #include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
+#include "lib/fwstate/fwtable.h"
 #include "lib/fwstate/types.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/dataplane/dataplane.h"
@@ -124,7 +125,8 @@ fwstate_test_config(struct cp_module **cp_module) {
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 
-	// Create fw4state and fw6state maps
+	// Create local fwtables standing in for the linked map objects: one
+	// layer each, grown with the fwtable control-plane helper.
 	fwmap_config_t fw4config = {
 		.key_size = sizeof(struct fw4_state_key),
 		.value_size = sizeof(struct fw_state_value),
@@ -139,12 +141,18 @@ fwstate_test_config(struct cp_module **cp_module) {
 		.index_size = 1024,
 		.extra_bucket_count = 64,
 	};
-	fwmap_t *fw4state =
-		fwmap_new(&fw4config, &config->cp_module.memory_context);
-	if (!fw4state) {
+	fwtable_t *fw4table =
+		memory_balloc(&fuzz_params.mctx, sizeof(fwtable_t));
+	if (!fw4table) {
 		return -ENOMEM;
 	}
-	SET_OFFSET_OF(&config->cfg.fw4state, fw4state);
+	memset(fw4table, 0, sizeof(fwtable_t));
+	if (fwtable_insert_layer_cp(
+		    fw4table, &fw4config, &config->cp_module.memory_context
+	    )) {
+		return -ENOMEM;
+	}
+	SET_OFFSET_OF(&config->fw4table, fw4table);
 
 	fwmap_config_t fw6config = {
 		.key_size = sizeof(struct fw6_state_key),
@@ -160,12 +168,18 @@ fwstate_test_config(struct cp_module **cp_module) {
 		.index_size = 1024,
 		.extra_bucket_count = 64,
 	};
-	fwmap_t *fw6state =
-		fwmap_new(&fw6config, &config->cp_module.memory_context);
-	if (!fw6state) {
+	fwtable_t *fw6table =
+		memory_balloc(&fuzz_params.mctx, sizeof(fwtable_t));
+	if (!fw6table) {
 		return -ENOMEM;
 	}
-	SET_OFFSET_OF(&config->cfg.fw6state, fw6state);
+	memset(fw6table, 0, sizeof(fwtable_t));
+	if (fwtable_insert_layer_cp(
+		    fw6table, &fw6config, &config->cp_module.memory_context
+	    )) {
+		return -ENOMEM;
+	}
+	SET_OFFSET_OF(&config->fw6table, fw6table);
 
 	// Configure sync settings
 	uint8_t multicast_addr[16] = {

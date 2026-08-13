@@ -5,15 +5,21 @@
 #include "lib/controlplane/config/zone.h"
 
 #include "lib/fwstate/config.h"
+#include "lib/fwstate/fwtable.h"
 
 struct fwstate_module_config {
 	struct cp_module cp_module;
 
-	struct fwstate_config cfg;
+	// fwtables of the linked fwstate-map objects, resolved against the
+	// agent's object registry at config-update time. NULL for a family
+	// (no link declared) means that family's sync frames are counted and
+	// dropped without inserting.
+	fwtable_t *fw4table;
+	fwtable_t *fw6table;
 
 	// Receive-side sync parameters: packet matching, timeouts, and
-	// suppression. Split from the maps so the struct mirrors what the
-	// module consumes.
+	// suppression. Kept standalone so the struct mirrors what the module
+	// consumes.
 	struct fwstate_sync_config sync_config;
 
 	// Module-level counters, registered by fwstate_module_config_new.

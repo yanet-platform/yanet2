@@ -21,8 +21,6 @@ pub enum ModeCmd {
     Update(UpdateCmd),
     /// Show fwstate configuration
     Show(ShowCmd),
-    /// Link fwstate configuration to ACL configurations
-    Link(LinkCmd),
     /// Get statistics for fwstate maps
     Stats(StatsCmd),
     /// List entries from fwstate map
@@ -103,17 +101,6 @@ pub struct ShowCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct LinkCmd {
-    /// FWState config name to link
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
-    pub config_name: String,
-
-    /// ACL config names to link (can be specified multiple times)
-    #[arg(long = "acl", required = true, num_args = 1..)]
-    pub acl_configs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Parser)]
 pub struct StatsCmd {
     /// FWState config name to get statistics for
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
@@ -126,13 +113,13 @@ pub struct UpdateCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// Size of the hash table index for firewall state maps
+    /// Name of the published fwstate-map (kind V4) object to link
     #[arg(long)]
-    pub index_size: Option<u32>,
+    pub map_name_v4: Option<String>,
 
-    /// Number of extra buckets for collision handling
+    /// Name of the published fwstate-map (kind V6) object to link
     #[arg(long)]
-    pub extra_bucket_count: Option<u32>,
+    pub map_name_v6: Option<String>,
 
     /// Source IPv6 address (e.g., "2001:db8::1")
     #[arg(long)]

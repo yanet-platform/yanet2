@@ -8,6 +8,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
+	objfwstate "github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 )
 
 // metricsSource provides the module's metrics, filtered by tags.
@@ -84,8 +85,11 @@ func (m *FWStateService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metri
 	return metrics.Filter(result, tags), nil
 }
 
-// collectMapStats emits gauge metrics derived from the per-config map
-// statistics (GetMapsStats) for both IPv4 and IPv6 address families.
+// mapStats is the bindings-level stats shape carried across CGo.
+type mapStats = objfwstate.MapStats
+
+// collectMapStats emits gauge metrics derived from the per-config linked
+// map objects' statistics for both IPv4 and IPv6 address families.
 func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
@@ -94,7 +98,7 @@ func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 
 	var result []*commonpb.Metric
 	for name, config := range m.configs {
-		mapsStats := config.GetMapsStats()
+		mapsStats := m.lookupMapsStats(config)
 
 		result = append(result, collectMapStatsForAF(name, "ipv4", now, mapsStats.IPv4)...)
 		result = append(result, collectMapStatsForAF(name, "ipv6", now, mapsStats.IPv6)...)

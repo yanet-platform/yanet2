@@ -217,6 +217,19 @@ func (c *CLIManager) ExecuteCommands(commands ...string) ([]string, error) {
 	return outputs, nil
 }
 
+// ExecuteCommandsSeparately runs every command to completion regardless of
+// individual failures, pairing each output with its own error. A
+// diagnostics dump uses this so one failed probe (say, catting a log the
+// crashed process never wrote) cannot hide the outputs of the rest.
+func (c *CLIManager) ExecuteCommandsSeparately(commands ...string) ([]string, []error) {
+	outputs := make([]string, len(commands))
+	errs := make([]error, len(commands))
+	for idx, cmd := range commands {
+		outputs[idx], errs[idx] = c.ExecuteCommand(cmd)
+	}
+	return outputs, errs
+}
+
 // waitForCommandCompletionWithMarkers waits for command completion by monitoring
 // the output buffer for specific start and end markers. This approach provides
 // reliable command boundary detection even when multiple commands are executed

@@ -17,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	objfwstate "github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 )
 
 // Memory sizes for the fwstate functional harness.
@@ -32,9 +33,9 @@ var syncMulticastAddr = net.IP{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 // syncPort is the UDP destination port for fwstate sync packets (host byte order).
 const syncPort = 9999
 
-// setupFWStateHarness builds a dataplane harness with the fwstate module and
-// a plain device, attaches a control-plane agent, and wires a minimal pipeline.
-// The returned agent and module config are ready for UpdateModules.
+// setupFWStateHarness builds a dataplane harness with the fwstate module,
+// the fwstate-map object types, and a plain device, attaches a
+// control-plane agent, and wires a minimal pipeline.
 func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 	t.Helper()
 
@@ -45,6 +46,7 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 		Devices:       []string{"port0"},
 		Modules:       []string{"fwstate", "forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)
@@ -58,12 +60,10 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 	return h, agent
 }
 
-// configureFWState creates and publishes a fwstate module config with sync
-// enabled for syncMulticastAddr:syncPort, one worker, 1024-entry maps.
-func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
-	t.Helper()
-
-	syncConfig := cfwstate.SyncConfig{
+// fwstateTestSyncConfig is the shared receive-side sync configuration:
+// sync enabled for syncMulticastAddr:syncPort with production timeouts.
+func fwstateTestSyncConfig() cfwstate.SyncConfig {
+	return cfwstate.SyncConfig{
 		DstAddrMulticast: [16]byte{
 			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
 		},
@@ -75,17 +75,48 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 		Udp:           uint64(30e9),
 		Default:       uint64(16e9),
 	}
+}
 
+// newPublishedFWStateMaps creates one v4 and one v6 fwstate-map object
+// under name+"-v4"/name+"-v6", installs the first layer, and publishes
+// both so fwstate module configs can link the names.
+func newPublishedFWStateMaps(
+	t *testing.T,
+	agent *ffi.Agent,
+	name string,
+	indexSize uint32,
+) (v4, v6 *objfwstate.MapObjectConfig) {
+	t.Helper()
+
+	newMap := func(kind objfwstate.Kind) *objfwstate.MapObjectConfig {
+		t.Helper()
+
+		objectName := name + "-" + kind.String()
+		mapObject, err := objfwstate.NewMapObjectConfig(agent, objectName, kind)
+		require.NoError(t, err)
+		require.NoError(t, mapObject.CreateMap(indexSize, 64, 1))
+		require.NoError(t, mapObject.Publish(agent))
+		t.Cleanup(mapObject.Free)
+		return mapObject
+	}
+
+	return newMap(objfwstate.KindV4), newMap(objfwstate.KindV6)
+}
+
+// configureFWState creates and publishes a fwstate module config linked,
+// by name, to freshly published 1024-entry maps.
+func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
+	t.Helper()
+
+	mapV4, mapV6 := newPublishedFWStateMaps(t, agent, name, 1024)
+
+	syncConfig := fwstateTestSyncConfig()
 	modCfg, err := cfwstate.NewModuleConfig(
 		agent,
 		name,
-		nil,
 		&syncConfig,
-		cfwstate.MapConfig{
-			IndexSize:        1024,
-			ExtraBucketCount: 64,
-		},
-		1,
+		mapV4.Name(),
+		mapV6.Name(),
 	)
 	require.NoError(t, err)
 	t.Cleanup(modCfg.Free)

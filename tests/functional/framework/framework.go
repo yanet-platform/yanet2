@@ -917,6 +917,12 @@ func (f *TestFramework) ExecuteCommands(commands ...string) ([]string, error) {
 	return f.cli.ExecuteCommands(commands...)
 }
 
+// ExecuteCommandsSeparately runs every command to completion regardless of
+// individual failures, pairing each output with its own error.
+func (f *TestFramework) ExecuteCommandsSeparately(commands ...string) ([]string, []error) {
+	return f.cli.ExecuteCommandsSeparately(commands...)
+}
+
 // getDumpFilePaths returns dump file paths for a test.
 // If debug is disabled or testName is empty, returns empty strings.
 func (f *TestFramework) getDumpFilePaths() (string, string) {
@@ -1471,6 +1477,10 @@ func (f *TestFramework) PrepareLocalStorage() error {
 		"mkdir -p /tmp/yanet/build/dataplane /tmp/yanet/build/controlplane /tmp/yanet/build/plugins /tmp/yanet/cli /tmp/yanet/config /tmp/yanet/logs /tmp/yanet/tools",
 		"cp /mnt/build/dataplane/yanet-dataplane /tmp/yanet/build/dataplane/",
 		"cp /mnt/build/controlplane/yanet-controlplane /tmp/yanet/build/controlplane/",
+		// A sanitizer-built binary carries an $ORIGIN rpath and ships its
+		// runtime libraries beside it; a release build stages none and the
+		// loop copies nothing.
+		"for f in /mnt/build/dataplane/*.so.* /mnt/build/controlplane/*.so.*; do [ -e \"$f\" ] || continue; d=/tmp/yanet/build/$(basename $(dirname \"$f\")); cp \"$f\" \"$d\"/; done",
 		"cp /mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py /tmp/yanet/tools/",
 		"for f in /mnt/build/modules/*/dataplane/*_dp_plugin.so; do [ -e \"$f\" ] || continue; b=$(basename \"$f\"); cp \"$f\" /tmp/yanet/build/plugins/${b%_plugin.so}.so; done",
 	}

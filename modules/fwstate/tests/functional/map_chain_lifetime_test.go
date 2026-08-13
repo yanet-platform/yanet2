@@ -38,37 +38,21 @@ func mapChainAgentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name strin
 }
 
 // newMapChainConfig builds and publishes an fwstate config under the given
-// name with sync enabled and 1024-entry maps.
+// name, linked to the given published map objects.
 //
 // Unlike the package's shared setup helper, it returns the handle instead
 // of freeing it at test end, because this test frees each generation
 // itself, in the same order the production update path does.
-func newMapChainConfig(t *testing.T, agent *ffi.Agent, name string) *cfwstate.ModuleConfig {
+func newMapChainConfig(
+	t *testing.T,
+	agent *ffi.Agent,
+	name, fw4MapName, fw6MapName string,
+) *cfwstate.ModuleConfig {
 	t.Helper()
 
-	syncConfig := cfwstate.SyncConfig{
-		DstAddrMulticast: [16]byte{
-			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
-		},
-		PortMulticast: syncPort,
-		TcpSynAck:     uint64(120e9),
-		TcpSyn:        uint64(120e9),
-		TcpFin:        uint64(120e9),
-		Tcp:           uint64(120e9),
-		Udp:           uint64(30e9),
-		Default:       uint64(16e9),
-	}
-
+	syncConfig := fwstateTestSyncConfig()
 	modCfg, err := cfwstate.NewModuleConfig(
-		agent,
-		name,
-		nil,
-		&syncConfig,
-		cfwstate.MapConfig{
-			IndexSize:        1024,
-			ExtraBucketCount: 64,
-		},
-		1,
+		agent, name, &syncConfig, fw4MapName, fw6MapName,
 	)
 	require.NoError(t, err)
 
@@ -80,52 +64,49 @@ func newMapChainConfig(t *testing.T, agent *ffi.Agent, name string) *cfwstate.Mo
 // TestFWStateUpdate_SecondUpdateKeepsLiveMaps pins the map-chain ownership
 // contract: a state entry survives a republish under the same name.
 //
-// Republishing propagates the live map chain into the new config and detaches
-// it from the old one before releasing it. Between the publish and that
-// detach-then-free, it constructs a module of this type on an unrelated name,
-// modeling a concurrent update racing this one. The first generation still
-// holds its own creator reference at that point, so the unrelated construction
-// drains nothing of it. A release never drains by itself; only a further
-// construction after the detach-then-free drains the park list.
+// The map objects own the tables, so republishing the module config keeps
+// the linked objects' chains and the entry in them. Between the publish
+// and the old generation's free, it constructs a module of this type on
+// an unrelated name, modeling a concurrent update racing this one. The
+// first generation still holds its own creator reference at that point,
+// so the unrelated construction drains nothing of it. A release never
+// drains by itself; only a further construction after the free drains
+// the park list.
 func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	h, agent := setupFWStateHarness(t)
 	shm := h.SharedMemory()
 	const agentName = "fwstate-test"
 
-	v1 := newMapChainConfig(t, agent, "fw0")
+	mapV4, mapV6 := newPublishedFWStateMaps(t, agent, "maps", 1024)
 
-	// Insert directly into the first generation's live map rather than driving a
+	v1 := newMapChainConfig(t, agent, "fw0", mapV4.Name(), mapV6.Name())
+
+	// Insert directly into the map object's live layer rather than driving a
 	// real sync packet.
 	//
-	// This package never runs a worker round, and a second publish after one has
-	// run would otherwise block forever waiting for a round nothing here drives.
+	// This package never runs a worker round, and a second publish after one
+	// has run would otherwise block forever waiting for a round nothing here
+	// drives.
 	srcAddr := [16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
 	dstAddr := [16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02}
 	require.NoError(t, insertFWStateIPv6Entry(
-		v1.AsFFIModule().AsRawPtr(), 1, srcAddr, dstAddr, 1234, 80,
+		mapV6.ResolveMap(0), 1, srcAddr, dstAddr, 1234, 80,
 	))
 
-	statsBefore := v1.GetMapsStats()
+	statsBefore := mapV6.GetStats()
 	require.Equal(
-		t, uint64(1), statsBefore.IPv6.TotalElements,
+		t, uint64(1), statsBefore.TotalElements,
 		"one state entry must be live before the second update",
 	)
 
-	entriesBefore, _, _, err := v1.ReadForward(true, 0, 0, true, 1, 10)
+	entriesBefore, _, _, err := mapV6.ReadForward(0, 0, true, 1, 10)
 	require.NoError(t, err)
 	require.Len(t, entriesBefore, 1)
 	keyBefore := entriesBefore[0].Key
 
+	syncConfig := fwstateTestSyncConfig()
 	v2, err := cfwstate.NewModuleConfig(
-		agent,
-		"fw0",
-		v1,
-		nil,
-		cfwstate.MapConfig{
-			IndexSize:        1024,
-			ExtraBucketCount: 64,
-		},
-		1,
+		agent, "fw0", &syncConfig, mapV4.Name(), mapV6.Name(),
 	)
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{v2.AsFFIModule()}))
@@ -135,12 +116,10 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	// Construct a module of this type on an unrelated name, the only call that
 	// drains the park list.
 	//
-	// The construction is straddled by a checkpoint, so a premature drain of the
-	// first generation there cannot be masked by that config's own later release
-	// landing on the same count.
-	// Zero worker count: an unmapped config, the same footprint the
-	// pre-merge construction used to leave.
-	other, err := cfwstate.NewModuleConfig(agent, "fw1", nil, nil, cfwstate.MapConfig{}, 0)
+	// The construction is straddled by a checkpoint, so a premature drain of
+	// the first generation there cannot be masked by that config's own later
+	// release landing on the same count.
+	other, err := cfwstate.NewModuleConfig(agent, "fw1", nil, "", "")
 	require.NoError(t, err)
 
 	afterUnrelatedCreate := mapChainAgentRootMemoryNode(t, shm, agentName)
@@ -157,7 +136,6 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 		"releasing the unrelated config must park it, not destroy it immediately",
 	)
 
-	v1.DetachMaps()
 	v1.Free()
 	t.Cleanup(v2.Free)
 
@@ -169,10 +147,7 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 
 	// Construct a module of this type once more, draining both the unrelated
 	// config and the first generation.
-	//
-	// This is the exact call that would have destroyed its map chain out from
-	// under the new generation, had the earlier detach not already run.
-	other2, err := cfwstate.NewModuleConfig(agent, "fw2", nil, nil, cfwstate.MapConfig{}, 0)
+	other2, err := cfwstate.NewModuleConfig(agent, "fw2", nil, "", "")
 	require.NoError(t, err)
 	t.Cleanup(other2.Free)
 
@@ -182,14 +157,14 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 		"fwstate's next construction must drain both the unrelated config and v1",
 	)
 
-	statsAfter := v2.GetMapsStats()
+	statsAfter := mapV6.GetStats()
 	require.Equalf(
-		t, statsBefore.IPv6.TotalElements, statsAfter.IPv6.TotalElements,
+		t, statsBefore.TotalElements, statsAfter.TotalElements,
 		"the entry inserted before the second update must still be live "+
-			"in the maps the new config took over, not a fresh empty map",
+			"in the map objects the new config relinked to, not a fresh empty map",
 	)
 
-	entriesAfter, _, _, err := v2.ReadForward(true, 0, 0, true, 1, 10)
+	entriesAfter, _, _, err := mapV6.ReadForward(0, 0, true, 1, 10)
 	require.NoError(t, err)
 	require.Len(t, entriesAfter, 1)
 	require.Equalf(

@@ -15,6 +15,11 @@
 
 #define ACL_MAX_ACTIONS 8
 
+// Sentinel for "no object link at this slot". object_link_get_address
+// returns NULL for any index >= object_link_count, so a config with no
+// map link at this slot resolves to a NULL fwtable.
+#define ACL_OBJECT_LINK_NONE UINT64_MAX
+
 struct acl_target {
 	// FIXME: use dynamic allocation
 	uint64_t actions[ACL_MAX_ACTIONS];
@@ -39,11 +44,16 @@ struct acl_module_config {
 	// resolved against this registry's per-worker storage.
 	uint64_t rules_registry_idx;
 
-	// Fwstate module maps borrowed for state lookups.
-	struct fwstate_config fwstate_cfg;
-
 	// Emission-side sync parameters for CREATE_STATE frames.
 	struct fwstate_sync_emit_config sync_config;
+
+	// Object link indices for the v4 and v6 fwtables, declared by
+	// acl_module_config_update via cp_module_link_object and resolved at
+	// ectx build time into per-worker object_ectx entries. The
+	// ACL_OBJECT_LINK_NONE sentinel marks an absent link, and CHECK_STATE
+	// then finds no state for that family.
+	uint64_t v4_object_link_idx;
+	uint64_t v6_object_link_idx;
 	// Metrics
 	uint64_t compilation_time_ns;
 	uint64_t filter_rule_count_ip4;

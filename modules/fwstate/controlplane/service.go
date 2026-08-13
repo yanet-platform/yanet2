@@ -15,15 +15,34 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
+	objfwstate "github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 )
 
 // Option configures an FWStateService.
 type Option func(*options)
 
+// MutationObserver observes updateMu acquisition for a mutation, before
+// Lock, after Lock succeeds, and immediately before Unlock. It observes
+// synchronization but never controls it, and lets tests prove ordering
+// between concurrent mutations.
+type MutationObserver interface {
+	ObserveFWStateMutation(operation, phase string)
+}
+
+// WithMutationObserver installs an observer receiving every mutation's
+// lock lifecycle events.
+func WithMutationObserver(observer MutationObserver) Option {
+	return func(o *options) {
+		o.Observer = observer
+	}
+}
+
 // options holds the optional parameters for FWStateService construction.
 type options struct {
-	Metrics grpcmetrics.Factory
-	Log     *zap.Logger
+	Metrics   grpcmetrics.Factory
+	Observer  MutationObserver
+	MapLookup MapLookup
+	Log       *zap.Logger
 }
 
 func newOptions() *options {
@@ -48,6 +67,21 @@ func WithLog(log *zap.Logger) Option {
 func WithMetrics(factory grpcmetrics.Factory) Option {
 	return func(o *options) {
 		o.Metrics = factory
+	}
+}
+
+// MapLookup resolves a fwstate-map object by name and family from the
+// objects controlplane's internal registry. It returns a borrowed
+// handle that stays valid until the object is deleted, or nil when no
+// such object exists.
+type MapLookup func(name string, kind objfwstate.Kind) *objfwstate.MapObjectConfig
+
+// WithMapLookup installs the resolver used for reads delegated to linked
+// map objects (stats, entry cursors), replacing the shared-memory
+// registry lookup via the C API.
+func WithMapLookup(lookup MapLookup) Option {
+	return func(o *options) {
+		o.MapLookup = lookup
 	}
 }
 
@@ -114,38 +148,6 @@ func clampBatchSize(n uint32) uint32 {
 	return n
 }
 
-// ACLServiceProvider is the interface through which the fwstate service drives
-// ACL config lifecycle. Implementations must be safe for concurrent use.
-type ACLServiceProvider interface {
-	// LinkedConfigNames returns ACL config names linked to the given fwstate
-	// config. Implementations lock internally.
-	LinkedConfigNames(fwstateConfigName string) []string
-
-	// RelinkConfigs rebuilds all ACL configs currently linked to fwstateConfig
-	// and invokes publish with their FFI handles. publish is called even when
-	// there are no linked configs (with nil) so the caller can still publish
-	// its own configs atomically.
-	RelinkConfigs(
-		fwstateConfig *FwStateConfig,
-		publish func(linkedFFI []ffi.ModuleConfig) error,
-	) error
-
-	// LinkConfigs links the given explicit list of ACL config names to
-	// fwstateConfig and invokes publish with their FFI handles so the caller
-	// can publish the combined update atomically.
-	LinkConfigs(
-		names []string,
-		fwstateConfig *FwStateConfig,
-		publish func(linkedFFI []ffi.ModuleConfig) error,
-	) error
-}
-
-// mutationObserver is optional instrumentation for verifying updateMu
-// acquisition order. It observes synchronization but never controls it.
-type mutationObserver interface {
-	ObserveFWStateMutation(operation, phase string)
-}
-
 // Mutation phases report a goroutine before Lock, after Lock succeeds, and
 // immediately before Unlock.
 const (
@@ -158,18 +160,16 @@ const (
 type FWStateService struct {
 	fwstatepb.UnimplementedFWStateServiceServer
 
-	// updateMu serializes mutations and owns pendingOutdatedLayers. stateMu
-	// protects configs and published handle lifetime. The only valid order is
-	// updateMu followed by stateMu.
-	updateMu    sync.Mutex
-	stateMu     sync.RWMutex
-	agent       *ffi.Agent
-	configs     map[string]*FwStateConfig
-	aclProvider ACLServiceProvider
-	metrics     *grpcmetrics.ServerMetrics
-
-	// Pending outdated layers to be freed after successful UpdateModules
-	pendingOutdatedLayers []*OutdatedLayers
+	// updateMu serializes mutations. stateMu protects configs and the
+	// published handle lifetime. The only valid order is updateMu followed
+	// by stateMu.
+	updateMu  sync.Mutex
+	stateMu   sync.RWMutex
+	agent     *ffi.Agent
+	configs   map[string]*FwStateConfig
+	observer  MutationObserver
+	metrics   *grpcmetrics.ServerMetrics
+	mapLookup MapLookup
 
 	log *zap.Logger
 }
@@ -180,7 +180,6 @@ type FWStateService struct {
 // exposed through the module's MetricsService.
 func NewFWStateService(
 	agent *ffi.Agent,
-	aclProvider ACLServiceProvider,
 	options ...Option,
 ) *FWStateService {
 	opts := newOptions()
@@ -189,10 +188,11 @@ func NewFWStateService(
 	}
 
 	m := &FWStateService{
-		agent:       agent,
-		configs:     make(map[string]*FwStateConfig),
-		aclProvider: aclProvider,
-		log:         opts.Log,
+		agent:     agent,
+		configs:   make(map[string]*FwStateConfig),
+		observer:  opts.Observer,
+		mapLookup: opts.MapLookup,
+		log:       opts.Log,
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -239,8 +239,11 @@ func (m *FWStateService) UpdateConfig(
 	if req.SyncConfig == nil {
 		return nil, status.Error(codes.InvalidArgument, "sync_config is required")
 	}
-	if req.MapConfig == nil {
-		return nil, status.Error(codes.InvalidArgument, "map_config is required")
+	if req.GetMapNameV4() == "" {
+		return nil, status.Error(codes.InvalidArgument, "map_name_v4 is required")
+	}
+	if req.GetMapNameV6() == "" {
+		return nil, status.Error(codes.InvalidArgument, "map_name_v6 is required")
 	}
 	if err := validateSyncPorts(req.SyncConfig); err != nil {
 		return nil, err
@@ -256,22 +259,13 @@ func (m *FWStateService) UpdateConfig(
 
 		m.log.Debug("update fwstate module config", zap.String("config", name))
 
-		// Rebuild all linked ACL configs against the new fwstate config and publish
-		// both atomically.
-		//
-		// RelinkConfigs holds each linked ACL config name's lock for the entire
-		// window, so it never blocks a read or a compile on an unrelated name.
-		if err := m.aclProvider.RelinkConfigs(newConfig, func(linkedFFI []ffi.ModuleConfig) error {
-			return m.publishUpdate(name, oldConfig, newConfig, linkedFFI)
-		}); err != nil {
-			newConfig.DetachMaps()
+		if err := m.publishUpdate(name, newConfig); err != nil {
 			newConfig.Free()
-			m.log.Error("failed to relink ACL configs", zap.String("config", name), zap.Error(err))
-			return status.Errorf(codes.Internal, "failed to relink ACL configs: %v", err)
+			m.log.Error("failed to publish fwstate config", zap.String("config", name), zap.Error(err))
+			return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 		}
 
 		if oldConfig != nil {
-			oldConfig.DetachMaps()
 			oldConfig.Free()
 		}
 
@@ -298,33 +292,27 @@ func (m *FWStateService) prepareUpdate(
 
 	oldConfig := m.configs[name]
 
-	dpConfig := m.agent.DPConfig()
+	// Validate the merged sync config before any C state is touched.
+	syncConfig := mergedSyncConfig(oldConfig, req.SyncConfig)
+	if err := validateSyncConfig(syncConfig); err != nil {
+		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
+		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
+
+	// The construction resolves both map names against the agent's
+	// current object generation, so an unknown name fails here and
+	// names the object.
 	newConfig, err := NewFWStateModuleConfig(
 		m.agent,
 		name,
 		oldConfig,
 		req.SyncConfig,
-		req.MapConfig,
-		uint16(dpConfig.WorkerCount()),
+		req.GetMapNameV4(),
+		req.GetMapNameV6(),
 	)
 	if err != nil {
-		m.log.Error("failed to create fwstate config",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil, nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
-	}
-
-	// Validate the installed sync config: the request's zero fields were
-	// merged over the propagated or default values at construction.
-	if err := validateSyncConfig(newConfig.GetSyncConfig()); err != nil {
-		if oldConfig != nil {
-			// The map offsets are borrowed from the old config.
-			newConfig.DetachMaps()
-		}
-		newConfig.Free()
-		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
-		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+		m.log.Error("failed to update fwstate config", zap.String("config", name), zap.Error(err))
+		return nil, nil, status.Errorf(codes.InvalidArgument, "failed to update fwstate config: %v", err)
 	}
 
 	return oldConfig, newConfig, nil
@@ -332,128 +320,18 @@ func (m *FWStateService) prepareUpdate(
 
 func (m *FWStateService) publishUpdate(
 	name string,
-	oldConfig, newConfig *FwStateConfig,
-	linkedFFI []ffi.ModuleConfig,
+	newConfig *FwStateConfig,
 ) error {
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
 
-	modules := append(linkedFFI, newConfig.AsFFIModule())
-	if err := m.agent.UpdateModules(modules); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{newConfig.AsFFIModule()}); err != nil {
 		return err
 	}
-	m.freePendingOutdatedLayers(newConfig)
+	newConfig.MarkPublished()
 	m.configs[name] = newConfig
 
-	if oldConfig == nil {
-		return nil
-	}
-
-	// Publish before trimming so a failed update leaves the old chain intact.
-	// Readers stay behind stateMu while the extra generation barrier makes
-	// detached layers safe to reclaim.
-	outdatedLayers := m.trimStaleLayers(name, newConfig)
-	if outdatedLayers == nil {
-		return nil
-	}
-	m.pendingOutdatedLayers = append(m.pendingOutdatedLayers, outdatedLayers)
-	if err := m.agent.UpdateModules(modules); err != nil {
-		m.log.Warn("deferred stale fwstate layer reclamation",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil
-	}
-	m.freePendingOutdatedLayers(newConfig)
 	return nil
-}
-
-func (m *FWStateService) trimStaleLayers(
-	name string,
-	config *FwStateConfig,
-) *OutdatedLayers {
-	now := uint64(time.Now().UnixNano())
-	outdatedLayers, err := config.TrimStaleLayers(now)
-	if err == nil {
-		return outdatedLayers
-	}
-	if outdatedLayers == nil {
-		m.log.Error("failed to trim stale fwstate layers",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil
-	}
-
-	// Publishing the partially trimmed chain releases the collected layers
-	// and leaves the rest linked for the next update.
-	m.log.Warn("trimmed stale layers only partially",
-		zap.String("config", name),
-		zap.Error(err),
-	)
-	return outdatedLayers
-}
-
-func (m *FWStateService) freePendingOutdatedLayers(config *FwStateConfig) {
-	for _, pending := range m.pendingOutdatedLayers {
-		config.FreeOutdatedLayers(pending)
-	}
-	m.pendingOutdatedLayers = nil
-}
-
-func (m *FWStateService) LinkFWState(
-	ctx context.Context,
-	req *fwstatepb.LinkFWStateRequest,
-) (*fwstatepb.LinkFWStateResponse, error) {
-	fwstateName := req.GetFwstateName()
-	if fwstateName == "" {
-		return nil, status.Error(codes.InvalidArgument, "fwstate name is required")
-	}
-
-	aclConfigNames := req.GetAclConfigNames()
-	if len(aclConfigNames) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one ACL config name is required")
-	}
-
-	// Check for duplicates in ACL config names
-	seen := make(map[string]bool)
-	for _, name := range aclConfigNames {
-		if seen[name] {
-			return nil, status.Errorf(codes.InvalidArgument, "duplicate ACL config name: %q", name)
-		}
-		seen[name] = true
-	}
-
-	err := m.withMutation("link", func() error {
-		fwstateConfig, ok := m.configForMutation(fwstateName)
-		if !ok {
-			return status.Errorf(codes.NotFound, "FWState config %q not found", fwstateName)
-		}
-
-		// Link the given ACL configs to this fwstate and publish both atomically.
-		// LinkConfigs holds each named ACL config's lock for the entire window,
-		// so it never blocks a read or a compile on an unrelated name.
-		if err := m.aclProvider.LinkConfigs(aclConfigNames, fwstateConfig, func(linkedFFI []ffi.ModuleConfig) error {
-			if err := m.agent.UpdateModules(append(linkedFFI, fwstateConfig.AsFFIModule())); err != nil {
-				return err
-			}
-			m.freePendingOutdatedLayers(fwstateConfig)
-			return nil
-		}); err != nil {
-			return status.Errorf(codes.Internal, "failed to link ACL configs: %v", err)
-		}
-
-		m.log.Info("successfully linked FWState to ACL configs",
-			zap.String("fwstate", fwstateName),
-			zap.Strings("acl_configs", aclConfigNames),
-		)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &fwstatepb.LinkFWStateResponse{}, nil
 }
 
 // configForMutation returns a handle whose lifetime remains protected by the
@@ -475,7 +353,7 @@ func (m *FWStateService) ShowConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	mapConfig, syncConfig, ok := m.configSnapshot(name)
+	mapNameV4, mapNameV6, syncConfig, ok := m.configSnapshot(name)
 	if !ok {
 		if req.OkIfNotFound {
 			return nil, nil
@@ -483,15 +361,11 @@ func (m *FWStateService) ShowConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	// LinkedConfigNames is self-locking: a brief RLock, never blocked behind
-	// an in-flight ACL compile.
-	linkedACLs := m.aclProvider.LinkedConfigNames(name)
-
 	response := &fwstatepb.ShowConfigResponse{
 		Name:       name,
-		MapConfig:  mapConfig,
+		MapNameV4:  mapNameV4,
+		MapNameV6:  mapNameV6,
 		SyncConfig: syncConfig,
-		LinkedAcls: linkedACLs,
 	}
 
 	return response, nil
@@ -499,16 +373,16 @@ func (m *FWStateService) ShowConfig(
 
 func (m *FWStateService) configSnapshot(
 	name string,
-) (*fwstatepb.MapConfig, *fwstatepb.SyncConfig, bool) {
+) (string, string, *fwstatepb.SyncConfig, bool) {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
 	config, ok := m.configs[name]
 	if !ok {
-		return nil, nil, false
+		return "", "", nil, false
 	}
 
-	return config.GetMapConfig(), config.GetSyncConfig(), true
+	return config.MapNameV4(), config.MapNameV6(), config.GetSyncConfig(), true
 }
 
 func (m *FWStateService) ListConfigs(
@@ -552,7 +426,6 @@ func (m *FWStateService) DeleteConfig(
 		}
 
 		m.unpublishConfig(name)
-		m.freePendingOutdatedLayers(config)
 		config.Free()
 		m.log.Info("successfully deleted FWState module config", zap.String("name", name))
 		return nil
@@ -577,8 +450,8 @@ func (m *FWStateService) withMutation(operation string, mutate func() error) err
 }
 
 func (m *FWStateService) observeMutation(operation, phase string) {
-	if observer, ok := m.aclProvider.(mutationObserver); ok {
-		observer.ObserveFWStateMutation(operation, phase)
+	if m.observer != nil {
+		m.observer.ObserveFWStateMutation(operation, phase)
 	}
 }
 
@@ -606,7 +479,7 @@ func (m *FWStateService) GetStats(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	mapsStats := config.GetMapsStats()
+	mapsStats := m.lookupMapsStats(config)
 
 	response := &fwstatepb.GetStatsResponse{
 		Ipv4Stats: &fwstatepb.MapStats{
@@ -632,6 +505,58 @@ func (m *FWStateService) GetStats(
 	}
 
 	return response, nil
+}
+
+// lookupMapsStats reads both linked map objects' stats from the objects
+// controlplane's internal registry. A family whose object is absent
+// reports zero stats: the module config's link pins the object against
+// deletion, so absence can only be transient topology drift, not a
+// missing table the module still inserts into.
+func (m *FWStateService) lookupMapsStats(config *FwStateConfig) objfwstate.MapsStats {
+	var mapsStats objfwstate.MapsStats
+	if object := m.lookupMap(config.MapNameV4(), objfwstate.KindV4); object != nil {
+		mapsStats.IPv4 = object.GetStats()
+	}
+	if object := m.lookupMap(config.MapNameV6(), objfwstate.KindV6); object != nil {
+		mapsStats.IPv6 = object.GetStats()
+	}
+	return mapsStats
+}
+
+// lookupMap returns the linked map object for the given family from the
+// objects controlplane's internal registry, or nil when no resolver is
+// installed or the object is absent.
+func (m *FWStateService) lookupMap(
+	name string,
+	kind objfwstate.Kind,
+) *objfwstate.MapObjectConfig {
+	if m.mapLookup == nil || name == "" {
+		return nil
+	}
+	return m.mapLookup(name, kind)
+}
+
+// lookupMapObject returns a borrowed read handle for the family's linked
+// map object, resolved against the objects controlplane's internal
+// registry.
+func (m *FWStateService) lookupMapObject(
+	config *FwStateConfig,
+	isIPv6 bool,
+) (*objfwstate.MapObjectConfig, error) {
+	kind := objfwstate.KindV4
+	mapName := config.MapNameV4()
+	if isIPv6 {
+		kind = objfwstate.KindV6
+		mapName = config.MapNameV6()
+	}
+
+	object := m.lookupMap(mapName, kind)
+	if object == nil {
+		return nil, status.Errorf(
+			codes.NotFound, "linked fwstate-map %q not found", mapName,
+		)
+	}
+	return object, nil
 }
 
 func (m *FWStateService) ListEntries(
@@ -682,7 +607,7 @@ func (m *FWStateService) ListEntries(
 func (m *FWStateService) readConfigEntries(
 	req *fwstatepb.ListEntriesRequest,
 	count uint32,
-) ([]CursorEntry, int64, bool, uint64, error) {
+) ([]objfwstate.CursorEntry, int64, bool, uint64, error) {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
@@ -692,16 +617,28 @@ func (m *FWStateService) readConfigEntries(
 		return nil, 0, false, 0, status.Errorf(codes.NotFound, "config %q not found", configName)
 	}
 
-	now := uint64(time.Now().UnixNano())
-	readEntries := config.ReadForward
-	if req.GetDirection() == fwstatepb.Direction_BACKWARD {
-		readEntries = config.ReadBackward
+	object, err := m.lookupMapObject(config, req.GetIsIpv6())
+	if err != nil {
+		return nil, 0, false, 0, err
 	}
-	entries, newIndex, hasMore, err := readEntries(
-		req.GetIsIpv6(), req.GetLayerIndex(),
-		req.GetIndex(), req.GetIncludeExpired(),
-		now, count,
-	)
+
+	now := uint64(time.Now().UnixNano())
+	var entries []objfwstate.CursorEntry
+	var newIndex int64
+	var hasMore bool
+	if req.GetDirection() == fwstatepb.Direction_BACKWARD {
+		entries, newIndex, hasMore, err = object.ReadBackward(
+			req.GetLayerIndex(),
+			req.GetIndex(), req.GetIncludeExpired(),
+			now, count,
+		)
+	} else {
+		entries, newIndex, hasMore, err = object.ReadForward(
+			req.GetLayerIndex(),
+			req.GetIndex(), req.GetIncludeExpired(),
+			now, count,
+		)
+	}
 
 	return entries, newIndex, hasMore, config.Generation(), err
 }
