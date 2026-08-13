@@ -19,7 +19,6 @@ import { API, ApiError, inventoryConfigNames, loadKnownConfigs, unionConfigNames
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '@yanet/core/utils/netip';
-import { parseMACToBytes } from '@yanet/core/utils/mac';
 import { formatBytes, toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
 import { SaveIcon, TrashIcon } from '@yanet/core/components/draft';
@@ -31,12 +30,8 @@ interface DraftConfig {
     mapIndexSize: number;
     mapExtraBucketCount: number;
     srcAddr: string;
-    dstEther: string;
     dstAddrMulticast: string;
     portMulticast: number;
-    dstAddrUnicast: string;
-    portUnicast: number;
-    syncMode: 'multicast' | 'unicast' | 'both';
     tcpSynAck: string;
     tcpSyn: string;
     tcpFin: string;
@@ -70,8 +65,6 @@ const STATES_TABLE_LOAD_THRESHOLD = 60;
 const STATES_TABLE_MAX_BATCH_SIZE = 10000;
 const BACKWARD_RESET_CURSOR = Number.MAX_SAFE_INTEGER;
 const STATES_CURSORBAR_HEIGHT = 41;
-
-const zeroIPv6AddressWire = (): IPAddressWire => ({ addr: '::' });
 
 const formatDurationNsAsSeconds = (value: number): string => {
     if (!Number.isFinite(value) || value <= 0) return '';
@@ -114,32 +107,14 @@ const isValidNonzeroIPv6Address = (value: string): boolean => {
     return isValidIPv6Address(value) && !isZeroIPv6Address(value);
 };
 
-const isValidNonzeroMAC = (value: string): boolean => {
-    const parsed = parseMACToBytes(value);
-    return Boolean(parsed && parsed.some((byte) => byte !== 0));
-};
-
 const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>> | null, isLocalOnly: boolean): DraftConfig => {
     const sync = config?.sync_config;
-    const multicastAddress = ipAddressToString(sync?.dst_addr_multicast as IPAddressWire | undefined).trim();
-    const unicastAddress = ipAddressToString(sync?.dst_addr_unicast as IPAddressWire | undefined).trim();
-    const multicastPresent = isValidNonzeroIPv6Address(multicastAddress) && (sync?.port_multicast ?? 0) !== 0;
-    const unicastPresent = isValidNonzeroIPv6Address(unicastAddress) && (sync?.port_unicast ?? 0) !== 0;
-    const syncMode: DraftConfig['syncMode'] = multicastPresent && unicastPresent
-        ? 'both'
-        : unicastPresent
-            ? 'unicast'
-            : 'multicast';
     return {
         mapIndexSize: config?.map_config?.index_size ?? 1_048_576,
         mapExtraBucketCount: config?.map_config?.extra_bucket_count ?? 1_024,
         srcAddr: ipAddressToString(sync?.src_addr as IPAddressWire | undefined),
-        dstEther: sync?.dst_ether?.addr ?? '',
         dstAddrMulticast: ipAddressToString(sync?.dst_addr_multicast as IPAddressWire | undefined),
         portMulticast: sync?.port_multicast ?? 0,
-        dstAddrUnicast: ipAddressToString(sync?.dst_addr_unicast as IPAddressWire | undefined),
-        portUnicast: sync?.port_unicast ?? 0,
-        syncMode,
         tcpSynAck: formatDurationNsAsSeconds(sync?.tcp_syn_ack ?? DEFAULT_NS.tcpSynAck),
         tcpSyn: formatDurationNsAsSeconds(sync?.tcp_syn ?? DEFAULT_NS.tcpSyn),
         tcpFin: formatDurationNsAsSeconds(sync?.tcp_fin ?? DEFAULT_NS.tcpFin),
@@ -1329,15 +1304,10 @@ const FWStatePage: React.FC = () => {
     const validateCurrent = (): boolean => {
         if (!current) return false;
         const durationFields = [current.tcpSynAck, current.tcpSyn, current.tcpFin, current.tcp, current.udp, current.defaultTimeout];
-        const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
-        const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
         if (current.mapIndexSize < 0 || current.mapExtraBucketCount < 0) return false;
-        if (useMulticast && (current.portMulticast < 0 || current.portMulticast > 65535)) return false;
-        if (useUnicast && (current.portUnicast < 0 || current.portUnicast > 65535)) return false;
+        if (current.portMulticast < 0 || current.portMulticast > 65535) return false;
         if (!isValidNonzeroIPv6Address(current.srcAddr)) return false;
-        if (useMulticast && (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0)) return false;
-        if (useUnicast && (!isValidNonzeroIPv6Address(current.dstAddrUnicast) || current.portUnicast === 0)) return false;
-        if (!isValidNonzeroMAC(current.dstEther)) return false;
+        if (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0) return false;
         if (durationFields.some((value) => parseDurationToNs(value) === null)) return false;
         return true;
     };
@@ -1353,15 +1323,10 @@ const FWStatePage: React.FC = () => {
             return;
         }
         const requestName = currentName;
-        const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
-        const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
         const syncConfig = {
             src_addr: stringToIPAddress(current.srcAddr),
-            dst_ether: { addr: current.dstEther },
-            dst_addr_multicast: useMulticast ? stringToIPAddress(current.dstAddrMulticast) : zeroIPv6AddressWire(),
-            port_multicast: useMulticast ? current.portMulticast : 0,
-            dst_addr_unicast: useUnicast ? stringToIPAddress(current.dstAddrUnicast) : zeroIPv6AddressWire(),
-            port_unicast: useUnicast ? current.portUnicast : 0,
+            dst_addr_multicast: stringToIPAddress(current.dstAddrMulticast),
+            port_multicast: current.portMulticast,
             tcp_syn_ack: parseDurationToNs(current.tcpSynAck) ?? undefined,
             tcp_syn: parseDurationToNs(current.tcpSyn) ?? undefined,
             tcp_fin: parseDurationToNs(current.tcpFin) ?? undefined,
@@ -1615,12 +1580,8 @@ const FWStatePage: React.FC = () => {
     }
 
     const configurationTab = current && (() => {
-        const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
-        const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
-        const multicastAddrError = !useMulticast ? undefined : !isValidNonzeroIPv6Address(current.dstAddrMulticast) ? 'Non-zero IPv6 required' : undefined;
-        const multicastPortError = !useMulticast ? undefined : current.portMulticast === 0 ? 'Port required' : current.portMulticast < 0 || current.portMulticast > 65535 ? '0..65535' : undefined;
-        const unicastAddrError = !useUnicast ? undefined : !isValidNonzeroIPv6Address(current.dstAddrUnicast) ? 'Non-zero IPv6 required' : undefined;
-        const unicastPortError = !useUnicast ? undefined : current.portUnicast === 0 ? 'Port required' : current.portUnicast < 0 || current.portUnicast > 65535 ? '0..65535' : undefined;
+        const multicastAddrError = !isValidNonzeroIPv6Address(current.dstAddrMulticast) ? 'Non-zero IPv6 required' : undefined;
+        const multicastPortError = current.portMulticast === 0 ? 'Port required' : current.portMulticast < 0 || current.portMulticast > 65535 ? '0..65535' : undefined;
 
         return (
             <div className="fwstate-config-panel">
@@ -1650,56 +1611,21 @@ const FWStatePage: React.FC = () => {
                                 <Text variant="caption-2" color="secondary">Sync source address</Text>
                                 <TextInput value={current.srcAddr} onUpdate={(srcAddr) => updateCurrent({ srcAddr })} error={!isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined} placeholder="2001:db8::1" />
                             </label>
-                            <label className="fwstate-field fwstate-sync-grid__mac">
-                                <Text variant="caption-2" color="secondary">Destination MAC</Text>
-                                <TextInput value={current.dstEther} onUpdate={(dstEther) => updateCurrent({ dstEther })} error={!isValidNonzeroMAC(current.dstEther) ? 'Non-zero MAC required' : undefined} placeholder="aa:bb:cc:dd:ee:ff" />
-                            </label>
-                            <label className="fwstate-field fwstate-sync-grid__mode">
-                                <Text variant="caption-2" color="secondary">Endpoint mode</Text>
-                                <Select
-                                    value={[current.syncMode]}
-                                    options={[
-                                        { value: 'multicast', content: 'Multicast' },
-                                        { value: 'unicast', content: 'Unicast' },
-                                        { value: 'both', content: 'Both' },
-                                    ]}
-                                    onUpdate={(value) => updateCurrent({ syncMode: (value[0] as DraftConfig['syncMode']) || 'multicast' })}
-                                />
-                            </label>
-                            {useMulticast && (
-                                <div className="fwstate-sync-grid__endpoint">
-                                    <div className="fwstate-field">
-                                        <Text variant="caption-2" color="secondary">Multicast endpoint</Text>
-                                        <div className="fwstate-endpoint-row">
-                                            <label className="fwstate-field">
-                                                <Text variant="caption-2" color="secondary">Address</Text>
-                                                <TextInput value={current.dstAddrMulticast} onUpdate={(dstAddrMulticast) => updateCurrent({ dstAddrMulticast })} error={multicastAddrError} placeholder="ff02::1" />
-                                            </label>
-                                            <label className="fwstate-field">
-                                                <Text variant="caption-2" color="secondary">Port</Text>
-                                                <TextInput type="number" value={String(current.portMulticast)} onUpdate={(v) => updateCurrent({ portMulticast: Number(v) })} error={multicastPortError} placeholder="2000" />
-                                            </label>
-                                        </div>
+                            <div className="fwstate-sync-grid__endpoint">
+                                <div className="fwstate-field">
+                                    <Text variant="caption-2" color="secondary">Multicast endpoint</Text>
+                                    <div className="fwstate-endpoint-row">
+                                        <label className="fwstate-field">
+                                            <Text variant="caption-2" color="secondary">Address</Text>
+                                            <TextInput value={current.dstAddrMulticast} onUpdate={(dstAddrMulticast) => updateCurrent({ dstAddrMulticast })} error={multicastAddrError} placeholder="ff02::1" />
+                                        </label>
+                                        <label className="fwstate-field">
+                                            <Text variant="caption-2" color="secondary">Port</Text>
+                                            <TextInput type="number" value={String(current.portMulticast)} onUpdate={(v) => updateCurrent({ portMulticast: Number(v) })} error={multicastPortError} placeholder="2000" />
+                                        </label>
                                     </div>
                                 </div>
-                            )}
-                            {useUnicast && (
-                                <div className="fwstate-sync-grid__endpoint">
-                                    <div className="fwstate-field">
-                                        <Text variant="caption-2" color="secondary">Unicast endpoint</Text>
-                                        <div className="fwstate-endpoint-row">
-                                            <label className="fwstate-field">
-                                                <Text variant="caption-2" color="secondary">Address</Text>
-                                                <TextInput value={current.dstAddrUnicast} onUpdate={(dstAddrUnicast) => updateCurrent({ dstAddrUnicast })} error={unicastAddrError} placeholder="2001:db8::2" />
-                                            </label>
-                                            <label className="fwstate-field">
-                                                <Text variant="caption-2" color="secondary">Port</Text>
-                                                <TextInput type="number" value={String(current.portUnicast)} onUpdate={(v) => updateCurrent({ portUnicast: Number(v) })} error={unicastPortError} placeholder="2000" />
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                            </div>
                         </div>
                     </div>
                 </div>

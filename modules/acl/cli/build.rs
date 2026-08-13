@@ -20,6 +20,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse",
             "#[derive(serde::Serialize)]",
         )
+        .message_attribute(
+            ".modules.acl.controlplane.aclpb.v1.SyncConfig",
+            "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
+        )
         .field_attribute(
             ".modules.acl.controlplane.aclpb.v1.Action.kind",
             "#[serde(with = \"crate::action_kind\")]",

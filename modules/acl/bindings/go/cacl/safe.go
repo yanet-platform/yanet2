@@ -1,9 +1,11 @@
 package cacl
 
 //#include "modules/acl/api/controlplane.h"
+//#include "lib/fwstate/config.h"
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"unsafe"
@@ -11,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 // Action kind constants mirror the C ACL_RULE_ACTION_KIND_* enum values.
@@ -60,9 +63,12 @@ type AclConfigInfo struct {
 	FilterRuleCountVlan    uint64
 }
 
-// UpdateRules compiles the given rules into C structures and pushes them into
+// UpdateRules compiles the given rules into C structures, attaches the
+// optional emission-side sync configuration, and pushes the config into
 // shared memory.
-func (m *ModuleConfig) UpdateRules(rules []AclRule) error {
+//
+// Pass nil emitConfig for a ruleset that emits no sync packets.
+func (m *ModuleConfig) UpdateRules(rules []AclRule, emitConfig *cfwstate.SyncEmitConfig) error {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
@@ -76,11 +82,21 @@ func (m *ModuleConfig) UpdateRules(rules []AclRule) error {
 		cRulesPtr = &cRules[0]
 	}
 
+	var cEmitPtr unsafe.Pointer
+	if emitConfig != nil {
+		cEmitPtr = cfwstate.NewCEmitSyncConfig(*emitConfig)
+		if cEmitPtr == nil {
+			return errors.New("failed to allocate ACL sync emission config")
+		}
+		defer cfwstate.FreeCEmitSyncConfig(cEmitPtr)
+	}
+
 	var cErr *C.yanet_error
 	rc := C.acl_module_config_update(
 		m.asRawPtr(),
 		cRulesPtr,
 		C.uint32_t(len(cRules)),
+		(*C.struct_fwstate_sync_emit_config)(cEmitPtr),
 		&cErr,
 	)
 	if rc != 0 {

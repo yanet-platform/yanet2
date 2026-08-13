@@ -4,6 +4,8 @@ package modules.acl.controlplane.aclpb.v1;
 
 import "common/filterpb/v1/filter.proto";
 import "common/commonpb/v1/metric.proto";
+import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/macaddr.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1;aclpb";
 
@@ -29,6 +31,12 @@ service MetricsService {
 message UpdateConfigRequest {
   string name = 1;
   repeated Rule rules = 2;
+  // sync_config carries the emission-side synchronization parameters the
+  // ACL dataplane uses for CREATE_STATE sync packets.
+  //
+  // Required when any rule uses ACTION_KIND_CREATE_STATE; otherwise
+  // optional.
+  SyncConfig sync_config = 3;
 }
 
 message UpdateConfigResponse {}
@@ -39,6 +47,9 @@ message ShowConfigResponse {
   string name = 1;
   repeated Rule rules = 2;
   string fwstate_name = 3;
+  // sync_config is the emission-side synchronization parameters this ACL
+  // config uses, absent when the config carries none.
+  SyncConfig sync_config = 4;
 }
 
 message Rule {
@@ -79,3 +90,15 @@ message DeleteConfigResponse { bool deleted = 1; }
 message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
+
+// SyncConfig carries the emission-side state-sync addressing: the outer
+// header fields of the sync frames a CREATE_STATE action synthesizes.
+// The receive-side parameters (timeouts, suppression) belong to the
+// fwstate module's own configuration.
+message SyncConfig {
+  common.commonpb.v1.MACAddress dst_ether = 1;          // Destination MAC address;
+  common.commonpb.v1.IPAddress dst_addr_multicast = 2; // Multicast IPv6 address;
+  uint32 port_multicast = 3;                            // Multicast port;
+  common.commonpb.v1.IPAddress dst_addr_unicast = 4;   // Unicast IPv6 address;
+  uint32 port_unicast = 5;                              // Unicast port;
+}

@@ -6,7 +6,26 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
+	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
+
+// ToC converts the proto SyncConfig to the [cfwstate.SyncEmitConfig]
+// value the C API consumes.
+func (m *SyncConfig) ToC() cfwstate.SyncEmitConfig {
+	if m == nil {
+		return cfwstate.SyncEmitConfig{}
+	}
+	var cfg cfwstate.SyncEmitConfig
+	if dstEther := m.GetDstEther(); dstEther != nil {
+		eui := dstEther.EUI48()
+		copy(cfg.DstEther[:], eui[:])
+	}
+	copy(cfg.DstAddrMulticast[:], m.GetDstAddrMulticast().GetAddr())
+	cfg.PortMulticast = uint16(m.GetPortMulticast())
+	copy(cfg.DstAddrUnicast[:], m.GetDstAddrUnicast().GetAddr())
+	cfg.PortUnicast = uint16(m.GetPortUnicast())
+	return cfg
+}
 
 // ToActions converts proto actions into backend cacl.AclAction values.
 //

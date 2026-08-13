@@ -1,6 +1,8 @@
 #pragma once
 
 #include "config.h"
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Forward declarations
@@ -16,9 +18,25 @@ enum sync_packet_direction {
 };
 
 /**
+ * Report whether an emission config can produce a valid sync frame.
+ *
+ * A zeroed config (all-zero destination MAC or zero multicast port)
+ * would send the frame nowhere, so callers skip crafting instead.
+ */
+static inline bool
+fwstate_sync_emit_config_usable(const struct fwstate_sync_emit_config *config) {
+	for (size_t idx = 0; idx < sizeof(config->dst_ether.addr); ++idx) {
+		if (config->dst_ether.addr[idx] != 0) {
+			return config->port_multicast != 0;
+		}
+	}
+	return false;
+}
+
+/**
  * Craft a state synchronization packet from the given packet.
  *
- * @param sync_config The firewall state sync configuration
+ * @param emit_config The emission-side sync addressing
  * @param packet The original packet to extract 5-tuple from
  * @param direction The direction of the sync packet (INGRESS or EGRESS)
  * @param sync_pkt Pre-allocated packet to fill with sync data
@@ -26,7 +44,7 @@ enum sync_packet_direction {
  */
 int
 fwstate_craft_state_sync_packet(
-	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_emit_config *emit_config,
 	const struct packet *packet,
 	const enum sync_packet_direction direction,
 	struct packet *sync_pkt

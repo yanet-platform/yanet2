@@ -1,7 +1,10 @@
 import { createService, type CallOptions } from './client';
 
 // Types matching aclpb/acl.proto and filterpb/filter.proto exactly.
-// No Action.counter, no keep_state, no MapConfig, no SyncConfig, no DUMP kind.
+// No Action.counter, no keep_state, no MapConfig, no DUMP kind.
+
+import type { MACAddress } from './neighbours';
+import type { IPAddressWire } from '../utils/netip';
 
 import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
 export type { IPNet, VlanRange, Device, ListConfigsResponse };
@@ -55,15 +58,25 @@ export interface ShowConfigRequest {
     name?: string;
 }
 
+export interface SyncConfig {
+    dst_ether?: MACAddress;
+    dst_addr_multicast?: IPAddressWire;
+    port_multicast?: number;
+    dst_addr_unicast?: IPAddressWire;
+    port_unicast?: number;
+}
+
 export interface ShowConfigResponse {
     name?: string;
     rules?: Rule[];
     fwstate_name?: string;
+    sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigRequest {
     name?: string;
     rules?: Rule[];
+    sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigResponse {}

@@ -1,4 +1,4 @@
-import type { Rule } from '@yanet/core/api/acl';
+import type { Rule, SyncConfig } from '@yanet/core/api/acl';
 
 /** Monotonically increasing counter for generating stable tmp- ids. */
 let tmpIdCounter = 0;
@@ -10,6 +10,11 @@ const serverIds = (rules: Rule[]): string[] => rules.map((_, idx) => `srv-${idx}
 export interface AclDraftState {
     server: Record<string, Rule[]>;
     serverFwStateName: Record<string, string>;
+    /**
+     * Emission sync config currently stored on the server, per config name.
+     * The web layer carries it along on save instead of editing it.
+     */
+    serverSyncConfig: Record<string, SyncConfig | undefined>;
     draft: Record<string, Rule[]>;
     /**
      * Stable row ids parallel to draft[configName].
@@ -27,6 +32,7 @@ export interface AclDraftState {
 export const initialAclDraftState: AclDraftState = {
     server: {},
     serverFwStateName: {},
+    serverSyncConfig: {},
     draft: {},
     draftIds: {},
     serverConfigs: [],
@@ -36,7 +42,7 @@ export const initialAclDraftState: AclDraftState = {
 };
 
 export type AclDraftAction =
-    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwstateName: string }> }
+    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwstateName: string; syncConfig?: SyncConfig }> }
     | { type: 'ADD_RULE'; configName: string; rule: Rule }
     | { type: 'UPDATE_RULE_AT_INDEX'; configName: string; index: number; rule: Rule }
     | { type: 'REMOVE_RULES'; configName: string; indices: number[] }
@@ -54,15 +60,17 @@ export const aclDraftReducer = (
         case 'LOAD_ALL_CONFIGS': {
             const newServer: Record<string, Rule[]> = { ...state.server };
             const newServerFwStateName: Record<string, string> = { ...state.serverFwStateName };
+            const newServerSyncConfig: Record<string, SyncConfig | undefined> = { ...state.serverSyncConfig };
             const newDraft: Record<string, Rule[]> = { ...state.draft };
             const newDraftIds: Record<string, string[]> = { ...state.draftIds };
             const serverConfigs: string[] = [];
             // Use reference equality to detect whether the user has local edits:
             // if draft[name] === server[name] the config was never mutated locally,
             // so it is safe to fast-forward to the new server snapshot.
-            for (const { name, rules, fwstateName } of action.configs) {
+            for (const { name, rules, fwstateName, syncConfig } of action.configs) {
                 newServer[name] = rules;
                 newServerFwStateName[name] = fwstateName;
+                newServerSyncConfig[name] = syncConfig;
                 if (state.draft[name] === state.server[name]) {
                     newDraft[name] = rules;
                     newDraftIds[name] = serverIds(rules);
@@ -81,6 +89,7 @@ export const aclDraftReducer = (
                 ...state,
                 server: newServer,
                 serverFwStateName: newServerFwStateName,
+                serverSyncConfig: newServerSyncConfig,
                 draft: newDraft,
                 draftIds: newDraftIds,
                 serverConfigs,
@@ -228,12 +237,14 @@ export const aclDraftReducer = (
                 // gone from the server.
                 const { [action.configName]: _s, ...serverRest } = state.server;
                 const { [action.configName]: _f, ...fwStateNameRest } = state.serverFwStateName;
+                const { [action.configName]: _sc, ...syncConfigRest } = state.serverSyncConfig;
                 const { [action.configName]: _d, ...draftRest } = state.draft;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;
                 return {
                     ...state,
                     server: serverRest,
                     serverFwStateName: fwStateNameRest,
+                    serverSyncConfig: syncConfigRest,
                     draft: draftRest,
                     draftIds: draftIdsRest,
                     serverConfigs: state.serverConfigs.filter(n => n !== action.configName),

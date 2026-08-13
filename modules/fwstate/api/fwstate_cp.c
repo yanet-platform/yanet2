@@ -39,14 +39,14 @@ fwstate_config_fini(struct fwstate_config *config, struct agent *agent) {
 
 // Set default timeout values for fwstate configuration
 static void
-fwstate_config_set_defaults(struct fwstate_config *config) {
-	memset(config, 0, sizeof(struct fwstate_config));
-	config->sync_config.timeouts.tcp_syn_ack = FW_STATE_DEFAULT_TIMEOUT;
-	config->sync_config.timeouts.tcp_syn = FW_STATE_DEFAULT_TIMEOUT;
-	config->sync_config.timeouts.tcp_fin = FW_STATE_DEFAULT_TIMEOUT;
-	config->sync_config.timeouts.tcp = FW_STATE_DEFAULT_TIMEOUT;
-	config->sync_config.timeouts.udp = 30e9;      // 30 seconds
-	config->sync_config.timeouts.default_ = 16e9; // 16 seconds
+fwstate_config_set_defaults(struct fwstate_sync_config *config) {
+	memset(config, 0, sizeof(struct fwstate_sync_config));
+	config->timeouts.tcp_syn_ack = FW_STATE_DEFAULT_TIMEOUT;
+	config->timeouts.tcp_syn = FW_STATE_DEFAULT_TIMEOUT;
+	config->timeouts.tcp_fin = FW_STATE_DEFAULT_TIMEOUT;
+	config->timeouts.tcp = FW_STATE_DEFAULT_TIMEOUT;
+	config->timeouts.udp = 30e9;	  // 30 seconds
+	config->timeouts.default_ = 16e9; // 16 seconds
 }
 
 static void
@@ -82,7 +82,10 @@ fwstate_module_config_new(
 		);
 		return NULL;
 	}
-	fwstate_config_set_defaults(&config->cfg);
+	// balloc does not zero, and the map create path reads the raw map
+	// pointers to reject double creation, so both halves start zeroed.
+	memset(&config->cfg, 0, sizeof(struct fwstate_config));
+	fwstate_config_set_defaults(&config->sync_config);
 
 	// Register module-level counters.
 	// size=2 counters hold [packets, bytes]; size=1 counters hold
@@ -167,7 +170,7 @@ fwstate_module_config_propogate(
 		old_cp_module, struct fwstate_module_config, cp_module
 	);
 
-	new->cfg = old->cfg; // copy sync config
+	new->sync_config = old->sync_config;
 	EQUATE_OFFSET(&new->cfg.fw4state, &old->cfg.fw4state);
 	EQUATE_OFFSET(&new->cfg.fw6state, &old->cfg.fw6state);
 }
@@ -320,7 +323,7 @@ fwstate_module_config_set_sync_config(
 	struct fwstate_module_config *config = container_of(
 		cp_module, struct fwstate_module_config, cp_module
 	);
-	config->cfg.sync_config = *sync_config;
+	config->sync_config = *sync_config;
 }
 
 struct fwmap_stats
@@ -350,7 +353,7 @@ fwstate_config_get_sync_config(const struct cp_module *cp_module) {
 		cp_module, struct fwstate_module_config, cp_module
 	);
 
-	return config->cfg.sync_config;
+	return config->sync_config;
 }
 
 // Structure to hold outdated layers from both IPv4 and IPv6 maps

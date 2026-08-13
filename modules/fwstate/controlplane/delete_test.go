@@ -91,7 +91,7 @@ func newACLDeleteTestConfig(
 	config, err := cacl.NewModuleConfig(agent, name)
 	require.NoError(testingTB, err)
 	testingTB.Cleanup(config.Free)
-	require.NoError(testingTB, config.UpdateRules(nil))
+	require.NoError(testingTB, config.UpdateRules(nil, nil))
 
 	return config
 }
@@ -140,7 +140,6 @@ func validDeleteTestUpdateRequest(name string) *fwstatepb.UpdateConfigRequest {
 		Name: name,
 		SyncConfig: &fwstatepb.SyncConfig{
 			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			DstEther:         commonpb.NewMACAddressEUI48([6]byte{1, 2, 3, 4, 5, 6}),
 			DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
 			PortMulticast:    9999,
 		},

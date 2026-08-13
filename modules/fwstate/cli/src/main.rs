@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use args::{DeleteCmd, DirectionArg, EntriesCmd, Family, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
-use commonpb::pb::{GetMetricsRequest, IpAddress, MacAddress, Metric as ProtoMetric};
+use commonpb::pb::{GetMetricsRequest, IpAddress, Metric as ProtoMetric};
 use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
@@ -141,7 +141,7 @@ impl FWStateService {
                     output::empty_with_hint(
                         format_args!("No FWState configurations found."),
                         format_args!(
-                            "create one with 'yanet-cli-fwstate update --name <name> --src-addr <addr> --dst-ether <mac> --dst-addr-unicast <addr> --port-unicast <port>'"
+                            "create one with 'yanet-cli-fwstate update --name <name> --src-addr <addr> --dst-addr-multicast <addr> --port-multicast <port>'"
                         ),
                     );
                     return;
@@ -226,13 +226,6 @@ impl FWStateService {
             sync_config.src_addr = Some(parse_ipv6(src_addr).map_err(|err| self.service.invalid("update", err))?);
         }
 
-        if let Some(ref dst_ether) = cmd.dst_ether {
-            let mac = dst_ether
-                .parse::<MacAddress>()
-                .map_err(|err| self.service.invalid("update", err.to_string()))?;
-            sync_config.dst_ether = Some(mac);
-        }
-
         if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
             sync_config.dst_addr_multicast =
                 Some(parse_ipv6(dst_addr_multicast).map_err(|err| self.service.invalid("update", err))?);
@@ -240,15 +233,6 @@ impl FWStateService {
 
         if let Some(port_multicast) = cmd.port_multicast {
             sync_config.port_multicast = port_multicast;
-        }
-
-        if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync_config.dst_addr_unicast =
-                Some(parse_ipv6(dst_addr_unicast).map_err(|err| self.service.invalid("update", err))?);
-        }
-
-        if let Some(port_unicast) = cmd.port_unicast {
-            sync_config.port_unicast = port_unicast;
         }
 
         // Convert timeouts from Duration to nanoseconds if provided

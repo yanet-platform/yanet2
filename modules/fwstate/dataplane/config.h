@@ -11,6 +11,11 @@ struct fwstate_module_config {
 
 	struct fwstate_config cfg;
 
+	// Receive-side sync parameters: packet matching, timeouts, and
+	// suppression. Split from the maps so the struct mirrors what the
+	// module consumes.
+	struct fwstate_sync_config sync_config;
+
 	// Module-level counters, registered by fwstate_module_config_new.
 	// Each counter_id is resolved per-worker via counter_get_address().
 	// size=2 counters hold [packets, bytes]; size=1 counters hold

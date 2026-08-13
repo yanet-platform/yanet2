@@ -152,8 +152,12 @@ acl_module_config_init(
 	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
 	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
 
-	// Initialize fwstate_cfg with NULL pointers
+	// Initialize fwstate_cfg with NULL pointers and zero the emission
+	// sync config, which acl_module_config_update overwrites with the
+	// caller's config when one is given.
 	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
+	memset(&config->sync_config, 0, sizeof(struct fwstate_sync_emit_config)
+	);
 
 	// Register module-level counters
 	struct {
@@ -648,6 +652,7 @@ acl_module_config_update(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t rule_count,
+	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
 ) {
 	struct acl_module_config *config =
@@ -836,6 +841,14 @@ acl_module_config_update(
 				   1000000000LL +
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
 
+	// Copy the emission sync config that drives CREATE_STATE frames, or
+	// clear the one a previous update installed so a reused config emits
+	// none.
+	if (emit_config != NULL) {
+		config->sync_config = *emit_config;
+	} else {
+		memset(&config->sync_config, 0, sizeof(config->sync_config));
+	}
 	if (rule_count > 0) {
 		free(filter_rule_ptrs);
 	}
@@ -877,7 +890,8 @@ acl_module_config_set_fwstate_config(
 		fwstate_cp_module, struct fwstate_module_config, cp_module
 	);
 
-	config->fwstate_cfg.sync_config = fwstate_config->cfg.sync_config;
+	// Only the borrowed maps cross over. The emission sync config comes
+	// from acl_module_config_update.
 	EQUATE_OFFSET(
 		&config->fwstate_cfg.fw4state, &fwstate_config->cfg.fw4state
 	);
@@ -898,8 +912,6 @@ acl_module_config_transfer_fwstate_config(
 		old_cp_module, struct acl_module_config, cp_module
 	);
 
-	new_config->fwstate_cfg.sync_config =
-		old_config->fwstate_cfg.sync_config;
 	EQUATE_OFFSET(
 		&new_config->fwstate_cfg.fw4state,
 		&old_config->fwstate_cfg.fw4state

@@ -138,13 +138,22 @@ message MapConfig {
 }
 
 // Firewall state synchronization configuration
+// SyncConfig carries the receive-side fwstate synchronization parameters:
+// incoming-packet matching, connection timeouts, and the suppression
+// window. The emission addressing for modules that synthesize sync
+// packets lives with the ACL module's own configuration.
 message SyncConfig {
-  common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source address;
-  common.commonpb.v1.MACAddress dst_ether = 2;         // Destination MAC address;
-  common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address;
+  common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source address stamped on forwarded internal frames;
+  // Deprecated: the emission-side destination MAC moved to the ACL
+  // module's SyncConfig; fwstate ignores this field.
+  common.commonpb.v1.MACAddress dst_ether = 2 [deprecated = true];
+  common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address matched on incoming sync packets;
   uint32 port_multicast = 4;                           // Multicast port;
-  common.commonpb.v1.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address;
-  uint32 port_unicast = 6;                             // Unicast port;
+  // Deprecated: the emission-side unicast destination moved to the ACL
+  // module's SyncConfig; fwstate ignores this field.
+  common.commonpb.v1.IPAddress dst_addr_unicast = 5 [deprecated = true];
+  // Deprecated: see dst_addr_unicast.
+  uint32 port_unicast = 6 [deprecated = true];         // Unused;
 
   // Connection timeouts
   uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
@@ -158,7 +167,7 @@ message SyncConfig {
   // whose new expiry lands within this window of the current one is discarded
   // (the fwmap record is left untouched), debouncing refreshes for busy
   // sessions. Every entry TTL is inflated by this value so the effective
-  // keep-alive never drops below the configured timeout. Zero disables it.
+  // keep-alive never falls below the configured timeout. Zero disables it.
   //
   // Optional so that clients unaware of the field (an older web form) can omit
   // it and keep the current window, while an explicit zero disables it.

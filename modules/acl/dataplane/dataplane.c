@@ -155,7 +155,7 @@ acl_handle_packets(
 		net6_share_dir_is_built(&acl_config->net6_share_src);
 
 	struct fwstate_config *fwstate_config = &acl_config->fwstate_cfg;
-	struct fwstate_sync_config *sync_config = &fwstate_config->sync_config;
+	struct fwstate_sync_emit_config *sync_config = &acl_config->sync_config;
 	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
 	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
 
@@ -561,7 +561,8 @@ acl_handle_packets(
 			pass_cnt[0] += 1;
 			packet_front_output(packet_front, packet);
 
-			if (push_sync_packet != SYNC_NONE) {
+			if (push_sync_packet != SYNC_NONE &&
+			    fwstate_sync_emit_config_usable(sync_config)) {
 				create_cnt[0] += 1;
 
 				// Allocate a new packet for the sync frame

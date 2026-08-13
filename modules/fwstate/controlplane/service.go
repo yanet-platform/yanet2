@@ -85,8 +85,8 @@ const (
 	// service state lock.
 	maxListEntriesBatchSize uint32 = 10000
 
-	// maxSyncPort is the highest value accepted for port_multicast and
-	// port_unicast, matching the width of the C-side uint16 port field.
+	// maxSyncPort is the highest value accepted for port_multicast,
+	// matching the width of the C-side uint16 port field.
 	maxSyncPort uint32 = 65535
 )
 
@@ -711,14 +711,11 @@ func (m *FWStateService) readConfigEntries(
 // C-side uint16 port field.
 //
 // A zero port means "unset / keep current" and is allowed here. The
-// required-destination-pair check in validateSyncConfig rejects a request
-// that leaves both destinations unset.
+// required-destination check in validateSyncConfig rejects a request
+// that leaves the multicast destination unset.
 func validateSyncPorts(cfg *fwstatepb.SyncConfig) error {
 	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
 		return status.Errorf(codes.InvalidArgument, "port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
-	}
-	if portUnicast := cfg.GetPortUnicast(); portUnicast > maxSyncPort {
-		return status.Errorf(codes.InvalidArgument, "port_unicast %d exceeds maximum allowed value %d", portUnicast, maxSyncPort)
 	}
 	return nil
 }
@@ -732,23 +729,13 @@ func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
 		missing = append(missing, "src_addr")
 	}
 
-	// Check dst_ether (6 bytes for MAC)
-	dstEther := cfg.GetDstEther()
-	if dstEther == nil {
-		missing = append(missing, "dst_ether")
-	} else {
-		eui := dstEther.EUI48()
-		if isAllZeroBytes(eui[:]) {
-			missing = append(missing, "dst_ether")
-		}
+	// The module matches incoming sync packets against the multicast
+	// destination, so both the address and the port are required.
+	if len(cfg.GetDstAddrMulticast().GetAddr()) != 16 || isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) {
+		missing = append(missing, "dst_addr_multicast")
 	}
-
-	// Check that at least one destination pair is configured
-	hasMulticast := len(cfg.GetDstAddrMulticast().GetAddr()) == 16 && !isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) && cfg.PortMulticast != 0
-	hasUnicast := len(cfg.GetDstAddrUnicast().GetAddr()) == 16 && !isAllZeroBytes(cfg.GetDstAddrUnicast().GetAddr()) && cfg.PortUnicast != 0
-
-	if !hasMulticast && !hasUnicast {
-		missing = append(missing, "dst_addr_multicast+port_multicast or dst_addr_unicast+port_unicast")
+	if cfg.GetPortMulticast() == 0 {
+		missing = append(missing, "port_multicast")
 	}
 
 	if len(missing) > 0 {

@@ -1,3 +1,4 @@
+use core::net::Ipv6Addr;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
@@ -258,6 +259,8 @@ fn print_metrics_table(metrics: &[Metric]) {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ACLConfig {
     rules: Vec<aclpb::Rule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sync_config: Option<aclpb::SyncConfig>,
 }
 
 impl ACLConfig {
@@ -270,6 +273,22 @@ impl ACLConfig {
 
         Ok(config)
     }
+}
+
+/// Display view of an ACL config returned by the show command.
+///
+/// `sync_config` is omitted when absent.
+#[derive(Debug, Serialize)]
+struct ShowConfig {
+    rules: Vec<aclpb::Rule>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sync_config: Option<aclpb::SyncConfig>,
+}
+
+/// Parse an IPv6 address string into the proto message.
+fn parse_ipv6(s: &str) -> Result<commonpb::IpAddress, String> {
+    let addr: Ipv6Addr = s.parse().map_err(|err: core::net::AddrParseError| err.to_string())?;
+    Ok(commonpb::IpAddress { addr: addr.octets().to_vec() })
 }
 
 /// ACL module CLI.
@@ -359,10 +378,13 @@ impl ACLService {
         output::data(
             || &response,
             || {
-                let config = ACLConfig { rules: response.rules.clone() };
+                let display = ShowConfig {
+                    rules: response.rules.clone(),
+                    sync_config: response.sync_config.clone(),
+                };
                 print!(
                     "{}",
-                    serde_yaml::to_string(&config).expect("ACL config YAML serialization must not fail")
+                    serde_yaml::to_string(&display).expect("ACL config YAML serialization must not fail")
                 );
 
                 if response.rules.is_empty() {
@@ -391,6 +413,53 @@ impl ACLService {
         Ok(())
     }
 
+    /// Merge the emission sync config from the YAML file and the flags.
+    ///
+    /// The YAML section is the base; every flag that was passed overrides
+    /// its field. A config with neither source carries no sync config.
+    fn merge_sync_config(
+        &self,
+        base: Option<aclpb::SyncConfig>,
+        cmd: &UpdateCmd,
+    ) -> Result<Option<aclpb::SyncConfig>, String> {
+        let mut sync = match base {
+            Some(base) => base,
+            None => {
+                let no_flags = cmd.dst_ether.is_none()
+                    && cmd.dst_addr_multicast.is_none()
+                    && cmd.port_multicast.is_none()
+                    && cmd.dst_addr_unicast.is_none()
+                    && cmd.port_unicast.is_none();
+                if no_flags {
+                    return Ok(None);
+                }
+                aclpb::SyncConfig::default()
+            }
+        };
+
+        if let Some(ref dst_ether) = cmd.dst_ether {
+            sync.dst_ether = Some(
+                dst_ether
+                    .parse()
+                    .map_err(|err: Box<dyn core::error::Error>| err.to_string())?,
+            );
+        }
+        if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
+            sync.dst_addr_multicast = Some(parse_ipv6(dst_addr_multicast)?);
+        }
+        if let Some(port_multicast) = cmd.port_multicast {
+            sync.port_multicast = port_multicast;
+        }
+        if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
+            sync.dst_addr_unicast = Some(parse_ipv6(dst_addr_unicast)?);
+        }
+        if let Some(port_unicast) = cmd.port_unicast {
+            sync.port_unicast = port_unicast;
+        }
+
+        Ok(Some(sync))
+    }
+
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         let config = ACLConfig::load(&cmd.rules).map_err(|err| {
             self.service.invalid(
@@ -399,9 +468,14 @@ impl ACLService {
             )
         })?;
         let rule_count = config.rules.len();
+        let sync_config = self
+            .merge_sync_config(config.sync_config, &cmd)
+            .map_err(|err| self.service.invalid("update", err))?;
+
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
+            sync_config,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self

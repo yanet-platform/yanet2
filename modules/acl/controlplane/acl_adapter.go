@@ -7,6 +7,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
+	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
 
@@ -193,15 +194,18 @@ func (m *ACLService) swapLinkedHandles(newHandles map[string]ModuleHandle, entri
 		entry := entries[name]
 
 		var rules []*aclpb.Rule
+		var syncConfig *aclpb.SyncConfig
 		if entry.published != nil {
 			oldHandles[name] = entry.published.acl
 			rules = entry.published.rules
+			syncConfig = entry.Published().SyncConfig()
 		}
 
 		entry.published = &aclConfig{
 			rules:       rules,
 			acl:         newHandle,
 			fwstateName: fwstateConfigName,
+			syncConfig:  syncConfig,
 		}
 	}
 	m.publishMetricsSnapshotLocked()
@@ -265,7 +269,13 @@ func (m *ACLService) createLinkedHandles(
 			return nil, fmt.Errorf("failed to convert rules for ACL config %q: %w", name, err)
 		}
 
-		if err := handle.UpdateRules(rules); err != nil {
+		var emitCfg *cfwstate.SyncEmitConfig
+		if stored := entry.Published().SyncConfig(); stored != nil {
+			emit := stored.ToC()
+			emitCfg = &emit
+		}
+
+		if err := handle.UpdateRules(rules, emitCfg); err != nil {
 			handle.Free()
 			for _, h := range newHandles {
 				h.Free()

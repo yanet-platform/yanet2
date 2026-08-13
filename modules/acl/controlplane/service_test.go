@@ -52,6 +52,7 @@ type fakeHandle struct {
 	mu          sync.Mutex
 	name        string
 	rules       []cacl.AclRule
+	emitConfig  *cfwstate.SyncEmitConfig
 	freeCount   int
 	transferred bool
 }
@@ -92,12 +93,22 @@ func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
 	return ffi.ModuleConfig{}
 }
 
-func (m *fakeHandle) UpdateRules(rules []cacl.AclRule) error {
+func (m *fakeHandle) UpdateRules(rules []cacl.AclRule, emitConfig *cfwstate.SyncEmitConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.rules = rules
+	m.emitConfig = emitConfig
 	return nil
+}
+
+// EmitConfig returns the emit config passed to the last UpdateRules call,
+// so a test can assert a relink carried the stored sync config over.
+func (m *fakeHandle) EmitConfig() *cfwstate.SyncEmitConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.emitConfig
 }
 
 func (m *fakeHandle) SetFwStateConfig(_ ffi.ModuleConfig) {}
@@ -252,7 +263,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name)
 		require.NoError(testingTB, moduleErr)
 		testingTB.Cleanup(moduleConfig.Free)
-		require.NoError(testingTB, moduleConfig.UpdateRules(nil))
+		require.NoError(testingTB, moduleConfig.UpdateRules(nil, nil))
 		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
 	}
 	require.NoError(testingTB, agent.UpdateModules(moduleConfigs))
@@ -476,14 +487,13 @@ type compileBlockingHandle struct {
 	name    string
 }
 
-func (m *compileBlockingHandle) UpdateRules(rules []cacl.AclRule) error {
+func (m *compileBlockingHandle) UpdateRules(rules []cacl.AclRule, emitConfig *cfwstate.SyncEmitConfig) error {
 	block := m.backend.recordEntry(m.name)
 	if block != nil {
 		close(block.entered)
 		<-block.release
 	}
-
-	return m.ModuleHandle.UpdateRules(rules)
+	return m.ModuleHandle.UpdateRules(rules, emitConfig)
 }
 
 func newTestService(b acl.Backend) *acl.ACLService {
@@ -613,6 +623,202 @@ func TestUpdateConfig_Idempotency(t *testing.T) {
 	publishAfter := b.PublishCalls()
 
 	assert.Equal(t, publishBefore, publishAfter, "second call with identical rules must not publish")
+}
+
+// validTestSyncConfig returns a sync config that passes validation.
+func validTestSyncConfig() *aclpb.SyncConfig {
+	return &aclpb.SyncConfig{
+		DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
+		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
+		PortMulticast:    9999,
+	}
+}
+
+// TestUpdateConfig_IdempotencyCountsSyncConfig verifies that the
+// idempotence short-circuit compares the sync config, not only the rules.
+// The ruleset only reads state, so a config with no sync section stays
+// legal and dropping the section is observable as a publish.
+func TestUpdateConfig_IdempotencyCountsSyncConfig(t *testing.T) {
+	b := newFakeBackend()
+	svc := newTestService(b)
+
+	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CHECK_STATE}}}}
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:       "acl0",
+		Rules:      rules,
+		SyncConfig: validTestSyncConfig(),
+	})
+	require.NoError(t, err)
+	publishBefore := b.PublishCalls()
+
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:       "acl0",
+		Rules:      rules,
+		SyncConfig: validTestSyncConfig(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, publishBefore, b.PublishCalls(), "identical sync config must not publish")
+
+	altered := validTestSyncConfig()
+	altered.PortMulticast = 1000
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:       "acl0",
+		Rules:      rules,
+		SyncConfig: altered,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, publishBefore+1, b.PublishCalls(), "a changed sync config must publish")
+
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  "acl0",
+		Rules: rules,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, publishBefore+2, b.PublishCalls(), "dropping the sync config must publish")
+}
+
+// TestUpdateConfig_CheckStateOnlyRulesNeedNoSyncConfig verifies that a
+// ruleset which only reads state carries no sync config requirement.
+func TestUpdateConfig_CheckStateOnlyRulesNeedNoSyncConfig(t *testing.T) {
+	b := newFakeBackend()
+	svc := newTestService(b)
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{
+			{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CHECK_STATE}}},
+		},
+	})
+	require.NoError(t, err)
+}
+
+// TestUpdateConfig_RequiresSyncConfigForCreateState verifies that a ruleset
+// using CREATE_STATE is rejected without a sync config and accepted with one.
+func TestUpdateConfig_RequiresSyncConfigForCreateState(t *testing.T) {
+	b := newFakeBackend()
+	svc := newTestService(b)
+
+	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CREATE_STATE}}}}
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "acl0", Rules: rules})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.Contains(t, err.Error(), "sync_config is required")
+
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:       "acl0",
+		Rules:      rules,
+		SyncConfig: validTestSyncConfig(),
+	})
+	require.NoError(t, err)
+}
+
+// TestUpdateConfig_RejectsInvalidSyncConfig verifies that a supplied sync
+// config is validated even when no rule requires one.
+func TestUpdateConfig_RejectsInvalidSyncConfig(t *testing.T) {
+	b := newFakeBackend()
+	svc := newTestService(b)
+
+	cfg := validTestSyncConfig()
+	cfg.PortUnicast = 65536
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:       "acl0",
+		Rules:      []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
+		SyncConfig: cfg,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.Contains(t, err.Error(), "port_unicast")
+}
+
+// TestUpdateConfig_ValidatesSyncConfig covers the sync config validation
+// through the update RPC: every field the craft path requires, and the
+// 16-bit port bounds.
+func TestUpdateConfig_ValidatesSyncConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*aclpb.SyncConfig)
+		wantErr string
+	}{
+		{
+			name:   "valid config passes",
+			mutate: func(*aclpb.SyncConfig) {},
+		},
+		{
+			name: "valid config with unicast destination passes",
+			mutate: func(c *aclpb.SyncConfig) {
+				c.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}}
+				c.PortUnicast = 1000
+			},
+		},
+		{
+			name:    "missing dst_ether",
+			mutate:  func(c *aclpb.SyncConfig) { c.DstEther = nil },
+			wantErr: "dst_ether",
+		},
+		{
+			name:    "all-zero dst_ether",
+			mutate:  func(c *aclpb.SyncConfig) { c.DstEther = &commonpb.MACAddress{} },
+			wantErr: "dst_ether",
+		},
+		{
+			name:    "missing multicast address",
+			mutate:  func(c *aclpb.SyncConfig) { c.DstAddrMulticast = nil },
+			wantErr: "dst_addr_multicast",
+		},
+		{
+			name:    "short multicast address",
+			mutate:  func(c *aclpb.SyncConfig) { c.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4}} },
+			wantErr: "dst_addr_multicast",
+		},
+		{
+			name:    "all-zero multicast address",
+			mutate:  func(c *aclpb.SyncConfig) { c.DstAddrMulticast = &commonpb.IPAddress{} },
+			wantErr: "dst_addr_multicast",
+		},
+		{
+			name:    "zero multicast port",
+			mutate:  func(c *aclpb.SyncConfig) { c.PortMulticast = 0 },
+			wantErr: "port_multicast",
+		},
+		{
+			name:    "multicast port over 16 bits",
+			mutate:  func(c *aclpb.SyncConfig) { c.PortMulticast = 65536 },
+			wantErr: "port_multicast",
+		},
+		{
+			name:    "unicast port over 16 bits",
+			mutate:  func(c *aclpb.SyncConfig) { c.PortUnicast = 65536 },
+			wantErr: "port_unicast",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newFakeBackend()
+			svc := newTestService(b)
+
+			cfg := validTestSyncConfig()
+			tc.mutate(cfg)
+
+			resp, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CREATE_STATE}}},
+				},
+				SyncConfig: cfg,
+			})
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Contains(t, err.Error(), tc.wantErr)
+			assert.Nil(t, resp)
+		})
+	}
 }
 
 // TestUpdateConfig_ErrorPropagation verifies that a backend failure from
@@ -1384,6 +1590,45 @@ func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assertAllHandlesFreed(t, backend)
+}
+
+// TestRelinkConfigs_PreservesSyncConfig verifies that relinking a name to a
+// fwstate config keeps the stored sync config both in the service state and
+// on the refreshed handle, so CREATE_STATE keeps emitting after a relink.
+func TestRelinkConfigs_PreservesSyncConfig(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+	adapter := acl.NewACLAdapter(svc)
+
+	fwstateConfig := &fwstate.FwStateConfig{ModuleConfig: &cfwstate.ModuleConfig{}}
+	publish := func(_ []ffi.ModuleConfig) error { return nil }
+
+	syncCfg := validTestSyncConfig()
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "a",
+		Rules: []*aclpb.Rule{
+			{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CREATE_STATE}}},
+		},
+		SyncConfig: syncCfg,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, adapter.RelinkConfigs(fwstateConfig, publish))
+
+	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "a"})
+	require.NoError(t, err)
+	require.NotNil(t, resp.SyncConfig, "a relink must keep the stored sync config")
+	assert.True(t, proto.Equal(syncCfg, resp.SyncConfig))
+
+	var refreshed *fakeHandle
+	for _, handle := range backend.CreatedHandles() {
+		if handle.Name() == "a" && handle.FreeCount() == 0 {
+			require.Nil(t, refreshed, "only one a handle may remain owned after relinking")
+			refreshed = handle
+		}
+	}
+	require.NotNil(t, refreshed, "RelinkConfigs must leave a refreshed a handle owned")
+	require.NotNil(t, refreshed.EmitConfig(), "the refreshed handle must receive the stored emit config")
 }
 
 // TestACLAdapterLinkConfigs_UnknownName verifies that LinkConfigs with an

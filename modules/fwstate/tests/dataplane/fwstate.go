@@ -75,17 +75,17 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 	// Multicast IPv6 address: ff02::1
 	multicastAddr := [16]C.uint8_t{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
 	for i := range 16 {
-		m.cfg.sync_config.dst_addr_multicast[i] = multicastAddr[i]
+		m.sync_config.dst_addr_multicast[i] = multicastAddr[i]
 	}
-	m.cfg.sync_config.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
+	m.sync_config.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
 
 	// Set timeouts (in nanoseconds)
-	m.cfg.sync_config.timeouts.tcp_syn_ack = C.uint64_t(120e9)
-	m.cfg.sync_config.timeouts.tcp_syn = C.uint64_t(120e9)
-	m.cfg.sync_config.timeouts.tcp_fin = C.uint64_t(120e9)
-	m.cfg.sync_config.timeouts.tcp = C.uint64_t(120e9)
-	m.cfg.sync_config.timeouts.udp = C.uint64_t(30e9)
-	m.cfg.sync_config.timeouts.default_ = C.uint64_t(16e9)
+	m.sync_config.timeouts.tcp_syn_ack = C.uint64_t(120e9)
+	m.sync_config.timeouts.tcp_syn = C.uint64_t(120e9)
+	m.sync_config.timeouts.tcp_fin = C.uint64_t(120e9)
+	m.sync_config.timeouts.tcp = C.uint64_t(120e9)
+	m.sync_config.timeouts.udp = C.uint64_t(30e9)
+	m.sync_config.timeouts.default_ = C.uint64_t(16e9)
 
 	// Link the counter registry and spawn a per-worker counter storage once,
 	// so counter values accumulate across fwstateHandlePackets calls.
@@ -107,7 +107,7 @@ func fwstateCounterStorageFree(storage *C.struct_counter_storage) {
 // module config produced by fwstateModuleConfig. Zero disables suppression.
 func SetSyncSuppressTimeout(cpModule *C.struct_cp_module, ns uint64) {
 	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
-	m.cfg.sync_config.sync_suppress_timeout = C.uint64_t(ns)
+	m.sync_config.sync_suppress_timeout = C.uint64_t(ns)
 }
 
 // SetSyncTCPTimeouts overrides the TCP established (tcp) and teardown
@@ -115,8 +115,8 @@ func SetSyncSuppressTimeout(cpModule *C.struct_cp_module, ns uint64) {
 // shorter-TTL state transition.
 func SetSyncTCPTimeouts(cpModule *C.struct_cp_module, tcp, tcpFin uint64) {
 	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
-	m.cfg.sync_config.timeouts.tcp = C.uint64_t(tcp)
-	m.cfg.sync_config.timeouts.tcp_fin = C.uint64_t(tcpFin)
+	m.sync_config.timeouts.tcp = C.uint64_t(tcp)
+	m.sync_config.timeouts.tcp_fin = C.uint64_t(tcpFin)
 }
 
 func fwstateHandlePackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {

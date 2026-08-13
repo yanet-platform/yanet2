@@ -121,7 +121,6 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 				" --index-size 1024" +
 				" --extra-bucket-count 64" +
 				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
@@ -482,7 +481,6 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 				" --index-size 1024" +
 				" --extra-bucket-count 64" +
 				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
@@ -728,7 +726,6 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 				" --index-size 1024" +
 				" --extra-bucket-count 64" +
 				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +

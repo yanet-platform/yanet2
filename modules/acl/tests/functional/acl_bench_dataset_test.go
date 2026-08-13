@@ -696,7 +696,7 @@ func datasetBenchSetup(b *testing.B) *datasetBenchState {
 			datasetBenchErr = err
 			return
 		}
-		if datasetBenchErr = handle.UpdateRules(rules); datasetBenchErr != nil {
+		if datasetBenchErr = handle.UpdateRules(rules, nil); datasetBenchErr != nil {
 			return
 		}
 		if datasetBenchErr = backend.UpdateModule(handle); datasetBenchErr != nil {
@@ -850,7 +850,7 @@ func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
 			topoBenchErr = err
 			return
 		}
-		if topoBenchErr = handle.UpdateRules(rules); topoBenchErr != nil {
+		if topoBenchErr = handle.UpdateRules(rules, nil); topoBenchErr != nil {
 			return
 		}
 		if topoBenchErr = backend.UpdateModule(handle); topoBenchErr != nil {

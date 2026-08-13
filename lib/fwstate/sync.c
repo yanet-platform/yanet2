@@ -131,7 +131,7 @@ fwstate_fill_sync_frame(
 
 int
 fwstate_craft_state_sync_packet(
-	const struct fwstate_sync_config *sync_config,
+	const struct fwstate_sync_emit_config *emit_config,
 	const struct packet *packet,
 	const enum sync_packet_direction direction,
 	struct packet *sync_pkt
@@ -163,7 +163,7 @@ fwstate_craft_state_sync_packet(
 	);
 	eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
 	struct ether_addr *ether_dst = (struct ether_addr *)&eth_hdr->dst_addr;
-	*ether_dst = sync_config->dst_ether;
+	*ether_dst = emit_config->dst_ether;
 
 	// Fill VLAN header
 	struct rte_vlan_hdr *vlan_hdr = rte_pktmbuf_mtod_offset(
@@ -184,7 +184,7 @@ fwstate_craft_state_sync_packet(
 	ipv6_hdr->hop_limits = 64;
 	// NOTE: Address will be set by the fwstate module
 	memset(ipv6_hdr->src_addr, 0, 16);
-	rte_memcpy(ipv6_hdr->dst_addr, sync_config->dst_addr_multicast, 16);
+	rte_memcpy(ipv6_hdr->dst_addr, emit_config->dst_addr_multicast, 16);
 
 	// Fill UDP header
 	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
@@ -193,8 +193,8 @@ fwstate_craft_state_sync_packet(
 	// IPFW reuses the same port for both src and dst
 	// FIXME: support for unicast addrs
 	// Port values are converted to BE format in the controlplane
-	udp_hdr->src_port = sync_config->port_multicast;
-	udp_hdr->dst_port = sync_config->port_multicast;
+	udp_hdr->src_port = emit_config->port_multicast;
+	udp_hdr->dst_port = emit_config->port_multicast;
 	udp_hdr->dgram_len = rte_cpu_to_be_16(
 		sizeof(struct rte_udp_hdr) + sizeof(struct fw_state_sync_frame)
 	);

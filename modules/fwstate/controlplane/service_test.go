@@ -59,37 +59,21 @@ func TestValidateSyncPorts(t *testing.T) {
 	cases := []struct {
 		name          string
 		portMulticast uint32
-		portUnicast   uint32
 		wantErr       bool
 	}{
 		{
-			name:          "both zero",
+			name:          "zero",
 			portMulticast: 0,
-			portUnicast:   0,
 			wantErr:       false,
 		},
 		{
 			name:          "boundary value",
 			portMulticast: 65535,
-			portUnicast:   65535,
 			wantErr:       false,
 		},
 		{
-			name:          "multicast port just above boundary",
+			name:          "just above boundary",
 			portMulticast: 65536,
-			portUnicast:   0,
-			wantErr:       true,
-		},
-		{
-			name:          "unicast port far above boundary",
-			portMulticast: 0,
-			portUnicast:   70000,
-			wantErr:       true,
-		},
-		{
-			name:          "one valid one out of range",
-			portMulticast: 1,
-			portUnicast:   70000,
 			wantErr:       true,
 		},
 	}
@@ -98,7 +82,6 @@ func TestValidateSyncPorts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &fwstatepb.SyncConfig{
 				PortMulticast: tc.portMulticast,
-				PortUnicast:   tc.portUnicast,
 			}
 
 			err := validateSyncPorts(cfg)
@@ -113,38 +96,35 @@ func TestValidateSyncPorts(t *testing.T) {
 	}
 }
 
-// TestValidateSyncConfigDstEther checks that dst_ether validation
-// distinguishes between absent and explicitly-zero MAC values.
-func TestValidateSyncConfigDstEther(t *testing.T) {
+// TestValidateSyncConfigMulticastRequired checks that the multicast
+// destination pair is validated as required.
+func TestValidateSyncConfigMulticastRequired(t *testing.T) {
 	newConfig := func() *fwstatepb.SyncConfig {
 		return &fwstatepb.SyncConfig{
-			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			PortMulticast:    1,
+			SrcAddr:       &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+			PortMulticast: 1,
 		}
 	}
 
-	t.Run("missing", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.DstEther = nil
-
-		err := validateSyncConfig(cfg)
+	t.Run("missing multicast address", func(t *testing.T) {
+		err := validateSyncConfig(newConfig())
 		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "dst_ether"))
+		require.True(t, strings.Contains(err.Error(), "dst_addr_multicast"))
 	})
 
-	t.Run("zero", func(t *testing.T) {
+	t.Run("zero multicast port", func(t *testing.T) {
 		cfg := newConfig()
-		cfg.DstEther = &commonpb.MACAddress{}
+		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+		cfg.PortMulticast = 0
 
 		err := validateSyncConfig(cfg)
 		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "dst_ether"))
+		require.True(t, strings.Contains(err.Error(), "port_multicast"))
 	})
 
 	t.Run("valid", func(t *testing.T) {
 		cfg := newConfig()
-		cfg.DstEther = commonpb.NewMACAddressEUI48([6]byte{1, 2, 3, 4, 5, 6})
+		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 
 		err := validateSyncConfig(cfg)
 		require.NoError(t, err)

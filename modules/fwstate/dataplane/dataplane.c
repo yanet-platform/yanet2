@@ -453,7 +453,7 @@ fwstate_handle_packets(
 		// packet before pushing to packet_front->output
 
 		if (!is_fw_state_sync_packet(
-			    packet, &fwstate_config->sync_config
+			    packet, &fwstate_module->sync_config
 		    )) {
 			// Not a sync packet, pass through
 			passthrough_cnt[0] += 1;
@@ -522,7 +522,7 @@ fwstate_handle_packets(
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config,
+					&fwstate_module->sync_config,
 					sync_v4_inserted_cnt,
 					sync_v4_insert_failed_cnt,
 					sync_v4_suppressed_cnt
@@ -535,7 +535,7 @@ fwstate_handle_packets(
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config,
+					&fwstate_module->sync_config,
 					sync_v6_inserted_cnt,
 					sync_v6_insert_failed_cnt,
 					sync_v6_suppressed_cnt
@@ -555,7 +555,7 @@ fwstate_handle_packets(
 		} else if (any_applied) {
 			rte_memcpy(
 				ipv6_hdr->src_addr,
-				fwstate_config->sync_config.src_addr,
+				fwstate_module->sync_config.src_addr,
 				16
 			);
 			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(

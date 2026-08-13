@@ -34,7 +34,7 @@
 #define TEST_DST_PORT 80
 
 // Dummy sync config (only used for packet construction, not for port logic)
-static struct fwstate_sync_config test_sync_config;
+static struct fwstate_sync_emit_config test_sync_config;
 static struct rte_mempool *test_pool;
 
 static void

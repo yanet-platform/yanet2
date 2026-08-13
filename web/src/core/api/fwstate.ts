@@ -1,5 +1,4 @@
 import { createService, createStreamingService, type CallOptions, type StreamCallbacks } from './client';
-import type { MACAddress } from './neighbours';
 import type { IPAddressWire } from '../utils/netip';
 
 export interface MapConfig {
@@ -9,11 +8,8 @@ export interface MapConfig {
 
 export interface SyncConfig {
     src_addr?: IPAddressWire;
-    dst_ether?: MACAddress;
     dst_addr_multicast?: IPAddressWire;
     port_multicast?: number;
-    dst_addr_unicast?: IPAddressWire;
-    port_unicast?: number;
     tcp_syn_ack?: number;
     tcp_syn?: number;
     tcp_fin?: number;

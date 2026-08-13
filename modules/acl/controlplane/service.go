@@ -2,6 +2,7 @@ package acl
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sort"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
+	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
@@ -27,7 +29,7 @@ import (
 type ModuleHandle interface {
 	Free()
 	AsFFIModule() ffi.ModuleConfig
-	UpdateRules(rules []cacl.AclRule) error
+	UpdateRules(rules []cacl.AclRule, emitConfig *cfwstate.SyncEmitConfig) error
 	SetFwStateConfig(fw ffi.ModuleConfig)
 	TransferFwStateConfig(old ffi.ModuleConfig)
 	GetInfo() *cacl.AclConfigInfo
@@ -83,6 +85,7 @@ type aclConfig struct {
 	rules       []*aclpb.Rule
 	acl         ModuleHandle
 	fwstateName string
+	syncConfig  *aclpb.SyncConfig
 }
 
 // Rules returns the rules held by the config.
@@ -98,6 +101,12 @@ func (m *aclConfig) Handle() ModuleHandle {
 // FwStateName returns the linked fwstate config name.
 func (m *aclConfig) FwStateName() string {
 	return m.fwstateName
+}
+
+// SyncConfig returns the stored emission-side sync configuration, or nil
+// when the config carries none.
+func (m *aclConfig) SyncConfig() *aclpb.SyncConfig {
+	return m.syncConfig
 }
 
 // Free releases the module handle held by the config.
@@ -466,6 +475,82 @@ func rulesEqual(a, b []*aclpb.Rule) bool {
 	return true
 }
 
+// rulesNeedCreateState reports whether any rule uses CREATE_STATE, the
+// action that synthesizes state-sync packets and therefore requires the
+// emission-side sync config. CHECK_STATE-only rulesets read state and
+// carry no sync config.
+func rulesNeedCreateState(rules []*aclpb.Rule) bool {
+	for _, rule := range rules {
+		for _, action := range rule.GetActions() {
+			if action.GetKind() == aclpb.ActionKind_ACTION_KIND_CREATE_STATE {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// syncConfigsEqual reports whether two sync configs are equal. Both nil
+// compares equal; one nil and one non-nil does not.
+func syncConfigsEqual(a, b *aclpb.SyncConfig) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == nil {
+		return true
+	}
+	return proto.Equal(a, b)
+}
+
+// validateSyncConfig rejects an emission sync config that could not
+// produce valid sync frames: a missing destination MAC, a missing
+// multicast destination pair (the only destination the craft path
+// uses), or out-of-range ports.
+func validateSyncConfig(cfg *aclpb.SyncConfig) error {
+	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
+		return fmt.Errorf("port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
+	}
+	if portUnicast := cfg.GetPortUnicast(); portUnicast > maxSyncPort {
+		return fmt.Errorf("port_unicast %d exceeds maximum allowed value %d", portUnicast, maxSyncPort)
+	}
+
+	var missing []string
+
+	if dstEther := cfg.GetDstEther(); dstEther == nil {
+		missing = append(missing, "dst_ether")
+	} else {
+		eui := dstEther.EUI48()
+		if isAllZeroBytes(eui[:]) {
+			missing = append(missing, "dst_ether")
+		}
+	}
+
+	if len(cfg.GetDstAddrMulticast().GetAddr()) != 16 || isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) {
+		missing = append(missing, "dst_addr_multicast")
+	}
+	if cfg.GetPortMulticast() == 0 {
+		missing = append(missing, "port_multicast")
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required sync config fields: %v", missing)
+	}
+	return nil
+}
+
+// maxSyncPort is the highest value accepted for the sync config ports,
+// matching the width of the C-side uint16 port field.
+const maxSyncPort uint32 = 65535
+
+func isAllZeroBytes(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
@@ -485,7 +570,22 @@ func (m *ACLService) UpdateConfig(
 	err := m.withEntry(name, func(entry *configEntry) error {
 		oldConfig := entry.Published()
 
-		if oldConfig != nil && rulesEqual(oldConfig.Rules(), req.Rules) {
+		syncConfig := req.GetSyncConfig()
+
+		if rulesNeedCreateState(req.Rules) {
+			if syncConfig == nil {
+				return status.Error(codes.InvalidArgument,
+					"sync_config is required when any rule uses ACTION_KIND_CREATE_STATE")
+			}
+		}
+		if syncConfig != nil {
+			if err := validateSyncConfig(syncConfig); err != nil {
+				return status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+			}
+		}
+
+		if oldConfig != nil && rulesEqual(oldConfig.Rules(), req.Rules) &&
+			syncConfigsEqual(oldConfig.SyncConfig(), syncConfig) {
 			resp = &aclpb.UpdateConfigResponse{}
 			return nil
 		}
@@ -500,7 +600,13 @@ func (m *ACLService) UpdateConfig(
 			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
 		}
 
-		if err := handle.UpdateRules(rules); err != nil {
+		var emitCfg *cfwstate.SyncEmitConfig
+		if syncConfig != nil {
+			emit := syncConfig.ToC()
+			emitCfg = &emit
+		}
+
+		if err := handle.UpdateRules(rules, emitCfg); err != nil {
 			handle.Free()
 			return status.Errorf(codes.Internal, "failed to update module config: %v", err)
 		}
@@ -520,11 +626,17 @@ func (m *ACLService) UpdateConfig(
 			return status.Errorf(codes.Internal, "failed to update module: %v", err)
 		}
 
+		var storedSync *aclpb.SyncConfig
+		if syncConfig != nil {
+			storedSync = proto.Clone(syncConfig).(*aclpb.SyncConfig)
+		}
+
 		m.mu.Lock()
 		entry.Publish(&aclConfig{
 			rules:       req.Rules,
 			acl:         handle,
 			fwstateName: fwstateName,
+			syncConfig:  storedSync,
 		})
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
@@ -568,6 +680,7 @@ func (m *ACLService) ShowConfig(
 		Name:        name,
 		Rules:       config.Rules(),
 		FwstateName: config.FwStateName(),
+		SyncConfig:  config.SyncConfig(),
 	}
 
 	return response, nil

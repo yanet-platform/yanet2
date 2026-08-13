@@ -33,6 +33,24 @@ pub struct UpdateCmd {
     /// Path to the ruleset YAML file
     #[arg(required = true, long = "rules", value_name = "PATH")]
     pub rules: PathBuf,
+    /// Destination MAC address of emitted state-sync frames
+    /// (e.g., "00:11:22:33:44:55")
+    #[arg(long)]
+    pub dst_ether: Option<String>,
+    /// Multicast IPv6 destination of emitted state-sync frames
+    /// (e.g., "ff02::1")
+    #[arg(long)]
+    pub dst_addr_multicast: Option<String>,
+    /// Multicast port of emitted state-sync frames
+    #[arg(long)]
+    pub port_multicast: Option<u32>,
+    /// Unicast IPv6 destination of emitted state-sync frames
+    /// (e.g., "2001:db8::2")
+    #[arg(long)]
+    pub dst_addr_unicast: Option<String>,
+    /// Unicast port of emitted state-sync frames
+    #[arg(long)]
+    pub port_unicast: Option<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]

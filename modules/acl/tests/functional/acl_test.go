@@ -116,7 +116,7 @@ func applyACLRules(
 	require.NoError(tb, err)
 	tb.Cleanup(handle.Free)
 
-	require.NoError(tb, handle.UpdateRules(rules))
+	require.NoError(tb, handle.UpdateRules(rules, nil))
 	require.NoError(tb, backend.UpdateModule(handle))
 	return handle
 }
@@ -1733,7 +1733,7 @@ func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
 		),
 	}
 
-	err = handle.UpdateRules(rules)
+	err = handle.UpdateRules(rules, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "non-contiguous")
 }
@@ -1760,7 +1760,7 @@ func TestACL_RejectsNonBiContiguousIPv6Mask(t *testing.T) {
 		),
 	}
 
-	err = handle.UpdateRules(rules)
+	err = handle.UpdateRules(rules, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bi-contiguous")
 }

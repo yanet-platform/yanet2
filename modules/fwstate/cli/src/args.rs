@@ -81,10 +81,6 @@ pub struct UpdateCmd {
     #[arg(long)]
     pub src_addr: Option<String>,
 
-    /// Destination MAC address (e.g., "00:11:22:33:44:55")
-    #[arg(long)]
-    pub dst_ether: Option<String>,
-
     /// Multicast IPv6 address (e.g., "ff02::1")
     #[arg(long)]
     pub dst_addr_multicast: Option<String>,
@@ -92,14 +88,6 @@ pub struct UpdateCmd {
     /// Multicast port
     #[arg(long)]
     pub port_multicast: Option<u32>,
-
-    /// Unicast IPv6 address (e.g., "2001:db8::2")
-    #[arg(long)]
-    pub dst_addr_unicast: Option<String>,
-
-    /// Unicast port
-    #[arg(long)]
-    pub port_unicast: Option<u32>,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h")
     #[arg(long, value_parser = parse_duration)]

@@ -19,6 +19,7 @@ enum acl_rule_action_kind {
 
 struct agent;
 struct cp_module;
+struct fwstate_sync_emit_config;
 
 struct cp_module *
 acl_module_config_init(
@@ -55,11 +56,17 @@ struct acl_rule {
 	enum filter_ip_fragment fragment;
 };
 
+// Compile rules into the ACL config and set the emission-side sync
+// parameters.
+//
+// emit_config is copied by value when non-NULL and drives the CREATE_STATE
+// sync frames.
 int
 acl_module_config_update(
 	struct cp_module *cp_module,
 	struct acl_rule *rules,
 	uint32_t rule_count,
+	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
 );
 

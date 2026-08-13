@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
 import { toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
-import type { Rule } from '@yanet/core/api/acl';
+import type { Rule, SyncConfig } from '@yanet/core/api/acl';
 import {
     aclDraftReducer,
     initialAclDraftState,
@@ -13,9 +13,6 @@ import { useConfigPersistence, type ConfigPersistenceDispatch } from '@yanet/cor
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_FWSTATE_NAME = '';
-
-const aclUpdateConfig = (name: string, rules: Rule[]): Promise<unknown> =>
-    API.acl.updateConfig({ name, rules });
 
 const aclDeleteConfig = (name: string): Promise<unknown> =>
     API.acl.deleteConfig({ name });
@@ -51,6 +48,15 @@ export const useAclDraft = (): UseAclDraftResult => {
     const [loadFailed, setLoadFailed] = useState(false);
     const { write: writeCache } = useConfigListCache('acl');
 
+    // Latest stored sync config per name, read by the identity-stable save
+    // wrapper below so a web save keeps the config's emission settings
+    // instead of dropping them.
+    const serverSyncConfigRef = useRef<Record<string, SyncConfig | undefined>>({});
+    serverSyncConfigRef.current = state.serverSyncConfig;
+
+    const aclUpdateConfig = useCallback((name: string, rules: Rule[]): Promise<unknown> =>
+        API.acl.updateConfig({ name, rules, sync_config: serverSyncConfigRef.current[name] }), []);
+
     const dispatchDraft = useCallback((action: AclDraftAction): void => {
         rawDispatch(action);
     }, []);
@@ -66,9 +72,14 @@ export const useAclDraft = (): UseAclDraftResult => {
 
             const configs = await loadKnownConfigs(
                 names,
-                async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string }> => {
+                async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string; syncConfig?: SyncConfig }> => {
                     const resp = await API.acl.showConfig({ name });
-                    return { name, rules: resp.rules ?? [], fwstateName: resp.fwstate_name ?? '' };
+                    return {
+                        name,
+                        rules: resp.rules ?? [],
+                        fwstateName: resp.fwstate_name ?? '',
+                        syncConfig: resp.sync_config,
+                    };
                 },
                 { onDropped: warnConfigsUnknown('acl-configs-unknown', 'ACL') },
             );

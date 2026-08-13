@@ -34,8 +34,11 @@ struct acl_module_config {
 	uint64_t target_count;
 	struct acl_target *targets;
 
+	// Fwstate module maps borrowed for state lookups.
 	struct fwstate_config fwstate_cfg;
 
+	// Emission-side sync parameters for CREATE_STATE frames.
+	struct fwstate_sync_emit_config sync_config;
 	// Metrics
 	uint64_t compilation_time_ns;
 	uint64_t filter_rule_count_ip4;

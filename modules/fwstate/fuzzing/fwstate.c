@@ -171,21 +171,21 @@ fwstate_test_config(struct cp_module **cp_module) {
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};
-	memcpy(config->cfg.sync_config.dst_addr_multicast, multicast_addr, 16);
-	config->cfg.sync_config.port_multicast = rte_cpu_to_be_16(9999);
+	memcpy(config->sync_config.dst_addr_multicast, multicast_addr, 16);
+	config->sync_config.port_multicast = rte_cpu_to_be_16(9999);
 
 	// Set imeouts
-	config->cfg.sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
-	config->cfg.sync_config.timeouts.tcp_syn = 120000000000ULL;
-	config->cfg.sync_config.timeouts.tcp_fin = 120000000000ULL;
-	config->cfg.sync_config.timeouts.tcp = 120000000000ULL;
-	config->cfg.sync_config.timeouts.udp = 30000000000ULL;
-	config->cfg.sync_config.timeouts.default_ = 16000000000ULL;
+	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
+	config->sync_config.timeouts.tcp_syn = 120000000000ULL;
+	config->sync_config.timeouts.tcp_fin = 120000000000ULL;
+	config->sync_config.timeouts.tcp = 120000000000ULL;
+	config->sync_config.timeouts.udp = 30000000000ULL;
+	config->sync_config.timeouts.default_ = 16000000000ULL;
 
 	// Exercise the suppression path under fuzzing: a fixed window means
 	// repeated frames for the same 5-tuple probe the fwmap without a write
 	// lock and may be discarded, covering the new code path.
-	config->cfg.sync_config.sync_suppress_timeout = 8000000000ULL;
+	config->sync_config.sync_suppress_timeout = 8000000000ULL;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
