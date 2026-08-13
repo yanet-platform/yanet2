@@ -354,7 +354,8 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	assert(outdated_count == 2);
 
 	// Teardown: free every collected layer and its bookkeeping node,
-	// mirroring fwstate_outdated_layers_free.
+	// the way the fwstate-map object trim consumers release collected
+	// layers.
 	cursor = outdated_head;
 	while (cursor) {
 		layermap_list_t *next =

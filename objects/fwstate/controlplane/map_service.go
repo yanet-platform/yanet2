@@ -10,7 +10,6 @@ package fwstatemap
 
 import (
 	"context"
-	"io"
 	"math"
 	"strings"
 	"sync"
@@ -21,6 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -128,6 +128,8 @@ func MapLabeler(fullMethod string, req any) metrics.Labels {
 		return metrics.Labels{"map": r.GetName()}
 	case *fwstatemappb.GetMapStatsRequest:
 		return metrics.Labels{"map": r.GetName()}
+	case *fwstatemappb.ListEntriesRequest:
+		return metrics.Labels{"map": r.GetMapName()}
 	case *fwstatemappb.InsertLayerRequest:
 		return metrics.Labels{"map": r.GetName()}
 	default:
@@ -206,6 +208,74 @@ func (m *FWStateMapService) UnaryServerInterceptor() grpc.UnaryServerInterceptor
 		return nil
 	}
 	return m.metrics.UnaryServerInterceptor()
+}
+
+// Metrics returns the map service's metrics matching tags: gauge series
+// derived from each live map's table statistics, plus the gRPC series
+// its interceptor records.
+//
+// The gRPC series carry the map service's own service and method labels;
+// the module's metrics RPC aggregates them with the fwstate module metrics so
+// map RPC traffic is reachable from a single endpoint.
+func (m *FWStateMapService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+	result := m.collectMapStats()
+
+	if m.metrics != nil {
+		result = append(result, m.metrics.Collect()...)
+	}
+	return metrics.Filter(result, tags), nil
+}
+
+// collectMapStats emits the gauge metric set derived from the table
+// statistics of every live map, one series set per map object.
+func (m *FWStateMapService) collectMapStats() []*commonpb.Metric {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+
+	result := make([]*commonpb.Metric, 0, len(m.maps)*7)
+	for name, fwMap := range m.maps {
+		af := "ipv4"
+		if fwMap.Config().Kind() == cfwstate.KindV6 {
+			af = "ipv6"
+		}
+		result = append(
+			result, mapStatsGauges(name, af, now, fwMap.Config().GetStats())...,
+		)
+	}
+
+	return result
+}
+
+// mapStatsGauges builds the gauge metric set for one map object.
+//
+// The names match the series the fwstate service exported per config
+// before the maps became standalone objects, so existing dashboards keep
+// working with the map and af labels in place of the config label.
+func mapStatsGauges(mapName, af string, now time.Time, stats mapStats) []*commonpb.Metric {
+	labels := []*commonpb.Label{
+		{Name: "map", Value: mapName},
+		{Name: "af", Value: af},
+	}
+
+	// MaxDeadline is an absolute timestamp on the dataplane's monotonic
+	// clock. Export the remaining time-to-live (clamped at zero once the
+	// deadline has passed).
+	deadlineTTL := uint64(0)
+	if nowNS := uint64(now.UnixNano()); stats.MaxDeadline > nowNS {
+		deadlineTTL = stats.MaxDeadline - nowNS
+	}
+
+	return []*commonpb.Metric{
+		commonpb.NewMetricGauge("fwstate_index_size", float64(stats.IndexSize), labels...),
+		commonpb.NewMetricGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
+		commonpb.NewMetricGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
+		commonpb.NewMetricGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
+		commonpb.NewMetricGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
+		commonpb.NewMetricGauge("fwstate_max_deadline_ns", float64(deadlineTTL), labels...),
+		commonpb.NewMetricGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
+	}
 }
 
 func (m *FWStateMapService) mapRetention() func(metrics.MetricID) bool {
@@ -293,10 +363,12 @@ func (m *FWStateMapService) CreateMap(
 
 // DeleteMap removes a named fwstate-map.
 //
-// TODO: once module configs (fwstate sync, ACL) link these objects, refuse
-// deletion while any consumer references the map name, mirroring the
-// module-service consumer scan. For now the objects controlplane owns no
-// consumers and removes the object unconditionally when the name exists.
+// Deletion is refused at the config level while any published module
+// config — an fwstate or ACL module of any agent on this instance —
+// declares a link to the name: with the object gone, building that
+// module's execution context would fail and wedge every later config
+// change. Updating or deleting the linking module unpins the map, after
+// which deletion succeeds.
 func (m *FWStateMapService) DeleteMap(
 	ctx context.Context,
 	req *fwstatemappb.DeleteMapRequest,
@@ -317,6 +389,22 @@ func (m *FWStateMapService) DeleteMap(
 	if err := cfwstate.DeleteMapObject(
 		m.agent, fwMap.Config().Kind().ObjectType(), name,
 	); err != nil {
+		// The C object deletion refuses while a published module links
+		// the object, failing with the exact error "object
+		// '<type>:<name>' is linked by module '<type>:<name>'": surface
+		// that refusal as a precondition failure so the operator
+		// updates or deletes the linking module first.
+		if strings.Contains(err.Error(), "is linked by module") {
+			m.log.Warn("fwstate-map deletion refused while a published module links it",
+				zap.String("map", name),
+				zap.Error(err),
+			)
+			return nil, status.Errorf(
+				codes.FailedPrecondition,
+				"fwstate-map %q is linked by a published module config; update or delete the linking module first: %v",
+				name, err,
+			)
+		}
 		m.log.Error("failed to delete fwstate-map",
 			zap.String("map", name), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to delete fwstate-map: %v", err)
@@ -329,7 +417,8 @@ func (m *FWStateMapService) DeleteMap(
 	return &fwstatemappb.DeleteMapResponse{}, nil
 }
 
-// ListMaps returns the names of all registered fwstate-map objects.
+// ListMaps returns the names of all registered fwstate-map objects,
+// with each map's address family alongside its name.
 func (m *FWStateMapService) ListMaps(
 	ctx context.Context,
 	req *fwstatemappb.ListMapsRequest,
@@ -338,10 +427,16 @@ func (m *FWStateMapService) ListMaps(
 	defer m.mu.Unlock()
 
 	response := &fwstatemappb.ListMapsResponse{
-		Maps: make([]string, 0, len(m.maps)),
+		Maps:  make([]string, 0, len(m.maps)),
+		Kinds: make(map[string]fwstatemappb.Kind, len(m.maps)),
 	}
-	for name := range m.maps {
+	for name, fwMap := range m.maps {
 		response.Maps = append(response.Maps, name)
+		if fwMap.Config().Kind() == cfwstate.KindV6 {
+			response.Kinds[name] = fwstatemappb.Kind_V6
+		} else {
+			response.Kinds[name] = fwstatemappb.Kind_V4
+		}
 	}
 	return response, nil
 }
@@ -419,111 +514,100 @@ func (m *FWStateMapService) InsertLayer(
 	return &fwstatemappb.InsertLayerResponse{}, nil
 }
 
-// ListEntries is a bidirectional stream that reads entries from a named
-// fwstate-map's fwtable via cursor.
+// ListEntries reads one cursor batch of entries from a named
+// fwstate-map's fwtable. The batch protocol is stateless: the request
+// carries the full cursor, and the response's index feeds the next call
+// until has_more is false.
 func (m *FWStateMapService) ListEntries(
-	stream grpc.BidiStreamingServer[fwstatemappb.ListEntriesRequest, fwstatemappb.ListEntriesResponse],
-) error {
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		mapName := req.GetMapName()
-		if mapName == "" {
-			return status.Error(codes.InvalidArgument, "map_name is required")
-		}
-
-		count := ClampBatchSize(req.GetBatchSize())
-		var backward bool
-		if req.GetDirection() == fwstatemappb.Direction_BACKWARD {
-			backward = true
-		} else if req.GetDirection() == fwstatemappb.Direction_FORWARD {
-			backward = false
-		} else {
-			return status.Error(codes.InvalidArgument, "invalid direction")
-		}
-
-		index, err := ResolveReadIndex(backward, req.GetIndex())
-		if err != nil {
-			return err
-		}
-
-		now := uint64(time.Now().UnixNano())
-
-		m.mu.Lock()
-		fwMap, ok := m.maps[mapName]
-		if !ok {
-			m.mu.Unlock()
-			return status.Errorf(codes.NotFound, "fwstate-map %q not found", mapName)
-		}
-
-		mapCfg := *fwMap.Config()
-
-		var entries []cfwstate.CursorEntry
-		var newIndex int64
-		var hasMore bool
-
-		if backward {
-			entries, newIndex, hasMore, err = mapCfg.ReadBackward(
-				req.GetLayerIndex(),
-				index, req.GetIncludeExpired(),
-				now, count,
-			)
-		} else {
-			entries, newIndex, hasMore, err = mapCfg.ReadForward(
-				req.GetLayerIndex(),
-				index, req.GetIncludeExpired(),
-				now, count,
-			)
-		}
-
-		if err == nil && backward && newIndex == 0 {
-			var tail []cfwstate.CursorEntry
-			tail, newIndex, hasMore, err = mapCfg.ReadBackward(
-				req.GetLayerIndex(),
-				0, req.GetIncludeExpired(),
-				now, 1,
-			)
-			entries = append(entries, tail...)
-		}
-
-		if backward && len(entries) == 0 {
-			hasMore = false
-		}
-
-		// Snapshot the generation before unlocking: the label must
-		// describe the chain the batch was read from, and after the
-		// unlock a concurrent DeleteMap can free the object, making
-		// any further dereference through mapCfg a use-after-free.
-		generation := mapCfg.Generation()
-
-		m.mu.Unlock()
-
-		if err != nil {
-			return status.Errorf(codes.Internal, "cursor read failed: %v", err)
-		}
-
-		pbEntries := make([]*fwstatemappb.FwStateEntry, 0, len(entries))
-		for idx := range entries {
-			pbEntries = append(pbEntries, fwstatemappb.FromCursorEntry(entries[idx]))
-		}
-
-		resp := &fwstatemappb.ListEntriesResponse{
-			Entries:    pbEntries,
-			HasMore:    hasMore,
-			Index:      newIndex,
-			Generation: generation,
-		}
-
-		if err := stream.Send(resp); err != nil {
-			return err
-		}
+	ctx context.Context,
+	req *fwstatemappb.ListEntriesRequest,
+) (*fwstatemappb.ListEntriesResponse, error) {
+	mapName := req.GetMapName()
+	if mapName == "" {
+		return nil, status.Error(codes.InvalidArgument, "map_name is required")
 	}
+
+	count := ClampBatchSize(req.GetBatchSize())
+	var backward bool
+	if req.GetDirection() == fwstatemappb.Direction_BACKWARD {
+		backward = true
+	} else if req.GetDirection() == fwstatemappb.Direction_FORWARD {
+		backward = false
+	} else {
+		return nil, status.Error(codes.InvalidArgument, "invalid direction")
+	}
+
+	index, err := ResolveReadIndex(backward, req.GetIndex())
+	if err != nil {
+		return nil, err
+	}
+
+	now := uint64(time.Now().UnixNano())
+
+	m.mu.Lock()
+	fwMap, ok := m.maps[mapName]
+	if !ok {
+		m.mu.Unlock()
+		return nil, status.Errorf(codes.NotFound, "fwstate-map %q not found", mapName)
+	}
+
+	mapCfg := *fwMap.Config()
+
+	var entries []cfwstate.CursorEntry
+	var newIndex int64
+	var hasMore bool
+
+	if backward {
+		entries, newIndex, hasMore, err = mapCfg.ReadBackward(
+			req.GetLayerIndex(),
+			index, req.GetIncludeExpired(),
+			now, count,
+		)
+	} else {
+		entries, newIndex, hasMore, err = mapCfg.ReadForward(
+			req.GetLayerIndex(),
+			index, req.GetIncludeExpired(),
+			now, count,
+		)
+	}
+
+	if err == nil && backward && newIndex == 0 {
+		var tail []cfwstate.CursorEntry
+		tail, newIndex, hasMore, err = mapCfg.ReadBackward(
+			req.GetLayerIndex(),
+			0, req.GetIncludeExpired(),
+			now, 1,
+		)
+		entries = append(entries, tail...)
+	}
+
+	if backward && len(entries) == 0 {
+		hasMore = false
+	}
+
+	// Snapshot the generation before unlocking: the label must
+	// describe the chain the batch was read from, and after the
+	// unlock a concurrent DeleteMap can free the object, making
+	// any further dereference through mapCfg a use-after-free.
+	generation := mapCfg.Generation()
+
+	m.mu.Unlock()
+
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "cursor read failed: %v", err)
+	}
+
+	pbEntries := make([]*fwstatemappb.FwStateEntry, 0, len(entries))
+	for idx := range entries {
+		pbEntries = append(pbEntries, fwstatemappb.FromCursorEntry(entries[idx]))
+	}
+
+	return &fwstatemappb.ListEntriesResponse{
+		Entries:    pbEntries,
+		HasMore:    hasMore,
+		Index:      newIndex,
+		Generation: generation,
+	}, nil
 }
 
 // ReclaimStaleLayers unlinks expired layers, advances every dataplane
@@ -639,6 +723,10 @@ func ResolveReadIndex(backward bool, index int64) (int64, error) {
 }
 
 // MapStatsToProto converts bindings-level map stats into the proto form.
+//
+// The stats describe the active head layer only (fwmap_get_stats walks
+// one layer; only layer_count spans the chain), so the note says so —
+// the values must not be presented as map totals after a rotation.
 func MapStatsToProto(stats mapStats) *fwstatemappb.MapStats {
 	return &fwstatemappb.MapStats{
 		IndexSize:        stats.IndexSize,
@@ -648,6 +736,7 @@ func MapStatsToProto(stats mapStats) *fwstatemappb.MapStats {
 		TotalElements:    stats.TotalElements,
 		MaxDeadline:      stats.MaxDeadline,
 		MemoryUsed:       stats.MemoryUsed,
+		Note:             "Statistics are currently shown for the first layer only",
 	}
 }
 

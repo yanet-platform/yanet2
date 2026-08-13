@@ -3,8 +3,6 @@ package acl
 import (
 	"context"
 	"fmt"
-	"slices"
-	"sort"
 	"sync"
 
 	"go.uber.org/zap"
@@ -21,6 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
@@ -30,19 +29,18 @@ import (
 type ModuleHandle interface {
 	Free()
 	AsFFIModule() ffi.ModuleConfig
-	SetFwStateConfig(fw ffi.ModuleConfig)
-	TransferFwStateConfig(old ffi.ModuleConfig)
 	GetInfo() *cacl.AclConfigInfo
 }
 
 // Backend abstracts shared-memory operations for the ACL service.
 type Backend interface {
 	// NewModule allocates a new ACL module config in shared memory with
-	// the ruleset compiled into it. The returned handle is not yet
-	// published to the dataplane.
+	// the ruleset compiled into it and the named fwstate-map objects
+	// linked. The returned handle is not yet published to the dataplane.
 	NewModule(
 		name string,
 		rules []cacl.AclRule,
+		fw4MapName, fw6MapName string,
 		emitConfig *cfwstate.SyncEmitConfig,
 	) (ModuleHandle, error)
 	// UpdateModule publishes handle to dp_config_gen so the dataplane
@@ -87,10 +85,11 @@ func WithMetrics(factory grpcmetrics.Factory) Option {
 }
 
 type aclConfig struct {
-	rules       []*aclpb.Rule
-	acl         ModuleHandle
-	fwstateName string
-	syncConfig  *aclpb.SyncConfig
+	rules      []*aclpb.Rule
+	acl        ModuleHandle
+	fw4MapName string
+	fw6MapName string
+	syncConfig *aclpb.SyncConfig
 }
 
 // Rules returns the rules held by the config.
@@ -103,9 +102,14 @@ func (m *aclConfig) Handle() ModuleHandle {
 	return m.acl
 }
 
-// FwStateName returns the linked fwstate config name.
-func (m *aclConfig) FwStateName() string {
-	return m.fwstateName
+// Fw4MapName returns the name of the referenced v4 fwstate-map object.
+func (m *aclConfig) Fw4MapName() string {
+	return m.fw4MapName
+}
+
+// Fw6MapName returns the name of the referenced v6 fwstate-map object.
+func (m *aclConfig) Fw6MapName() string {
+	return m.fw6MapName
 }
 
 // SyncConfig returns the stored emission-side sync configuration, or nil
@@ -128,12 +132,9 @@ func (m *aclConfig) Free() {
 // config for that name.
 //
 // UpdateConfig is the only mutation that can create an entry: it is the
-// only one of the four with*-calling RPCs that ever reaches withEntry or
-// withEntries for a name with no existing entry. DeleteConfig and
-// checkLinkable (LinkConfigs' pre-check) reject an unknown name before
-// either gets there, and RelinkConfigs takes its names from
-// linkedConfigNames, which only lists names already in the map, so none of
-// the other three mutation paths ever interns one. Once created, an
+// only with*-calling RPC that ever reaches withEntry for a name with no
+// existing entry. DeleteConfig rejects an unknown name before it gets
+// there, so no other mutation path ever interns one. Once created, an
 // entry is never removed: DeleteConfig sets published to nil instead of
 // dropping the map entry, keeping it as the lock anchor. Every mutation
 // RPC is operator-driven, so the key set stays low-cardinality, and an
@@ -152,9 +153,8 @@ func (m *aclConfig) Free() {
 // whole life of the process.
 type configEntry struct {
 	// updateMu serializes mutations of this name for the entry's whole
-	// life, across the whole operation including a C compile: UpdateConfig,
-	// DeleteConfig, and the fwstate adapter's link/relink of this name all
-	// hold it for their duration.
+	// life, across the whole operation including a C compile: UpdateConfig
+	// and DeleteConfig both hold it for their duration.
 	updateMu sync.Mutex
 	// published is the currently active config for this name, or nil when
 	// the name is absent (a tombstone left by DeleteConfig or a name that
@@ -266,16 +266,15 @@ func (m *ACLService) entry(name string) *configEntry {
 // hasEntry reports whether name already has an entry in configs, regardless
 // of whether that entry's published config is live or tombstoned.
 //
-// It takes m.mu.RLock for the lookup. DeleteConfig and checkLinkable use it
-// as a read-only pre-check before a mutation reaches withEntry or
-// withEntries, which would otherwise intern an entry for a name regardless
-// of whether one already exists. Existence alone is the correct test for
-// that pre-check: an entry is created only by UpdateConfig, so one already
-// being present means the name was created at some point, or is being
-// created right now by an UpdateConfig whose compile has not finished. In
-// either case falling through to the locked path below is the right
-// outcome, since it interns nothing for a name that already has an entry
-// and its check of published runs under the name's own lock, after any
+// It takes m.mu.RLock for the lookup. DeleteConfig uses it as a read-only
+// pre-check before withEntry, which would otherwise intern an entry for a
+// name regardless of whether one already exists. Existence alone is the
+// correct test for that pre-check: an entry is created only by UpdateConfig,
+// so one already being present means the name was created at some point, or
+// is being created right now by an UpdateConfig whose compile has not
+// finished. In either case falling through to the locked path below is the
+// right outcome, since it interns nothing for a name that already has an
+// entry and its check of published runs under the name's own lock, after any
 // in-flight compile for the name has finished. A name with no entry at all
 // can never reach that state through any other path, so rejecting it here
 // is exact, not an approximation refined later.
@@ -299,47 +298,6 @@ func (m *ACLService) withEntry(name string, fn func(*configEntry) error) error {
 	defer entry.UnlockUpdate()
 
 	return fn(entry)
-}
-
-// withEntries dedups and sorts names, fetches or creates the entry for
-// each, locks their updateMu in sorted order, then runs fn with the
-// entries keyed by name before unlocking in reverse order and returning
-// fn's error.
-//
-// A consistent lock order across every multi-name caller avoids
-// deadlocks between two calls that share some names but list them in a
-// different order.
-//
-// Every multi-name mutation acquires and releases entry locks through the
-// LockUpdate and UnlockUpdate receiver methods. Sorted acquisition and reverse
-// release preserve the consistent order that prevents deadlocks.
-func (m *ACLService) withEntries(names []string, fn func(map[string]*configEntry) error) error {
-	seen := make(map[string]struct{}, len(names))
-	sorted := make([]string, 0, len(names))
-	for _, name := range names {
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		sorted = append(sorted, name)
-	}
-	sort.Strings(sorted)
-
-	entries := make(map[string]*configEntry, len(sorted))
-	locked := make([]*configEntry, len(sorted))
-	for idx, name := range sorted {
-		e := m.entry(name)
-		e.LockUpdate()
-		locked[idx] = e
-		entries[name] = e
-	}
-	defer func() {
-		for _, e := range slices.Backward(locked) {
-			e.UnlockUpdate()
-		}
-	}()
-
-	return fn(entries)
 }
 
 // UnaryServerInterceptor returns the service's gRPC metrics interceptor, or nil
@@ -510,6 +468,15 @@ func syncConfigsEqual(a, b *aclpb.SyncConfig) bool {
 // produce valid sync frames: a missing destination MAC, a missing
 // multicast destination pair (the only destination the craft path
 // uses), or out-of-range ports.
+// validateMapNameOptional applies the C-side round-trip rules to a map
+// link name; the empty name declares no link and stays valid.
+func validateMapNameOptional(name string) error {
+	if name == "" {
+		return nil
+	}
+	return fwstatemap.ValidateMapName(name)
+}
+
 func validateSyncConfig(cfg *aclpb.SyncConfig) error {
 	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
 		return fmt.Errorf("port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
@@ -574,7 +541,21 @@ func (m *ACLService) UpdateConfig(
 	err := m.withEntry(name, func(entry *configEntry) error {
 		oldConfig := entry.Published()
 
+		fw4MapName := req.GetFwtableNameV4()
+		fw6MapName := req.GetFwtableNameV6()
 		syncConfig := req.GetSyncConfig()
+
+		// A non-empty name must round-trip through the fixed-size C
+		// object registry: cp_module_link_object silently truncates
+		// longer ones, which could link an entirely different map than
+		// the one ShowConfig reports. An empty name stays valid: it
+		// declares no link for that family.
+		if err := validateMapNameOptional(fw4MapName); err != nil {
+			return err
+		}
+		if err := validateMapNameOptional(fw6MapName); err != nil {
+			return err
+		}
 
 		if rulesNeedCreateState(req.Rules) {
 			if syncConfig == nil {
@@ -589,6 +570,8 @@ func (m *ACLService) UpdateConfig(
 		}
 
 		if oldConfig != nil && rulesEqual(oldConfig.Rules(), req.Rules) &&
+			oldConfig.Fw4MapName() == fw4MapName &&
+			oldConfig.Fw6MapName() == fw6MapName &&
 			syncConfigsEqual(oldConfig.SyncConfig(), syncConfig) {
 			resp = &aclpb.UpdateConfigResponse{}
 			return nil
@@ -605,19 +588,11 @@ func (m *ACLService) UpdateConfig(
 			emitCfg = &emit
 		}
 
-		handle, err := m.backend.NewModule(name, rules, emitCfg)
+		handle, err := m.backend.NewModule(
+			name, rules, fw4MapName, fw6MapName, emitCfg,
+		)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
-		}
-
-		fwstateName := ""
-		if oldConfig != nil {
-			fwstateName = oldConfig.FwStateName()
-		}
-
-		if fwstateName != "" {
-			handle.TransferFwStateConfig(oldConfig.Handle().AsFFIModule())
-			m.log.Info("transferred fwstate config for ACL module", zap.String("config", name))
 		}
 
 		if err := m.backend.UpdateModule(handle); err != nil {
@@ -632,10 +607,11 @@ func (m *ACLService) UpdateConfig(
 
 		m.mu.Lock()
 		entry.Publish(&aclConfig{
-			rules:       req.Rules,
-			acl:         handle,
-			fwstateName: fwstateName,
-			syncConfig:  storedSync,
+			rules:      req.Rules,
+			acl:        handle,
+			fw4MapName: fw4MapName,
+			fw6MapName: fw6MapName,
+			syncConfig: storedSync,
 		})
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
@@ -676,10 +652,11 @@ func (m *ACLService) ShowConfig(
 	}
 
 	response := &aclpb.ShowConfigResponse{
-		Name:        name,
-		Rules:       config.Rules(),
-		FwstateName: config.FwStateName(),
-		SyncConfig:  config.SyncConfig(),
+		Name:          name,
+		Rules:         config.Rules(),
+		FwtableNameV4: config.Fw4MapName(),
+		FwtableNameV6: config.Fw6MapName(),
+		SyncConfig:    config.SyncConfig(),
 	}
 
 	return response, nil

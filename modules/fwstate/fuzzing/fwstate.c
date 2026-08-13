@@ -15,9 +15,12 @@
 #include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
+#include "lib/fwstate/fwtable.h"
 #include "lib/fwstate/types.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/dataplane/dataplane.h"
+#include "objects/fwstate/api/fwstate_map_v4_object.h"
+#include "objects/fwstate/api/fwstate_map_v6_object.h"
 
 #include "lib/fuzzing/fuzzing.h"
 
@@ -26,6 +29,62 @@ extern void
 set_tsc_freq(void);
 
 static struct fuzzing_params fuzz_params = {0};
+
+// Fuzz-local stand-ins for the fwstate-map objects: real layer chains
+// living inside the fwstate_map_*_object structs, so the handler's link
+// resolution — link index, object execution context, object table —
+// exercises the production path. The embedded cp_object fields stay
+// zeroed; the handler reads only the table through them.
+static struct fwstate_map_v4_object fuzz_map_v4;
+static struct fwstate_map_v6_object fuzz_map_v6;
+static struct object_ectx fuzz_object_ectxs[2];
+static struct module_object_link_ectx fuzz_object_links[2];
+
+// Free every layer of a table's head chain. Single-threaded teardown, so
+// no reader can be mid-walk and no generation barrier is needed.
+static void
+fwstate_fuzz_free_chain(fwtable_t *table, struct memory_context *ctx) {
+	fwtable_free_stale(table, ctx);
+
+	fwmap_t *layer = ADDR_OF(&table->head);
+	while (layer != NULL) {
+		fwmap_t *next = (fwmap_t *)ADDR_OF(&layer->next);
+		fwmap_free(layer, ctx);
+		layer = next;
+	}
+	SET_OFFSET_OF(&table->head, NULL);
+}
+
+// Free everything the fuzz target allocated in its arena, pairing every
+// setup allocation: layer chains, counter storage, counter registry, and
+// the module config itself. A libFuzzer run has no per-target teardown
+// hook, so this runs at process exit, where the leak check then sees a
+// clean arena.
+static void
+fwstate_fuzz_cleanup(void) {
+	if (fuzz_params.cp_module == NULL) {
+		return;
+	}
+
+	struct fwstate_module_config *config =
+		(struct fwstate_module_config *)fuzz_params.cp_module;
+	struct memory_context *ctx = &config->cp_module.memory_context;
+
+	fwstate_fuzz_free_chain(&fuzz_map_v4.table, ctx);
+	fwstate_fuzz_free_chain(&fuzz_map_v6.table, ctx);
+
+	struct counter_storage *counter_storage =
+		ADDR_OF(&fuzz_params.module_ectx.counter_storage);
+	if (counter_storage != NULL) {
+		counter_storage_free(counter_storage);
+	}
+	counter_registry_fini(&config->cp_module.counter_registry);
+
+	memory_bfree(
+		&fuzz_params.mctx, config, sizeof(struct fwstate_module_config)
+	);
+	fuzz_params.cp_module = NULL;
+}
 
 static int
 fwstate_test_config(struct cp_module **cp_module) {
@@ -61,7 +120,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 		    &config->cp_module.memory_context,
 		    0
 	    )) {
-		return -ENOMEM;
+		goto error_config;
 	}
 
 	struct {
@@ -105,7 +164,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 			NULL
 		);
 		if (id == (uint64_t)-1) {
-			return -ENOMEM;
+			goto error_registry;
 		}
 		*counters[i].dst = id;
 	}
@@ -113,18 +172,22 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (counter_registry_link(
 		    &config->cp_module.counter_registry, NULL, NULL
 	    )) {
-		return -ENOMEM;
+		goto error_registry;
 	}
 
 	struct counter_storage *cs = counter_storage_spawn(
 		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
 	);
 	if (cs == NULL) {
-		return -ENOMEM;
+		goto error_registry;
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 
-	// Create fw4state and fw6state maps
+	// Give each stand-in map object one table layer, grown with the
+	// fwtable control-plane helper into the module's memory context.
+	memset(&fuzz_map_v4, 0, sizeof(fuzz_map_v4));
+	memset(&fuzz_map_v6, 0, sizeof(fuzz_map_v6));
+
 	fwmap_config_t fw4config = {
 		.key_size = sizeof(struct fw4_state_key),
 		.value_size = sizeof(struct fw_state_value),
@@ -139,12 +202,13 @@ fwstate_test_config(struct cp_module **cp_module) {
 		.index_size = 1024,
 		.extra_bucket_count = 64,
 	};
-	fwmap_t *fw4state =
-		fwmap_new(&fw4config, &config->cp_module.memory_context);
-	if (!fw4state) {
-		return -ENOMEM;
+	if (fwtable_insert_layer_cp(
+		    &fuzz_map_v4.table,
+		    &fw4config,
+		    &config->cp_module.memory_context
+	    )) {
+		goto error_storage;
 	}
-	SET_OFFSET_OF(&config->cfg.fw4state, fw4state);
 
 	fwmap_config_t fw6config = {
 		.key_size = sizeof(struct fw6_state_key),
@@ -160,12 +224,29 @@ fwstate_test_config(struct cp_module **cp_module) {
 		.index_size = 1024,
 		.extra_bucket_count = 64,
 	};
-	fwmap_t *fw6state =
-		fwmap_new(&fw6config, &config->cp_module.memory_context);
-	if (!fw6state) {
-		return -ENOMEM;
+	if (fwtable_insert_layer_cp(
+		    &fuzz_map_v6.table,
+		    &fw6config,
+		    &config->cp_module.memory_context
+	    )) {
+		goto error_table_v4;
 	}
-	SET_OFFSET_OF(&config->cfg.fw6state, fw6state);
+
+	// Wire the config's link indices to the stand-in objects through the
+	// execution context: slot 0 names the v4 map, slot 1 the v6 map.
+	memset(fuzz_object_ectxs, 0, sizeof(fuzz_object_ectxs));
+	memset(fuzz_object_links, 0, sizeof(fuzz_object_links));
+	SET_OFFSET_OF(&fuzz_object_ectxs[0].cp_object, &fuzz_map_v4.cp_object);
+	SET_OFFSET_OF(&fuzz_object_ectxs[1].cp_object, &fuzz_map_v6.cp_object);
+	SET_OFFSET_OF(&fuzz_object_links[0].object_ectx, &fuzz_object_ectxs[0]);
+	SET_OFFSET_OF(&fuzz_object_links[1].object_ectx, &fuzz_object_ectxs[1]);
+	fuzz_params.module_ectx.object_link_count = 2;
+	SET_OFFSET_OF(
+		&fuzz_params.module_ectx.object_links, &fuzz_object_links[0]
+	);
+
+	config->v4_object_link_idx = 0;
+	config->v6_object_link_idx = 1;
 
 	// Configure sync settings
 	uint8_t multicast_addr[16] = {
@@ -174,7 +255,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	memcpy(config->sync_config.dst_addr_multicast, multicast_addr, 16);
 	config->sync_config.port_multicast = rte_cpu_to_be_16(9999);
 
-	// Set imeouts
+	// Set timeouts
 	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
 	config->sync_config.timeouts.tcp_syn = 120000000000ULL;
 	config->sync_config.timeouts.tcp_fin = 120000000000ULL;
@@ -189,6 +270,24 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
+
+error_table_v4:
+	fwstate_fuzz_free_chain(
+		&fuzz_map_v4.table, &config->cp_module.memory_context
+	);
+
+error_storage:
+	counter_storage_free(ADDR_OF(&fuzz_params.module_ectx.counter_storage));
+	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, NULL);
+
+error_registry:
+	counter_registry_fini(&config->cp_module.counter_registry);
+
+error_config:
+	memory_bfree(
+		&fuzz_params.mctx, config, sizeof(struct fwstate_module_config)
+	);
+	return -ENOMEM;
 }
 
 static int
@@ -216,7 +315,15 @@ fuzz_setup() {
 		return -ENOMEM;
 	}
 
-	return fwstate_test_config(&fuzz_params.cp_module);
+	if (fwstate_test_config(&fuzz_params.cp_module)) {
+		return -ENOMEM;
+	}
+
+	// The exit-time cleanup frees the arena allocations above; register it
+	// only after they all exist.
+	atexit(fwstate_fuzz_cleanup);
+
+	return 0;
 }
 
 // Helper to build a valid sync packet wrapper around fuzzer input

@@ -10,9 +10,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
-	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
-	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
-	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 const (
@@ -41,17 +38,14 @@ func WithModuleLog(log *zap.Logger) ModuleOption {
 	}
 }
 
-// ACLModule is a control-plane component for ACL (Access Control List) module
-// with integrated firewall state management.
+// ACLModule is a control-plane component for ACL (Access Control List)
+// module.
 type ACLModule struct {
-	cfg                   *Config
-	shm                   *ffi.SharedMemory
-	agent                 *ffi.Agent
-	aclService            *ACLService
-	metricsService        *MetricsService
-	fwstateService        *fwstate.FWStateService
-	fwstateMetricsService *fwstate.MetricsService
-	mapService            *fwstatemap.FWStateMapService
+	cfg            *Config
+	shm            *ffi.SharedMemory
+	agent          *ffi.Agent
+	aclService     *ACLService
+	metricsService *MetricsService
 }
 
 // NewACLModule creates a new ACL module instance.
@@ -91,29 +85,12 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 
 	metricsService := NewMetricsService(aclService)
 
-	aclAdapter := NewACLAdapter(aclService)
-	fwstateService := fwstate.NewFWStateService(
-		agent,
-		aclAdapter,
-		fwstate.WithLog(log),
-		fwstate.WithMetrics(fwstate.NewMetricsFactory()),
-	)
-	fwstateMetricsService := fwstate.NewMetricsService(fwstateService)
-
-	mapService := fwstatemap.NewFWStateMapService(
-		agent,
-		fwstatemap.WithLog(log),
-	)
-
 	return &ACLModule{
-		cfg:                   cfg,
-		shm:                   shm,
-		agent:                 agent,
-		aclService:            aclService,
-		metricsService:        metricsService,
-		fwstateService:        fwstateService,
-		fwstateMetricsService: fwstateMetricsService,
-		mapService:            mapService,
+		cfg:            cfg,
+		shm:            shm,
+		agent:          agent,
+		aclService:     aclService,
+		metricsService: metricsService,
 	}, nil
 }
 
@@ -129,18 +106,12 @@ func (m *ACLModule) ServicesNames() []string {
 	return []string{
 		serviceName,
 		aclpb.MetricsService_ServiceDesc.ServiceName,
-		fwstate.FWStateServiceName,
-		fwstate.FWStateMetricsServiceName,
-		fwstatemap.ServiceName,
 	}
 }
 
 func (m *ACLModule) RegisterService(server *grpc.Server) {
 	aclpb.RegisterACLServiceServer(server, m.aclService)
 	aclpb.RegisterMetricsServiceServer(server, m.metricsService)
-	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
-	fwstatepb.RegisterMetricsServiceServer(server, m.fwstateMetricsService)
-	m.mapService.Register(server)
 }
 
 // UnaryServerInterceptors returns the gRPC unary interceptors for this module.
@@ -149,18 +120,7 @@ func (m *ACLModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 	if si := m.aclService.UnaryServerInterceptor(); si != nil {
 		interceptors = append(interceptors, si)
 	}
-	if si := m.fwstateService.UnaryServerInterceptor(); si != nil {
-		interceptors = append(interceptors, si)
-	}
-	if si := m.mapService.UnaryServerInterceptor(); si != nil {
-		interceptors = append(interceptors, si)
-	}
 	return interceptors
-}
-
-// ACLAdapter returns an adapter for fwstate module integration.
-func (m *ACLModule) ACLAdapter() *ACLAdapter {
-	return NewACLAdapter(m.aclService)
 }
 
 func (m *ACLModule) Close() error {

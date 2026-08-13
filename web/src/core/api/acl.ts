@@ -69,13 +69,16 @@ export interface SyncConfig {
 export interface ShowConfigResponse {
     name?: string;
     rules?: Rule[];
-    fwstate_name?: string;
+    fwtable_name_v4?: string;
+    fwtable_name_v6?: string;
     sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigRequest {
     name?: string;
     rules?: Rule[];
+    fwtable_name_v4?: string;
+    fwtable_name_v6?: string;
     sync_config?: SyncConfig;
 }
 

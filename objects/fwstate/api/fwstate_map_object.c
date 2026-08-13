@@ -9,6 +9,7 @@
 #include "common/strutils.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_object.h"
+#include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwtable.h"

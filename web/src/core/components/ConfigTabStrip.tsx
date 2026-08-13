@@ -8,8 +8,8 @@ export interface ConfigTabStripProps {
     configs: string[];
     /** Currently active config name. */
     activeConfig: string;
-    /** Item counts keyed by config name (shown as a badge). */
-    counts: Map<string, number>;
+    /** Item counts keyed by config name (shown as a badge). Omit for no badges. */
+    counts?: Map<string, number>;
     /** Config names that have unsaved changes (show dirty dot). */
     dirtyConfigs: Set<string>;
     /** Called when the user selects a tab. */
@@ -59,7 +59,9 @@ export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
                     <span className="yn-tab__dot" aria-label="unsaved changes" />
                 )}
                 {trailingIcon?.(cfg)}
-                <span className="yn-tab__count">{counts.get(cfg) ?? 0}</span>
+                {counts && (
+                    <span className="yn-tab__count">{counts.get(cfg) ?? 0}</span>
+                )}
             </button>
         ))}
         <Button view="flat" size="s" onClick={onAddConfig} disabled={addConfigDisabled} className="yn-tabs__add" title={addLabel}>

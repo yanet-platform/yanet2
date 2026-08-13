@@ -6,14 +6,26 @@
 
 #include "lib/fwstate/config.h"
 
+// Sentinel for "no object link at this slot". object_link_get_address
+// returns NULL for any index >= object_link_count, so a config with no
+// map link at this slot resolves to a NULL fwtable.
+#define FWSTATE_OBJECT_LINK_NONE UINT64_MAX
+
 struct fwstate_module_config {
 	struct cp_module cp_module;
 
-	struct fwstate_config cfg;
+	// Object link indices for the v4 and v6 fwtables, declared by the
+	// module constructor and resolved at execution-context build time
+	// into per-worker entries naming the linked fwstate-map objects.
+	// The FWSTATE_OBJECT_LINK_NONE sentinel marks an absent link, and
+	// that family's sync frames are then counted and dropped without
+	// inserting.
+	uint64_t v4_object_link_idx;
+	uint64_t v6_object_link_idx;
 
 	// Receive-side sync parameters: packet matching, timeouts, and
-	// suppression. Split from the maps so the struct mirrors what the
-	// module consumes.
+	// suppression. Kept standalone so the struct mirrors what the module
+	// consumes.
 	struct fwstate_sync_config sync_config;
 
 	// Module-level counters, registered by fwstate_module_config_new.

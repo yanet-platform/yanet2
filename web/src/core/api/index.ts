@@ -10,6 +10,7 @@ export * from './decap';
 export { acl, ACTION_KIND_LABELS } from './acl';
 export * from './forward';
 export { fwstate } from './fwstate';
+export { fwstatemap } from './fwstatemap';
 export * from './counters';
 
 // Several module clients each declare their own ShowConfigRequest /
@@ -29,6 +30,7 @@ import { decap } from './decap';
 import { acl } from './acl';
 import { forward } from './forward';
 import { fwstate } from './fwstate';
+import { fwstatemap } from './fwstatemap';
 import { counters } from './counters';
 
 export const API = {
@@ -43,5 +45,6 @@ export const API = {
     acl,
     forward,
     fwstate,
+    fwstatemap,
     counters,
 };

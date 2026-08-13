@@ -5,23 +5,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
-func (m *MapConfig) ToC() cfwstate.MapConfig {
-	if m == nil {
-		return cfwstate.MapConfig{}
-	}
-	return cfwstate.MapConfig{
-		IndexSize:        m.GetIndexSize(),
-		ExtraBucketCount: m.GetExtraBucketCount(),
-	}
-}
-
-func FromCMapConfig(cfg cfwstate.MapConfig) *MapConfig {
-	return &MapConfig{
-		IndexSize:        cfg.IndexSize,
-		ExtraBucketCount: cfg.ExtraBucketCount,
-	}
-}
-
 func (m *SyncConfig) ToC() cfwstate.SyncConfig {
 	if m == nil {
 		return cfwstate.SyncConfig{}
@@ -95,35 +78,5 @@ func FromCSyncConfig(cfg cfwstate.SyncConfig) *SyncConfig {
 		Udp:                 cfg.Udp,
 		Default:             cfg.Default,
 		SyncSuppressTimeout: cfg.SyncSuppressTimeout,
-	}
-}
-
-func FromCursorKey(key cfwstate.StateKey) *FwStateKey {
-	return &FwStateKey{
-		Proto:   key.Proto,
-		SrcPort: key.SrcPort,
-		DstPort: key.DstPort,
-		SrcAddr: &commonpb.IPAddress{Addr: append([]byte(nil), key.SrcAddr...)},
-		DstAddr: &commonpb.IPAddress{Addr: append([]byte(nil), key.DstAddr...)},
-	}
-}
-
-func FromCursorValue(value cfwstate.StateValue) *FwStateValue {
-	return &FwStateValue{
-		External:        value.External,
-		Flags:           value.Flags,
-		CreatedAt:       value.CreatedAt,
-		UpdatedAt:       value.UpdatedAt,
-		PacketsBackward: value.PacketsBackward,
-		PacketsForward:  value.PacketsForward,
-	}
-}
-
-func FromCursorEntry(entry cfwstate.CursorEntry) *FwStateEntry {
-	return &FwStateEntry{
-		Key:     FromCursorKey(entry.Key),
-		Value:   FromCursorValue(entry.Value),
-		Idx:     entry.Idx,
-		Expired: entry.Expired,
 	}
 }

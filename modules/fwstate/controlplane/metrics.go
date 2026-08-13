@@ -2,7 +2,6 @@ package fwstate
 
 import (
 	"context"
-	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
@@ -16,15 +15,20 @@ type metricsSource interface {
 }
 
 // MetricsService exposes FWState module metrics over its own gRPC service.
+//
+// It aggregates every source supplied at construction: the fwstate
+// service's dataplane counters and gRPC call metrics, plus the map
+// service's per-map gauge series and gRPC call metrics for the RPCs the
+// module also serves.
 type MetricsService struct {
 	fwstatepb.UnimplementedMetricsServiceServer
 
-	source metricsSource
+	sources []metricsSource
 }
 
-// NewMetricsService creates a MetricsService backed by source.
-func NewMetricsService(source metricsSource) *MetricsService {
-	return &MetricsService{source: source}
+// NewMetricsService creates a MetricsService backed by sources.
+func NewMetricsService(sources ...metricsSource) *MetricsService {
+	return &MetricsService{sources: sources}
 }
 
 // GetMetrics returns a snapshot of FWState module metrics matching the
@@ -33,9 +37,13 @@ func (m *MetricsService) GetMetrics(
 	ctx context.Context,
 	req *commonpb.GetMetricsRequest,
 ) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.Metrics(req.GetTags()...)
-	if err != nil {
-		return nil, err
+	all := make([]*commonpb.Metric, 0)
+	for _, source := range m.sources {
+		collected, err := source.Metrics(req.GetTags()...)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, collected...)
 	}
 
 	return &commonpb.GetMetricsResponse{Metrics: all}, nil
@@ -57,50 +65,24 @@ var fwstateStructuralCounters = []string{
 	"rx", "tx", "drop", "pending_input", "pending_output",
 }
 
-// Metrics returns FWState module metrics matching tags: per-config map
-// statistics (gauge), dataplane counters, and gRPC call metrics.
-//
-// Gauge metrics are emitted per address family (af=ipv4|ipv6) for every
-// loaded fwstate config.
+// Metrics returns FWState module metrics matching tags: dataplane counters
+// and gRPC call metrics.
 //
 // Labels:
 //   - config:        fwstate config name (all metrics)
-//   - af:            address family, "ipv4" or "ipv6" (map stats only)
 //   - grpc_type:     always "unary" (gRPC metrics)
 //   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:   RPC name (gRPC metrics)
 //   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
 func (m *FWStateService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
-	result := m.collectMapStats()
-
-	dpMetrics, err := m.collectDataplaneMetrics(tags)
+	result, err := m.collectDataplaneMetrics(tags)
 	if err != nil {
 		return nil, err
 	}
-	result = append(result, dpMetrics...)
 	if m.metrics != nil {
 		result = append(result, m.metrics.Collect()...)
 	}
 	return metrics.Filter(result, tags), nil
-}
-
-// collectMapStats emits gauge metrics derived from the per-config map
-// statistics (GetMapsStats) for both IPv4 and IPv6 address families.
-func (m *FWStateService) collectMapStats() []*commonpb.Metric {
-	m.stateMu.RLock()
-	defer m.stateMu.RUnlock()
-
-	now := time.Now()
-
-	var result []*commonpb.Metric
-	for name, config := range m.configs {
-		mapsStats := config.GetMapsStats()
-
-		result = append(result, collectMapStatsForAF(name, "ipv4", now, mapsStats.IPv4)...)
-		result = append(result, collectMapStatsForAF(name, "ipv6", now, mapsStats.IPv6)...)
-	}
-
-	return result
 }
 
 // collectDataplaneMetrics emits per-config packet/byte counters read from the
@@ -291,33 +273,6 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 			commonpb.NewMetricCounter("fwstate_counter_packets", packets, counterLabels...),
 			commonpb.NewMetricCounter("fwstate_counter_bytes", bytes, counterLabels...),
 		}
-	}
-}
-
-// collectMapStatsForAF builds the gauge metric set for a single address family
-// of a single fwstate config.
-func collectMapStatsForAF(configName, af string, now time.Time, stats mapStats) []*commonpb.Metric {
-	labels := []*commonpb.Label{
-		{Name: "config", Value: configName},
-		{Name: "af", Value: af},
-	}
-
-	// MaxDeadline is an absolute timestamp on the dataplane's monotonic clock.
-	// Export the remaining time-to-live (clamped at zero once the deadline has
-	// passed).
-	deadlineTTL := uint64(0)
-	if nowNS := uint64(now.UnixNano()); stats.MaxDeadline > nowNS {
-		deadlineTTL = stats.MaxDeadline - nowNS
-	}
-
-	return []*commonpb.Metric{
-		commonpb.NewMetricGauge("fwstate_index_size", float64(stats.IndexSize), labels...),
-		commonpb.NewMetricGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
-		commonpb.NewMetricGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
-		commonpb.NewMetricGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
-		commonpb.NewMetricGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
-		commonpb.NewMetricGauge("fwstate_max_deadline_ns", float64(deadlineTTL), labels...),
-		commonpb.NewMetricGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
 	}
 }
 

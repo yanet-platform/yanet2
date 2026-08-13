@@ -6,13 +6,14 @@ import type { Rule, SyncConfig } from '@yanet/core/api/acl';
 import {
     aclDraftReducer,
     initialAclDraftState,
+    EMPTY_FWTABLE_NAMES,
+    type FwtableNames,
 } from './draftReducer';
 import type { AclDraftAction } from './draftReducer';
 import { useConfigPersistence, type ConfigPersistenceDispatch } from '@yanet/core/components/draft/useConfigPersistence';
 
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];
-const EMPTY_FWSTATE_NAME = '';
 
 const aclDeleteConfig = (name: string): Promise<unknown> =>
     API.acl.deleteConfig({ name });
@@ -25,7 +26,7 @@ export interface UseAclDraftResult {
     draftRules: (configName: string) => Rule[];
     draftRuleIds: (configName: string) => string[];
     serverRules: (configName: string) => Rule[];
-    fwstateName: (configName: string) => string;
+    fwtableNames: (configName: string) => FwtableNames;
     isDirty: (configName: string) => boolean;
     anyDirty: boolean;
     dispatchDraft: (action: AclDraftAction) => void;
@@ -50,12 +51,23 @@ export const useAclDraft = (): UseAclDraftResult => {
 
     // Latest stored sync config per name, read by the identity-stable save
     // wrapper below so a web save keeps the config's emission settings
-    // instead of dropping them.
+    // instead of dropping them; the sync config has no editing UI yet.
     const serverSyncConfigRef = useRef<Record<string, SyncConfig | undefined>>({});
     serverSyncConfigRef.current = state.serverSyncConfig;
+    // The map names are editable, so a save sends their draft values.
+    const draftFwtableNameRef = useRef<Record<string, FwtableNames>>({});
+    draftFwtableNameRef.current = state.draftFwtableName;
 
-    const aclUpdateConfig = useCallback((name: string, rules: Rule[]): Promise<unknown> =>
-        API.acl.updateConfig({ name, rules, sync_config: serverSyncConfigRef.current[name] }), []);
+    const aclUpdateConfig = useCallback((name: string, rules: Rule[]): Promise<unknown> => {
+        const fwtableName = draftFwtableNameRef.current[name] ?? EMPTY_FWTABLE_NAMES;
+        return API.acl.updateConfig({
+            name,
+            rules,
+            fwtable_name_v4: fwtableName.v4 || undefined,
+            fwtable_name_v6: fwtableName.v6 || undefined,
+            sync_config: serverSyncConfigRef.current[name],
+        });
+    }, []);
 
     const dispatchDraft = useCallback((action: AclDraftAction): void => {
         rawDispatch(action);
@@ -72,12 +84,15 @@ export const useAclDraft = (): UseAclDraftResult => {
 
             const configs = await loadKnownConfigs(
                 names,
-                async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string; syncConfig?: SyncConfig }> => {
+                async (name): Promise<{ name: string; rules: Rule[]; fwtableName: FwtableNames; syncConfig?: SyncConfig }> => {
                     const resp = await API.acl.showConfig({ name });
                     return {
                         name,
                         rules: resp.rules ?? [],
-                        fwstateName: resp.fwstate_name ?? '',
+                        fwtableName: {
+                            v4: resp.fwtable_name_v4 ?? '',
+                            v6: resp.fwtable_name_v6 ?? '',
+                        },
                         syncConfig: resp.sync_config,
                     };
                 },
@@ -121,8 +136,8 @@ export const useAclDraft = (): UseAclDraftResult => {
 
     const serverRulesFor = useCallback((configName: string): Rule[] =>
         state.server[configName] ?? EMPTY_RULES, [state.server]);
-    const fwstateNameFor = useCallback((configName: string): string =>
-        state.serverFwStateName[configName] ?? EMPTY_FWSTATE_NAME, [state.serverFwStateName]);
+    const fwtableNamesFor = useCallback((configName: string): FwtableNames =>
+        state.draftFwtableName[configName] ?? EMPTY_FWTABLE_NAMES, [state.draftFwtableName]);
 
     const isDirty = useCallback((configName: string): boolean =>
         state.dirty.has(configName), [state.dirty]);
@@ -141,7 +156,7 @@ export const useAclDraft = (): UseAclDraftResult => {
         draftRules: draftRulesFor,
         draftRuleIds: draftRuleIdsFor,
         serverRules: serverRulesFor,
-        fwstateName: fwstateNameFor,
+        fwtableNames: fwtableNamesFor,
         isDirty,
         anyDirty,
         dispatchDraft,

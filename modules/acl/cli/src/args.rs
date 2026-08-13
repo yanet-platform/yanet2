@@ -35,6 +35,14 @@ pub struct UpdateCmd {
     /// Path to the ruleset YAML file
     #[arg(required = true, long = "rules", value_name = "PATH")]
     pub rules: PathBuf,
+    /// Name of the standalone fwstate-map (kind V4) whose fwtable this
+    /// config uses for state lookups
+    #[arg(long = "map-name-v4", value_name = "NAME")]
+    pub map_name_v4: Option<String>,
+    /// Name of the standalone fwstate-map (kind V6) whose fwtable this
+    /// config uses for state lookups
+    #[arg(long = "map-name-v6", value_name = "NAME")]
+    pub map_name_v6: Option<String>,
     /// Destination MAC address of emitted state-sync frames
     /// (e.g., "00:11:22:33:44:55")
     #[arg(long)]

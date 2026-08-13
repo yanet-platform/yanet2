@@ -223,6 +223,10 @@ fn print_metrics_table(metrics: &[Metric]) {
 pub struct ACLConfig {
     rules: Vec<aclpb::Rule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    fwtable_name_v4: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fwtable_name_v6: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     sync_config: Option<aclpb::SyncConfig>,
 }
 
@@ -240,10 +244,15 @@ impl ACLConfig {
 
 /// Display view of an ACL config returned by the show command.
 ///
-/// `sync_config` is omitted when absent.
+/// `fwtable_name_v4`, `fwtable_name_v6`, and `sync_config` are omitted
+/// when absent.
 #[derive(Debug, Serialize)]
 struct ShowConfig {
     rules: Vec<aclpb::Rule>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fwtable_name_v4: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fwtable_name_v6: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sync_config: Option<aclpb::SyncConfig>,
 }
@@ -343,6 +352,16 @@ impl ACLService {
             || {
                 let display = ShowConfig {
                     rules: response.rules.clone(),
+                    fwtable_name_v4: if response.fwtable_name_v4.is_empty() {
+                        None
+                    } else {
+                        Some(response.fwtable_name_v4.clone())
+                    },
+                    fwtable_name_v6: if response.fwtable_name_v6.is_empty() {
+                        None
+                    } else {
+                        Some(response.fwtable_name_v6.clone())
+                    },
                     sync_config: response.sync_config.clone(),
                 };
                 print!(
@@ -431,6 +450,21 @@ impl ACLService {
             )
         })?;
         let rule_count = config.rules.len();
+
+        // A flag wins for that field whenever it is passed, even as an
+        // explicit empty value: an empty map name declares no link, so
+        // `--map-name-v4 ''` clears a name the YAML carries. Absent
+        // flags fall back to the YAML fields.
+        let fwtable_name_v4 = cmd
+            .map_name_v4
+            .clone()
+            .or(config.fwtable_name_v4.clone())
+            .unwrap_or_default();
+        let fwtable_name_v6 = cmd
+            .map_name_v6
+            .clone()
+            .or(config.fwtable_name_v6.clone())
+            .unwrap_or_default();
         let sync_config = self
             .merge_sync_config(config.sync_config, &cmd)
             .map_err(|err| self.service.invalid("update", err))?;
@@ -438,6 +472,8 @@ impl ACLService {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
+            fwtable_name_v4,
+            fwtable_name_v6,
             sync_config,
         };
         log::trace!("UpdateConfigRequest: {request:?}");

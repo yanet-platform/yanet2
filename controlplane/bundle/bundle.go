@@ -17,6 +17,7 @@ import (
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
+	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
@@ -151,6 +152,13 @@ func buildServices(
 			Configured: modulesCfg.ACL.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
 				return acl.NewACLModule(modulesCfg.ACL.Unwrap(), acl.WithModuleLog(log))
+			},
+		},
+		{
+			Name:       "fwstate module",
+			Configured: modulesCfg.FWState.Unwrap() != nil,
+			New: func() (gateway.Service, error) {
+				return fwstate.NewFWStateModule(modulesCfg.FWState.Unwrap(), fwstate.WithLog(log))
 			},
 		},
 		{

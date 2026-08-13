@@ -12,47 +12,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
-// TestClampBatchSize verifies zero defaulting and upper-bound clamping.
-func TestClampBatchSize(t *testing.T) {
-	cases := []struct {
-		name  string
-		input uint32
-		want  uint32
-	}{
-		{
-			name:  "zero becomes default",
-			input: 0,
-			want:  defaultListEntriesBatchSize,
-		},
-		{
-			name:  "below max passes through",
-			input: 500,
-			want:  500,
-		},
-		{
-			name:  "exactly max passes through",
-			input: maxListEntriesBatchSize,
-			want:  maxListEntriesBatchSize,
-		},
-		{
-			name:  "above max is clamped to max",
-			input: maxListEntriesBatchSize + 1,
-			want:  maxListEntriesBatchSize,
-		},
-		{
-			name:  "large value is clamped to max",
-			input: 1<<32 - 1,
-			want:  maxListEntriesBatchSize,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, clampBatchSize(tc.input))
-		})
-	}
-}
-
 // TestValidateSyncPorts verifies that ports above the uint16 range are
 // rejected with InvalidArgument, while zero and boundary values pass.
 func TestValidateSyncPorts(t *testing.T) {
@@ -129,4 +88,99 @@ func TestValidateSyncConfigMulticastRequired(t *testing.T) {
 		err := validateSyncConfig(cfg)
 		require.NoError(t, err)
 	})
+}
+
+// TestUpdateConfigRequiresMapNames checks that a request without both map
+// object names is rejected with InvalidArgument naming the missing field,
+// before any backend or agent state is touched.
+func TestUpdateConfigRequiresMapNames(t *testing.T) {
+	syncConfig := &fwstatepb.SyncConfig{
+		SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		PortMulticast:    9999,
+	}
+
+	cases := []struct {
+		name       string
+		request    *fwstatepb.UpdateConfigRequest
+		wantDetail string
+	}{
+		{
+			name: "missing map_name_v4",
+			request: &fwstatepb.UpdateConfigRequest{
+				Name:       "cfg",
+				MapNameV6:  "maps-v6",
+				SyncConfig: syncConfig,
+			},
+			wantDetail: "map_name_v4",
+		},
+		{
+			name: "missing map_name_v6",
+			request: &fwstatepb.UpdateConfigRequest{
+				Name:       "cfg",
+				MapNameV4:  "maps-v4",
+				SyncConfig: syncConfig,
+			},
+			wantDetail: "map_name_v6",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := NewFWStateService(nil)
+
+			_, err := service.UpdateConfig(t.Context(), tc.request)
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Contains(t, err.Error(), tc.wantDetail)
+		})
+	}
+}
+
+// TestUpdateConfigRejectsUnrepresentableMapNames checks that map names too
+// long for the fixed-size C object registry, or containing NUL bytes, are
+// rejected before any C state is built: cp_module_link_object would
+// silently truncate them and link an unintended map.
+func TestUpdateConfigRejectsUnrepresentableMapNames(t *testing.T) {
+	syncConfig := &fwstatepb.SyncConfig{
+		SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		PortMulticast:    9999,
+	}
+
+	cases := []struct {
+		name   string
+		mapV4  string
+		mapV6  string
+		detail string
+	}{
+		{
+			name:   "v4 name at the C field limit",
+			mapV4:  strings.Repeat("a", 80),
+			mapV6:  "maps-v6",
+			detail: "shorter than 80 bytes",
+		},
+		{
+			name:   "v6 name with embedded NUL",
+			mapV4:  "maps-v4",
+			mapV6:  "ma\x00ps-v6",
+			detail: "must not contain NUL",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := NewFWStateService(nil)
+
+			_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+				Name:       "cfg",
+				MapNameV4:  tc.mapV4,
+				MapNameV6:  tc.mapV6,
+				SyncConfig: syncConfig,
+			})
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Contains(t, err.Error(), tc.detail)
+		})
+	}
 }

@@ -1,9 +1,9 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Button, Icon, Label } from '@gravity-ui/uikit';
+import { Button, Icon, Label, TextInput } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
-import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '@yanet/core/components';
 import { useConfigListCache, useListNavigation, usePageContribution } from '@yanet/core/hooks';
+import { extractBytes } from '@yanet/core/utils';
 import { useAclDraft } from './useAclDraft';
 import type { Rule } from '@yanet/core/api/acl';
 import { ActionKind } from '@yanet/core/api/acl';
@@ -26,6 +26,40 @@ const QP_CONFIG = 'config';
 
 const cloneRuleItem = (item: RuleItem): RuleItem => ({ ...item, rule: { ...item.rule } });
 
+/**
+ * Families that stateful rules need a state map for.
+ *
+ * A rule with IP networks of one family can only match packets of that
+ * family, so it requires that family's map; a stateful rule with no IP
+ * networks at all can match either family and requires both.
+ */
+const statefulRuleRequiredFamilies = (rules: Rule[]): Set<'v4' | 'v6'> => {
+    const required = new Set<'v4' | 'v6'>();
+    for (const rule of rules) {
+        const stateful = (rule.actions ?? []).some((action) =>
+            action.kind === ActionKind.ACTION_KIND_CHECK_STATE || action.kind === ActionKind.ACTION_KIND_CREATE_STATE,
+        );
+        if (!stateful) {
+            continue;
+        }
+        let hasV4 = false;
+        let hasV6 = false;
+        for (const net of [...(rule.srcs ?? []), ...(rule.dsts ?? [])]) {
+            const len = extractBytes(net.addr)?.length ?? 0;
+            if (len === 4) hasV4 = true;
+            else if (len === 16) hasV6 = true;
+        }
+        if (hasV4 || hasV6) {
+            if (hasV4) required.add('v4');
+            if (hasV6) required.add('v6');
+        } else {
+            required.add('v4');
+            required.add('v6');
+        }
+    }
+    return required;
+};
+
 const AclPage: React.FC = () => {
     const {
         draftConfigs,
@@ -34,7 +68,7 @@ const AclPage: React.FC = () => {
         draftRules,
         draftRuleIds,
         serverRules,
-        fwstateName,
+        fwtableNames,
         isDirty,
         anyDirty,
         dispatchDraft,
@@ -52,7 +86,6 @@ const AclPage: React.FC = () => {
     const [deleteConfigTarget, setDeleteConfigTarget] = useState<string | null>(null);
     const [bulkDeleteConfig, setBulkDeleteConfig] = useState<string | null>(null);
     const [bulkDeleteRuleIds, setBulkDeleteRuleIds] = useState<string[]>([]);
-    const navigate = useNavigate();
 
     const {
         currentConfig,
@@ -123,7 +156,7 @@ const AclPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    const currentFwStateName = fwstateName(currentConfig);
+    const currentFwtableNames = fwtableNames(currentConfig);
     const rawRules: Rule[] = draftRules(currentConfig);
     const rawIds: string[] = draftRuleIds(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules, rawIds), [rawRules, rawIds]);
@@ -241,13 +274,6 @@ const AclPage: React.FC = () => {
         updateParams({ [QP_CONFIG]: target || null });
     }, [currentConfig, draftRules, dispatchDraft, updateParams]);
 
-    const handleOpenLinkedFwstate = useCallback((): void => {
-        if (!currentFwStateName) {
-            return;
-        }
-        navigate(`/modules/fwstate?config=${encodeURIComponent(currentFwStateName)}`);
-    }, [currentFwStateName, navigate]);
-
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
         if (currentConfig) {
@@ -285,16 +311,6 @@ const AclPage: React.FC = () => {
                 onSelect: () => setPaused(p => !p),
             });
         }
-        if (currentFwStateName) {
-            list.push({
-                id: '__open_fwstate',
-                icon: '↗',
-                label: 'Open linked FWState',
-                sub: currentFwStateName,
-                keywords: 'fwstate open link navigate',
-                onSelect: () => handleOpenLinkedFwstate(),
-            });
-        }
         list.push({
             id: '__clear_search',
             icon: '✕',
@@ -305,9 +321,9 @@ const AclPage: React.FC = () => {
         return list;
     }, [
         canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet,
-        enabledCounterNames, paused, currentFwStateName,
+        enabledCounterNames, paused,
         openAdd, handleSavePress, handleDiscard, closeDrawer,
-        handleTabSelect, handleOpenDeleteConfig, handleSearchChange, handleOpenLinkedFwstate,
+        handleTabSelect, handleOpenDeleteConfig, handleSearchChange,
     ]);
 
     const rowAdapter = useMemo((): RowAdapter<RuleItem> => ({
@@ -331,10 +347,21 @@ const AclPage: React.FC = () => {
     }), [commands, rowAdapter]);
     usePageContribution(contribution);
 
-    const hasStatefulRules = useMemo(() =>
-        rawRules.some((rule) => (rule.actions ?? []).some((action) =>
-            action.kind === ActionKind.ACTION_KIND_CHECK_STATE || action.kind === ActionKind.ACTION_KIND_CREATE_STATE,
-        )), [rawRules]);
+    const missingStateMapFamilies = useMemo((): Array<'v4' | 'v6'> => {
+        const required = statefulRuleRequiredFamilies(rawRules);
+        return (['v4', 'v6'] as const).filter((family) => required.has(family) && currentFwtableNames[family] === '');
+    }, [rawRules, currentFwtableNames]);
+
+    const updateFwtableName = useCallback((family: 'v4' | 'v6', value: string): void => {
+        if (!currentConfig) {
+            return;
+        }
+        dispatchDraft({
+            type: 'SET_FWTABLE_NAMES',
+            configName: currentConfig,
+            fwtableName: { ...currentFwtableNames, [family]: value },
+        });
+    }, [currentConfig, currentFwtableNames, dispatchDraft]);
 
     const pageHeader = (
         <CommandPaletteHeader
@@ -399,14 +426,29 @@ const AclPage: React.FC = () => {
                         ) : (
                             <>
                                 <div className="yn-toolbar-bordered">
-                                    {currentFwStateName && (
-                                        <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
-                                            FWState: {currentFwStateName}
-                                        </Button>
-                                    )}
-                                    {!currentFwStateName && hasStatefulRules && (
-                                        <Label theme="warning">Stateful rules without FWState</Label>
-                                    )}
+                                    {missingStateMapFamilies.map((family) => (
+                                        <Label key={family} theme="warning">
+                                            Stateful rules without a {family} state map
+                                        </Label>
+                                    ))}
+                                    <TextInput
+                                        size="m"
+                                        style={{ width: 140 }}
+                                        value={currentFwtableNames.v4}
+                                        onUpdate={(v) => updateFwtableName('v4', v)}
+                                        placeholder="state map v4"
+                                        disabled={!currentConfig}
+                                        hasClear
+                                    />
+                                    <TextInput
+                                        size="m"
+                                        style={{ width: 140 }}
+                                        value={currentFwtableNames.v6}
+                                        onUpdate={(v) => updateFwtableName('v6', v)}
+                                        placeholder="state map v6"
+                                        disabled={!currentConfig}
+                                        hasClear
+                                    />
                                     <div style={{ flex: 1 }} />
                                     <div style={{ flexBasis: 320, flexShrink: 1 }}>
                                         <SearchInput

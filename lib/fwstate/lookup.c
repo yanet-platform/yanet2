@@ -7,8 +7,7 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
-#include "fwmap_typed.h"
-#include "layermap.h"
+#include "fwtable.h"
 #include "lookup.h"
 #include "types.h"
 
@@ -100,13 +99,12 @@ fwstate_build_state_key_v6(
 }
 
 /**
- * Typed IPv4 state lookup. The fwmap4_t handle and the fw4_state_key are
- * bound by the type system — a mismatch is a compile error.
+ * Common fwtable state lookup.
  */
 static inline bool
-fwstate_lookup_state_v4(
-	fwmap4_t map,
-	const struct fw4_state_key *key,
+fwstate_lookup_table_state(
+	fwtable_t *table,
+	void *key,
 	uint64_t now,
 	uint64_t *deadline,
 	bool *value_from_stale_layer
@@ -114,42 +112,14 @@ fwstate_lookup_state_v4(
 	struct fw_state_value *value = NULL;
 	rwlock_t *lock = NULL;
 
-	int64_t result = fwmap4_get_value_and_deadline(
-		map, now, key, &value, &lock, deadline, value_from_stale_layer
-	);
-
-	bool found = result >= 0;
-	if (found && value) {
-		// Increment backward packet counter atomically
-		// (we're checking state for return traffic)
-		__atomic_fetch_add(
-			&value->packets_backward, 1, __ATOMIC_RELAXED
-		);
-	}
-
-	if (lock) {
-		rwlock_read_unlock(lock);
-	}
-
-	return found;
-}
-
-/**
- * Typed IPv6 state lookup.
- */
-static inline bool
-fwstate_lookup_state_v6(
-	fwmap6_t map,
-	const struct fw6_state_key *key,
-	uint64_t now,
-	uint64_t *deadline,
-	bool *value_from_stale_layer
-) {
-	struct fw_state_value *value = NULL;
-	rwlock_t *lock = NULL;
-
-	int64_t result = fwmap6_get_value_and_deadline(
-		map, now, key, &value, &lock, deadline, value_from_stale_layer
+	int64_t result = fwtable_lookup_with_deadline(
+		table,
+		now,
+		key,
+		(void **)&value,
+		&lock,
+		deadline,
+		value_from_stale_layer
 	);
 
 	bool found = result >= 0;
@@ -167,13 +137,17 @@ fwstate_lookup_state_v6(
 }
 
 bool
-fwstate_check_state(
-	fwmap_t *fw4state,
-	fwmap_t *fw6state,
+fwstate_check_state_table(
+	fwtable_t *table,
 	struct packet *packet,
 	uint64_t now,
 	enum sync_packet_direction *sync_required
 ) {
+	if (table == NULL) {
+		*sync_required = SYNC_NONE;
+		return false;
+	}
+
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	uint64_t deadline = now;
@@ -182,33 +156,17 @@ fwstate_check_state(
 
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		if (fw4state == NULL) {
-			*sync_required = SYNC_NONE;
-			return false;
-		}
 		struct fw4_state_key key;
 		fwstate_build_state_key_v4(mbuf, packet, &key);
-		found = fwstate_lookup_state_v4(
-			fwmap4_from_raw(fw4state),
-			&key,
-			now,
-			&deadline,
-			&value_from_stale_layer
+		found = fwstate_lookup_table_state(
+			table, &key, now, &deadline, &value_from_stale_layer
 		);
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		if (fw6state == NULL) {
-			*sync_required = SYNC_NONE;
-			return false;
-		}
 		struct fw6_state_key key;
 		fwstate_build_state_key_v6(mbuf, packet, &key);
-		found = fwstate_lookup_state_v6(
-			fwmap6_from_raw(fw6state),
-			&key,
-			now,
-			&deadline,
-			&value_from_stale_layer
+		found = fwstate_lookup_table_state(
+			table, &key, now, &deadline, &value_from_stale_layer
 		);
 	} else {
 		// Non-IP packet — no firewall state to check.

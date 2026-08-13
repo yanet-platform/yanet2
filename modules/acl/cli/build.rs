@@ -32,10 +32,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             ".modules.acl.controlplane.aclpb.v1.Action.kind",
             "#[serde(with = \"crate::action_kind\")]",
         )
-        .field_attribute(
-            ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse.fwstate_name",
-            "#[serde(skip)]",
-        )
         .compile_protos(&["aclpb/v1/acl.proto"], &["../../..", "../controlplane"])?;
 
     Ok(())

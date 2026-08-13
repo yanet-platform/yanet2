@@ -60,6 +60,19 @@ if not get_option('b_sanitize').contains('thread')
   )
 endif
 
+fwtable_test = executable(
+  'fwtable_test',
+  ['fwtable_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('fwtable_locks',
+  fwtable_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)
+
 fwstate_cursor_test = executable(
   'fwstate_cursor_test',
   ['fwstate_cursor_test.c'],

@@ -6,33 +6,38 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
+// FwStateConfig is a service-owned fwstate module config plus the names of
+// the fwstate-map objects it links, which the service needs for ShowConfig
+// and for stats and entry reads delegated to the map objects.
 type FwStateConfig struct {
 	*cfwstate.ModuleConfig
+
+	mapNameV4 string
+	mapNameV6 string
 }
 
-type CursorEntry = cfwstate.CursorEntry
-type OutdatedLayers = cfwstate.OutdatedLayers
-type mapStats = cfwstate.MapStats
-
+// NewFWStateModuleConfig builds the config in one step: the request's
+// sync config merges over the replaced config's values (or the defaults
+// for a fresh config) and both map names are declared as object links,
+// resolving against published objects when the config is published.
+//
+// The map names are remembered only after the C construction succeeds,
+// so a failed construction leaves the previous linkage visible to
+// readers.
 func NewFWStateModuleConfig(
 	agent *ffi.Agent,
 	name string,
 	old *FwStateConfig,
 	syncConfig *fwstatepb.SyncConfig,
-	mapConfig *fwstatepb.MapConfig,
-	workerCount uint16,
+	fw4MapName, fw6MapName string,
 ) (*FwStateConfig, error) {
-	var oldModule *cfwstate.ModuleConfig
 	current := cfwstate.DefaultSyncConfig()
 	if old != nil {
-		oldModule = old.ModuleConfig
 		current = old.ModuleConfig.GetSyncConfig()
 	}
 
 	var finalSync *cfwstate.SyncConfig
 	if syncConfig != nil {
-		// The request's zero fields inherit the propagated or default
-		// values, exactly the values a second update used to merge.
 		merged := syncConfig.ToCWithDefaults(current)
 		finalSync = &merged
 	}
@@ -40,28 +45,50 @@ func NewFWStateModuleConfig(
 	moduleCfg, err := cfwstate.NewModuleConfig(
 		agent,
 		name,
-		oldModule,
 		finalSync,
-		mapConfig.ToC(),
-		workerCount,
+		fw4MapName,
+		fw6MapName,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &FwStateConfig{ModuleConfig: moduleCfg}, nil
+	return &FwStateConfig{
+		ModuleConfig: moduleCfg,
+		mapNameV4:    fw4MapName,
+		mapNameV6:    fw6MapName,
+	}, nil
 }
 
-func (m *FwStateConfig) InsertLayer(
-	mapConfig *fwstatepb.MapConfig,
-	workerCount uint16,
-) error {
-	return m.ModuleConfig.InsertLayer(mapConfig.ToC(), workerCount)
+// mergedSyncConfig merges the request's sync config over the replaced
+// config's current values (or the defaults for a fresh config): the
+// exact values a construction would install.
+func mergedSyncConfig(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+) *fwstatepb.SyncConfig {
+	current := cfwstate.DefaultSyncConfig()
+	if old != nil {
+		current = old.ModuleConfig.GetSyncConfig()
+	}
+	return fwstatepb.FromCSyncConfig(syncConfig.ToCWithDefaults(current))
+}
+
+// MergedSyncConfig returns the request's sync config merged with the
+// defaults: the exact values a fresh construction would install.
+func (m *FwStateConfig) MergedSyncConfig(syncConfig *fwstatepb.SyncConfig) *fwstatepb.SyncConfig {
+	return mergedSyncConfig(nil, syncConfig)
+}
+
+// MapNameV4 returns the name of the linked IPv4 fwstate-map object.
+func (m *FwStateConfig) MapNameV4() string {
+	return m.mapNameV4
+}
+
+// MapNameV6 returns the name of the linked IPv6 fwstate-map object.
+func (m *FwStateConfig) MapNameV6() string {
+	return m.mapNameV6
 }
 
 func (m *FwStateConfig) GetSyncConfig() *fwstatepb.SyncConfig {
 	return fwstatepb.FromCSyncConfig(m.ModuleConfig.GetSyncConfig())
-}
-
-func (m *FwStateConfig) GetMapConfig() *fwstatepb.MapConfig {
-	return fwstatepb.FromCMapConfig(m.ModuleConfig.GetMapConfig())
 }

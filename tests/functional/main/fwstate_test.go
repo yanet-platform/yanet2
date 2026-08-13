@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -105,21 +104,35 @@ func listedEndpoints(t *testing.T, output string) (srcs, dsts []netip.AddrPort) 
 	return srcs, dsts
 }
 
-func TestFWStateListEntries(t *testing.T) {
+// TestFWStateMapListEntries covers the fwstate-map introspection surface:
+// forward/backward/paginated entry dumps and stats, read from the map
+// objects by name via the map CLI.
+func TestFWStateMapListEntries(t *testing.T) {
 	t.Parallel()
 	withBootedVM(t, func(fw *framework.TestFramework) {
-		testFWStateListEntries(t, fw)
+		testFWStateMapListEntries(t, fw)
 	})
 }
 
-func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
+func testFWStateMapListEntries(t *testing.T, fw *framework.TestFramework) {
+	const mapV4, mapV6 = "fwstate0-v4", "fwstate0-v6"
 
-	// 1. Configure fwstate module with maps and sync settings.
+	// 1. Create the fwstate-map objects the config below links by name.
+	fw.Run("Create_state_maps", func(fw *framework.TestFramework, t *testing.T) {
+		commands := []string{
+			framework.CLIFWStateMap + " create --name " + mapV4 + " --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name " + mapV6 + " --kind v6 --index-size 1024 --extra-bucket-count 64",
+		}
+		_, err := fw.ExecuteCommands(commands...)
+		require.NoError(t, err, "fwstate-map creation failed")
+	})
+
+	// 2. Configure fwstate module with map links and sync settings.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFWState + " update --name fwstate0" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 " + mapV4 +
+				" --map-name-v6 " + mapV6 +
 				" --src-addr 2001:db8::100" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
@@ -130,19 +143,21 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	// 2. Link fwstate to an ACL config so the dataplane module is active.
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
+	// 3. Wire the ACL config to the same state maps so the dataplane
+	// modules are active.
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_fw --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate0 --acl acl_fw",
+			framework.CLIACL + " update --name acl_fw" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 " + mapV4 + " --map-name-v6 " + mapV6,
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
-		require.NoError(t, err, "fwstate link configuration failed")
+		require.NoError(t, err, "acl state map wiring failed")
 	})
 
-	// 3. Inject packets to create firewall state entries.
+	// 4. Inject packets to create firewall state entries.
 	fw.Run("Create_state_entries", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -163,12 +178,12 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		}
 	})
 
-	// 4. Forward listing: verify exact entries.
+	// 5. Forward listing on the v4 map: verify exact entries.
 	fw.Run("Forward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction forward --include-expired",
+			framework.CLIFWStateMap + " entries --name " + mapV4 + " --batch 100 --direction forward --include-expired",
 		)
-		require.NoError(t, err, "list-entries forward failed")
+		require.NoError(t, err, "map entries forward failed")
 		t.Log("Forward listing output:\n", output)
 
 		for _, e := range expectedEntries {
@@ -179,12 +194,12 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.Contains(t, output, "-S--|----")
 	})
 
-	// 5. Forward listing with JSON: parse and verify key fields.
+	// 6. Forward listing with JSON: parse and verify key fields.
 	fw.Run("Forward_listing_json", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction forward --include-expired --format json",
+			framework.CLIFWStateMap + " entries --name " + mapV4 + " --batch 100 --direction forward --include-expired --format json",
 		)
-		require.NoError(t, err, "list-entries forward json failed")
+		require.NoError(t, err, "map entries forward json failed")
 		t.Log("JSON output:\n", output)
 
 		const tcpProto = 6
@@ -228,12 +243,12 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		}
 	})
 
-	// 6. Backward listing from last entry: verify all entries present.
+	// 7. Backward listing from last entry: verify all entries present.
 	fw.Run("Backward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction backward --index 4294967295 --include-expired",
+			framework.CLIFWStateMap + " entries --name " + mapV4 + " --batch 100 --direction backward --index 4294967295 --include-expired",
 		)
-		require.NoError(t, err, "list-entries backward failed")
+		require.NoError(t, err, "map entries backward failed")
 		require.NotEmpty(t, output, "backward listing returned empty output")
 		t.Log("Backward listing output:\n", output)
 
@@ -242,12 +257,12 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		}
 	})
 
-	// 7. Pagination: read with batch=1, verify all entries are still returned.
+	// 8. Pagination: read with batch=1, verify all entries are still returned.
 	fw.Run("Pagination", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 1 --direction forward --include-expired",
+			framework.CLIFWStateMap + " entries --name " + mapV4 + " --batch 1 --direction forward --include-expired",
 		)
-		require.NoError(t, err, "list-entries with batch=1 failed")
+		require.NoError(t, err, "map entries with batch=1 failed")
 		t.Log("Pagination output:\n", output)
 
 		// CLI loops through batches; all 3 entries should appear.
@@ -256,15 +271,179 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		}
 	})
 
-	// 8. Config not found: request entries from a non-existent config.
-	fw.Run("Config_not_found", func(fw *framework.TestFramework, t *testing.T) {
+	// 9. Map not found: request entries from a non-existent map.
+	fw.Run("Map_not_found", func(fw *framework.TestFramework, t *testing.T) {
 		_, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name nonexistent --batch 10",
+			framework.CLIFWStateMap + " entries --name nonexistent --batch 10",
 		)
-		require.Error(t, err, "should fail for non-existent config")
+		require.Error(t, err, "should fail for non-existent map")
 	})
 
-	// 9. CheckState: return traffic passes through ACL because forward state exists.
+	// 10. Stats: verify total_elements matches the number of injected entries.
+	fw.Run("Stats_after_entries", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWStateMap + " stats --name " + mapV4,
+		)
+		require.NoError(t, err, "map stats command failed")
+		t.Log("Stats output:\n", output)
+
+		var stats struct {
+			Stats struct {
+				TotalElements int `json:"total_elements"`
+				IndexSize     int `json:"index_size"`
+				LayerCount    int `json:"layer_count"`
+			} `json:"stats"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(output), &stats), "stats should be valid JSON")
+		require.Equal(t, 1024, stats.Stats.IndexSize)
+		require.Equal(t, 1, stats.Stats.LayerCount)
+		require.Equal(t, 3, stats.Stats.TotalElements, "should have exactly 3 state entries")
+	})
+
+	// === IPv6 ===
+
+	// 11. Create IPv6 state entries via CreateState.
+	fw.Run("IPv6_create_state", func(fw *framework.TestFramework, t *testing.T) {
+		pg := NewPacketGenerator()
+
+		for i := range 3 {
+			srcPort := uint16(20000 + i)
+			pkt := pg.TCPv6(
+				net.ParseIP("2001:db8:1::10"),
+				net.ParseIP("2001:db8:2::1"),
+				srcPort, 80,
+				true, false, false, false, // SYN
+				[]byte("v6 state"),
+			)
+			out, err := fw.SendPacketAndParseAll(0, 0, pkt, 200*time.Millisecond)
+			require.NoError(t, err, "CreateState should not error")
+			require.NotEmpty(t, out, "CreateState should forward packets")
+			require.Len(t, out, 2, "CreateState should produce 2 packets (original + sync)")
+		}
+	})
+
+	// 12. IPv6 forward listing: verify entries were created.
+	fw.Run("IPv6_forward_listing", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWStateMap + " entries --name " + mapV6 + " --batch 100 --direction forward --include-expired",
+		)
+		require.NoError(t, err, "IPv6 map entries forward failed")
+		t.Log("IPv6 forward listing output:\n", output)
+
+		src := netip.MustParseAddr("2001:db8:1::10")
+		dst := netip.AddrPortFrom(netip.MustParseAddr("2001:db8:2::1"), 80)
+
+		srcs, dsts := listedEndpoints(t, output)
+		require.Equal(t, []netip.AddrPort{
+			netip.AddrPortFrom(src, 20000),
+			netip.AddrPortFrom(src, 20001),
+			netip.AddrPortFrom(src, 20002),
+		}, srcs)
+		require.Equal(t, []netip.AddrPort{dst, dst, dst}, dsts)
+		require.Contains(t, output, "TCP")
+	})
+
+	// 13. IPv6 JSON listing keeps the family's sources in order.
+	fw.Run("IPv6_listing_json", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWStateMap + " entries --name " + mapV6 + " --batch 100 --direction forward --include-expired --format json",
+		)
+		require.NoError(t, err, "IPv6 map entries json failed")
+		require.Equal(t, expectedIPv6Sources, jsonEntrySources(t, output))
+	})
+
+	// 14. IPv6 stats: verify total_elements.
+	fw.Run("IPv6_stats", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWStateMap + " stats --name " + mapV6,
+		)
+		require.NoError(t, err, "map stats command failed")
+		t.Log("Stats output:\n", output)
+
+		var stats struct {
+			Stats struct {
+				TotalElements int `json:"total_elements"`
+			} `json:"stats"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(output), &stats), "stats should be valid JSON")
+		require.Equal(t, 3, stats.Stats.TotalElements, "should have exactly 3 IPv6 state entries")
+	})
+}
+
+// TestFWStateCheckState covers the fwstate state lifecycle end to end:
+// state entries created by CreateState are matched by CheckState on
+// return traffic, and unknown flows are dropped, for both IPv4 and IPv6.
+func TestFWStateCheckState(t *testing.T) {
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.TestFramework) {
+		testFWStateCheckState(t, fw)
+	})
+}
+
+func testFWStateCheckState(t *testing.T, fw *framework.TestFramework) {
+
+	// 1. Create the fwstate-map objects the configs below link by name.
+	fw.Run("Create_state_maps", func(fw *framework.TestFramework, t *testing.T) {
+		commands := []string{
+			framework.CLIFWStateMap + " create --name fwstate0-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate0-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
+		}
+		_, err := fw.ExecuteCommands(commands...)
+		require.NoError(t, err, "fwstate-map creation failed")
+	})
+
+	// 2. Configure fwstate module with map links and sync settings.
+	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
+		commands := []string{
+			framework.CLIFWState + " update --name fwstate0" +
+				" --map-name-v4 fwstate0-v4" +
+				" --map-name-v6 fwstate0-v6" +
+				" --src-addr 2001:db8::100" +
+				" --dst-addr-multicast ff02::1" +
+				" --port-multicast 9999" +
+				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
+				" --udp 30s --default 16s",
+		}
+		_, err := fw.ExecuteCommands(commands...)
+		require.NoError(t, err, "fwstate configuration failed")
+	})
+
+	// 3. Wire the ACL config to the same state maps so the dataplane
+	// modules are active.
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
+		commands := []string{
+			framework.CLIACL + " update --name acl_fw" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate0-v4 --map-name-v6 fwstate0-v6",
+			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
+			framework.CLIPipeline + " update --name=test --functions test",
+		}
+		_, err := fw.ExecuteCommands(commands...)
+		require.NoError(t, err, "acl state map wiring failed")
+	})
+
+	// 4. Inject packets to create firewall state entries.
+	fw.Run("Create_state_entries", func(fw *framework.TestFramework, t *testing.T) {
+		pg := NewPacketGenerator()
+
+		for i := range 3 {
+			srcPort := uint16(10000 + i)
+			pkt := pg.TCP(
+				net.IPv4(192, 0, 2, byte(10+i)),
+				net.IPv4(192, 0, 3, 1),
+				srcPort, 80,
+				true, false, false, false, // SYN
+				[]byte("state entry"),
+			)
+			out, err := fw.SendPacketAndParseAll(0, 0, pkt, 200*time.Millisecond)
+			require.NoError(t, err, "CreateState should not error")
+			require.NotEmpty(t, out, "CreateState should forward packets")
+			// CreateState produces 2 packets: original + sync packet
+			require.Len(t, out, 2, "CreateState should produce 2 packets (original + sync)")
+		}
+	})
+
+	// 5. CheckState: return traffic passes through ACL because forward state exists.
 	fw.Run("CheckState_return_traffic", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -283,7 +462,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.NotNil(t, out, "return packet should be forwarded by CheckState")
 	})
 
-	// 10. CheckState: packet with no matching state is dropped.
+	// 6. CheckState: packet with no matching state is dropped.
 	fw.Run("CheckState_no_state_dropped", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -301,30 +480,9 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.Nil(t, out, "packet with no matching state should be dropped")
 	})
 
-	// 11. Stats: verify total_elements matches the number of injected entries.
-	fw.Run("Stats_after_entries", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate0",
-		)
-		require.NoError(t, err, "stats command failed")
-		t.Log("Stats output:\n", output)
-
-		var stats struct {
-			IPv4Stats struct {
-				TotalElements int `json:"total_elements"`
-				IndexSize     int `json:"index_size"`
-				LayerCount    int `json:"layer_count"`
-			} `json:"ipv4_stats"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(output), &stats), "stats should be valid JSON")
-		require.Equal(t, 1024, stats.IPv4Stats.IndexSize)
-		require.Equal(t, 1, stats.IPv4Stats.LayerCount)
-		require.Equal(t, 3, stats.IPv4Stats.TotalElements, "should have exactly 3 state entries")
-	})
-
 	// === IPv6 tests ===
 
-	// 12. Create IPv6 state entries via CreateState.
+	// 7. Create IPv6 state entries via CreateState.
 	fw.Run("IPv6_create_state", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -345,61 +503,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		}
 	})
 
-	// 13. IPv6 forward listing: verify entries were created.
-	fw.Run("IPv6_forward_listing", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv6 --batch 100 --direction forward --include-expired",
-		)
-		require.NoError(t, err, "IPv6 list-entries forward failed")
-		t.Log("IPv6 forward listing output:\n", output)
-
-		src := netip.MustParseAddr("2001:db8:1::10")
-		dst := netip.AddrPortFrom(netip.MustParseAddr("2001:db8:2::1"), 80)
-
-		srcs, dsts := listedEndpoints(t, output)
-		require.Equal(t, []netip.AddrPort{
-			netip.AddrPortFrom(src, 20000),
-			netip.AddrPortFrom(src, 20001),
-			netip.AddrPortFrom(src, 20002),
-		}, srcs)
-		require.Equal(t, []netip.AddrPort{dst, dst, dst}, dsts)
-		require.Contains(t, output, "TCP")
-	})
-
-	// Family filters: --ipv4/--ipv6 select one map. Neither or both lists IPv4 then IPv6.
-	fw.Run("Family_ipv4_only", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction forward --include-expired --format json",
-		)
-		require.NoError(t, err, "IPv4 list-entries failed")
-		require.Equal(t, expectedIPv4Sources(), jsonEntrySources(t, output))
-	})
-
-	fw.Run("Family_default_both", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --format json",
-		)
-		require.NoError(t, err, "default list-entries failed")
-		require.Equal(t, slices.Concat(expectedIPv4Sources(), expectedIPv6Sources), jsonEntrySources(t, output))
-	})
-
-	fw.Run("Family_both_flags", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --ipv4 --ipv6 --batch 100 --direction forward --include-expired --format json",
-		)
-		require.NoError(t, err, "list-entries with both family flags failed")
-		require.Equal(t, slices.Concat(expectedIPv4Sources(), expectedIPv6Sources), jsonEntrySources(t, output))
-	})
-
-	fw.Run("Family_count_spans_maps", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --count 4 --batch 100 --direction forward --include-expired --format json",
-		)
-		require.NoError(t, err, "list-entries with shared --count failed")
-		require.Equal(t, slices.Concat(expectedIPv4Sources(), expectedIPv6Sources[:1]), jsonEntrySources(t, output))
-	})
-
-	// 14. IPv6 CheckState: return traffic passes because forward state exists.
+	// 8. IPv6 CheckState: return traffic passes because forward state exists.
 	fw.Run("IPv6_CheckState_return_traffic", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -416,7 +520,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.NotNil(t, out, "IPv6 return packet should be forwarded by CheckState")
 	})
 
-	// 15. IPv6 CheckState: packet with no matching state is dropped.
+	// 9. IPv6 CheckState: packet with no matching state is dropped.
 	fw.Run("IPv6_CheckState_no_state_dropped", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -431,23 +535,6 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		_, out, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
 		_ = err
 		require.Nil(t, out, "IPv6 packet with no matching state should be dropped")
-	})
-
-	// 16. IPv6 stats: verify total_elements.
-	fw.Run("IPv6_stats", func(fw *framework.TestFramework, t *testing.T) {
-		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate0",
-		)
-		require.NoError(t, err, "stats command failed")
-		t.Log("Stats output:\n", output)
-
-		var stats struct {
-			IPv6Stats struct {
-				TotalElements int `json:"total_elements"`
-			} `json:"ipv6_stats"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(output), &stats), "stats should be valid JSON")
-		require.Equal(t, 3, stats.IPv6Stats.TotalElements, "should have exactly 3 IPv6 state entries")
 	})
 }
 
@@ -474,12 +561,14 @@ func TestFWStateUDPEndianness(t *testing.T) {
 
 func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 
-	// 1. Configure fwstate + ACL (reuse existing config from TestFWStateListEntries)
+	// 1. Create the fwstate-map objects and configure fwstate.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWStateMap + " create --name fwstate_udp-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate_udp-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 			framework.CLIFWState + " update --name fwstate_udp" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate_udp-v4" +
+				" --map-name-v6 fwstate_udp-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
@@ -490,10 +579,11 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_udp --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate_udp --acl acl_udp",
+			framework.CLIACL + " update --name acl_udp" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate_udp-v4 --map-name-v6 fwstate_udp-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_udp,fwstate:fwstate_udp,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
@@ -520,12 +610,12 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 		require.NotNil(t, output, "CreateState should forward the original packet")
 	})
 
-	// 3. Verify state was created with correct ports via entries listing.
+	// 3. Verify state was created with correct ports via map listing.
 	fw.Run("Verify_UDP_state_entries", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_udp --batch 100 --direction forward --include-expired",
+			framework.CLIFWStateMap + " entries --name fwstate_udp-v4 --batch 100 --direction forward --include-expired",
 		)
-		require.NoError(t, err, "list-entries forward failed")
+		require.NoError(t, err, "map entries forward failed")
 		t.Log("UDP entries output:\n", output)
 
 		// The entry should show host-order ports (12345, 80), not byte-swapped
@@ -554,7 +644,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 		require.NotNil(t, out, "UDP return packet should be forwarded by CheckState (endianness bug if nil)")
 	})
 
-	// 5. Control test: TCP should work (TCP ports are correctly converted).
+	// 4. Control test: TCP should work (TCP ports are correctly converted).
 	fw.Run("Create_TCP_state_control", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
@@ -719,12 +809,14 @@ func TestFWStateExternalSyncFrame(t *testing.T) {
 
 func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 
-	// 1. Configure fwstate module.
+	// 1. Create the fwstate-map objects and configure the fwstate module.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
+			framework.CLIFWStateMap + " create --name fwstate_ext-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate_ext-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 			framework.CLIFWState + " update --name fwstate_ext" +
-				" --index-size 1024" +
-				" --extra-bucket-count 64" +
+				" --map-name-v4 fwstate_ext-v4" +
+				" --map-name-v6 fwstate_ext-v6" +
 				" --src-addr 2001:db8::100" +
 				" --dst-addr-multicast ff02::1" +
 				" --port-multicast 9999" +
@@ -735,47 +827,50 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	// 2. Link fwstate to ACL with the sync frame allow rule.
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
+	// 2. Wire the ACL config to the same state maps.
+	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_ext --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
-			framework.CLIFWState + " link --name fwstate_ext --acl acl_ext",
+			framework.CLIACL + " update --name acl_ext" +
+				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" --map-name-v4 fwstate_ext-v4 --map-name-v6 fwstate_ext-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_ext,fwstate:fwstate_ext,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
-		require.NoError(t, err, "fwstate link configuration failed")
+		require.NoError(t, err, "acl state map wiring failed")
 	})
 
 	// 3. Verify no state entries exist initially.
 	fw.Run("Verify_empty_state", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate_ext",
+			framework.CLIFWStateMap + " stats --name fwstate_ext-v4",
 		)
-		require.NoError(t, err, "stats command failed")
+		require.NoError(t, err, "map stats command failed")
 		t.Log("Initial stats:\n", output)
 
 		var stats struct {
-			IPv4Stats struct {
+			Stats struct {
 				TotalElements int `json:"total_elements"`
-			} `json:"ipv4_stats"`
+			} `json:"stats"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(output), &stats))
-		require.Equal(t, 0, stats.IPv4Stats.TotalElements, "should start with 0 state entries")
+		require.Equal(t, 0, stats.Stats.TotalElements, "should start with 0 state entries")
 	})
 
 	// 4. Send an external sync frame and verify it is dropped.
-	// The sync frame carries a TCP SYN state for 10.0.0.1:5000 -> 10.0.0.2:80.
+	// The sync frame carries a TCP SYN state for 192.0.2.77:5000 -> 192.0.3.1:80,
+	// inside the subnets the rules file's CheckState rule covers, so the
+	// return traffic below reaches CHECK_STATE.
 	fw.Run("Send_external_sync_frame", func(fw *framework.TestFramework, t *testing.T) {
 		syncFrame := buildFWStateSyncFrame(
-			net.IPv4(10, 0, 0, 1), // src IP
-			net.IPv4(10, 0, 0, 2), // dst IP
-			5000,                  // src port
-			80,                    // dst port
-			6,                     // proto: TCP
-			0,                     // fib: 0 = forward (INGRESS)
-			0x02,                  // flags: SYN
-			4,                     // addr_type: IPv4
+			net.IPv4(192, 0, 2, 77), // src IP
+			net.IPv4(192, 0, 3, 1),  // dst IP
+			5000,                    // src port
+			80,                      // dst port
+			6,                       // proto: TCP
+			0,                       // fib: 0 = forward (INGRESS)
+			0x02,                    // flags: SYN
+			4,                       // addr_type: IPv4
 		)
 		pkt := buildExternalSyncPacket(syncFrame, nil)
 
@@ -788,22 +883,22 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 5. Verify that the external sync frame created a state entry.
 	fw.Run("Verify_state_created", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired",
+			framework.CLIFWStateMap + " entries --name fwstate_ext-v4 --batch 100 --direction forward --include-expired",
 		)
-		require.NoError(t, err, "list-entries forward failed")
+		require.NoError(t, err, "map entries forward failed")
 		t.Log("Entries after external sync:\n", output)
 
-		require.Contains(t, output, "10.0.0.1:5000", "should contain source from external sync frame")
-		require.Contains(t, output, "10.0.0.2:80", "should contain destination from external sync frame")
+		require.Contains(t, output, "192.0.2.77:5000", "should contain source from external sync frame")
+		require.Contains(t, output, "192.0.3.1:80", "should contain destination from external sync frame")
 		require.Contains(t, output, "TCP", "should be TCP protocol")
 	})
 
 	// 6. Verify the state entry is marked as external via JSON listing.
 	fw.Run("Verify_state_is_external", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired --format json",
+			framework.CLIFWStateMap + " entries --name fwstate_ext-v4 --batch 100 --direction forward --include-expired --format json",
 		)
-		require.NoError(t, err, "list-entries forward json failed")
+		require.NoError(t, err, "map entries json failed")
 		t.Log("JSON entries:\n", output)
 
 		const tcpProto = 6
@@ -824,8 +919,8 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 		entries := decodeJSONLines[jsonEntry](t, output)
 		require.Len(t, entries, 1, "should have exactly 1 state entry from external sync")
 		e := entries[0]
-		require.Equal(t, "10.0.0.1", e.Key.SrcAddr, "src_addr should match sync frame")
-		require.Equal(t, "10.0.0.2", e.Key.DstAddr, "dst_addr should match sync frame")
+		require.Equal(t, "192.0.2.77", e.Key.SrcAddr, "src_addr should match sync frame")
+		require.Equal(t, "192.0.3.1", e.Key.DstAddr, "dst_addr should match sync frame")
 		require.Equal(t, 5000, e.Key.SrcPort, "src_port should match sync frame")
 		require.Equal(t, 80, e.Key.DstPort, "dst_port should match sync frame")
 		require.Equal(t, tcpProto, e.Key.Proto, "proto should be TCP")
@@ -835,17 +930,52 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 7. Verify stats show exactly 1 entry.
 	fw.Run("Verify_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " stats --name fwstate_ext",
+			framework.CLIFWStateMap + " stats --name fwstate_ext-v4",
 		)
-		require.NoError(t, err, "stats command failed")
+		require.NoError(t, err, "map stats command failed")
 		t.Log("Stats after external sync:\n", output)
 
 		var stats struct {
-			IPv4Stats struct {
+			Stats struct {
 				TotalElements int `json:"total_elements"`
-			} `json:"ipv4_stats"`
+			} `json:"stats"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(output), &stats))
-		require.Equal(t, 1, stats.IPv4Stats.TotalElements, "should have exactly 1 state entry")
+		require.Equal(t, 1, stats.Stats.TotalElements, "should have exactly 1 state entry")
+	})
+
+	// 8. Verify the external sync frame created state: return traffic for
+	// the synced flow passes through ACL via CheckState.
+	fw.Run("CheckState_external_return_traffic", func(fw *framework.TestFramework, t *testing.T) {
+		pg := NewPacketGenerator()
+
+		// Reverse of the synced flow: 192.0.3.1:80 -> 192.0.2.77:5000.
+		// Forwarded only when the external state landed in the map.
+		pkt := pg.TCP(
+			net.IPv4(192, 0, 3, 1),
+			net.IPv4(192, 0, 2, 77),
+			80, 5000,
+			true, true, false, false, // SYN+ACK
+			[]byte("external return"),
+		)
+		_, out, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
+		require.NoError(t, err, "external return packet should not error")
+		require.NotNil(t, out, "return packet should be forwarded by CheckState over the external state")
+	})
+
+	// 9. Control: a flow the external frame did not sync is dropped.
+	fw.Run("CheckState_unsynced_dropped", func(fw *framework.TestFramework, t *testing.T) {
+		pg := NewPacketGenerator()
+
+		pkt := pg.TCP(
+			net.IPv4(192, 0, 3, 1),
+			net.IPv4(192, 0, 2, 78),
+			80, 55555,
+			true, true, false, false, // SYN+ACK
+			[]byte("unsynced flow"),
+		)
+		_, out, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
+		_ = err
+		require.Nil(t, out, "packet with no matching state should be dropped")
 	})
 }

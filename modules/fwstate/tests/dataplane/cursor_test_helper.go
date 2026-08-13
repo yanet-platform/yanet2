@@ -1,6 +1,8 @@
 package fwstate
 
 /*
+#include <harness.h>
+
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "lib/fwstate/config.h"
@@ -42,10 +44,10 @@ func insertFw4Entry(
 	createdAt uint64, updatedAt uint64,
 	ttlNs uint64,
 ) error {
-	// Resolve the active IPv4 map (layer 0)
-	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(false), C.uint32_t(0))
+	// Resolve the active IPv4 layer (layer 0)
+	fwmap := C.fwstate_test_table_layer(cpModule, C.bool(false), C.uint32_t(0))
 	if fwmap == nil {
-		return fmt.Errorf("failed to resolve IPv4 map")
+		return fmt.Errorf("failed to resolve IPv4 table layer")
 	}
 
 	var key C.struct_fw4_state_key
@@ -72,6 +74,24 @@ func insertFw4Entry(
 	return nil
 }
 
+// tableCursor resolves a linked table layer and positions a cursor on it.
+func tableCursor(
+	cpModule *C.struct_cp_module,
+	isIPv6 bool, layerIndex uint32,
+	index int64, includeExpired bool,
+) (*C.fwmap_t, *C.fwstate_cursor_t, error) {
+	fwmap := C.fwstate_test_table_layer(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))
+	if fwmap == nil {
+		return nil, nil, fmt.Errorf("layer %d of the %s table not found",
+			layerIndex, map[bool]string{false: "IPv4", true: "IPv6"}[isIPv6])
+	}
+
+	cursor := &C.fwstate_cursor_t{}
+	cursor.key_pos = C.int64_t(index)
+	cursor.include_expired = C.bool(includeExpired)
+	return fwmap, cursor, nil
+}
+
 // readCursorForward reads entries in the forward direction using the cursor API.
 func readCursorForward(
 	cpModule *C.struct_cp_module,
@@ -79,24 +99,14 @@ func readCursorForward(
 	index int64, includeExpired bool,
 	now uint64, count uint32,
 ) ([]CursorResult, int64, error) {
-	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_init(
-		cpModule, &cursor,
-		C.bool(isIPv6), C.uint32_t(layerIndex),
-		C.int64_t(index), C.bool(includeExpired),
-	)
-	if rc != 0 {
-		return nil, 0, fmt.Errorf("fwstate_config_cursor_init failed: %d", rc)
-	}
-
-	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))
-	if fwmap == nil {
-		return nil, 0, fmt.Errorf("fwstate_config_resolve_map returned nil")
+	fwmap, cursor, err := tableCursor(cpModule, isIPv6, layerIndex, index, includeExpired)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	buf := make([]C.fwstate_cursor_entry_t, count)
 	n := C.fwstate_cursor_read_forward(
-		fwmap, &cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
+		fwmap, cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
 	)
 
 	results := make([]CursorResult, 0, n)
@@ -131,24 +141,14 @@ func readCursorBackward(
 	index int64, includeExpired bool,
 	now uint64, count uint32,
 ) ([]CursorResult, int64, error) {
-	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_init(
-		cpModule, &cursor,
-		C.bool(isIPv6), C.uint32_t(layerIndex),
-		C.int64_t(index), C.bool(includeExpired),
-	)
-	if rc != 0 {
-		return nil, 0, fmt.Errorf("fwstate_config_cursor_init failed: %d", rc)
-	}
-
-	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))
-	if fwmap == nil {
-		return nil, 0, fmt.Errorf("fwstate_config_resolve_map returned nil")
+	fwmap, cursor, err := tableCursor(cpModule, isIPv6, layerIndex, index, includeExpired)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	buf := make([]C.fwstate_cursor_entry_t, count)
 	n := C.fwstate_cursor_read_backward(
-		fwmap, &cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
+		fwmap, cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
 	)
 
 	results := make([]CursorResult, 0, n)

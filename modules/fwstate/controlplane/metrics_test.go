@@ -301,3 +301,44 @@ func TestEmitCounterMetricsAggregatesWorkers(t *testing.T) {
 	require.Equal(t, uint64(15), counterValue(t, findMetric(t, metrics, "fwstate_sync_packets")))
 	require.Equal(t, uint64(150), counterValue(t, findMetric(t, metrics, "fwstate_sync_bytes")))
 }
+
+// stubMetricsSource is a canned metrics source that returns a fixed
+// series list and records the tags it was queried with.
+type stubMetricsSource struct {
+	series  []*commonpb.Metric
+	gotTags []*commonpb.MetricTag
+}
+
+func (m *stubMetricsSource) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+	m.gotTags = tags
+	return m.series, nil
+}
+
+// Test_MetricsService_AggregatesAllSources verifies that the module's
+// metrics RPC merges every source's series and forwards the request's
+// tags to each source.
+func Test_MetricsService_AggregatesAllSources(t *testing.T) {
+	fwstateSource := &stubMetricsSource{series: []*commonpb.Metric{
+		commonpb.NewMetricCounter("fwstate_rx_packets", 3,
+			&commonpb.Label{Name: "config", Value: "fw0"},
+		),
+	}}
+	mapSource := &stubMetricsSource{series: []*commonpb.Metric{
+		commonpb.NewMetricCounter("grpc_server_started_total", 1,
+			&commonpb.Label{Name: "grpc_service", Value: "fwstatemap"},
+		),
+	}}
+
+	service := NewMetricsService(fwstateSource, mapSource)
+	tags := []*commonpb.MetricTag{{Name: "config", Value: "fw0"}}
+	response, err := service.GetMetrics(t.Context(), &commonpb.GetMetricsRequest{Tags: tags})
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(response.GetMetrics()))
+	for _, metric := range response.GetMetrics() {
+		names = append(names, metric.Name)
+	}
+	require.ElementsMatch(t, []string{"fwstate_rx_packets", "grpc_server_started_total"}, names)
+	require.Equal(t, tags, fwstateSource.gotTags)
+	require.Equal(t, tags, mapSource.gotTags)
+}

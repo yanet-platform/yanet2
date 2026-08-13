@@ -2,6 +2,9 @@ package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/fwstate/api -lfwstate_cp
+//#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
+//#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
+//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
@@ -23,9 +26,8 @@ import (
 // ModuleConfig is an opaque handle to the fwstate module configuration in
 // shared memory.
 type ModuleConfig struct {
-	name       string
-	ptr        ffi.ModuleConfig
-	generation uint64
+	name string
+	ptr  ffi.ModuleConfig
 }
 
 // DefaultSyncConfig returns the C-side default receive-side sync
@@ -41,31 +43,20 @@ func DefaultSyncConfig() SyncConfig {
 // one step: a config handle is constructed once and never updated
 // afterwards.
 //
-// old names the config this one replaces, or nil for a fresh config.
-// From old the sync config and the borrowed map offsets propagate; with
-// old nil the maps are created fresh from mapConfig. When old is given,
-// its maps are kept unless mapConfig asks for a different aligned size
-// pair, in which case a new layer with the requested sizes is prepended.
-//
 // syncConfig is the final receive-side sync config to install, or nil to
-// keep the propagated or default one. A zero workerCount leaves the
-// config unmapped: no maps are created and the propagated chain, if
-// any, is kept as is.
+// keep the defaults. fw4MapName and fw6MapName name standalone
+// fwstate_map_v4 / fwstate_map_v6 objects whose fwtables the module
+// inserts synced state into; an empty name declares no link and that
+// family's table offset stays NULL, so the module counts and drops that
+// family's sync frames without inserting.
 func NewModuleConfig(
 	agent *ffi.Agent,
 	name string,
-	old *ModuleConfig,
 	syncConfig *SyncConfig,
-	mapConfig MapConfig,
-	workerCount uint16,
+	fw4MapName, fw6MapName string,
 ) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
-
-	var cOld *C.struct_cp_module
-	if old != nil {
-		cOld = old.asRawPtr()
-	}
 
 	var cSync *C.struct_fwstate_sync_config
 	if syncConfig != nil {
@@ -73,39 +64,35 @@ func NewModuleConfig(
 		cSync = &cSyncConfig
 	}
 
+	var cFw4Name *C.char
+	if fw4MapName != "" {
+		cFw4Name = C.CString(fw4MapName)
+		defer C.free(unsafe.Pointer(cFw4Name))
+	}
+
+	var cFw6Name *C.char
+	if fw6MapName != "" {
+		cFw6Name = C.CString(fw6MapName)
+		defer C.free(unsafe.Pointer(cFw6Name))
+	}
+
 	var cErr *C.yanet_error
 	ptr := C.fwstate_module_config_new(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
-		cOld,
 		cSync,
-		C.uint32_t(mapConfig.IndexSize),
-		C.uint32_t(mapConfig.ExtraBucketCount),
-		C.uint16_t(workerCount),
+		cFw4Name,
+		cFw6Name,
 		&cErr,
 	)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to initialize FWState module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
-	m := &ModuleConfig{
+	return &ModuleConfig{
 		name: name,
 		ptr:  ffi.NewModuleConfig(unsafe.Pointer(ptr)),
-	}
-
-	// Generation mirrors the former CreateMaps bookkeeping: fresh maps
-	// start at 1, a propagated config keeps the old generation and
-	// advances it exactly when the map sizes changed.
-	if old != nil {
-		m.generation = old.generation
-		if old.GetMapConfig() != m.GetMapConfig() {
-			m.generation++
-		}
-	} else {
-		m.generation = 1
-	}
-
-	return m, nil
+	}, nil
 }
 
 func (m *ModuleConfig) Name() string {
@@ -118,14 +105,6 @@ func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
-}
-
-func (m *ModuleConfig) Generation() uint64 {
-	return m.generation
-}
-
-func (m *ModuleConfig) DetachMaps() {
-	C.fwstate_module_config_detach_maps(m.asRawPtr())
 }
 
 // Free releases the underlying C memory.

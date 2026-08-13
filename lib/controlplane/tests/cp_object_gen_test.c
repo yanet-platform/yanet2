@@ -791,11 +791,13 @@ test_module_object_link_ectx(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
-// Generation must fail when a module links to an object that is not installed:
-// the device install triggers the ectx build where the link resolution fails.
+// A module linking an object that is not installed must fail its own
+// update: the declared links are validated against the new generation's
+// object registry before anything is published, so no live generation
+// can carry a module whose link cannot resolve.
 //
-// Uses distinct names from the positive test so the inherited generation's
-// pipeline path is not disturbed.
+// Uses a distinct module name so the inherited generation's state is not
+// disturbed.
 static int
 test_module_object_link_missing_fails(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
@@ -813,8 +815,7 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
 	// Create the forward module linking to an object that was never
-	// installed. The module install succeeds because no device references
-	// a pipeline containing this module yet.
+	// installed.
 	struct cp_module *module =
 		forward_module_config_init(agent, "fwd-missing", &err);
 	TEST_ASSERT_NOT_NULL(module, "forward_module_config_init failed");
@@ -826,65 +827,32 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 		"cp_module_link_object failed"
 	);
 	struct cp_module *modules[] = {module};
-	TEST_ASSERT_SUCCESS(
-		cp_config_update_modules(
-			dp_config, cp_config, 1, modules, &err
-		),
-		"update_modules must succeed before pipeline is wired"
-	);
-
-	const char *const chain_types[] = {"forward"};
-	const char *const chain_names[] = {"fwd-missing"};
-	struct cp_chain_config *chain_cfg = cp_chain_config_create(
-		"chain-missing", 1, chain_types, chain_names
-	);
-	TEST_ASSERT_NOT_NULL(chain_cfg, "chain_config_create failed");
-	struct cp_function_config *func_cfg =
-		cp_function_config_create("func-missing", 1);
-	TEST_ASSERT_NOT_NULL(func_cfg, "function_config_create failed");
-	TEST_ASSERT_SUCCESS(
-		cp_function_config_set_chain(func_cfg, 0, chain_cfg, 1),
-		"set_chain failed"
-	);
-	struct cp_function_config *func_cfgs[] = {func_cfg};
-	TEST_ASSERT_SUCCESS(
-		cp_config_update_functions(
-			dp_config, cp_config, 1, func_cfgs, &err
-		),
-		"update_functions failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	cp_function_config_free(func_cfg);
-
-	struct cp_pipeline_config *pipe_cfg =
-		cp_pipeline_config_create("pipe-missing", 1);
-	TEST_ASSERT_NOT_NULL(pipe_cfg, "pipeline_config_create failed");
-	TEST_ASSERT_SUCCESS(
-		cp_pipeline_config_set_function(pipe_cfg, 0, "func-missing"),
-		"set_function failed"
-	);
-	struct cp_pipeline_config *pipe_cfgs[] = {pipe_cfg};
-	TEST_ASSERT_SUCCESS(
-		cp_config_update_pipelines(
-			dp_config, cp_config, 1, pipe_cfgs, &err
-		),
-		"update_pipelines failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	cp_pipeline_config_free(pipe_cfg);
-
-	// The device install triggers the full ectx build. The module's link
-	// to the non-existent object fails resolution, so the generation
-	// install must fail.
-	int rc = install_device_with_pipeline(
-		agent, dp_config, cp_config, "dev-missing", "pipe-missing", &err
+	int rc = cp_config_update_modules(
+		dp_config, cp_config, 1, modules, &err
 	);
 	TEST_ASSERT(
 		rc != 0,
-		"device install must fail when a linked object is missing"
+		"module update must fail when a linked object is missing"
+	);
+	TEST_ASSERT_STR_CONTAINS(
+		yanet_error_message(err),
+		"linked object 'test:nonexistent' not found for module "
+		"'forward:fwd-missing'",
+		"the failure must name the missing object and the linking "
+		"module"
 	);
 	yanet_error_free(err);
 	err = NULL;
+
+	// The rejected update leaves the prior generation live and the
+	// module uninstalled.
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	TEST_ASSERT_NULL(
+		cp_config_gen_lookup_module(
+			config_gen, "forward", "fwd-missing"
+		),
+		"a module from a rejected update must not be published"
+	);
 
 	agent_detach(agent);
 	return TEST_SUCCESS;

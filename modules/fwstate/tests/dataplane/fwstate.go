@@ -1,8 +1,11 @@
 package fwstate
 
-//#cgo CFLAGS: -I../../../.. -I../../../../common
+//#cgo CFLAGS: -I../../../.. -I../../../../lib
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
+//#cgo LDFLAGS: -L../../../../build/objects/fwstate/api -lfwstate_objects
+//#cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
+//#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -lconfig_dp
 //#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
@@ -13,6 +16,7 @@ package fwstate
 */
 import "C"
 import (
+	"encoding/binary"
 	"fmt"
 	"net/netip"
 	"runtime"
@@ -26,13 +30,15 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
 
-// fwstateModuleConfig creates a fwstate module config and spawns a per-worker
-// counter storage that is reused across fwstateHandlePackets calls so that
-// counter values accumulate. The returned storage must be freed with
-// [fwstateCounterStorageFree] (the caller owns it).
+// fwstateModuleConfig creates a fwstate module config linked, by name, to two
+// fwstate-map objects registered in the harness agent's object registry, and
+// spawns a per-worker counter storage that is reused across
+// fwstateHandlePackets calls so that counter values accumulate. The returned
+// storage must be freed with [fwstateCounterStorageFree] (the caller owns it).
 func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *C.struct_counter_storage) {
 	// Allocate the stand-in agent through the harness constructor, which zeroes
-	// the whole structure, not just the memory context.
+	// the whole structure, not just the memory context, and wires the object
+	// registry the harness's own link-name lookups resolve against.
 	//
 	// Every module construction now walks the agent's parked-list head, and an
 	// unzeroed head reads as stale bytes rather than a valid empty list.
@@ -47,39 +53,56 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 		panic("failed to allocate agent")
 	}
 
-	// Use the proper API to create the module config: one-shot
-	// construction installs the sync settings and creates the maps.
+	// Use the proper API to create the module config
 	cName := C.CString("test")
 	defer C.free(unsafe.Pointer(cName))
 
-	var syncConfig C.struct_fwstate_sync_config
-	C.fwstate_config_set_defaults(&syncConfig)
+	// Create the map objects, give each a first table layer, and register
+	// them so the module construction can resolve the names.
+	cName4 := C.CString("fw4")
+	defer C.free(unsafe.Pointer(cName4))
+	obj4 := C.fwstate_test_map_object_new(agent, C.bool(false), cName4)
+	if obj4 == nil {
+		panic("failed to create fwstate-map v4 object")
+	}
+	if rc := C.fwstate_test_register_object(agent, obj4); rc != 0 {
+		panic("failed to register fwstate-map v4 object")
+	}
 
-	// Configure sync settings
+	cName6 := C.CString("fw6")
+	defer C.free(unsafe.Pointer(cName6))
+	obj6 := C.fwstate_test_map_object_new(agent, C.bool(true), cName6)
+	if obj6 == nil {
+		panic("failed to create fwstate-map v6 object")
+	}
+	if rc := C.fwstate_test_register_object(agent, obj6); rc != 0 {
+		panic("failed to register fwstate-map v6 object")
+	}
+
+	// Configure sync settings and link both map objects by name.
 	// Multicast IPv6 address: ff02::1
+	var syncCfg C.struct_fwstate_sync_config
 	multicastAddr := [16]C.uint8_t{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
 	for i := range 16 {
-		syncConfig.dst_addr_multicast[i] = multicastAddr[i]
+		syncCfg.dst_addr_multicast[i] = multicastAddr[i]
 	}
-	syncConfig.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
+	syncCfg.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
 
 	// Set timeouts (in nanoseconds)
-	syncConfig.timeouts.tcp_syn_ack = C.uint64_t(120e9)
-	syncConfig.timeouts.tcp_syn = C.uint64_t(120e9)
-	syncConfig.timeouts.tcp_fin = C.uint64_t(120e9)
-	syncConfig.timeouts.tcp = C.uint64_t(120e9)
-	syncConfig.timeouts.udp = C.uint64_t(30e9)
-	syncConfig.timeouts.default_ = C.uint64_t(16e9)
+	syncCfg.timeouts.tcp_syn_ack = C.uint64_t(120e9)
+	syncCfg.timeouts.tcp_syn = C.uint64_t(120e9)
+	syncCfg.timeouts.tcp_fin = C.uint64_t(120e9)
+	syncCfg.timeouts.tcp = C.uint64_t(120e9)
+	syncCfg.timeouts.udp = C.uint64_t(30e9)
+	syncCfg.timeouts.default_ = C.uint64_t(16e9)
 
 	var cErr *C.yanet_error
 	cpModule := C.fwstate_module_config_new(
 		agent,
 		cName,
-		nil,
-		&syncConfig,
-		C.uint32_t(1024),
-		C.uint32_t(64),
-		C.uint16_t(1),
+		&syncCfg,
+		cName4,
+		cName6,
 		&cErr,
 	)
 	if cpModule == nil {
@@ -135,6 +158,42 @@ func fwstateHandlePackets(cpModule *C.struct_cp_module, storage *C.struct_counte
 	C.test_fwstate_handle_packets(dpWorker, cpModule, storage, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := pf.Payload()
 	return &result, nil
+}
+
+// fwstateTable resolves the module config's linked fwtable for one family,
+// or nil when the family is unlinked. Resolution goes through the C harness,
+// which reads the module's declared link and looks it up in the harness
+// agent's object registry.
+func fwstateTable(cpModule *C.struct_cp_module, isIPv6 bool) *C.fwtable_t {
+	return C.fwstate_test_linked_table(cpModule, C.bool(isIPv6))
+}
+
+// fwstateKey builds the pinned C key for a 5-tuple. The pinner passed in must
+// be unpinned by the caller.
+func fwstateKey(pinner *runtime.Pinner, proto layers.IPProtocol, srcPort, dstPort uint16, srcIP, dstIP netip.Addr) unsafe.Pointer {
+	if srcIP.Is6() && dstIP.Is6() {
+		key6 := C.struct_fw6_state_key{}
+		key6.hdr.proto = C.uint16_t(proto)
+		key6.hdr.src_port = C.uint16_t(srcPort)
+		key6.hdr.dst_port = C.uint16_t(dstPort)
+		srcBytes := srcIP.As16()
+		dstBytes := dstIP.As16()
+		copy(unsafe.Slice((*byte)(&key6.src_addr[0]), 16), srcBytes[:])
+		copy(unsafe.Slice((*byte)(&key6.dst_addr[0]), 16), dstBytes[:])
+		pinner.Pin(&key6)
+		return unsafe.Pointer(&key6)
+	}
+
+	key4 := C.struct_fw4_state_key{}
+	key4.hdr.proto = C.uint16_t(proto)
+	key4.hdr.src_port = C.uint16_t(srcPort)
+	key4.hdr.dst_port = C.uint16_t(dstPort)
+	srcBytes := srcIP.As4()
+	dstBytes := dstIP.As4()
+	copy(unsafe.Slice((*C.uint32_t)(&key4.src_addr), 1), []C.uint32_t{C.uint32_t(binary.LittleEndian.Uint32(srcBytes[:]))})
+	copy(unsafe.Slice((*C.uint32_t)(&key4.dst_addr), 1), []C.uint32_t{C.uint32_t(binary.LittleEndian.Uint32(dstBytes[:]))})
+	pinner.Pin(&key4)
+	return unsafe.Pointer(&key4)
 }
 
 // SyncFrameOption is a functional option for createSyncFrame
@@ -198,8 +257,9 @@ type StateValueSnapshot struct {
 	Deadline        uint64
 }
 
-// GetStateValue reads the raw fw_state_value for a given 5-tuple via layermap_get_value_and_deadline.
-// Returns Found=false if the state does not exist.
+// GetStateValue reads the raw fw_state_value for a given 5-tuple via a
+// fwtable lookup across all layers. Returns Found=false if the state does
+// not exist.
 func GetStateValue(
 	cpModule *C.struct_cp_module,
 	proto layers.IPProtocol,
@@ -208,52 +268,26 @@ func GetStateValue(
 	srcAddr string,
 	dstAddr string,
 ) StateValueSnapshot {
-	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
-	cfg := &m.cfg
-
 	srcIP, err1 := netip.ParseAddr(srcAddr)
 	dstIP, err2 := netip.ParseAddr(dstAddr)
 	if err1 != nil || err2 != nil {
 		return StateValueSnapshot{}
 	}
 
-	var fwmap *C.fwmap_t
-	var keyPtr unsafe.Pointer
+	table := fwstateTable(cpModule, srcIP.Is6() && dstIP.Is6())
+	if table == nil {
+		return StateValueSnapshot{}
+	}
 
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-
-	if srcIP.Is6() && dstIP.Is6() {
-		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw6state))))
-		key6 := C.struct_fw6_state_key{}
-		key6.hdr.proto = C.uint16_t(proto)
-		key6.hdr.src_port = C.uint16_t(srcPort)
-		key6.hdr.dst_port = C.uint16_t(dstPort)
-		srcBytes := srcIP.As16()
-		dstBytes := dstIP.As16()
-		copy(unsafe.Slice((*byte)(&key6.src_addr[0]), 16), srcBytes[:])
-		copy(unsafe.Slice((*byte)(&key6.dst_addr[0]), 16), dstBytes[:])
-		pinner.Pin(&key6)
-		keyPtr = unsafe.Pointer(&key6)
-	} else {
-		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw4state))))
-		key4 := C.struct_fw4_state_key{}
-		key4.hdr.proto = C.uint16_t(proto)
-		key4.hdr.src_port = C.uint16_t(srcPort)
-		key4.hdr.dst_port = C.uint16_t(dstPort)
-		srcBytes := srcIP.As4()
-		dstBytes := dstIP.As4()
-		copy(unsafe.Slice((*byte)(unsafe.Pointer(&key4.src_addr)), 4), srcBytes[:])
-		copy(unsafe.Slice((*byte)(unsafe.Pointer(&key4.dst_addr)), 4), dstBytes[:])
-		pinner.Pin(&key4)
-		keyPtr = unsafe.Pointer(&key4)
-	}
+	keyPtr := fwstateKey(&pinner, proto, srcPort, dstPort, srcIP, dstIP)
 
 	var value unsafe.Pointer
 	var deadline C.uint64_t
 	var valueFromStale C.bool
-	// now=0 so deadline check inside fwmap_get_value_and_deadline always passes
-	ret := C.layermap_get_value_and_deadline(fwmap, 0, keyPtr, &value, nil, &deadline, &valueFromStale)
+	// now=0 so the deadline check inside the lookup always passes
+	ret := C.fwtable_lookup_with_deadline(table, 0, keyPtr, &value, nil, &deadline, &valueFromStale)
 	if ret < 0 || value == nil {
 		return StateValueSnapshot{Found: false}
 	}
@@ -271,7 +305,7 @@ func GetStateValue(
 	}
 }
 
-// CheckStateExists checks if a state exists in the fwmap
+// CheckStateExists checks if a state exists in the linked fwtable
 func CheckStateExists(
 	cpModule *C.struct_cp_module,
 	proto layers.IPProtocol,
@@ -280,81 +314,34 @@ func CheckStateExists(
 	srcAddr string,
 	dstAddr string,
 ) bool {
-	// Get the fwstate_config from cp_module
-	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
-	cfg := &m.cfg
-
-	// Parse addresses using netip
 	srcIP, err1 := netip.ParseAddr(srcAddr)
 	dstIP, err2 := netip.ParseAddr(dstAddr)
 	if err1 != nil || err2 != nil {
 		return false
 	}
 
-	// Select the appropriate map and create C struct directly
-	var fwmap *C.fwmap_t
-	var keyPtr unsafe.Pointer
+	table := fwstateTable(cpModule, srcIP.Is6() && dstIP.Is6())
+	if table == nil {
+		return false
+	}
 
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
+	keyPtr := fwstateKey(&pinner, proto, srcPort, dstPort, srcIP, dstIP)
 
-	if srcIP.Is6() && dstIP.Is6() {
-		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw6state))))
-		key6 := C.struct_fw6_state_key{}
-
-		key6.hdr.proto = C.uint16_t(proto)
-		key6.hdr.src_port = C.uint16_t(srcPort)
-		key6.hdr.dst_port = C.uint16_t(dstPort)
-
-		// Copy addresses using unsafe.Slice (addresses stay in network order)
-		srcBytes := srcIP.As16()
-		dstBytes := dstIP.As16()
-		srcAddrSlice := unsafe.Slice((*byte)(&key6.src_addr[0]), 16)
-		dstAddrSlice := unsafe.Slice((*byte)(&key6.dst_addr[0]), 16)
-		copy(srcAddrSlice, srcBytes[:])
-		copy(dstAddrSlice, dstBytes[:])
-
-		pinner.Pin(&key6)
-		keyPtr = unsafe.Pointer(&key6)
-
-	} else {
-		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw4state))))
-		key4 := C.struct_fw4_state_key{}
-
-		key4.hdr.proto = C.uint16_t(proto)
-		key4.hdr.src_port = C.uint16_t(srcPort)
-		key4.hdr.dst_port = C.uint16_t(dstPort)
-
-		// Copy addresses using unsafe.Slice (addresses stay in network order)
-		srcBytes := srcIP.As4()
-		dstBytes := dstIP.As4()
-		srcAddrSlice := unsafe.Slice((*byte)(unsafe.Pointer(&key4.src_addr)), 4)
-		dstAddrSlice := unsafe.Slice((*byte)(unsafe.Pointer(&key4.dst_addr)), 4)
-		copy(srcAddrSlice, srcBytes[:])
-		copy(dstAddrSlice, dstBytes[:])
-
-		pinner.Pin(&key4)
-		keyPtr = unsafe.Pointer(&key4)
-	}
-
-	// Check if state exists using layermap_get
+	// now=0 so the deadline check inside the lookup always passes
 	var value unsafe.Pointer
-	now := C.uint64_t(0)
 	var valueFromStale C.bool
-	ret := C.layermap_get(fwmap, now, keyPtr, &value, nil, &valueFromStale)
+	ret := C.fwtable_lookup(table, 0, keyPtr, &value, nil, &valueFromStale)
 	return ret >= 0
 }
 
-// InsertNewLayer inserts a new layer using the C API
+// InsertNewLayer appends a new layer to both linked map objects via the C
+// harness helper.
 func InsertNewLayer(cpModule *C.struct_cp_module) {
-	rc, cErr := C.fwstate_config_insert_new_layer(
-		cpModule,
-		C.uint32_t(1024),
-		C.uint32_t(64),
-		C.uint16_t(1),
-	)
+	rc := C.fwstate_test_insert_new_layer(cpModule)
 	if rc != 0 {
-		panic(fmt.Sprintf("failed to insert new layer: rc=%d, err=%v", rc, cErr))
+		panic(fmt.Sprintf("failed to insert new layer: rc=%d", rc))
 	}
 }
 
@@ -367,80 +354,37 @@ func GetStateDeadline(
 	srcAddr string,
 	dstAddr string,
 ) uint64 {
-	// Get the fwstate_config from cp_module
-	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
-	cfg := &m.cfg
-
 	srcIP, err1 := netip.ParseAddr(srcAddr)
 	dstIP, err2 := netip.ParseAddr(dstAddr)
 	if err1 != nil || err2 != nil {
 		return 0
 	}
 
-	var fwmap *C.fwmap_t
-	var keyPtr unsafe.Pointer
+	table := fwstateTable(cpModule, srcIP.Is6() && dstIP.Is6())
+	if table == nil {
+		return 0
+	}
 
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-
-	if srcIP.Is6() && dstIP.Is6() {
-		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw6state))))
-		key6 := C.struct_fw6_state_key{}
-		key6.hdr.proto = C.uint16_t(proto)
-		key6.hdr.src_port = C.uint16_t(srcPort)
-		key6.hdr.dst_port = C.uint16_t(dstPort)
-
-		srcBytes := srcIP.As16()
-		dstBytes := dstIP.As16()
-		srcAddrSlice := unsafe.Slice((*byte)(&key6.src_addr[0]), 16)
-		dstAddrSlice := unsafe.Slice((*byte)(&key6.dst_addr[0]), 16)
-		copy(srcAddrSlice, srcBytes[:])
-		copy(dstAddrSlice, dstBytes[:])
-
-		pinner.Pin(&key6)
-		keyPtr = unsafe.Pointer(&key6)
-	} else {
-		cfgReal := (*C.struct_fwstate_config)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(cfg))))
-		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfgReal.fw4state))))
-		key4 := C.struct_fw4_state_key{}
-		key4.hdr.proto = C.uint16_t(proto)
-		key4.hdr.src_port = C.uint16_t(srcPort)
-		key4.hdr.dst_port = C.uint16_t(dstPort)
-
-		srcBytes := srcIP.As4()
-		dstBytes := dstIP.As4()
-		srcAddrSlice := unsafe.Slice((*byte)(unsafe.Pointer(&key4.src_addr)), 4)
-		dstAddrSlice := unsafe.Slice((*byte)(unsafe.Pointer(&key4.dst_addr)), 4)
-		copy(srcAddrSlice, srcBytes[:])
-		copy(dstAddrSlice, dstBytes[:])
-
-		pinner.Pin(&key4)
-		keyPtr = unsafe.Pointer(&key4)
-	}
+	keyPtr := fwstateKey(&pinner, proto, srcPort, dstPort, srcIP, dstIP)
 
 	var value unsafe.Pointer
 	var deadline C.uint64_t
 	var valueFromStale C.bool
-	now := C.uint64_t(C.clock_get_time_ns(nil))
-	ret := C.layermap_get_value_and_deadline(fwmap, now*0, keyPtr, &value, nil, &deadline, &valueFromStale)
+	ret := C.fwtable_lookup_with_deadline(table, 0, keyPtr, &value, nil, &deadline, &valueFromStale)
 	if ret < 0 {
 		return 0
 	}
 	return uint64(deadline)
 }
 
-// GetLayerCount returns the number of layers in both IPv4 and IPv6 maps
+// GetLayerCount returns the number of layers in both IPv4 and IPv6 tables
 func GetLayerCount(cpModule *C.struct_cp_module) (uint32, uint32) {
-	// Get the fwstate_config from cp_module
-	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
-	cfg := &m.cfg
-
-	// Get layer count for IPv4
-	fwmap4 := (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw4state))))
+	fwmap4 := C.fwstate_test_table_layer(cpModule, C.bool(false), C.uint32_t(0))
 	layerCount4 := uint32(C.fwmap_layer_count(fwmap4))
 
-	// Get layer count for IPv6
-	fwmap6 := (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw6state))))
+	fwmap6 := C.fwstate_test_table_layer(cpModule, C.bool(true), C.uint32_t(0))
 	layerCount6 := uint32(C.fwmap_layer_count(fwmap6))
 
 	return layerCount4, layerCount6
@@ -451,18 +395,11 @@ func GetCurrentTime() uint64 {
 	return uint64(C.clock_get_time_ns(nil))
 }
 
-// TrimStaleLayers trims stale layers using the C API.
-//
-// It immediately frees whatever layers were collected, since the test
-// harness has no publish step to defer the free to.
+// TrimStaleLayers trims stale layers from both linked map objects.
 func TrimStaleLayers(cpModule *C.struct_cp_module, now uint64) error {
-	var outdated *C.fwstate_outdated_layers_t
-	rc, cErr := C.fwstate_config_trim_stale_layers(cpModule, C.uint64_t(now), &outdated)
-	if outdated != nil {
-		C.fwstate_outdated_layers_free(outdated, cpModule)
-	}
+	rc := C.fwstate_test_trim_stale_layers(cpModule, C.uint64_t(now))
 	if rc != 0 {
-		return fmt.Errorf("failed to trim stale layers: error code=%d, cErr=%v", rc, cErr)
+		return fmt.Errorf("failed to trim stale layers: rc=%d", rc)
 	}
 	return nil
 }

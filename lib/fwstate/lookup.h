@@ -3,32 +3,31 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "fwtable.h"
+
 struct packet;
-typedef struct fwmap fwmap_t;
 
 // Import sync direction enum
 #include "sync.h"
 
 /**
- * Check if a state exists for the given packet.
- * Builds the appropriate key based on packet IP version and performs lookup
- * in the matching map (fw4state for IPv4, fw6state for IPv6).
+ * Check if a state exists for the given packet in an fwtable.
+ * Builds the appropriate key based on packet IP version and performs
+ * lookup across all layers of the table.
  *
- * Both maps are passed explicitly so that the key family and the map family
- * are decided by the same packet-type branch inside this function — a
- * key/map mismatch is impossible by construction.
+ * The table serves a single family, so the caller picks it per packet
+ * family — a v4 packet is checked against the v4 map object's table and
+ * a v6 packet against the v6 object's.
  *
- * @param fw4state The IPv4 firewall state map (may be NULL)
- * @param fw6state The IPv6 firewall state map (may be NULL)
+ * @param table The firewall state table (may be NULL)
  * @param packet The packet to check state for
  * @param now Current time in nanoseconds
  * @param sync_required Output parameter indicating if sync is required
  * @return true if state was found, false otherwise
  */
 bool
-fwstate_check_state(
-	fwmap_t *fw4state,
-	fwmap_t *fw6state,
+fwstate_check_state_table(
+	fwtable_t *table,
 	struct packet *packet,
 	uint64_t now,
 	enum sync_packet_direction *sync_required

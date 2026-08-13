@@ -18,12 +18,6 @@ service FWStateService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
   // List all FWState configurations across instances
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
-  // Link FWState configuration to ACL configurations
-  rpc LinkFWState(LinkFWStateRequest) returns (LinkFWStateResponse);
-  // Get statistics for FWState maps
-  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
-  // Bidirectional stream for listing map entries.
-  rpc ListEntries(stream ListEntriesRequest) returns (stream ListEntriesResponse);
 }
 
 // MetricsService exposes FWState module metrics.
@@ -34,8 +28,12 @@ service MetricsService {
 
 message UpdateConfigRequest {
   string name = 1;
-  MapConfig map_config = 2;
-  SyncConfig sync_config = 3;
+  // Names of the published fwstate_map_v4 / fwstate_map_v6 objects whose
+  // fwtables receive the synced state. Both are required: the module owns
+  // neither family's table itself.
+  string map_name_v4 = 2;
+  string map_name_v6 = 3;
+  SyncConfig sync_config = 4;
 }
 
 message UpdateConfigResponse {}
@@ -47,9 +45,9 @@ message ShowConfigRequest {
 
 message ShowConfigResponse {
   string name = 1;
-  repeated string linked_acls = 2;
-  MapConfig map_config = 3;
-  SyncConfig sync_config = 4;
+  string map_name_v4 = 3;
+  string map_name_v6 = 4;
+  SyncConfig sync_config = 5;
 }
 
 message DeleteConfigRequest { string name = 1; }
@@ -59,83 +57,6 @@ message DeleteConfigResponse {}
 message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
-
-message LinkFWStateRequest {
-  string fwstate_name = 1;
-  repeated string acl_config_names = 2;
-}
-
-message LinkFWStateResponse {}
-
-message GetStatsRequest { string name = 1; }
-
-message GetStatsResponse {
-  MapStats ipv4_stats = 1;
-  MapStats ipv6_stats = 2;
-}
-
-message MapStats {
-  uint32 index_size = 1;
-  uint32 extra_bucket_count = 2;
-  uint32 max_chain_length = 3;
-  uint32 layer_count = 4;
-  uint64 total_elements = 5;
-  uint64 max_deadline = 6;
-  uint64 memory_used = 7;
-  string note = 8;
-}
-
-enum Direction {
-  FORWARD = 0;
-  BACKWARD = 1;
-}
-
-message FwStateKey {
-  uint32 proto = 1;
-  uint32 src_port = 2;
-  uint32 dst_port = 3;
-  common.commonpb.v1.IPAddress src_addr = 4;
-  common.commonpb.v1.IPAddress dst_addr = 5;
-}
-
-message FwStateValue {
-  bool external = 1;
-  uint32 flags = 2;      // raw fw_state_flags_u byte
-  uint64 created_at = 3; // nanoseconds
-  uint64 updated_at = 4; // nanoseconds
-  uint64 packets_backward = 5;
-  uint64 packets_forward = 6;
-}
-
-message FwStateEntry {
-  FwStateKey key = 1;
-  FwStateValue value = 2;
-  uint32 idx = 3;   // Key index within the layer
-  bool expired = 4; // Whether updated_at + TTL < now
-}
-
-message ListEntriesRequest {
-  string config_name = 1;   // Config to iterate
-  bool is_ipv6 = 2;         // false = fw4state, true = fw6state
-  uint32 layer_index = 3;   // Which layer to iterate (0 = active)
-  bool include_expired = 4; // Whether to include expired entries
-  Direction direction = 5;  // Direction for this read
-  uint32 batch_size = 6;    // Number of entries to return in this batch
-  int64 index = 7;          // Cursor position from previous response (0 on first)
-}
-
-message ListEntriesResponse {
-  repeated FwStateEntry entries = 1;
-  bool has_more = 2;     // false when cursor reached the end
-  int64 index = 3;       // Updated cursor position for next request
-  uint64 generation = 4; // Config generation for consistency detection
-}
-
-// Map configuration for fwstate
-message MapConfig {
-  uint32 index_size = 1;
-  uint32 extra_bucket_count = 2;
-}
 
 // Firewall state synchronization configuration
 // SyncConfig carries the receive-side fwstate synchronization parameters:

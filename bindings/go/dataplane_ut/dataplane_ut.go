@@ -11,6 +11,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/modules/dscp/dataplane
 #cgo LDFLAGS: -L../../../build/modules/acl/dataplane
 #cgo LDFLAGS: -L../../../build/modules/fwstate/dataplane
+#cgo LDFLAGS: -L../../../build/objects/fwstate/api
 #cgo LDFLAGS: -L../../../build/modules/forward/dataplane
 #cgo LDFLAGS: -L../../../build/modules/mirror/dataplane
 #cgo LDFLAGS: -L../../../build/modules/route/dataplane
@@ -38,7 +39,7 @@ package dataplaneut
 // references between them (fwstate->acl, worker->pipeline, etc.).
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp
+#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -L../../../build/subprojects/regex
@@ -179,7 +180,7 @@ type WorkerSpec struct {
 // Config holds parameters for constructing a Harness.
 //
 // WorkerCount must be >= 1.
-// Devices, Modules, and DevicesToLoad may be empty.
+// Devices, Modules, DevicesToLoad, and ObjectsToLoad may be empty.
 type Config struct {
 	CPMemory      uint64
 	DPMemory      uint64
@@ -187,11 +188,11 @@ type Config struct {
 	Devices       []string
 	Modules       []string
 	DevicesToLoad []string
+	// ObjectsToLoad registers standalone shared-memory object types (e.g. "fwstate_map_v4") in the dataplane config.
+	ObjectsToLoad []string
 	// PluginDir is the directory scanned for module .so plugins. An empty
 	// value loads only the statically-linked built-ins.
 	PluginDir string
-	// ObjectsToLoad registers standalone shared-memory object types (e.g. "fwstate_map_v4") in the dataplane config.
-	ObjectsToLoad []string
 	// Workers optionally assigns each worker's device and queue.
 	//
 	// When nil, every worker defaults to device 0 with queue id equal to

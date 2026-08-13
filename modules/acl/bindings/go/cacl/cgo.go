@@ -4,6 +4,7 @@ package cacl
 //#cgo LDFLAGS: -L../../../../../build/modules/acl/api -lacl_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
+//#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
 //
 //#include "api/agent.h"
 //#include "modules/acl/api/controlplane.h"
@@ -30,11 +31,17 @@ type ModuleConfig struct {
 // the given rules into it in one step: a config handle is constructed
 // once and never updated afterwards.
 //
-// Pass nil emitConfig for a ruleset that emits no sync packets.
+// fw4MapName and fw6MapName name standalone fwstate_map_v4 /
+// fwstate_map_v6 objects whose fwtables back state lookups; the names
+// are declared as object links here and resolve against published
+// objects when the config is published. An empty name declares no link,
+// and CHECK_STATE then finds no state for that family. Pass nil
+// emitConfig for a ruleset that emits no sync packets.
 func NewModuleConfig(
 	agent *ffi.Agent,
 	name string,
 	rules []AclRule,
+	fw4MapName, fw6MapName string,
 	emitConfig *cfwstate.SyncEmitConfig,
 ) (*ModuleConfig, error) {
 	pinner := &runtime.Pinner{}
@@ -48,6 +55,18 @@ func NewModuleConfig(
 	var cRulesPtr *C.struct_acl_rule
 	if len(cRules) > 0 {
 		cRulesPtr = &cRules[0]
+	}
+
+	var cFw4Name *C.char
+	if fw4MapName != "" {
+		cFw4Name = C.CString(fw4MapName)
+		defer C.free(unsafe.Pointer(cFw4Name))
+	}
+
+	var cFw6Name *C.char
+	if fw6MapName != "" {
+		cFw6Name = C.CString(fw6MapName)
+		defer C.free(unsafe.Pointer(cFw6Name))
 	}
 
 	var cEmitPtr unsafe.Pointer
@@ -68,6 +87,8 @@ func NewModuleConfig(
 		cName,
 		cRulesPtr,
 		C.uint32_t(len(cRules)),
+		cFw4Name,
+		cFw6Name,
 		(*C.struct_fwstate_sync_emit_config)(cEmitPtr),
 		&cErr,
 	)

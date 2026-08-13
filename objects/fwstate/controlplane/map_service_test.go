@@ -1,8 +1,8 @@
 package fwstatemap_test
 
 import (
+	"context"
 	"errors"
-	"io"
 	"math"
 	"strings"
 	"sync"
@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
@@ -445,28 +446,6 @@ func TestListMapsConcurrent(t *testing.T) {
 	require.NoError(t, group.Wait())
 }
 
-type fakeListEntriesStream struct {
-	grpc.BidiStreamingServer[fwstatemappb.ListEntriesRequest, fwstatemappb.ListEntriesResponse]
-	requests  []*fwstatemappb.ListEntriesRequest
-	responses []*fwstatemappb.ListEntriesResponse
-}
-
-func (m *fakeListEntriesStream) Recv() (*fwstatemappb.ListEntriesRequest, error) {
-	if len(m.requests) == 0 {
-		return nil, io.EOF
-	}
-	req := m.requests[0]
-	m.requests = m.requests[1:]
-	return req, nil
-}
-
-func (m *fakeListEntriesStream) Send(
-	resp *fwstatemappb.ListEntriesResponse,
-) error {
-	m.responses = append(m.responses, resp)
-	return nil
-}
-
 // TestListEntriesEmptyMapTerminates verifies that both dump directions end on a map with no entries.
 func TestListEntriesEmptyMapTerminates(t *testing.T) {
 	h, err := dataplaneut.NewHarness(dataplaneut.Config{
@@ -500,17 +479,147 @@ func TestListEntriesEmptyMapTerminates(t *testing.T) {
 		{name: "forward", direction: fwstatemappb.Direction_FORWARD},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stream := &fakeListEntriesStream{
-				requests: []*fwstatemappb.ListEntriesRequest{{
-					MapName:   "empty-v4",
-					Direction: tc.direction,
-					BatchSize: 10,
-				}},
-			}
-			require.NoError(t, svc.ListEntries(stream))
-			require.Len(t, stream.responses, 1)
-			require.Empty(t, stream.responses[0].GetEntries())
-			require.False(t, stream.responses[0].GetHasMore())
+			resp, err := svc.ListEntries(t.Context(), &fwstatemappb.ListEntriesRequest{
+				MapName:   "empty-v4",
+				Direction: tc.direction,
+				BatchSize: 10,
+			})
+			require.NoError(t, err)
+			require.Empty(t, resp.GetEntries())
+			require.False(t, resp.GetHasMore())
 		})
 	}
+}
+
+// Test_ListMapsCarriesKinds verifies that the listing names each map's
+// address family, so callers can scope a name to a family without a
+// per-map lookup.
+func Test_ListMapsCarriesKinds(t *testing.T) {
+	h, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("fwstatemap-test", 0, 16*datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	svc := fwstatemap.NewFWStateMapService(agent)
+	for name, kind := range map[string]fwstatemappb.Kind{
+		"kinds-v4": fwstatemappb.Kind_V4,
+		"kinds-v6": fwstatemappb.Kind_V6,
+	} {
+		_, err := svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+			Name:             name,
+			Kind:             kind,
+			IndexSize:        1024,
+			ExtraBucketCount: 64,
+		})
+		require.NoError(t, err)
+	}
+
+	resp, err := svc.ListMaps(t.Context(), &fwstatemappb.ListMapsRequest{})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"kinds-v4", "kinds-v6"}, resp.GetMaps())
+	require.Equal(t, fwstatemappb.Kind_V4, resp.GetKinds()["kinds-v4"])
+	require.Equal(t, fwstatemappb.Kind_V6, resp.GetKinds()["kinds-v6"])
+}
+
+// Test_FWStateMapService_MetricsExposesGRPCSeries verifies that the map
+// service's metrics collection returns the gRPC series its interceptor
+// records, labelled with the map service's own service name.
+func Test_FWStateMapService_MetricsExposesGRPCSeries(t *testing.T) {
+	svc := fwstatemap.NewFWStateMapService(
+		nil,
+		fwstatemap.WithMetrics(fwstatemap.NewMetricsFactory()),
+	)
+	interceptor := svc.UnaryServerInterceptor()
+	require.NotNil(t, interceptor)
+
+	info := &grpc.UnaryServerInfo{
+		FullMethod: "/" + fwstatemap.ServiceName + "/ListMaps",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return &fwstatemappb.ListMapsResponse{}, nil
+	}
+	_, err := interceptor(t.Context(), &fwstatemappb.ListMapsRequest{}, info, handler)
+	require.NoError(t, err)
+
+	collected, err := svc.Metrics()
+	require.NoError(t, err)
+
+	var started *commonpb.Metric
+	for _, metric := range collected {
+		if metric.Name == "grpc_server_started_total" {
+			started = metric
+		}
+	}
+	require.NotNil(t, started, "map service metrics must include the gRPC started counter")
+
+	serviceLabel := ""
+	for _, label := range started.Labels {
+		if label.Name == "grpc_service" {
+			serviceLabel = label.Value
+		}
+	}
+	require.Equal(t, fwstatemap.ServiceName, serviceLabel)
+}
+
+// Test_FWStateMapService_MetricsEmitPerMapGauges verifies that the map
+// service's metrics collection exports the table-statistics gauge set
+// for every live map, labelled with the map's name and address family.
+func Test_FWStateMapService_MetricsEmitPerMapGauges(t *testing.T) {
+	h, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("fwstatemap-test", 0, 16*datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	svc := fwstatemap.NewFWStateMapService(agent)
+	_, err = svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+		Name:             "gauges-v4",
+		Kind:             fwstatemappb.Kind_V4,
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+	})
+	require.NoError(t, err)
+
+	collected, err := svc.Metrics()
+	require.NoError(t, err)
+
+	gauges := map[string]*commonpb.Metric{}
+	for _, metric := range collected {
+		gauges[metric.Name] = metric
+	}
+	for _, name := range []string{
+		"fwstate_index_size",
+		"fwstate_extra_bucket_count",
+		"fwstate_max_chain_length",
+		"fwstate_layer_count",
+		"fwstate_total_elements",
+		"fwstate_max_deadline_ns",
+		"fwstate_memory_bytes",
+	} {
+		require.Contains(t, gauges, name, "the per-map gauge set must include %s", name)
+	}
+
+	labels := map[string]string{}
+	for _, label := range gauges["fwstate_total_elements"].Labels {
+		labels[label.Name] = label.Value
+	}
+	require.Equal(t, "gauges-v4", labels["map"])
+	require.Equal(t, "ipv4", labels["af"])
 }

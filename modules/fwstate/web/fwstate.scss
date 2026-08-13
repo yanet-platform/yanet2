@@ -846,6 +846,36 @@
     min-width: 0;
 }
 
+.fwstate-map-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+
+    &__row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    &__input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    &__actions {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+
+        // Match the medium text input height instead of the table's 32px.
+        .yn-table-action-btn {
+            width: 28px;
+            height: 28px;
+        }
+    }
+}
+
 .fwstate-sync-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(180px, 1fr));

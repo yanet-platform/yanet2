@@ -9,7 +9,6 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // Action kind constants mirror the C ACL_RULE_ACTION_KIND_* enum values.
@@ -57,16 +56,6 @@ type AclConfigInfo struct {
 	FilterRuleCountIp6     uint64
 	FilterRuleCountIp6Port uint64
 	FilterRuleCountVlan    uint64
-}
-
-// SetFwStateConfig links the given fwstate module config to this ACL config.
-func (m *ModuleConfig) SetFwStateConfig(fw ffi.ModuleConfig) {
-	C.acl_module_config_set_fwstate_config(m.asRawPtr(), (*C.struct_cp_module)(fw.AsRawPtr()))
-}
-
-// TransferFwStateConfig copies the fwstate pointer from old into this config.
-func (m *ModuleConfig) TransferFwStateConfig(old ffi.ModuleConfig) {
-	C.acl_module_config_transfer_fwstate_config(m.asRawPtr(), (*C.struct_cp_module)(old.AsRawPtr()))
 }
 
 // GetInfo returns compiled configuration metadata for this ACL module.

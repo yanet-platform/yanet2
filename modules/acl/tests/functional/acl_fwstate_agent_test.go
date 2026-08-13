@@ -53,7 +53,7 @@ func setupACLFWStateHarness(tb testing.TB) (*ffi.Agent, acl.Backend) {
 func TestACL_FWStateAgentSharing_ParkedModuleSurvivesUnrelatedDrain(t *testing.T) {
 	agent, backend := setupACLFWStateHarness(t)
 
-	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0", nil, nil, cfwstate.MapConfig{}, 0)
+	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0", nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwCfg.AsFFIModule()}))
 

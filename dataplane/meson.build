@@ -72,6 +72,10 @@ executable(
   'yanet-dataplane',
   sources,
   dependencies: dependencies,
+  # In sanitizer builds the staged shared runtimes need the rpath on the
+  # final executable too; link_args of the static libraries do not
+  # propagate to the link of the executable itself.
+  link_args: yanet_link_args,
   install: true,
   export_dynamic: true,
 )

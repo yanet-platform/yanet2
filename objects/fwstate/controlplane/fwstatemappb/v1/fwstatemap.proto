@@ -26,8 +26,11 @@ service FWStateMapService {
   // InsertLayer inserts a new layer into the fwtable chain of a named
   // fwstate-map.
   rpc InsertLayer(InsertLayerRequest) returns (InsertLayerResponse);
-  // Bidirectional stream for listing map entries.
-  rpc ListEntries(stream ListEntriesRequest) returns (stream ListEntriesResponse);
+  // ListEntries reads one batch of entries from a named fwstate-map's
+  // fwtable via cursor. The request carries the full cursor, so a dump
+  // is a plain sequence of calls; a response's index feeds the next
+  // request until has_more is false.
+  rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
 }
 
 // Kind identifies the address family of a standalone fwstate-map object.
@@ -94,7 +97,13 @@ message DeleteMapResponse {}
 
 message ListMapsRequest {}
 
-message ListMapsResponse { repeated string maps = 1; }
+// maps lists every registered map name; kinds additionally names each
+// map's address family, so a caller can scope a name to a family without
+// a per-map lookup. The two fields describe the same set of maps.
+message ListMapsResponse {
+  repeated string maps = 1;
+  map<string, Kind> kinds = 2;
+}
 
 message GetMapStatsRequest { string name = 1; }
 

@@ -8,16 +8,18 @@
 #include <rte_udp.h>
 
 #include "common/memory_address.h"
+#include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
-#include "lib/fwstate/fwmap_typed.h"
-#include "lib/fwstate/layermap.h"
+#include "lib/fwstate/fwtable.h"
 #include "lib/fwstate/types.h"
 #include "lib/logging/log.h"
+#include "objects/fwstate/api/fwstate_map_v4_object.h"
+#include "objects/fwstate/api/fwstate_map_v6_object.h"
 
 #include "config.h"
 
@@ -215,7 +217,7 @@ fwstate_should_suppress_sync(
 // decide whether a fully-suppressed internal packet should still be forwarded.
 static bool
 fwstate_process_sync_v4(
-	fwmap4_t fw4state,
+	fwtable_t *fw4table,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
@@ -225,6 +227,15 @@ fwstate_process_sync_v4(
 	uint64_t *insert_failed_cnt,
 	uint64_t *suppressed_cnt
 ) {
+	if (fw4table == NULL) {
+		// No linked map object for this family: the frame is counted
+		// as a failed insert and dropped, while the packet-level
+		// outcome (forward internal, drop external) stays with the
+		// caller.
+		insert_failed_cnt[0] += 1;
+		return true;
+	}
+
 	struct fw4_state_key key = {
 		.hdr.proto = sync_frame->proto,
 		.hdr.src_port = sync_frame->src_port,
@@ -246,11 +257,11 @@ fwstate_process_sync_v4(
 		rwlock_t *get_lock = NULL;
 		uint64_t current_deadline = 0;
 		bool from_stale = false;
-		int64_t found = fwmap4_get_value_and_deadline(
-			fw4state,
+		int64_t found = fwtable_lookup_with_deadline(
+			fw4table,
 			now,
 			&key,
-			&existing,
+			(void **)&existing,
 			&get_lock,
 			&current_deadline,
 			&from_stale
@@ -285,8 +296,8 @@ fwstate_process_sync_v4(
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
-	int64_t result = fwmap4_put(
-		fw4state, worker_idx, now, state.ttl, &key, &state.value, &lock
+	int64_t result = fwtable_insert(
+		fw4table, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
 	if (result < 0) {
@@ -306,7 +317,7 @@ fwstate_process_sync_v4(
 // Process IPv6 state sync frame. See fwstate_process_sync_v4 for semantics.
 static bool
 fwstate_process_sync_v6(
-	fwmap6_t fw6state,
+	fwtable_t *fw6table,
 	uint16_t worker_idx,
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
@@ -316,6 +327,11 @@ fwstate_process_sync_v6(
 	uint64_t *insert_failed_cnt,
 	uint64_t *suppressed_cnt
 ) {
+	if (fw6table == NULL) {
+		insert_failed_cnt[0] += 1;
+		return true;
+	}
+
 	struct fw6_state_key key = {
 		.hdr.proto = sync_frame->proto,
 		.hdr.src_port = sync_frame->src_port,
@@ -333,11 +349,11 @@ fwstate_process_sync_v6(
 		rwlock_t *get_lock = NULL;
 		uint64_t current_deadline = 0;
 		bool from_stale = false;
-		int64_t found = fwmap6_get_value_and_deadline(
-			fw6state,
+		int64_t found = fwtable_lookup_with_deadline(
+			fw6table,
 			now,
 			&key,
-			&existing,
+			(void **)&existing,
 			&get_lock,
 			&current_deadline,
 			&from_stale
@@ -372,8 +388,8 @@ fwstate_process_sync_v6(
 
 	// Insert or update the state
 	rwlock_t *lock = NULL;
-	int64_t result = fwmap6_put(
-		fw6state, worker_idx, now, state.ttl, &key, &state.value, &lock
+	int64_t result = fwtable_insert(
+		fw6table, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
 	if (result < 0) {
@@ -402,9 +418,31 @@ fwstate_handle_packets(
 		cp_module
 	);
 
-	struct fwstate_config *fwstate_config = &fwstate_module->cfg;
-	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
-	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
+	// fwtables of the linked map objects, one per family. NULL when the
+	// config declared no link for the family, in which case that
+	// family's sync frames are counted as failed inserts and dropped.
+	fwtable_t *fw4table = NULL;
+	fwtable_t *fw6table = NULL;
+	if (fwstate_module->v4_object_link_idx != FWSTATE_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, fwstate_module->v4_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			fw4table = fwstate_map_v4_object_table(cp_obj);
+		}
+	}
+	if (fwstate_module->v6_object_link_idx != FWSTATE_OBJECT_LINK_NONE) {
+		struct module_object_link_ectx *link = object_link_get_address(
+			module_ectx, fwstate_module->v6_object_link_idx
+		);
+		if (link != NULL) {
+			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			fw6table = fwstate_map_v6_object_table(cp_obj);
+		}
+	}
 
 	uint64_t now = dp_worker->current_time;
 
@@ -517,7 +555,7 @@ fwstate_handle_packets(
 			bool applied = true;
 			if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
 				applied = fwstate_process_sync_v4(
-					fwmap4_from_raw(fw4state),
+					fw4table,
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
@@ -530,7 +568,7 @@ fwstate_handle_packets(
 			} else if (sync_frame->addr_type ==
 				   FW_STATE_ADDR_TYPE_IP6) {
 				applied = fwstate_process_sync_v6(
-					fwmap6_from_raw(fw6state),
+					fw6table,
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,

@@ -87,6 +87,7 @@ endif
 yanet_go_env = {}
 yanet_cgo_cflags = []
 yanet_cgo_ldflags = []
+sanitize_link_args = []
 b_sanitize = get_option('b_sanitize')
 if b_sanitize != 'none'
     yanet_project_args += '-DYANET_SANITIZE'
@@ -100,18 +101,22 @@ if b_sanitize != 'none'
     if sanitize_flags.length() > 0
         sanitize_str = ','.join(sanitize_flags)
         cgo_flags = '-fsanitize=' + sanitize_str + ' -g'
+        # The toolchain links the shared sanitizer runtimes and copies each
+        # one beside the executable without adding a runpath; $ORIGIN makes
+        # that staged copy load wherever the binary is deployed.
         yanet_go_env = {
             'CGO_CFLAGS': cgo_flags,
-            'CGO_LDFLAGS': cgo_flags,
+            'CGO_LDFLAGS': cgo_flags + ' -Wl,-rpath,$ORIGIN',
         }
         yanet_cgo_cflags += cgo_flags
         yanet_cgo_ldflags += cgo_flags
+        sanitize_link_args = ['-Wl,-rpath,$ORIGIN']
     endif
 endif
 
 yanet_test_c_args = ['-O0']
 yanet_c_args = []
-yanet_link_args = []
+yanet_link_args = sanitize_link_args
 if get_option('fuzzing').enabled()
   fuzz_args = [
     '-fsanitize=fuzzer-no-link,address,undefined',

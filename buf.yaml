@@ -26,9 +26,10 @@ breaking:
     - PACKAGE
   ignore:
     - modules/balancer2
-  # sync_suppress_timeout intentionally dropped proto3 optional presence; the
-  # wire format (field 13, varint) is unchanged. Drop this waiver once main
-  # carries the plain field.
-  ignore_only:
-    FIELD_SAME_CARDINALITY:
-      - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto
+    # TODO: drop once main carries the fwstate-map object cutover (acl/fwstate
+    # resolve state tables through named map objects).
+    - modules/acl/controlplane/aclpb/v1/acl.proto
+    - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto
+    # ListEntries changes from a bidi stream to cursor-paginated unary calls
+    # in the same cutover.
+    - objects/fwstate/controlplane/fwstatemappb/v1/fwstatemap.proto

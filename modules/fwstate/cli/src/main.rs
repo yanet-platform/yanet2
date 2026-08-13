@@ -1,33 +1,22 @@
-use core::{
-    fmt,
-    net::{IpAddr, Ipv6Addr},
-};
+use core::net::Ipv6Addr;
 use std::collections::HashMap;
 
-use args::{
-    DeleteCmd, DirectionArg, EntriesCmd, Family, LinkCmd, MapCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd,
-};
+use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, IpAddress, Metric as ProtoMetric};
-use fwstatemappb::{
-    CreateMapRequest, DeleteMapRequest, ListMapsRequest, fw_state_map_service_client::FwStateMapServiceClient,
-};
 use fwstatepb::{
-    DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
-    ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
-    metrics_service_client::MetricsServiceClient,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
+    fw_state_service_client::FwStateServiceClient, metrics_service_client::MetricsServiceClient,
 };
 use tabled::Tabled;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Status, codec::CompressionEncoding};
+use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
     errors::Error,
-    metrics::{self, GaugeRow, Kind, Metric},
+    metrics::{self, Kind, Metric},
     output::{self, CommonFormat},
 };
 
@@ -40,21 +29,11 @@ pub mod fwstatepb {
     tonic::include_proto!("modules.fwstate.controlplane.fwstatepb.v1");
 }
 
-#[allow(clippy::std_instead_of_core, non_snake_case)]
-pub mod fwstatemappb {
-    use serde::Serialize;
-
-    tonic::include_proto!("objects.fwstate.controlplane.fwstatemappb.v1");
-}
-
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
 
 /// The fully-qualified gRPC service name for the metrics service.
 const METRICS_SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.MetricsService";
-
-/// The fully-qualified gRPC service name for the fwstate-map service.
-const MAP_SERVICE_NAME: &str = "objects.fwstate.controlplane.fwstatemappb.v1.FWStateMapService";
 
 /// FWState module CLI.
 #[derive(Debug, Clone, Parser)]
@@ -79,48 +58,30 @@ fn parse_ipv6(s: &str) -> Result<IpAddress, String> {
     Ok(IpAddress { addr: addr.octets().to_vec() })
 }
 
+/// Merges the linked map object names an update should carry.
+///
+/// The pre-flight lookup answers an unknown name with an empty message,
+/// while a stored config always echoes the requested one — an empty name
+/// in the reply therefore marks the create case. A create has no stored
+/// names to merge from and the server rejects empty ones, so both
+/// map-name flags are required then; otherwise each flag, when present,
+/// overrides the stored value.
+fn merged_map_names(current: &ShowConfigResponse, cmd: &UpdateCmd) -> Result<(String, String), String> {
+    if current.name.is_empty() && (cmd.map_name_v4.is_none() || cmd.map_name_v6.is_none()) {
+        return Err(format!(
+            "creating config '{}' requires --map-name-v4 and --map-name-v6",
+            cmd.config_name
+        ));
+    }
+    Ok((
+        cmd.map_name_v4.clone().unwrap_or_else(|| current.map_name_v4.clone()),
+        cmd.map_name_v6.clone().unwrap_or_else(|| current.map_name_v6.clone()),
+    ))
+}
+
 pub struct FWStateService {
     service: Service<FwStateServiceClient<LayeredChannel>>,
     metrics: Service<MetricsServiceClient<LayeredChannel>>,
-    maps: Service<FwStateMapServiceClient<LayeredChannel>>,
-}
-
-/// State an `entries` dump carries across its batches and both maps.
-struct DumpState {
-    /// Entries printed so far, which `--count` limits.
-    printed: u32,
-    /// Whether the human-readable header row is already out. Deferred until
-    /// the first entry arrives, so a zero-entry result prints no header.
-    header_printed: bool,
-    /// Config generation the last response reported.
-    generation: Option<u64>,
-}
-
-impl DumpState {
-    fn new() -> Self {
-        Self {
-            printed: 0,
-            header_printed: false,
-            generation: None,
-        }
-    }
-
-    /// Warns when a response reports a different generation than the one
-    /// before it.
-    ///
-    /// A bump means layers were relinked, so the cursor and `--layer` stop
-    /// denoting what they did when the dump began, and the remaining
-    /// entries can repeat or be missed. Rows already printed were accurate
-    /// when read, so the dump goes on and only warns.
-    fn note_generation(&mut self, generation: u64) {
-        match self.generation.replace(generation) {
-            Some(previous) if previous != generation => log::warn!(
-                "fwstate config changed mid-dump (generation {previous} -> {generation}): \
-                 entries may repeat or be missed"
-            ),
-            _ => {}
-        }
-    }
 }
 
 impl FWStateService {
@@ -136,13 +97,7 @@ impl FWStateService {
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         });
-        let maps = Service::new(&conn, MAP_SERVICE_NAME, |channel| {
-            FwStateMapServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
-
-        Ok(Self { service, metrics, maps })
+        Ok(Self { service, metrics })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -162,7 +117,7 @@ impl FWStateService {
                     output::empty_with_hint(
                         format_args!("No FWState configurations found."),
                         format_args!(
-                            "create one with 'yanet-cli-fwstate update --name <name> --src-addr <addr> --dst-addr-multicast <addr> --port-multicast <port>'"
+                            "provision maps with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map> --src-addr <addr> --dst-addr-multicast <addr> --port-multicast <port>'"
                         ),
                     );
                     return;
@@ -225,22 +180,19 @@ impl FWStateService {
             ok_if_not_found: true,
         };
         let current_response = self.service.client().show_config(current_request).await;
-        let (mut map_config, mut sync_config) = match current_response {
+        let (map_name_v4, map_name_v6, mut sync_config) = match current_response {
             Ok(resp) => {
                 let msg = resp.into_inner();
-                (msg.map_config.unwrap_or_default(), msg.sync_config.unwrap_or_default())
+                let (map_name_v4, map_name_v6) =
+                    merged_map_names(&msg, &cmd).map_err(|err| self.service.invalid("update", err))?;
+                (map_name_v4, map_name_v6, msg.sync_config.unwrap_or_default())
             }
-            _ => (Default::default(), Default::default()),
+            _ => (
+                cmd.map_name_v4.clone().unwrap_or_default(),
+                cmd.map_name_v6.clone().unwrap_or_default(),
+                Default::default(),
+            ),
         };
-
-        // Update map config fields if provided
-        if let Some(index_size) = cmd.index_size {
-            map_config.index_size = index_size;
-        }
-
-        if let Some(extra_bucket_count) = cmd.extra_bucket_count {
-            map_config.extra_bucket_count = extra_bucket_count;
-        }
 
         // Update only the fields that were provided
         if let Some(ref src_addr) = cmd.src_addr {
@@ -287,7 +239,8 @@ impl FWStateService {
 
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            map_config: Some(map_config),
+            map_name_v4,
+            map_name_v6,
             sync_config: Some(sync_config),
         };
         log::trace!("UpdateConfigRequest: {request:?}");
@@ -298,170 +251,6 @@ impl FWStateService {
             .map_err(self.service.status("update"))?;
 
         output::success("update", format_args!("Updated fwstate config {}.", cmd.config_name));
-
-        Ok(())
-    }
-
-    pub async fn link_fwstate(&mut self, cmd: LinkCmd) -> Result<(), Error> {
-        let request = LinkFwStateRequest {
-            fwstate_name: cmd.config_name.clone(),
-            acl_config_names: cmd.acl_configs.clone(),
-        };
-        log::trace!("LinkFwStateRequest: {request:?}");
-        self.service
-            .client()
-            .link_fw_state(request)
-            .await
-            .map_err(self.service.status("link"))?;
-
-        output::success(
-            "link",
-            format_args!(
-                "Linked fwstate {} to ACL config(s) {}.",
-                cmd.config_name,
-                cmd.acl_configs.join(", ")
-            ),
-        );
-
-        Ok(())
-    }
-
-    pub async fn get_stats(&mut self, cmd: StatsCmd) -> Result<(), Error> {
-        let request = GetStatsRequest { name: cmd.config_name.clone() };
-        log::trace!("GetStatsRequest: {request:?}");
-        let response = self
-            .service
-            .client()
-            .get_stats(request)
-            .await
-            .map_err(self.service.status("stats"))?
-            .into_inner();
-
-        output::data(
-            || &response,
-            || {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response).expect("fwstate stats JSON serialization must not fail")
-                );
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn list_entries(&mut self, cmd: EntriesCmd, format: CommonFormat) -> Result<(), Error> {
-        let direction = match cmd.direction {
-            DirectionArg::Forward => Direction::Forward,
-            DirectionArg::Backward => Direction::Backward,
-        };
-
-        let limit = cmd.count;
-        let mut state = DumpState::new();
-
-        for family in cmd.families() {
-            if limit > 0 && state.printed >= limit {
-                break;
-            }
-            self.list_entries_map(&cmd, family, direction, format, &mut state)
-                .await?;
-        }
-
-        if state.printed == 0 {
-            output::empty(format_args!(
-                "No firewall state entries found for '{}'.",
-                cmd.config_name
-            ));
-        }
-
-        Ok(())
-    }
-
-    async fn list_entries_map(
-        &mut self,
-        cmd: &EntriesCmd,
-        family: Family,
-        direction: Direction,
-        format: CommonFormat,
-        state: &mut DumpState,
-    ) -> Result<(), Error> {
-        let limit = cmd.count;
-        let (tx, rx) = mpsc::channel(1);
-        let stream = ReceiverStream::new(rx);
-
-        let initial_req = ListEntriesRequest {
-            config_name: cmd.config_name.clone(),
-            is_ipv6: family.is_ipv6(),
-            layer_index: cmd.layer,
-            include_expired: cmd.include_expired,
-            direction: direction as i32,
-            batch_size: cmd.batch,
-            index: cmd.index as i64,
-        };
-        tx.send(initial_req)
-            .await
-            .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
-
-        let mut response_stream = self
-            .service
-            .client()
-            .list_entries(stream)
-            .await
-            .map_err(self.service.status("list entries"))?
-            .into_inner();
-
-        while let Some(resp) = response_stream
-            .message()
-            .await
-            .map_err(self.service.status("list entries"))?
-        {
-            state.note_generation(resp.generation);
-
-            for entry in &resp.entries {
-                if limit > 0 && state.printed >= limit {
-                    break;
-                }
-
-                match format {
-                    CommonFormat::Human => {
-                        if !state.header_printed {
-                            println!(
-                                "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
-                                "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
-                            );
-                            state.header_printed = true;
-                        }
-
-                        print_entry(entry);
-                    }
-                    CommonFormat::Json => {
-                        println!(
-                            "{}",
-                            serde_json::to_string(entry).expect("fwstate entry JSON serialization must not fail")
-                        );
-                    }
-                }
-
-                state.printed += 1;
-            }
-
-            if (limit > 0 && state.printed >= limit) || !resp.has_more {
-                break;
-            }
-
-            let next_req = ListEntriesRequest {
-                config_name: cmd.config_name.clone(),
-                is_ipv6: family.is_ipv6(),
-                layer_index: cmd.layer,
-                include_expired: cmd.include_expired,
-                direction: direction as i32,
-                batch_size: cmd.batch,
-                index: resp.index,
-            };
-            tx.send(next_req)
-                .await
-                .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
-        }
 
         Ok(())
     }
@@ -521,191 +310,6 @@ impl FWStateService {
 
         Ok(())
     }
-
-    pub async fn manage_maps(&mut self, cmd: MapCmd) -> Result<(), Error> {
-        match cmd {
-            MapCmd::Create(cmd) => self.map_create(cmd).await,
-            MapCmd::Delete(cmd) => self.map_delete(cmd).await,
-            MapCmd::List(cmd) => self.map_list(cmd).await,
-        }
-    }
-
-    pub async fn map_create(&mut self, cmd: args::MapCreateCmd) -> Result<(), Error> {
-        let request = CreateMapRequest {
-            name: cmd.map_name.clone(),
-            kind: match cmd.kind {
-                args::MapKind::V4 => fwstatemappb::Kind::V4.into(),
-                args::MapKind::V6 => fwstatemappb::Kind::V6.into(),
-            },
-            index_size: cmd.index_size.unwrap_or(0),
-            extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
-            worker_count: cmd.worker_count.unwrap_or(0),
-        };
-        log::trace!("CreateMapRequest: {request:?}");
-        self.maps
-            .client()
-            .create_map(request)
-            .await
-            .map_err(self.maps.status("map create"))?;
-
-        output::success("map create", format_args!("Created fwstate-map {}.", cmd.map_name));
-
-        Ok(())
-    }
-
-    pub async fn map_delete(&mut self, cmd: args::MapDeleteCmd) -> Result<(), Error> {
-        let request = DeleteMapRequest { name: cmd.map_name.clone() };
-        log::trace!("DeleteMapRequest: {request:?}");
-        self.maps
-            .client()
-            .delete_map(request)
-            .await
-            .map_err(self.maps.status("map delete"))?;
-
-        output::success("map delete", format_args!("Deleted fwstate-map {}.", cmd.map_name));
-
-        Ok(())
-    }
-
-    pub async fn map_list(&mut self, _cmd: args::MapListCmd) -> Result<(), Error> {
-        let request = ListMapsRequest {};
-        let response = self
-            .maps
-            .client()
-            .list_maps(request)
-            .await
-            .map_err(self.maps.status("map list"))?
-            .into_inner();
-
-        output::data(
-            || &response.maps,
-            || {
-                if response.maps.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No fwstate-map objects found."),
-                        format_args!("create one with 'yanet-cli-fwstate map create --name <name> --kind <v4|v6>'"),
-                    );
-                    return;
-                }
-
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.maps)
-                        .expect("fwstate-map list JSON serialization must not fail")
-                );
-            },
-        );
-
-        Ok(())
-    }
-}
-
-/// Formats an address and port as an endpoint, bracketing IPv6.
-///
-/// Without brackets the port merges into the trailing hextet: `2001:db8::2`
-/// on port 80 would read as `2001:db8::2:80`. An IPv4-mapped IPv6 address is
-/// unmapped first, and a malformed one reads as `invalid`, both as
-/// `IpAddress` renders them on its own. An absent address reads as `?`.
-fn format_endpoint(addr: Option<&IpAddress>, port: u32) -> String {
-    let Some(addr) = addr else {
-        return format!("?:{port}");
-    };
-
-    match IpAddr::try_from(addr) {
-        Ok(IpAddr::V4(v4)) => format!("{v4}:{port}"),
-        Ok(IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
-            Some(v4) => format!("{v4}:{port}"),
-            None => format!("[{v6}]:{port}"),
-        },
-        Err(..) => format!("invalid:{port}"),
-    }
-}
-
-/// Format IANA protocol number as a human-readable name.
-/// See: https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
-fn format_proto(proto: u32) -> String {
-    match proto {
-        1 => "ICMP".into(),
-        4 => "IPv4".into(),
-        6 => "TCP".into(),
-        17 => "UDP".into(),
-        41 => "IPv6".into(),
-        47 => "GRE".into(),
-        58 => "ICMPv6".into(),
-        132 => "SCTP".into(),
-        _ => proto.to_string(),
-    }
-}
-
-/// Decoded TCP flags for a single direction (4-bit nibble).
-///
-/// Bit layout (from [`lib/fwstate/types.h`]):
-///   - 0x01 = FIN
-///   - 0x02 = SYN
-///   - 0x04 = RST
-///   - 0x08 = ACK
-struct TcpNibble(u8);
-
-const TCP_FLAG_TABLE: [(u8, char); 4] = [(0x08, 'A'), (0x02, 'S'), (0x04, 'R'), (0x01, 'F')];
-
-impl fmt::Display for TcpNibble {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (mask, ch) in TCP_FLAG_TABLE {
-            if self.0 & mask != 0 {
-                write!(f, "{ch}")?;
-            } else {
-                f.write_str("-")?;
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Firewall state flags byte containing src (lower nibble) and dst
-/// (upper nibble) TCP flag sets.
-///
-/// The raw byte is stored in `fw_state_value.flags` and transmitted
-/// via protobuf as `FwStateValue.flags`.
-/// See `struct fw_state_flags` (from `lib/fwstate/types.h`)
-struct FwStateFlags(u32);
-
-impl FwStateFlags {
-    fn src(&self) -> TcpNibble {
-        TcpNibble((self.0 & 0x0f) as u8)
-    }
-
-    fn dst(&self) -> TcpNibble {
-        TcpNibble(((self.0 >> 4) & 0x0f) as u8)
-    }
-}
-
-impl fmt::Display for FwStateFlags {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}|{}", self.src(), self.dst())
-    }
-}
-
-fn print_entry(entry: &fwstatepb::FwStateEntry) {
-    let (src, dst, proto) = match &entry.key {
-        Some(key) => (
-            format_endpoint(key.src_addr.as_ref(), key.src_port),
-            format_endpoint(key.dst_addr.as_ref(), key.dst_port),
-            key.proto,
-        ),
-        None => (format_endpoint(None, 0), format_endpoint(None, 0), 0),
-    };
-
-    let flags = entry.value.as_ref().map(|v| v.flags).unwrap_or(0);
-
-    println!(
-        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
-        entry.idx,
-        src,
-        dst,
-        format_proto(proto),
-        FwStateFlags(flags),
-        if entry.expired { "yes" } else { "no" },
-    );
 }
 
 #[derive(Tabled)]
@@ -720,6 +324,28 @@ struct CounterRow {
     entries: String,
 }
 
+#[derive(Tabled)]
+struct GaugeRow {
+    #[tabled(rename = "Map")]
+    map: String,
+    #[tabled(rename = "AF")]
+    af: String,
+    #[tabled(rename = "Index size")]
+    index_size: String,
+    #[tabled(rename = "Extra buckets")]
+    extra_buckets: String,
+    #[tabled(rename = "Max chain")]
+    max_chain: String,
+    #[tabled(rename = "Layers")]
+    layers: String,
+    #[tabled(rename = "Elements")]
+    elements: String,
+    #[tabled(rename = "Max deadline TTL")]
+    max_deadline_ttl: String,
+    #[tabled(rename = "Memory")]
+    memory: String,
+}
+
 fn print_metrics_table(metrics: &[Metric]) {
     struct CounterPair {
         display: String,
@@ -730,8 +356,8 @@ fn print_metrics_table(metrics: &[Metric]) {
 
     let mut counter_keys: Vec<String> = Vec::new();
     let mut counter_map: HashMap<String, Vec<&Metric>> = HashMap::new();
-    let mut gauge_keys: Vec<String> = Vec::new();
-    let mut gauge_map: HashMap<String, Vec<&Metric>> = HashMap::new();
+    let mut map_gauges: HashMap<(String, String), HashMap<String, u64>> = HashMap::new();
+    let mut map_gauge_order: Vec<(String, String)> = Vec::new();
     let mut grpc_counters: Vec<&Metric> = Vec::new();
     let mut grpc_histograms: Vec<&Metric> = Vec::new();
 
@@ -745,33 +371,35 @@ fn print_metrics_table(metrics: &[Metric]) {
             continue;
         }
 
-        match m.kind {
-            Kind::Gauge => {
-                let cfg = format!(
-                    "{}\0{}",
-                    m.label_value("config").unwrap_or("global"),
-                    m.label_value("af").unwrap_or(""),
-                );
-                if !gauge_map.contains_key(&cfg) {
-                    gauge_keys.push(cfg.clone());
-                }
-                gauge_map.entry(cfg).or_default().push(m);
+        // State-map gauges (fwstate_total_elements and siblings) carry a
+        // map name and an address family; collect them per map for the
+        // gauge section below.
+        if m.kind == Kind::Gauge && m.label_value("map").is_some() {
+            let key = (
+                m.label_value("map").unwrap_or_default().to_string(),
+                m.label_value("af").unwrap_or_default().to_string(),
+            );
+            let entry = map_gauges.entry(key.clone()).or_insert_with(|| {
+                map_gauge_order.push(key);
+                HashMap::new()
+            });
+            entry.insert(m.name.clone(), m.value.unwrap_or(0.0) as u64);
+            continue;
+        }
+
+        if m.kind == Kind::Counter {
+            let key = format!(
+                "{}\0{}\0{}\0{}\0{}",
+                m.label_value("config").unwrap_or(""),
+                m.label_value("device").unwrap_or(""),
+                m.label_value("pipeline").unwrap_or(""),
+                m.label_value("function").unwrap_or(""),
+                m.label_value("chain").unwrap_or(""),
+            );
+            if !counter_map.contains_key(&key) {
+                counter_keys.push(key.clone());
             }
-            Kind::Counter => {
-                let key = format!(
-                    "{}\0{}\0{}\0{}\0{}",
-                    m.label_value("config").unwrap_or(""),
-                    m.label_value("device").unwrap_or(""),
-                    m.label_value("pipeline").unwrap_or(""),
-                    m.label_value("function").unwrap_or(""),
-                    m.label_value("chain").unwrap_or(""),
-                );
-                if !counter_map.contains_key(&key) {
-                    counter_keys.push(key.clone());
-                }
-                counter_map.entry(key).or_default().push(m);
-            }
-            _ => {}
+            counter_map.entry(key).or_default().push(m);
         }
     }
 
@@ -859,19 +487,41 @@ fn print_metrics_table(metrics: &[Metric]) {
         println!();
     }
 
-    for cfg in &gauge_keys {
-        let gauges = &gauge_map[cfg];
-        let parts: Vec<&str> = cfg.split('\0').collect();
-        let (config, af) = (parts[0], parts[1]);
-        println!("FWSTATE MAP STATS  config={config} af={af}");
-        println!();
-        let rows: Vec<GaugeRow> = gauges
-            .iter()
-            .map(|m| GaugeRow {
-                metric: metrics::metric_display_name(&m.name, "fwstate_"),
-                value: metrics::format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
+    if !map_gauge_order.is_empty() {
+        let rows: Vec<GaugeRow> = map_gauge_order
+            .into_iter()
+            .map(|(map, af)| {
+                let gauges = &map_gauges[&(map.clone(), af.clone())];
+                let get = |name: &str| gauges.get(name).copied();
+                GaugeRow {
+                    map,
+                    af,
+                    index_size: get("fwstate_index_size")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                    extra_buckets: get("fwstate_extra_bucket_count")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                    max_chain: get("fwstate_max_chain_length")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                    layers: get("fwstate_layer_count")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                    elements: get("fwstate_total_elements")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                    max_deadline_ttl: get("fwstate_max_deadline_ns")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                    memory: get("fwstate_memory_bytes")
+                        .map(metrics::format_number)
+                        .unwrap_or_else(|| "-".into()),
+                }
             })
             .collect();
+        println!("FWSTATE STATE MAPS");
+        println!();
         print_table_from_entries(rows);
         println!();
     }
@@ -881,18 +531,13 @@ fn print_metrics_table(metrics: &[Metric]) {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = FWStateService::new(&cmd.connection).await?;
-    let format = cmd.format;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
-        ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
-        ModeCmd::Entries(cmd) => service.list_entries(cmd, format).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
-        ModeCmd::Map { command } => service.manage_maps(command).await,
     }
 }
 
@@ -937,27 +582,71 @@ mod tests {
         Cmd::command().debug_assert();
     }
 
-    #[test]
-    fn format_endpoint_brackets_ipv6_only() {
-        let v4: IpAddress = "192.0.2.10".parse().unwrap();
-        let v6: IpAddress = "2001:db8::2".parse().unwrap();
+    /// Update command carrying only the config name and optional map names.
+    fn update_cmd(config_name: &str, map_name_v4: Option<&str>, map_name_v6: Option<&str>) -> UpdateCmd {
+        UpdateCmd {
+            config_name: config_name.to_string(),
+            map_name_v4: map_name_v4.map(str::to_string),
+            map_name_v6: map_name_v6.map(str::to_string),
+            src_addr: None,
+            dst_addr_multicast: None,
+            port_multicast: None,
+            tcp_syn_ack: None,
+            tcp_syn: None,
+            tcp_fin: None,
+            tcp: None,
+            udp: None,
+            default: None,
+            sync_suppress_timeout: None,
+        }
+    }
 
-        assert_eq!("192.0.2.10:10000", format_endpoint(Some(&v4), 10000));
-        assert_eq!("[2001:db8::2]:80", format_endpoint(Some(&v6), 80));
+    /// Reply for the given config name and its two linked map objects.
+    fn show_response(name: &str, map_name_v4: &str, map_name_v6: &str) -> ShowConfigResponse {
+        ShowConfigResponse {
+            name: name.to_string(),
+            map_name_v4: map_name_v4.to_string(),
+            map_name_v6: map_name_v6.to_string(),
+            sync_config: None,
+        }
     }
 
     #[test]
-    fn format_endpoint_leaves_ipv4_mapped_bare() {
-        let mapped: IpAddress = "::ffff:192.0.2.10".parse().unwrap();
+    fn test_merged_map_names_create_without_map_names_is_rejected() {
+        let cmd = update_cmd("cfg", None, None);
+        let err = merged_map_names(&show_response("", "", ""), &cmd).unwrap_err();
 
-        assert_eq!("192.0.2.10:80", format_endpoint(Some(&mapped), 80));
+        assert_eq!("creating config 'cfg' requires --map-name-v4 and --map-name-v6", err);
     }
 
     #[test]
-    fn format_endpoint_renders_absent_and_malformed() {
-        let malformed = IpAddress { addr: vec![0u8; 5] };
+    fn test_merged_map_names_create_with_one_map_name_is_rejected() {
+        let empty_reply = show_response("", "", "");
+        assert!(merged_map_names(&empty_reply, &update_cmd("cfg", Some("v4"), None)).is_err());
+        assert!(merged_map_names(&empty_reply, &update_cmd("cfg", None, Some("v6"))).is_err());
+    }
 
-        assert_eq!("?:0", format_endpoint(None, 0));
-        assert_eq!("invalid:80", format_endpoint(Some(&malformed), 80));
+    #[test]
+    fn test_merged_map_names_create_with_both_map_names_uses_flags() {
+        let cmd = update_cmd("cfg", Some("map4"), Some("map6"));
+        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd).unwrap();
+
+        assert_eq!(("map4", "map6"), (map_name_v4.as_str(), map_name_v6.as_str()));
+    }
+
+    #[test]
+    fn test_merged_map_names_existing_config_keeps_stored_names_without_flags() {
+        let cmd = update_cmd("cfg", None, None);
+        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("cfg", "stored4", "stored6"), &cmd).unwrap();
+
+        assert_eq!(("stored4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
+    }
+
+    #[test]
+    fn test_merged_map_names_existing_config_flag_overrides_stored_name() {
+        let reply = show_response("cfg", "stored4", "stored6");
+        let (map_name_v4, map_name_v6) = merged_map_names(&reply, &update_cmd("cfg", Some("new4"), None)).unwrap();
+
+        assert_eq!(("new4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
     }
 }

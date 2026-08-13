@@ -95,37 +95,11 @@ maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1 
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics_snapshot.go:newACLMetricsState:map[string]cacl.AclConfigInfo:1  # legacy: use T{} instead of make(map...)
-maplit:modules/fwstate/controlplane/service.go:FWStateService.LinkFWState:map[string]bool:1  # legacy: use T{} instead of make(map...)
 maplit:modules/fwstate/controlplane/service.go:NewFWStateService:map[string]*FwStateConfig:1  # legacy: use T{} instead of make(map...)
 maplit:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:map[byte]bool:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)
 maplit:operators/route/internal/discovery/neigh/neigh.go:newOptions:map[string]string:1  # legacy: use T{} instead of make(map...)
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.checkLinkable:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.createLinkedHandles:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.swapLinkedHandles:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.withEntries:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkedConfigNames:m.service.linkedConfigNames:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.createLinkedHandles:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.linkedConfigNames:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.stillLinked:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.swapLinkedHandles:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.RelinkConfigs:m.service.withEntries:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandles:entry.published.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandles:entry.published:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.createLinkedHandles:entry.published:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNames:entry.published.fwstateName:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNames:entry.published:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.linkedConfigNames:entry.published:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.stillLinked:entry.published.fwstateName:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.stillLinked:entry.published:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.stillLinked:entry.published:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published.acl:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published.rules:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:1  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:2  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:3  # legacy: encapsulate behind an exported method or field
-private:modules/acl/controlplane/acl_adapter.go:ACLService.swapLinkedHandles:entry.published:4  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:m.metricsState.load:1  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:snapshot.configInfo:1  # acl metrics snapshot: encapsulate behind an exported method or field
 private:modules/acl/controlplane/service.go:ACLService.publishMetricsSnapshotLocked:entry.published.acl:1  # acl metrics snapshot: encapsulate behind an exported method or field

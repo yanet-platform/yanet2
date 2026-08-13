@@ -132,6 +132,17 @@ fwtable_lookup_internal(
 		return result;
 	}
 
+	// The probe above leaves its bucket read-lock in *lock even on a
+	// miss, so release it before the next layer's probe stores its own
+	// lock through the same out-parameter. Without this the start
+	// layer's lock leaks on every miss that probes deeper, and a later
+	// insert on the same bucket of that layer deadlocks against the
+	// read lock this thread still holds.
+	if (lock && *lock) {
+		rwlock_read_unlock(*lock);
+		*lock = NULL;
+	}
+
 	*from_stale = true;
 	fwmap_t *layer = (fwmap_t *)ATOMIC_ADDR_OF(&start->next);
 	if (!layer) {
@@ -144,7 +155,7 @@ fwtable_lookup_internal(
 		return result;
 	}
 
-	// Release the first-layer lock before walking the deeper layers.
+	// Release the second-layer lock before walking the deeper layers.
 	if (lock && *lock) {
 		rwlock_read_unlock(*lock);
 		*lock = NULL;

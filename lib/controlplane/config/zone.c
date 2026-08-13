@@ -1,6 +1,7 @@
 #include "zone.h"
 
 #include <errno.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "lib/controlplane/config/econtext.h"
@@ -326,6 +327,42 @@ cp_config_update_modules(
 				new_cp_module->name
 			);
 			goto error_free;
+		}
+	}
+
+	// Validate the incoming modules' declared object links against the
+	// new generation's object registry before anything is published: a
+	// module naming a missing object must fail the whole update, or the
+	// later per-worker execution-context build would reject this
+	// generation and wedge every subsequent config change. Only the
+	// modules of this update are checked; carried-over modules were
+	// validated by their own update.
+	for (uint64_t idx = 0; idx < module_count; ++idx) {
+		struct cp_module *new_cp_module = cp_modules[idx];
+
+		struct cp_module_object *linked_objects =
+			ADDR_OF(&new_cp_module->objects);
+		for (uint64_t link_idx = 0;
+		     link_idx < new_cp_module->object_count;
+		     ++link_idx) {
+			uint64_t object_idx;
+			if (cp_config_gen_lookup_object_index(
+				    new_config_gen,
+				    linked_objects[link_idx].type,
+				    linked_objects[link_idx].name,
+				    &object_idx
+			    )) {
+				yanet_error_add(
+					err,
+					"linked object '%s:%s' not found for "
+					"module '%s:%s'",
+					linked_objects[link_idx].type,
+					linked_objects[link_idx].name,
+					new_cp_module->type,
+					new_cp_module->name
+				);
+				goto error_free;
+			}
 		}
 	}
 
@@ -833,6 +870,48 @@ cp_config_delete_object(
 			object_name
 		);
 		goto error_unlock;
+	}
+
+	// Refuse to delete an object a module of the published generation
+	// still links: with the object gone, the per-worker
+	// execution-context build for that module would fail and wedge every
+	// subsequent config change. The linking module must be updated or
+	// deleted first.
+	uint64_t module_count =
+		cp_module_registry_size(&old_config_gen->module_registry);
+	for (uint64_t idx = 0; idx < module_count; ++idx) {
+		struct cp_module *module =
+			cp_config_gen_get_module(old_config_gen, idx);
+		if (module == NULL) {
+			continue;
+		}
+
+		struct cp_module_object *linked_objects =
+			ADDR_OF(&module->objects);
+		for (uint64_t link_idx = 0; link_idx < module->object_count;
+		     ++link_idx) {
+			if (!strncmp(
+				    linked_objects[link_idx].type,
+				    object_type,
+				    CP_OBJECT_TYPE_LEN
+			    ) &&
+			    !strncmp(
+				    linked_objects[link_idx].name,
+				    object_name,
+				    CP_OBJECT_NAME_LEN
+			    )) {
+				yanet_error_add(
+					err,
+					"object '%s:%s' is linked by module "
+					"'%s:%s'",
+					object_type,
+					object_name,
+					module->type,
+					module->name
+				);
+				goto error_unlock;
+			}
+		}
 	}
 
 	struct cp_config_gen *new_config_gen =

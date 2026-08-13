@@ -74,3 +74,50 @@ The same change also makes the module and device list exhaustive: a module or de
    ```
 
 2. Add a block for every module and device your deployment actually uses, even if it previously relied on the implicit default set. Use the packaged `/etc/yanet2/controlplane.d/default.yaml` as the worked example of the new shape — it lists every bundled module and the `plain`/`vlan` devices with `instance_id: 0`, but omits `trafgen`. If your deployment uses the trafgen device, add its `instance_id`-carrying block yourself; the packaged example does not do it for you.
+
+## Firewall state moved to named fwstate-map objects
+
+Stateful ACL setups no longer link an ACL config to a fwstate config through
+the gateway. State tables are standalone `fwstate-map` objects created by
+name, and both the ACL and fwstate module configs reference them by name.
+
+1. Add the `fwstate` module to the controlplane config. It attaches its own
+   agent and hosts the fwstate and fwstate-map services; the ACL agent no
+   longer serves them. A stateful setup whose config does not list the
+   `fwstate` module silently loses those services:
+
+   ```yaml
+   modules:
+     fwstate:
+       instance_id: 0
+       memory_path: *memory_path
+       memory_requirements: 8GB
+   ```
+
+   The fwstate-map objects linked by acl and fwstate configs allocate in
+   this module's agent zone — size `memory_requirements` for the state
+   tables.
+
+2. Provision the maps with the new CLI, one per address family, and record
+   the names:
+
+   ```bash
+   yanet-cli-fwstatemap create --name fw4 --kind v4
+   yanet-cli-fwstatemap create --name fw6 --kind v6
+   ```
+
+   Map introspection (list, stats, entries, layer rotation) lives in
+   `yanet-cli-fwstatemap`; the fwstate CLI keeps only its config commands,
+   and the fwstate service no longer serves `GetStats`/`ListEntries`.
+
+3. Reference the names from both modules — `map_name_v4`/`map_name_v6` on
+   the fwstate config (both required), `fwtable_name_v4`/`fwtable_name_v6`
+   on the ACL config (optional; an empty name means that family's
+   CHECK_STATE finds no state). The old link workflow (the `LinkFWState`
+   RPC, the CLI link subcommand, the web link tab) is gone.
+
+An update naming a map that is not published is rejected, and a map cannot
+be deleted while any published module config links it — update or delete
+the linking module first. The proto field renumbering on the two rewritten
+services means an old CLI against a new control plane misdecodes requests:
+upgrade the `yanet2-cli` package together with the control plane.
