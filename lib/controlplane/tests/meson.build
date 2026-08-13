@@ -157,7 +157,6 @@ parked_modules_test = executable(
     lib_logging_dep,
     lib_errors_dep,
     lib_decap_cp_dep,
-    lib_forward_cp_dep,
     libdpdk_dep,
   ],
   link_with: [lib_decap_dp, lib_forward_dp],

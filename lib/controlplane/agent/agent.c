@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <errno.h>
@@ -2318,6 +2319,22 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	free(counters);
 }
 
+// Whether the process recorded as pid is confirmed gone.
+//
+// Scoped narrowly to the parked-teardown pin below: it decides only
+// whether an already-set pin still means anything, never whether an agent
+// may be reclaimed on its own — a superseded agent's owning process is very
+// often still the live one doing the superseding, and gating reclaim on
+// that generally would leak an arena on every such update. Bias toward
+// "alive": kill() reports ESRCH only when the pid is unambiguously unused,
+// so a reused pid is misread as live, leaving one arena unreclaimed exactly
+// as it is today, rather than risking a false "dead" that frees memory a
+// running destructor is still walking.
+static bool
+agent_owner_process_is_dead(pid_t pid) {
+	return pid > 0 && kill(pid, 0) == -1 && errno == ESRCH;
+}
+
 // Unlocked body shared by agent_free_unused_agents and the agent_attach call
 // site, which already holds cp_config_lock itself.
 //
@@ -2337,10 +2354,14 @@ agent_free_unused_agents_locked(struct agent *agent) {
 	while (ADDR_OF(&agent->prev) != NULL) {
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
 
+		bool teardown_pin_blocks =
+			prev_agent->parked_teardown_count != 0 &&
+			!agent_owner_process_is_dead(prev_agent->pid);
+
 		if (prev_agent->loaded_module_count == 0 &&
 		    prev_agent->loaded_device_count == 0 &&
 		    prev_agent->loaded_object_count == 0 &&
-		    prev_agent->parked_teardown_count == 0) {
+		    !teardown_pin_blocks) {
 			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
 			agent_cleanup(prev_agent);
 			continue;

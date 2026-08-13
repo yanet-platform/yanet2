@@ -11,24 +11,23 @@
 #include "controlplane/config/zone.h"
 
 #include <stdio.h>
+#include <unistd.h>
 
-// Destroy every parked module of one type, using the caller's destructor
-// for that type.
+// Destroy every module parked on the agent, using each entry's own stored
+// destructor.
 //
-// A different type sharing the same parked list is left in place for its
-// own next call. A parked entry already sits at reference count zero, so
-// the destructor runs directly with no further release and nothing here
-// outlives this call. Matching entries are detached under the
-// configuration lock and destroyed outside it, because a type's teardown
-// can run tens of milliseconds and must not hold a lock every update
-// needs. While outside the lock, a teardown is marked in flight so the
-// arena cannot be reclaimed out from under an entry still being destroyed.
+// A parked entry already sits at reference count zero, so its destructor
+// runs directly with no further release. The whole list is detached under
+// the configuration lock and destroyed outside it, since a teardown can
+// run tens of milliseconds and must not hold a lock every update needs.
+// While outside the lock, the batch is marked in flight so the arena
+// cannot be reclaimed out from under it.
+//
+// A stored destructor is a code address, valid only inside the process
+// that wrote it. This cannot fire today, since it only ever runs against
+// the caller's own just-attached agent — it guards a future drain instead.
 static void
-cp_module_drain_parked(
-	struct agent *agent,
-	const char *module_type,
-	cp_module_free_handler destroy
-);
+cp_module_drain_parked(struct agent *agent);
 
 static int
 cp_module_build_perf_counters(struct cp_module *cp_module, yanet_error **err) {
@@ -71,8 +70,7 @@ cp_module_init(
 ) {
 	memset(cp_module, 0, sizeof(struct cp_module));
 
-	// Reclaim this type's parked entries before anything else here
-	// allocates.
+	// Reclaim every parked entry before anything else here allocates.
 	//
 	// The caller's own wrapper allocation already happened, but a parked
 	// instance can be most of the arena for a large type, so reclaiming
@@ -80,7 +78,7 @@ cp_module_init(
 	// pressure. Construction has not registered or parked this instance
 	// anywhere yet, so the walk below cannot observe it — only earlier
 	// instances left behind by a previous release.
-	cp_module_drain_parked(agent, module_type, destroy);
+	cp_module_drain_parked(agent);
 
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
@@ -97,6 +95,7 @@ cp_module_init(
 
 	strtcpy(cp_module->type, module_type, sizeof(cp_module->type));
 	strtcpy(cp_module->name, module_name, sizeof(cp_module->name));
+	cp_module->destroy = destroy;
 	memory_context_init_from(
 		&cp_module->memory_context, &agent->memory_context, module_name
 	);
@@ -380,61 +379,35 @@ cp_module_acquire(struct cp_module *cp_module) {
 }
 
 static void
-cp_module_drain_parked(
-	struct agent *agent,
-	const char *module_type,
-	cp_module_free_handler destroy
-) {
+cp_module_drain_parked(struct agent *agent) {
+	if (agent->pid != getpid()) {
+		return;
+	}
+
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
 	cp_config_lock(cp_config);
 
-	// Splice the target type's entries into a local list, leaving the
-	// rest linked in place for their own type's next call.
-	//
-	// A spliced-out tail leaves its former predecessor pointing at itself
-	// as the new end of the list, so a parked entry's link is never null.
-	struct cp_module *owned = NULL;
-	struct cp_module *prev = NULL;
-	struct cp_module *cur = ADDR_OF(&agent->parked_modules);
-
-	while (cur != NULL) {
-		struct cp_module *raw_next = ADDR_OF(&cur->parked_next);
-		struct cp_module *next = (raw_next == cur) ? NULL : raw_next;
-
-		if (!strncmp(cur->type, module_type, sizeof(cur->type))) {
-			if (prev == NULL) {
-				SET_OFFSET_OF(&agent->parked_modules, next);
-			} else {
-				SET_OFFSET_OF(
-					&prev->parked_next,
-					(next != NULL) ? next : prev
-				);
-			}
-			SET_OFFSET_OF(&cur->parked_next, owned);
-			owned = cur;
-		} else {
-			prev = cur;
-		}
-
-		cur = next;
-	}
-
+	struct cp_module *owned = ADDR_OF(&agent->parked_modules);
 	if (owned == NULL) {
 		cp_config_unlock(cp_config);
 		return;
 	}
+	SET_OFFSET_OF(&agent->parked_modules, NULL);
 
 	// Pin the agent's arena for the destroy loop below, still under the
-	// same lock the splice above ran under, so the reclaim guard can never
-	// observe the entries detached but the pin not yet set.
+	// same lock the take above ran under, so the reclaim guard can never
+	// observe the list cleared but the pin not yet set.
 	agent->parked_teardown_count += 1;
 
 	cp_config_unlock(cp_config);
 
 	while (owned != NULL) {
-		struct cp_module *next = ADDR_OF(&owned->parked_next);
-		destroy(owned);
+		// A self-referential link marks the list's tail.
+		struct cp_module *raw_next = ADDR_OF(&owned->parked_next);
+		struct cp_module *next = (raw_next == owned) ? NULL : raw_next;
+
+		owned->destroy(owned);
 		owned = next;
 	}
 

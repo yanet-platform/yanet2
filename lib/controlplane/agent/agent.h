@@ -64,9 +64,10 @@ struct agent {
 	// a nonzero count as a live reference, because those destructors
 	// still touch this agent's arena even though the generation counts
 	// above already read zero for them. A process that dies mid-teardown
-	// leaves this above zero forever, leaking that one superseded arena
-	// rather than risking a destructor running against memory that has
-	// already been freed.
+	// would otherwise leave this above zero forever, leaking that one
+	// superseded arena — the reclaim guard instead ignores this pin once
+	// pid is confirmed no longer running, rather than risking a
+	// destructor running against memory that has already been freed.
 	uint64_t parked_teardown_count;
 	struct agent *prev;
 	char name[80];
@@ -79,11 +80,11 @@ struct agent {
 	// Head of this agent's list of modules parked after their reference
 	// count reached zero.
 	//
-	// Parked entries await destruction until the next construction call
-	// for their module type reclaims them. A control plane can reuse one
-	// agent across more than one service, so this list may mix module
-	// types. Each type's construction reclaims only matching entries,
-	// leaving the rest parked for their own type's turn.
+	// Parked entries await destruction until the next construction call on
+	// this agent drains the whole list, invoking each entry's own stored
+	// teardown regardless of its module type. A control plane can reuse one
+	// agent across more than one service, so this list may mix types, but
+	// nothing needs to match them anymore.
 	struct cp_module *parked_modules;
 };
 

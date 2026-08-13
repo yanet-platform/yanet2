@@ -98,12 +98,23 @@ struct cp_module {
 	// Link to the next module parked on the same agent's list, once this
 	// module's reference count reaches zero.
 	//
-	// Only the zero-transition handler sets it, and only a later reclaim
-	// for this module's own type reads it. It stays unset until that
-	// transition happens. The parked list's tail refers to itself
-	// instead of ending at null, so a parked entry's link is never null
-	// — which also marks that this module is already parked.
+	// Only the zero-transition handler sets it, and only a later drain
+	// reads it. It stays unset until that transition happens. The parked
+	// list's tail refers to itself instead of ending at null, so a
+	// parked entry's link is never null — which also marks that this
+	// module is already parked.
 	struct cp_module *parked_next;
+
+	// Teardown for this module's own configuration data, set once at
+	// construction and never reassigned.
+	//
+	// A drain reads this directly off each parked entry instead of
+	// being told a type to match, so it can reclaim the whole list in
+	// one pass regardless of how many types share the agent. This is a
+	// plain code pointer, not a shared-memory offset: valid only inside
+	// the process that set it, which is why a drain must confirm the
+	// agent's owning process before calling it.
+	cp_module_free_handler destroy;
 };
 
 /**
@@ -152,18 +163,18 @@ cp_module_link_object(
  * Initialize a module configuration structure.
  *
  * Sets up counters and associates the module with the given agent. Before
- * any of that allocates, this reclaims whatever the agent parked for this
- * type since the last such call, using the destructor supplied here, so a
- * recreation under memory pressure benefits from the space a parked
- * instance would free rather than failing before reaching that reclaim.
- * The destructor is used only for this call and never stored. A different
- * type sharing the same agent is left for its own next call to collect.
+ * any of that allocates, this drains everything the agent has parked since
+ * the last such call, using each entry's own stored destructor, so a
+ * recreation under memory pressure benefits from the space parked instances
+ * would free rather than failing before reaching that reclaim. The
+ * destructor passed here is stored on this new configuration for its own
+ * eventual parking, not used to reclaim anything today.
  *
  * @param cp_module Pointer to the module configuration to initialize
  * @param agent Pointer to the controlplane agent owning this module
  * @param module_type Type identifier for the module
  * @param module_name Name identifier for the module
- * @param destroy Destructor for a parked module of this same type
+ * @param destroy Destructor for this module's own configuration data
  * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
@@ -191,9 +202,9 @@ cp_module_fini(struct cp_module *cp_module);
 // the same way from a registry drop or an explicit release.
 //
 // Parks the module on its agent's list instead of destroying it, because
-// this generic layer does not know the module's type, and an agent can
-// host more than one type at once — as when acl and fwstate share one.
-// The module's own type-specific reclaim destroys it later.
+// this generic layer does not know how to tear down a module's own
+// configuration data. The module's own stored destructor destroys it
+// later, when the agent's next construction call drains the list.
 //
 // Idempotent: once set, a parked entry's link is never null again, so a
 // duplicate transition leaves it in place instead of relinking it. Every
@@ -207,9 +218,8 @@ cp_module_registry_item_free_cb(struct registry_item *item, void *data);
 // The zero-transition handler runs only when this drop is the last
 // reference, so a caller must not assume the call freed anything: a live
 // or pinned configuration generation may still hold the module. A module
-// parked here is not destroyed on the spot — the next construction call
-// for the same type reclaims it, or it is freed along with the agent's
-// arena.
+// parked here is not destroyed on the spot — the agent's next construction
+// call of any type drains it, or it is freed along with the agent's arena.
 //
 // Takes the module's own agent's configuration lock itself, unlike the
 // registry-driven path to the same handler, which already runs under

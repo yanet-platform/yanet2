@@ -1,6 +1,7 @@
 package acl_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,33 +41,78 @@ func setupACLFWStateHarness(tb testing.TB) (*ffi.Agent, acl.Backend) {
 	return agent, backend
 }
 
-// TestACL_FWStateAgentSharing_ParkedModuleSurvivesUnrelatedDrain reproduces
-// production agent sharing where fwstate parks during an ACL drain.
+// aclSharedAgentRootMemoryNode returns the shared "acl" agent's own root
+// memory-context node.
+//
+// A parked entry's own stored teardown frees its outer struct directly
+// against this root context, so BFreeCount/BFreeSize advance once and only
+// once per real teardown, unlike the live-module count, which never
+// observes a park.
+func aclSharedAgentRootMemoryNode(t *testing.T, agent *ffi.Agent) ffi.AgentMemoryNode {
+	t.Helper()
+
+	const agentName = "acl"
+	for _, agentInfo := range agent.DPConfig().Agents() {
+		if agentInfo.Name != agentName {
+			continue
+		}
+		require.Lenf(t, agentInfo.Instances, 1, "agent %q: expected exactly one live instance", agentName)
+
+		for _, node := range agentInfo.Instances[0].MemoryTree {
+			if node.ParentIdx == math.MaxUint32 {
+				return node
+			}
+		}
+		t.Fatalf("agent %q: no root memory-context node in its snapshot", agentName)
+	}
+
+	t.Fatalf("agent %q not found in dataplane config", agentName)
+	return ffi.AgentMemoryNode{}
+}
+
+// TestACL_FWStateAgentSharing_UnrelatedUpdateReclaimsParkedModule pins the
+// type-agnostic drain contract: constructing an access-control module on
+// the shared agent reclaims a parked firewall-state entry through that
+// entry's own stored teardown, not just entries of the constructing type.
 //
 // The acl module attaches one agent and hands it to both the ACL and
-// fwstate services. The sequence mirrors the fwstate service's own release
-// path, followed by a delete that retires the generation still pinning it,
-// parking the module before the ACL update runs. A drain call must stay
-// scoped to its own module type: destroying the parked fwstate module with
-// the wrong destructor would corrupt the arena during the filter
-// compiler's teardown.
-func TestACL_FWStateAgentSharing_ParkedModuleSurvivesUnrelatedDrain(t *testing.T) {
+// fwstate services, so this is the only place in the tree where a drain
+// actually crosses module types. fw0 is built with real maps, then
+// detached before release the way the fwstate service detaches a
+// superseded config's maps: leaving them attached instead would trip the
+// separate, already-filed map-ownership gap (#2003), which this test is
+// not about. A release alone must not run fw0's teardown; only the later
+// ACL construction, sharing the agent but not fw0's type, does.
+func TestACL_FWStateAgentSharing_UnrelatedUpdateReclaimsParkedModule(t *testing.T) {
 	agent, backend := setupACLFWStateHarness(t)
 
 	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0")
 	require.NoError(t, err)
+	require.NoError(t, fwCfg.CreateMaps(cfwstate.MapConfig{
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+	}, 1))
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwCfg.AsFFIModule()}))
 
-	// Release the creator's reference while the published generation
-	// still holds fw0: it must not park yet.
+	// Detach fw0's maps before releasing it, mirroring the fwstate
+	// service's own supersede path, then release the creator's reference
+	// while the published generation still holds fw0: it must not park
+	// yet.
+	fwCfg.DetachMaps()
 	fwCfg.Free()
 
 	// Retiring the generation that still references fw0 is what actually
 	// parks it.
 	require.NoError(t, agent.DeleteModuleConfig("fwstate", "fw0"))
 
-	// An ACL update on the shared agent must not touch the parked fwstate
-	// module: its own drain call is filtered to the acl type.
+	afterPark := aclSharedAgentRootMemoryNode(t, agent)
+	require.Equalf(
+		t, uint64(0), afterPark.BFreeCount,
+		"parking fw0 must not itself run its teardown",
+	)
+
+	// An ACL construction on the shared agent is the only call able to
+	// reach fw0 next: it shares the agent but not fw0's module type.
 	rules := []cacl.AclRule{
 		allow4Rule(
 			filter.IPNets{filter.UnspecifiedIPv4},
@@ -76,4 +122,15 @@ func TestACL_FWStateAgentSharing_ParkedModuleSurvivesUnrelatedDrain(t *testing.T
 	}
 	handle := applyACLRules(t, backend, "acl0", rules)
 	require.NotNil(t, handle)
+
+	afterACLUpdate := aclSharedAgentRootMemoryNode(t, agent)
+	require.Equalf(
+		t, afterPark.BFreeCount+1, afterACLUpdate.BFreeCount,
+		"the ACL construction must drain fw0 through its own stored teardown",
+	)
+	require.Greaterf(
+		t, afterACLUpdate.BFreeSize, afterPark.BFreeSize,
+		"fw0's teardown must have reclaimed its own bytes, not merely "+
+			"emptied the parked list",
+	)
 }

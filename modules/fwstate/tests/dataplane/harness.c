@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 // Allocate and initialize a stand-in agent for a test that needs the real
 // structure behind it, not just a bare memory context, such as one that
@@ -22,6 +23,11 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 
 	memset(agent, 0, sizeof(struct agent));
 	memory_context_init_from(&agent->memory_context, parent, name);
+
+	// Matches production agent_attach, which stamps the attaching
+	// process's own pid: the parked-entry drain refuses to run a stored
+	// teardown against any other pid.
+	agent->pid = getpid();
 
 	return agent;
 }
@@ -123,41 +129,26 @@ cp_module_release(struct cp_module *cp_module) {
 
 // Reproduces the production parked-entry reclaim, folded into
 // construction below the same way the real implementation folds it in.
+//
+// Drains every parked entry through its own stored destructor rather than
+// matching a type, mirroring lib/controlplane/config/cp_module.c.
 static void
-cp_module_drain_parked(
-	struct agent *agent,
-	const char *module_type,
-	cp_module_free_handler destroy
-) {
-	struct cp_module *owned = NULL;
-	struct cp_module *prev = NULL;
-	struct cp_module *cur = ADDR_OF(&agent->parked_modules);
-
-	while (cur != NULL) {
-		struct cp_module *raw_next = ADDR_OF(&cur->parked_next);
-		struct cp_module *next = (raw_next == cur) ? NULL : raw_next;
-
-		if (!strncmp(cur->type, module_type, sizeof(cur->type))) {
-			if (prev == NULL) {
-				SET_OFFSET_OF(&agent->parked_modules, next);
-			} else {
-				SET_OFFSET_OF(
-					&prev->parked_next,
-					(next != NULL) ? next : prev
-				);
-			}
-			SET_OFFSET_OF(&cur->parked_next, owned);
-			owned = cur;
-		} else {
-			prev = cur;
-		}
-
-		cur = next;
+cp_module_drain_parked(struct agent *agent) {
+	if (agent->pid != getpid()) {
+		return;
 	}
 
+	struct cp_module *owned = ADDR_OF(&agent->parked_modules);
+	if (owned == NULL) {
+		return;
+	}
+	SET_OFFSET_OF(&agent->parked_modules, NULL);
+
 	while (owned != NULL) {
-		struct cp_module *next = ADDR_OF(&owned->parked_next);
-		destroy(owned);
+		struct cp_module *raw_next = ADDR_OF(&owned->parked_next);
+		struct cp_module *next = (raw_next == owned) ? NULL : raw_next;
+
+		owned->destroy(owned);
 		owned = next;
 	}
 }
@@ -177,9 +168,9 @@ cp_module_init(
 	// lib/controlplane/config/cp_module.c:13-74)
 	memset(cp_module, 0, sizeof(struct cp_module));
 
-	// Reclaim this type's parked entries first, the same as production
-	// does, before this construction allocates anything of its own.
-	cp_module_drain_parked(agent, module_type, destroy);
+	// Reclaim every parked entry first, the same as production does,
+	// before this construction allocates anything of its own.
+	cp_module_drain_parked(agent);
 
 	// We don't have dp_config in tests, so skip dp_module_idx lookup
 	cp_module->dp_module_idx = 0;
@@ -187,6 +178,7 @@ cp_module_init(
 	// Copy module type and name
 	strncpy(cp_module->type, module_type, sizeof(cp_module->type) - 1);
 	strncpy(cp_module->name, module_name, sizeof(cp_module->name) - 1);
+	cp_module->destroy = destroy;
 
 	// Initialize memory context from agent
 	memory_context_init_from(
