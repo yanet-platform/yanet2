@@ -72,8 +72,12 @@ message WorkerCounter {
   uint64 local_tx_drops = 14;
   // Packets dropped because the inter-worker data pipe was full or absent.
   uint64 remote_tx_drops = 15;
-  // Total packets dropped by this worker for any reason.
-  uint64 drops = 16;
+  // Packets this worker itself freed rather than forwarded.
+  //
+  // Covers malformed input, transmit failures, and deliberate module policy
+  // drops such as an ACL deny, so nonzero alone is not a fault. Already
+  // includes every local_tx_drops and remote_tx_drops packet.
+  uint64 disposed = 16;
 }
 
 // Requests a snapshot of raw cumulative per-port extended stats counters.

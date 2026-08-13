@@ -28,7 +28,7 @@ type WorkerCounter struct {
 	RemoteTxPackets uint64
 	LocalTxDrops    uint64
 	RemoteTxDrops   uint64
-	Drops           uint64
+	Disposed        uint64
 }
 
 func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
@@ -55,6 +55,8 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	remoteTxHandle := counterByName["remote_tx"]
 	localTxDropsHandle := counterByName["local_tx_drops"]
 	remoteTxDropsHandle := counterByName["remote_tx_drops"]
+	// "drops" is the dataplane counter-registry name backing Disposed. A
+	// mismatched rename leaves dropsHandle nil, crashing the dereference below.
 	dropsHandle := counterByName["drops"]
 
 	workerCount := counters.instance_count
@@ -115,7 +117,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 				workerCounterSingleValueIdx,
 				idx,
 			)),
-			Drops: uint64(C.yanet_get_counter_value(
+			Disposed: uint64(C.yanet_get_counter_value(
 				dropsHandle.values,
 				workerCounterSingleValueIdx,
 				idx,

@@ -445,7 +445,7 @@ struct WorkerRow {
     #[tabled(rename = "RemTX Drp")]
     remote_tx_drops: String,
     #[tabled(rename = "Disposed")]
-    drops: String,
+    disposed: String,
 }
 
 impl From<&WorkerCounter> for WorkerRow {
@@ -488,7 +488,7 @@ impl From<&WorkerCounter> for WorkerRow {
             remote_tx: format_number(w.remote_tx_packets),
             local_tx_drops: format_number(w.local_tx_drops),
             remote_tx_drops: format_number(w.remote_tx_drops),
-            drops: format_number(w.drops),
+            disposed: format_number(w.disposed),
         }
     }
 }
