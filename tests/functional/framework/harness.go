@@ -12,7 +12,7 @@ import (
 
 const (
 	baselineSnapshotName    = "baseline"
-	baselineTemplateVersion = "v4"
+	baselineTemplateVersion = "v5"
 )
 
 // baselineTemplatePath returns the versioned overlay path for a baseline

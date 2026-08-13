@@ -16,13 +16,13 @@ func TestBaselineTemplatePath(t *testing.T) {
 			name:        "default baseline",
 			qemuImage:   "/tmp/yanet-test.qcow2",
 			baselineTag: baselineSnapshotName,
-			want:        "/tmp/yanet-test-baseline-v4.qcow2",
+			want:        "/tmp/yanet-test-baseline-v5.qcow2",
 		},
 		{
 			name:        "custom baseline",
 			qemuImage:   "/tmp/yanet-test.qcow2",
 			baselineTag: "nat64",
-			want:        "/tmp/yanet-test-nat64-v4.qcow2",
+			want:        "/tmp/yanet-test-nat64-v5.qcow2",
 		},
 	}
 
@@ -40,7 +40,7 @@ func TestBaselineTemplatePath(t *testing.T) {
 }
 
 func TestBootedTemplatePath(t *testing.T) {
-	want := "/tmp/yanet-test-booted-v2.qcow2"
+	want := "/tmp/yanet-test-booted-v3.qcow2"
 	if got := BootedImagePath("/tmp/yanet-test.qcow2"); got != want {
 		t.Errorf("BootedImagePath() = %q, want %q", got, want)
 	}

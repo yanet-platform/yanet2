@@ -1,6 +1,6 @@
 # Test configuration
 QEMU_IMAGE := yanet-test.qcow2
-BOOTED_TEMPLATE := yanet-test-booted-v2.qcow2
+BOOTED_TEMPLATE := yanet-test-booted-v3.qcow2
 
 UBUNTU_IMAGE := ubuntu-24.04-minimal-cloudimg-amd64.img
 UBUNTU_URL := https://cloud-images.ubuntu.com/minimal/releases/noble/release/$(UBUNTU_IMAGE)

@@ -46,6 +46,13 @@ packages:
   - libnuma-dev
   - libpcap-dev
   - libyaml-dev
+  # Runtime libs the host-built yanet-dataplane loads (ldd NEEDED). Noble
+  # ships libarchive under its t64 name and hides libmlx5.so.1 inside
+  # ibverbs-providers, and one unresolvable name here fails the whole
+  # apt-get install, taking every other package on this list with it.
+  - libarchive13t64
+  - ibverbs-providers
+  - libibverbs1
   - gdb
   - kmod
   - procps

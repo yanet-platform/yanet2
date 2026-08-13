@@ -145,7 +145,7 @@ const (
 	// clean boot. When a pool VM's overlay contains this snapshot, Start()
 	// restores it instantly via -loadvm instead of waiting ~44s for boot.
 	BootedSnapshotName    = "booted"
-	bootedTemplateVersion = "v2"
+	bootedTemplateVersion = "v3"
 )
 
 // OverlayHasSnapshot returns true if the given qcow2 image contains a
