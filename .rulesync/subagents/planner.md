@@ -91,8 +91,23 @@ resolved in order:
 3. Otherwise CI, packaging, deployment, or dev and test infrastructure → **#9**.
 4. Otherwise → **#8** — module readiness, canonical layout, code health, ledger burn-down.
 
+This four-way resolution is untouched by what follows. A matching issue *also* joins **#11 `FW to
+the production`** on top of the one board above — see below.
+
 Deferred or out-of-focus work goes on **no board**, and is found with `no:project`. Deferring does
 not change the item's `Priority`.
+
+**#11 `FW to the production`** is not a fifth board — it's a cross-cutting initiative tracker laid
+over the four. Board membership stays a total function exactly as above: an issue resolves its one
+board first, unchanged, and then is additionally added to #11 when it matches, or left off #11
+otherwise. Never treat the two memberships as competing — a #11 issue still needs its board. The
+criteria are the user's own and live in the project's short description, not in this charter, so
+they can change without a charter edit: read that description yourself for a borderline call rather
+than trusting a paraphrase. In summary, as of writing: everything blocking taking the firewall —
+`acl`, `fwstate`, `route`, `forward` — to production, meaning those modules' stability and
+performance, platform-wide stability such as the `cp_config_lock`/counters livelock class, and
+observability and the CLI. **#5 `Not so busy workers`** stays exactly as instructed above —
+untouched, never filed into unless the user says so.
 
 **Types, labels, fields.** Org issue types: `Bug`, `Feature`, `Task`. Planner-semantic labels,
 present in both repos: `debt`, `chore`, `epic`, `blocked`, `needs-architect`. Area labels in the
@@ -214,9 +229,10 @@ prose house style only. Their labels, type and board membership are not a model 
 GitHub goes through the write-capable `github` MCP server. Writes: `issue_write` (create/update —
 title, body, labels, type, state, `state_reason`, `issue_fields`, assignees), `sub_issue_write`
 (add/remove/reprioritize), `add_issue_comment`, `projects_write` (`add_project_item`,
-`update_project_item` for Status). Reads: `projects_list`, `projects_get`, `list_issues`,
-`search_issues`, `issue_read`, `list_pull_requests`, `search_pull_requests`, `pull_request_read`,
-`list_commits`, `list_issue_types`, `list_issue_fields`.
+`update_project_item` for Status and other project-item fields). Reads: `projects_list`,
+`projects_get`, `list_issues`, `search_issues`, `issue_read`, `list_pull_requests`,
+`search_pull_requests`, `pull_request_read`, `list_commits`, `list_issue_types`,
+`list_issue_fields`.
 
 One mechanical trap: `sub_issue_write` wants the child's numeric **id**, which is NOT its issue
 number. Take it from the create response, else
@@ -301,6 +317,12 @@ Invoked with a **mode + payload**. Every mode ends with the reconciliation pass 
   setting `assignees: ["3Hren"]`, and, when the issue is on a board,
   `projects_write update_project_item` setting Status `In Progress`. An issue on no board just
   gets the assignee. Nothing else moves — not the type, not the labels, not the `Priority`.
+  On an issue that is also on **#11**, `start` makes a third, conditional write: set that
+  project's `Start date` to today, but only when the field is empty — never overwrite a value a
+  person already set — and never on a later re-entry into `In Progress`, since the field records
+  when work first began, not most recently. An issue whose only board membership is one of the
+  four boards has no `Start date` field to set. **`Sprint` stays untouched** — that iteration
+  field is the user's planned window, not the actual, and is theirs to set.
   **Read the state before writing anything**: a closed issue is refused and reported, since a
   mistyped or reused number would otherwise leave finished work assigned and at `In Progress`,
   which is the schema's own definition of active.
@@ -322,6 +344,10 @@ Invoked with a **mode + payload**. Every mode ends with the reconciliation pass 
   `Closes #N` already closes the issue, so this is usually verification plus the board move — and
   it must flag any issue whose PR merged without closing it. The assignee is left alone: it is the
   record of who did the work.
+  **No end date.** An issue's own closure timestamp already records when it finished —
+  authoritative, queryable, needs no upkeep, and cannot drift, where a mirrored field would
+  diverge the moment the issue reopens. Elapsed time is that timestamp minus `Start date`. `close`
+  writes no date on #11.
 - **`ingest`** — classify a surfaced debt/idea/backlog item and file it. **Dedup first**, with
   `search_issues` across **both** repos on title keywords, before creating anything. An area label
   joins that query for the public repo only: `C:`/`M:` do not exist in the private repo, where the
