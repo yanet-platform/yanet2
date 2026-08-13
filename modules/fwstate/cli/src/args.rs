@@ -144,7 +144,15 @@ pub struct EntriesCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// Use IPv6 map instead of IPv4
+    /// List IPv4 map entries
+    ///
+    /// Omit both flags, or pass both, to list IPv4 then IPv6.
+    #[arg(long, short = '4')]
+    pub ipv4: bool,
+
+    /// List IPv6 map entries
+    ///
+    /// Omit both flags, or pass both, to list IPv4 then IPv6.
     #[arg(long, short = '6')]
     pub ipv6: bool,
 
@@ -161,16 +169,35 @@ pub struct EntriesCmd {
     pub batch: u32,
 
     /// Total number of entries to return (0 = unlimited)
+    ///
+    /// This limit is shared across both maps when listing both families.
     #[arg(long, default_value = "0")]
     pub count: u32,
 
     /// Iteration direction
+    ///
+    /// When listing both families, this flag is applied to each map separately.
     #[arg(long, default_value = "forward")]
     pub direction: DirectionArg,
 
     /// Starting cursor position (0 = beginning)
+    ///
+    /// When listing both families, this flag is applied to each map separately.
+    /// The second pass starts from this index again, not where the first map
+    /// stopped.
     #[arg(long, default_value = "0")]
     pub index: u32,
+}
+
+impl EntriesCmd {
+    /// Returns which maps to list: `false` is IPv4, `true` is IPv6.
+    pub fn ipv6_maps(&self) -> &'static [bool] {
+        match (self.ipv4, self.ipv6) {
+            (true, false) => &[false],
+            (false, true) => &[true],
+            _ => &[false, true],
+        }
+    }
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -206,4 +233,23 @@ pub struct MetricsCmd {
     /// Show only metrics matching this category
     #[arg(long, short, value_enum)]
     pub name: Option<MetricName>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipv6_maps_from_flags() {
+        let cases: [(&[&str], &[bool]); 4] = [
+            (&["entries", "--name", "x"], &[false, true]),
+            (&["entries", "--name", "x", "--ipv4"], &[false]),
+            (&["entries", "--name", "x", "--ipv6"], &[true]),
+            (&["entries", "--name", "x", "--ipv4", "--ipv6"], &[false, true]),
+        ];
+        for (args, want) in cases {
+            let cmd = EntriesCmd::try_parse_from(args).unwrap();
+            assert_eq!(want, cmd.ipv6_maps(), "{args:?}");
+        }
+    }
 }

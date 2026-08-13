@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +29,80 @@ var expectedEntries = []struct {
 	{"192.0.2.10:10000", "192.0.3.1:80", "TCP", "-S--|----"},
 	{"192.0.2.11:10001", "192.0.3.1:80", "TCP", "-S--|----"},
 	{"192.0.2.12:10002", "192.0.3.1:80", "TCP", "-S--|----"},
+}
+
+// expectedIPv6Sources are the IPv6 entry sources in forward listing order.
+var expectedIPv6Sources = []string{
+	"[2001:db8:1::10]:20000",
+	"[2001:db8:1::10]:20001",
+	"[2001:db8:1::10]:20002",
+}
+
+// expectedIPv4Sources returns the sources of expectedEntries in listing order.
+func expectedIPv4Sources() []string {
+	sources := make([]string, 0, len(expectedEntries))
+	for _, entry := range expectedEntries {
+		sources = append(sources, entry.src)
+	}
+	return sources
+}
+
+// decodeJSONLines decodes the CLI's newline-delimited JSON output.
+func decodeJSONLines[T any](t *testing.T, output string) []T {
+	t.Helper()
+	var decoded []T
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var item T
+		require.NoError(t, json.Unmarshal([]byte(line), &item))
+		decoded = append(decoded, item)
+	}
+	return decoded
+}
+
+// jsonEntrySources returns each listed entry's source in output order.
+func jsonEntrySources(t *testing.T, output string) []string {
+	t.Helper()
+	type sourceEntry struct {
+		Key struct {
+			SrcAddr string `json:"src_addr"`
+			SrcPort int    `json:"src_port"`
+		} `json:"key"`
+	}
+	entries := decodeJSONLines[sourceEntry](t, output)
+	sources := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		sources = append(sources, net.JoinHostPort(entry.Key.SrcAddr, strconv.Itoa(entry.Key.SrcPort)))
+	}
+	return sources
+}
+
+// listedEndpoints parses the source and destination of every row of the
+// human-formatted listing.
+//
+// ParseAddrPort rejects an IPv6 endpoint whose address is not bracketed,
+// so parsing keeps that rendering covered without pinning the column text.
+func listedEndpoints(t *testing.T, output string) (srcs, dsts []netip.AddrPort) {
+	t.Helper()
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if _, err := strconv.Atoi(fields[0]); err != nil {
+			continue // header row
+		}
+		src, err := netip.ParseAddrPort(fields[1])
+		require.NoError(t, err, "source endpoint %q should parse", fields[1])
+		dst, err := netip.ParseAddrPort(fields[2])
+		require.NoError(t, err, "destination endpoint %q should parse", fields[2])
+		srcs = append(srcs, src)
+		dsts = append(dsts, dst)
+	}
+	return srcs, dsts
 }
 
 func TestFWStateListEntries(t *testing.T) {
@@ -90,7 +167,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 4. Forward listing: verify exact entries.
 	fw.Run("Forward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "list-entries forward failed")
 		t.Log("Forward listing output:\n", output)
@@ -106,7 +183,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 5. Forward listing with JSON: parse and verify key fields.
 	fw.Run("Forward_listing_json", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --format json",
+			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction forward --include-expired --format json",
 		)
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON output:\n", output)
@@ -135,17 +212,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 			} `json:"value"`
 		}
 
-		var entries []jsonEntry
-		for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var e jsonEntry
-			require.NoError(t, json.Unmarshal([]byte(line), &e))
-			entries = append(entries, e)
-		}
-
+		entries := decodeJSONLines[jsonEntry](t, output)
 		require.Len(t, entries, 3, "should have exactly 3 JSON entries")
 
 		for i, e := range entries {
@@ -165,7 +232,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 6. Backward listing from last entry: verify all entries present.
 	fw.Run("Backward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction backward --index 4294967295 --include-expired",
+			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction backward --index 4294967295 --include-expired",
 		)
 		require.NoError(t, err, "list-entries backward failed")
 		require.NotEmpty(t, output, "backward listing returned empty output")
@@ -179,7 +246,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 7. Pagination: read with batch=1, verify all entries are still returned.
 	fw.Run("Pagination", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 1 --direction forward --include-expired",
+			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 1 --direction forward --include-expired",
 		)
 		require.NoError(t, err, "list-entries with batch=1 failed")
 		t.Log("Pagination output:\n", output)
@@ -287,11 +354,50 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err, "IPv6 list-entries forward failed")
 		t.Log("IPv6 forward listing output:\n", output)
 
-		require.Contains(t, output, "2001:db8:1::10:20000")
-		require.Contains(t, output, "2001:db8:1::10:20001")
-		require.Contains(t, output, "2001:db8:1::10:20002")
-		require.Contains(t, output, "2001:db8:2::1:80")
+		src := netip.MustParseAddr("2001:db8:1::10")
+		dst := netip.AddrPortFrom(netip.MustParseAddr("2001:db8:2::1"), 80)
+
+		srcs, dsts := listedEndpoints(t, output)
+		require.Equal(t, []netip.AddrPort{
+			netip.AddrPortFrom(src, 20000),
+			netip.AddrPortFrom(src, 20001),
+			netip.AddrPortFrom(src, 20002),
+		}, srcs)
+		require.Equal(t, []netip.AddrPort{dst, dst, dst}, dsts)
 		require.Contains(t, output, "TCP")
+	})
+
+	// Family filters: --ipv4/--ipv6 select one map. Neither or both lists IPv4 then IPv6.
+	fw.Run("Family_ipv4_only", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWState + " entries --name fwstate0 --ipv4 --batch 100 --direction forward --include-expired --format json",
+		)
+		require.NoError(t, err, "IPv4 list-entries failed")
+		require.Equal(t, expectedIPv4Sources(), jsonEntrySources(t, output))
+	})
+
+	fw.Run("Family_default_both", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --format json",
+		)
+		require.NoError(t, err, "default list-entries failed")
+		require.Equal(t, slices.Concat(expectedIPv4Sources(), expectedIPv6Sources), jsonEntrySources(t, output))
+	})
+
+	fw.Run("Family_both_flags", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWState + " entries --name fwstate0 --ipv4 --ipv6 --batch 100 --direction forward --include-expired --format json",
+		)
+		require.NoError(t, err, "list-entries with both family flags failed")
+		require.Equal(t, slices.Concat(expectedIPv4Sources(), expectedIPv6Sources), jsonEntrySources(t, output))
+	})
+
+	fw.Run("Family_count_spans_maps", func(fw *framework.TestFramework, t *testing.T) {
+		output, err := fw.ExecuteCommand(
+			framework.CLIFWState + " entries --name fwstate0 --count 4 --batch 100 --direction forward --include-expired --format json",
+		)
+		require.NoError(t, err, "list-entries with shared --count failed")
+		require.Equal(t, slices.Concat(expectedIPv4Sources(), expectedIPv6Sources[:1]), jsonEntrySources(t, output))
 	})
 
 	// 14. IPv6 CheckState: return traffic passes because forward state exists.
@@ -718,17 +824,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 			} `json:"value"`
 		}
 
-		var entries []jsonEntry
-		for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var e jsonEntry
-			require.NoError(t, json.Unmarshal([]byte(line), &e))
-			entries = append(entries, e)
-		}
-
+		entries := decodeJSONLines[jsonEntry](t, output)
 		require.Len(t, entries, 1, "should have exactly 1 state entry from external sync")
 		e := entries[0]
 		require.Equal(t, "10.0.0.1", e.Key.SrcAddr, "src_addr should match sync frame")
