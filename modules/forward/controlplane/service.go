@@ -48,7 +48,7 @@ func (m *forwardConfig) Free() {
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	backend Backend
 	configs map[string]forwardConfig
 }
@@ -63,8 +63,8 @@ func NewForwardService(backend Backend) *ForwardService {
 func (m *ForwardService) ListConfigs(
 	ctx context.Context, request *forwardpb.ListConfigsRequest,
 ) (*forwardpb.ListConfigsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	configs := make([]string, 0, len(m.configs))
 	for name := range m.configs {
@@ -84,8 +84,8 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	config, ok := m.configs[req.Name]
 

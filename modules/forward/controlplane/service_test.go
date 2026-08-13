@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
@@ -34,6 +36,18 @@ func (m *mockBackend) DeleteModule(name string) error {
 }
 
 func (m *mockBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {
+	return nil
+}
+
+type blockingMetricsBackend struct {
+	mockBackend
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingMetricsBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {
+	m.entered <- struct{}{}
+	<-m.release
 	return nil
 }
 
@@ -303,6 +317,62 @@ func TestMetricsExactTagNeverReadsForeignCounter(t *testing.T) {
 		require.NotContains(t, metric.GetName(), "forward_rule")
 	}
 	require.Empty(t, backend.queries, "rx is not one of the config's own rule counters, so ModuleCounters must never be called")
+}
+
+// TestConcurrentMetricsReads verifies that concurrent metrics reads both reach
+// the dataplane counter backend without serializing behind the service lock.
+func TestConcurrentMetricsReads(t *testing.T) {
+	backend := &blockingMetricsBackend{
+		entered: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	service := forward.NewForwardService(backend)
+
+	var group errgroup.Group
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(backend.release)
+		})
+	}
+	defer func() {
+		release()
+		require.NoError(t, group.Wait())
+	}()
+
+	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{Action: &forwardpb.Action{Target: "device0", Counter: "to_device0"}},
+		},
+	})
+	require.NoError(t, err)
+
+	group.Go(func() error {
+		_, err := service.Metrics()
+		return err
+	})
+
+	waitForEntry := func() {
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+
+		select {
+		case <-backend.entered:
+		case <-timer.C:
+			t.Fatal("timed out waiting for metrics reader")
+		}
+	}
+	waitForEntry()
+
+	group.Go(func() error {
+		_, err := service.Metrics()
+		return err
+	})
+	waitForEntry()
+
+	release()
+	require.NoError(t, group.Wait())
 }
 
 // Run with: go test -race

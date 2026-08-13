@@ -56,8 +56,8 @@ func (m *ForwardService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metri
 // per-module counter such as "rx" — leaves that config with nothing to
 // read.
 func (m *ForwardService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	result := make([]*commonpb.Metric, 0)
 	for configName, config := range m.configs {
