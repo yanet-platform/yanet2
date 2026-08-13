@@ -92,3 +92,39 @@ type TxPipeMbuf struct {
 func (m *TxPipeMbuf) Complete() {
 	C.dataplane_ut_tx_pipe_complete(m.ptr)
 }
+
+// Segment returns the segment at chain position idx below m (0 is m
+// itself), or nil past the end of the chain.
+func (m *TxPipeMbuf) Segment(idx int) *TxPipeMbuf {
+	ptr := C.dataplane_ut_tx_pipe_segment(m.ptr, C.size_t(idx))
+	if ptr == nil {
+		return nil
+	}
+
+	return &TxPipeMbuf{ptr: ptr}
+}
+
+// Refcnt reads the segment's current DPDK refcount.
+func (m *TxPipeMbuf) Refcnt() uint16 {
+	return uint16(C.dataplane_ut_tx_pipe_segment_refcnt(m.ptr))
+}
+
+// AddRefcnt adds delta to the segment's refcount directly, bypassing the
+// pipe.
+//
+// A positive delta manufactures the mismatch Push rejects, a matching
+// negative delta restores uniformity so the chain can be reused through the
+// normal push/drain path.
+func (m *TxPipeMbuf) AddRefcnt(delta int16) {
+	C.dataplane_ut_tx_pipe_segment_refcnt_add(m.ptr, C.int16_t(delta))
+}
+
+// CompleteSegment releases exactly this segment's consumer-side reference,
+// where Complete releases a whole chain at once.
+//
+// Release each segment exactly once, through this method or Complete but
+// never both, and never twice on the same segment — either mistake
+// double-frees it.
+func (m *TxPipeMbuf) CompleteSegment() {
+	C.dataplane_ut_tx_pipe_complete_segment(m.ptr)
+}

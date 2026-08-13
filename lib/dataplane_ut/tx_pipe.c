@@ -118,6 +118,32 @@ dataplane_ut_tx_pipe_complete(struct rte_mbuf *mbuf) {
 	rte_pktmbuf_free(mbuf);
 }
 
+struct rte_mbuf *
+dataplane_ut_tx_pipe_segment(struct rte_mbuf *mbuf, size_t idx) {
+	while (mbuf != NULL && idx > 0) {
+		mbuf = mbuf->next;
+		--idx;
+	}
+	return mbuf;
+}
+
+uint16_t
+dataplane_ut_tx_pipe_segment_refcnt(struct rte_mbuf *segment) {
+	return rte_mbuf_refcnt_read(segment);
+}
+
+void
+dataplane_ut_tx_pipe_segment_refcnt_add(
+	struct rte_mbuf *segment, int16_t delta
+) {
+	rte_mbuf_refcnt_update(segment, delta);
+}
+
+void
+dataplane_ut_tx_pipe_complete_segment(struct rte_mbuf *segment) {
+	rte_pktmbuf_free_seg(segment);
+}
+
 void
 dataplane_ut_tx_pipe_reclaim(struct dataplane_ut_tx_pipe *fixture) {
 	worker_tx_pipe_reclaim(&fixture->tx_pipe);

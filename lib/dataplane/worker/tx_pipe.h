@@ -19,10 +19,10 @@ struct worker_pending_mbuf {
 
 // A data pipe to another worker paired with its own deferred-free ring.
 //
-// The producer holds an extra reference on each mbuf pushed into pipe
-// and records it in pending_mbufs. The reference is released once the
-// consumer's NIC tx completes. Per-pipe completion is FIFO, so the ring
-// is drained head-first.
+// The producer pins every segment, recording their shared pre-pin
+// refcount as the baseline reclaim checks each segment against — so
+// segments must already agree on one refcount. FIFO completion drains
+// the ring head-first as each segment's NIC tx finishes.
 struct worker_tx_pipe {
 	struct data_pipe pipe;
 	struct worker_pending_mbuf *pending_mbufs;
@@ -43,7 +43,9 @@ worker_tx_pipe_fini(struct worker_tx_pipe *tx_pipe);
 
 // Push mbuf onto the pipe for the consumer to transmit.
 //
-// Returns 0 on success, -1 if the pipe or its deferred-free ring is full.
+// Returns 0 on success, -1 if the pipe or its deferred-free ring is
+// full, or if the chain's segments don't share one refcount to record
+// as the reclaim baseline.
 int
 worker_tx_pipe_push(struct worker_tx_pipe *tx_pipe, struct rte_mbuf *mbuf);
 

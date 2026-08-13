@@ -1,5 +1,6 @@
 #include "tx_pipe.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,8 +17,26 @@ worker_connection_push_cb(void **item, size_t count, void *data) {
 	struct worker_tx_pipe *tx_pipe = push_ctx->tx_pipe;
 
 	if (count > 0) {
-		uint32_t ref_cnt =
-			rte_mbuf_refcnt_update(push_ctx->mbuf, 1) - 1;
+		// Every segment must share one ref_cnt, the baseline
+		// worker_pending_mbuf_ready checks each segment against: one
+		// above it never sinks back down and wedges the pipe, one
+		// below it already reads as reclaimable while still in flight.
+		// Walked by hand rather than rte_pktmbuf_refcnt_update,
+		// which pins every segment blind with no unwind on mismatch.
+		uint64_t ref_cnt = rte_mbuf_refcnt_read(push_ctx->mbuf);
+		struct rte_mbuf *seg = push_ctx->mbuf;
+		do {
+			if (rte_mbuf_refcnt_read(seg) != ref_cnt) {
+				for (struct rte_mbuf *pinned = push_ctx->mbuf;
+				     pinned != seg;
+				     pinned = pinned->next) {
+					rte_mbuf_refcnt_update(pinned, -1);
+				}
+				return 0;
+			}
+			rte_mbuf_refcnt_update(seg, 1);
+		} while ((seg = seg->next) != NULL);
+
 		memcpy(item, &push_ctx->mbuf, sizeof(struct rte_mbuf *));
 
 		uint32_t ofs = tx_pipe->pending_stop & tx_pipe->pending_mask;
@@ -88,20 +107,45 @@ worker_tx_pipe_push(struct worker_tx_pipe *tx_pipe, struct rte_mbuf *mbuf) {
 	return 0;
 }
 
+// True once every segment has sunk back to ref_cnt: the consumer freed
+// the whole chain, only the producer's pin remains.
+//
+// Safe mid-decrement — a segment's next pointer clears only once its
+// own pin drops, never while still above baseline.
+static bool
+worker_pending_mbuf_ready(struct rte_mbuf *mbuf, uint64_t ref_cnt) {
+	do {
+		// Acquire load, not relaxed + fence: a bare fence with no
+		// preceding acquire load is invisible to TSan. Pairs with
+		// the consumer's release decrement — DPDK has no
+		// acquire-ordered refcnt accessor.
+		if (rte_atomic_load_explicit(
+			    &mbuf->refcnt, rte_memory_order_acquire
+		    ) > ref_cnt) {
+			return false;
+		}
+	} while ((mbuf = mbuf->next) != NULL);
+
+	return true;
+}
+
 void
 worker_tx_pipe_reclaim(struct worker_tx_pipe *tx_pipe) {
 	// Reclaim consumed pipe slots (producer free phase).
 	data_pipe_item_free(&tx_pipe->pipe, worker_connection_free_cb, NULL);
 
-	// Release mbufs whose consumer-side NIC tx has completed. A single
-	// pipe feeds one rx worker and one NIC tx queue, so completion is
-	// FIFO: drain from the head and stop at the first mbuf still held.
+	// Release mbufs whose consumer-side NIC tx has completed on every
+	// segment. A single pipe feeds one rx worker and one NIC tx queue,
+	// so completion is FIFO: drain from the head and stop at the first
+	// mbuf still held.
 	while (tx_pipe->pending_start < tx_pipe->pending_stop) {
 		uint32_t ofs = tx_pipe->pending_start & tx_pipe->pending_mask;
 		struct worker_pending_mbuf *pending =
 			tx_pipe->pending_mbufs + ofs;
 
-		if (rte_mbuf_refcnt_read(pending->mbuf) > pending->ref_cnt) {
+		if (!worker_pending_mbuf_ready(
+			    pending->mbuf, pending->ref_cnt
+		    )) {
 			break;
 		}
 
