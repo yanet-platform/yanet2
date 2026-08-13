@@ -511,6 +511,54 @@ cp_config_counter_storage_registry_insert_module(
 }
 
 struct counter_storage *
+cp_config_counter_storage_registry_lookup_module_config(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name
+) {
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = module_type},
+		{.key = "module_name", .value = module_name},
+		{.key = "kind", .value = "config"}
+	};
+	return get_one(registry, tags, 7);
+}
+
+int
+cp_config_counter_storage_registry_insert_module_config(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+) {
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = module_type},
+		{.key = "module_name", .value = module_name},
+		{.key = "kind", .value = "config"},
+	};
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 7, counter_storage, err
+	);
+}
+
+struct counter_storage *
 cp_config_counter_storage_registry_lookup_object(
 	struct cp_config_counter_storage_registry *registry,
 	const char *object_type,

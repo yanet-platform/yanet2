@@ -19,6 +19,12 @@ module_ectx_free(
 		counter_storage_free(counter_storage);
 	}
 
+	struct counter_storage *config_counter_storage =
+		ADDR_OF(&module_ectx->config_counter_storage);
+	if (config_counter_storage != NULL) {
+		counter_storage_free(config_counter_storage);
+	}
+
 	uint64_t *cm_index = ADDR_OF(&module_ectx->cm_index);
 	if (cm_index != NULL) {
 		memory_bfree(
@@ -195,6 +201,62 @@ module_ectx_create(
 	}
 
 	SET_OFFSET_OF(&module_ectx->counter_storage, counter_storage);
+
+	struct counter_storage *old_config_counter_storage = NULL;
+	if (old_ectx != NULL) {
+		old_config_counter_storage =
+			cp_config_counter_storage_registry_lookup_module_config(
+				ADDR_OF(&old_ectx->counter_storage_registry),
+				cp_device->name,
+				cp_pipeline->name,
+				cp_function->name,
+				cp_chain->name,
+				cp_module->type,
+				cp_module->name
+			);
+	}
+
+	struct counter_storage *config_counter_storage = counter_storage_spawn(
+		&cp_config->counter_storage_memory_context,
+		old_config_counter_storage,
+		&cp_module->config_counter_registry
+	);
+	if (config_counter_storage == NULL) {
+		yanet_error_add(
+			err,
+			"failed to spawn config counter storage for module "
+			"'%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
+		goto error;
+	}
+
+	if (cp_config_counter_storage_registry_insert_module_config(
+		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
+		    cp_device->name,
+		    cp_pipeline->name,
+		    cp_function->name,
+		    cp_chain->name,
+		    cp_module->type,
+		    cp_module->name,
+		    config_counter_storage,
+		    err
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to insert config counter storage for module "
+			"'%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
+		counter_storage_free(config_counter_storage);
+		goto error;
+	}
+
+	SET_OFFSET_OF(
+		&module_ectx->config_counter_storage, config_counter_storage
+	);
 
 	if (cp_module->object_count > 0) {
 		struct memory_context *counter_storage_memory_context =

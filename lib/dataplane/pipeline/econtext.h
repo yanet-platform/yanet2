@@ -36,6 +36,7 @@ struct module_ectx {
 	struct counter_value_handle *perf_counters[MODULE_ECTX_PERF_COUNTERS];
 
 	struct counter_storage *counter_storage;
+	struct counter_storage *config_counter_storage;
 	struct config_gen_ectx *config_gen_ectx;
 
 	uint64_t mc_index_size;

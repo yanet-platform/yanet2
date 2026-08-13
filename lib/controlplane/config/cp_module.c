@@ -118,6 +118,21 @@ cp_module_init(
 		goto fail;
 	}
 
+	if (counter_registry_init(
+		    &cp_module->config_counter_registry,
+		    &cp_module->memory_context,
+		    0
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to initialize config counter registry for "
+			"module '%s:%s'",
+			module_type,
+			module_name
+		);
+		goto fail;
+	}
+
 	cp_module->rx_counter_id = counter_registry_register(
 		&cp_module->counter_registry, "rx", 2, err
 	);
@@ -208,6 +223,7 @@ fail:
 void
 cp_module_fini(struct cp_module *cp_module) {
 	counter_registry_fini(&cp_module->counter_registry);
+	counter_registry_fini(&cp_module->config_counter_registry);
 
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	if (devices != NULL) {
@@ -611,11 +627,24 @@ cp_module_registry_upsert(
 	struct cp_module *old_module =
 		cp_module_registry_lookup(module_registry, type, name);
 
-	counter_registry_link(
-		&new_module->counter_registry,
-		(old_module != NULL) ? &old_module->counter_registry : NULL,
-		err
-	);
+	if (counter_registry_link(
+		    &new_module->counter_registry,
+		    (old_module != NULL) ? &old_module->counter_registry : NULL,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to link counter registry");
+		return -1;
+	}
+
+	if (counter_registry_link(
+		    &new_module->config_counter_registry,
+		    (old_module != NULL) ? &old_module->config_counter_registry
+					 : NULL,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to link config counter registry");
+		return -1;
+	}
 
 	if (registry_replace(
 		    &module_registry->registry,

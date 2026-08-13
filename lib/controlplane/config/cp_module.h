@@ -61,6 +61,11 @@ struct cp_module {
 	// Counters declared inside module data
 	struct counter_registry counter_registry;
 
+	// Counters declared from user-supplied configuration (per-rule,
+	// per-route, etc.). Expanded into a separate storage tagged
+	// kind=config on config-gen installation.
+	struct counter_registry config_counter_registry;
+
 	// Rx packet/byte counter (size 2: [packets, bytes])
 	uint64_t rx_counter_id;
 	// Tx packet/byte counter (size 2: [packets, bytes])
