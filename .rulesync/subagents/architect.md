@@ -15,7 +15,7 @@ claudecode:
     networking-expert, reviewer, bug-hunter, performance-engineer, planner),
     AskUserQuestion, ExitPlanMode, Bash, Write, Read, WebFetch, WebSearch, LSP,
     Glob, Grep, Skill, TaskList, TaskCreate, TaskGet, TaskUpdate, TaskStop,
-    mcp__github
+    SendMessage, mcp__github
   color: purple
   memory: project
   effort: xhigh
