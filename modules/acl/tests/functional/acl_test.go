@@ -98,7 +98,7 @@ func setupACLHarnessSized(
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := acl.NewBackend(agent, uint64(agentMemory))
+	backend := acl.NewBackend(agent)
 	return h, agent, backend
 }
 

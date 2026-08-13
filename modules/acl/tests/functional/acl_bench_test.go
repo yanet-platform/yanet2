@@ -190,7 +190,7 @@ func setupACLHarnessLarge(b *testing.B, devices []string) (*dataplaneut.Harness,
 	require.NoError(b, err)
 	b.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := acl.NewBackend(agent, uint64(largeMemSize))
+	backend := acl.NewBackend(agent)
 	return h, agent, backend
 }
 

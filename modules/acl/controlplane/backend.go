@@ -9,16 +9,12 @@ import (
 
 // backend is the production Backend implementation backed by *ffi.Agent.
 type backend struct {
-	agent       *ffi.Agent
-	memoryBytes uint64
+	agent *ffi.Agent
 }
 
 // NewBackend creates a Backend that operates on real shared memory.
-func NewBackend(agent *ffi.Agent, memoryBytes uint64) Backend {
-	return &backend{
-		agent:       agent,
-		memoryBytes: memoryBytes,
-	}
+func NewBackend(agent *ffi.Agent) Backend {
+	return &backend{agent: agent}
 }
 
 func (m *backend) NewModule(name string) (ModuleHandle, error) {
@@ -36,10 +32,6 @@ func (m *backend) UpdateModule(handle ModuleHandle) error {
 
 func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
-}
-
-func (m *backend) MemoryBytes() uint64 {
-	return m.memoryBytes
 }
 
 func (m *backend) DPConfig() *ffi.DPConfig {

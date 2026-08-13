@@ -36,7 +36,7 @@ func setupACLFWStateHarness(tb testing.TB) (*ffi.Agent, acl.Backend) {
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := acl.NewBackend(agent, uint64(aclMemSize))
+	backend := acl.NewBackend(agent)
 	return agent, backend
 }
 

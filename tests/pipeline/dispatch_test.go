@@ -98,7 +98,7 @@ func setupACLBackend(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := acl.NewBackend(agent, uint64(dispatchMemSize))
+	backend := acl.NewBackend(agent)
 	return h, agent, backend
 }
 

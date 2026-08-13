@@ -125,7 +125,6 @@ type fakeBackend struct {
 	newModuleErr error
 	deleteErr    error
 	deleteCalls  int
-	memoryBytes  uint64
 	dpConfig     *ffi.DPConfig
 }
 
@@ -151,8 +150,8 @@ type blockingDPConfigBackend struct {
 	nextBlock *updateBlock
 }
 
-func newBlockingUpdateBackend(memoryBytes uint64) *blockingUpdateBackend {
-	return &blockingUpdateBackend{fakeBackend: newFakeBackend(memoryBytes)}
+func newBlockingUpdateBackend() *blockingUpdateBackend {
+	return &blockingUpdateBackend{fakeBackend: newFakeBackend()}
 }
 
 func (m *blockingUpdateBackend) blockNextUpdate() (<-chan struct{}, func()) {
@@ -185,7 +184,7 @@ func (m *blockingUpdateBackend) UpdateModule(handle acl.ModuleHandle) error {
 }
 
 func newBlockingDPConfigBackend(dpConfig *ffi.DPConfig) *blockingDPConfigBackend {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	backend.dpConfig = dpConfig
 	return &blockingDPConfigBackend{fakeBackend: backend}
 }
@@ -219,10 +218,9 @@ func (m *blockingDPConfigBackend) DPConfig() *ffi.DPConfig {
 	return m.fakeBackend.DPConfig()
 }
 
-func newFakeBackend(memoryBytes uint64) *fakeBackend {
+func newFakeBackend() *fakeBackend {
 	return &fakeBackend{
-		modules:     map[string]*fakeHandle{},
-		memoryBytes: memoryBytes,
+		modules: map[string]*fakeHandle{},
 	}
 }
 
@@ -336,10 +334,6 @@ func (m *fakeBackend) DeleteModule(name string) error {
 	return nil
 }
 
-func (m *fakeBackend) MemoryBytes() uint64 {
-	return m.memoryBytes
-}
-
 func (m *fakeBackend) DPConfig() *ffi.DPConfig {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -418,9 +412,9 @@ type compileBlockingBackend struct {
 	blocks  map[string]*compileBlock
 }
 
-func newCompileBlockingBackend(memoryBytes uint64) *compileBlockingBackend {
+func newCompileBlockingBackend() *compileBlockingBackend {
 	return &compileBlockingBackend{
-		fakeBackend: newFakeBackend(memoryBytes),
+		fakeBackend: newFakeBackend(),
 		blocks:      map[string]*compileBlock{},
 	}
 }
@@ -578,7 +572,7 @@ func TestUpdateConfigCounter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			backend := newFakeBackend(0)
+			backend := newFakeBackend()
 			svc := newTestService(backend)
 			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 				Name:  "acl0",
@@ -600,7 +594,7 @@ func TestUpdateConfigCounter(t *testing.T) {
 // TestUpdateConfig_Idempotency verifies that calling UpdateConfig twice with
 // identical rules does not publish a second time.
 func TestUpdateConfig_Idempotency(t *testing.T) {
-	b := newFakeBackend(0)
+	b := newFakeBackend()
 	svc := newTestService(b)
 
 	req := &aclpb.UpdateConfigRequest{
@@ -624,7 +618,7 @@ func TestUpdateConfig_Idempotency(t *testing.T) {
 // TestUpdateConfig_ErrorPropagation verifies that a backend failure from
 // NewModule returns codes.Internal and leaves the service config unchanged.
 func TestUpdateConfig_ErrorPropagation(t *testing.T) {
-	b := newFakeBackend(0)
+	b := newFakeBackend()
 	svc := newTestService(b)
 
 	// Pre-populate a config so we can verify it is unchanged after the error.
@@ -674,7 +668,7 @@ func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			b := newFakeBackend(0)
+			b := newFakeBackend()
 			svc := newTestService(b)
 
 			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
@@ -693,7 +687,7 @@ func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
 // TestConvertRules_RejectsUnknownActionKind ensures unrecognized action kinds
 // become a client error rather than silently mapping to ALLOW.
 func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
-	svc := newTestService(newFakeBackend(0))
+	svc := newTestService(newFakeBackend())
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "acl0",
 		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(999)}}}},
@@ -706,7 +700,7 @@ func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
 // non-contiguous network mask is rejected with codes.InvalidArgument before
 // reaching the backend.
 func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
-	svc := newTestService(newFakeBackend(0))
+	svc := newTestService(newFakeBackend())
 
 	req := &aclpb.UpdateConfigRequest{
 		Name: "acl0",
@@ -731,7 +725,7 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 // codes.NotFound for a config name that was never applied and does not call
 // the backend.
 func TestDeleteConfig_UnknownConfig(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 
 	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
@@ -743,7 +737,7 @@ func TestDeleteConfig_UnknownConfig(t *testing.T) {
 // live published config succeeds, removes the backend module, and makes a
 // second delete return NotFound.
 func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 
 	name := "acl0"
@@ -769,7 +763,7 @@ func TestDeleteConfig_LiveNameTombstones(t *testing.T) {
 // asserts that the delete resolves after the create publishes, then removes
 // the config it just published.
 func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
-	backend := newCompileBlockingBackend(0)
+	backend := newCompileBlockingBackend()
 	svc := newTestService(backend)
 
 	name := "new-config"
@@ -833,7 +827,7 @@ func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
 // resurrected rules, List reports the name exactly once, and cleanup frees
 // every handle the fakeBackend produced exactly once.
 func TestUpdateConfig_ResurrectsThroughTombstone(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 
 	name := "acl0"
@@ -874,7 +868,7 @@ func TestUpdateConfig_ResurrectsThroughTombstone(t *testing.T) {
 // TestUpdateConfig_ConcurrentRace exercises UpdateConfig and ShowConfig under
 // concurrent access to surface data races under go test -race.
 func TestUpdateConfig_ConcurrentRace(t *testing.T) {
-	svc := newTestService(newFakeBackend(0))
+	svc := newTestService(newFakeBackend())
 
 	var wg errgroup.Group
 	for range 8 {
@@ -896,7 +890,7 @@ func TestUpdateConfig_ConcurrentRace(t *testing.T) {
 // TestMetrics_DoesNotWaitForUpdateConfig verifies that metrics collection is
 // not stalled by a blocked backend update.
 func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
-	backend := newBlockingUpdateBackend(0)
+	backend := newBlockingUpdateBackend()
 	svc := acl.NewACLService(backend, acl.WithMetrics(grpcmetrics.NewFactory(
 		grpcmetrics.WithLabeler(testLabeler),
 	)))
@@ -1050,7 +1044,7 @@ func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 // the settled state without relying on a particular scheduling interleaving.
 func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
 	_, agent := newMetricsSnapshotHarness(t)
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	backend.dpConfig = agent.DPConfig()
 	svc := newTestService(backend)
 
@@ -1100,7 +1094,7 @@ func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
 // different names compile concurrently: both are proven to be inside
 // UpdateRules at the same time via channel synchronization, not timing.
 func TestUpdateConfig_CompilesInParallel(t *testing.T) {
-	backend := newCompileBlockingBackend(0)
+	backend := newCompileBlockingBackend()
 	svc := newTestService(backend)
 
 	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
@@ -1148,7 +1142,7 @@ func TestUpdateConfig_CompilesInParallel(t *testing.T) {
 // UpdateConfig call is parked inside a compile. Under a single global mutex
 // both would hang until the compile released it.
 func TestShowAndListConfigs_DoNotWaitForCompile(t *testing.T) {
-	backend := newCompileBlockingBackend(0)
+	backend := newCompileBlockingBackend()
 	svc := newTestService(backend)
 
 	initialRules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
@@ -1217,7 +1211,7 @@ func TestShowAndListConfigs_DoNotWaitForCompile(t *testing.T) {
 // first has released the per-name lock, which is proven by lock acquisition
 // order rather than a sleep-based race check.
 func TestUpdateConfig_SameNameSerializes(t *testing.T) {
-	backend := newCompileBlockingBackend(0)
+	backend := newCompileBlockingBackend()
 	svc := newTestService(backend)
 
 	rulesA := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
@@ -1282,7 +1276,7 @@ func TestUpdateConfig_SameNameSerializes(t *testing.T) {
 // UpdateConfig and DeleteConfig calls racing on the same name never free a
 // handle twice or free a handle that remains active.
 func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 
 	name := "a"
@@ -1322,7 +1316,7 @@ func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
 // ACLAdapter.RelinkConfigs racing an UpdateConfig call on one linked name
 // completes without deadlock and refreshes the non-racing b handle safely.
 func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 	adapter := acl.NewACLAdapter(svc)
 
@@ -1396,7 +1390,7 @@ func TestRelinkConfigs_ConcurrentWithUpdateOfSharedName(t *testing.T) {
 // unknown name in the list fails without allocating a backend module for it,
 // and without disturbing an already-live name also present in the list.
 func TestACLAdapterLinkConfigs_UnknownName(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 	adapter := acl.NewACLAdapter(svc)
 
@@ -1428,7 +1422,7 @@ func TestACLAdapterLinkConfigs_UnknownName(t *testing.T) {
 // TestACLAdapterLinkConfigs_TombstonedName verifies retained-name linking
 // failure frees every temporary handle and preserves the live config.
 func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 	adapter := acl.NewACLAdapter(svc)
 
@@ -1470,7 +1464,7 @@ func TestACLAdapterLinkConfigs_TombstonedName(t *testing.T) {
 // instead of leaking the handle a naive per-occurrence loop would create
 // and then drop.
 func TestACLAdapterLinkConfigs_DuplicateName(t *testing.T) {
-	backend := newFakeBackend(0)
+	backend := newFakeBackend()
 	svc := newTestService(backend)
 	adapter := acl.NewACLAdapter(svc)
 

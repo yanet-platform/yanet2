@@ -43,8 +43,6 @@ type Backend interface {
 	UpdateModule(handle ModuleHandle) error
 	// DeleteModule removes a module config from the dataplane.
 	DeleteModule(name string) error
-	// TODO: remove this
-	MemoryBytes() uint64
 	// DPConfig returns the dataplane configuration handle for counter
 	// and position queries.
 	DPConfig() *ffi.DPConfig

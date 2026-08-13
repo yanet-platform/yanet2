@@ -227,7 +227,6 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 						"acl_filter_rule_count_ip6_port",
 						float64(info.FilterRuleCountIp6Port),
 						configLabels...),
-					commonpb.NewMetricGauge("acl_memory_bytes", float64(m.backend.MemoryBytes()), configLabels...),
 				)
 			}
 		}

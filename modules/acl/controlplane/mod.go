@@ -77,7 +77,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 	}
 
 	aclService := NewACLService(
-		NewBackend(agent, uint64(cfg.MemoryRequirements.Unwrap().Bytes())),
+		NewBackend(agent),
 		WithLog(log),
 		WithMetrics(grpcmetrics.NewFactory(
 			grpcmetrics.WithLabeler(labeler),
