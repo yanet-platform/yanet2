@@ -20,6 +20,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/modules/pdump/dataplane
 #cgo LDFLAGS: -L../../../build/devices/plain/dataplane
 #cgo LDFLAGS: -L../../../build/devices/vlan/dataplane
+#cgo LDFLAGS: -L../../../build/devices/vxlan/dataplane
 #cgo LDFLAGS: -L../../../build/lib/dataplane_ut
 #cgo LDFLAGS: -L../../../build/lib/dataplane/pipeline
 #cgo LDFLAGS: -L../../../build/lib/dataplane/module
@@ -40,7 +41,7 @@ package dataplaneut
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
 #cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp
-#cgo LDFLAGS: -lplain_dp -lvlan_dp
+#cgo LDFLAGS: -lplain_dp -lvlan_dp -lvxlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -L../../../build/subprojects/regex
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
@@ -129,6 +130,7 @@ keep_refs(void **ptrs) {
 
 	extern struct device *new_device_plain(void);
 	extern struct device *new_device_vlan(void);
+	extern struct device *new_device_vxlan(void);
 
 	static void *funcs[] = {
 		new_module_blackhole,
@@ -145,6 +147,7 @@ keep_refs(void **ptrs) {
 
 		new_device_plain,
 		new_device_vlan,
+		new_device_vxlan,
 	};
 
 	*ptrs = funcs;

@@ -31,7 +31,7 @@ make ai/agents                                     # regenerate agent charters f
 
 - `dataplane/` — DPDK binary (`main.c`, `config.c`, `dpdk.c`, `worker.c`, `drivers/`).
 - `controlplane/` — gateway (`gateway/`), built-in services (`builtin/`), CGO shm bindings (`ffi/`), root protos (`ynpb/`), control-plane package (`yncp/`), entrypoint (`cmd/yncp-director`).
-- `modules/` — packet-processing modules; `devices/` — device adapters (`plain`, `vlan`, `trafgen`), same layout.
+- `modules/` — packet-processing modules; `devices/` — device adapters (`plain`, `vlan`, `trafgen`, `vxlan`), same layout.
 - `operators/` — long-running Go orchestration daemons above the gateway: `pipeline`, `decap`, `forward`, `route` (each `cmd/` + `internal/` + `operatorpb/` + Rust `cli/`), `bird-adapter`, `neighbours` (web only here; process in the private repo).
 - `lib/` — C support libs (`controlplane`, `counters`, `dataplane`, `dataplane_ut`, `errors`, `filter`, `fwstate`, `logging`, `utils`); `api/` — public C API headers; `bindings/go/` — root CGO agent bindings.
 - `common/` — shared code: `go/` (`xcfg`, `xcmd`, `xerror`, `xpacket`, `xgrpc`, `logging`, `metrics`, `readiness`, `testutils`, …), `rust/` (`commonpb`, `filterpb`, `ynpb`, `bitmap`), `commonpb/`, `filterpb/`, `ttlmap/`, C headers (`lpm.h`, `radix.h`, `hash.h`, `rcu.h`, `memory*.h`).

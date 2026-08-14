@@ -1,0 +1,140 @@
+#include <stdlib.h>
+#include <string.h>
+
+#include "controlplane.h"
+
+#include "config.h"
+
+#include "common/container_of.h"
+
+#include "lib/controlplane/agent/agent.h"
+
+#include "lib/errors/errors.h"
+
+struct cp_device *
+cp_device_vxlan_new(
+	struct agent *agent,
+	const struct cp_device_vxlan_config *config,
+	yanet_error **err
+) {
+	struct cp_device_vxlan *cp_device_vxlan =
+		(struct cp_device_vxlan *)memory_balloc(
+			&agent->memory_context, sizeof(struct cp_device_vxlan)
+		);
+	if (cp_device_vxlan == NULL) {
+		yanet_error_add(err, "memory allocation failed");
+		return NULL;
+	}
+
+	memset(cp_device_vxlan, 0, sizeof(struct cp_device_vxlan));
+
+	if (cp_device_init(
+		    &cp_device_vxlan->cp_device,
+		    agent,
+		    &config->cp_device_config,
+		    err
+	    )) {
+		memory_bfree(
+			&agent->memory_context,
+			cp_device_vxlan,
+			sizeof(struct cp_device_vxlan)
+		);
+		return NULL;
+	}
+
+	const struct cp_device_vxlan_settings *settings = &config->settings;
+	cp_device_vxlan->vni = settings->vni;
+	cp_device_vxlan->dst_port = settings->dst_port;
+	cp_device_vxlan->pad = 0;
+	memcpy(cp_device_vxlan->src_mac,
+	       settings->src_mac,
+	       sizeof(cp_device_vxlan->src_mac));
+	memcpy(cp_device_vxlan->dst_mac,
+	       settings->dst_mac,
+	       sizeof(cp_device_vxlan->dst_mac));
+	cp_device_vxlan->src_ip = settings->src_ip;
+	cp_device_vxlan->dst_ip = settings->dst_ip;
+
+	return &cp_device_vxlan->cp_device;
+}
+
+void
+cp_device_vxlan_free(struct cp_device *cp_device) {
+	struct agent *agent = ADDR_OF(&cp_device->agent);
+	cp_device_fini(cp_device);
+	memory_bfree(
+		&agent->memory_context,
+		cp_device,
+		sizeof(struct cp_device_vxlan)
+	);
+}
+
+struct cp_device_vxlan_config *
+cp_device_vxlan_config_new(
+	const char *name,
+	uint64_t input_count,
+	uint64_t output_count,
+	const struct cp_device_vxlan_settings *settings,
+	yanet_error **err
+) {
+	struct cp_device_vxlan_config *cp_device_vxlan_config =
+		(struct cp_device_vxlan_config *)malloc(
+			sizeof(struct cp_device_vxlan_config)
+		);
+	if (cp_device_vxlan_config == NULL) {
+		yanet_error_add(err, "memory allocation failed");
+		return NULL;
+	}
+
+	if (cp_device_config_init(
+		    &cp_device_vxlan_config->cp_device_config,
+		    "vxlan",
+		    name,
+		    input_count,
+		    output_count,
+		    err
+	    )) {
+		goto error_init;
+	}
+
+	cp_device_vxlan_config->settings = *settings;
+
+	return cp_device_vxlan_config;
+
+error_init:
+	free(cp_device_vxlan_config);
+
+	return NULL;
+}
+
+int
+cp_device_vxlan_config_set_input_pipeline(
+	struct cp_device_vxlan_config *cp_device_vxlan_config,
+	uint64_t index,
+	const char *name,
+	uint64_t weight
+) {
+	return cp_device_config_set_input_pipeline(
+		&cp_device_vxlan_config->cp_device_config, index, name, weight
+	);
+}
+
+int
+cp_device_vxlan_config_set_output_pipeline(
+	struct cp_device_vxlan_config *cp_device_vxlan_config,
+	uint64_t index,
+	const char *name,
+	uint64_t weight
+) {
+	return cp_device_config_set_output_pipeline(
+		&cp_device_vxlan_config->cp_device_config, index, name, weight
+	);
+}
+
+void
+cp_device_vxlan_config_free(
+	struct cp_device_vxlan_config *cp_device_vxlan_config
+) {
+	cp_device_config_fini(&cp_device_vxlan_config->cp_device_config);
+	free(cp_device_vxlan_config);
+}

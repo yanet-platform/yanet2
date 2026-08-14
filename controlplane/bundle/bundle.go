@@ -12,6 +12,7 @@ import (
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	trafgen "github.com/yanet-platform/yanet2/devices/trafgen/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
+	vxlan "github.com/yanet-platform/yanet2/devices/vxlan/controlplane"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
@@ -187,6 +188,13 @@ func buildServices(
 			Configured: devicesCfg.Trafgen.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
 				return trafgen.NewTrafgenDevice(devicesCfg.Trafgen.Unwrap(), trafgen.WithLog(log))
+			},
+		},
+		{
+			Name:       "vxlan device",
+			Configured: devicesCfg.Vxlan.Unwrap() != nil,
+			New: func() (gateway.Service, error) {
+				return vxlan.NewDeviceVxlanDevice(devicesCfg.Vxlan.Unwrap(), vxlan.WithLog(log))
 			},
 		},
 	}
