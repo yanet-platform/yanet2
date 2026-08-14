@@ -17,7 +17,7 @@ jobs:
     name: Review the pull request diff with GLM
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,27 +100,51 @@ jobs:
           If you find nothing significant, say so in one sentence.
 
           Repository conventions:
-          $conventions"
+          $conventions
+
+          /no_think"
 
           payload=$(jq -n \
             --arg model "$GLM_MODEL" \
             --arg system "$system" \
             --arg user "$user" \
-            '{model: $model, max_tokens: 16384, thinking: {type: "disabled"}, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')
+            '{model: $model, max_tokens: 65536, thinking: {type: "disabled"}, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')
 
-          if ! response=$(curl -sS --fail-with-body --max-time 900 \
-            -H "Authorization: Bearer $GLM_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            "$GLM_API_URL"); then
-            echo "GLM API request failed:" >&2
-            printf '%s\n' "$response" >&2
-            exit 1
+          review=""
+          api_error="unknown error"
+          for attempt in 1 2 3; do
+            echo "Requesting GLM review, attempt $attempt of 3."
+            if response=$(curl -sS --fail-with-body --max-time 600 \
+              -H "Authorization: Bearer $GLM_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "$payload" \
+              "$GLM_API_URL"); then
+              if review=$(jq -er '.choices[0].message.content | select(type == "string" and length > 0)' <<<"$response" 2>/dev/null); then
+                break
+              fi
+              api_error=$(jq -r '"finish_reason " + (.choices[0].finish_reason // "unknown") + ", " + ((.usage.completion_tokens // 0) | tostring) + " completion tokens"' <<<"$response" 2>/dev/null) || api_error="unparseable response"
+              echo "Attempt $attempt: model returned no review content ($api_error)." >&2
+              printf '%s\n' "$response" >&2
+            else
+              api_error="curl exit $?"
+              echo "Attempt $attempt: API request failed ($api_error)." >&2
+              printf '%s\n' "$response" >&2
+            fi
+            review=""
+            if [ "$attempt" -lt 3 ]; then
+              sleep 20
+            fi
+          done
+
+          if [ -z "$review" ]; then
+            review="**The GLM review is unavailable for this push.** The API returned no review content after 3 attempts (last attempt: $api_error). The bot degrades to this notice instead of failing required checks; see the workflow run log for the full responses."
           fi
-          if ! review=$(jq -er '.choices[0].message.content | select(type == "string" and length > 0)' <<<"$response"); then
-            echo "Unexpected GLM API response:" >&2
-            printf '%s\n' "$response" >&2
-            exit 1
+
+          max_chars=60000
+          if [ "${#review}" -gt "$max_chars" ]; then
+            review="${review:0:$max_chars}
+
+          The review was truncated to ${max_chars} characters to fit the GitHub comment limit."
           fi
 
           marker="<!-- yanet-glm-review -->"
