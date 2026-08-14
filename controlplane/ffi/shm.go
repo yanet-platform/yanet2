@@ -97,28 +97,6 @@ func (m *SharedMemory) AgentAttach(
 	return &Agent{name: name, ptr: ptr}, nil
 }
 
-// AgentsAttach attaches agents to shared memory on the specified list of instances.
-func (m *SharedMemory) AgentsAttach(
-	name string,
-	instanceIndices []uint32,
-	size datasize.ByteSize,
-) ([]*Agent, error) {
-	agents := make([]*Agent, 0, len(instanceIndices))
-	for _, instanceIdx := range instanceIndices {
-		agent, err := m.AgentAttach(name, instanceIdx, size)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to connect to shared memory on instance %d: %w",
-				instanceIdx,
-				err,
-			)
-		}
-
-		agents = append(agents, agent)
-	}
-	return agents, nil
-}
-
 // DPConfig represents a handle to dataplane configuration.
 type DPConfig struct {
 	ptr *C.struct_dp_config
