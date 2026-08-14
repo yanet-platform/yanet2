@@ -138,22 +138,46 @@ pub enum DirectionArg {
     Backward,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Family {
+    /// fw4state map
+    Ipv4,
+    /// fw6state map
+    Ipv6,
+}
+
+impl Family {
+    /// Renders the family as the request's `is_ipv6` map selector.
+    pub fn is_ipv6(self) -> bool {
+        matches!(self, Self::Ipv6)
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct EntriesCmd {
     /// FWState config name
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// List IPv4 map entries
+    /// Address families to list, in the given order
     ///
-    /// Omit both flags, or pass both, to list IPv4 then IPv6.
-    #[arg(long, short = '4')]
+    /// Repeatable and comma-separated. Omit every family argument to list
+    /// IPv4 then IPv6.
+    #[arg(
+        long = "family",
+        short = 'f',
+        value_name = "FAMILY",
+        value_enum,
+        value_delimiter = ','
+    )]
+    pub families: Vec<Family>,
+
+    /// Shorthand for --family ipv4
+    #[arg(long, short = '4', conflicts_with = "families")]
     pub ipv4: bool,
 
-    /// List IPv6 map entries
-    ///
-    /// Omit both flags, or pass both, to list IPv4 then IPv6.
-    #[arg(long, short = '6')]
+    /// Shorthand for --family ipv6
+    #[arg(long, short = '6', conflicts_with = "families")]
     pub ipv6: bool,
 
     /// Layer index to iterate (0 = active layer)
@@ -190,12 +214,27 @@ pub struct EntriesCmd {
 }
 
 impl EntriesCmd {
-    /// Returns which maps to list: `false` is IPv4, `true` is IPv6.
-    pub fn ipv6_maps(&self) -> &'static [bool] {
+    /// Returns the maps to list, in listing order.
+    ///
+    /// A repeated family collapses onto its first occurrence, so `--family
+    /// ipv4,ipv4` reads one map rather than dumping it twice. The shorthand
+    /// flags conflict with `--family`, so only one of the two sources is
+    /// ever populated.
+    pub fn families(&self) -> Vec<Family> {
+        if !self.families.is_empty() {
+            let mut families = Vec::with_capacity(self.families.len());
+            for family in self.families.iter().copied() {
+                if !families.contains(&family) {
+                    families.push(family);
+                }
+            }
+            return families;
+        }
+
         match (self.ipv4, self.ipv6) {
-            (true, false) => &[false],
-            (false, true) => &[true],
-            _ => &[false, true],
+            (true, false) => vec![Family::Ipv4],
+            (false, true) => vec![Family::Ipv6],
+            _ => vec![Family::Ipv4, Family::Ipv6],
         }
     }
 }
@@ -240,16 +279,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ipv6_maps_from_flags() {
-        let cases: [(&[&str], &[bool]); 4] = [
-            (&["entries", "--name", "x"], &[false, true]),
-            (&["entries", "--name", "x", "--ipv4"], &[false]),
-            (&["entries", "--name", "x", "--ipv6"], &[true]),
-            (&["entries", "--name", "x", "--ipv4", "--ipv6"], &[false, true]),
+    fn families_from_args() {
+        let both = &[Family::Ipv4, Family::Ipv6][..];
+        let cases: [(&[&str], &[Family]); 8] = [
+            (&["entries", "--name", "x"], both),
+            (&["entries", "--name", "x", "--ipv4"], &[Family::Ipv4]),
+            (&["entries", "--name", "x", "--ipv6"], &[Family::Ipv6]),
+            (&["entries", "--name", "x", "--ipv4", "--ipv6"], both),
+            (&["entries", "--name", "x", "--family", "ipv6"], &[Family::Ipv6]),
+            (&["entries", "--name", "x", "-f", "ipv4,ipv6"], both),
+            // The listing follows the requested order, and a repeat reads
+            // the map once rather than dumping it twice.
+            (
+                &["entries", "--name", "x", "-f", "ipv6", "-f", "ipv4"],
+                &[Family::Ipv6, Family::Ipv4],
+            ),
+            (&["entries", "--name", "x", "-f", "ipv4,ipv4"], &[Family::Ipv4]),
         ];
         for (args, want) in cases {
             let cmd = EntriesCmd::try_parse_from(args).unwrap();
-            assert_eq!(want, cmd.ipv6_maps(), "{args:?}");
+            assert_eq!(want, cmd.families(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn shorthand_conflicts_with_family() {
+        let args = ["entries", "--name", "x", "--family", "ipv6", "--ipv4"];
+        assert!(EntriesCmd::try_parse_from(args).is_err());
     }
 }

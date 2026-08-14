@@ -4,7 +4,7 @@ use core::{
 };
 use std::collections::HashMap;
 
-use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
+use args::{DeleteCmd, DirectionArg, EntriesCmd, Family, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, IpAddress, MacAddress, Metric as ProtoMetric};
@@ -354,11 +354,11 @@ impl FWStateService {
         let limit = cmd.count;
         let mut state = DumpState::new();
 
-        for &is_ipv6 in cmd.ipv6_maps() {
+        for family in cmd.families() {
             if limit > 0 && state.printed >= limit {
                 break;
             }
-            self.list_entries_map(&cmd, is_ipv6, direction, format, &mut state)
+            self.list_entries_map(&cmd, family, direction, format, &mut state)
                 .await?;
         }
 
@@ -375,7 +375,7 @@ impl FWStateService {
     async fn list_entries_map(
         &mut self,
         cmd: &EntriesCmd,
-        is_ipv6: bool,
+        family: Family,
         direction: Direction,
         format: CommonFormat,
         state: &mut DumpState,
@@ -386,7 +386,7 @@ impl FWStateService {
 
         let initial_req = ListEntriesRequest {
             config_name: cmd.config_name.clone(),
-            is_ipv6,
+            is_ipv6: family.is_ipv6(),
             layer_index: cmd.layer,
             include_expired: cmd.include_expired,
             direction: direction as i32,
@@ -446,7 +446,7 @@ impl FWStateService {
 
             let next_req = ListEntriesRequest {
                 config_name: cmd.config_name.clone(),
-                is_ipv6,
+                is_ipv6: family.is_ipv6(),
                 layer_index: cmd.layer,
                 include_expired: cmd.include_expired,
                 direction: direction as i32,
