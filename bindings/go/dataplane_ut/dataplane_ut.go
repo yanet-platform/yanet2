@@ -24,6 +24,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/modules/unrdup/dataplane
 #cgo LDFLAGS: -L../../../build/devices/plain/dataplane
 #cgo LDFLAGS: -L../../../build/devices/vlan/dataplane
+#cgo LDFLAGS: -L../../../build/devices/vxlan/dataplane
 #cgo LDFLAGS: -L../../../build/lib/dataplane_ut
 #cgo LDFLAGS: -L../../../build/lib/dataplane/pipeline
 #cgo LDFLAGS: -L../../../build/lib/dataplane/module
@@ -46,7 +47,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/lib/statemap
 #cgo LDFLAGS: -L../../../build/lib/l3state
 #cgo LDFLAGS: -lblackhole_dp -ll3b_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -ll3b_objects -lring_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
-#cgo LDFLAGS: -lplain_dp -lvlan_dp
+#cgo LDFLAGS: -lplain_dp -lvlan_dp -lvxlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
 #cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
@@ -136,6 +137,7 @@ keep_refs(void **ptrs) {
 
 	extern struct device *new_device_plain(void);
 	extern struct device *new_device_vlan(void);
+	extern struct device *new_device_vxlan(void);
 
 	static void *funcs[] = {
 		new_module_blackhole,
@@ -154,6 +156,7 @@ keep_refs(void **ptrs) {
 
 		new_device_plain,
 		new_device_vlan,
+		new_device_vxlan,
 	};
 
 	*ptrs = funcs;

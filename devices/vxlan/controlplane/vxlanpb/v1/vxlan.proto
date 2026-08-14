@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package devices.vxlan.controlplane.vxlanpb.v1;
+
+import "common/commonpb/v1/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/devices/vxlan/controlplane/vxlanpb/v1;vxlanpb";
+
+// DeviceVxlanService configures vxlan tunnel devices.
+//
+// UpdateDevice installs the whole configuration of one tunnel in a single
+// call: the input/output pipeline bindings and the tunnel parameters that
+// drive decapsulation on input and encapsulation on output.
+service DeviceVxlanService {
+  // UpdateDevice binds the input/output pipelines and tunnel parameters of
+  // the named device.
+  rpc UpdateDevice(UpdateDeviceVxlanRequest) returns (UpdateDeviceVxlanResponse);
+
+  // GetDevice returns the last applied configuration of the named device.
+  rpc GetDevice(GetDeviceVxlanRequest) returns (GetDeviceVxlanResponse);
+}
+
+// UpdateDeviceVxlanRequest carries the full configuration of one tunnel.
+message UpdateDeviceVxlanRequest {
+  string name = 1;
+  common.commonpb.v1.Device device = 2;
+  // VXLAN network identifier, 24 bits.
+  uint32 vni = 3;
+  // Outer UDP destination port (4789 for the IANA allocation).
+  uint32 dst_port = 4;
+  // Outer source MAC in aa:bb:cc:dd:ee:ff notation.
+  string src_mac = 5;
+  // Outer destination MAC in aa:bb:cc:dd:ee:ff notation.
+  string dst_mac = 6;
+  // Outer source IPv4 underlay address.
+  string src_ip = 7;
+  // Outer destination IPv4 underlay address.
+  string dst_ip = 8;
+}
+
+message UpdateDeviceVxlanResponse { string error = 1; }
+
+message GetDeviceVxlanRequest { string name = 1; }
+
+// GetDeviceVxlanResponse echoes the fields of the last accepted
+// UpdateDeviceVxlanRequest of the named device.
+message GetDeviceVxlanResponse {
+  string name = 1;
+  common.commonpb.v1.Device device = 2;
+  // VXLAN network identifier, 24 bits.
+  uint32 vni = 3;
+  // Outer UDP destination port (4789 for the IANA allocation).
+  uint32 dst_port = 4;
+  // Outer source MAC in aa:bb:cc:dd:ee:ff notation.
+  string src_mac = 5;
+  // Outer destination MAC in aa:bb:cc:dd:ee:ff notation.
+  string dst_mac = 6;
+  // Outer source IPv4 underlay address.
+  string src_ip = 7;
+  // Outer destination IPv4 underlay address.
+  string dst_ip = 8;
+}
