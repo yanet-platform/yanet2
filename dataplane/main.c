@@ -3,6 +3,7 @@
 
 #include <rte_version.h>
 
+#include "common/buildinfo.h"
 #include "config.h"
 #include "dataplane.h"
 #include "logging/log.h"
@@ -80,6 +81,12 @@ main(int argc, char **argv) {
 
 	// This function initializes and enables logging
 	log_enable_name("debug");
+
+	if (!build_is_optimized()) {
+		LOG(WARN,
+		    "running a non-production build (optimizations off or "
+		    "sanitizers on): throughput will be far below production");
+	}
 
 	struct dataplane_config *config;
 	FILE *config_file = fopen(config_path, "r");

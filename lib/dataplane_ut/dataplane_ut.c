@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/buildinfo.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
@@ -637,18 +638,5 @@ dataplane_ut_run_rounds(
 
 int
 dataplane_ut_build_optimized(void) {
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-	return 0;
-#endif
-#endif
-#if defined(__SANITIZE_ADDRESS__)
-	return 0;
-#else
-#if defined(__OPTIMIZE__)
-	return 1;
-#else
-	return 0;
-#endif
-#endif
+	return build_is_optimized();
 }
