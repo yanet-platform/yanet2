@@ -1,0 +1,149 @@
+name: GLM Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Review the pull request diff with GLM
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Post a GLM review comment for the diff
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+          GLM_API_URL: ${{ vars.GLM_API_URL || 'https://api.z.ai/api/coding/paas/v4/chat/completions' }}
+          GLM_MODEL: ${{ vars.GLM_MODEL || 'glm-5.2' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GLM_API_KEY" ]; then
+            echo "Secret GLM_API_KEY is not configured; skipping review."
+            exit 0
+          fi
+
+          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          git diff "$merge_base" "$HEAD_SHA" \
+            ':(exclude)package-lock.json' \
+            ':(exclude)Cargo.lock' \
+            ':(exclude)go.sum' \
+            ':(exclude)*.pb.go' \
+            ':(exclude)subprojects' \
+            > full.diff
+
+          if [ ! -s full.diff ]; then
+            echo "No reviewable changes in the diff; skipping."
+            exit 0
+          fi
+
+          max_bytes=$((256 * 1024))
+          diff_bytes=$(wc -c < full.diff)
+          truncate_note="The diff was complete."
+          if [ "$diff_bytes" -gt "$max_bytes" ]; then
+            head -c "$max_bytes" full.diff > review.diff
+            truncate_note="The diff was truncated to ${max_bytes} of ${diff_bytes} bytes; only the first part was reviewed."
+          else
+            mv full.diff review.diff
+          fi
+
+          conventions=$(cat .claude/conventions/comments.md 2>/dev/null || true)
+          added="|"
+          while IFS= read -r name; do
+            case $name in
+              *.c|*.h) conv=.claude/conventions/c.md ;;
+              *.go) conv=.claude/conventions/go.md ;;
+              *.rs) conv=.claude/conventions/rust.md ;;
+              *.ts|*.tsx) conv=.claude/conventions/ts.md ;;
+              *) continue ;;
+            esac
+            case $added in
+              *"|$conv|"*) continue ;;
+            esac
+            added="$added$conv|"
+            if [ -f "$conv" ]; then
+              conventions="$conventions
+
+          $(cat "$conv")"
+            fi
+          done < <(git diff --name-only "$merge_base" "$HEAD_SHA")
+          [ -n "$conventions" ] || conventions="(none applicable)"
+
+          stat=$(git diff --stat "$merge_base" "$HEAD_SHA" | head -n 200 || true)
+          user=$(printf 'Pull request #%s: %s\n\n%s\n\nChanged files:\n```\n%s\n```\n\nDiff:\n```diff\n%s\n```\n' \
+            "$PR_NUMBER" "$PR_TITLE" "${PR_BODY:0:2000}" "$stat" "$(cat review.diff)")
+
+          system="You are an expert code reviewer for the YANET project: a DPDK software router with a C dataplane, Go control plane, Rust CLI, and TypeScript web UI.
+          Review the pull request diff below and report only findings that matter: correctness bugs, memory safety, concurrency hazards, broken contracts, security issues, and missing test coverage for changed behavior.
+          Do not comment on formatting or style unless it violates the repository conventions provided below.
+          Answer in GitHub-flavored markdown: one short verdict line first, then findings ordered by severity, each referencing the file and the diff hunk it belongs to.
+          If you find nothing significant, say so in one sentence.
+
+          Repository conventions:
+          $conventions"
+
+          payload=$(jq -n \
+            --arg model "$GLM_MODEL" \
+            --arg system "$system" \
+            --arg user "$user" \
+            '{model: $model, max_tokens: 16384, thinking: {type: "disabled"}, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')
+
+          if ! response=$(curl -sS --fail-with-body --max-time 900 \
+            -H "Authorization: Bearer $GLM_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$GLM_API_URL"); then
+            echo "GLM API request failed:" >&2
+            printf '%s\n' "$response" >&2
+            exit 1
+          fi
+          if ! review=$(jq -er '.choices[0].message.content | select(type == "string" and length > 0)' <<<"$response"); then
+            echo "Unexpected GLM API response:" >&2
+            printf '%s\n' "$response" >&2
+            exit 1
+          fi
+
+          marker="<!-- yanet-glm-review -->"
+          body=$(printf '%s\n\n## GLM code review\n\nModel `%s` reviewed commit %s. %s Auto-generated; not a substitute for human review.\n\n%s' \
+            "$marker" "$GLM_MODEL" "${HEAD_SHA:0:12}" "$truncate_note" "$review")
+          comment=$(jq -n --arg body "$body" '{body: $body}')
+
+          existing_id=$(curl -sS \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$REPO/issues/$PR_NUMBER/comments?per_page=100&sort=updated&direction=desc" \
+            | jq -r --arg marker "$marker" '[.[] | select(.body | startswith($marker))][0].id // ""')
+
+          if [ -n "$existing_id" ]; then
+            curl -sS --fail-with-body -o /dev/null -X PATCH \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$comment" \
+              "$GITHUB_API_URL/repos/$REPO/issues/comments/$existing_id"
+          else
+            curl -sS --fail-with-body -o /dev/null -X POST \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$comment" \
+              "$GITHUB_API_URL/repos/$REPO/issues/$PR_NUMBER/comments"
+          fi
