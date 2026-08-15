@@ -107,10 +107,11 @@ dataplane_ut_run(
 );
 
 // Report whether this dataplane build is suitable for benchmarking:
-// compiled with optimizations enabled and without AddressSanitizer.
+// compiled with optimizations enabled and neither AddressSanitizer nor a
+// Meson-selected sanitizer enabled.
 //
-// Benchmarks against a debug or AddressSanitizer build produce misleading
-// numbers, so the Go harness warns when this returns 0.
+// The Go harness warns when this returns 0 because the benchmark is not
+// representative for that build.
 int
 dataplane_ut_build_optimized(void);
 

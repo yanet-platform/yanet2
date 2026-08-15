@@ -89,6 +89,7 @@ yanet_cgo_cflags = []
 yanet_cgo_ldflags = []
 b_sanitize = get_option('b_sanitize')
 if b_sanitize != 'none'
+    yanet_project_args += '-DYANET_SANITIZE'
     sanitize_flags = []
     if b_sanitize.contains('address')
         sanitize_flags += 'address'

@@ -5,7 +5,8 @@
 #include "asan.h"
 
 // Reports whether this translation unit was compiled as a production build:
-// optimizations enabled and AddressSanitizer disabled.
+// optimizations enabled and neither AddressSanitizer nor a Meson-selected
+// sanitizer enabled.
 //
 // The answer reflects the compile flags of whichever translation unit
 // includes this header, so it is only meaningful from a meson-built C
@@ -13,7 +14,7 @@
 // with its own, independent flags.
 static inline bool
 build_is_optimized(void) {
-#if defined(HAVE_ASAN)
+#if defined(HAVE_ASAN) || defined(YANET_SANITIZE)
 	return false;
 #elif defined(__OPTIMIZE__)
 	return true;
