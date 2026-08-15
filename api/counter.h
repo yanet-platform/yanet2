@@ -32,6 +32,29 @@ struct counter_handle_list {
 	struct counter_handle counters[];
 };
 
+// A counter-name filter, applied to every counter a read walks.
+struct counter_query;
+
+// Why a compile failed, a bad request apart from this side's own failure.
+enum yanet_counter_query_result {
+	YANET_COUNTER_QUERY_OK,
+	YANET_COUNTER_QUERY_REJECTED,
+	YANET_COUNTER_QUERY_NOMEM,
+};
+
+// Compile whole-name patterns in Rust regex syntax, any of which may match.
+enum yanet_counter_query_result
+yanet_counter_query_compile(
+	const char *const *patterns,
+	size_t count,
+	struct counter_query **out,
+	yanet_error **err
+);
+
+// Release a compiled query. No-op on NULL.
+void
+yanet_counter_query_free(struct counter_query *query);
+
 struct counter_handle_list *
 yanet_get_device_counters(struct dp_config *dp_config, const char *device_name);
 
@@ -59,9 +82,9 @@ yanet_get_chain_counters(
 	const char *chain_name
 );
 
-// Get module counters, optionally filtered by name. Returns the module's
-// predefined counters only; its per-rule counters live on runtime-kind
-// storages read through yanet_get_counters_by_tags.
+// Get module counters, optionally filtered by the compiled name query.
+// Returns the module's predefined counters only; its per-rule counters
+// live on runtime-kind storages read through yanet_get_counters_by_tags.
 struct counter_handle_list *
 yanet_get_module_counters(
 	struct dp_config *dp_config,
@@ -71,8 +94,7 @@ yanet_get_module_counters(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
-	const char *const *query,
-	size_t query_count
+	const struct counter_query *query
 );
 
 struct counter_handle_list *
@@ -154,9 +176,9 @@ yanet_get_counter_values(
 	uint64_t *values_out
 );
 
-// Return counters that satisfy every predicate in tags and match at
-// least one name in query. Pass tag_count == 0 to impose no per-tag
-// constraint and query_count == -1 to match any name.
+// Return counters that satisfy every predicate in tags and the compiled
+// name query. Pass tag_count == 0 to impose no per-tag constraint and a
+// NULL query to impose no name constraint.
 //
 // Each counter_tag is a predicate against the counter's tags, with
 // the check encoded in value: an empty string requires the tag to be
@@ -183,8 +205,7 @@ yanet_get_counters_by_tags(
 	struct dp_config *dp_config,
 	const struct counter_tag *tags,
 	size_t tag_count,
-	const char *const *query,
-	size_t query_count,
+	const struct counter_query *query,
 	yanet_error **err
 );
 

@@ -98,6 +98,9 @@ web/dist/
 # Ignore lock for subprojects
 subprojects/.wraplock
 
+# Cloned by meson from subprojects/regex.wrap, not a submodule
+subprojects/regex/
+
 # local env
 .envrc
 .env

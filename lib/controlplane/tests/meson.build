@@ -9,6 +9,7 @@ counters_test = executable(
   ],
   dependencies: [
     lib_dataplane_ut_dep,
+    lib_agent_counters_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,
@@ -33,6 +34,7 @@ counters_lock_test = executable(
   ],
   dependencies: [
     lib_dataplane_ut_dep,
+    lib_agent_counters_dep,
     lib_logging_dep,
     lib_errors_dep,
     lib_dev_plain_api,

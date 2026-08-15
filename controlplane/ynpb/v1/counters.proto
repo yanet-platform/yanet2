@@ -18,6 +18,7 @@ message CounterTag {
 
 message CountersByTagsRequest {
   repeated CounterTag tags = 1;
+  // Whole-name patterns in Rust regex syntax, any one of which may match.
   repeated string query = 2;
 }
 

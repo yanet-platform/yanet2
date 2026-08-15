@@ -2,16 +2,22 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strconv"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
+
+// The most name patterns one request may carry, bounding a client only.
+const maxQueryPatterns = 64
 
 // Counters is an in-process gRPC service for retrieving counters.
 type Counters struct {
@@ -143,11 +149,20 @@ func (m *Counters) Perf(
 }
 
 // ByTags returns counters grouped by tag set, filtered by the request's
-// tag and query predicates.
+// tag predicates and name patterns.
 func (m *Counters) ByTags(
 	ctx context.Context,
 	request *ynpb.CountersByTagsRequest,
 ) (*ynpb.CountersByTagsResponse, error) {
+	if len(request.GetQuery()) > maxQueryPatterns {
+		return nil, status.Errorf(
+			codes.InvalidArgument,
+			"query carries %d patterns, at most %d are accepted",
+			len(request.GetQuery()),
+			maxQueryPatterns,
+		)
+	}
+
 	reqTags := request.GetTags()
 	tags := make([]ffi.CounterTag, len(reqTags))
 	for idx, tag := range reqTags {
@@ -160,6 +175,9 @@ func (m *Counters) ByTags(
 	dpConfig := m.shm.DPConfig(m.instanceID)
 	groups, err := dpConfig.CountersByTags(tags, request.GetQuery())
 	if err != nil {
+		if errors.Is(err, ffi.ErrInvalidQuery) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		return nil, err
 	}
 
