@@ -31,23 +31,18 @@ type CAEntry struct {
 	PublicKey ssh.PublicKey
 }
 
-// caSnapshot holds an immutable set of CA entries for atomic swap.
-type caSnapshot struct {
-	entries []CAEntry
-}
-
 // CAStore stores trusted certificate authority public keys.
 type CAStore struct {
-	snapshot atomic.Pointer[caSnapshot]
+	snapshot atomic.Pointer[[]CAEntry]
 	loader   Loader
 }
 
 // NewCAStore creates a CAStore from an in-memory slice.
 func NewCAStore(entries []CAEntry) *CAStore {
-	s := &CAStore{}
-	s.snapshot.Store(&caSnapshot{entries: entries})
+	m := &CAStore{}
+	m.snapshot.Store(&entries)
 
-	return s
+	return m
 }
 
 // NewCAStoreFromLoader creates a CAStore by loading CA data from
@@ -63,22 +58,22 @@ func NewCAStoreFromLoader(loader Loader) (*CAStore, error) {
 		return nil, err
 	}
 
-	s := &CAStore{loader: loader}
-	s.snapshot.Store(&caSnapshot{entries: entries})
+	m := &CAStore{loader: loader}
+	m.snapshot.Store(&entries)
 
-	return s, nil
+	return m, nil
 }
 
 // VerifyCA cryptographically verifies that the certificate was signed by a
 // trusted CA.
 func (m *CAStore) VerifyCA(cert *ssh.Certificate) error {
-	snapshot := m.snapshot.Load()
+	entries := m.snapshot.Load()
 
 	checker := &ssh.CertChecker{
 		IsUserAuthority: func(auth ssh.PublicKey) bool {
 			authData := auth.Marshal()
 
-			for _, ca := range snapshot.entries {
+			for _, ca := range *entries {
 				if bytes.Equal(authData, ca.PublicKey.Marshal()) {
 					return true
 				}
@@ -122,7 +117,7 @@ func (m *CAStore) Reload() error {
 		return fmt.Errorf("failed to parse CA data: %w", err)
 	}
 
-	m.snapshot.Store(&caSnapshot{entries: entries})
+	m.snapshot.Store(&entries)
 
 	return nil
 }

@@ -30,7 +30,6 @@ type Authenticator struct {
 	caVerifier        CAVerifier
 	revocationChecker RevocationChecker
 	timeWindow        time.Duration
-	refreshInterval   time.Duration
 	stopCh            chan struct{}
 	log               *zap.Logger
 }
@@ -84,17 +83,23 @@ func NewAuthenticator(
 		o(options)
 	}
 
+	stopCh := make(chan struct{})
 	a := &Authenticator{
 		caVerifier:        caVerifier,
 		revocationChecker: revocationChecker,
 		timeWindow:        options.TimeWindow,
-		refreshInterval:   options.RefreshInterval,
 		log:               options.Log,
-		stopCh:            make(chan struct{}),
+		stopCh:            stopCh,
 	}
 
 	// Start periodic refresh.
-	go a.refreshLoop()
+	go runRefreshLoop(
+		caVerifier,
+		revocationChecker,
+		options.RefreshInterval,
+		stopCh,
+		options.Log,
+	)
 
 	return a
 }
@@ -138,7 +143,7 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	if err := token.checkTimestamp(time.Now(), m.timeWindow); err != nil {
+	if err := token.CheckTimestamp(time.Now(), m.timeWindow); err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
 			"sshcert token expired: %v", err,
@@ -206,7 +211,7 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	signedData := token.canonicalSignedData()
+	signedData := token.CanonicalSignedData()
 	if err := verifySignature(signedData, token.Signature, cert); err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
@@ -231,32 +236,33 @@ func (m *Authenticator) Close() {
 	close(m.stopCh)
 }
 
-// refreshLoop periodically reloads CA and KRL data.
-func (m *Authenticator) refreshLoop() {
-	ticker := time.NewTicker(m.refreshInterval)
+// runRefreshLoop periodically reloads CA and KRL data.
+func runRefreshLoop(
+	caVerifier CAVerifier,
+	revocationChecker RevocationChecker,
+	refreshInterval time.Duration,
+	stopCh <-chan struct{},
+	log *zap.Logger,
+) {
+	ticker := time.NewTicker(refreshInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-m.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
-			m.doRefresh()
+			if err := caVerifier.Reload(); err != nil {
+				log.Warn("failed to refresh CA store", zap.Error(err))
+			} else {
+				log.Info("refreshed CA store")
+			}
+
+			if err := revocationChecker.Reload(); err != nil {
+				log.Warn("failed to refresh KRL", zap.Error(err))
+			} else {
+				log.Info("refreshed KRL")
+			}
 		}
-	}
-}
-
-// doRefresh reloads CA and KRL data.
-func (m *Authenticator) doRefresh() {
-	if err := m.caVerifier.Reload(); err != nil {
-		m.log.Warn("failed to refresh CA store", zap.Error(err))
-	} else {
-		m.log.Info("refreshed CA store")
-	}
-
-	if err := m.revocationChecker.Reload(); err != nil {
-		m.log.Warn("failed to refresh KRL", zap.Error(err))
-	} else {
-		m.log.Info("refreshed KRL")
 	}
 }

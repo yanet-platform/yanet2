@@ -1,4 +1,4 @@
-package sshcert
+package sshcert_test
 
 import (
 	"encoding/base64"
@@ -7,108 +7,141 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 )
 
+func authenticateRawToken(t *testing.T, raw string) error {
+	t.Helper()
+
+	authenticator := sshcert.NewAuthenticator(
+		sshcert.NewCAStore(nil),
+		sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(time.Minute),
+	)
+	t.Cleanup(authenticator.Close)
+
+	_, err := authenticator.Authenticate(
+		t.Context(),
+		raw,
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
+	return err
+}
+
+func rawToken(t *testing.T, payload string) string {
+	t.Helper()
+
+	return "sshcert " + base64.StdEncoding.EncodeToString([]byte(payload))
+}
+
 func TestParseToken(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
-		t,
-		ca,
-		"alice",
-		1,
-		time.Now().Add(-1*time.Hour),
-		time.Now().Add(24*time.Hour),
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
+		t, ca, "alice", 1,
+		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
+	)
+	raw := signTestCertToken(
+		t, userSigner, cert, "/test.Service/Method",
+		time.Now().UnixNano(), "nonce-1",
 	)
 
-	now := time.Now()
-	raw := signCertToken(
-		t,
-		userSigner,
-		cert,
-		"/test.Service/Method",
-		now.UnixNano(),
-		"nonce-1",
+	authenticator := sshcert.NewAuthenticator(
+		sshcert.NewCAStore([]sshcert.CAEntry{{PublicKey: ca.PublicKey()}}),
+		sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(time.Minute),
 	)
+	t.Cleanup(authenticator.Close)
 
-	token, err := parseToken(raw)
+	authInfo, err := authenticator.Authenticate(
+		t.Context(), raw,
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.NoError(t, err)
-	assert.Equal(t, tokenVersion, token.Version)
-	assert.NotEmpty(t, token.Certificate)
-	assert.Equal(t, "/test.Service/Method", token.Method)
-	assert.Equal(t, "nonce-1", token.Nonce)
-	assert.NotEmpty(t, token.Signature)
+	assert.Equal(t, "alice", authInfo.Username)
 }
 
 func TestParseToken_WrongPrefix(t *testing.T) {
-	_, err := parseToken("sshkey dGVzdA==")
-	require.ErrorIs(t, err, ErrInvalidTokenPrefix)
+	err := authenticateRawToken(t, "sshkey dGVzdA==")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sshcert.ErrInvalidTokenPrefix.Error())
 }
 
 func TestParseToken_InvalidBase64(t *testing.T) {
-	_, err := parseToken("sshcert !!!invalid-base64!!!")
+	err := authenticateRawToken(t, "sshcert !!!invalid-base64!!!")
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid base64 encoding")
 }
 
 func TestParseToken_InvalidJSON(t *testing.T) {
-	raw := "sshcert " + base64.StdEncoding.EncodeToString(
-		[]byte("not-json"),
-	)
-	_, err := parseToken(raw)
+	err := authenticateRawToken(t, rawToken(t, "not-json"))
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid JSON payload")
 }
 
 func TestParseToken_UnsupportedVersion(t *testing.T) {
 	payload := `{"version":99,"certificate":"c","timestamp":1,"nonce":"n","method":"/m","signature":"sig"}`
-	raw := "sshcert " + base64.StdEncoding.EncodeToString(
-		[]byte(payload),
-	)
-
-	_, err := parseToken(raw)
-	require.ErrorIs(t, err, ErrUnsupportedVersion)
+	err := authenticateRawToken(t, rawToken(t, payload))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sshcert.ErrUnsupportedVersion.Error())
 }
 
 func TestParseToken_EmptyCertificate(t *testing.T) {
 	payload := `{"version":1,"certificate":"","timestamp":1,"nonce":"n","method":"/m","signature":"sig"}`
-	raw := "sshcert " + base64.StdEncoding.EncodeToString(
-		[]byte(payload),
-	)
-
-	_, err := parseToken(raw)
-	require.ErrorIs(t, err, ErrEmptyCertificate)
+	err := authenticateRawToken(t, rawToken(t, payload))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sshcert.ErrEmptyCertificate.Error())
 }
 
 func TestParseToken_EmptyNonce(t *testing.T) {
 	payload := `{"version":1,"certificate":"c","timestamp":1,"nonce":"","method":"/m","signature":"sig"}`
-	raw := "sshcert " + base64.StdEncoding.EncodeToString(
-		[]byte(payload),
-	)
-
-	_, err := parseToken(raw)
-	require.ErrorIs(t, err, ErrEmptyNonce)
+	err := authenticateRawToken(t, rawToken(t, payload))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sshcert.ErrEmptyNonce.Error())
 }
 
 func TestParseToken_EmptyMethod(t *testing.T) {
 	payload := `{"version":1,"certificate":"c","timestamp":1,"nonce":"n","method":"","signature":"sig"}`
-	raw := "sshcert " + base64.StdEncoding.EncodeToString(
-		[]byte(payload),
-	)
-
-	_, err := parseToken(raw)
-	require.ErrorIs(t, err, ErrEmptyMethod)
+	err := authenticateRawToken(t, rawToken(t, payload))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sshcert.ErrEmptyMethod.Error())
 }
 
 func TestParseToken_EmptySignature(t *testing.T) {
 	payload := `{"version":1,"certificate":"c","timestamp":1,"nonce":"n","method":"/m","signature":""}`
-	raw := "sshcert " + base64.StdEncoding.EncodeToString(
-		[]byte(payload),
+	err := authenticateRawToken(t, rawToken(t, payload))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sshcert.ErrEmptySignature.Error())
+}
+
+func TestToken_CanonicalSignedDataAuthenticates(t *testing.T) {
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
+		t, ca, "alice", 1,
+		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
+	)
+	raw := signTestCertToken(
+		t, userSigner, cert, "/test.Service/Method",
+		time.Now().UnixNano(), "nonce-1",
 	)
 
-	_, err := parseToken(raw)
-	require.ErrorIs(t, err, ErrEmptySignature)
+	authenticator := sshcert.NewAuthenticator(
+		sshcert.NewCAStore([]sshcert.CAEntry{{PublicKey: ca.PublicKey()}}),
+		sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(time.Minute),
+	)
+	t.Cleanup(authenticator.Close)
+
+	_, err := authenticator.Authenticate(
+		t.Context(), raw,
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
+	require.NoError(t, err)
 }
 
 func TestToken_CanonicalSignedData(t *testing.T) {
-	token := &Token{
+	token := &sshcert.Token{
 		Version:     1,
 		Certificate: "cert-data",
 		Timestamp:   1234567890,
@@ -119,5 +152,5 @@ func TestToken_CanonicalSignedData(t *testing.T) {
 	expected := "version=1\ncertificate=cert-data\n" +
 		"timestamp=1234567890\nnonce=test-nonce\n" +
 		"method=/test.Service/Method"
-	assert.Equal(t, expected, string(token.canonicalSignedData()))
+	assert.Equal(t, expected, string(token.CanonicalSignedData()))
 }

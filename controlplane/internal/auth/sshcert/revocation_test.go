@@ -1,4 +1,4 @@
-package sshcert
+package sshcert_test
 
 import (
 	"testing"
@@ -6,11 +6,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/krl"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 )
 
 func TestRevocationChecker_Revoked(t *testing.T) {
-	ca := generateCA(t)
-	cert, _ := generateUserCert(
+	ca := generateTestCA(t)
+	cert, _ := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -19,18 +21,18 @@ func TestRevocationChecker_Revoked(t *testing.T) {
 		time.Now().Add(24*time.Hour),
 	)
 
-	krlData := buildKRL(t, ca, []uint64{42})
+	krlData := buildTestKRL(t, ca, []uint64{42})
 	k, err := krl.ParseKRL(krlData)
 	require.NoError(t, err)
 
-	checker := NewKRLRevocationChecker(k)
+	checker := sshcert.NewKRLRevocationChecker(k)
 	err = checker.IsRevoked(cert)
-	require.ErrorIs(t, err, ErrCertRevoked)
+	require.ErrorIs(t, err, sshcert.ErrCertRevoked)
 }
 
 func TestRevocationChecker_NotRevoked(t *testing.T) {
-	ca := generateCA(t)
-	cert, _ := generateUserCert(
+	ca := generateTestCA(t)
+	cert, _ := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -40,11 +42,11 @@ func TestRevocationChecker_NotRevoked(t *testing.T) {
 	)
 
 	// Revoke serial 99, not 42.
-	krlData := buildKRL(t, ca, []uint64{99})
+	krlData := buildTestKRL(t, ca, []uint64{99})
 	k, err := krl.ParseKRL(krlData)
 	require.NoError(t, err)
 
-	checker := NewKRLRevocationChecker(k)
+	checker := sshcert.NewKRLRevocationChecker(k)
 	err = checker.IsRevoked(cert)
 	require.NoError(t, err)
 }

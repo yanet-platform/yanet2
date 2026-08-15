@@ -101,7 +101,7 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	if err := token.checkTimestamp(time.Now(), m.timeWindow); err != nil {
+	if err := token.CheckTimestamp(time.Now(), m.timeWindow); err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated, "sshkey token expired: %v", err,
 		)
@@ -125,7 +125,7 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	signedData := token.canonicalSignedData()
+	signedData := token.CanonicalSignedData()
 	if err := verifySignature(signedData, token.Signature, publicKeys); err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated, "signature verification failed: %v", err,

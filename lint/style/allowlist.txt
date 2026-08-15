@@ -120,16 +120,6 @@ private:controlplane/gateway/registry.go:BackendRegistry.Renew:entry.lastSeenAt:
 private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend:1  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend:2  # legacy: encapsulate behind an exported method or field
 private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.lastSeenAt:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/authenticator.go:Authenticator.Authenticate:token.canonicalSignedData:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/authenticator.go:Authenticator.Authenticate:token.checkTimestamp:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/authenticator.go:NewAuthenticator:a.refreshLoop:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/ca_store.go:CAStore.VerifyCA:snapshot.entries:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/ca_store.go:NewCAStore:s.snapshot:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/ca_store.go:NewCAStoreFromLoader:s.snapshot:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshcert/token.go:parseToken:token.validate:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshkey/authenticator.go:Authenticator.Authenticate:token.canonicalSignedData:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshkey/authenticator.go:Authenticator.Authenticate:token.checkTimestamp:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/internal/auth/sshkey/token.go:parseToken:token.validate:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.checkLinkable:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.createLinkedHandles:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.swapLinkedHandles:1  # legacy: encapsulate behind an exported method or field
@@ -270,21 +260,6 @@ testpkg:controlplane/gateway/gateway_test.go:gateway:1  # legacy: migrate to the
 testpkg:controlplane/gateway/readiness_test.go:gateway:1  # legacy: migrate to the external test package
 testpkg:controlplane/gateway/registry_test.go:gateway:1  # legacy: migrate to the external test package
 testpkg:controlplane/gateway/runner_test.go:gateway:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/interceptor_test.go:auth:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/none/authenticator_test.go:none:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/authenticator_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/ca_store_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/certificate_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/common_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/loader_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/revocation_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/signature_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshcert/token_test.go:sshcert:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshkey/authenticator_test.go:sshkey:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshkey/common_test.go:sshkey:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshkey/key_store_test.go:sshkey:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshkey/signature_test.go:sshkey:1  # legacy: migrate to the external test package
-testpkg:controlplane/internal/auth/sshkey/token_test.go:sshkey:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/xgrpc/interceptor_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/xgrpc/method_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:devices/plain/controlplane/service_test.go:plain:1  # legacy: migrate to the external test package

@@ -54,15 +54,15 @@ func parseToken(raw string) (*Token, error) {
 		return nil, fmt.Errorf("invalid JSON payload: %w", err)
 	}
 
-	if err := token.validate(); err != nil {
+	if err := token.Validate(); err != nil {
 		return nil, err
 	}
 
 	return &token, nil
 }
 
-// validate checks token fields for correctness.
-func (m *Token) validate() error {
+// Validate checks token fields for correctness.
+func (m *Token) Validate() error {
 	if m.Version != tokenVersion {
 		return fmt.Errorf("%w: %d", ErrUnsupportedVersion, m.Version)
 	}
@@ -90,13 +90,13 @@ func (m *Token) validate() error {
 	return nil
 }
 
-// canonicalSignedData builds the canonical string that must be signed.
+// CanonicalSignedData builds the canonical string that must be signed.
 //
 // Format:
 //
 //	version={version}\nusername={username}\ntimestamp={timestamp}\n
 //	nonce={nonce}\nmethod={method}
-func (m *Token) canonicalSignedData() []byte {
+func (m *Token) CanonicalSignedData() []byte {
 	return fmt.Appendf(nil,
 		"version=%d\nusername=%s\ntimestamp=%d\nnonce=%s\nmethod=%s",
 		m.Version,
@@ -107,9 +107,9 @@ func (m *Token) canonicalSignedData() []byte {
 	)
 }
 
-// checkTimestamp verifies that the token timestamp is within the allowed
+// CheckTimestamp verifies that the token timestamp is within the allowed
 // window relative to the current time.
-func (m *Token) checkTimestamp(now time.Time, window time.Duration) error {
+func (m *Token) CheckTimestamp(now time.Time, window time.Duration) error {
 	tokenTime := time.Unix(0, m.Timestamp)
 	diff := now.Sub(tokenTime)
 

@@ -1,4 +1,4 @@
-package sshkey
+package sshkey_test
 
 import (
 	"crypto/ecdsa"
@@ -15,10 +15,12 @@ import (
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
-// generateEd25519Signer creates a new Ed25519 SSH signer.
-func generateEd25519Signer(t *testing.T) ssh.Signer {
+// generateTestEd25519Signer creates a new Ed25519 SSH signer.
+func generateTestEd25519Signer(t *testing.T) ssh.Signer {
 	t.Helper()
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -30,8 +32,8 @@ func generateEd25519Signer(t *testing.T) ssh.Signer {
 	return signer
 }
 
-// generateRSASigner creates a new RSA SSH signer.
-func generateRSASigner(t *testing.T) ssh.Signer {
+// generateTestRSASigner creates a new RSA SSH signer.
+func generateTestRSASigner(t *testing.T) ssh.Signer {
 	t.Helper()
 
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -43,8 +45,8 @@ func generateRSASigner(t *testing.T) ssh.Signer {
 	return signer
 }
 
-// generateECDSASigner creates a new ECDSA SSH signer.
-func generateECDSASigner(t *testing.T) ssh.Signer {
+// generateTestECDSASigner creates a new ECDSA SSH signer.
+func generateTestECDSASigner(t *testing.T) ssh.Signer {
 	t.Helper()
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -57,7 +59,7 @@ func generateECDSASigner(t *testing.T) ssh.Signer {
 }
 
 // signToken creates a valid signed token for testing.
-func signToken(
+func signTestToken(
 	t *testing.T,
 	signer ssh.Signer,
 	username string,
@@ -67,15 +69,15 @@ func signToken(
 ) string {
 	t.Helper()
 
-	token := &Token{
-		Version:   tokenVersion,
+	token := &sshkey.Token{
+		Version:   1,
 		Username:  username,
 		Timestamp: timestamp,
 		Nonce:     nonce,
 		Method:    method,
 	}
 
-	data := token.canonicalSignedData()
+	data := token.CanonicalSignedData()
 	sig, err := signer.Sign(rand.Reader, data)
 	require.NoError(t, err)
 
@@ -84,18 +86,7 @@ func signToken(
 	jsonBytes, err := json.Marshal(token)
 	require.NoError(t, err)
 
-	return tokenPrefix + base64.StdEncoding.EncodeToString(jsonBytes)
-}
-
-// signData signs the given data with the signer and returns the
-// base64-encoded SSH signature.
-func signData(t *testing.T, signer ssh.Signer, data []byte) string {
-	t.Helper()
-
-	sig, err := signer.Sign(rand.Reader, data)
-	require.NoError(t, err)
-
-	return base64.StdEncoding.EncodeToString(ssh.Marshal(sig))
+	return "sshkey " + base64.StdEncoding.EncodeToString(jsonBytes)
 }
 
 // requireGRPCError asserts that err is a gRPC status error with the

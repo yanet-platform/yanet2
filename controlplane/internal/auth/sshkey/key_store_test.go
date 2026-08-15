@@ -1,16 +1,18 @@
-package sshkey
+package sshkey_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
 func TestKeyStore_GetKeys(t *testing.T) {
-	signer := generateEd25519Signer(t)
+	signer := generateTestEd25519Signer(t)
 
-	store := NewKeyStore(map[string][]KeyEntry{
+	store := sshkey.NewKeyStore(map[string][]sshkey.KeyEntry{
 		"alice": {
 			{
 				PublicKey: signer.PublicKey(),
@@ -24,9 +26,9 @@ func TestKeyStore_GetKeys(t *testing.T) {
 }
 
 func TestKeyStore_DisabledKeyFiltered(t *testing.T) {
-	signer := generateEd25519Signer(t)
+	signer := generateTestEd25519Signer(t)
 
-	store := NewKeyStore(map[string][]KeyEntry{
+	store := sshkey.NewKeyStore(map[string][]sshkey.KeyEntry{
 		"alice": {
 			{
 				PublicKey: signer.PublicKey(),
@@ -41,17 +43,17 @@ func TestKeyStore_DisabledKeyFiltered(t *testing.T) {
 }
 
 func TestKeyStore_UnknownUser(t *testing.T) {
-	store := NewKeyStore(map[string][]KeyEntry{})
+	store := sshkey.NewKeyStore(map[string][]sshkey.KeyEntry{})
 
 	keys := store.GetKeys("unknown")
 	assert.Nil(t, keys)
 }
 
 func TestKeyStore_MultipleKeysPerUser(t *testing.T) {
-	signer1 := generateEd25519Signer(t)
-	signer2 := generateRSASigner(t)
+	signer1 := generateTestEd25519Signer(t)
+	signer2 := generateTestRSASigner(t)
 
-	store := NewKeyStore(map[string][]KeyEntry{
+	store := sshkey.NewKeyStore(map[string][]sshkey.KeyEntry{
 		"alice": {
 			{
 				PublicKey: signer1.PublicKey(),
@@ -69,6 +71,6 @@ func TestKeyStore_MultipleKeysPerUser(t *testing.T) {
 }
 
 func TestKeyStoreFromFile_InvalidFile(t *testing.T) {
-	_, err := NewKeyStoreFromFile("/nonexistent/path.yaml")
+	_, err := sshkey.NewKeyStoreFromFile("/nonexistent/path.yaml")
 	require.Error(t, err)
 }

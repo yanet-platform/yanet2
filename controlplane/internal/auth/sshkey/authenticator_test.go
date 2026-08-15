@@ -1,4 +1,4 @@
-package sshkey
+package sshkey_test
 
 import (
 	"context"
@@ -12,18 +12,19 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
 // setupAuthenticator creates an Authenticator with generated keys,
 // returning the authenticator and per-user signers.
-func setupAuthenticator(t *testing.T) (*Authenticator, map[string]ssh.Signer) {
+func setupAuthenticator(t *testing.T) (*sshkey.Authenticator, map[string]ssh.Signer) {
 	t.Helper()
 
-	signerAlice := generateEd25519Signer(t)
-	signerBob := generateRSASigner(t)
-	signerCharlie := generateECDSASigner(t)
+	signerAlice := generateTestEd25519Signer(t)
+	signerBob := generateTestRSASigner(t)
+	signerCharlie := generateTestECDSASigner(t)
 
-	keyStore := NewKeyStore(map[string][]KeyEntry{
+	keyStore := sshkey.NewKeyStore(map[string][]sshkey.KeyEntry{
 		"alice": {
 			{
 				PublicKey: signerAlice.PublicKey(),
@@ -44,8 +45,8 @@ func setupAuthenticator(t *testing.T) (*Authenticator, map[string]ssh.Signer) {
 		},
 	})
 
-	auth := NewAuthenticator(keyStore,
-		WithTimeWindow(5*time.Second),
+	auth := sshkey.NewAuthenticator(keyStore,
+		sshkey.WithTimeWindow(5*time.Second),
 	)
 
 	signers := map[string]ssh.Signer{
@@ -58,7 +59,7 @@ func setupAuthenticator(t *testing.T) (*Authenticator, map[string]ssh.Signer) {
 }
 
 func TestAuthenticator_IsTokenSupported(t *testing.T) {
-	auth := &Authenticator{}
+	auth := &sshkey.Authenticator{}
 
 	tests := []struct {
 		name  string
@@ -86,7 +87,7 @@ func TestAuthenticate_Ed25519(t *testing.T) {
 	method := "/test.Service/TestMethod"
 	reqInfo := &core.RequestInfo{FullMethod: method}
 
-	token := signToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
 	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
@@ -101,7 +102,7 @@ func TestAuthenticate_RSA(t *testing.T) {
 	method := "/test.Service/TestMethod"
 	reqInfo := &core.RequestInfo{FullMethod: method}
 
-	token := signToken(t, signers["bob"], "bob", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["bob"], "bob", method, now.UnixNano(), "nonce-1")
 
 	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
@@ -116,7 +117,7 @@ func TestAuthenticate_ECDSA(t *testing.T) {
 	method := "/test.Service/TestMethod"
 	reqInfo := &core.RequestInfo{FullMethod: method}
 
-	token := signToken(t, signers["charlie"], "charlie", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["charlie"], "charlie", method, now.UnixNano(), "nonce-1")
 
 	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
@@ -132,7 +133,7 @@ func TestAuthenticate_ExpiredTimestamp(t *testing.T) {
 	reqInfo := &core.RequestInfo{FullMethod: method}
 
 	oldTimestamp := now.Add(-10 * time.Second).UnixNano()
-	token := signToken(t, signers["alice"], "alice", method, oldTimestamp, "nonce-1")
+	token := signTestToken(t, signers["alice"], "alice", method, oldTimestamp, "nonce-1")
 
 	_, err := auth.Authenticate(context.Background(), token, reqInfo)
 	st, ok := status.FromError(err)
@@ -146,7 +147,7 @@ func TestAuthenticate_MethodBindingMismatch(t *testing.T) {
 	now := time.Now()
 	reqInfo := &core.RequestInfo{FullMethod: "/test.Service/TestMethod"}
 
-	token := signToken(
+	token := signTestToken(
 		t, signers["alice"], "alice",
 		"/other.Service/OtherMethod", now.UnixNano(), "nonce-1",
 	)
@@ -164,7 +165,7 @@ func TestAuthenticate_UnknownUser(t *testing.T) {
 	method := "/test.Service/TestMethod"
 	reqInfo := &core.RequestInfo{FullMethod: method}
 
-	token := signToken(t, signers["alice"], "unknown_user", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["alice"], "unknown_user", method, now.UnixNano(), "nonce-1")
 
 	_, err := auth.Authenticate(context.Background(), token, reqInfo)
 	requireGRPCError(t, err, codes.Unauthenticated,
@@ -180,7 +181,7 @@ func TestAuthenticate_WrongSignature(t *testing.T) {
 	reqInfo := &core.RequestInfo{FullMethod: method}
 
 	// Sign with bob's key but claim to be alice.
-	token := signToken(t, signers["bob"], "alice", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["bob"], "alice", method, now.UnixNano(), "nonce-1")
 
 	_, err := auth.Authenticate(context.Background(), token, reqInfo)
 	requireGRPCError(t, err, codes.Unauthenticated,
@@ -204,7 +205,7 @@ func TestAuthenticate_NilRequestInfo(t *testing.T) {
 	now := time.Now()
 	method := "/test.Service/TestMethod"
 
-	token := signToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
 	authInfo, err := auth.Authenticate(context.Background(), token, nil)
 	require.NoError(t, err)
@@ -217,7 +218,7 @@ func TestAuthenticate_EmptyFullMethod(t *testing.T) {
 	now := time.Now()
 	method := "/test.Service/TestMethod"
 
-	token := signToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
+	token := signTestToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
 	emptyReqInfo := &core.RequestInfo{}
 	authInfo, err := auth.Authenticate(context.Background(), token, emptyReqInfo)

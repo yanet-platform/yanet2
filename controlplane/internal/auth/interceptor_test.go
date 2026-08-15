@@ -1,4 +1,4 @@
-package auth
+package auth_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
@@ -56,17 +57,17 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager, err := NewManager(&Config{
+			manager, err := auth.NewManager(&auth.Config{
 				Disabled: tt.disabled,
 			})
 			require.NoError(t, err)
 
-			interceptor := UnaryServerInterceptor(manager, log)
+			interceptor := auth.UnaryServerInterceptor(manager, log)
 
 			// Create context with or without token.
 			ctx := context.Background()
 			if tt.withToken {
-				md := metadata.Pairs(authMetadataKey, tt.token)
+				md := metadata.Pairs("x-yanet-authentication", tt.token)
 				ctx = metadata.NewIncomingContext(ctx, md)
 			}
 
@@ -96,12 +97,12 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 func TestStreamServerInterceptor(t *testing.T) {
 	log := zap.NewNop()
-	manager, err := NewManager(&Config{
+	manager, err := auth.NewManager(&auth.Config{
 		Disabled: true,
 	})
 	require.NoError(t, err)
 
-	interceptor := StreamServerInterceptor(manager, log)
+	interceptor := auth.StreamServerInterceptor(manager, log)
 
 	// Create context without token.
 	ctx := context.Background()
@@ -140,7 +141,7 @@ func TestExtractToken(t *testing.T) {
 	}{
 		{
 			name: "with token",
-			md:   metadata.Pairs(authMetadataKey, "test-token"),
+			md:   metadata.Pairs("x-yanet-authentication", "test-token"),
 			want: "test-token",
 		},
 		{
@@ -150,7 +151,7 @@ func TestExtractToken(t *testing.T) {
 		},
 		{
 			name: "multiple values (first wins)",
-			md:   metadata.Pairs(authMetadataKey, "token1", authMetadataKey, "token2"),
+			md:   metadata.Pairs("x-yanet-authentication", "token1", "x-yanet-authentication", "token2"),
 			want: "token1",
 		},
 	}
@@ -158,7 +159,7 @@ func TestExtractToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := metadata.NewIncomingContext(context.Background(), tt.md)
-			got := ExtractToken(ctx)
+			got := auth.ExtractToken(ctx)
 			if got != tt.want {
 				t.Errorf("extractToken() = %q, want %q", got, tt.want)
 			}
@@ -168,7 +169,7 @@ func TestExtractToken(t *testing.T) {
 	// Test without metadata in context.
 	t.Run("no metadata", func(t *testing.T) {
 		ctx := context.Background()
-		got := ExtractToken(ctx)
+		got := auth.ExtractToken(ctx)
 		if got != "" {
 			t.Errorf("extractToken() = %q, want empty", got)
 		}

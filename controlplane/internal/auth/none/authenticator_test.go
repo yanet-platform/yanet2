@@ -1,14 +1,15 @@
-package none
+package none_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/none"
 )
 
 func TestNoneAuthenticator_IsTokenSupported(t *testing.T) {
-	auth := NewNoneAuthenticator()
+	authenticator := none.NewNoneAuthenticator()
 
 	tests := []struct {
 		name  string
@@ -29,7 +30,7 @@ func TestNoneAuthenticator_IsTokenSupported(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := auth.IsTokenSupported(tt.token); got != tt.want {
+			if got := authenticator.IsTokenSupported(tt.token); got != tt.want {
 				t.Errorf("IsTokenSupported() = %v, want %v", got, tt.want)
 			}
 		})
@@ -37,7 +38,7 @@ func TestNoneAuthenticator_IsTokenSupported(t *testing.T) {
 }
 
 func TestNoneAuthenticator_Authenticate(t *testing.T) {
-	auth := NewNoneAuthenticator()
+	authenticator := none.NewNoneAuthenticator()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -57,7 +58,7 @@ func TestNoneAuthenticator_Authenticate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
-			authInfo, err := auth.Authenticate(ctx, tt.token, requestInfo)
+			authInfo, err := authenticator.Authenticate(ctx, tt.token, requestInfo)
 			if err != nil {
 				t.Fatalf("Authenticate() error = %v, want nil", err)
 			}

@@ -1,4 +1,4 @@
-package sshcert
+package sshcert_test
 
 import (
 	"crypto/ecdsa"
@@ -12,10 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/krl"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 )
 
-// generateECDSASigner creates a new ECDSA P-256 SSH signer.
-func generateECDSASigner(t *testing.T) ssh.Signer {
+// generateTestECDSASigner creates a new ECDSA P-256 SSH signer.
+func generateTestECDSASigner(t *testing.T) ssh.Signer {
 	t.Helper()
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -27,15 +29,15 @@ func generateECDSASigner(t *testing.T) ssh.Signer {
 	return signer
 }
 
-// generateCA creates a new ECDSA P-256 CA signer.
-func generateCA(t *testing.T) ssh.Signer {
+// generateTestCA creates a new ECDSA P-256 CA signer.
+func generateTestCA(t *testing.T) ssh.Signer {
 	t.Helper()
 
-	return generateECDSASigner(t)
+	return generateTestECDSASigner(t)
 }
 
-// generateUserCert creates a signed SSH user certificate.
-func generateUserCert(
+// generateTestUserCert creates a signed SSH user certificate.
+func generateTestUserCert(
 	t *testing.T,
 	caSigner ssh.Signer,
 	username string,
@@ -45,7 +47,7 @@ func generateUserCert(
 ) (*ssh.Certificate, ssh.Signer) {
 	t.Helper()
 
-	userSigner := generateECDSASigner(t)
+	userSigner := generateTestECDSASigner(t)
 
 	cert := &ssh.Certificate{
 		CertType:        ssh.UserCert,
@@ -68,8 +70,8 @@ func generateUserCert(
 	return cert, userSigner
 }
 
-// generateHostCert creates a signed SSH host certificate.
-func generateHostCert(
+// generateTestHostCert creates a signed SSH host certificate.
+func generateTestHostCert(
 	t *testing.T,
 	caSigner ssh.Signer,
 	hostname string,
@@ -77,7 +79,7 @@ func generateHostCert(
 ) (*ssh.Certificate, ssh.Signer) {
 	t.Helper()
 
-	userSigner := generateECDSASigner(t)
+	userSigner := generateTestECDSASigner(t)
 
 	cert := &ssh.Certificate{
 		CertType:        ssh.HostCert,
@@ -102,8 +104,8 @@ func encodeCert(t *testing.T, cert *ssh.Certificate) string {
 	return base64.StdEncoding.EncodeToString(cert.Marshal())
 }
 
-// signCertToken creates a valid signed sshcert token for testing.
-func signCertToken(
+// signTestCertToken creates a valid signed sshcert token for testing.
+func signTestCertToken(
 	t *testing.T,
 	userSigner ssh.Signer,
 	cert *ssh.Certificate,
@@ -115,15 +117,15 @@ func signCertToken(
 
 	certB64 := encodeCert(t, cert)
 
-	token := &Token{
-		Version:     tokenVersion,
+	token := &sshcert.Token{
+		Version:     1,
 		Certificate: certB64,
 		Timestamp:   timestamp,
 		Nonce:       nonce,
 		Method:      method,
 	}
 
-	data := token.canonicalSignedData()
+	data := token.CanonicalSignedData()
 	sig, err := userSigner.Sign(rand.Reader, data)
 	require.NoError(t, err)
 
@@ -134,27 +136,12 @@ func signCertToken(
 	jsonBytes, err := json.Marshal(token)
 	require.NoError(t, err)
 
-	return tokenPrefix + base64.StdEncoding.EncodeToString(jsonBytes)
+	return "sshcert " + base64.StdEncoding.EncodeToString(jsonBytes)
 }
 
-// signData signs the given data with the signer and returns the
-// base64-encoded SSH signature.
-func signData(
-	t *testing.T,
-	signer ssh.Signer,
-	data []byte,
-) string {
-	t.Helper()
-
-	sig, err := signer.Sign(rand.Reader, data)
-	require.NoError(t, err)
-
-	return base64.StdEncoding.EncodeToString(ssh.Marshal(sig))
-}
-
-// buildKRL creates a KRL binary with the given revoked serials
+// buildTestKRL creates a KRL binary with the given revoked serials
 // for the given CA.
-func buildKRL(
+func buildTestKRL(
 	t *testing.T,
 	caSigner ssh.Signer,
 	revokedSerials []uint64,

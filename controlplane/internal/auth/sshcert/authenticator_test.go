@@ -1,4 +1,4 @@
-package sshcert
+package sshcert_test
 
 import (
 	"context"
@@ -12,27 +12,28 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 )
 
 func TestAuthenticator_Name(t *testing.T) {
-	ca := generateCA(t)
-	store := NewCAStore([]CAEntry{
+	ca := generateTestCA(t)
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker())
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker())
 	defer auth.Close()
 
 	assert.Equal(t, "sshcert", auth.Name())
 }
 
 func TestAuthenticator_IsTokenSupported(t *testing.T) {
-	ca := generateCA(t)
-	store := NewCAStore([]CAEntry{
+	ca := generateTestCA(t)
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker())
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker())
 	defer auth.Close()
 
 	assert.True(t, auth.IsTokenSupported("sshcert eyJ0ZXN0Ig=="))
@@ -41,24 +42,24 @@ func TestAuthenticator_IsTokenSupported(t *testing.T) {
 }
 
 func TestAuthenticator_HappyPath(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
 		t, ca, "alice", 1,
 		time.Now().Add(-1*time.Hour),
 		time.Now().Add(24*time.Hour),
 	)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker(),
-		WithTimeWindow(10*time.Second),
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t,
 		userSigner,
 		cert,
@@ -78,8 +79,8 @@ func TestAuthenticator_HappyPath(t *testing.T) {
 }
 
 func TestAuthenticator_ExpiredTimestamp(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -88,18 +89,18 @@ func TestAuthenticator_ExpiredTimestamp(t *testing.T) {
 		time.Now().Add(24*time.Hour),
 	)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker(),
-		WithTimeWindow(5*time.Second),
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(5*time.Second),
 	)
 	defer auth.Close()
 
 	// Timestamp 1 hour ago.
 	oldTimestamp := time.Now().Add(-1 * time.Hour).UnixNano()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", oldTimestamp, "nonce-1",
 	)
@@ -114,8 +115,8 @@ func TestAuthenticator_ExpiredTimestamp(t *testing.T) {
 }
 
 func TestAuthenticator_MethodBindingMismatch(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -124,17 +125,17 @@ func TestAuthenticator_MethodBindingMismatch(t *testing.T) {
 		time.Now().Add(24*time.Hour),
 	)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker(),
-		WithTimeWindow(10*time.Second),
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", now.UnixNano(), "nonce-1",
 	)
@@ -149,10 +150,10 @@ func TestAuthenticator_MethodBindingMismatch(t *testing.T) {
 }
 
 func TestAuthenticator_UntrustedCA(t *testing.T) {
-	ca := generateCA(t)
-	otherCA := generateCA(t)
+	ca := generateTestCA(t)
+	otherCA := generateTestCA(t)
 
-	cert, userSigner := generateUserCert(
+	cert, userSigner := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -162,17 +163,17 @@ func TestAuthenticator_UntrustedCA(t *testing.T) {
 	)
 
 	// Store only has otherCA.
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: otherCA.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker(),
-		WithTimeWindow(10*time.Second),
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", now.UnixNano(), "nonce-1",
 	)
@@ -187,8 +188,8 @@ func TestAuthenticator_UntrustedCA(t *testing.T) {
 }
 
 func TestAuthenticator_ExpiredCertificate(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -197,17 +198,17 @@ func TestAuthenticator_ExpiredCertificate(t *testing.T) {
 		time.Now().Add(-24*time.Hour),
 	)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(store, NewNopRevocationChecker(),
-		WithTimeWindow(10*time.Second),
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", now.UnixNano(), "nonce-1",
 	)
@@ -222,8 +223,8 @@ func TestAuthenticator_ExpiredCertificate(t *testing.T) {
 }
 
 func TestAuthenticator_RevokedCertificate(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -232,22 +233,22 @@ func TestAuthenticator_RevokedCertificate(t *testing.T) {
 		time.Now().Add(24*time.Hour),
 	)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	krlData := buildKRL(t, ca, []uint64{42})
+	krlData := buildTestKRL(t, ca, []uint64{42})
 	k, err := krl.ParseKRL(krlData)
 	require.NoError(t, err)
-	checker := NewKRLRevocationChecker(k)
+	checker := sshcert.NewKRLRevocationChecker(k)
 
-	auth := NewAuthenticator(store, checker,
-		WithTimeWindow(10*time.Second),
+	auth := sshcert.NewAuthenticator(store, checker,
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", now.UnixNano(), "nonce-1",
 	)
@@ -262,22 +263,22 @@ func TestAuthenticator_RevokedCertificate(t *testing.T) {
 }
 
 func TestAuthenticator_HostCertRejected(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateHostCert(t, ca, "host.example.com", 1)
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestHostCert(t, ca, "host.example.com", 1)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
-	auth := NewAuthenticator(
+	auth := sshcert.NewAuthenticator(
 		store,
-		NewNopRevocationChecker(),
-		WithTimeWindow(10*time.Second),
+		sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", now.UnixNano(), "nonce-1",
 	)
@@ -292,8 +293,8 @@ func TestAuthenticator_HostCertRejected(t *testing.T) {
 }
 
 func TestAuthenticator_NopRevocationChecker(t *testing.T) {
-	ca := generateCA(t)
-	cert, userSigner := generateUserCert(
+	ca := generateTestCA(t)
+	cert, userSigner := generateTestUserCert(
 		t,
 		ca,
 		"alice",
@@ -302,18 +303,18 @@ func TestAuthenticator_NopRevocationChecker(t *testing.T) {
 		time.Now().Add(24*time.Hour),
 	)
 
-	store := NewCAStore([]CAEntry{
+	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
 	})
 
 	// Nop revocation checker skips KRL check.
-	auth := NewAuthenticator(store, NewNopRevocationChecker(),
-		WithTimeWindow(10*time.Second),
+	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker(),
+		sshcert.WithTimeWindow(10*time.Second),
 	)
 	defer auth.Close()
 
 	now := time.Now()
-	rawToken := signCertToken(
+	rawToken := signTestCertToken(
 		t, userSigner, cert,
 		"/test.Service/Method", now.UnixNano(), "nonce-1",
 	)
