@@ -1,18 +1,31 @@
-package gateway
+package gateway_test
 
 import (
+	"context"
+	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
+
+const testGatewayReadinessScope = "gateway"
 
 func newTestTracker() *readiness.Tracker {
 	return readiness.NewTracker(
-		[]string{gatewayReadinessScope},
+		[]string{testGatewayReadinessScope},
 		readiness.WithDrainLatch(),
 		readiness.WithLog(zap.NewNop()),
 	)
@@ -25,7 +38,7 @@ func TestReadinessTracker_InitialState(t *testing.T) {
 	require.Len(t, resp.GetScopes(), 1)
 
 	scope := resp.GetScopes()[0]
-	require.Equal(t, "gateway", scope.GetName())
+	require.Equal(t, testGatewayReadinessScope, scope.GetName())
 	require.Equal(t, readinesspb.State_STATE_UNKNOWN, scope.GetState())
 	require.Nil(t, scope.GetObservedAt())
 	require.Nil(t, scope.GetLastTransitionTime())
@@ -33,7 +46,7 @@ func TestReadinessTracker_InitialState(t *testing.T) {
 
 func TestReadinessTracker_AfterReady(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+	tracker.Set(testGatewayReadinessScope, readinesspb.State_STATE_READY)
 
 	resp := tracker.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.GetScopes(), 1)
@@ -47,7 +60,7 @@ func TestReadinessTracker_AfterReady(t *testing.T) {
 
 func TestReadinessTracker_AfterDrain(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+	tracker.Set(testGatewayReadinessScope, readinesspb.State_STATE_READY)
 	tracker.Drain()
 
 	resp := tracker.Ready(&readinesspb.ReadyRequest{})
@@ -76,7 +89,7 @@ func TestReadinessTracker_SnapshotFilter(t *testing.T) {
 		},
 		{
 			name:        "explicit gateway filter returns gateway scope",
-			filter:      []string{"gateway"},
+			filter:      []string{testGatewayReadinessScope},
 			wantScopes:  1,
 			wantGateway: true,
 		},
@@ -90,13 +103,13 @@ func TestReadinessTracker_SnapshotFilter(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tracker := newTestTracker()
-			tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+			tracker.Set(testGatewayReadinessScope, readinesspb.State_STATE_READY)
 
 			resp := tracker.Ready(&readinesspb.ReadyRequest{Scopes: tc.filter})
 			require.Len(t, resp.GetScopes(), tc.wantScopes)
 
 			if tc.wantGateway {
-				require.Equal(t, "gateway", resp.GetScopes()[0].GetName())
+				require.Equal(t, testGatewayReadinessScope, resp.GetScopes()[0].GetName())
 			}
 		})
 	}
@@ -104,9 +117,9 @@ func TestReadinessTracker_SnapshotFilter(t *testing.T) {
 
 func TestReadinessTracker_ReadyAfterDrainIsNoop(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+	tracker.Set(testGatewayReadinessScope, readinesspb.State_STATE_READY)
 	tracker.Drain()
-	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+	tracker.Set(testGatewayReadinessScope, readinesspb.State_STATE_READY)
 
 	resp := tracker.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.GetScopes(), 1)
@@ -117,37 +130,121 @@ func TestReadinessTracker_ReadyAfterDrainIsNoop(t *testing.T) {
 	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
 }
 
-// TestNewGateway_ReadinessTrackerLatchesDrain verifies that the gateway
-// wires its readiness tracker with the drain latch, so a late Set to ready
-// after Drain cannot undo the shutdown state, and not just that the
-// underlying tracker library supports the latch.
-func TestNewGateway_ReadinessTrackerLatchesDrain(t *testing.T) {
-	cfg := DefaultConfig()
-
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = gw.Close() })
-
-	gw.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
-	gw.readinessTracker.Drain()
-	gw.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
-
-	resp := gw.readinessTracker.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp.GetScopes(), 1)
-
-	scope := resp.GetScopes()[0]
-	require.Equal(t, readinesspb.State_STATE_NOT_READY, scope.GetState())
-	require.Len(t, scope.GetReasons(), 1)
-	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
-}
-
 func TestReadinessService_Ready(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
+	tracker.Set(testGatewayReadinessScope, readinesspb.State_STATE_READY)
 
-	svc := NewReadinessService(tracker)
+	svc := gateway.NewReadinessService(tracker)
 	resp, err := svc.Ready(t.Context(), &readinesspb.ReadyRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetScopes(), 1)
 	require.Equal(t, readinesspb.State_STATE_READY, resp.GetScopes()[0].GetState())
+}
+
+type readinessLatchService struct {
+	endpoint string
+}
+
+func (m *readinessLatchService) Name() string {
+	return "readiness-latch-service"
+}
+
+func (m *readinessLatchService) Endpoint() string {
+	return m.endpoint
+}
+
+func (m *readinessLatchService) ServicesNames() []string {
+	return []string{"test.ReadinessLatchService"}
+}
+
+func (m *readinessLatchService) RegisterService(_ *grpc.Server) {}
+
+// TestGateway_Run_ReadinessDrainLatchesLateReady verifies through the public
+// run and readiness surfaces that a late READY attempt after shutdown drain
+// cannot restore the gateway's readiness state.
+func TestGateway_Run_ReadinessDrainLatchesLateReady(t *testing.T) {
+	t.Parallel()
+
+	core, observed := observer.New(zap.InfoLevel)
+	readyLogEntered := make(chan struct{})
+	releaseReadyLog := make(chan struct{})
+	var readyLogOnce sync.Once
+	var releaseReadyLogOnce sync.Once
+	releaseReadyLogFunc := func() {
+		releaseReadyLogOnce.Do(func() { close(releaseReadyLog) })
+	}
+	t.Cleanup(releaseReadyLogFunc)
+	log := zap.New(core, zap.Hooks(func(entry zapcore.Entry) error {
+		if entry.Message == "all built-in modules ready" {
+			readyLogOnce.Do(func() { close(readyLogEntered) })
+			<-releaseReadyLog
+		}
+		return nil
+	}))
+
+	listener := NewTestListener(t)
+	service := &readinessLatchService{
+		endpoint: filepath.Join(t.TempDir(), "readiness-latch.sock"),
+	}
+	gw, err := gateway.NewGateway(
+		gateway.DefaultConfig(),
+		gateway.WithLog(log),
+		gateway.WithListener(listener),
+		gateway.WithService(service),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		releaseReadyLogFunc()
+		_ = group.Wait()
+	})
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := ynpb.NewGatewayClient(conn)
+	require.Eventually(t, func() bool {
+		response, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		if listErr != nil {
+			return false
+		}
+		for _, entry := range response.GetServices() {
+			if entry.GetBackend().GetName() == "test.ReadinessLatchService" {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "service runner did not register")
+
+	select {
+	case <-readyLogEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("gateway readiness publication did not reach the log hook")
+	}
+
+	watchCtx, watchCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(watchCancel)
+	stream := watchUntilOpen(t, watchCtx, ynpb.NewReadinessServiceClient(conn))
+
+	cancel()
+	response, err := stream.Recv()
+	require.NoError(t, err)
+	require.Len(t, response.GetScopes(), 1)
+	require.Equal(t, readinesspb.State_STATE_NOT_READY, response.GetScopes()[0].GetState())
+	require.Equal(t, "SHUTTING_DOWN", response.GetScopes()[0].GetReasons()[0].GetCode())
+
+	releaseReadyLogFunc()
+	watchCancel()
+	require.NoError(t, group.Wait())
+
+	transitions := observed.FilterMessage("readiness scope transitioned").All()
+	require.Len(t, transitions, 1, "late READY must not produce a post-drain transition")
+	fields := transitions[0].ContextMap()
+	require.Equal(t, readinesspb.State_STATE_NOT_READY.String(), fields["to"])
+	require.Equal(t, "SHUTTING_DOWN", fields["reason"])
 }

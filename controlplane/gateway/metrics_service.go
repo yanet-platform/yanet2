@@ -43,7 +43,7 @@ func (m *MetricsService) GetMetrics(
 func metricsCollectors(server metricsCollector, entries []serviceEntry) []metricsCollector {
 	collectors := []metricsCollector{server}
 	for _, entry := range entries {
-		if collector, ok := entry.service.(metricsCollector); ok {
+		if collector, ok := entry.Service.(metricsCollector); ok {
 			collectors = append(collectors, collector)
 		}
 	}

@@ -95,6 +95,11 @@ func (m *ServiceRunner) Ready() <-chan struct{} {
 	return m.ready
 }
 
+// ServiceType returns the concrete service type used in runner diagnostics.
+func (m *ServiceRunner) ServiceType() string {
+	return fmt.Sprintf("%T", m.module)
+}
+
 // Close closes the underlying service if it implements ClosableService.
 func (m *ServiceRunner) Close() error {
 	if c, ok := m.module.(ClosableService); ok {

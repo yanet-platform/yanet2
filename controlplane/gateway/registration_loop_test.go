@@ -40,7 +40,7 @@ func TestGateway_RegistrationLoop_SurvivesSweepsThatEvictOneShot(t *testing.T) {
 	t.Parallel()
 
 	cfg := gateway.DefaultConfig()
-	listener := gateway.NewTestListener(t)
+	listener := NewTestListener(t)
 	cfg.Registry.TTL = xcfg.MustNonZero(time.Second)
 	cfg.Registry.SweepInterval = xcfg.MustNonZero(25 * time.Millisecond)
 

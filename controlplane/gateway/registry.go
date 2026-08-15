@@ -126,6 +126,15 @@ type BackendRegistry struct {
 	refs     map[Backend]*backendRef
 }
 
+func newBackendEntry(service string, backend Backend, kind BackendKind, lastSeenAt time.Time) BackendEntry {
+	return BackendEntry{
+		service:    service,
+		backend:    backend,
+		kind:       kind,
+		lastSeenAt: lastSeenAt,
+	}
+}
+
 // NewBackendRegistry creates a new BackendRegistry.
 func NewBackendRegistry() *BackendRegistry {
 	return &BackendRegistry{
@@ -153,7 +162,7 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, func(), boo
 		return nil, func() {}, false
 	}
 
-	ref := m.refs[entry.backend]
+	ref := m.refs[entry.GetBackend()]
 	ref.Retain()
 	m.mu.RUnlock()
 
@@ -239,19 +248,17 @@ func (m *BackendRegistry) registerBackend(service string, b Backend, kind Backen
 
 	existing, ok := m.backends[service]
 	switch {
-	case ok && existing.backend.Endpoint() == b.Endpoint():
-		existing.lastSeenAt = now
-		m.backends[service] = existing
+	case ok && m.renewLocked(service, b.Endpoint(), now):
 		if _, tracked := m.refs[b]; tracked {
 			return RegistrationRenewed, nil
 		}
 		return RegistrationRenewed, b
 	case ok:
-		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
+		m.backends[service] = newBackendEntry(service, b, kind, now)
 		m.retainLocked(b)
-		return RegistrationUpdated, m.releaseLocked(existing.backend)
+		return RegistrationUpdated, m.releaseLocked(existing.GetBackend())
 	default:
-		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
+		m.backends[service] = newBackendEntry(service, b, kind, now)
 		m.retainLocked(b)
 		return RegistrationRegistered, nil
 	}
@@ -309,14 +316,25 @@ func (m *BackendRegistry) Renew(service, endpoint string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.renewLocked(service, endpoint, time.Now().UTC())
+}
+
+// renewLocked refreshes the matching entry and reports whether it exists.
+//
+// Must be called with m.mu held for writing.
+func (m *BackendRegistry) renewLocked(service, endpoint string, now time.Time) bool {
 	entry, ok := m.backends[service]
-	if ok && entry.backend.Endpoint() == endpoint {
-		entry.lastSeenAt = time.Now().UTC()
-		m.backends[service] = entry
-		return true
+	if !ok || entry.Endpoint() != endpoint {
+		return false
 	}
 
-	return false
+	m.backends[service] = newBackendEntry(
+		entry.Service(),
+		entry.GetBackend(),
+		entry.Kind(),
+		now,
+	)
+	return true
 }
 
 // Close closes all backend connections without holding the registry lock.
@@ -395,8 +413,7 @@ func (m *BackendRegistry) ListBackends() []BackendEntry {
 	defer m.mu.RUnlock()
 
 	services := make([]BackendEntry, 0, len(m.backends))
-	for name, entry := range m.backends {
-		entry.service = name
+	for _, entry := range m.backends {
 		services = append(services, entry)
 	}
 

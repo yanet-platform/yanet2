@@ -104,22 +104,6 @@ maplit:modules/pdump/controlplane/ring_test.go:TestRingBufferRunReaders:map[byte
 maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)
 maplit:operators/route/internal/discovery/neigh/neigh.go:newOptions:map[string]string:1  # legacy: use T{} instead of make(map...)
-private:controlplane/gateway/gateway.go:Gateway.Run:runner.module:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.kind:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.kind:2  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.service:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.service:2  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.service:3  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.service:4  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/gateway.go:NewGateway:entry.service:5  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/metrics_service.go:metricsCollectors:entry.service:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.GetBackend:entry.backend:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.ListBackends:entry.service:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.Renew:entry.backend:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.Renew:entry.lastSeenAt:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend:1  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.backend:2  # legacy: encapsulate behind an exported method or field
-private:controlplane/gateway/registry.go:BackendRegistry.registerBackend:existing.lastSeenAt:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.checkLinkable:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.createLinkedHandles:1  # legacy: encapsulate behind an exported method or field
 private:modules/acl/controlplane/acl_adapter.go:ACLAdapter.LinkConfigs:m.service.swapLinkedHandles:1  # legacy: encapsulate behind an exported method or field
@@ -256,10 +240,6 @@ testpkg:common/go/xcfg/nonempty_test.go:xcfg:1  # legacy: migrate to the externa
 testpkg:common/go/xcfg/nonzero_test.go:xcfg:1  # legacy: migrate to the external test package
 testpkg:common/go/xgrpc/graceful_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:common/go/xnetip/netip_test.go:xnetip:1  # legacy: migrate to the external test package
-testpkg:controlplane/gateway/gateway_test.go:gateway:1  # legacy: migrate to the external test package
-testpkg:controlplane/gateway/readiness_test.go:gateway:1  # legacy: migrate to the external test package
-testpkg:controlplane/gateway/registry_test.go:gateway:1  # legacy: migrate to the external test package
-testpkg:controlplane/gateway/runner_test.go:gateway:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/xgrpc/interceptor_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/xgrpc/method_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:devices/plain/controlplane/service_test.go:plain:1  # legacy: migrate to the external test package

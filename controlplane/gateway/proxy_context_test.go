@@ -103,7 +103,7 @@ func startCancelProbeGateway(t *testing.T) (gatewayAddr string, entered chan str
 	t.Helper()
 
 	cfg := gateway.DefaultConfig()
-	listener := gateway.NewTestListener(t)
+	listener := NewTestListener(t)
 
 	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
 	require.NoError(t, err)

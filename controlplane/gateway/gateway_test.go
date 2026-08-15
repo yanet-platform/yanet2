@@ -1,8 +1,7 @@
-package gateway
+package gateway_test
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -51,27 +51,49 @@ func TestNewGateway_DeclaredKindsWired(t *testing.T) {
 		svcNames: []string{"test.InProcessService"},
 	}
 
-	cfg := DefaultConfig()
-	gw, err := NewGateway(cfg,
-		WithBuiltinService(builtinSvc),
-		WithService(inprocSvc),
+	cfg := gateway.DefaultConfig()
+	listener := NewTestListener(t)
+	gw, err := gateway.NewGateway(cfg, gateway.WithListener(listener),
+		gateway.WithBuiltinService(builtinSvc),
+		gateway.WithService(inprocSvc),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
-	entries := gw.registry.ListBackends()
-	kinds := map[string]BackendKind{}
-	for _, e := range entries {
-		kinds[e.Service()] = e.Kind()
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := ynpb.NewGatewayClient(conn)
+	var response *ynpb.ListServicesResponse
+	require.Eventually(t, func() bool {
+		response, err = client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "gateway did not become reachable")
+
+	kinds := map[string]ynpb.BackendKind{}
+	for _, entry := range response.GetServices() {
+		kinds[entry.GetBackend().GetName()] = entry.GetKind()
 	}
 
 	// Framework services registered with WithBuiltinService must be built-in.
-	require.Equal(t, BackendKindBuiltin, kinds["controlplane.ynpb.v1.Gateway"], "controlplane.ynpb.v1.Gateway must be built-in")
-	require.Equal(t, BackendKindBuiltin, kinds["controlplane.ynpb.v1.Auth"], "controlplane.ynpb.v1.Auth must be built-in")
-	require.Equal(t, BackendKindBuiltin, kinds["test.BuiltinService"], "WithBuiltinService must yield built-in kind")
+	require.Equal(t, ynpb.BackendKind_BACKEND_KIND_BUILTIN, kinds["controlplane.ynpb.v1.Gateway"], "controlplane.ynpb.v1.Gateway must be built-in")
+	require.Equal(t, ynpb.BackendKind_BACKEND_KIND_BUILTIN, kinds["controlplane.ynpb.v1.Auth"], "controlplane.ynpb.v1.Auth must be built-in")
+	require.Equal(t, ynpb.BackendKind_BACKEND_KIND_BUILTIN, kinds["test.BuiltinService"], "WithBuiltinService must yield built-in kind")
 
 	// Module/device services registered with WithService must be in-process.
-	require.Equal(t, BackendKindInProcess, kinds["test.InProcessService"], "WithService must yield in-process kind")
+	require.Equal(t, ynpb.BackendKind_BACKEND_KIND_IN_PROCESS, kinds["test.InProcessService"], "WithService must yield in-process kind")
+
+	cancel()
+	require.NoError(t, group.Wait())
 }
 
 // NewTestListener opens an ephemeral loopback TCP listener for a test to
@@ -163,10 +185,10 @@ func watchUntilOpen(
 func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultConfig()
+	cfg := gateway.DefaultConfig()
 	listener := NewTestListener(t)
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()), WithListener(listener))
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -206,10 +228,10 @@ func TestGateway_Run_ShutsDownWithOpenStream(t *testing.T) {
 func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultConfig()
+	cfg := gateway.DefaultConfig()
 	listener := NewTestListener(t)
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()), WithListener(listener))
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -220,17 +242,20 @@ func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
 		return gw.Run(ctx)
 	})
 
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	readinessClient := ynpb.NewReadinessServiceClient(conn)
 	require.Eventually(t, func() bool {
-		resp := gw.readinessTracker.Ready(&readinesspb.ReadyRequest{})
+		resp, readyErr := readinessClient.Ready(t.Context(), &readinesspb.ReadyRequest{})
+		if readyErr != nil {
+			return false
+		}
 		if len(resp.GetScopes()) != 1 {
 			return false
 		}
 		return resp.GetScopes()[0].GetState() == readinesspb.State_STATE_READY
 	}, 5*time.Second, 50*time.Millisecond, "gateway did not become ready")
-
-	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
 
 	watchCtx, watchCancel := context.WithCancel(t.Context())
 	t.Cleanup(watchCancel)
@@ -273,14 +298,6 @@ func TestGateway_Run_DrainsReadinessOnShutdown(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Gateway.Run did not return within the shutdown grace period")
 	}
-
-	resp := gw.readinessTracker.Ready(&readinesspb.ReadyRequest{})
-	require.Len(t, resp.GetScopes(), 1)
-
-	scope := resp.GetScopes()[0]
-	require.Equal(t, readinesspb.State_STATE_NOT_READY, scope.GetState())
-	require.Len(t, scope.GetReasons(), 1)
-	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
 }
 
 // TestGateway_Run_BindsOwnListenerWhenNoneInjected verifies that Run falls
@@ -293,10 +310,10 @@ func TestGateway_Run_BindsOwnListenerWhenNoneInjected(t *testing.T) {
 
 	occupied := NewTestListener(t)
 
-	cfg := DefaultConfig()
+	cfg := gateway.DefaultConfig()
 	cfg.Server.Endpoint = occupied.Addr().String()
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()))
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -313,10 +330,10 @@ func TestGateway_Run_BindsOwnListenerWhenNoneInjected(t *testing.T) {
 func TestGateway_Director_RegistryMissCarriesReasonTrailer(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultConfig()
+	cfg := gateway.DefaultConfig()
 	listener := NewTestListener(t)
 
-	gw, err := NewGateway(cfg, WithLog(zap.NewNop()), WithListener(listener))
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -377,7 +394,7 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	require.NoError(t, err)
 
 	gatewayServer := grpc.NewServer()
-	ynpb.RegisterGatewayServer(gatewayServer, NewGatewayService(NewBackendRegistry()))
+	ynpb.RegisterGatewayServer(gatewayServer, gateway.NewGatewayService(gateway.NewBackendRegistry()))
 
 	var gatewayGroup errgroup.Group
 	gatewayGroup.Go(func() error {
@@ -393,7 +410,7 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	})
 
 	backendAddr := filepath.Join(t.TempDir(), "runner.sock")
-	runner := NewServiceRunner(
+	runner := gateway.NewServiceRunner(
 		&blockingReadinessService{endpoint: backendAddr},
 		gatewayListener.Addr().String(),
 		nil,
@@ -432,178 +449,199 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	}
 }
 
-// TestGateway_RunRegistrySweeper_PreserveModeShortCircuits verifies that
-// PreserveStaleBackends returns immediately without touching a long-stale
-// external entry.
-func TestGateway_RunRegistrySweeper_PreserveModeShortCircuits(t *testing.T) {
+// TestGateway_RunRegistrySweeper_PreserveModeKeepsStaleExternal verifies that
+// PreserveStaleBackends keeps a registered external service visible.
+func TestGateway_RunRegistrySweeper_PreserveModeKeepsStaleExternal(t *testing.T) {
 	t.Parallel()
 
-	reg := NewBackendRegistry()
-	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
+	cfg := gateway.DefaultConfig()
+	cfg.Registry.PreserveStaleBackends = true
+	cfg.Registry.TTL = xcfg.MustNonZero(time.Millisecond)
+	cfg.Registry.SweepInterval = xcfg.MustNonZero(5 * time.Millisecond)
+	listener := NewTestListener(t)
 
-	entry := reg.backends["svc.Foo"]
-	entry.lastSeenAt = time.Now().UTC().Add(-24 * time.Hour)
-	reg.backends["svc.Foo"] = entry
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
 
-	gw := &Gateway{
-		cfg: &Config{
-			Registry: RegistryConfig{
-				PreserveStaleBackends: true,
-				TTL:                   xcfg.MustNonZero(time.Minute),
-				SweepInterval:         xcfg.MustNonZero(time.Second),
-			},
-		},
-		registry: reg,
-		log:      zap.NewNop(),
-	}
-
-	done := make(chan error, 1)
-	go func() { done <- gw.runRegistrySweeper(t.Context()) }()
-
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("runRegistrySweeper did not return promptly in preserve mode")
-	}
-
-	require.False(t, b.Closed(), "preserved backend must not be closed")
-
-	_, ok := reg.backends["svc.Foo"]
-	require.True(t, ok, "preserved entry must remain registered")
-}
-
-// TestGateway_RunRegistrySweeper_EvictsStaleExternal verifies that a stale
-// external entry is evicted and its backend closed once the sweeper's
-// ticker fires.
-func TestGateway_RunRegistrySweeper_EvictsStaleExternal(t *testing.T) {
-	t.Parallel()
-
-	reg := NewBackendRegistry()
-	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
-
-	entry := reg.backends["svc.Foo"]
-	entry.lastSeenAt = time.Now().UTC().Add(-time.Hour)
-	reg.backends["svc.Foo"] = entry
-
-	gw := &Gateway{
-		cfg: &Config{
-			Registry: RegistryConfig{
-				TTL:           xcfg.MustNonZero(time.Millisecond),
-				SweepInterval: xcfg.MustNonZero(5 * time.Millisecond),
-			},
-		},
-		registry: reg,
-		log:      zap.NewNop(),
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
 
-	done := make(chan error, 1)
-	go func() { done <- gw.runRegistrySweeper(ctx) }()
+	backendAddr, entered, results := newCancelProbeServer(t)
 
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := ynpb.NewGatewayClient(conn)
 	require.Eventually(t, func() bool {
-		return b.Closed()
-	}, time.Second, 5*time.Millisecond, "stale external backend must be evicted and closed")
+		_, err = client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "gateway did not become reachable")
 
-	cancel()
+	_, err = client.Register(t.Context(), &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+		Name: cancelProbeServiceName, Endpoint: backendAddr,
+	}})
+	require.NoError(t, err)
 
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("runRegistrySweeper did not return after cancel")
-	}
+	time.Sleep(50 * time.Millisecond)
+	response, err := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+	require.NoError(t, err)
+	services := response.GetServices()
+	require.True(t, hasService(services, cancelProbeServiceName), "preserved entry must remain registered")
 
-	_, ok := reg.backends["svc.Foo"]
-	require.False(t, ok, "evicted entry must be removed from the registry")
-}
-
-// TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack verifies that a
-// programmatic RegistryConfig with a zero SweepInterval falls back to the
-// default instead of panicking.
-//
-// A zero interval reaches time.NewTicker directly, which panics. The
-// fallback is the guard against that.
-func TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack(t *testing.T) {
-	t.Parallel()
-
-	reg := NewBackendRegistry()
-
-	gw := &Gateway{
-		cfg: &Config{
-			Registry: RegistryConfig{
-				TTL: xcfg.MustNonZero(time.Minute),
-			},
-		},
-		registry: reg,
-		log:      zap.NewNop(),
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-
-	done := make(chan error, 1)
+	invokeCtx, invokeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	invokeDone := make(chan error, 1)
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				done <- fmt.Errorf("runRegistrySweeper panicked: %v", r)
-			}
-		}()
-		done <- gw.runRegistrySweeper(ctx)
+		invokeDone <- conn.Invoke(invokeCtx, cancelProbeFullMethod, &emptypb.Empty{}, &emptypb.Empty{})
 	}()
 
 	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("runRegistrySweeper did not return after context timeout")
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("preserved backend did not receive the proxied request")
 	}
+
+	invokeCancel()
+	select {
+	case observation := <-results:
+		require.ErrorIs(t, observation.err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("preserved backend did not observe request cancellation")
+	}
+	select {
+	case invokeErr := <-invokeDone:
+		require.Equal(t, codes.Canceled, status.Code(invokeErr))
+	case <-time.After(5 * time.Second):
+		t.Fatal("proxied request did not complete after cancellation")
+	}
+
+	cancel()
+	require.NoError(t, group.Wait())
 }
 
-// TestGateway_RunRegistrySweeper_ZeroTTLFallsBack verifies that a
-// programmatic RegistryConfig with a zero TTL falls back to the default
-// instead of evicting a live entry on the first sweep.
-//
-// The sweep interval is small and positive so a sweep genuinely runs before
-// the test's deadline. The fallback TTL must still land far enough in the
-// past to spare an entry seen moments ago, or the cutoff would land at or
-// after time.Now and wipe every live backend on the first sweep.
-func TestGateway_RunRegistrySweeper_ZeroTTLFallsBack(t *testing.T) {
+// TestGateway_RunRegistrySweeper_EvictsStaleExternal verifies that the
+// gateway removes an external service after its TTL expires.
+func TestGateway_RunRegistrySweeper_EvictsStaleExternal(t *testing.T) {
 	t.Parallel()
 
-	reg := NewBackendRegistry()
-	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, BackendKindExternal)
+	cfg := gateway.DefaultConfig()
+	cfg.Registry.TTL = xcfg.MustNonZero(time.Millisecond)
+	cfg.Registry.SweepInterval = xcfg.MustNonZero(5 * time.Millisecond)
+	listener := NewTestListener(t)
 
-	gw := &Gateway{
-		cfg: &Config{
-			Registry: RegistryConfig{
-				SweepInterval: xcfg.MustNonZero(5 * time.Millisecond),
-			},
-		},
-		registry: reg,
-		log:      zap.NewNop(),
-	}
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := ynpb.NewGatewayClient(conn)
+	require.Eventually(t, func() bool {
+		_, err = client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "gateway did not become reachable")
+
+	_, err = client.Register(t.Context(), &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+		Name: "svc.Foo", Endpoint: "127.0.0.1:9000",
+	}})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		response, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		return listErr == nil && !hasService(response.GetServices(), "svc.Foo")
+	}, time.Second, 5*time.Millisecond, "stale external backend must be evicted")
+
+	cancel()
+	require.NoError(t, group.Wait())
+}
+
+// TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack verifies that a
+// zero sweep interval does not panic when Gateway.Run starts the sweeper.
+func TestGateway_RunRegistrySweeper_ZeroSweepIntervalFallsBack(t *testing.T) {
+	t.Parallel()
+
+	cfg := gateway.DefaultConfig()
+	cfg.Registry.SweepInterval = xcfg.NonZero[time.Duration]{}
+	listener := NewTestListener(t)
+
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
 
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
 
-	done := make(chan error, 1)
-	go func() { done <- gw.runRegistrySweeper(ctx) }()
+	require.NoError(t, group.Wait())
+}
 
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("runRegistrySweeper did not return after context timeout")
+// TestGateway_RunRegistrySweeper_ZeroTTLFallsBack verifies that a zero TTL
+// does not evict a live external service on the first sweep.
+func TestGateway_RunRegistrySweeper_ZeroTTLFallsBack(t *testing.T) {
+	t.Parallel()
+
+	cfg := gateway.DefaultConfig()
+	cfg.Registry.TTL = xcfg.NonZero[time.Duration]{}
+	cfg.Registry.SweepInterval = xcfg.MustNonZero(5 * time.Millisecond)
+	listener := NewTestListener(t)
+
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := ynpb.NewGatewayClient(conn)
+	require.Eventually(t, func() bool {
+		_, err = client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "gateway did not become reachable")
+
+	_, err = client.Register(t.Context(), &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+		Name: "svc.Foo", Endpoint: "127.0.0.1:9000",
+	}})
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	response, err := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+	require.NoError(t, err)
+	require.True(t, hasService(response.GetServices(), "svc.Foo"), "live entry must survive the fallback ttl")
+
+	cancel()
+	require.NoError(t, group.Wait())
+}
+
+func hasService(services []*ynpb.RegisteredBackend, name string) bool {
+	for _, service := range services {
+		if service.GetBackend().GetName() == name {
+			return true
+		}
 	}
 
-	require.False(t, b.Closed(), "live entry must survive the fallback ttl")
-
-	_, ok := reg.backends["svc.Foo"]
-	require.True(t, ok, "live entry must remain registered")
+	return false
 }

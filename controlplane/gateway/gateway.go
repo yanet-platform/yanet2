@@ -57,8 +57,8 @@ type ClosableService interface {
 
 // serviceEntry pairs a service with its declared backend kind.
 type serviceEntry struct {
-	service Service
-	kind    BackendKind
+	Service Service
+	Kind    BackendKind
 }
 
 // defaultPerServiceMethodLimit caps the number of distinct grpc_method label
@@ -96,14 +96,14 @@ type GatewayOption func(*gatewayOptions)
 // WithService adds an in-process module or device service to the Gateway.
 func WithService(service Service) GatewayOption {
 	return func(o *gatewayOptions) {
-		o.Services = append(o.Services, serviceEntry{service: service, kind: BackendKindInProcess})
+		o.Services = append(o.Services, serviceEntry{Service: service, Kind: BackendKindInProcess})
 	}
 }
 
 // WithBuiltinService adds a framework service that shares the gateway's own gRPC server.
 func WithBuiltinService(service Service) GatewayOption {
 	return func(o *gatewayOptions) {
-		o.Services = append(o.Services, serviceEntry{service: service, kind: BackendKindBuiltin})
+		o.Services = append(o.Services, serviceEntry{Service: service, Kind: BackendKindBuiltin})
 	}
 }
 
@@ -370,26 +370,26 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	var serviceRunners []*ServiceRunner
 
 	for _, entry := range opts.Services {
-		if entry.service.Endpoint() == "" {
+		if entry.Service.Endpoint() == "" {
 			// Shared-server service: register on the gateway's gRPC server and
 			// point every service name at the shared loopback backend using the
 			// declared kind.
-			entry.service.RegisterService(server)
+			entry.Service.RegisterService(server)
 
-			for _, name := range entry.service.ServicesNames() {
-				registry.RegisterBackend(name, loopback, entry.kind)
+			for _, name := range entry.Service.ServicesNames() {
+				registry.RegisterBackend(name, loopback, entry.Kind)
 				log.Info("registered service in registry",
 					zap.String("service", name),
-					zap.Stringer("kind", entry.kind),
+					zap.Stringer("kind", entry.Kind),
 				)
 			}
 		} else {
 			// Out-of-process: wrap in a ServiceRunner.
-			runner := NewServiceRunner(entry.service, endpoint, cfg.Server.TLS, WithServiceRunnerLog(log))
+			runner := NewServiceRunner(entry.Service, endpoint, cfg.Server.TLS, WithServiceRunnerLog(log))
 			serviceRunners = append(serviceRunners, runner)
 		}
 
-		services = append(services, entry.service)
+		services = append(services, entry.Service)
 	}
 
 	return &Gateway{
@@ -454,7 +454,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 
 	for _, runner := range m.serviceRunners {
 		wg.Go(func() error {
-			m.log.Info("starting out-of-process service", zap.String("service", fmt.Sprintf("%T", runner.module)))
+			m.log.Info("starting out-of-process service", zap.String("service", runner.ServiceType()))
 			return runner.Run(ctx)
 		})
 	}

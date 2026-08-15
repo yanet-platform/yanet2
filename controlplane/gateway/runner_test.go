@@ -1,6 +1,7 @@
-package gateway
+package gateway_test
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -102,8 +104,8 @@ func TestServiceRunner_registerClosesGatewayClientConnection(t *testing.T) {
 	require.NoError(t, err)
 
 	trackingListener := newConnectionTrackingListener(gatewayListener)
-	backendRegistry := NewBackendRegistry()
-	gatewayService := NewGatewayService(backendRegistry)
+	backendRegistry := gateway.NewBackendRegistry()
+	gatewayService := gateway.NewGatewayService(backendRegistry)
 
 	gatewayServer := grpc.NewServer()
 	ynpb.RegisterGatewayServer(gatewayServer, gatewayService)
@@ -117,16 +119,18 @@ func TestServiceRunner_registerClosesGatewayClientConnection(t *testing.T) {
 		_ = wg.Wait()
 	})
 
-	serviceRunner := NewServiceRunner(&fakeService{}, trackingListener.Addr().String(), nil)
+	serviceRunner := gateway.NewServiceRunner(&fakeService{}, trackingListener.Addr().String(), nil)
 
-	backendAddrListener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, backendAddrListener.Close())
-	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var runnerGroup errgroup.Group
+	runnerGroup.Go(func() error { return serviceRunner.Run(ctx) })
 
-	err = serviceRunner.register(t.Context(), backendAddrListener.Addr())
-	require.NoError(t, err)
+	select {
+	case <-serviceRunner.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("service runner did not become ready")
+	}
 
 	require.Eventually(t, func() bool {
 		return trackingListener.AcceptedCount() > 0
@@ -135,4 +139,7 @@ func TestServiceRunner_registerClosesGatewayClientConnection(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return trackingListener.ActiveCount() == 0
 	}, 2*time.Second, 25*time.Millisecond, "registration client connections were not closed")
+
+	cancel()
+	require.NoError(t, runnerGroup.Wait())
 }
