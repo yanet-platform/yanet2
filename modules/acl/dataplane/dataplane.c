@@ -204,30 +204,39 @@ acl_handle_packets(
 	 * For the second option we have to split v4 and v6 processing.
 	 */
 
-	struct packet *vlan_packets[packet_front_input_count(packet_front)];
-	uint32_t vlan_result[packet_front_input_count(packet_front)];
+	// A force-polled tick can reach this handler with an empty front, and
+	// zero-sizing every variable-length array declared below is undefined
+	// behavior. The early return is only safe because everything below is
+	// per-packet — trailing work added later must go above the guard.
+	uint64_t count = packet_front_input_count(packet_front);
+	if (count == 0) {
+		return;
+	}
+
+	struct packet *vlan_packets[count];
+	uint32_t vlan_result[count];
 	uint64_t vlan_idx = 0;
 
-	struct packet *ip4_packets[packet_front_input_count(packet_front)];
-	uint32_t ip4_result[packet_front_input_count(packet_front)];
+	struct packet *ip4_packets[count];
+	uint32_t ip4_result[count];
 	uint64_t ip4_idx = 0;
 
-	struct packet *ip4_port_packets[packet_front_input_count(packet_front)];
-	uint32_t ip4_port_result[packet_front_input_count(packet_front)];
+	struct packet *ip4_port_packets[count];
+	uint32_t ip4_port_result[count];
 	uint64_t ip4_port_idx = 0;
 
-	struct packet *ip6_packets[packet_front_input_count(packet_front)];
-	uint32_t ip6_result[packet_front_input_count(packet_front)];
+	struct packet *ip6_packets[count];
+	uint32_t ip6_result[count];
 	uint64_t ip6_idx = 0;
 
-	struct packet *ip6_port_packets[packet_front_input_count(packet_front)];
-	uint32_t ip6_port_result[packet_front_input_count(packet_front)];
+	struct packet *ip6_port_packets[count];
+	uint32_t ip6_port_result[count];
 	uint64_t ip6_port_idx = 0;
 
 	// Position of each ip6_port batch packet within the ip6 batch, filled
 	// only on the shared-classification path where every ip6_port packet
 	// is by construction also an ip6 packet.
-	uint32_t ip6_port_pos[packet_front_input_count(packet_front)];
+	uint32_t ip6_port_pos[count];
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
 	     packet != NULL;
@@ -287,17 +296,14 @@ acl_handle_packets(
 	);
 
 	if (net6_share) {
-		const uint32_t batch_count =
-			packet_front_input_count(packet_front);
-
 		struct net6_share_dir *share_src = &acl_config->net6_share_src;
 		struct net6_share_dir *share_dst = &acl_config->net6_share_dst;
 
 		// Classify each v6 address half once on the union tries.
-		uint32_t src_hi[batch_count];
-		uint32_t src_lo[batch_count];
-		uint32_t dst_hi[batch_count];
-		uint32_t dst_lo[batch_count];
+		uint32_t src_hi[count];
+		uint32_t src_lo[count];
+		uint32_t dst_hi[count];
+		uint32_t dst_lo[count];
 
 		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
 			struct rte_mbuf *mbuf =
@@ -338,8 +344,8 @@ acl_handle_packets(
 		struct net6_classifier *ip6_dst_cls = (struct net6_classifier *)
 			ADDR_OF(&acl_config->filter_ip6.v[ip6_dst_leaf].data);
 
-		uint32_t ip6_src_slots[batch_count];
-		uint32_t ip6_dst_slots[batch_count];
+		uint32_t ip6_src_slots[count];
+		uint32_t ip6_dst_slots[count];
 
 		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
 			ip6_src_slots[idx] = value_table_get(
@@ -371,8 +377,8 @@ acl_handle_packets(
 					 .data
 			);
 
-		uint32_t ip6_port_src_slots[batch_count];
-		uint32_t ip6_port_dst_slots[batch_count];
+		uint32_t ip6_port_src_slots[count];
+		uint32_t ip6_port_dst_slots[count];
 
 		for (uint64_t idx = 0; idx < ip6_port_idx; ++idx) {
 			uint32_t pos = ip6_port_pos[idx];

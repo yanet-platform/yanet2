@@ -462,3 +462,93 @@ func TestACL_Net6Share_VerdictParity_ScaleHeavy(t *testing.T) {
 	)
 	runNet6ShareVerdictParity(t, 40000, 4096, scaleCPMemory, scaleAgentMemory)
 }
+
+// TestACL_Net6Share_EmptyRoundForcePoll runs one force-polled empty round.
+//
+// It builds the shared net6 trie, then calls acl_handle_packets with an
+// empty input front. No Go-visible assertion can observe the zero-length-
+// VLA defect this accompanies: it is undefined behavior the handler never
+// indexes. This is the only test in acl's own suite that reaches an empty
+// front, and, under a sanitizer build, the only one that extends that
+// reach to the shared-classification arrays.
+func TestACL_Net6Share_EmptyRoundForcePoll(t *testing.T) {
+	const (
+		emptyRoundCPMemory    = 192 * datasize.MB
+		emptyRoundAgentMemory = 48 * datasize.MB
+	)
+
+	_, present := os.LookupEnv(net6ShareDisableEnv)
+	require.False(
+		t, present,
+		"%s is present in the ambient environment (acl_module_init_net6_share "+
+			"keys off getenv() != NULL, not the value); this test would compile "+
+			"the unshared path and cover none of the shared-classification arrays",
+		net6ShareDisableEnv,
+	)
+
+	harness, agent, backend := setupACLHarnessSized(t, []string{"port0"}, emptyRoundCPMemory, emptyRoundAgentMemory)
+	handle := applyACLRules(t, backend, "test", net6ShareEdgeCaseRules())
+	wireACLPipeline(t, agent, "port0", "test")
+
+	info := handle.GetInfo()
+	require.True(
+		t,
+		info.FilterRuleCountIp6 > 0 && info.FilterRuleCountIp6Port > 0,
+		"ruleset has filter_rule_count_ip6=%d filter_rule_count_ip6_port=%d; "+
+			"acl_module_init_net6_share returns without building the shared "+
+			"trie when either is zero, so this test would exercise only the "+
+			"unshared main-body arrays",
+		info.FilterRuleCountIp6, info.FilterRuleCountIp6Port,
+	)
+
+	result, err := harness.HandlePackets()
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "empty round must not produce output")
+	require.Empty(t, result.Drop, "empty round must not produce drops")
+
+	path := aclCounterPath("port0", "test")
+	counters := harness.SharedMemory().DPConfig(0).ModuleCounters(
+		path.Device, path.Pipeline, path.Function, path.Chain,
+		path.ModuleType, path.ModuleName, nil,
+	)
+	for name, values := range dataplaneut.ValueCounters(counters) {
+		for _, value := range values {
+			require.Zero(
+				t, value,
+				"counter %q holds %d after an empty round; today every acl "+
+					"counter stays at zero with no packet input, so this "+
+					"failing means behavior changed and is worth checking, "+
+					"not necessarily a defect",
+				name, value,
+			)
+		}
+	}
+
+	// Positive control: proves the wiring is live and that this rule set
+	// really does route through filter_ip6_port on the shared-classification
+	// path, and that the guard above did not break that non-empty path. It
+	// says nothing about the empty round itself, which this test cannot
+	// observe for the reason given above.
+	ethernetLayer := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+	ipv6Layer := layers.IPv6{
+		Version:    6,
+		HopLimit:   64,
+		NextHeader: layers.IPProtocolTCP,
+		SrcIP:      net.ParseIP("2001:db8:5::1"),
+		DstIP:      net.ParseIP("2001:db8:9::1000:1"),
+	}
+	tcpLayer := layers.TCP{SrcPort: 12345, DstPort: 8000, SYN: true}
+	require.NoError(t, tcpLayer.SetNetworkLayerForChecksum(&ipv6Layer))
+	packet := xpacket.LayersToPacket(t, &ethernetLayer, &ipv6Layer, &tcpLayer)
+	packetSize := uint64(len(packet.Data()))
+
+	result, err = harness.HandlePackets(packet)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "deep_lo_a packet must be allowed through")
+	require.Empty(t, result.Drop)
+	dataplaneut.RequireModuleCounter(t, harness, path, "deep_lo_a", 1, packetSize)
+}
