@@ -598,6 +598,42 @@ func TestMirror_MinAction(t *testing.T) {
 	dataplaneut.RequireModuleCounter(t, h, path, "ip4lose", 0, 0)
 }
 
+// TestMirror_EmptyRound verifies that a force-poll round with no packets at
+// all passes through mirror_handle_packets harmlessly.
+//
+// The empty round models a force-poll tick with no traffic: the worker
+// invokes mirror_handle_packets even though the input front is empty. This
+// cannot observe any sanitizer diagnostic on its own, so it only checks that
+// the round completes cleanly and leaves the module's state untouched.
+func TestMirror_EmptyRound(t *testing.T) {
+	rule := cmirror.MirrorRule{
+		Target:  "port0",
+		Mode:    cmirror.ModeNone,
+		Counter: "rule0",
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+	}
+
+	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
+	applyRules(t, backend, "test", []cmirror.MirrorRule{rule})
+	wireMirrorPipeline(t, agent, "port0", "test", nil)
+
+	path := dataplaneut.CounterPath{
+		Device:     "port0",
+		Pipeline:   "test",
+		Function:   "test",
+		Chain:      "test_chain",
+		ModuleType: "mirror",
+		ModuleName: "test",
+	}
+
+	result, err := h.HandlePackets()
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "empty round produces no output")
+	require.Empty(t, result.Drop, "empty round produces no drops")
+	dataplaneut.RequireModuleCounter(t, h, path, "rule0", 0, 0)
+}
+
 // TestMirrorConfigMemoryLeak verifies the block allocator returns memory once a
 // superseded mirror config generation is reclaimed.
 //
