@@ -42,12 +42,22 @@ route_mpls_handle_packets(
 		cp_module
 	);
 
-	struct packet *ip4_packets[packet_front_input_count(packet_front)];
-	uint32_t ip4_result[packet_front_input_count(packet_front)];
+	// The worker's per-tick force-poll can reach this handler with an empty
+	// front, and the arrays below would then be declared with zero length,
+	// which is undefined behavior. The early return is only safe because
+	// nothing in this handler runs after its final packet loop — any code
+	// added after that loop must run before the return.
+	uint64_t count = packet_front_input_count(packet_front);
+	if (count == 0) {
+		return;
+	}
+
+	struct packet *ip4_packets[count];
+	uint32_t ip4_result[count];
 	uint64_t ip4_idx = 0;
 
-	struct packet *ip6_packets[packet_front_input_count(packet_front)];
-	uint32_t ip6_result[packet_front_input_count(packet_front)];
+	struct packet *ip6_packets[count];
+	uint32_t ip6_result[count];
 	uint64_t ip6_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
