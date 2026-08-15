@@ -8,7 +8,7 @@ on:
 jobs:
   notify:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     env:
       Message: |
         🚀 PR created by ${{ github.actor }}:
@@ -23,7 +23,7 @@ jobs:
 
   notify_issue:
     if: github.event_name == 'issues'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     env:
       Message: |
         📝 Issue ${{ github.event.action }}:
