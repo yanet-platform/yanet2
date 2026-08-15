@@ -412,7 +412,7 @@ func (m *RouteService) UpdateFIB(
 	// materializes a range here, so its counter name is not exported.
 	nexthopCounterNames, err := module.ActiveNexthopCounterNames()
 	if err != nil {
-		// module is live, so this must never free it here — workers may
+		// The module is live, so this must never free it here — workers may
 		// dereference it. The caller retries on error and resends the
 		// whole FIB, so surfacing this one would burn a fresh config
 		// generation from the arena, the worst response to memory pressure.

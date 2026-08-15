@@ -873,7 +873,7 @@ func TestStaticRIBReadiness_ReadyWhenRoutesPresent(t *testing.T) {
 	require.NotEmpty(t, s.Reasons)
 	assert.Equal(t, "NO_ROUTES", s.Reasons[0].Code)
 
-	// bird-session scope must never have been set (still UNKNOWN).
+	// The bird-session scope must never have been set (still UNKNOWN).
 	bs := requireScope(t, tracker, "bird-session")
 	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, bs.State,
 		"bird-session must never be touched by staticRIBReadiness")
@@ -924,8 +924,8 @@ func TestStaticRIBReadiness_PostPreRunReady(t *testing.T) {
 		return helper.Run(ctx)
 	})
 
-	// 50ms is far shorter than the 500ms sample_interval — any readiness change
-	// here can only come from the entry evaluate, not a ticker tick.
+	// The 50ms interval is shorter than the 500ms sample_interval. Any readiness
+	// change here can only come from entry evaluation, not a ticker tick.
 	require.Eventually(t, func() bool {
 		s := requireScope(t, tracker, "rib")
 		return s.State == readinesspb.State_STATE_READY

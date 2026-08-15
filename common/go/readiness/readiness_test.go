@@ -183,8 +183,8 @@ func TestTracker_LastTransitionTime_OnlyChangesOnStateChange(t *testing.T) {
 	obs2 := resp2.Scopes[0].ObservedAt.AsTime()
 
 	assert.Equal(t, ltt1, ltt2, "last_transition_time must not change when state stays READY")
-	// observed_at may or may not advance depending on clock resolution. Just
-	// ensure it is not before the first observation.
+	// The observed_at value may or may not advance depending on clock
+	// resolution. The test only ensures it is not before the first observation.
 	assert.False(t, obs2.Before(obs1))
 
 	// Third observation with failure (READY -> DEGRADED): ltt must change.
@@ -469,8 +469,9 @@ func TestTracker_Log_DrainLogsPerChangedScope(t *testing.T) {
 	// Leave gw-b at UNKNOWN (no transition yet).
 	countBeforeDrain := logs.Len()
 
-	// Drain: gw-a transitions READY -> NOT_READY (logs). gw-b transitions
-	// UNKNOWN -> NOT_READY (logs). gw-b was never in NOT_READY, so it logs too.
+	// Drain: gw-a transitions READY -> NOT_READY (logs). The gw-b scope
+	// transitions UNKNOWN -> NOT_READY (logs). The gw-b scope was never in
+	// NOT_READY, so it logs too.
 	r.Drain()
 	assert.Equal(t, countBeforeDrain+2, logs.Len(),
 		"Drain must log one entry per scope that changes state")

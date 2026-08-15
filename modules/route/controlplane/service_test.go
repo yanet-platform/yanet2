@@ -767,8 +767,8 @@ func TestNexthopMetricsExactTagNeverReadsForeignCounter(t *testing.T) {
 	require.Empty(t, findMetrics(all, "route_nexthop_packets"))
 	require.Empty(t, findMetrics(all, "route_nexthop_bytes"))
 
-	// "route_forwarded_v4" names a module-level counter, which carries no
-	// "counter" label, so neither collectNexthopMetrics (whose only
+	// The "route_forwarded_v4" name identifies a module-level counter, which
+	// carries no "counter" label, so neither collectNexthopMetrics (whose only
 	// reachable name is "nexthop_my_counter") nor collectDataplaneMetrics
 	// (whose exact-tag branch never matches a per-entry read) has anything
 	// left to query.

@@ -55,7 +55,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	remoteTxHandle := counterByName["remote_tx"]
 	localTxDropsHandle := counterByName["local_tx_drops"]
 	remoteTxDropsHandle := counterByName["remote_tx_drops"]
-	// "drops" is the dataplane counter-registry name backing Disposed. A
+	// The "drops" name is the dataplane counter-registry name backing Disposed. A
 	// mismatched rename leaves dropsHandle nil, crashing the dereference below.
 	dropsHandle := counterByName["drops"]
 

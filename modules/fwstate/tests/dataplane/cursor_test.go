@@ -233,7 +233,7 @@ func TestCursorInvalidLayer(t *testing.T) {
 
 	now := uint64(GetCurrentTime())
 
-	// layer_index=99 should fail.
+	// The layer index 99 should fail.
 	_, _, err := readCursorForward(cpModule,
 		false, 99, 0, true, now, 10,
 	)

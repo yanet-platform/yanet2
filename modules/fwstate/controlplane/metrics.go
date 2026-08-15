@@ -257,8 +257,8 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 			commonpb.NewMetricCounter("fwstate_tx_packets", packets, baseLabels...),
 			commonpb.NewMetricCounter("fwstate_tx_bytes", bytes, baseLabels...),
 		}
-	// drop counts packets the module dropped itself. For fwstate this is
-	// meaningful: external sync packets are dropped when they cannot be
+	// The drop metric counts packets the module dropped itself. For fwstate,
+	// this is meaningful: external sync packets are dropped when they cannot be
 	// inserted, so it deserves a dedicated pair like the others rather than
 	// falling through to the generic arm.
 	case "drop":

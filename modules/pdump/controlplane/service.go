@@ -334,11 +334,10 @@ func (m *PdumpService) transferConfigParameters(
 func (m *PdumpService) updateModuleConfig(
 	name string,
 ) error {
-	// m.mu is held by the caller. First, terminate all active ring readers.
-	// This is crucial because changing the module configuration (via ffiConfig.AsFFIModule()
-	// and agent.UpdateModules) can lead to deallocating the shared memory
-	// used by the ring buffers. If readers were still active during or after this
-	// deallocation, they would attempt to access invalid memory, leading to segmentation faults.
+	// The caller holds m.mu while this update runs.
+	// Stop active ring readers before updating the module configuration.
+	// The update can free shared ring buffers, so readers must finish first.
+	// Otherwise they could access freed memory.
 
 	// First pass: terminate matching ring readers and wait for completion
 	for _, rr := range m.ringReaders {

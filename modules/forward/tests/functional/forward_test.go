@@ -479,7 +479,7 @@ func TestForward_ModeIn_IPv4(t *testing.T) {
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
 	applyRules(t, backend, "test", []cforward.ForwardRule{rule})
-	// port1 gets a dummy input pipeline — the re-routed packet passes through
+	// Port 1 gets a dummy input pipeline — the re-routed packet passes through
 	// it unchanged and ends up in packet_front.output.
 	wireForwardPipeline(t, agent, "port0", "test", []string{"port1"})
 
@@ -513,8 +513,8 @@ func TestForward_UnmappedDevice(t *testing.T) {
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
 
-	// "phantom" is never registered via UpdatePlainDevices. Its mc_index
-	// entry stays at the initial sentinel value of -1.
+	// The "phantom" target is never registered via UpdatePlainDevices. Its
+	// mc_index entry stays at the initial sentinel value of -1.
 	rule := cforward.ForwardRule{
 		Target:  "phantom",
 		Mode:    cforward.ModeOut,

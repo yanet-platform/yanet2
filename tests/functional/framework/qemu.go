@@ -105,7 +105,7 @@ type QEMUManager struct {
 //	}
 func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*QEMUManager, error) {
 	// Use /tmp directly to keep UNIX socket paths under the 104-byte limit.
-	// macOS TMPDIR (/var/folders/.../) is too long for socket paths.
+	// The macOS TMPDIR (/var/folders/.../) is too long for socket paths.
 	workDir, err := os.MkdirTemp("/tmp", fmt.Sprintf("yvm-%s-", name))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create work directory: %w", err)
@@ -555,7 +555,7 @@ func (q *QEMUManager) Stop() error {
 		}
 		if !alreadyExited && q.Command != nil && q.Command.Process != nil {
 			if err := q.Command.Process.Kill(); err != nil {
-				// "process already finished" is not an error here.
+				// The "process already finished" error is not an error here.
 				if !strings.Contains(err.Error(), "process already finished") {
 					errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
 				}
@@ -1082,7 +1082,7 @@ func (q *QEMUManager) SaveSnapshot(name string) error {
 		return fmt.Errorf("savevm %q failed: %w", name, err)
 	}
 	elapsed := time.Since(start)
-	// savevm prints nothing on success; any output indicates an error.
+	// The savevm command prints nothing on success. Any output indicates an error.
 	if resp != "" {
 		return fmt.Errorf("savevm %q returned unexpected output: %s", name, resp)
 	}

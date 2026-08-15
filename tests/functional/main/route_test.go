@@ -118,8 +118,8 @@ func testRoute(t *testing.T, fw *framework.TestFramework) {
 	})
 
 	fw.Run("Delete_Static_Route", func(fw *framework.TestFramework, t *testing.T) {
-		// fib update is a full atomic replacement; an empty entry set
-		// effectively removes all routes from the module.
+		// A FIB update is a full atomic replacement.
+		// An empty entry set effectively removes all routes from the module.
 		applyFIB(t, fw, routeCfgName, "clear")
 		t.Logf("Successfully cleared route FIB")
 	})

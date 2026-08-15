@@ -73,7 +73,7 @@ func Test_CheckKnownKeys_ScalarAliasIntoStructFieldNotFlagged(t *testing.T) {
 name: &n foo
 inner: *n
 `
-	// inner decodes from a scalar alias into a struct type, which is a
+	// The inner value decodes from a scalar alias into a struct type, which is a
 	// shape mismatch and must be skipped rather than flagged.
 	require.NoError(t, xcfg.CheckKnownKeys[knownKeysConfig]([]byte(input)))
 }
@@ -126,8 +126,8 @@ nodes:
 }
 
 func Test_CheckKnownKeys_ScalarUnmarshalerNotFlagged(t *testing.T) {
-	// chain is xcfg.NonEmptyString, which decodes from a bare scalar. There
-	// are no keys to check underneath it.
+	// The chain value is xcfg.NonEmptyString, which decodes from a bare scalar.
+	// No keys need checking underneath it.
 	input := `
 name: foo
 chain: some-value
@@ -233,7 +233,7 @@ name: x
 }
 
 func Test_CheckKnownKeys_UntaggedFieldLowercasedNameNotFlagged(t *testing.T) {
-	// yaml.v3 decodes an untagged field under its lowercased Go name.
+	// The yaml.v3 package decodes an untagged field under its lowercased Go name.
 	input := `
 memorypath: /dev/hugepages/yanet
 `
@@ -241,7 +241,7 @@ memorypath: /dev/hugepages/yanet
 }
 
 func Test_CheckKnownKeys_UntaggedFieldOriginalCaseFlagged(t *testing.T) {
-	// yaml.v3 silently drops this key rather than decoding it into
+	// The yaml.v3 package silently drops this key rather than decoding it into
 	// MemoryPath, so it must be reported rather than accepted.
 	input := `
 MemoryPath: /dev/hugepages/yanet

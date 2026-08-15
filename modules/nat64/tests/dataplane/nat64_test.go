@@ -275,12 +275,11 @@ func TestICMPv6EmbeddedExtFragTranslated(t *testing.T) {
 	packetID := binary.BigEndian.Uint16(embeddedIPv4[4:6])
 	fragmentOffset := binary.BigEndian.Uint16(embeddedIPv4[6:8])
 
-	// packetID and fragmentOffset pin the translator's current encoding, not
-	// RFC 7915: section 5.1.1 wants the identification's low-order 16 bits
-	// (0x5678 here), but the narrowing keeps the high-order half, and the
-	// offset is written in bytes rather than the 8-octet units the field
-	// defines. Only a fix to that narrowing or unit conversion should change
-	// these values.
+	// These values pin the translator's current encoding rather than RFC 7915.
+	// Section 5.1.1 expects the identification's low-order 16 bits, but the
+	// narrowing retains the high-order half. The offset uses bytes instead of
+	// the field's 8-octet units. Only those narrowing or unit-conversion fixes
+	// should change these values.
 	require.EqualValues(t, 0x1234, packetID, "translated embedded Fragment identification is wrong")
 	require.EqualValues(t, (2<<3)|0x2000, fragmentOffset, "translated embedded Fragment offset is wrong")
 }

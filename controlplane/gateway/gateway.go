@@ -166,7 +166,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	log := opts.Log
 	registry := NewBackendRegistry()
 
-	// endpoint is what the gateway's own loopback dial, TLS SNI host, and
+	// The endpoint is what the gateway's own loopback dial, TLS SNI host, and
 	// out-of-process service registration target. It follows the injected
 	// listener's real address when one is supplied, and cfg.Server.Endpoint
 	// otherwise, without ever mutating cfg, which the caller owns.
@@ -227,7 +227,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		return proxy.One2One, []proxy.Backend{backend}, nil
 	}
 
-	// server is assigned below, after the metrics retention predicate and
+	// The server is assigned below, after the metrics retention predicate and
 	// service filter are built. Neither reads server before Serve is called:
 	// the retention closure only reads server.GetServiceInfo() at Collect
 	// time, and serviceKnown defers its own server.GetServiceInfo() read to
@@ -235,8 +235,8 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	// registration is complete. The forward reference is safe.
 	var server *grpc.Server
 
-	// serviceKnown snapshots the gateway's own statically registered gRPC
-	// services exactly once, on first use, rather than on every call.
+	// The serviceKnown helper snapshots the gateway's own statically registered
+	// gRPC services exactly once, on first use, rather than on every call.
 	//
 	// server.GetServiceInfo() allocates a fresh map on every call, and the
 	// service filter runs on the interceptor hot path, so the snapshot is
@@ -251,7 +251,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		return known
 	})
 
-	// serviceFilter rejects any service the gateway does not know about,
+	// The serviceFilter rejects any service the gateway does not know about,
 	// stopping metric series and per-service method bookkeeping allocation
 	// at the source for unauthenticated scans against random service names.
 	// A registry backend lookup is mutex-guarded and cheap. The gateway's
@@ -264,7 +264,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		return ok
 	}
 
-	// retention keeps a series iff its grpc_service is a registry backend
+	// Retention keeps a series iff its grpc_service is a registry backend
 	// (built-in or proxied module) or is registered directly on the
 	// gateway's own gRPC server.
 	//

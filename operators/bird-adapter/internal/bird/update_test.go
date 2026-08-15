@@ -179,7 +179,7 @@ func TestDecodeUpdate(t *testing.T) {
 				2: 0x8, 0,
 				// ipv4 prefix ad LE u32
 				4: 0, 0x4, 0, 0x1,
-				// ... garbage ...
+				// ... Garbage ...
 				// update.opType
 				40: 0x1, 0, 0, 0,
 				// peer addr 16 byte as 4 LE u32 = ::1
@@ -521,7 +521,7 @@ func TestDecodeUpdate(t *testing.T) {
 }
 
 func Benchmark_update_Decode(b *testing.B) {
-	route := &rib.Route{} // memset(0)
+	route := &rib.Route{} // Zero value matches memset(0).
 	result := 0
 
 	// The production caller always supplies a logger option, so a bare call
@@ -535,9 +535,9 @@ func Benchmark_update_Decode(b *testing.B) {
 			b.Logf("unexpected error: %v", err)
 			b.FailNow()
 		}
-		*route = rib.Route{} // memset(0)
+		*route = rib.Route{} // Reset to the memset(0) state.
 		if route.Pref != 0 {
-			b.FailNow() // memset did not work?
+			b.FailNow() // The memset operation did not work?
 		}
 		decoder.Decode(route)
 		// Expected NextHop "2a02:2891:9:200::13"

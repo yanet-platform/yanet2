@@ -198,7 +198,8 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 
 	h, agent, backend := setupACLBackend(t, "pf-test")
 
-	// funcA allows every matching UDP IPv4 packet; funcB then drops them all.
+	// The funcA function allows every matching UDP IPv4 packet.
+	// The funcB function then drops them all.
 	publishMatchAllACL(t, backend, aclA, cacl.ActionAllow)
 	publishMatchAllACL(t, backend, aclB, cacl.ActionDeny)
 
@@ -247,7 +248,7 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 	require.Len(t, result.Drop, packetCount,
 		"allow-then-deny pipeline must drop all packets")
 
-	// funcB's input counter must equal N: the single-chain fast path handed
+	// The funcB input counter must equal N: the single-chain fast path handed
 	// funcA's forwarded packets to funcB intact.
 	counters := h.SharedMemory().DPConfig(0).FunctionCounters("port0", pipelineAB, aclB)
 	byName := dataplaneut.SingleValueCounters(counters)

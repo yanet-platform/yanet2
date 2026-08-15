@@ -110,7 +110,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx(t *testing.T) {
 
 	handler := httpproxy.NewHTTPHandler(singleBackendRegistry{backend: passthroughBackend{conn: conn}})
 	server := httptest.NewServer(handler)
-	// conn.Close must run before server.Close: server.Close drains the
+	// The conn.Close call must run before server.Close: server.Close drains the
 	// in-flight HTTP request, which stays outstanding until closing conn
 	// unblocks the handler goroutine parked in conn.Invoke. Registering
 	// conn's cleanup after server.Close's here puts it first under LIFO.

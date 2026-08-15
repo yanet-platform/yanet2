@@ -858,7 +858,7 @@ func buildRouteARPPacket(t *testing.T) gopacket.Packet {
 // route_drop_empty_route_list_{v4,v6} is unreachable because the backend skips
 // prefixes with no nexthops, so no packet can ever reach that outcome.
 func TestRoute_PerOutcomeCounters(t *testing.T) {
-	// phantomNextHop names a device that is never wired via
+	// The phantomNextHop name refers to a device that is never wired via
 	// UpdatePlainDevices, leaving mc_index at the sentinel (-1) so
 	// module_ectx_encode_device fails and the packet is dropped — the same
 	// construction as TestRoute_DeviceTranslation_Drop.

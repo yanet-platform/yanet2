@@ -258,8 +258,8 @@ func TestGRE(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkNewPacket_Simple(b *testing.B) {
-	// b.Loop() blocks inlining of the option constructors, charging a heap
-	// allocation per option that real callers avoid. Discarding the result is
+	// The b.Loop() call blocks inlining of the option constructors, charging a
+	// heap allocation per option that real callers avoid. Discarding the result is
 	// safe: NewPacket is too complex to inline, so the call cannot be elided.
 	for range b.N {
 		_, _ = NewPacket(nil,
@@ -271,8 +271,8 @@ func BenchmarkNewPacket_Simple(b *testing.B) {
 }
 
 func BenchmarkNewPacket_Complex(b *testing.B) {
-	// b.Loop() blocks inlining of the option constructors, charging a heap
-	// allocation per option that real callers avoid. Discarding the result is
+	// The b.Loop() call blocks inlining of the option constructors, charging a
+	// heap allocation per option that real callers avoid. Discarding the result is
 	// safe: NewPacket is too complex to inline, so the call cannot be elided.
 	for range b.N {
 		_, _ = NewPacket(nil,

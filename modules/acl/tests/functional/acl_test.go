@@ -1556,8 +1556,8 @@ func TestACL_IPv4Fragment_FirstFragment(t *testing.T) {
 	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
 	udp.SetNetworkLayerForChecksum(&ip4)
 
-	// serializeFragPacket is used because gopacket decodes this as a Fragment
-	// layer (not a UDP layer) on the receive side, which would cause
+	// The serializeFragPacket helper is used because gopacket decodes this as a
+	// Fragment layer (not a UDP layer) on the receive side, which would cause
 	// LayersToPacket to report an error layer.
 	pkt := serializeFragPacket(t, &eth, &ip4, &udp)
 
@@ -1663,7 +1663,8 @@ func TestACL_IPv4Fragment_LaterFragment_NoPortRule(t *testing.T) {
 	payload := gopacket.Payload([]byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04})
 	pkt := serializeFragPacket(t, &eth, &ip4, payload)
 
-	// allPorts for both src and dst — rule enters filter_ip4 AND filter_ip4_port.
+	// The allPorts case applies to both src and dst. The rule enters filter_ip4
+	// and filter_ip4_port.
 	// Because filter_ip4 has a lower or equal result index, the packet is
 	// allowed regardless of what the "port" bytes contain.
 	rules := []cacl.AclRule{

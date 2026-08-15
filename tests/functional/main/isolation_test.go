@@ -65,7 +65,7 @@ func testIsolation(t *testing.T, fw *framework.TestFramework) {
 		outputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 
-		// fw.Run() already reset the connection before this step, so the
+		// The fw.Run() call already reset the connection before this step, so the
 		// unread packet from Step 1 must NOT be readable on a fresh connection.
 		require.NoError(t, outputClient.Connect())
 		_, err = outputClient.ReceivePacket(100*time.Millisecond, "")

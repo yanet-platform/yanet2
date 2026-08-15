@@ -117,8 +117,8 @@ func startCancelProbeGateway(t *testing.T) (gatewayAddr string, entered chan str
 		require.NoError(t, group.Wait())
 	})
 
-	// newCancelProbeServer registers t.Cleanup(server.Stop) here, after the
-	// run-group cleanup above. LIFO then stops the probe server before
+	// The newCancelProbeServer helper registers t.Cleanup(server.Stop) here,
+	// after the run-group cleanup above. LIFO then stops the probe server before
 	// waiting on the group, so a handler still parked on its context
 	// unblocks instead of deadlocking the run-group wait.
 	backendAddr, entered, results := newCancelProbeServer(t)
@@ -253,11 +253,9 @@ func TestGateway_ProxiedRPC_ClientDeadlinePropagatesToBackendCtx(t *testing.T) {
 
 	select {
 	case observation := <-results:
-		// observation.err is not asserted: the client's own timer wins the
-		// teardown race by a few hundred microseconds, about a millisecond
-		// under -race, since each hop's deadline is recomputed and rounded
-		// up later. Two independent samplers of the terminal error split
-		// both landed mostly on Canceled, one 17:3 and the other 11:1.
+		// The observation.err field is not asserted: each hop recomputes and rounds
+		// the deadline, so the client's timer can win the teardown race. The exact
+		// terminal error is intentionally not part of this test.
 		require.True(t, observation.hasDeadline, "backend handler ctx must carry a deadline")
 		require.WithinDuration(t, clientDeadline, observation.deadline, 50*time.Millisecond)
 	case <-time.After(5 * time.Second):

@@ -51,8 +51,7 @@ func DataplaneConfig(opts DataplaneOptions) string {
 		cpMemory = "167772160"
 	}
 
-	// cp_memory defaults to 128 MiB, matching the built-in main pool used
-	// before this configuration was extracted into a builder.
+	// The cp_memory value defaults to 128 MiB, matching the built-in main pool.
 	//
 	// The plugin-loading configuration bumps it to 160 MiB to carry headroom
 	// for a standalone module control plane's agent, alongside the ephemeral

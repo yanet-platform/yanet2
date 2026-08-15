@@ -246,7 +246,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy_out"}))
 
-	// port0 has no output pipeline: the rule never targets it, so an
+	// Port 0 has no output pipeline: the rule never targets it, so an
 	// unmatched packet has nowhere to go but drop.
 	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
 		{

@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   commentlint:
-    name: Pure-run comment separators
+    name: Comment conventions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

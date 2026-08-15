@@ -58,7 +58,7 @@ func generateTestECDSASigner(t *testing.T) ssh.Signer {
 	return signer
 }
 
-// signToken creates a valid signed token for testing.
+// signTestToken creates a valid signed token for testing.
 func signTestToken(
 	t *testing.T,
 	signer ssh.Signer,

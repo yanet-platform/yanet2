@@ -92,8 +92,8 @@ func Decode(buf []byte, dst any, options ...Option) error {
 			return err
 		}
 
-		// checkKnownKeys runs first so an unknown key always reports through
-		// its operator-facing message rather than yaml.v3's own. This decode
+		// The checkKnownKeys helper runs first so an unknown key always reports
+		// through its operator-facing message rather than yaml.v3's own. This decode
 		// is what actually populates dst.
 		dec := yaml.NewDecoder(bytes.NewReader(buf))
 		dec.KnownFields(true)

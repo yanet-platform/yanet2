@@ -108,7 +108,7 @@ func TestReclaimFreesPipeSlotsForReuse(t *testing.T) {
 		require.NoError(t, err)
 
 		if err := fixture.Push(mbuf); err != nil {
-			// mbuf was allocated to probe fullness and never pushed,
+			// The mbuf was allocated to probe fullness and never pushed,
 			// so it holds no extra pin — Complete releases it back
 			// to the pool exactly like a plain single-owner free.
 			mbuf.Complete()

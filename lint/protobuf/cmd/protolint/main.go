@@ -58,8 +58,8 @@ func main() {
 // isExcluded reports whether path is inside any of the excluded directories.
 func isExcluded(path string, excludes []string) bool {
 	for _, ex := range excludes {
-		// filepath.Rel returns a path without ".." prefix when path is inside
-		// ex.
+		// The filepath.Rel call returns a path without ".." prefix when path is
+		// inside ex.
 		rel, err := filepath.Rel(ex, path)
 		if err != nil {
 			continue

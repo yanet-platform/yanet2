@@ -992,7 +992,7 @@ func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
 		deleteDone <- err
 	}()
 
-	// deleteDone firing here would mean DeleteConfig resolved without
+	// If deleteDone fires here, DeleteConfig resolved without
 	// waiting for the create's compile to release the name's lock, which is
 	// only possible through the liveness-keyed pre-check this test guards
 	// against.

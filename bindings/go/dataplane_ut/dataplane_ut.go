@@ -241,9 +241,9 @@ func NewHarness(cfg Config) (*Harness, error) {
 		deviceCount = 1
 	}
 
-	// dp_worker->device_id feeds the same per-device scheduling arrays as
-	// packet->tx_device_id in the real dataplane, so an id outside the
-	// registered topology would corrupt memory on the C side.
+	// The dp_worker->device_id field feeds the same per-device scheduling arrays
+	// as packet->tx_device_id in the real dataplane. An id outside the registered
+	// topology would corrupt memory on the C side.
 	for idx, worker := range cfg.Workers {
 		if int(worker.DeviceID) >= deviceCount {
 			return nil, fmt.Errorf(
@@ -427,9 +427,8 @@ func (m *Harness) handleSegmentedPackets(
 	txDeviceID, rxDeviceID uint16,
 	packets ...[][]byte,
 ) (*RawResult, error) {
-	// dataplane_ut_run indexes ut->dp_config->workers[worker] directly, so
-	// a worker index outside the registered topology would corrupt memory
-	// on the C side.
+	// The dataplane_ut_run call indexes ut->dp_config->workers[worker] directly.
+	// An index outside the registered topology would corrupt C memory.
 	if worker < 0 || worker >= m.workerCount {
 		return nil, fmt.Errorf(
 			"worker %d exceeds topology worker count %d",
@@ -494,9 +493,8 @@ func (m *Harness) handlePackets(
 	hashes []uint32,
 	packets ...gopacket.Packet,
 ) (*Result, error) {
-	// dataplane_ut_run indexes ut->dp_config->workers[worker] directly, so
-	// a worker index outside the registered topology would corrupt memory
-	// on the C side.
+	// The dataplane_ut_run call indexes ut->dp_config->workers[worker] directly.
+	// An index outside the registered topology would corrupt C memory.
 	if worker < 0 || worker >= m.workerCount {
 		return nil, fmt.Errorf(
 			"worker %d exceeds topology worker count %d",

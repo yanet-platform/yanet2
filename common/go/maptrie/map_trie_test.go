@@ -204,7 +204,7 @@ func Test_MapTrie_LookupTraverse(t *testing.T) {
 		netip.MustParsePrefix("192.168.9.32/32"),
 	}, traverseLPM(addr))
 
-	// ... but 192.168.9.0/26 does.
+	// The 192.168.9.0/26 prefix does contain the address.
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.9.0/26"), onEmpty(0), onUpdate(0))
 	assert.Equal(t, []netip.Prefix{
 		netip.MustParsePrefix("192.168.9.0/24"),
@@ -228,7 +228,7 @@ func Test_MapTrie_LookupTraverse(t *testing.T) {
 		netip.MustParsePrefix("192.168.9.32/32"),
 	}, traverseLPM(addr))
 
-	// 192.168.0.0 in hex.
+	// The hexadecimal prefix encodes 192.168.0.0.
 	trie.InsertOrUpdate(netip.MustParsePrefix("a8c0::/16"), onEmpty(0), onUpdate(0))
 	assert.Equal(t, []netip.Prefix{
 		netip.MustParsePrefix("192.168.0.0/16"),
@@ -291,7 +291,7 @@ func Test_MapTrie_LookupTraverse(t *testing.T) {
 		netip.MustParsePrefix("192.168.9.32/32"),
 	}, traverseLPM(addr))
 
-	// ... but IPv4 UNSPECIFIED is okay.
+	// ... But IPv4 UNSPECIFIED is okay.
 	trie.InsertOrUpdate(netip.MustParsePrefix("0.0.0.0/0"), onEmpty(0), onUpdate(0))
 	assert.Equal(t, []netip.Prefix{
 		netip.MustParsePrefix("0.0.0.0/0"),

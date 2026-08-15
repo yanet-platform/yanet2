@@ -64,7 +64,7 @@ func Test_NonEmptyString_NullYAMLCaughtByValidate(t *testing.T) {
 	var out struct {
 		V NonEmptyString `yaml:"v"`
 	}
-	// "v:" (null) does not trigger UnmarshalYAML in yaml.v3,
+	// The "v:" (null) value does not trigger UnmarshalYAML in yaml.v3,
 	// leaving zero value.
 	//
 	// Validate() catches this instead.

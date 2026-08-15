@@ -365,8 +365,8 @@ func (m *AdapterService) processBirdImport(
 	}
 	clientLog := opts.Log
 
-	// streamCtx governs this specific import's gRPC stream and BIRD reader.
-	// Cancelled via the holder's Close on replacement or service stop.
+	// The streamCtx value governs this specific import's gRPC stream and BIRD
+	// reader. The holder's Close cancels it on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
 	client := routepb.NewRouteServiceClient(conn)
 	stream, err := client.FeedRIB(streamCtx)
@@ -381,7 +381,8 @@ func (m *AdapterService) processBirdImport(
 
 	log := m.log.With(zap.String("config", name))
 
-	// onUpdate sends route batches over the gRPC stream. Called by bird.Export.
+	// The onUpdate callback sends route batches over the gRPC stream. The
+	// bird.Export function invokes it.
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
 		log.Debug("processing BIRD routes",
 			zap.Int("count", len(routes)),
@@ -468,9 +469,10 @@ func (m *AdapterService) processBirdImport(
 		return nil
 	}
 
-	// onFlush commits updates to dataplane. Called by bird.Export.
+	// The onFlush callback commits updates to dataplane when bird.Export signals
+	// a flush.
 	onFlush := func() error {
-		// update without route indicates flush event
+		// An update without a route indicates a flush event.
 		err := (*currentStream).Send(&routepb.Update{Name: name})
 		if err != nil {
 			return fmt.Errorf("flush BIRD routes failed: %w", err)

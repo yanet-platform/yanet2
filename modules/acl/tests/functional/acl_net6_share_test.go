@@ -60,29 +60,24 @@ func setNet6ShareDisabled(t *testing.T, disabled bool) {
 // classification mechanism rather than the ACL action logic: the specific
 // actions only need to be distinguishable, not meaningful.
 func net6ShareEdgeCaseRules() []cacl.AclRule {
-	// divergeBroad has no port constraint (filter_ip6). divergeNested is
-	// a narrower network scoped to a destination port (filter_ip6_port).
-	// An address inside the nested network lands in a partition that
-	// filter_ip6's own classifier never has to distinguish, exactly the
-	// case a broken remap would smooth over.
+	// The divergeBroad rule has no port constraint (filter_ip6). The
+	// divergeNested rule is a narrower network scoped to a destination port
+	// (filter_ip6_port).
+	// An address inside the nested network lands in a partition. The filter_ip6
+	// classifier never has to distinguish it, exactly the case a broken remap
+	// would smooth over.
 	divergeBroad := filter.MustParseIPNet("2001:db8:1::/48")
 	divergeNested := filter.IPNet{
 		Addr: netip.MustParseAddr("2001:db8:1:1::"),
 		Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff::"),
 	}
 
-	// deepLoA and deepLoB are two disjoint, port-scoped destination
-	// networks that each reach 112 bits deep — 48 bits past the hi/lo
-	// split at byte 8 (see lib/filter/query/net6.h) — so the dst-lo
-	// union partition carries at least three real classes (default,
-	// deepLoA, deepLoB) instead of the degenerate default-plus-one a
-	// small synthetic ruleset otherwise produces. Neither network nor
-	// port range overlaps any other rule here, and both are port-scoped
-	// so they compile into filter_ip6_port only (see check_acl_rule_ip6
-	// / check_acl_rule_ip6_port in modules/acl/api/controlplane.c) —
-	// filter_ip6 has no matching rule to fall back on, so a dst-lo remap
-	// bug affecting either network is not maskable by the other filter's
-	// independently correct answer.
+	// The deepLoA and deepLoB networks are disjoint port-scoped ranges reaching
+	// 112 bits deep, 48 past the hi/lo split at byte 8. Their dst-lo union has
+	// three classes (default, deepLoA, deepLoB), with no network or port overlap.
+	// Port scoping compiles them only into filter_ip6_port. filter_ip6 has no
+	// matching fallback, so a dst-lo remap failure for either network cannot be
+	// masked by the other filter's independent result.
 	deepLoA := filter.IPNet{
 		Addr: netip.MustParseAddr("2001:db8:9::1000:0"),
 		Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:0000"),
@@ -92,7 +87,7 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:0000"),
 	}
 
-	// nonContiguous has a mask that is bi-contiguous (5 hi bytes, then 3
+	// The nonContiguous rule has a mask that is bi-contiguous (5 hi bytes, then 3
 	// lo bytes) but not contiguous across the full 128 bits: exactly the
 	// shape the net6 compiler accepts and a union partition can obscure.
 	nonContiguous := filter.IPNet{
@@ -212,11 +207,11 @@ func net6ShareEdgeCasePackets(t *testing.T) []gopacket.Packet {
 	buildTCP("2001:db8:5::1", "2001:db8:9::1000:1", 8000)
 	// Matches deepLoB the same way, on a disjoint network and port.
 	buildTCP("2001:db8:5::2", "2001:db8:9::2000:1", 8001)
-	// Matches the non-contiguous-mask network via UDP + a scoped port,
+	// The non-contiguous-mask network matches via UDP and a scoped port,
 	// reaching filter_ip6_port.
 	buildUDP("bbbb:bbbb:bb00:0000:aaaa:aa00:0000:0001", "2001:db8:bbbb::1", 9000)
 
-	// Later IPv6 fragment (FragmentOffset != 0): skips the port filter
+	// A later IPv6 fragment (FragmentOffset != 0) skips the port filter
 	// regardless of its inner protocol, so only filter_ip6 ever sees it.
 	fragIP6 := layers.IPv6{
 		Version:    6,

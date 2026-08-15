@@ -145,9 +145,9 @@ func nat64ModuleConfig(prefix [12]byte, mappings []nat64Mapping, memCtx testutil
 	if m == nil {
 		panic("failed to allocate nat64 module config")
 	}
-	// memory_balloc does not zero its block, and cp_module_init is stubbed
-	// to fail above, so nothing else zeroes the cp_module fields this test
-	// harness never sets.
+	// The memory_balloc function does not zero its block. The cp_module_init
+	// call is stubbed to fail above, so nothing else zeroes the cp_module fields
+	// this test harness never sets.
 	C.memset(unsafe.Pointer(m), 0, C.sizeof_struct_nat64_module_config)
 
 	cName := C.CString("nat64_test")

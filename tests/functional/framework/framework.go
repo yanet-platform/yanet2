@@ -1589,7 +1589,7 @@ func (f *TestFramework) SaveSnapshotKeepUnmounted(name string) error {
 	if err := f.thawRootFilesystem(); err != nil {
 		return fmt.Errorf("post-savevm filesystem thaw failed: %w", err)
 	}
-	// ninepmounted remains false — caller knows 9P is unmounted.
+	// The ninepmounted flag remains false — caller knows 9P is unmounted.
 	f.log.Infof("Snapshot %q saved (9P unmounted, ready for pool use)", name)
 	return nil
 }

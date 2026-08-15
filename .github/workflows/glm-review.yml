@@ -104,11 +104,18 @@ jobs:
 
           /no_think"
 
-          payload=$(jq -n \
+          system_file=$(mktemp)
+          user_file=$(mktemp)
+          payload_file=$(mktemp)
+          trap 'rm -f "$system_file" "$user_file" "$payload_file"' EXIT
+          printf '%s' "$system" > "$system_file"
+          printf '%s' "$user" > "$user_file"
+          jq -n \
             --arg model "$GLM_MODEL" \
-            --arg system "$system" \
-            --arg user "$user" \
-            '{model: $model, max_tokens: 65536, thinking: {type: "disabled"}, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')
+            --rawfile system "$system_file" \
+            --rawfile user "$user_file" \
+            '{model: $model, max_tokens: 65536, thinking: {type: "disabled"}, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}' \
+            > "$payload_file"
 
           review=""
           api_error="unknown error"
@@ -117,7 +124,7 @@ jobs:
             if response=$(curl -sS --fail-with-body --max-time 600 \
               -H "Authorization: Bearer $GLM_API_KEY" \
               -H "Content-Type: application/json" \
-              -d "$payload" \
+              --data-binary "@$payload_file" \
               "$GLM_API_URL"); then
               if review=$(jq -er '.choices[0].message.content | select(type == "string" and length > 0)' <<<"$response" 2>/dev/null); then
                 break
