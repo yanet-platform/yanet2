@@ -351,7 +351,10 @@ test-asan-only:
 		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build; \
 	fi
 	meson compile -C build
-	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
+# Set as a default only, mirroring the same if-absent condition meson uses for
+# its own injection: without it, a recoverable diagnostic would go unseen and
+# the package would still pass.
+	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
 	meson test -C build
 
 test-tsan:
