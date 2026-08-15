@@ -1606,6 +1606,10 @@ yanet_get_module_counters(
 	const char *const *query,
 	size_t query_count
 ) {
+	// Select module-kind storages only; the module's runtime-kind
+	// storages hold its per-rule counters and are read through
+	// yanet_get_counters_by_tags, as are relation counters on
+	// module_object_link-kind storages sharing these six tags.
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
 		{.key = "pipeline", .value = pipeline_name},
@@ -1613,9 +1617,7 @@ yanet_get_module_counters(
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
 		{.key = "module_name", .value = module_name},
-		// Select module-kind storages only; relation counters live on
-		// module_object_link-kind storages that share these six tags.
-		{.key = "kind", .value = "module"}
+		{.key = "kind", .value = "module"},
 	};
 	return yanet_get_counters_by_tags(
 		dp_config, tags, 7, query, query_count, NULL

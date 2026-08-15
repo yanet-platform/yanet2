@@ -36,7 +36,13 @@ struct module_ectx {
 	struct counter_value_handle *perf_counters[MODULE_ECTX_PERF_COUNTERS];
 
 	struct counter_storage *counter_storage;
-	struct counter_storage *config_counter_storage;
+
+	// Per-worker storages for the module's runtime counter registries, in
+	// parallel with cp_module.runtime_counter_registries. Offset pointer
+	// to a separately allocated array of offset pointers, one per
+	// registry.
+	uint64_t runtime_counter_storage_count;
+	struct counter_storage **runtime_counter_storages;
 	struct config_gen_ectx *config_gen_ectx;
 
 	uint64_t mc_index_size;
@@ -72,6 +78,18 @@ object_link_get_address(struct module_ectx *module_ectx, uint64_t index) {
 	struct module_object_link_ectx *links =
 		ADDR_OF(&module_ectx->object_links);
 	return links + index;
+}
+
+// Return the per-worker counter storage for the module's runtime counter
+// registry at the given index, or NULL when the index is out of range.
+static inline struct counter_storage *
+module_ectx_counter_storage(struct module_ectx *module_ectx, uint64_t index) {
+	if (index >= module_ectx->runtime_counter_storage_count) {
+		return NULL;
+	}
+	struct counter_storage **storages =
+		ADDR_OF(&module_ectx->runtime_counter_storages);
+	return ADDR_OF(storages + index);
 }
 
 static inline uint64_t

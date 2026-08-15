@@ -59,7 +59,9 @@ yanet_get_chain_counters(
 	const char *chain_name
 );
 
-// Get module counters, optionally filtered by name.
+// Get module counters, optionally filtered by name. Returns the module's
+// predefined counters only; its per-rule counters live on runtime-kind
+// storages read through yanet_get_counters_by_tags.
 struct counter_handle_list *
 yanet_get_module_counters(
 	struct dp_config *dp_config,
@@ -164,8 +166,9 @@ yanet_get_counter_values(
 //
 // Recognized keys are "device", "pipeline", "function", "chain",
 // "module_type", "module_name", and "kind". The "kind" value names the
-// owner level: "device", "pipeline", "function", "chain", "module", or
-// "object".
+// owner level: "device", "pipeline", "function", "chain", "module",
+// "runtime", or "object". A "runtime" storage is module-owned and
+// additionally carries a "config" tag naming its counter registry.
 //
 // A tag is rejected with err filled and NULL returned if any of the
 // following holds: key is NULL; value is NULL; key is unrecognized;

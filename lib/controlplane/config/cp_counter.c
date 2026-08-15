@@ -479,7 +479,7 @@ cp_config_counter_storage_registry_lookup_module(
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
 		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "module"}
+		{.key = "kind", .value = "module"},
 	};
 	return get_one(registry, tags, 7);
 }
@@ -511,14 +511,15 @@ cp_config_counter_storage_registry_insert_module(
 }
 
 struct counter_storage *
-cp_config_counter_storage_registry_lookup_module_config(
+cp_config_counter_storage_registry_lookup_module_tagged(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	const char *registry_tag
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
@@ -527,13 +528,14 @@ cp_config_counter_storage_registry_lookup_module_config(
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
 		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "config"}
+		{.key = "kind", .value = "runtime"},
+		{.key = "config", .value = registry_tag},
 	};
-	return get_one(registry, tags, 7);
+	return get_one(registry, tags, 8);
 }
 
 int
-cp_config_counter_storage_registry_insert_module_config(
+cp_config_counter_storage_registry_insert_module_tagged(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
@@ -541,6 +543,7 @@ cp_config_counter_storage_registry_insert_module_config(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
+	const char *registry_tag,
 	struct counter_storage *counter_storage,
 	yanet_error **err
 ) {
@@ -551,10 +554,11 @@ cp_config_counter_storage_registry_insert_module_config(
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = module_type},
 		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "config"},
+		{.key = "kind", .value = "runtime"},
+		{.key = "config", .value = registry_tag},
 	};
 	return cp_config_counter_storage_registry_insert(
-		registry, tags, 7, counter_storage, err
+		registry, tags, 8, counter_storage, err
 	);
 }
 

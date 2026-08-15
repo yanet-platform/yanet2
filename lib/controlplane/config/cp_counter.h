@@ -151,18 +151,7 @@ cp_config_counter_storage_registry_insert_module(
 );
 
 struct counter_storage *
-cp_config_counter_storage_registry_lookup_module_config(
-	struct cp_config_counter_storage_registry *registry,
-	const char *device_name,
-	const char *pipeline_name,
-	const char *function_name,
-	const char *chain_name,
-	const char *module_type,
-	const char *module_name
-);
-
-int
-cp_config_counter_storage_registry_insert_module_config(
+cp_config_counter_storage_registry_lookup_module_tagged(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
@@ -170,6 +159,19 @@ cp_config_counter_storage_registry_insert_module_config(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
+	const char *registry_tag
+);
+
+int
+cp_config_counter_storage_registry_insert_module_tagged(
+	struct cp_config_counter_storage_registry *registry,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name,
+	const char *registry_tag,
 	struct counter_storage *counter_storage,
 	yanet_error **err
 );

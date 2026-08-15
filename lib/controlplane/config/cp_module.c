@@ -118,21 +118,6 @@ cp_module_init(
 		goto fail;
 	}
 
-	if (counter_registry_init(
-		    &cp_module->config_counter_registry,
-		    &cp_module->memory_context,
-		    0
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to initialize config counter registry for "
-			"module '%s:%s'",
-			module_type,
-			module_name
-		);
-		goto fail;
-	}
-
 	cp_module->rx_counter_id = counter_registry_register(
 		&cp_module->counter_registry, "rx", 2, err
 	);
@@ -223,7 +208,24 @@ fail:
 void
 cp_module_fini(struct cp_module *cp_module) {
 	counter_registry_fini(&cp_module->counter_registry);
-	counter_registry_fini(&cp_module->config_counter_registry);
+
+	struct cp_module_counter_registry *runtime_registries =
+		ADDR_OF(&cp_module->runtime_counter_registries);
+	if (runtime_registries != NULL) {
+		for (uint64_t i = 0;
+		     i < cp_module->runtime_counter_registry_count;
+		     ++i) {
+			counter_registry_fini(&runtime_registries[i].registry);
+		}
+		memory_bfree(
+			&cp_module->memory_context,
+			runtime_registries,
+			sizeof(*runtime_registries) *
+				cp_module->runtime_counter_registry_count
+		);
+	}
+	SET_OFFSET_OF(&cp_module->runtime_counter_registries, NULL);
+	cp_module->runtime_counter_registry_count = 0;
 
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	if (devices != NULL) {
@@ -252,6 +254,78 @@ cp_module_fini(struct cp_module *cp_module) {
 	SET_OFFSET_OF(&cp_module->agent, NULL);
 
 	memory_context_fini(&cp_module->memory_context);
+}
+
+struct counter_registry *
+cp_module_counter_registry(
+	struct cp_module *cp_module,
+	const char *tag,
+	uint64_t *index_out,
+	yanet_error **err
+) {
+	struct cp_module_counter_registry *runtime_registries =
+		ADDR_OF(&cp_module->runtime_counter_registries);
+	for (uint64_t idx = 0; idx < cp_module->runtime_counter_registry_count;
+	     ++idx) {
+		if (!strncmp(
+			    runtime_registries[idx].tag, tag, COUNTER_NAME_LEN
+		    )) {
+			if (index_out != NULL) {
+				*index_out = idx;
+			}
+			return &runtime_registries[idx].registry;
+		}
+	}
+
+	uint64_t old_count = cp_module->runtime_counter_registry_count;
+	uint64_t new_count = old_count + 1;
+	struct cp_module_counter_registry *new_registries =
+		(struct cp_module_counter_registry *)memory_brealloc(
+			&cp_module->memory_context,
+			runtime_registries,
+			sizeof(*runtime_registries) * old_count,
+			sizeof(*runtime_registries) * new_count
+		);
+	if (new_registries == NULL) {
+		yanet_error_add(
+			err,
+			"failed to allocate counter registry '%s' for module "
+			"'%s:%s'",
+			tag,
+			cp_module->type,
+			cp_module->name
+		);
+		return NULL;
+	}
+
+	// realloc freed the old array, so publish the new one before any
+	// fallible step below. A failure past this point leaves the count
+	// unchanged, so the partially initialized slot sits beyond the live
+	// range and is reaped with the array at cp_module_fini.
+	SET_OFFSET_OF(&cp_module->runtime_counter_registries, new_registries);
+
+	struct cp_module_counter_registry *slot = &new_registries[old_count];
+	strtcpy(slot->tag, tag, sizeof(slot->tag));
+	if (counter_registry_init(
+		    &slot->registry, &cp_module->memory_context, 0
+	    )) {
+		yanet_error_add(
+			err,
+			"failed to initialize counter registry '%s' for module "
+			"'%s:%s'",
+			tag,
+			cp_module->type,
+			cp_module->name
+		);
+		return NULL;
+	}
+
+	cp_module->runtime_counter_registry_count = new_count;
+
+	if (index_out != NULL) {
+		*index_out = old_count;
+	}
+	return &slot->registry;
 }
 
 int
@@ -636,14 +710,44 @@ cp_module_registry_upsert(
 		return -1;
 	}
 
-	if (counter_registry_link(
-		    &new_module->config_counter_registry,
-		    (old_module != NULL) ? &old_module->config_counter_registry
-					 : NULL,
-		    err
-	    )) {
-		yanet_error_add(err, "failed to link config counter registry");
-		return -1;
+	// Link each new runtime registry against the matching-tag registry on
+	// the displaced module so per-rule counters survive a config rebuild
+	// that leaves the layout unchanged.
+	struct cp_module_counter_registry *new_runtime =
+		ADDR_OF(&new_module->runtime_counter_registries);
+	for (uint64_t idx = 0; idx < new_module->runtime_counter_registry_count;
+	     ++idx) {
+		struct counter_registry *old_registry = NULL;
+		if (old_module != NULL) {
+			struct cp_module_counter_registry *old_runtime =
+				ADDR_OF(&old_module->runtime_counter_registries
+				);
+			for (uint64_t old_idx = 0;
+			     old_idx <
+			     old_module->runtime_counter_registry_count;
+			     ++old_idx) {
+				if (!strncmp(
+					    old_runtime[old_idx].tag,
+					    new_runtime[idx].tag,
+					    COUNTER_NAME_LEN
+				    )) {
+					old_registry =
+						&old_runtime[old_idx].registry;
+					break;
+				}
+			}
+		}
+
+		if (counter_registry_link(
+			    &new_runtime[idx].registry, old_registry, err
+		    )) {
+			yanet_error_add(
+				err,
+				"failed to link counter registry '%s'",
+				new_runtime[idx].tag
+			);
+			return -1;
+		}
 	}
 
 	if (registry_replace(

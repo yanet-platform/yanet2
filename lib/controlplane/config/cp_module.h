@@ -34,6 +34,15 @@ struct cp_module_device {
 	char name[CP_DEVICE_NAME_LEN];
 };
 
+// Named counter registry for config-defined counters (per-rule, per-route,
+// etc.). Carries a module-unique tag so its per-worker storage can be
+// distinguished from other registries and from the predefined module
+// counters.
+struct cp_module_counter_registry {
+	char tag[COUNTER_NAME_LEN];
+	struct counter_registry registry;
+};
+
 // A module's declared link to a cp_object, identified by the object's
 // (type, name) pair. Resolved to a per-worker object_ectx at execution-context
 // build time, mirroring cp_module_device's name-based device linkage.
@@ -61,10 +70,12 @@ struct cp_module {
 	// Counters declared inside module data
 	struct counter_registry counter_registry;
 
-	// Counters declared from user-supplied configuration (per-rule,
-	// per-route, etc.). Expanded into a separate storage tagged
-	// kind=config on config-gen installation.
-	struct counter_registry config_counter_registry;
+	// Named counter registries for config-defined counters (per-rule,
+	// per-route, etc.). Each registry carries a module-unique tag. All
+	// registries are expanded into per-worker storages on config-gen
+	// installation.
+	uint64_t runtime_counter_registry_count;
+	struct cp_module_counter_registry *runtime_counter_registries;
 
 	// Rx packet/byte counter (size 2: [packets, bytes])
 	uint64_t rx_counter_id;
@@ -191,6 +202,19 @@ cp_module_init(
  */
 void
 cp_module_fini(struct cp_module *cp_module);
+
+// Get or create a named counter registry on the module.
+//
+// The tag must be unique within the module; on a repeat tag the existing
+// registry is returned with its index. The index is written through
+// `index_out`. Returns NULL on allocation failure.
+struct counter_registry *
+cp_module_counter_registry(
+	struct cp_module *cp_module,
+	const char *tag,
+	uint64_t *index_out,
+	yanet_error **err
+);
 
 // The single handler for a module reference count reaching zero, reached
 // the same way from a registry drop or an explicit release.
