@@ -34,6 +34,11 @@ struct acl_module_config {
 	uint64_t target_count;
 	struct acl_target *targets;
 
+	// Index of the per-rule "rules" counter registry within
+	// cp_module.runtime_counter_registries. Each per-rule counter_id is
+	// resolved against this registry's per-worker storage.
+	uint64_t rules_registry_idx;
+
 	// Fwstate module maps borrowed for state lookups.
 	struct fwstate_config fwstate_cfg;
 

@@ -41,9 +41,8 @@ func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetric
 // "counter" label.
 //
 // It MUST mirror the named cases of the switch in collectDataplaneMetrics.
-// A per-rule ("counter"-labelled) metric is anything not in this set. Used
-// to derive the counter-name query so per-rule counters are not read from
-// shm when they are filtered out.
+// A per-rule counter is anything not in this set; the metrics read queries
+// only these names, so per-rule counters are never read for metrics.
 var aclStructuralCounters = []string{
 	"acl_no_match", "acl_action_allow", "acl_action_deny", "acl_action_count",
 	"acl_action_check_state", "acl_action_create_state", "acl_action_unknown",
@@ -51,11 +50,11 @@ var aclStructuralCounters = []string{
 }
 
 // Metrics returns ACL module metrics matching tags: per-pipeline packet
-// counters, per-rule counters, ACL compilation info, and gRPC call metrics.
+// counters, ACL compilation info, and gRPC call metrics.
 //
-// Counter metrics are omitted when all worker values are zero to reduce output
-// noise. A "counter" tag is pushed down into the dataplane counter read, so
-// per-rule counters excluded by tags are never read from shared memory.
+// Per-rule counters are served by GetRulesCounters, not here. Counter
+// metrics are omitted when all worker values are zero to reduce output
+// noise.
 //
 // Labels:
 //   - config:        ACL config name (all counter metrics)
@@ -63,7 +62,6 @@ var aclStructuralCounters = []string{
 //   - pipeline:      pipeline name (all counter metrics)
 //   - function:      pipeline function name (all counter metrics)
 //   - chain:         pipeline chain name (all counter metrics)
-//   - counter:       ACL rule counter name (acl_rule_packets / acl_rule_bytes only)
 //   - grpc_type:     always "unary" (gRPC metrics)
 //   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:   RPC name (gRPC metrics)
@@ -89,9 +87,9 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 
 	positions := dpConfig.AllModulePositions(moduleType)
 
-	names, read := metrics.Query(tags,
+	names, read := metrics.Query(
+		tags,
 		metrics.WithStructuralCounters(aclStructuralCounters),
-		metrics.WithUnknownEntryCounters(),
 	)
 
 	result := make([]*commonpb.Metric, 0)
@@ -180,15 +178,6 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 				result = append(result,
 					commonpb.NewMetricCounter("acl_sync_sent_packets", packets, baseLabels...),
 					commonpb.NewMetricCounter("acl_sync_sent_bytes", bytes, baseLabels...),
-				)
-			default:
-				ruleLabels := append(
-					baseLabels,
-					&commonpb.Label{Name: "counter", Value: counter.Name},
-				)
-				result = append(result,
-					commonpb.NewMetricCounter("acl_rule_packets", packets, ruleLabels...),
-					commonpb.NewMetricCounter("acl_rule_bytes", bytes, ruleLabels...),
 				)
 			}
 		}

@@ -16,6 +16,8 @@ pub enum ModeCmd {
     Show(ShowCmd),
     /// Show ACL metrics
     Metrics(MetricsCmd),
+    /// Show per-rule ACL counters
+    RuleCounters(RuleCountersCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -71,8 +73,6 @@ pub enum MetricName {
     Action,
     /// State-table counters: check_state, create_state, state_miss
     State,
-    /// Per-rule named counters (acl_rule_*)
-    Rule,
     /// Compiled filter rule counts per protocol
     FilterRuleCount,
     /// Compilation time and memory usage
@@ -88,7 +88,6 @@ impl MetricName {
             Self::Bytes => "bytes",
             Self::Action => "action",
             Self::State => "state",
-            Self::Rule => "rule",
             Self::FilterRuleCount => "filter_rule_count",
             Self::Compilation => "compilation",
             Self::Handler => "handler",
@@ -108,4 +107,11 @@ pub struct MetricsCmd {
     /// Show only metrics matching this category
     #[arg(long, short, value_enum)]
     pub name: Option<MetricName>,
+}
+
+#[derive(Debug, Clone, Parser, Default)]
+pub struct RuleCountersCmd {
+    /// ACL config name; omit to show rule counters of every config
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
+    pub config_name: Option<String>,
 }

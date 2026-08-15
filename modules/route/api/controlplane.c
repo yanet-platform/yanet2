@@ -246,11 +246,22 @@ route_module_config_add_route(
 
 	uint64_t counter_id = COUNTER_INVALID;
 	if (counter_name != NULL && counter_name[0] != '\0') {
+		// Per-route counters live in a dedicated "routes" registry so
+		// they are separated from the module's predefined counters in
+		// the per-worker storages and the counter storage registry.
+		struct counter_registry *routes_registry =
+			cp_module_counter_registry(
+				cp_module,
+				"routes",
+				&config->routes_registry_idx,
+				err
+			);
+		if (routes_registry == NULL) {
+			return -1;
+		}
+
 		counter_id = counter_registry_register(
-			&config->cp_module.counter_registry,
-			counter_name,
-			2,
-			err
+			routes_registry, counter_name, 2, err
 		);
 		if (counter_id == COUNTER_INVALID) {
 			yanet_error_add(
@@ -554,7 +565,14 @@ fib_iter_nexthop_counter_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 	}
 
 	struct route_module_config *config = it->config;
-	struct counter_registry *registry = &config->cp_module.counter_registry;
+	if (config->routes_registry_idx >=
+	    config->cp_module.runtime_counter_registry_count) {
+		return "";
+	}
+	struct cp_module_counter_registry *registries =
+		ADDR_OF(&config->cp_module.runtime_counter_registries);
+	struct counter_registry *registry =
+		&registries[config->routes_registry_idx].registry;
 	if (r->counter_id < registry->count) {
 		return ADDR_OF(&registry->names)[r->counter_id].name;
 	}

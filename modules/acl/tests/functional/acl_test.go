@@ -15,6 +15,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -1044,7 +1045,7 @@ func TestACL_Counters(t *testing.T) {
 		}
 
 		path := aclCounterPath("port0", "test")
-		dataplaneut.RequireModuleCounter(t, h, path, "acl_http", 3, 3*pktSize)
+		dataplaneut.RequireRuleCounter(t, h, path, "acl_http", 3, 3*pktSize)
 	})
 
 	t.Run("multiple_named_counters", func(t *testing.T) {
@@ -1123,8 +1124,100 @@ func TestACL_Counters(t *testing.T) {
 		}
 
 		path := aclCounterPath("port0", "test")
-		dataplaneut.RequireModuleCounter(t, h, path, "http", 3, 3*pktSize0)
-		dataplaneut.RequireModuleCounter(t, h, path, "dns", 2, 2*pktSize1)
+		dataplaneut.RequireRuleCounter(t, h, path, "http", 3, 3*pktSize0)
+		dataplaneut.RequireRuleCounter(t, h, path, "dns", 2, 2*pktSize1)
+	})
+
+	t.Run("rules_counters_via_service", func(t *testing.T) {
+		// GetRulesCounters serves the per-rule counters of a config applied
+		// through the service, while Metrics reports no per-rule counters.
+		pbRules := []*aclpb.Rule{{
+			Actions: []*aclpb.Action{
+				{Kind: aclpb.ActionKind_ACTION_KIND_COUNT},
+				{Kind: aclpb.ActionKind_ACTION_KIND_PASS},
+			},
+			Counter: "svc_counter",
+			Devices: []*filterpb.Device{{Name: "port0"}},
+			Srcs:    []*filterpb.IPNet{{Addr: make([]byte, 4), Mask: make([]byte, 4)}},
+			Dsts:    []*filterpb.IPNet{{Addr: make([]byte, 4), Mask: make([]byte, 4)}},
+			// UDP (17) with any subtype: proto in the high byte.
+			ProtoRanges:   []*filterpb.ProtoRange{{From: 17 << 8, To: 17<<8 | 0xFF}},
+			SrcPortRanges: []*filterpb.PortRange{{From: 0, To: 65535}},
+			DstPortRanges: []*filterpb.PortRange{{From: 0, To: 65535}},
+		}}
+
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolUDP,
+			SrcIP:    net.ParseIP("192.0.2.1"),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		udp := layers.UDP{SrcPort: 12345, DstPort: 80}
+		udp.SetNetworkLayerForChecksum(&ip4)
+		pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+		pktSize := uint64(len(pkt.Data()))
+
+		h, agent, _ := setupACLHarness(t, []string{"port0"})
+		svc := acl.NewACLService(acl.NewBackend(agent))
+		_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+			Name:  "test",
+			Rules: pbRules,
+		})
+		require.NoError(t, err)
+		wireACLPipeline(t, agent, "port0", "test")
+
+		for range 3 {
+			result, err := h.HandlePackets(pkt)
+			require.NoError(t, err)
+			require.Len(t, result.Output, 1)
+		}
+
+		named, err := svc.GetRulesCounters(t.Context(), &aclpb.GetRulesCountersRequest{Name: "test"})
+		require.NoError(t, err)
+		require.Len(t, named.GetCounters(), 1)
+		got := named.GetCounters()[0]
+		require.Equal(t, "test", got.GetConfig())
+		require.Equal(t, "port0", got.GetDevice())
+		require.Equal(t, "test", got.GetPipeline())
+		require.Equal(t, "test", got.GetFunction())
+		require.Equal(t, "test_chain", got.GetChain())
+		require.Equal(t, "svc_counter", got.GetCounter())
+		require.Equal(t, uint64(3), got.GetPackets())
+		require.Equal(t, 3*pktSize, got.GetBytes())
+
+		all, err := svc.GetRulesCounters(t.Context(), &aclpb.GetRulesCountersRequest{})
+		require.NoError(t, err)
+		require.Len(t, all.GetCounters(), 1)
+
+		// ModuleCounters returns the predefined counters only; the
+		// rule counter is served through the runtime-kind tag query.
+		path := aclCounterPath("port0", "test")
+		moduleCounters := h.SharedMemory().DPConfig(0).ModuleCounters(
+			path.Device, path.Pipeline, path.Function, path.Chain,
+			path.ModuleType, path.ModuleName, []string{"svc_counter"},
+		)
+		require.Empty(t, moduleCounters)
+		ruleCounters := dataplaneut.RuleCounters(t, h, path, []string{"svc_counter"})
+		require.Len(t, ruleCounters, 1)
+
+		collected, err := svc.Metrics()
+		require.NoError(t, err)
+		metricNames := make(map[string]struct{}, len(collected))
+		for _, metric := range collected {
+			metricNames[metric.GetName()] = struct{}{}
+		}
+		require.NotContains(t, metricNames, "acl_rule_packets")
+		require.NotContains(t, metricNames, "acl_rule_bytes")
+		require.Contains(t, metricNames, "acl_action_allow_packets")
+
+		_, err = svc.GetRulesCounters(t.Context(), &aclpb.GetRulesCountersRequest{Name: "missing"})
+		require.Equal(t, codes.NotFound, status.Code(err))
 	})
 
 	t.Run("default_counter_name", func(t *testing.T) {
@@ -1172,7 +1265,7 @@ func TestACL_Counters(t *testing.T) {
 		}
 
 		path := aclCounterPath("port0", "test")
-		dataplaneut.RequireModuleCounter(t, h, path, "rule 0", 2, 2*pktSize)
+		dataplaneut.RequireRuleCounter(t, h, path, "rule 0", 2, 2*pktSize)
 	})
 
 	t.Run("named_counter_no_count_action", func(t *testing.T) {
@@ -1221,7 +1314,7 @@ func TestACL_Counters(t *testing.T) {
 		// The "unused" counter is registered but stays at zero because no
 		// ACTION_COUNT is present in the rule's action list.
 		path := aclCounterPath("port0", "test")
-		dataplaneut.RequireModuleCounter(t, h, path, "unused", 0, 0)
+		dataplaneut.RequireRuleCounter(t, h, path, "unused", 0, 0)
 		requireModuleCounterPackets(t, h, path, "acl_action_allow", 1)
 	})
 
@@ -1386,7 +1479,7 @@ func TestACL_NoTerminatingAction_Drop(t *testing.T) {
 	path := aclCounterPath("port0", "test")
 	requireModuleCounterPackets(t, h, path, "acl_action_non_term", 1)
 	requireModuleCounterPackets(t, h, path, "acl_action_deny", 1)
-	dataplaneut.RequireModuleCounter(t, h, path, "acl_count_only", 1, pktSize)
+	dataplaneut.RequireRuleCounter(t, h, path, "acl_count_only", 1, pktSize)
 }
 
 // TestACL_VLAN_Match asserts that a VLAN-tagged packet matches a rule whose

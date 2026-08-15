@@ -2,10 +2,10 @@ use core::net::Ipv6Addr;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
-    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
+    DeleteConfigRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
-use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, MetricsCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use serde::{Deserialize, Serialize};
@@ -153,7 +153,6 @@ fn print_metrics_table(metrics: &[Metric]) {
         println!();
 
         let std_counters: Vec<&&Metric> = counters.iter().filter(|m| m.label_value("counter").is_none()).collect();
-        let rule_counters: Vec<&&Metric> = counters.iter().filter(|m| m.label_value("counter").is_some()).collect();
 
         let mut pair_order: Vec<String> = Vec::new();
         let mut pair_map: HashMap<String, CounterPair> = HashMap::new();
@@ -193,42 +192,6 @@ fn print_metrics_table(metrics: &[Metric]) {
                         counter: p.display.clone(),
                         packets: p.packets.map(metrics::format_number).unwrap_or_else(|| "-".into()),
                         bytes: p.bytes.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                    }
-                })
-                .collect();
-            print_counter_table(rows);
-        }
-
-        if !rule_counters.is_empty() {
-            println!();
-            println!("Per-Rule Counters:");
-
-            let mut rule_order: Vec<String> = Vec::new();
-            let mut rule_map_inner: HashMap<String, (Option<u64>, Option<u64>)> = HashMap::new();
-
-            for m in &rule_counters {
-                let rule_name = m.label_value("counter").unwrap_or("unknown").to_string();
-                let val = m.value.unwrap_or(0.0) as u64;
-                if !rule_map_inner.contains_key(&rule_name) {
-                    rule_order.push(rule_name.clone());
-                    rule_map_inner.insert(rule_name.clone(), (None, None));
-                }
-                let entry = rule_map_inner.get_mut(&rule_name).unwrap();
-                if m.name.ends_with("_packets") {
-                    entry.0 = Some(val);
-                } else if m.name.ends_with("_bytes") {
-                    entry.1 = Some(val);
-                }
-            }
-
-            let rows: Vec<CounterRow> = rule_order
-                .iter()
-                .map(|name| {
-                    let (pkts, b) = rule_map_inner[name];
-                    CounterRow {
-                        counter: name.clone(),
-                        packets: pkts.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                        bytes: b.map(metrics::format_number).unwrap_or_else(|| "-".into()),
                     }
                 })
                 .collect();
@@ -495,6 +458,71 @@ impl ACLService {
         Ok(())
     }
 
+    pub async fn rule_counters(&mut self, cmd: RuleCountersCmd) -> Result<(), Error> {
+        let request = GetRulesCountersRequest {
+            name: cmd.config_name.clone().unwrap_or_default(),
+        };
+        let response = self
+            .service
+            .client()
+            .get_rules_counters(request)
+            .await
+            .map_err(self.service.status("rule-counters"))?
+            .into_inner();
+
+        output::data(
+            || &response.counters,
+            || {
+                if response.counters.is_empty() {
+                    match cmd.config_name.as_deref() {
+                        Some(name) => output::empty(format_args!("No rule counters found for '{name}'.")),
+                        None => output::empty(format_args!("No rule counters found.")),
+                    }
+                    return;
+                }
+
+                let mut location_keys: Vec<String> = Vec::new();
+                let mut location_map: HashMap<String, Vec<&aclpb::RuleCounter>> = HashMap::new();
+                for entry in &response.counters {
+                    let key = format!(
+                        "{}\0{}\0{}\0{}\0{}",
+                        entry.config, entry.device, entry.pipeline, entry.function, entry.chain,
+                    );
+                    if !location_map.contains_key(&key) {
+                        location_keys.push(key.clone());
+                    }
+                    location_map.entry(key).or_default().push(entry);
+                }
+
+                for (loc_idx, key) in location_keys.iter().enumerate() {
+                    if loc_idx > 0 {
+                        println!();
+                    }
+                    let entries = &location_map[key];
+                    let parts: Vec<&str> = key.split('\0').collect();
+                    let (cfg, device, pipeline, function, chain) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+                    println!(
+                        "ACL RULE COUNTERS  config={cfg} device={device} pipeline={pipeline} function={function} chain={chain}"
+                    );
+                    println!();
+
+                    let rows: Vec<CounterRow> = entries
+                        .iter()
+                        .map(|entry| CounterRow {
+                            counter: entry.counter.clone(),
+                            packets: metrics::format_number(entry.packets),
+                            bytes: metrics::format_number(entry.bytes),
+                        })
+                        .collect();
+                    print_counter_table(rows);
+                    println!();
+                }
+            },
+        );
+
+        Ok(())
+    }
+
     pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
         let tags = cmd
             .tags
@@ -560,6 +588,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
+        ModeCmd::RuleCounters(cmd) => service.rule_counters(cmd).await,
     }
 }
 

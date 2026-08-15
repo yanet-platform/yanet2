@@ -687,6 +687,18 @@ acl_module_config_update(
 	SET_OFFSET_OF(&config->targets, targets);
 	config->target_count = rule_count;
 
+	// Per-rule counters live in a dedicated "rules" registry so they are
+	// separated from the module's predefined counters in the per-worker
+	// storages and the counter storage registry.
+	uint64_t rules_registry_idx;
+	struct counter_registry *rules_registry = cp_module_counter_registry(
+		cp_module, "rules", &rules_registry_idx, err
+	);
+	if (rules_registry == NULL) {
+		goto error_target;
+	}
+	config->rules_registry_idx = rules_registry_idx;
+
 	struct filter_rule *filter_rules = NULL;
 	const struct filter_rule *dummy_filter_rule_ptr = NULL;
 	const struct filter_rule **filter_rule_ptrs = &dummy_filter_rule_ptr;
@@ -741,7 +753,7 @@ acl_module_config_update(
 			counter_name = default_counter;
 		}
 		if ((targets[idx].counter_id = counter_registry_register(
-			     &cp_module->counter_registry, counter_name, 2, err
+			     rules_registry, counter_name, 2, err
 		     )) == (uint64_t)-1) {
 			goto error_target;
 		}

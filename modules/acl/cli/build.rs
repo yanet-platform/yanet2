@@ -21,6 +21,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "#[derive(serde::Serialize)]",
         )
         .message_attribute(
+            ".modules.acl.controlplane.aclpb.v1.RuleCounter",
+            "#[derive(serde::Serialize)]",
+        )
+        .message_attribute(
             ".modules.acl.controlplane.aclpb.v1.SyncConfig",
             "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
         )

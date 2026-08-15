@@ -255,6 +255,7 @@ route_mpls_module_init_ip6(
 static struct target *
 route_mpls_rule_target_new(
 	struct cp_module *cp_module,
+	struct counter_registry *routes_registry,
 	struct route_mpls_rule *route_mpls_rule,
 	yanet_error **err
 ) {
@@ -301,7 +302,7 @@ route_mpls_rule_target_new(
 			route_mpls_rule->nexthops + idx;
 
 		if ((nexthops[idx].counter_id = counter_registry_register(
-			     &cp_module->counter_registry,
+			     routes_registry,
 			     route_mpls_nexthop->counter,
 			     2,
 			     err
@@ -364,6 +365,16 @@ route_mpls_module_config_update(
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
+	// Per-nexthop counters live in a dedicated "routes" registry so they
+	// are separated from the module's predefined counters in the
+	// per-worker storages and the counter storage registry.
+	struct counter_registry *routes_registry = cp_module_counter_registry(
+		cp_module, "routes", &config->routes_registry_idx, err
+	);
+	if (routes_registry == NULL) {
+		goto error;
+	}
+
 	struct target **targets = (struct target **)memory_balloc(
 		memory_context, sizeof(struct target *) * route_mpls_rule_count
 	);
@@ -377,7 +388,7 @@ route_mpls_module_config_update(
 
 	for (uint64_t idx = 0; idx < route_mpls_rule_count; ++idx) {
 		struct target *target = route_mpls_rule_target_new(
-			cp_module, route_mpls_rules + idx, err
+			cp_module, routes_registry, route_mpls_rules + idx, err
 		);
 
 		if (target == NULL) {

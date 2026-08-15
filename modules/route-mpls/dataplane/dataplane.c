@@ -139,9 +139,13 @@ route_mpls_handle_packets(
 				[packet->hash % target->nexthop_map_size];
 		struct nexthop *nexthop =
 			ADDR_OF(&target->nexthops) + nexthop_idx;
+		// Per-nexthop counters live in the "routes" runtime registry,
+		// resolved through its own per-worker storage.
 		uint64_t *counters = counter_get_address(
 			nexthop->counter_id,
-			ADDR_OF_NONNULL(&module_ectx->counter_storage)
+			module_ectx_counter_storage(
+				module_ectx, module_config->routes_registry_idx
+			)
 		);
 		counters[0] += 1;
 		counters[1] += packet_data_len(packet);

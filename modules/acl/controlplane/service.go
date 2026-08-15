@@ -758,3 +758,83 @@ func (m *ACLService) DeleteConfig(
 
 	return &aclpb.DeleteConfigResponse{}, nil
 }
+
+// GetRulesCounters returns the per-rule counters of the named config, or of
+// every config when the request names none.
+//
+// Counters whose packets and bytes are both zero across all workers are
+// omitted, matching the metrics read.
+func (m *ACLService) GetRulesCounters(
+	ctx context.Context,
+	req *aclpb.GetRulesCountersRequest,
+) (*aclpb.GetRulesCountersResponse, error) {
+	name := req.GetName()
+
+	if name != "" {
+		m.mu.RLock()
+		entry, ok := m.configs[name]
+		m.mu.RUnlock()
+		if !ok || entry.Published() == nil {
+			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+		}
+	}
+
+	dpConfig := m.backend.DPConfig()
+	if dpConfig == nil {
+		return &aclpb.GetRulesCountersResponse{}, nil
+	}
+
+	result := make([]*aclpb.RuleCounter, 0)
+	for pos := range dpConfig.AllModulePositions(moduleType) {
+		if name != "" && pos.ModuleName != name {
+			continue
+		}
+
+		// Runtime-kind storages expand exactly the module's per-rule
+		// registries, so this read excludes the predefined module
+		// counters (rx, tx, acl_action_*, ...) by construction.
+		groups, err := dpConfig.CountersByTags([]ffi.CounterTag{
+			{Key: "device", Value: pos.Device},
+			{Key: "pipeline", Value: pos.Pipeline},
+			{Key: "function", Value: pos.Function},
+			{Key: "chain", Value: pos.Chain},
+			{Key: "module_type", Value: moduleType},
+			{Key: "module_name", Value: pos.ModuleName},
+			{Key: "kind", Value: "runtime"},
+		}, nil)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to read rule counters of config %q: %v", pos.ModuleName, err)
+		}
+
+		for _, group := range groups {
+			for _, counter := range group.Counters {
+				var packets, bytes uint64
+				for _, workerVals := range counter.Values {
+					if len(workerVals) > 0 {
+						packets += workerVals[0]
+					}
+					if len(workerVals) > 1 {
+						bytes += workerVals[1]
+					}
+				}
+
+				if packets == 0 && bytes == 0 {
+					continue
+				}
+
+				result = append(result, &aclpb.RuleCounter{
+					Config:   pos.ModuleName,
+					Device:   pos.Device,
+					Pipeline: pos.Pipeline,
+					Function: pos.Function,
+					Chain:    pos.Chain,
+					Counter:  counter.Name,
+					Packets:  packets,
+					Bytes:    bytes,
+				})
+			}
+		}
+	}
+
+	return &aclpb.GetRulesCountersResponse{Counters: result}, nil
+}

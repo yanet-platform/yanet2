@@ -296,10 +296,7 @@ func collectNet6ShareVerdicts(
 	}
 
 	path := aclCounterPath("port0", "test")
-	counters := h.SharedMemory().DPConfig(0).ModuleCounters(
-		path.Device, path.Pipeline, path.Function, path.Chain,
-		path.ModuleType, path.ModuleName, nil,
-	)
+	counters := dataplaneut.RuleCounters(t, h, path, nil)
 
 	return net6ShareResult{
 		verdicts:     verdicts,
@@ -511,6 +508,7 @@ func TestACL_Net6Share_EmptyRoundForcePoll(t *testing.T) {
 		path.Device, path.Pipeline, path.Function, path.Chain,
 		path.ModuleType, path.ModuleName, nil,
 	)
+	counters = append(counters, dataplaneut.RuleCounters(t, harness, path, nil)...)
 	for name, values := range dataplaneut.ValueCounters(counters) {
 		for _, value := range values {
 			require.Zero(
@@ -550,5 +548,5 @@ func TestACL_Net6Share_EmptyRoundForcePoll(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Output, 1, "deep_lo_a packet must be allowed through")
 	require.Empty(t, result.Drop)
-	dataplaneut.RequireModuleCounter(t, harness, path, "deep_lo_a", 1, packetSize)
+	dataplaneut.RequireRuleCounter(t, harness, path, "deep_lo_a", 1, packetSize)
 }

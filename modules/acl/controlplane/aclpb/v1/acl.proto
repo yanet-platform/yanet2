@@ -20,6 +20,8 @@ service ACLService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
   // List all ACL configurations across instances
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // Returns per-rule counters of ACL configurations
+  rpc GetRulesCounters(GetRulesCountersRequest) returns (GetRulesCountersResponse);
 }
 
 // MetricsService exposes ACL module metrics.
@@ -100,5 +102,27 @@ message SyncConfig {
   common.commonpb.v1.IPAddress dst_addr_multicast = 2; // Multicast IPv6 address;
   uint32 port_multicast = 3;                            // Multicast port;
   common.commonpb.v1.IPAddress dst_addr_unicast = 4;   // Unicast IPv6 address;
-  uint32 port_unicast = 5;                              // Unicast port;
+  uint32 port_unicast = 5;                            // Unicast port;
 }
+
+// Request for per-rule counters. An empty name returns the rule counters
+// of every configuration.
+message GetRulesCountersRequest {
+  // Optional ACL configuration name.
+  string name = 1;
+}
+
+// One per-rule counter at the module position holding it.
+message RuleCounter {
+  string config = 1;
+  string device = 2;
+  string pipeline = 3;
+  string function = 4;
+  string chain = 5;
+  // Rule counter name, as set on the rule.
+  string counter = 6;
+  uint64 packets = 7;
+  uint64 bytes = 8;
+}
+
+message GetRulesCountersResponse { repeated RuleCounter counters = 1; }

@@ -34,13 +34,11 @@ enum route_drop_reason {
 
 static inline void
 route_count_packet(
-	struct module_ectx *module_ectx,
+	struct counter_storage *counter_storage,
 	uint64_t counter_id,
 	struct packet *packet
 ) {
-	uint64_t *counters = counter_get_address(
-		counter_id, ADDR_OF_NONNULL(&module_ectx->counter_storage)
-	);
+	uint64_t *counters = counter_get_address(counter_id, counter_storage);
 	counters[0] += 1;
 	counters[1] += packet_data_len(packet);
 }
@@ -160,6 +158,14 @@ route_handle_packets(
 		cp_module
 	);
 
+	struct counter_storage *counter_storage =
+		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+	// Per-route counters live in the "routes" runtime registry, resolved
+	// through its own per-worker storage.
+	struct counter_storage *routes_storage = module_ectx_counter_storage(
+		module_ectx, route_config->routes_registry_idx
+	);
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		uint32_t route_list_id = 0;
@@ -182,7 +188,7 @@ route_handle_packets(
 			counters = &route_config->counters_v6;
 		} else {
 			route_count_packet(
-				module_ectx,
+				counter_storage,
 				route_config->drop_non_ip_counter_id,
 				packet
 			);
@@ -192,7 +198,7 @@ route_handle_packets(
 
 		if (route_list_id == LPM_VALUE_INVALID) {
 			route_count_packet(
-				module_ectx,
+				counter_storage,
 				drop_reason == ROUTE_DROP_TTL_EXPIRED
 					? counters->drop_ttl_expired
 					: counters->drop_no_route,
@@ -206,7 +212,7 @@ route_handle_packets(
 			ADDR_OF(&route_config->route_lists) + route_list_id;
 		if (route_list->count == 0) {
 			route_count_packet(
-				module_ectx,
+				counter_storage,
 				counters->drop_empty_route_list,
 				packet
 			);
@@ -228,7 +234,7 @@ route_handle_packets(
 
 		if (device_id == (uint16_t)-1) {
 			route_count_packet(
-				module_ectx,
+				counter_storage,
 				counters->drop_device_unresolved,
 				packet
 			);
@@ -238,10 +244,12 @@ route_handle_packets(
 
 		route_set_packet_destination(packet, route);
 		packet->tx_device_id = device_id;
-		route_count_packet(module_ectx, counters->forwarded, packet);
+		route_count_packet(
+			counter_storage, counters->forwarded, packet
+		);
 		if (route->counter_id != COUNTER_INVALID) {
 			route_count_packet(
-				module_ectx, route->counter_id, packet
+				routes_storage, route->counter_id, packet
 			);
 		}
 		module_ectx_route_output(module_ectx, packet_front, packet);

@@ -61,6 +61,10 @@ type Backend interface {
 	// ModuleCounters reads the named counters back from every position
 	// at which the named config is installed.
 	ModuleCounters(name string, counterNames []string) []CounterView
+	// RuntimeModuleCounters reads the named runtime counters (the
+	// config's per-nexthop registry) from every position at which the
+	// named config is installed.
+	RuntimeModuleCounters(name string, counterNames []string) []CounterView
 }
 
 // backend is the real Backend implementation backed by shared memory.
@@ -158,6 +162,28 @@ func (m *backend) DeleteModule(name string) error {
 }
 
 func (m *backend) ModuleCounters(name string, counterNames []string) []CounterView {
+	return m.counters(name, counterNames, func(d, p, f, c, mt, mn string, q []string) []ffi.CounterInfo {
+		return m.agent.DPConfig().ModuleCounters(d, p, f, c, mt, mn, q)
+	})
+}
+
+func (m *backend) RuntimeModuleCounters(name string, counterNames []string) []CounterView {
+	return m.counters(name, counterNames, func(d, p, f, c, mt, mn string, q []string) []ffi.CounterInfo {
+		infos, err := m.agent.DPConfig().ModuleRuntimeCounters(d, p, f, c, mt, mn, q)
+		if err != nil {
+			return nil
+		}
+		return infos
+	})
+}
+
+// counters reads the selected counters from every position at which the
+// named config is installed, through the supplied per-position read.
+func (m *backend) counters(
+	name string,
+	counterNames []string,
+	read func(string, string, string, string, string, string, []string) []ffi.CounterInfo,
+) []CounterView {
 	dpConfig := m.agent.DPConfig()
 
 	var views []CounterView
@@ -166,7 +192,7 @@ func (m *backend) ModuleCounters(name string, counterNames []string) []CounterVi
 			continue
 		}
 
-		infos := dpConfig.ModuleCounters(
+		infos := read(
 			pos.Device,
 			pos.Pipeline,
 			pos.Function,

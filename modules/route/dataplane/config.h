@@ -69,4 +69,9 @@ struct route_module_config {
 	// A non-IP packet has no address family, so its drop counter is
 	// shared rather than kept in a per-family set.
 	uint64_t drop_non_ip_counter_id;
+
+	// Index of the per-route "routes" counter registry within
+	// cp_module.runtime_counter_registries. Each per-route counter_id is
+	// resolved against this registry's per-worker storage.
+	uint64_t routes_registry_idx;
 };

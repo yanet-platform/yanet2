@@ -102,7 +102,7 @@ func (m *RouteService) collectNexthopMetrics(tags []*commonpb.MetricTag) []*comm
 			continue
 		}
 
-		for _, counter := range m.backend.ModuleCounters(configName, names) {
+		for _, counter := range m.backend.RuntimeModuleCounters(configName, names) {
 			var packets, bytes uint64
 			for _, instance := range counter.Values {
 				if len(instance) > 0 {

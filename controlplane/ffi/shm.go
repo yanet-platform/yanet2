@@ -650,6 +650,40 @@ func (m *DPConfig) ModuleCounters(
 	return m.encodeCounters(counters)
 }
 
+// ModuleRuntimeCounters returns the module's runtime counters — those
+// expanded from its named counter registries (per-route, per-rule, etc.) —
+// optionally filtered by name.
+//
+// If counterQuery is nil or empty, returns all runtime counters.
+func (m *DPConfig) ModuleRuntimeCounters(
+	deviceName string,
+	pipelineName string,
+	functionName string,
+	chainName string,
+	moduleType string,
+	moduleName string,
+	counterQuery []string,
+) ([]CounterInfo, error) {
+	groups, err := m.CountersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "pipeline", Value: pipelineName},
+		{Key: "function", Value: functionName},
+		{Key: "chain", Value: chainName},
+		{Key: "module_type", Value: moduleType},
+		{Key: "module_name", Value: moduleName},
+		{Key: "kind", Value: "runtime"},
+	}, counterQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	counters := make([]CounterInfo, 0)
+	for _, group := range groups {
+		counters = append(counters, group.Counters...)
+	}
+	return counters, nil
+}
+
 // ObjectCounters returns the counters of an object identified by its type
 // and name.
 func (m *DPConfig) ObjectCounters(

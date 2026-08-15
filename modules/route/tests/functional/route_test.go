@@ -1004,7 +1004,7 @@ func TestRoute_NexthopCounter(t *testing.T) {
 		Device: "port0", Pipeline: "test", Function: "test",
 		Chain: "test_chain", ModuleType: "route", ModuleName: "test",
 	}
-	dataplaneut.RequireModuleCounter(t, h, path, counterName, 1, pktSize)
+	dataplaneut.RequireRuleCounter(t, h, path, counterName, 1, pktSize)
 
 	// Close the round trip: ShowFIB's DumpFIB path must resolve the same
 	// name back out of the real C counter registry, not just accept it on

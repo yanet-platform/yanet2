@@ -48,6 +48,11 @@ struct module_config {
 	struct target **targets;
 	uint64_t target_count;
 
+	// Index of the per-nexthop "routes" counter registry within
+	// cp_module.runtime_counter_registries. Each per-nexthop counter_id
+	// is resolved against this registry's per-worker storage.
+	uint64_t routes_registry_idx;
+
 	struct filter filter_ip4;
 	struct filter filter_ip6;
 };

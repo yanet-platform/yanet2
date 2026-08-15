@@ -162,6 +162,10 @@ acl_handle_packets(
 	struct counter_storage *counter_storage =
 		ADDR_OF_NONNULL(&module_ectx->counter_storage);
 
+	struct counter_storage *rules_storage = module_ectx_counter_storage(
+		module_ectx, acl_config->rules_registry_idx
+	);
+
 	uint64_t *pass_cnt = counter_get_address(
 		acl_config->action_allow_counter_id, counter_storage
 	);
@@ -507,7 +511,7 @@ acl_handle_packets(
 					uint64_t *counters =
 						counter_get_address(
 							target->counter_id,
-							counter_storage
+							rules_storage
 						);
 					counters[0] += 1;
 					counters[1] += pkt_len;

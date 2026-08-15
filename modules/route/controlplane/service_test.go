@@ -63,9 +63,14 @@ type fakeBackend struct {
 	mu       sync.Mutex
 	handle   *fakeHandle
 	counters []route.CounterView
+	// runtimeCounters backs RuntimeModuleCounters, the per-nexthop read.
+	runtimeCounters []route.CounterView
 	// queries records the counterNames argument of every ModuleCounters
 	// call, in call order.
 	queries [][]string
+	// runtimeQueries records the counterNames argument of every
+	// RuntimeModuleCounters call, in call order.
+	runtimeQueries [][]string
 	// updateCalls records the range entries passed to UpdateModule on
 	// every call, in call order.
 	updateCalls [][]*routepb.FIBEntry
@@ -113,6 +118,14 @@ func (m *fakeBackend) ModuleCounters(name string, counterNames []string) []route
 
 	m.queries = append(m.queries, append([]string(nil), counterNames...))
 	return m.counters
+}
+
+func (m *fakeBackend) RuntimeModuleCounters(name string, counterNames []string) []route.CounterView {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.runtimeQueries = append(m.runtimeQueries, append([]string(nil), counterNames...))
+	return m.runtimeCounters
 }
 
 // newServiceWithConfig returns a service holding a single applied config
@@ -664,7 +677,7 @@ func TestUpdateFIBRejectsConflictingCounterNamesAcrossEntries(t *testing.T) {
 func TestUpdateFIBToleratesActiveNexthopCounterNamesFailure(t *testing.T) {
 	backend := newFakeBackend()
 	backend.handle = &fakeHandle{routeCount: 3, activeNamesErr: errors.New("fib_iter_new: allocation failure")}
-	backend.counters = []route.CounterView{
+	backend.runtimeCounters = []route.CounterView{
 		counterView("nexthop_my_counter", [][]uint64{{1, 100}}),
 	}
 	service := route.NewRouteService(backend)
@@ -682,7 +695,7 @@ func TestUpdateFIBToleratesActiveNexthopCounterNamesFailure(t *testing.T) {
 	all, err := service.Metrics()
 	require.NoError(t, err)
 	require.Empty(t, findMetrics(all, "route_nexthop_packets"), "the counter set must be empty until the next update")
-	for _, query := range backend.queries {
+	for _, query := range append(append([][]string(nil), backend.queries...), backend.runtimeQueries...) {
 		require.NotContains(t, query, "nexthop_my_counter", "the empty counter set must never be queried for")
 	}
 
@@ -706,7 +719,7 @@ func TestNexthopMetricsSumWorkerInstances(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	backend.counters = []route.CounterView{
+	backend.runtimeCounters = []route.CounterView{
 		counterView("nexthop_my_counter", [][]uint64{{1, 100}, {2, 200}}),
 	}
 
@@ -730,12 +743,12 @@ func TestNexthopMetricsSumWorkerInstances(t *testing.T) {
 }
 
 // TestNexthopMetricsExactTagNeverReadsForeignCounter verifies that an exact
-// "counter" tag naming a module-level counter never reaches
-// collectNexthopMetrics's dataplane read, so the structural counter can
+// "counter" tag naming anything outside a config's own reachable names never
+// reaches collectNexthopMetrics's dataplane read, so a foreign counter can
 // never resurface mislabeled under the route_nexthop_* family.
 func TestNexthopMetricsExactTagNeverReadsForeignCounter(t *testing.T) {
 	backend := newFakeBackend()
-	backend.counters = []route.CounterView{
+	backend.runtimeCounters = []route.CounterView{
 		counterView("route_forwarded_v4", [][]uint64{{7, 700}}),
 	}
 	service := route.NewRouteService(backend)
@@ -760,4 +773,5 @@ func TestNexthopMetricsExactTagNeverReadsForeignCounter(t *testing.T) {
 	// (whose exact-tag branch never matches a per-entry read) has anything
 	// left to query.
 	require.Empty(t, backend.queries)
+	require.Empty(t, backend.runtimeQueries)
 }
