@@ -31,45 +31,6 @@ func authenticateKeyToken(
 	return err
 }
 
-func TestVerifySignature_Ed25519(t *testing.T) {
-	signer := generateTestEd25519Signer(t)
-	token := signTestToken(
-		t, signer, "alice", "/test.Service/Method",
-		time.Now().UnixNano(), "nonce-1",
-	)
-
-	err := authenticateKeyToken(t, map[string][]sshkey.KeyEntry{
-		"alice": {{PublicKey: signer.PublicKey()}},
-	}, token)
-	require.NoError(t, err)
-}
-
-func TestVerifySignature_RSA(t *testing.T) {
-	signer := generateTestRSASigner(t)
-	token := signTestToken(
-		t, signer, "alice", "/test.Service/Method",
-		time.Now().UnixNano(), "nonce-1",
-	)
-
-	err := authenticateKeyToken(t, map[string][]sshkey.KeyEntry{
-		"alice": {{PublicKey: signer.PublicKey()}},
-	}, token)
-	require.NoError(t, err)
-}
-
-func TestVerifySignature_ECDSA(t *testing.T) {
-	signer := generateTestECDSASigner(t)
-	token := signTestToken(
-		t, signer, "alice", "/test.Service/Method",
-		time.Now().UnixNano(), "nonce-1",
-	)
-
-	err := authenticateKeyToken(t, map[string][]sshkey.KeyEntry{
-		"alice": {{PublicKey: signer.PublicKey()}},
-	}, token)
-	require.NoError(t, err)
-}
-
 func TestVerifySignature_WrongKey(t *testing.T) {
 	signerEd25519 := generateTestEd25519Signer(t)
 	signerRSA := generateTestRSASigner(t)

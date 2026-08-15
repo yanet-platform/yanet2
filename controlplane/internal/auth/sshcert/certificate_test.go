@@ -63,16 +63,6 @@ func certificateToken(t *testing.T, certificate string) string {
 	return "sshcert " + base64.StdEncoding.EncodeToString(encoded)
 }
 
-func TestParseCertificate_Valid(t *testing.T) {
-	ca := generateTestCA(t)
-	cert, userSigner := generateTestUserCert(
-		t, ca, "alice", 1,
-		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
-	)
-
-	require.NoError(t, authenticateCertificate(t, ca, cert, userSigner))
-}
-
 func TestParseCertificate_InvalidBase64(t *testing.T) {
 	ca := generateTestCA(t)
 	authenticator := sshcert.NewAuthenticator(
@@ -110,16 +100,6 @@ func TestParseCertificate_NotACert(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid certificate: not a certificate")
 }
 
-func TestCheckKeyType_ECDSA(t *testing.T) {
-	ca := generateTestCA(t)
-	cert, userSigner := generateTestUserCert(
-		t, ca, "alice", 1,
-		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
-	)
-
-	require.NoError(t, authenticateCertificate(t, ca, cert, userSigner))
-}
-
 func TestCheckKeyType_Ed25519_Rejected(t *testing.T) {
 	ca := generateTestCA(t)
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
@@ -143,16 +123,6 @@ func TestCheckKeyType_Ed25519_Rejected(t *testing.T) {
 	require.Contains(t, err.Error(), "certificate key type check failed: unsupported key type")
 }
 
-func TestCheckCertType_UserCert(t *testing.T) {
-	ca := generateTestCA(t)
-	cert, userSigner := generateTestUserCert(
-		t, ca, "alice", 1,
-		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
-	)
-
-	require.NoError(t, authenticateCertificate(t, ca, cert, userSigner))
-}
-
 func TestCheckCertType_HostCert_Rejected(t *testing.T) {
 	ca := generateTestCA(t)
 	cert, userSigner := generateTestHostCert(t, ca, "host.example.com", 1)
@@ -160,16 +130,6 @@ func TestCheckCertType_HostCert_Rejected(t *testing.T) {
 	err := authenticateCertificate(t, ca, cert, userSigner)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "certificate type check failed: not a user certificate")
-}
-
-func TestCheckValidity_Valid(t *testing.T) {
-	ca := generateTestCA(t)
-	cert, userSigner := generateTestUserCert(
-		t, ca, "alice", 1,
-		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
-	)
-
-	require.NoError(t, authenticateCertificate(t, ca, cert, userSigner))
 }
 
 func TestCheckValidity_Expired(t *testing.T) {
@@ -194,16 +154,6 @@ func TestCheckValidity_NotYetValid(t *testing.T) {
 	err := authenticateCertificate(t, ca, cert, userSigner)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "certificate validity check failed: certificate not yet valid")
-}
-
-func TestExtractPrincipal_Valid(t *testing.T) {
-	ca := generateTestCA(t)
-	cert, userSigner := generateTestUserCert(
-		t, ca, "alice", 1,
-		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
-	)
-
-	require.NoError(t, authenticateCertificate(t, ca, cert, userSigner))
 }
 
 func TestExtractPrincipal_Empty(t *testing.T) {

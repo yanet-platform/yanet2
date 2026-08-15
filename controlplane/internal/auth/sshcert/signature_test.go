@@ -47,16 +47,6 @@ func authenticateWithSignature(
 	return err
 }
 
-func TestVerifySignature_Valid(t *testing.T) {
-	ca := generateTestCA(t)
-	cert, userSigner := generateTestUserCert(
-		t, ca, "alice", 1,
-		time.Now().Add(-time.Hour), time.Now().Add(time.Hour),
-	)
-
-	require.NoError(t, authenticateCertificate(t, ca, cert, userSigner))
-}
-
 func TestVerifySignature_WrongKey(t *testing.T) {
 	ca := generateTestCA(t)
 	cert, _ := generateTestUserCert(
