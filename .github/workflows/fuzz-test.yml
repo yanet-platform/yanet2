@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build and Go fuzz
     runs-on: ubuntu-24.04
+    outputs:
+      fuzz-binaries-artifact-id: ${{ steps.upload-fuzz-binaries.outputs.artifact-id }}
 
     steps:
       - name: Free up disk space on GitHub runner
@@ -55,45 +57,79 @@ jobs:
         run: |
           mkdir -p fuzz-out
           find build/tests/fuzzing/ -maxdepth 1 -type f -executable -exec cp {} fuzz-out/ \;
+          if [ -z "$(ls -A fuzz-out)" ]; then
+            echo "::error::no fuzz binaries were collected from build/tests/fuzzing/"
+            exit 1
+          fi
 
       - name: Upload fuzz binaries
+        id: upload-fuzz-binaries
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-binaries
           path: fuzz-out/
           retention-days: 1
+          overwrite: true
 
       - name: Run Go fuzz tests
         id: go-fuzz
-        continue-on-error: true
+        env:
+          # The cgo test binary has to link the sanitizer runtimes the
+          # instrumented archives reference, or it fails to link entirely.
+          CGO_CFLAGS: -O2 -g -fsanitize=address,undefined
+          CGO_LDFLAGS: -O2 -g -fsanitize=address,undefined
+          # Without this, a caught sanitizer diagnostic prints but the
+          # test still passes.
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1
         run: |
+          # Listing targets executes TestMain, and this suite's TestMain
+          # boots a VM from an image never staged in this job.
+          excluded_pkg="github.com/yanet-platform/yanet2/tests/functional/main"
           packages=$(go list ./...)
+          failed_list_pkgs=""
           for pkg in $packages; do
-            fuzz_funcs=$(go test "$pkg" -list '^Fuzz' 2>/dev/null | grep '^Fuzz' || true)
+            if [ "$pkg" = "$excluded_pkg" ]; then
+              continue
+            fi
+            if ! list_out=$(go test "$pkg" -list '^Fuzz'); then
+              echo "::error::failed to list fuzz targets in $pkg"
+              failed_list_pkgs="$failed_list_pkgs $pkg"
+              continue
+            fi
+            fuzz_funcs=$(printf '%s\n' "$list_out" | grep '^Fuzz' || true)
             for func in $fuzz_funcs; do
               echo "Fuzzing $func in $pkg"
               go test "$pkg" -run '^$' -fuzz "^${func}\$" -fuzztime 10m
             done
           done
+          if [ -n "$failed_list_pkgs" ]; then
+            echo "Failed to list fuzz targets in:$failed_list_pkgs"
+            exit 1
+          fi
 
       - name: Upload Go fuzz failure testdata
         uses: actions/upload-artifact@v4
-        if: steps.go-fuzz.outcome == 'failure'
+        if: always() && steps.go-fuzz.outcome == 'failure'
         with:
           name: go-fuzz-testdata
           path: "**/testdata/fuzz/**"
           retention-days: 7
+          overwrite: true
 
   c-fuzz-test:
     name: Fuzz ${{ matrix.module }}
     runs-on: ubuntu-24.04
     needs: build
+    # The build job's conclusion tracks the Go fuzz loop, so a bare needs
+    # would skip the C fuzzers on any Go fuzz failure too. Run whenever the
+    # fuzz binaries were uploaded, even if build failed afterward.
+    if: ${{ !cancelled() && needs.build.outputs.fuzz-binaries-artifact-id != '' }}
     timeout-minutes: 15
 
     strategy:
       fail-fast: false
       matrix:
-        module: [decap, route, nat64w, dscp, fwstate]
+        module: [decap, route, nat64w, dscp, fwstate, forward, mirror]
 
     steps:
       - name: Download fuzz binaries
