@@ -1157,7 +1157,6 @@ func TestUpdateFIB_ShadowedNexthopCounterExcludedFromMetrics(t *testing.T) {
 		}),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "test"}) })
 
 	wirePipeline(t, agent, "port0", "test")
 
