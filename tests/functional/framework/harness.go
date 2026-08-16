@@ -12,12 +12,12 @@ import (
 
 const (
 	baselineSnapshotName    = "baseline"
-	baselineTemplateVersion = "v5"
+	baselineTemplateVersion = "v6"
 )
 
 // baselineTemplatePath returns the versioned overlay path for a baseline
 // snapshot. Bumping the version invalidates locally cached templates when
-// their guest filesystem layout changes.
+// any captured guest state stops matching what this harness configures.
 func baselineTemplatePath(qemuImage, baselineTag string) string {
 	return SnapshotImagePath(qemuImage, baselineTag+"-"+baselineTemplateVersion)
 }

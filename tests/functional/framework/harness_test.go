@@ -16,13 +16,13 @@ func TestBaselineTemplatePath(t *testing.T) {
 			name:        "default baseline",
 			qemuImage:   "/tmp/yanet-test.qcow2",
 			baselineTag: baselineSnapshotName,
-			want:        "/tmp/yanet-test-baseline-v5.qcow2",
+			want:        "/tmp/yanet-test-baseline-v6.qcow2",
 		},
 		{
 			name:        "custom baseline",
 			qemuImage:   "/tmp/yanet-test.qcow2",
 			baselineTag: "nat64",
-			want:        "/tmp/yanet-test-nat64-v5.qcow2",
+			want:        "/tmp/yanet-test-nat64-v6.qcow2",
 		},
 	}
 

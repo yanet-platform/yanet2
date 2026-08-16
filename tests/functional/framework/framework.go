@@ -138,6 +138,17 @@ func HasBaselineSnapshot() bool {
 func (f *TestFramework) CommonConfigCommands() []string {
 	p := f.Paths
 	return []string{
+		// Duplicate address detection holds kni0's link-local address tentative, and
+		// the kernel drops packets addressed to it. The global and per-device knobs
+		// must both be below 1, since either alone leaves detection active. The
+		// default knob also covers an interface created afterward. The write precedes
+		// the link coming up, since it cannot clear an address already tentative.
+		"sysctl -w net.ipv6.conf.all.accept_dad=0 net.ipv6.conf.default.accept_dad=0 net.ipv6.conf.kni0.accept_dad=0",
+
+		// This race is timing-dependent: a link-up either falls inside the
+		// exposure window or misses it, so a green run is weak evidence it
+		// is gone.
+
 		// Configure kni0 network interface
 		"ip link set kni0 up",
 		"ip nei replace " + VMIPv6Gateway + " lladdr " + SrcMAC + " dev kni0",
