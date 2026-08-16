@@ -77,13 +77,21 @@ fwstate_map_v4_object_insert_layer(
 	uint16_t worker_count
 );
 
-// Trim stale layers from the object's table chain.
+// Unlink stale layers from the object's table chain.
 //
-// Returns 0 on success or -1 on error. Trimmed layers are tracked in the
-// fwtable stale chain and freed on the next trim call (giving the
-// dataplane one trim cycle to quiesce), so the caller has nothing to
-// free.
+// Returns 0 on success or -1 on error. Unlinked layers are parked in
+// the fwtable stale chain; the caller frees them with
+// fwstate_map_v4_object_free_stale_layers after a config generation
+// barrier has elapsed.
 int
-fwstate_map_v4_object_trim_stale_layers(
+fwstate_map_v4_object_unlink_stale_layers(
 	struct fwstate_map_v4_object *self, uint64_t now
 );
+
+// Free the layers parked by fwstate_map_v4_object_unlink_stale_layers.
+//
+// Safe only after a generation barrier that every worker advanced past
+// since the unlink: the barrier is what proves no reader is still
+// walking the parked chain.
+void
+fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self);

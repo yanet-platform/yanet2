@@ -254,28 +254,46 @@ func (m *MapObjectConfig) ResolveMap(layerIndex uint32) unsafe.Pointer {
 	return unsafe.Pointer(ptr)
 }
 
-// TrimStaleLayers trims stale layers from the fwtable chain.
+// UnlinkStaleLayers parks expired layers in the fwtable stale chain.
 //
-// Trimmed layers are tracked in the fwtable stale chain and freed on the
-// next trim call (giving the dataplane one trim cycle to quiesce), so the
-// caller has nothing to free.
-func (m *MapObjectConfig) TrimStaleLayers(now uint64) error {
+// The parked layers stay allocated until FreeStaleLayers releases
+// them after the caller's generation barrier has elapsed; a failed
+// barrier leaves them parked for a later round.
+func (m *MapObjectConfig) UnlinkStaleLayers(now uint64) error {
 	var rc C.int
 	if m.kind == KindV6 {
-		rc = C.fwstate_map_v6_object_trim_stale_layers(
+		rc = C.fwstate_map_v6_object_unlink_stale_layers(
 			C.fwstate_map_v6_from_cp_object(m.asRawPtr()),
 			C.uint64_t(now),
 		)
 	} else {
-		rc = C.fwstate_map_v4_object_trim_stale_layers(
+		rc = C.fwstate_map_v4_object_unlink_stale_layers(
 			C.fwstate_map_v4_from_cp_object(m.asRawPtr()),
 			C.uint64_t(now),
 		)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to trim stale layers: error code=%d", rc)
+		return fmt.Errorf("failed to unlink stale layers: error code=%d", rc)
 	}
 	m.generation++
+	return nil
+}
+
+// FreeStaleLayers releases the layers parked by UnlinkStaleLayers.
+//
+// Safe only after a generation barrier that every worker advanced past
+// since the unlink: the barrier is what proves no reader is still
+// walking the parked chain.
+func (m *MapObjectConfig) FreeStaleLayers() error {
+	if m.kind == KindV6 {
+		C.fwstate_map_v6_object_free_stale_layers(
+			C.fwstate_map_v6_from_cp_object(m.asRawPtr()),
+		)
+	} else {
+		C.fwstate_map_v4_object_free_stale_layers(
+			C.fwstate_map_v4_from_cp_object(m.asRawPtr()),
+		)
+	}
 	return nil
 }
 

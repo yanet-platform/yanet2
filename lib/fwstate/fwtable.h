@@ -12,14 +12,16 @@
 //
 // The head fwmap is the active (read-write) layer; each layer reachable
 // through fwmap_t::next is progressively older.  The control plane
-// grows the chain with fwtable_insert_layer_cp and reclaims expired
-// layers with fwtable_trim_stale_cp.  The dataplane searches the chain
-// with fwtable_lookup and writes through fwtable_insert.
+// grows the chain with fwtable_insert_layer_cp, reclaims expired
+// layers with fwtable_unlink_stale_cp, and frees them with
+// fwtable_free_stale once a config generation barrier has elapsed.
+// The dataplane searches the chain with fwtable_lookup and writes
+// through fwtable_insert.
 //
-// Trim reuses fwmap_t::next to thread stale layers, so the dataplane
+// Unlink reuses fwmap_t::next to thread stale layers, so the dataplane
 // reads the chain and table head with acquire loads and the control
-// plane publishes them with release stores; see fwtable_trim_stale_cp
-// for the reader-lifetime precondition.
+// plane publishes them with release stores; see
+// fwtable_unlink_stale_cp for the reader-lifetime precondition.
 typedef struct fwtable {
 	fwmap_t *head;
 	fwmap_t *stale;
@@ -50,8 +52,11 @@ fwtable_insert_layer_cp(
 
 // Free every layer in the stale chain.
 //
-// Called internally by fwtable_trim_stale_cp (to release the previous
-// generation) and usable standalone during table destruction.
+// Safe only after a config generation barrier that every worker
+// advanced past since the layers were unlinked: a reader that started
+// before the unlink can still be walking them, and it is the barrier
+// that proves no such reader remains. Also usable standalone during
+// table destruction, where no concurrent readers exist.
 static inline void
 fwtable_free_stale(fwtable_t *table, struct memory_context *ctx) {
 	fwmap_t *layer = ADDR_OF(&table->stale);
@@ -63,23 +68,17 @@ fwtable_free_stale(fwtable_t *table, struct memory_context *ctx) {
 	SET_OFFSET_OF(&table->stale, NULL);
 }
 
-// Reclaim an expired tail layer from the active chain.
+// Unlink an expired tail layer from the active chain.
 //
-// First frees the stale layers reclaimed last call, then, if the
-// oldest layer past the head is expired, atomically unlinks it to
-// table->stale.  Only the tail is trimmed, so middle next links stay
-// intact and a reader walking from the head always reaches the current
-// tail; the head is never trimmed.
-//
-// Trimmed layers are freed on the next call, so a dataplane reader
-// must not span two consecutive trims — the caller bounds reader
-// duration below one trim interval.  Returns 0.
+// If the oldest layer past the head is expired, atomically unlinks it
+// into table->stale without freeing anything.  Only the tail is
+// unlinked, so middle next links stay intact and a reader walking from
+// the head always reaches the current tail; the head is never
+// unlinked.  The unlinked layers are released by fwtable_free_stale
+// after the caller's generation barrier elapses; a failed barrier
+// simply leaves them parked for a later round.  Returns 0.
 static inline int
-fwtable_trim_stale_cp(
-	fwtable_t *table, struct memory_context *ctx, uint64_t now
-) {
-	fwtable_free_stale(table, ctx);
-
+fwtable_unlink_stale_cp(fwtable_t *table, uint64_t now) {
 	fwmap_t *head = ADDR_OF(&table->head);
 	if (!head || !head->next) {
 		return 0;

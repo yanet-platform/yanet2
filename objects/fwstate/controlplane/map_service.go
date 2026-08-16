@@ -56,17 +56,19 @@ func ClampBatchSize(n uint32) uint32 {
 // mapStats is the bindings-level stats shape carried across CGo.
 type mapStats = cfwstate.MapStats
 
-// MapLayerTrimmer reclaims layers whose deadline has passed.
+// MapLayerReclaimer parks and releases a fwtable's stale layers around
+// the generation barrier.
 //
 // [cfwstate.MapObjectConfig] satisfies this interface; the seam lets unit
-// tests record trim calls without a live shared-memory handle.
-type MapLayerTrimmer interface {
-	TrimStaleLayers(now uint64) error
+// tests record reclamation calls without a live shared-memory handle.
+type MapLayerReclaimer interface {
+	UnlinkStaleLayers(now uint64) error
+	FreeStaleLayers() error
 }
 
 // Compile-time assertion that [cfwstate.MapObjectConfig] satisfies
-// [MapLayerTrimmer].
-var _ MapLayerTrimmer = (*cfwstate.MapObjectConfig)(nil)
+// [MapLayerReclaimer].
+var _ MapLayerReclaimer = (*cfwstate.MapObjectConfig)(nil)
 
 // MapOption configures an FWStateMapService.
 type MapOption func(*mapOptions)
@@ -362,13 +364,12 @@ func (m *FWStateMapService) GetMapStats(
 // InsertLayer inserts a new layer into the fwtable chain of a named
 // fwstate-map.
 //
-// After the new layer is committed in place (the table head now points at
-// the new active layer), layers whose deadline has passed are reclaimed.
-// mu stays held across the insert and the stale-layer reclamation.
-// ReclaimStaleLayers publishes its own generation barrier before freeing,
-// because the fwmap chain is shared memory walked across all generations
-// for fallback lookups and a worker can be mid-walk on a just-unlinked
-// layer.
+// The insert and the stale-layer reclamation are separate routines
+// bracketed by one config generation update: the new layer becomes the
+// active head, expired tails are unlinked, and a single published
+// generation that every worker advanced past both makes the rotation
+// durable and gates the release of the unlinked layers. mu stays held
+// across both.
 func (m *FWStateMapService) InsertLayer(
 	ctx context.Context,
 	req *fwstatemappb.InsertLayerRequest,
@@ -480,37 +481,43 @@ func (m *FWStateMapService) ListEntries(
 	}
 }
 
-// ReclaimStaleLayers unlinks expired layers and waits for every dataplane
-// worker to advance past the current generation.
+// ReclaimStaleLayers unlinks expired layers, advances every dataplane
+// worker past a new config generation, then frees the unlinked layers.
 //
-// TrimStaleLayers atomically moves stale layers from the active chain to
-// the fwtable's stale chain so new walks skip them, but a worker already
-// mid-chain-walk can still be reading a just-unlinked layer. Publishing a
-// new generation via the barrier waits until every worker changed
-// generation, guaranteeing no in-flight walk can touch the unlinked memory.
-// The trimmed layers are then freed by the next TrimStaleLayers call,
-// giving the dataplane one trim cycle to quiesce.
+// UnlinkStaleLayers atomically moves stale layers from the active chain
+// to the fwtable's stale chain so new walks skip them, but a worker
+// already mid-chain-walk can still be reading a just-unlinked layer.
+// The barrier publishes a new generation and waits until every worker
+// changed generation, proving no in-flight walk can touch the unlinked
+// memory; only then does FreeStaleLayers release it.
 //
-// If the barrier fails the stale chain is not advanced on the next trim,
-// so the layers remain allocated for one more cycle — a rare leak, not a
-// correctness or use-after-free issue. The caller must hold mu because
-// trim mutates the shared map head chain. now is real-time nanoseconds,
-// matching the domain the dataplane stamps layer deadlines in.
+// If the barrier fails the parked layers stay allocated and are freed
+// by a later round after a successful barrier — a rare leak, never a
+// use-after-free. The caller must hold mu because unlink mutates the
+// shared map head chain. now is real-time nanoseconds, matching the
+// domain the dataplane stamps layer deadlines in.
 func (m *FWStateMapService) ReclaimStaleLayers(
-	trimmer MapLayerTrimmer,
+	reclaimer MapLayerReclaimer,
 	mapCP cfwstate.MapObjectConfig,
 	now uint64,
 ) {
-	if err := trimmer.TrimStaleLayers(now); err != nil {
+	if err := reclaimer.UnlinkStaleLayers(now); err != nil {
 		m.log.Error(
-			"failed to trim stale layers; stale chain not advanced",
+			"failed to unlink stale layers; layers left on the active chain",
 			zap.Error(err),
 		)
 		return
 	}
 	if err := m.barrier(mapCP); err != nil {
 		m.log.Error(
-			"generation barrier failed after layer trim; stale chain not advanced on next trim",
+			"generation barrier failed after layer unlink; parked layers retained for a later round",
+			zap.Error(err),
+		)
+		return
+	}
+	if err := reclaimer.FreeStaleLayers(); err != nil {
+		m.log.Error(
+			"failed to free unlinked stale layers",
 			zap.Error(err),
 		)
 		return

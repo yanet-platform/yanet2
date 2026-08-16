@@ -226,12 +226,17 @@ fwstate_map_v4_object_insert_layer(
 }
 
 int
-fwstate_map_v4_object_trim_stale_layers(
+fwstate_map_v4_object_unlink_stale_layers(
 	struct fwstate_map_v4_object *self, uint64_t now
 ) {
+	return fwtable_unlink_stale_cp(&self->table, now);
+}
+
+void
+fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
 	struct agent *agent = ADDR_OF(&self->cp_object.agent);
 
-	return fwtable_trim_stale_cp(&self->table, &agent->memory_context, now);
+	fwtable_free_stale(&self->table, &agent->memory_context);
 }
 
 // --- IPv6 object -------------------------------------------------------------
@@ -346,12 +351,17 @@ fwstate_map_v6_object_insert_layer(
 }
 
 int
-fwstate_map_v6_object_trim_stale_layers(
+fwstate_map_v6_object_unlink_stale_layers(
 	struct fwstate_map_v6_object *self, uint64_t now
 ) {
+	return fwtable_unlink_stale_cp(&self->table, now);
+}
+
+void
+fwstate_map_v6_object_free_stale_layers(struct fwstate_map_v6_object *self) {
 	struct agent *agent = ADDR_OF(&self->cp_object.agent);
 
-	return fwtable_trim_stale_cp(&self->table, &agent->memory_context, now);
+	fwtable_free_stale(&self->table, &agent->memory_context);
 }
 
 // --- object factories --------------------------------------------------------

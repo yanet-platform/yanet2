@@ -121,35 +121,53 @@ func TestMapLabeler(t *testing.T) {
 	require.Nil(t, fwstatemap.MapLabeler("", &fwstatemappb.ListMapsRequest{}))
 }
 
-// recordingTrimmer is a MapLayerTrimmer test double that records trim
-// calls so stale-layer reclamation can be asserted without a live
-// shared-memory handle.
-type recordingTrimmer struct {
-	mu       sync.Mutex
-	trimCall []uint64
-	trimErr  error
-	onTrim   func()
+// recordingReclaimer is a MapLayerReclaimer test double that records
+// unlink and free calls so stale-layer reclamation can be asserted
+// without a live shared-memory handle.
+type recordingReclaimer struct {
+	mu        sync.Mutex
+	unlinkAt  []uint64
+	unlinkErr error
+	freeCalls int
+	onUnlink  func()
+	onFree    func()
 }
 
-func (m *recordingTrimmer) TrimStaleLayers(now uint64) error {
+func (m *recordingReclaimer) UnlinkStaleLayers(now uint64) error {
 	m.mu.Lock()
-	m.trimCall = append(m.trimCall, now)
+	m.unlinkAt = append(m.unlinkAt, now)
 	m.mu.Unlock()
-	if m.onTrim != nil {
-		m.onTrim()
+	if m.onUnlink != nil {
+		m.onUnlink()
 	}
-	return m.trimErr
+	return m.unlinkErr
 }
 
-func (m *recordingTrimmer) trimCalls() []uint64 {
+func (m *recordingReclaimer) FreeStaleLayers() error {
+	m.mu.Lock()
+	m.freeCalls++
+	m.mu.Unlock()
+	if m.onFree != nil {
+		m.onFree()
+	}
+	return nil
+}
+
+func (m *recordingReclaimer) unlinkCalls() []uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]uint64(nil), m.trimCall...)
+	return append([]uint64(nil), m.unlinkAt...)
+}
+
+func (m *recordingReclaimer) frees() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.freeCalls
 }
 
 // recordingBarrier captures generation-barrier invocations so the RCU
-// grace period between layer trim and the next trim call can be asserted
-// without a live agent.
+// grace period between layer unlink and free can be asserted without a
+// live agent.
 type recordingBarrier struct {
 	mu    sync.Mutex
 	calls int
@@ -169,44 +187,46 @@ func (m *recordingBarrier) count() int {
 	return m.calls
 }
 
-// TestReclaimStaleLayers verifies that ReclaimStaleLayers trims stale
-// layers and runs the generation barrier on the success path.
+// TestReclaimStaleLayers verifies that ReclaimStaleLayers unlinks stale
+// layers, runs the generation barrier, then frees the parked layers.
 func TestReclaimStaleLayers(t *testing.T) {
-	trimmer := &recordingTrimmer{}
+	reclaimer := &recordingReclaimer{}
 	barrier := &recordingBarrier{}
 
 	svc := fwstatemap.NewFWStateMapServiceForTest(barrier.invoke)
 
-	svc.ReclaimStaleLayers(trimmer, cfwstate.MapObjectConfig{}, 123456)
+	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 123456)
 
-	require.Equal(t, []uint64{123456}, trimmer.trimCalls())
-	require.Equal(t, 1, barrier.count(), "generation barrier must run after trim")
+	require.Equal(t, []uint64{123456}, reclaimer.unlinkCalls())
+	require.Equal(t, 1, barrier.count(), "generation barrier must run after unlink")
+	require.Equal(t, 1, reclaimer.frees(), "parked layers must be freed after the barrier")
 }
 
-// TestReclaimStaleLayersTrimFailureSkipsBarrier verifies that a trim
-// failure skips the generation barrier without panicking.
-func TestReclaimStaleLayersTrimFailureSkipsBarrier(t *testing.T) {
-	trimmer := &recordingTrimmer{trimErr: errors.New("trim failed")}
+// TestReclaimStaleLayersUnlinkFailureSkipsBarrier verifies that an
+// unlink failure skips the generation barrier and the free without
+// panicking.
+func TestReclaimStaleLayersUnlinkFailureSkipsBarrier(t *testing.T) {
+	reclaimer := &recordingReclaimer{unlinkErr: errors.New("unlink failed")}
 	barrier := &recordingBarrier{}
 
 	svc := fwstatemap.NewFWStateMapServiceForTest(barrier.invoke)
 
-	svc.ReclaimStaleLayers(trimmer, cfwstate.MapObjectConfig{}, 0)
+	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 0)
 
-	require.Equal(t, []uint64{0}, trimmer.trimCalls())
-	require.Equal(t, 0, barrier.count(), "barrier must not run when trim fails")
+	require.Equal(t, []uint64{0}, reclaimer.unlinkCalls())
+	require.Equal(t, 0, barrier.count(), "barrier must not run when unlink fails")
+	require.Equal(t, 0, reclaimer.frees(), "nothing was parked, so nothing is freed")
 }
 
-// TestReclaimStaleLayersBarrierRunsAfterTrim verifies that the generation
-// barrier runs only after TrimStaleLayers completes successfully.
+// TestReclaimStaleLayersBarrierRunsBeforeFree verifies that the
+// generation barrier elapses between unlink and free.
 //
 // Regression guard for a use-after-free: the fwmap layer chain is shared
 // memory walked across all config generations for fallback lookups. A
 // worker can be mid-walk on a just-unlinked layer at the moment
-// TrimStaleLayers moves it into the stale chain. Advancing the stale chain
-// before the grace period can free memory a worker still reads. The
-// generation barrier must elapse between trim and the next reclaim.
-func TestReclaimStaleLayersBarrierRunsAfterTrim(t *testing.T) {
+// UnlinkStaleLayers parks it. Freeing before the grace period would
+// release memory a worker still reads.
+func TestReclaimStaleLayersBarrierRunsBeforeFree(t *testing.T) {
 	var eventsMu sync.Mutex
 	var events []string
 	record := func(event string) {
@@ -215,8 +235,9 @@ func TestReclaimStaleLayersBarrierRunsAfterTrim(t *testing.T) {
 		eventsMu.Unlock()
 	}
 
-	trimmer := &recordingTrimmer{
-		onTrim: func() { record("trim") },
+	reclaimer := &recordingReclaimer{
+		onUnlink: func() { record("unlink") },
+		onFree:   func() { record("free") },
 	}
 
 	svc := fwstatemap.NewFWStateMapServiceForTest(func(cfwstate.MapObjectConfig) error {
@@ -224,31 +245,35 @@ func TestReclaimStaleLayersBarrierRunsAfterTrim(t *testing.T) {
 		return nil
 	})
 
-	svc.ReclaimStaleLayers(trimmer, cfwstate.MapObjectConfig{}, 1)
+	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 1)
 
 	eventsMu.Lock()
 	require.Equal(
 		t,
-		[]string{"trim", "barrier"},
+		[]string{"unlink", "barrier", "free"},
 		events,
-		"barrier must follow trim, never precede it",
+		"free must follow the generation barrier, never precede it",
 	)
 	eventsMu.Unlock()
 }
 
-// TestReclaimStaleLayersBarrierFailureIsLogged verifies that when the
-// generation barrier fails, ReclaimStaleLayers returns without panicking
-// and the trim is recorded as having run.
-func TestReclaimStaleLayersBarrierFailureIsLogged(t *testing.T) {
-	trimmer := &recordingTrimmer{}
+// TestReclaimStaleLayersBarrierFailureRetainsLayers verifies that a
+// failed generation barrier leaves the parked layers allocated.
+//
+// Freeing after a failed barrier could release memory a worker still
+// walks; the layers must survive for a later round with a successful
+// barrier.
+func TestReclaimStaleLayersBarrierFailureRetainsLayers(t *testing.T) {
+	reclaimer := &recordingReclaimer{}
 	barrier := &recordingBarrier{err: errors.New("generation barrier failed")}
 
 	svc := fwstatemap.NewFWStateMapServiceForTest(barrier.invoke)
 
-	svc.ReclaimStaleLayers(trimmer, cfwstate.MapObjectConfig{}, 1)
+	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 1)
 
-	require.Equal(t, []uint64{1}, trimmer.trimCalls(), "trim runs unconditionally")
-	require.Equal(t, 1, barrier.count(), "barrier must run after trim")
+	require.Equal(t, []uint64{1}, reclaimer.unlinkCalls(), "unlink runs unconditionally")
+	require.Equal(t, 1, barrier.count(), "barrier must run after unlink")
+	require.Equal(t, 0, reclaimer.frees(), "parked layers must be retained when the barrier fails")
 }
 
 // TestListMapsEmpty verifies that a fresh service reports no maps.

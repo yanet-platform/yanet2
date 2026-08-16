@@ -143,17 +143,17 @@ message MapConfig {
 // window. The emission addressing for modules that synthesize sync
 // packets lives with the ACL module's own configuration.
 message SyncConfig {
-  common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source address stamped on forwarded internal frames;
+  common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source address stamped on forwarded internal frames;
   // Deprecated: the emission-side destination MAC moved to the ACL
   // module's SyncConfig; fwstate ignores this field.
-  common.commonpb.v1.MACAddress dst_ether = 2 [deprecated = true];
+  common.commonpb.v1.MACAddress dst_ether = 2 [ deprecated = true ];
   common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address matched on incoming sync packets;
   uint32 port_multicast = 4;                           // Multicast port;
   // Deprecated: the emission-side unicast destination moved to the ACL
   // module's SyncConfig; fwstate ignores this field.
-  common.commonpb.v1.IPAddress dst_addr_unicast = 5 [deprecated = true];
+  common.commonpb.v1.IPAddress dst_addr_unicast = 5 [ deprecated = true ];
   // Deprecated: see dst_addr_unicast.
-  uint32 port_unicast = 6 [deprecated = true];         // Unused;
+  uint32 port_unicast = 6 [ deprecated = true ]; // Unused;
 
   // Connection timeouts
   uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
