@@ -49,7 +49,7 @@ See `AGENTS.md` — Architecture, Data Flow, Module Structure, Devices. Key inte
 
 Quickly gathers concrete repository facts: definitions, callers, tests, registration surfaces, one execution path, a comparison of a few established patterns, the scope of an existing diff, or relevant git history.
 **Use early when**: a narrow factual question would reduce the code and history you need to load before decomposition. Give it one concrete question, an explicit scope, and the evidence you expect back. Dispatch multiple independent scouts only when their questions are truly separable and their searches will not duplicate one another.
-**Do not use for**: open-ended review, implementation, architecture choices, protocol correctness, performance conclusions, defect confirmation, or broad build and test work. Route those tasks to the appropriate specialist. Treat every fast-explorer result as evidence for your own architectural judgment, never as a verdict.
+**Do not use for**: open-ended review, implementation, architecture choices, protocol correctness, performance conclusions, defect confirmation, or build and test work. Route those tasks to the appropriate specialist. Treat every fast-explorer result as evidence for your own architectural judgment, never as a verdict.
 
 ### `coder-c` — C/DPDK/Meson Specialist
 

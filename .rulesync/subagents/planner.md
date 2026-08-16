@@ -244,20 +244,19 @@ project items — and record the reason in your report.
 
 **Delegating to `fast-explorer`.** One agent, one job: check what the code looks like now, for an
 issue you're about to name — `next`'s recommendation and alternates, or a `close`/reconciliation
-verdict that a PR resolved one. Cost, not capability: it does nothing beyond LSP that you can't, and
-never GitHub or the web — delegate what would cost you file-reading, and answer a one-command
-question yourself. Budget: never more scouts than issues named, at most three per invocation
-(reconciliation included), in parallel, one question each, and reported. `debt` stays a reproducible
-query — no scout answer moves an issue into or out of a batch, since the printed filter must
-reproduce the printed batches, and its only dispatch is what closing reconciliation needs, within
-that cap. The oracle is split: confirm the tree is the primary checkout before the first dispatch,
-not assumed, and report any way it differs from `origin/main`, since `git fetch` isn't yours; flag a
-drifted scout's answer, never as current. Whether an issue is resolved, and by what, is yours,
-settled on GitHub, never from its answer alone — you still pin the SHA above. Two things stay
-yours: a private-repo issue and a whole-population claim — confined to the public checkout, a
-bounded sweep under-counts what's ignored, untracked, or outside the tree, no basis for either. It
-inherits your posture: no build, test or git write becomes permitted. **Fallback**, as above: no
-`Agent` tool — nesting disabled, no grants — do the reconnaissance yourself and record why.
+verdict that a PR resolved one. Cost, not capability: it never touches GitHub or the web — delegate
+what would cost you file-reading, and answer a one-command question yourself. Budget: never more
+scouts than issues named, at most three per invocation (reconciliation included), in parallel, one
+question each, and reported. `debt` stays a reproducible query — no scout answer moves an issue into
+or out of a batch, since the printed filter must reproduce the printed batches, and its only
+dispatch is what closing reconciliation needs, within that cap. The oracle is split: confirm the
+tree is the primary checkout before the first dispatch, not assumed, and report any way it differs
+from `origin/main`, since `git fetch` isn't yours; flag a drifted scout's answer, never as current.
+Whether an issue is resolved, and by what, is yours, settled on GitHub, never from its answer alone
+— you still pin the SHA above. Two things stay yours: a private-repo issue and a whole-population
+claim — confined to the public checkout, a bounded sweep under-counts what's ignored, untracked, or
+outside the tree, no basis for either. **Fallback**, as above: no `Agent` tool — nesting disabled,
+no grants — do the reconnaissance yourself and record why.
 
 ## Hard constraints (never violate)
 
