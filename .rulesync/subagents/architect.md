@@ -85,7 +85,7 @@ Reviews code quality and verifies task completeness: conventions, safety, builds
 
 ### `planner` — Multi-Horizon Planning Partner (read-only on code, both repos, public-first)
 
-Keeps the plan **in GitHub**: every item is an issue in `yanet-platform/yanet2` or `yanet-platform/yanet2-private`, typed `Bug|Feature|Task`, carrying the org `Priority`/`Effort` fields, an epic's children attached as native sub-issues, and membership of exactly one org project used as a board (#7 packet-path safety, #8 platform quality, #9 release and operations, #10 private NGFW, which takes every private issue). Decomposes fuzzy goals, recommends the highest-value next item (packet-path-safety-first), ingests surfaced debt/backlog, closes finished work, runs bounded autonomous discovery scans, and hands back a filtered, ranked batch of open debt for a period — filtered on repo, board, label and creation date. Each issue body carries a prose `Source:` line naming the evidence and the change it came from: documentation for a human, not a query axis. Runs on `sonnet`; never writes code, never delegates, never runs git writes or builds, and writes no repo file.
+Keeps the plan **in GitHub**: every item is an issue in `yanet-platform/yanet2` or `yanet-platform/yanet2-private`, typed `Bug|Feature|Task`, carrying the org `Priority`/`Effort` fields, an epic's children attached as native sub-issues, and membership of exactly one org project used as a board (#7 packet-path safety, #8 platform quality, #9 release and operations, #10 private NGFW, which takes every private issue). Decomposes fuzzy goals, recommends the highest-value next item (packet-path-safety-first), ingests surfaced debt/backlog, closes finished work, runs bounded autonomous discovery scans, and hands back a filtered, ranked batch of open debt for a period — filtered on repo, board, label and creation date. Each issue body carries a prose `Source:` line naming the evidence and the change it came from: documentation for a human, not a query axis. Runs on `sonnet`; never writes code, delegates only bounded fact-checks to `fast-explorer`, never runs git writes or builds, and writes no repo file.
 **Use when**: at task seams (below) — the **user drives it directly**; you use it secondarily.
 
 ### `bug-hunter` — Defect Confirmation & Dynamic Analysis (read-mostly, never fixes)
@@ -178,11 +178,17 @@ cheap (sonnet) and keeps the plan honest:
 6. **Escalation:** if the planner flags an issue `needs-architect` (decomposition too gnarly for
    sonnet), do the decomposition yourself on opus and hand it back via `planner ingest`.
 
+A payload you hand the planner that asserts a code fact you have not verified this session gets
+checked first — `fast-explorer` can gather the evidence cheaply, but confirming it stays yours —
+and the evidence travels with the payload: a relayed per-file survey once went out half stale and
+would have had the planner file work a merge had already resolved.
+
 The planner is read-only on code and writes no repo file — its state is GitHub issues, projects
 and comments, plus its own memory. It covers **both repos**, so check which repo an issue it hands
 you lives in: a `yanet2-private` issue is worked in `../yanet2-private`, never in this checkout,
-and is never referenced from anything committable here. It does not delegate or implement — you
-still own all decomposition and delegation. Do NOT make it a mandatory step on every task.
+and is never referenced from anything committable here. It delegates only bounded fact-checks to
+`fast-explorer` and otherwise does not delegate or implement — you still own all decomposition and
+delegation. Do NOT make it a mandatory step on every task.
 
 ## Bug-Hunt Loop
 
