@@ -41,9 +41,6 @@ func TestTest_002_decap_default(t *testing.T) {
 			require.NoError(t, err, "Failed to configure Decap module")
 		})
 
-		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
-		time.Sleep(3 * time.Second)
-
 		fw.Run("Step_001_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: send.pcap -> expect.pcap
 			sendPackets := create002_decap_defaultSendPacket1(t)
@@ -59,15 +56,15 @@ func TestTest_002_decap_default(t *testing.T) {
 			defer client.Close()
 			require.NoError(t, client.Connect(), "Failed to connect to socket")
 
+			budget := framework.NewReplyBudget()
 			var receivedPackets []gopacket.Packet
 			for idx, pkt := range sendPackets {
 				packetBytes := pkt.Data()
 
-				// Send packet
-				require.NoError(t, client.SendPacket(packetBytes, ""), "Failed to send packet %d", idx)
-
-				// Receive packet (ignore errors - packet may be dropped)
-				responseData, _ := client.ReceivePacket(100*time.Millisecond, "")
+				// Send packet and wait for a reply. A missing reply is
+				// tolerated here and surfaces below as a count mismatch.
+				responseData, err := client.SendAndReceivePacket(budget, packetBytes, "")
+				require.NoError(t, err, "Failed to send packet %d", idx)
 				if responseData != nil {
 					receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
 					receivedPackets = append(receivedPackets, receivedPkt)

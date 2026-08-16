@@ -337,7 +337,7 @@ test:
 	$(MAKE) test-only
 
 test-only: dataplane
-	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
+	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-asan:
@@ -354,7 +354,7 @@ test-asan-only:
 # Set as a default only, mirroring the same if-absent condition meson uses for
 # its own injection: without it, a recoverable diagnostic would go unseen and
 # the package would still pass.
-	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
+	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-tsan:

@@ -126,7 +126,6 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 	var result strings.Builder
 	routeCounter := 0
 	packetCounter := 0
-	isFirstPacketTest := true
 
 	for _, step := range steps {
 		// Skip empty steps (skipped due to skiplist rules)
@@ -143,16 +142,6 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 		%s
 	})`, routeCounter, step.Description, step.GoCode))
 		} else if step.Type == "sendPackets" {
-			// Add delay before the first packet test (after all configuration steps)
-			if isFirstPacketTest {
-				result.WriteString(`
-
-	// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
-	time.Sleep(3 * time.Second)
-`)
-				isFirstPacketTest = false
-			}
-
 			// Generate test cases for each packet group (per PCAP entry)
 			for _, testCase := range step.PacketTests {
 				packetCounter++
@@ -175,15 +164,15 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 		defer client.Close()
 		require.NoError(t, client.Connect(), "Failed to connect to socket")
 
+		budget := framework.NewReplyBudget()
 		var receivedPackets []gopacket.Packet
 		for idx, pkt := range sendPackets {
 			packetBytes := pkt.Data()
 
-			// Send packet
-			require.NoError(t, client.SendPacket(packetBytes, ""), "Failed to send packet %%d", idx)
-
-			// Receive packet (ignore errors - packet may be dropped)
-			responseData, _ := client.ReceivePacket(100 * time.Millisecond, "")
+			// Send packet and wait for a reply. A missing reply is
+			// tolerated here.
+			responseData, err := client.SendAndReceivePacket(budget, packetBytes, "")
+			require.NoError(t, err, "Failed to send packet %%d", idx)
 			if responseData != nil {
 				receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
 				receivedPackets = append(receivedPackets, receivedPkt)

@@ -39,10 +39,6 @@ func testIsolation(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err)
 		require.NoError(t, inputClient.Connect())
 
-		outputClient, err := fw.GetSocketClient(0)
-		require.NoError(t, err)
-		require.NoError(t, outputClient.Connect())
-
 		// Send first packet and read it back to confirm the path works
 		packet := createICMPPacket(
 			net.ParseIP(framework.VMIPv4Gateway),
@@ -50,9 +46,10 @@ func testIsolation(t *testing.T, fw *framework.TestFramework) {
 			[]byte("isolation-verify"),
 		)
 
-		require.NoError(t, inputClient.SendPacket(packet, ""))
-		_, err = outputClient.ReceivePacket(500*time.Millisecond, "")
-		require.NoError(t, err, "First packet should arrive successfully")
+		budget := framework.NewReplyBudget()
+		data, err := inputClient.SendAndReceivePacket(budget, packet, "")
+		require.NoError(t, err)
+		require.NotNil(t, data, "First packet should arrive successfully")
 
 		// Send second packet but do NOT read it — it will be buffered
 		require.NoError(t, inputClient.SendPacket(packet, ""))
@@ -82,18 +79,15 @@ func testIsolation(t *testing.T, fw *framework.TestFramework) {
 		require.NoError(t, err)
 		require.NoError(t, inputClient.Connect())
 
-		outputClient, err := fw.GetSocketClient(0)
-		require.NoError(t, err)
-		require.NoError(t, outputClient.Connect())
-
 		packet := createICMPPacket(
 			net.ParseIP(framework.VMIPv4Gateway),
 			net.ParseIP(framework.VMIPv4Host),
 			[]byte("isolation-after-reset"),
 		)
 
-		require.NoError(t, inputClient.SendPacket(packet, ""))
-		_, err = outputClient.ReceivePacket(500*time.Millisecond, "")
+		budget := framework.NewReplyBudget()
+		data, err := inputClient.SendAndReceivePacket(budget, packet, "")
 		require.NoError(t, err, "Packet should arrive after reset -- connection must be functional")
+		require.NotNil(t, data, "Packet should arrive after reset -- connection must be functional")
 	})
 }

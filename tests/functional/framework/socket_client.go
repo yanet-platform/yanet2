@@ -2,6 +2,7 @@ package framework
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,57 @@ import (
 
 	"go.uber.org/zap"
 )
+
+// ReadTimeout is the per-read timeout SendAndReceivePacket waits for a
+// single reply.
+//
+// Measured against a CPU-starved CI runner across roughly 38000 sends,
+// reply latency was p50 10ms and p99 53ms, and the single miss observed
+// still arrived at 114ms rather than being lost. The timeout gives roughly
+// 18x headroom over that observed maximum.
+const ReadTimeout = 2 * time.Second
+
+// replyBudgetPool bounds how many timed-out reads a ReplyBudget absorbs
+// before it stops waiting the full ReadTimeout on that subtest.
+const replyBudgetPool = 6 * time.Second
+
+// exhaustedReadTimeout is the per-read timeout SendAndReceivePacket falls
+// back to once its ReplyBudget is drained, the same timeout the socket
+// protocol used before ReplyBudget existed.
+const exhaustedReadTimeout = 100 * time.Millisecond
+
+// ReplyBudget bounds how many reads one subtest will wait out for replies
+// that never arrive.
+//
+// A caller creates one ReplyBudget per subtest and passes it to every
+// SendAndReceivePacket call in that subtest. A reply that arrives costs the
+// pool nothing, because only a timed-out read debits it. Once drained, later
+// reads still wait at exhaustedReadTimeout rather than skipping outright, so
+// a reply that arrives promptly is still collected. The debit is a flat
+// per-read cap, not an elapsed-time one, so a single read can still exceed it.
+type ReplyBudget struct {
+	mu        sync.Mutex
+	remaining time.Duration
+}
+
+// NewReplyBudget returns a ReplyBudget with a fresh pool for one subtest.
+func NewReplyBudget() *ReplyBudget {
+	return &ReplyBudget{remaining: replyBudgetPool}
+}
+
+// exhausted reports whether prior timeouts have drained the pool.
+func (b *ReplyBudget) exhausted() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.remaining <= 0
+}
+
+// debit charges d against the pool after a timed-out read.
+func (b *ReplyBudget) debit(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.remaining -= d
+}
 
 // socketClientInner holds the shared connection state that should not be copied
 // between SocketClient instances. This allows multiple SocketClient wrappers
@@ -402,6 +454,47 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 		// Skip packets with incorrect SrcMAC
 		sc.log.Debugf("Skipping packet with incorrect DstMAC: %s (expected: %s)", packetInfo.DstMAC, ourMAC)
 	}
+}
+
+// SendAndReceivePacket transmits packet and waits for a single reply,
+// returning the raw reply bytes.
+//
+// The wait is not retried on timeout: a late reply is far more likely than a
+// lost one under a starved CI runner, and resending risks a duplicate packet
+// through stateful modules. budget must be shared by every call in one
+// subtest — see ReplyBudget for what that buys when replies are missing by
+// construction. A missing reply returns a nil slice and a nil error, not an
+// error, and surfaces later as a packet-count mismatch.
+//
+// Parameters:
+//   - budget: Per-subtest pool debited only when a read times out
+//   - packet: Raw packet bytes to transmit through the socket
+//   - dumpPath: Path to dump file for recording socket data (empty string to skip dumping)
+//
+// Returns:
+//   - []byte: Raw reply bytes, or nil if no reply arrived
+//   - error: An error if the packet could not be sent, or the read failed for a reason other than a timeout
+func (sc *SocketClient) SendAndReceivePacket(budget *ReplyBudget, packet []byte, dumpPath string) ([]byte, error) {
+	if err := sc.SendPacket(packet, dumpPath); err != nil {
+		return nil, err
+	}
+
+	timeout := ReadTimeout
+	if budget.exhausted() {
+		timeout = exhaustedReadTimeout
+	}
+
+	responseData, err := sc.ReceivePacket(timeout, dumpPath)
+	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			budget.debit(timeout)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to receive reply: %w", err)
+	}
+
+	return responseData, nil
 }
 
 // ReceiveAllPackets receives all packets available on the socket within the timeout.

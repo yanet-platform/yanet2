@@ -37,9 +37,6 @@ func TestTest_016_route(t *testing.T) {
 			applyFIB(t, fw, "route0", "step001", "0.0.0.0/0", "::/0")
 		})
 
-		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
-		time.Sleep(3 * time.Second)
-
 		fw.Run("Step_001_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: 001-send.pcap -> 001-expect.pcap
 			sendPackets := create016_routeSendPacket1(t)
@@ -55,15 +52,15 @@ func TestTest_016_route(t *testing.T) {
 			defer client.Close()
 			require.NoError(t, client.Connect(), "Failed to connect to socket")
 
+			budget := framework.NewReplyBudget()
 			var receivedPackets []gopacket.Packet
 			for idx, pkt := range sendPackets {
 				packetBytes := pkt.Data()
 
-				// Send packet
-				require.NoError(t, client.SendPacket(packetBytes, ""), "Failed to send packet %d", idx)
-
-				// Receive packet (ignore errors - packet may be dropped)
-				responseData, _ := client.ReceivePacket(100*time.Millisecond, "")
+				// Send packet and wait for a reply. A missing reply is
+				// tolerated here and surfaces below as a count mismatch.
+				responseData, err := client.SendAndReceivePacket(budget, packetBytes, "")
+				require.NoError(t, err, "Failed to send packet %d", idx)
 				if responseData != nil {
 					receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
 					receivedPackets = append(receivedPackets, receivedPkt)
