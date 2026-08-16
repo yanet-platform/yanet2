@@ -1,8 +1,10 @@
 package route_test
 
 import (
+	"encoding/hex"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -1165,4 +1167,165 @@ func TestUpdateFIB_ShadowedNexthopCounterExcludedFromMetrics(t *testing.T) {
 	names := nexthopCounterLabels(all)
 	require.NotContains(t, names, "nexthop_shadowed", "a fully shadowed nexthop must not be scraped")
 	require.Contains(t, names, "nexthop_surviving")
+}
+
+// nexthopCounterPrefix mirrors the unexported prefix constant in service.go
+// without depending on it, so the generated-name check and the disabled
+// arm's "no per-nexthop counter registered" check cannot drift apart.
+const nexthopCounterPrefix = "nexthop_"
+
+// nexthopCounterNames computes the per-nexthop counter names a counted arm
+// must materialize for fib, deduplicated since several nexthops can share
+// a (device, DstMAC) pair.
+//
+// A renamed materializer in service.go still gets caught by a name mismatch.
+func nexthopCounterNames(fib []FIBEntry) []string {
+	seen := map[string]bool{}
+	names := make([]string, 0)
+	for _, entry := range fib {
+		for _, nexthop := range entry.Nexthops {
+			name := nexthopCounterPrefix + nexthop.Device + "_" + hex.EncodeToString(nexthop.DstMAC)
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// applyRouteForwardArm pushes fib through service.UpdateFIB under module
+// name "arms" and wires the pipeline topology on top of it.
+//
+// Shared by both counter arms so their only difference is the service's
+// nexthop-counter option.
+func applyRouteForwardArm(
+	t *testing.T,
+	service *route.RouteService,
+	agent *ffi.Agent,
+	fib []FIBEntry,
+) {
+	t.Helper()
+
+	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
+		ModuleName: "arms",
+		Entries:    toFIBEntries(t, fib),
+	})
+	require.NoError(t, err)
+
+	wirePipeline(t, agent, "port0", "arms")
+}
+
+// requireCounterModesDistinct guards the table this test derives its own
+// expectations from: it fails if modes collapses to one kind instead of
+// covering both.
+//
+// The test's assertions branch on the same mode.disabled field the service
+// wiring branches on, so a table with only counted rows or only disabled
+// rows would pass every sub-test while asserting nothing about the arm the
+// row name claims to be.
+func requireCounterModesDistinct(t *testing.T, modes []routeForwardCounterMode) {
+	t.Helper()
+
+	var haveCounted, haveDisabled bool
+	for _, mode := range modes {
+		if mode.disabled {
+			haveDisabled = true
+		} else {
+			haveCounted = true
+		}
+	}
+	require.True(t, haveCounted, "the counter axis must keep a counted mode")
+	require.True(t, haveDisabled, "the counter axis must keep a disabled mode")
+}
+
+// TestRoute_NexthopCounterArms verifies that BenchmarkRouteForward's two
+// counter modes exercise genuinely distinct dataplane paths.
+//
+// It ranges over routeForwardCounterModes, the same table the benchmark
+// builds its arms from: the counted mode must materialize and increment a
+// per-nexthop counter for every packet forwarded, and the disabled mode
+// must never register one.
+func TestRoute_NexthopCounterArms(t *testing.T) {
+	requireCounterModesDistinct(t, routeForwardCounterModes)
+	require.NotEmpty(t, routeForwardShapes, "the shape table must keep at least one shape")
+
+	path := dataplaneut.CounterPath{
+		Device: "port0", Pipeline: "arms", Function: "arms",
+		Chain: "arms_chain", ModuleType: "route", ModuleName: "arms",
+	}
+
+	for _, shape := range routeForwardShapes {
+		t.Run(shape.name, func(t *testing.T) {
+			fib := buildRouteForwardFIB(shape)
+			names := nexthopCounterNames(fib)
+			require.NotEmpty(t, names, "shape must materialize at least one nexthop counter name")
+
+			for _, mode := range routeForwardCounterModes {
+				t.Run(mode.name, func(t *testing.T) {
+					h, agent, backend := setupRouteHarness(t, "port0")
+					service := route.NewRouteService(backend, mode.serviceOptions()...)
+					applyRouteForwardArm(t, service, agent, fib)
+
+					packets := buildRouteForwardPackets(t)
+					result, err := h.HandlePackets(packets...)
+					require.NoError(t, err)
+					require.Len(t, result.Output, len(packets), "all packets must be forwarded")
+					require.Empty(t, result.Drop)
+
+					if mode.disabled {
+						// Unfiltered on purpose: a filtered query would only
+						// prove the *expected* names are absent, not that no
+						// per-nexthop counter exists under any name.
+						for _, counter := range dataplaneut.RuleCounters(t, h, path, nil) {
+							require.False(t, strings.HasPrefix(counter.Name, nexthopCounterPrefix),
+								"disabled arm must register no per-nexthop counter, found %q", counter.Name)
+						}
+						return
+					}
+
+					// Positive control for the disabled arm's unfiltered
+					// query above: asserts the unfiltered result is a
+					// superset of names, so a nil sentinel that degraded to a
+					// filter excluding per-nexthop counters fails here.
+					unfiltered := dataplaneut.RuleCounters(t, h, path, nil)
+					unfilteredNames := make(map[string]bool, len(unfiltered))
+					for _, counter := range unfiltered {
+						unfilteredNames[counter.Name] = true
+					}
+					for _, name := range names {
+						require.True(t, unfilteredNames[name],
+							"unfiltered query must include per-nexthop counter %q", name)
+					}
+
+					counters := dataplaneut.RuleCounters(t, h, path, names)
+
+					var wantBytes uint64
+					for _, packet := range packets {
+						wantBytes += uint64(len(packet.Data()))
+					}
+
+					byName := map[string][]uint64{}
+					for _, counter := range counters {
+						require.NotEmpty(t, counter.Values)
+						_, dup := byName[counter.Name]
+						require.False(t, dup, "counter name %q must not repeat in the query result", counter.Name)
+						byName[counter.Name] = counter.Values[0]
+					}
+
+					var gotPackets, gotBytes uint64
+					for _, name := range names {
+						values, ok := byName[name]
+						require.True(t, ok, "materialized counter %q must be registered", name)
+						require.GreaterOrEqual(t, len(values), 2, "counter %q must have at least two values (packets, bytes)", name)
+						gotPackets += values[0]
+						gotBytes += values[1]
+					}
+					require.Equal(t, uint64(len(packets)), gotPackets, "per-nexthop counters must sum to every forwarded packet")
+					require.Equal(t, wantBytes, gotBytes, "per-nexthop counters must sum to every forwarded byte")
+				})
+			}
+		})
+	}
 }

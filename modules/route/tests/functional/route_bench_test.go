@@ -37,23 +37,42 @@ var routeForwardShapes = []routeForwardShape{
 	{name: "spread", spread: true},
 }
 
+// routeForwardCounterMode names one of the two RouteService configurations
+// that BenchmarkRouteForward and TestRoute_NexthopCounterArms both build
+// their arms from.
+type routeForwardCounterMode struct {
+	name string
+	// disabled selects the operator opt-out over the shipped default.
+	disabled bool
+}
+
+var routeForwardCounterModes = []routeForwardCounterMode{
+	{name: "uncounted", disabled: true},
+	{name: "counted"},
+}
+
+// serviceOptions returns the RouteServiceOption set that puts a service
+// into this counter mode.
+func (m routeForwardCounterMode) serviceOptions() []route.RouteServiceOption {
+	if m.disabled {
+		return []route.RouteServiceOption{route.WithNexthopCountersDisabled()}
+	}
+	return nil
+}
+
 // BenchmarkRouteForward measures IPv4 forwarding in both counter modes.
 //
-// The counted arm routes the FIB through RouteService.UpdateFIB with empty
-// counter names, so the service materialises the default per-nexthop
-// counter and the dataplane takes its counted arm (the shipped default).
-// The uncounted arm builds the service with the disable option, so empty
-// counters stay empty and the dataplane takes its uncounted arm.
+// See routeForwardCounterModes for what distinguishes the two arms.
 //
 // The payload-resetting bench runner is required: the route module
 // decrements TTL in place, so without it every round past the initial TTL
 // would measure the drop path instead of forwarding.
 func BenchmarkRouteForward(b *testing.B) {
-	for _, counterMode := range []string{"uncounted", "counted"} {
-		b.Run("counter="+counterMode, func(b *testing.B) {
+	for _, mode := range routeForwardCounterModes {
+		b.Run("counter="+mode.name, func(b *testing.B) {
 			for _, shape := range routeForwardShapes {
 				b.Run(shape.name, func(b *testing.B) {
-					runRouteForwardBench(b, shape, counterMode)
+					runRouteForwardBench(b, shape, mode)
 				})
 			}
 		})
@@ -65,16 +84,12 @@ func BenchmarkRouteForward(b *testing.B) {
 //
 // Setup is excluded from timing: only h.Bench is measured, so the service
 // path's extra setup work does not skew results.
-func runRouteForwardBench(b *testing.B, shape routeForwardShape, counterMode string) {
+func runRouteForwardBench(b *testing.B, shape routeForwardShape, mode routeForwardCounterMode) {
 	b.Helper()
 
 	h, agent, backend := setupRouteHarness(b, "port0")
 
-	var serviceOpts []route.RouteServiceOption
-	if counterMode == "uncounted" {
-		serviceOpts = append(serviceOpts, route.WithNexthopCountersDisabled())
-	}
-	service := route.NewRouteService(backend, serviceOpts...)
+	service := route.NewRouteService(backend, mode.serviceOptions()...)
 
 	entries := buildRouteForwardFIB(shape)
 	_, err := service.UpdateFIB(b.Context(), &routepb.UpdateFIBRequest{
@@ -82,9 +97,6 @@ func runRouteForwardBench(b *testing.B, shape routeForwardShape, counterMode str
 		Entries:    toFIBEntries(b, entries),
 	})
 	require.NoError(b, err)
-	b.Cleanup(func() {
-		_, _ = service.DeleteConfig(b.Context(), &routepb.DeleteConfigRequest{Name: "bench"})
-	})
 
 	// Route config must exist before the pipeline resolves chain references.
 	wirePipeline(b, agent, "port0", "bench")
@@ -95,8 +107,7 @@ func runRouteForwardBench(b *testing.B, shape routeForwardShape, counterMode str
 
 // buildRouteForwardFIB assembles the FIB entries for a bench shape.
 //
-// Nexthop counters are left empty in both modes. The counted service fills
-// the default name per nexthop. The uncounted service leaves it empty.
+// Nexthop counters are left empty in both modes.
 func buildRouteForwardFIB(shape routeForwardShape) []FIBEntry {
 	if shape.spread {
 		entries := make([]FIBEntry, 32)
