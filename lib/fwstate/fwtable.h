@@ -145,7 +145,7 @@ fwtable_lookup_internal(
 		return result;
 	}
 
-	// Release the first-layer lock before walking read-only layers.
+	// Release the first-layer lock before walking the deeper layers.
 	if (lock && *lock) {
 		rwlock_read_unlock(*lock);
 		*lock = NULL;
@@ -157,9 +157,18 @@ fwtable_lookup_internal(
 			break;
 		}
 		layer = next;
+		// Every layer is probed under its own bucket read-lock: even
+		// below the head, another thread may still be working with the
+		// layer's buckets. The lock is dropped before advancing, and a
+		// deep hit returns without one, matching the documented
+		// first-layer-only contract for *lock.
+		rwlock_t *layer_lock = NULL;
 		result = fwmap_get_value_and_deadline(
-			layer, now, key, value, NULL, deadline
+			layer, now, key, value, &layer_lock, deadline
 		);
+		if (layer_lock) {
+			rwlock_read_unlock(layer_lock);
+		}
 		if (result >= 0) {
 			return result;
 		}
