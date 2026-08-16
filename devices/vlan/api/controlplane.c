@@ -10,12 +10,27 @@
 
 #include "lib/errors/errors.h"
 
+// Destroy a vlan device: base teardown, then the wrapper allocation.
+static void
+cp_device_vlan_destroy(struct cp_device *cp_device) {
+	struct agent *agent = ADDR_OF(&cp_device->agent);
+	cp_device_fini(cp_device);
+	memory_bfree(
+		&agent->memory_context, cp_device, sizeof(struct cp_device_vlan)
+	);
+}
+
 struct cp_device *
 cp_device_vlan_new(
 	struct agent *agent,
 	const struct cp_device_vlan_config *config,
 	yanet_error **err
 ) {
+	// Reclaim this type's parked entries before the wrapper allocation:
+	// a parked instance can be most of the arena, so reclaiming it first
+	// can be the difference between success and failure under pressure.
+	cp_device_drain_parked(agent, "vlan", cp_device_vlan_destroy);
+
 	struct cp_device_vlan *cp_device_vlan =
 		(struct cp_device_vlan *)memory_balloc(
 			&agent->memory_context, sizeof(struct cp_device_vlan)
@@ -48,11 +63,7 @@ cp_device_vlan_new(
 
 void
 cp_device_vlan_free(struct cp_device *cp_device) {
-	struct agent *agent = ADDR_OF(&cp_device->agent);
-	cp_device_fini(cp_device);
-	memory_bfree(
-		&agent->memory_context, cp_device, sizeof(struct cp_device_vlan)
-	);
+	cp_device_release(cp_device);
 }
 
 struct cp_device_vlan_config *

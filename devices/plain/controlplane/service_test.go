@@ -16,9 +16,10 @@ import (
 // UpdateDevice calls do not leak shared-memory arena space.
 //
 // Each update after the first supersedes the previous generation's device;
-// the service frees that handle explicitly once the new generation is
-// installed, so free bytes must settle after the first update instead of
-// decreasing indefinitely.
+// freeing that handle parks it on the agent, and the next update's
+// construction reclaims the parked entry. Exactly one parked device's worth
+// of space stays held between updates, so free bytes must settle after the
+// first supersede instead of decreasing indefinitely.
 func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
@@ -48,7 +49,10 @@ func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 		require.NoError(t, err)
 
 		freeBytes := freeBytesForAgent(t, shm, "plain")
-		if idx > 0 {
+		// The first supersede parks the old device without destroying
+		// it, so its space stays held once; every later construction
+		// reclaims the previous parked entry before parking a new one.
+		if idx > 1 {
 			require.Equalf(
 				t,
 				previousFreeBytes,
@@ -64,11 +68,12 @@ func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 }
 
 // TestUpdateDevice_ReclaimsAcrossMultipleNames verifies that tracking and
-// reclaiming superseded handles works independently per device name.
+// parking superseded handles works independently per device name.
 //
-// Two names are created and then each is updated again: every superseded
-// handle is freed by the service, so the arena settles back to the size it
-// had right before the second round of updates.
+// Two names are created and then updated for two more rounds: every
+// construction reclaims whatever the previous round parked for its own
+// name, so after the first superseding round the arena holds exactly one
+// parked device's worth of space and stops shrinking.
 func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
@@ -85,32 +90,36 @@ func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
 	service := NewDevicePlainService(agent)
+	names := []string{"d0", "d1"}
 
-	for _, name := range []string{"d0", "d1"} {
-		_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
-			Name:   name,
-			Device: &commonpb.Device{},
-		})
-		require.NoError(t, err)
+	var previousFreeBytes uint64
+	for round := range 3 {
+		for _, name := range names {
+			_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+				Name:   name,
+				Device: &commonpb.Device{},
+			})
+			require.NoError(t, err)
+		}
+
+		freeBytes := freeBytesForAgent(t, shm, "plain")
+		// The first superseding round parks each name's old device
+		// without destroying it, so its space stays held once; every
+		// later construction reclaims the previous parked entry
+		// before parking a new one.
+		if round > 1 {
+			require.Equalf(
+				t,
+				previousFreeBytes,
+				freeBytes,
+				"free bytes changed on round %d: %d -> %d",
+				round,
+				previousFreeBytes,
+				freeBytes,
+			)
+		}
+		previousFreeBytes = freeBytes
 	}
-
-	freeBytesBeforeSecondRound := freeBytesForAgent(t, shm, "plain")
-
-	for _, name := range []string{"d0", "d1"} {
-		_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
-			Name:   name,
-			Device: &commonpb.Device{},
-		})
-		require.NoError(t, err)
-	}
-
-	// Both superseded handles from the first round are freed by the second
-	// round of updates, so the arena returns to its pre-second-round size.
-	require.Equal(
-		t,
-		freeBytesBeforeSecondRound,
-		freeBytesForAgent(t, shm, "plain"),
-	)
 }
 
 // freeBytesForAgent returns the free byte count reported for the named

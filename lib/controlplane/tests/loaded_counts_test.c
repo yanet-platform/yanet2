@@ -9,14 +9,13 @@
  * agent's arenas and memory context, freeing the agent underneath them is a
  * use-after-free.
  *
- * The counts are maintained at registry refcount transitions: a module or
- * device gains its first reference on upsert (0->1, count++) and loses its
- * last reference in the registry free callback (1->0, count--). This test
- * drives the full update path: it puts a device into the live generation
- * (upsert), supersedes the owning agent, and checks that reclamation is
- * withheld while the count is non-zero and proceeds once the device leaves
- * the live generation, which drops the old owner's last reference via the
- * free callback.
+ * The counts follow generation references: a copy, an upsert and a delete
+ * adjust them where the reference changes hands, and the free callback only
+ * parks a device whose last reference dropped. This test drives the full
+ * update path: it puts a device into the live generation (upsert),
+ * supersedes the owning agent, and checks that reclamation is withheld while
+ * the count is non-zero and proceeds once the device leaves the live
+ * generation.
  */
 
 #include "api/agent.h"
@@ -38,10 +37,9 @@
 
 #define LOADED_COUNTS_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
 
-// Install a plain device owned by agent. The upsert refs the new device
-// (0->1, count++) and the install frees the superseded generation, dropping
-// any replaced device's last reference through the free callback, so the
-// owning agent's loaded counts track the generation that is now live.
+// Install a plain device owned by agent, mirroring the plain control
+// plane: construct, update, then drop the construction reference so the
+// live generation holds the only remaining reference.
 static int
 install_device(
 	struct agent *agent,
@@ -71,6 +69,10 @@ install_device(
 		"update_devices failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
+	// Drop the construction reference. If the update displaced this
+	// agent's own older device, that older one already parked; this
+	// device stays held by the live generation.
+	cp_device_plain_free(dev);
 	return TEST_SUCCESS;
 }
 
@@ -124,8 +126,8 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	);
 
 	// Agent B replaces dev0 with its own. Agent A's device loses its last
-	// reference when the superseded generation is freed, so the free
-	// callback drops A's loaded_device_count to zero. The device's memory
+	// reference when the superseded generation is freed, so it parks on
+	// A and A's loaded_device_count drops to zero. The device's memory
 	// remains in A's arena until A itself is reclaimed.
 	TEST_ASSERT_SUCCESS(
 		install_device(agent_b, dp_config, cp_config, "dev0"),
@@ -144,7 +146,7 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	);
 
 	// Both counts now zero: reclamation may proceed, and agent A's arena
-	// (still holding the replaced device's memory) is freed with it.
+	// (still holding the parked device's memory) is freed with it.
 	agent_free_unused_agents(agent_b);
 	TEST_ASSERT_NULL(
 		ADDR_OF(&agent_b->prev),
@@ -155,8 +157,8 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 }
 
 // Regression test for re-inserting the same device instance: the loaded
-// count must track first-reference (0->1) transitions, so upserting an
-// already-referenced instance a second time must not bump the count again.
+// count follows generation references, so upserting an already-referenced
+// instance a second time must not bump the count again.
 // Before the fix the upsert incremented unconditionally, which over-counted
 // and permanently blocked reclamation of the owning agent.
 static int
@@ -182,7 +184,7 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 	cp_device_plain_config_free(cfg);
 	TEST_ASSERT_NOT_NULL(dev, "device new failed");
 
-	// First install: the device gains its first reference (count 0->1).
+	// First install: the device gains a generation reference (count 0->1).
 	struct cp_device *devs[] = {dev};
 	TEST_ASSERT_SUCCESS(
 		cp_config_update_devices(dp_config, cp_config, 1, devs, &err),
@@ -195,7 +197,8 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		"device count should be one after the first install"
 	);
 
-	// Re-insert the SAME pointer: it is already referenced, so the count
+	// Re-insert the SAME pointer: the upsert's reference gain and its
+	// displacement of the instance itself must cancel out, so the count
 	// must stay one. Before the fix this bumped it to two.
 	TEST_ASSERT_SUCCESS(
 		cp_config_update_devices(dp_config, cp_config, 1, devs, &err),
@@ -207,6 +210,10 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		1,
 		"re-inserting the same device must not double-count"
 	);
+
+	// Drop the construction reference, as the control plane does after an
+	// update: the live generation keeps holding the device.
+	cp_device_plain_free(dev);
 
 	return TEST_SUCCESS;
 }

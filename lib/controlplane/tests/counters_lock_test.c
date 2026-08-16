@@ -195,6 +195,9 @@ install_device(
 		"update_devices failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
+	// Drop the construction reference: the live generation holds the
+	// device from here on.
+	cp_device_plain_free(dev);
 	return TEST_SUCCESS;
 }
 

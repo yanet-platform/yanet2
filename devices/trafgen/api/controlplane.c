@@ -14,12 +14,20 @@
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
+static void
+cp_device_trafgen_destroy(struct cp_device *cp_device);
+
 struct cp_device *
 cp_device_trafgen_new(
 	struct agent *agent,
 	const struct cp_device_trafgen_config *config,
 	yanet_error **err
 ) {
+	// Reclaim this type's parked entries before the wrapper allocation:
+	// a parked instance can be most of the arena, so reclaiming it first
+	// can be the difference between success and failure under pressure.
+	cp_device_drain_parked(agent, "trafgen", cp_device_trafgen_destroy);
+
 	struct cp_device_trafgen *cp_device_trafgen =
 		(struct cp_device_trafgen *)memory_balloc(
 			&agent->memory_context, sizeof(struct cp_device_trafgen)
@@ -56,11 +64,10 @@ cp_device_trafgen_new(
 		);
 		if (states == NULL) {
 			yanet_error_add(err, "failed to allocate worker state");
-			cp_device_fini(&cp_device_trafgen->cp_device);
-			memory_bfree(
-				&agent->memory_context,
-				cp_device_trafgen,
-				sizeof(struct cp_device_trafgen)
+			// Construction failed before registration, so no
+			// other holder can observe this device: destroy it
+			// directly instead of parking it.
+			cp_device_trafgen_destroy(&cp_device_trafgen->cp_device
 			);
 			return NULL;
 		}
@@ -74,12 +81,17 @@ cp_device_trafgen_new(
 
 void
 cp_device_trafgen_free(struct cp_device *cp_device) {
+	cp_device_release(cp_device);
+}
+
+// Destroy a trafgen device: the subclass buffers, the base resources,
+// then the wrapper allocation.
+static void
+cp_device_trafgen_destroy(struct cp_device *cp_device) {
 	struct cp_device_trafgen *config =
 		container_of(cp_device, struct cp_device_trafgen, cp_device);
 	struct memory_context *memory_context = &cp_device->memory_context;
 
-	// Release the subclass-owned buffers before the base teardown, then the
-	// base resources, then the wrapper struct.
 	struct trafgen_worker_state *states = ADDR_OF(&config->worker_states);
 	if (states != NULL) {
 		memory_bfree(
@@ -199,8 +211,8 @@ cp_device_trafgen_set_rate(struct cp_device *cp_device, uint64_t rate_pps) {
 // Load the frames replayed by the generator.
 //
 // Called once on a freshly created device, so it only allocates. The buffers
-// live in the device's memory_context and are released by
-// cp_device_trafgen_free.
+// live in the device's memory_context and are released by the device's
+// destruction.
 int
 cp_device_trafgen_set_frames(
 	struct cp_device *cp_device,

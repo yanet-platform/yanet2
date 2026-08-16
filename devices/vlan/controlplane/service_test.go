@@ -15,10 +15,11 @@ import (
 // TestUpdateDevice_DrainsUnusedDevices verifies that repeated UpdateDevice
 // calls do not leak shared-memory arena space.
 //
-// Each update after the first retires the previous generation's device onto
-// the agent's unused list. Without draining that list, the arena shrinks by
-// a fixed amount every call and eventually runs out. Free bytes must settle
-// after the first update instead of decreasing indefinitely.
+// Each update after the first supersedes the previous generation's device;
+// freeing that handle parks it on the agent, and the next update's
+// construction reclaims the parked entry. Exactly one parked device's worth
+// of space stays held between updates, so free bytes must settle after the
+// first supersede instead of decreasing indefinitely.
 func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
@@ -49,7 +50,10 @@ func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 		require.NoError(t, err)
 
 		freeBytes := freeBytesForAgent(t, shm, "vlan")
-		if idx > 0 {
+		// The first supersede parks the old device without destroying
+		// it, so its space stays held once; every later construction
+		// reclaims the previous parked entry before parking a new one.
+		if idx > 1 {
 			require.Equalf(
 				t,
 				previousFreeBytes,

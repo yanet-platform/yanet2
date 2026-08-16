@@ -50,11 +50,10 @@ func (m *DeviceVlanService) UpdateDevice(
 		return nil, fmt.Errorf("failed to update device: %w", err)
 	}
 
-	// UpdateDevices publishes the new generation and waits for the dataplane
-	// to drop the old one, so the superseded device is no longer referenced
-	// and can be freed explicitly. This mirrors how the ACL control plane
-	// reclaims superseded module configs, instead of relying on a type-blind
-	// drain of the agent's unused list.
+	// Free only drops the superseded handle's construction reference: the
+	// device parks on the agent, and the next vlan-device construction
+	// reclaims it. This mirrors how the module control planes retire
+	// superseded configs.
 	if old, ok := m.configs[name]; ok {
 		old.Free()
 	}

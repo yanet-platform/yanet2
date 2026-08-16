@@ -77,6 +77,16 @@ func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
+// Release drops the construction reference the C constructor took.
+//
+// When this is the last reference, the device parks on its agent until the
+// next construction of the same device type reclaims it.
+func (m ShmDeviceConfig) Release() {
+	if m.ptr != nil {
+		C.cp_device_release(m.ptr)
+	}
+}
+
 type Agent struct {
 	name string
 	ptr  *C.struct_agent
@@ -192,6 +202,16 @@ func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
 
 func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 	configs := make([]ShmDeviceConfig, 0, len(devices))
+
+	// This helper owns the construction references of every device it
+	// creates, so drop them once the update resolves: on success the live
+	// generation holds the only remaining reference, and on failure the
+	// release parks each device for the next construction to reclaim.
+	defer func() {
+		for idx := range configs {
+			configs[idx].Release()
+		}
+	}()
 
 	for idx := range devices {
 		device := &devices[idx]

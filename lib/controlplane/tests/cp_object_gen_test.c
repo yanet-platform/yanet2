@@ -626,7 +626,11 @@ install_device_with_pipeline(
 		return -1;
 	}
 	struct cp_device *devs[] = {dev};
-	return cp_config_update_devices(dp_config, cp_config, 1, devs, err);
+	int rc = cp_config_update_devices(dp_config, cp_config, 1, devs, err);
+	// Drop the construction reference: on success the live generation
+	// holds the device, on failure it parks on the agent.
+	cp_device_plain_free(dev);
+	return rc;
 }
 
 // A forward module linked to an installed object produces a per-worker link

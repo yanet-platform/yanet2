@@ -13,6 +13,13 @@
 struct agent;
 struct cp_device;
 
+// Free handler for a device subclass, run when the agent reclaims a parked
+// device of that subclass's type.
+//
+// It must release the subclass's own allocations, then call cp_device_fini
+// and free the enclosing subclass allocation.
+typedef void (*cp_device_free_handler)(struct cp_device *self);
+
 struct cp_device_pipeline {
 	char name[CP_PIPELINE_NAME_LEN];
 	uint64_t weight;
@@ -46,6 +53,16 @@ struct cp_device {
 
 	struct cp_device_entry *input_pipelines;
 	struct cp_device_entry *output_pipelines;
+
+	// Link to the next device parked on the same agent's list, once this
+	// device's reference count reaches zero.
+	//
+	// Only the zero-transition handler sets it, and only a later reclaim
+	// for this device's own type reads it. It stays unset until that
+	// transition happens. The parked list's tail refers to itself
+	// instead of ending at null, so a parked entry's link is never null
+	// — which also marks that this device is already parked.
+	struct cp_device *parked_next;
 };
 
 struct dp_config;
@@ -110,6 +127,53 @@ cp_device_init(
 // Idempotent on zero-init.
 void
 cp_device_fini(struct cp_device *self);
+
+// Destroy every parked device of one type, using the caller's destructor
+// for that type.
+//
+// A different type sharing the same parked list is left in place for its
+// own next call. A parked entry already sits at reference count zero, so
+// the destructor runs directly with no further release and nothing here
+// outlives this call. A device type's construction call runs this before
+// allocating, so a recreation under memory pressure benefits from the
+// space a parked instance would free rather than failing before reaching
+// that reclaim. The caller must not hold the configuration lock.
+void
+cp_device_drain_parked(
+	struct agent *agent,
+	const char *device_type,
+	cp_device_free_handler destroy
+);
+
+// The single handler for a device reference count reaching zero, reached
+// the same way from a registry drop or an explicit release.
+//
+// Parks the device on its agent's list instead of destroying it, because
+// this generic layer does not know the device's subclass, and an agent can
+// host more than one device type at once. The device's own type-specific
+// reclaim destroys it later.
+//
+// Idempotent: once set, a parked entry's link is never null again, so a
+// duplicate transition leaves it in place instead of relinking it. Every
+// caller already holds the configuration lock, so this handler must not
+// take it itself.
+void
+cp_device_registry_item_free_cb(struct registry_item *item, void *data);
+
+// Drop the reference construction took on the caller's behalf.
+//
+// The zero-transition handler runs only when this drop is the last
+// reference, so a caller must not assume the call freed anything: a live
+// or pinned configuration generation may still hold the device. A device
+// parked here is not destroyed on the spot — the next construction call
+// for the same type reclaims it, or it is freed along with the agent's
+// arena.
+//
+// Takes the device's own agent's configuration lock itself, unlike the
+// registry-driven path to the same handler, which already runs under
+// that lock.
+void
+cp_device_release(struct cp_device *self);
 
 /*
  * Pipeline registry contains all existing devices.

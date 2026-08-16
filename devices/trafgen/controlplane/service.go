@@ -245,11 +245,9 @@ func (m *TrafgenService) SetRate(
 // apply publishes the full device state through the backend and, on success,
 // stores the new config. The caller must hold m.mu.
 //
-// UpdateDevices publishes the new generation and waits for the dataplane to
-// drop the old one, so the superseded handle is safe to free once the new
-// config is stored. This mirrors how the ACL control plane reclaims
-// superseded module configs, instead of relying on a type-blind drain of the
-// agent's unused list.
+// The superseded handle's Free only drops its construction reference: the
+// device parks on the agent, and the next trafgen construction reclaims it.
+// This mirrors how the module control planes retire superseded configs.
 func (m *TrafgenService) apply(
 	name string,
 	packets [][]byte,

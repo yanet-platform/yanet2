@@ -115,9 +115,11 @@ func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }
 
-// Free releases the underlying C memory.
+// Free drops the underlying device's construction reference.
 //
-// Safe to call multiple times: subsequent calls are no-ops.
+// Safe to call multiple times: subsequent calls are no-ops. When this is the
+// last reference, the device parks on the agent until the next trafgen-device
+// construction reclaims it.
 func (m *DeviceConfig) Free() {
 	if ptr := m.asRawPtr(); ptr != nil {
 		C.cp_device_trafgen_free(ptr)

@@ -347,6 +347,13 @@ cp_device_init(
 		goto err_out;
 	}
 
+	// Take the creator's reference only after construction succeeds.
+	//
+	// A failed construction leaves nothing to unbalance. This reference
+	// is never mirrored into the live-reference count: a dead creator
+	// must not hold it above zero.
+	registry_item_ref(&self->config_item);
+
 	return 0;
 
 err_out:
@@ -419,22 +426,154 @@ cp_device_registry_copy(
 	};
 
 	SET_OFFSET_OF(&new_device_registry->memory_context, memory_context);
+
+	// Mirror each copied item's new generation reference into its own
+	// agent.
+	//
+	// This keeps the per-agent live count tracking references from a
+	// live configuration generation rather than the creator's own hold,
+	// which a dead creator would otherwise never release.
+	for (uint64_t idx = 0; idx < new_device_registry->registry.capacity;
+	     ++idx) {
+		struct cp_device *device =
+			cp_device_registry_get(new_device_registry, idx);
+		if (device == NULL) {
+			continue;
+		}
+		struct agent *agent = ADDR_OF(&device->agent);
+		if (agent != NULL) {
+			agent->loaded_device_count += 1;
+		}
+	}
+
 	return 0;
 }
 
-static void
+void
 cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
 	struct cp_device *device =
 		container_of(item, struct cp_device, config_item);
 	struct agent *agent = ADDR_OF(&device->agent);
-	if (agent != NULL) {
-		agent->loaded_device_count -= 1;
+	if (agent == NULL) {
+		return;
 	}
+
+	if (ADDR_OF(&device->parked_next) != NULL) {
+		return;
+	}
+
+	struct cp_device *head = ADDR_OF(&agent->parked_devices);
+	SET_OFFSET_OF(&device->parked_next, (head != NULL) ? head : device);
+	SET_OFFSET_OF(&agent->parked_devices, device);
 	(void)data;
 }
 
 void
+cp_device_release(struct cp_device *self) {
+	struct agent *agent = ADDR_OF(&self->agent);
+	struct cp_config *cp_config =
+		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
+
+	if (cp_config != NULL) {
+		cp_config_lock(cp_config);
+	}
+	registry_item_unref(
+		&self->config_item, cp_device_registry_item_free_cb, NULL
+	);
+	if (cp_config != NULL) {
+		cp_config_unlock(cp_config);
+	}
+}
+
+void
+cp_device_drain_parked(
+	struct agent *agent,
+	const char *device_type,
+	cp_device_free_handler destroy
+) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	cp_config_lock(cp_config);
+
+	// Splice the target type's entries into a local list, leaving the
+	// rest linked in place for their own type's next call.
+	//
+	// A spliced-out tail leaves its former predecessor pointing at itself
+	// as the new end of the list, so a parked entry's link is never null.
+	struct cp_device *owned = NULL;
+	struct cp_device *prev = NULL;
+	struct cp_device *cur = ADDR_OF(&agent->parked_devices);
+
+	while (cur != NULL) {
+		struct cp_device *raw_next = ADDR_OF(&cur->parked_next);
+		struct cp_device *next = (raw_next == cur) ? NULL : raw_next;
+
+		if (!strncmp(cur->type, device_type, sizeof(cur->type))) {
+			if (prev == NULL) {
+				SET_OFFSET_OF(&agent->parked_devices, next);
+			} else {
+				SET_OFFSET_OF(
+					&prev->parked_next,
+					(next != NULL) ? next : prev
+				);
+			}
+			SET_OFFSET_OF(&cur->parked_next, owned);
+			owned = cur;
+		} else {
+			prev = cur;
+		}
+
+		cur = next;
+	}
+
+	if (owned == NULL) {
+		cp_config_unlock(cp_config);
+		return;
+	}
+
+	// Pin the agent's arena for the destroy loop below, still under the
+	// same lock the splice above ran under, so the reclaim guard can never
+	// observe the entries detached but the pin not yet set.
+	agent->parked_teardown_count += 1;
+
+	cp_config_unlock(cp_config);
+
+	while (owned != NULL) {
+		struct cp_device *next = ADDR_OF(&owned->parked_next);
+		destroy(owned);
+		owned = next;
+	}
+
+	cp_config_lock(cp_config);
+	agent->parked_teardown_count -= 1;
+	cp_config_unlock(cp_config);
+}
+
+void
 cp_device_registry_fini(struct cp_device_registry *device_registry) {
+	// Mirror each remaining item's dropped generation reference into its
+	// own agent before releasing it.
+	//
+	// The callback this teardown invokes only parks each item at zero
+	// references instead of adjusting the live count itself, so this
+	// loop mirrors the drop first. The same allocation-failure guard
+	// applies as elsewhere: a registry whose backing storage never
+	// allocated reports a nonzero capacity with nothing to walk.
+	if (ADDR_OF(&device_registry->registry.items) != NULL) {
+		for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+		     ++idx) {
+			struct cp_device *device =
+				cp_device_registry_get(device_registry, idx);
+			if (device == NULL) {
+				continue;
+			}
+			struct agent *agent = ADDR_OF(&device->agent);
+			if (agent != NULL) {
+				agent->loaded_device_count -= 1;
+			}
+		}
+	}
+
 	registry_fini(
 		&device_registry->registry,
 		cp_device_registry_item_free_cb,
@@ -484,6 +623,28 @@ cp_device_registry_name_cmp(
 		container_of(item, struct cp_device, config_item);
 
 	return strncmp(device->name, (const char *)data, CP_DEVICE_NAME_LEN);
+}
+
+// Name-only lookup backing delete, whose key is the name alone.
+static struct cp_device *
+cp_device_registry_lookup_name(
+	struct cp_device_registry *device_registry, const char *name
+) {
+	uint64_t index;
+	if (registry_lookup(
+		    &device_registry->registry,
+		    cp_device_registry_name_cmp,
+		    name,
+		    &index
+	    )) {
+		return NULL;
+	}
+
+	return container_of(
+		registry_get(&device_registry->registry, index),
+		struct cp_device,
+		config_item
+	);
 }
 
 struct cp_device *
@@ -541,11 +702,6 @@ cp_device_registry_upsert(
 		return -1;
 	}
 
-	// Count the device only on its first registry reference, mirroring the
-	// 1->0 transition at which cp_device_registry_item_free_cb decrements;
-	// a re-upsert of an already-referenced instance must not double-count.
-	uint64_t refcnt_before = new_device->config_item.refcnt;
-
 	if (registry_replace(
 		    &device_registry->registry,
 		    cp_device_registry_item_cmp,
@@ -558,9 +714,21 @@ cp_device_registry_upsert(
 		return -1;
 	}
 
-	struct agent *agent = ADDR_OF(&new_device->agent);
-	if (agent != NULL && refcnt_before == 0) {
-		agent->loaded_device_count += 1;
+	// Mirror this upsert's generation-reference changes into each
+	// affected device's own agent.
+	//
+	// Gaining a reference through upsert only ever happens here, and
+	// losing one to a displacing upsert only ever happens here too, so
+	// the per-agent live count must track both in this one place.
+	struct agent *new_agent = ADDR_OF(&new_device->agent);
+	if (new_agent != NULL) {
+		new_agent->loaded_device_count += 1;
+	}
+	if (old_device != NULL) {
+		struct agent *old_agent = ADDR_OF(&old_device->agent);
+		if (old_agent != NULL) {
+			old_agent->loaded_device_count -= 1;
+		}
 	}
 
 	return 0;
@@ -570,12 +738,29 @@ int
 cp_device_registry_delete(
 	struct cp_device_registry *device_registry, const char *name
 ) {
-	return registry_replace(
-		&device_registry->registry,
-		cp_device_registry_name_cmp,
-		name,
-		NULL,
-		cp_device_registry_item_free_cb,
-		NULL
-	);
+	struct cp_device *old_device =
+		cp_device_registry_lookup_name(device_registry, name);
+
+	if (registry_replace(
+		    &device_registry->registry,
+		    cp_device_registry_name_cmp,
+		    name,
+		    NULL,
+		    cp_device_registry_item_free_cb,
+		    NULL
+	    )) {
+		return -1;
+	}
+
+	// Mirror the generation reference this delete drops into the removed
+	// device's own agent, matching the decrement upsert performs when it
+	// displaces an entry.
+	if (old_device != NULL) {
+		struct agent *old_agent = ADDR_OF(&old_device->agent);
+		if (old_agent != NULL) {
+			old_agent->loaded_device_count -= 1;
+		}
+	}
+
+	return 0;
 }

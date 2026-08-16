@@ -20,6 +20,10 @@ cp_device_vlan_new(
 	yanet_error **err
 );
 
+// Drop the creator's construction reference.
+//
+// Parks the device on its agent when this is the last reference, leaving
+// destruction to the next vlan-device construction's reclaim.
 void
 cp_device_vlan_free(struct cp_device *cp_device);
 

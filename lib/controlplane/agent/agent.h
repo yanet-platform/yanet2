@@ -85,6 +85,15 @@ struct agent {
 	// types. Each type's construction reclaims only matching entries,
 	// leaving the rest parked for their own type's turn.
 	struct cp_module *parked_modules;
+
+	// Head of this agent's list of devices parked after their reference
+	// count reached zero.
+	//
+	// Follows the same discipline as the module list above: a device type's
+	// construction call reclaims only matching entries, so a list shared by
+	// plain and vlan devices keeps each type's entries for that type's own
+	// next construction.
+	struct cp_device *parked_devices;
 };
 
 struct dp_config *

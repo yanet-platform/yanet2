@@ -90,11 +90,11 @@ func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }
 
-// Free releases the underlying shared-memory device allocation.
+// Free drops the underlying device's construction reference.
 //
-// Safe to call multiple times: subsequent calls are no-ops. Call it only after
-// the device has been superseded by a newer generation installed via
-// UpdateDevices, so no live config generation references it anymore.
+// Safe to call multiple times: subsequent calls are no-ops. When this is the
+// last reference, the device parks on the agent until the next plain-device
+// construction reclaims it.
 func (m *DeviceConfig) Free() {
 	if ptr := m.asRawPtr(); ptr != nil {
 		C.cp_device_plain_free(ptr)
