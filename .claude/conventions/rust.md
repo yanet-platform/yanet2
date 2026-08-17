@@ -16,7 +16,7 @@ Loaded on demand by the agent writing or reviewing Rust; this is the single sour
 - **`clippy::std_instead_of_core`** is deny-level via `[workspace.lints.clippy]` + per-crate `[lints] workspace = true`; prefer `core::` for anything `core` provides (`error::Error`, `fmt`, `net`, `str::FromStr`, `time::Duration`, `mem`, `iter`, `ops`).
 - **Escape hatches** are `#[allow(clippy::std_instead_of_core)]` on an enclosing item (function or module), never the `use` itself — clippy's `useless_attribute` rejects that: tonic's client codegen emits `std::` paths we do not control, and `core_io`-gated items (`io::ErrorKind`, `io::Cursor`) are still unstable in `core`.
 - **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/ `Default`/`FromStr` impls — the trait name is the doc.
-- **Doc comments**: `///`/`//!` begin with a one-sentence period-terminated brief and separate detail with a blank `///` line.
+- **Doc comments**: `///`/`//!` follow AGENTS.md's comment rule; the same applies to a plain `//` comment. `.rustfmt.toml`'s `wrap_comments` reflows any of these past `comment_width` (80 columns) into multiple lines on `cargo +nightly fmt`, so keep a line within that width — the formatter's wrap is not an exemption from the one-line ceiling.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.
 - **`assert_eq!` order**: expected first, actual second: `assert_eq!(expected, actual)`.
 - **Style**: prefer shadowing to `_str`, destructure `self` rather than `self.0`, put bounds in `where`, and import types directly.

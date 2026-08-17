@@ -67,7 +67,7 @@ jobs:
             mv full.diff review.diff
           fi
 
-          conventions=$(cat .claude/conventions/comments.md 2>/dev/null || true)
+          conventions=""
           added="|"
           while IFS= read -r name; do
             case $name in

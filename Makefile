@@ -116,7 +116,6 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	proto-breaking \
 	proto-go \
 	lint-go \
-	lint/comments \
 	lint/clang-syntax \
 	lint-commit \
 	ai/agents \
@@ -183,10 +182,6 @@ lint-go:
 	else \
 		echo "WARN: 'golangci-lint' not found, skipping modernize lint (install: https://golangci-lint.run/welcome/install/)"; \
 	fi
-
-lint/comments:
-	go test ./lint/comment/cmd/commentlint/
-	go run ./lint/comment/cmd/commentlint/
 
 # Reparses the configured build's compile database with clang -fsyntax-only.
 #

@@ -51,7 +51,6 @@ You have Bash access ONLY for verification. You are PROHIBITED from using Bash t
 - `git rev-parse --show-toplevel`
 - `git branch --show-current`
 - `test -L build` / `ls -ld build` (is the build directory real or a borrowed symlink)
-- `make lint/comments`
 
 **Build verification:**
 
@@ -191,7 +190,7 @@ that enumeration is an incomplete review.
 
 Review rules are organized by severity. When time or context window is limited, prioritize Safety-critical issues over Correctness over Convention. Never skip safety checks.
 
-Convention-level rules for each language the diff touches live in `.claude/conventions/<lang>.md` (`c`, `go`, `rust`, `ts`) — read the ones that apply before reviewing; do not re-derive them from memory. `.claude/conventions/comments.md` is not a language file and applies to any diff that adds or edits a comment. A convention item that guards memory/type safety (buffer bounds, CGO pinning, unsafe blocks) is still a Critical finding, not downgraded because it lives in a convention file.
+Convention-level rules for each language the diff touches live in `.claude/conventions/<lang>.md` (`c`, `go`, `rust`, `ts`) — read the ones that apply before reviewing; do not re-derive them from memory. A convention item that guards memory/type safety (buffer bounds, CGO pinning, unsafe blocks) is still a Critical finding, not downgraded because it lives in a convention file.
 
 ### C Code (`dataplane/`, `modules/*/api/`, `lib/`, `common/`)
 
@@ -259,9 +258,10 @@ Convention-level rules for each language the diff touches live in `.claude/conve
 - Changes match task requirements (no scope creep, no missing pieces)
 - No secrets or credentials
 - Error handling appropriate (not swallowed, not over-handled)
-- Comments within budget: over 8 prose lines is a finding, over 12 is blocking. A comment this diff pushed further over budget is a finding.
-- A comment stating several ideas at once is blocking whether it is a doc comment or inline.
-- Whether either grading above still blocks in a later round is settled by `## Rounds and Severity`.
+- Unless it falls under AGENTS.md's carve-out for a comment serving a job other than explaining the code to a reader, a new comment on a private symbol (unexported Go identifier, `static` in a `.c` file — a header's `static`/`static inline` symbol is public API, not private — non-`pub` Rust item, non-exported TypeScript declaration) is a finding, and so is a new comment inside a function or method body.
+- A new comment longer than one line is a finding unless the user explicitly approved it in this task; silence is refusal, not approval.
+- An existing comment the diff reflows, re-wraps, or re-cuts without the change requiring it is a finding.
+- Whether any of these checks still blocks in a later round is settled by `## Rounds and Severity`.
 
 ### Tests & Benchmarks (any language)
 
@@ -382,22 +382,23 @@ go vet ./...
   so an `APPROVED` verdict may carry a non-empty Minor or Suggestions list. File
   a contract failure under `Critical` as well, so every blocking finding wears
   the category the architect routes on.
-- **Prose findings batch once.** Report comment and documentation-prose
-  findings — line budget, doc-comment shape, semicolon splice, claim
-  falsifiability, wording — as one batch in the first round that sees that
-  prose. Afterwards, do not reopen prose that did not change, and do not raise
-  a new ground against prose re-cut to satisfy that batch. Prose that did not
-  change on frozen surface answers to this rule rather than the round rules: it
-  is never reopened in this change, though a defect noticed there is still
-  recorded under `Deferred`.
-- **A rewrite's own defects are always reportable.** A defect the re-cut itself
-  introduced is a finding on any ground, whatever the batch named — cramming or
-  a semicolon splice as much as a false claim, a lost load-bearing rationale, or
-  a comment pushed over budget. The prohibition above bars re-litigating prose
-  the batch settled, never reporting a defect the fix created. A round-1 batch
-  that found nothing names no rules and restricts nothing — every prose rule
-  stays live for prose that changes later. The rewrite cap below bounds the
-  loop, not a limit on correctness.
+- **Prose findings batch once.** Report comment findings — a private-symbol
+  or body comment, a comment over one line, an unnecessary reflow — and
+  documentation-prose findings — wording, claim falsifiability — as one batch
+  in the first round that sees that prose. Afterwards, do not reopen prose
+  that did not change, and do not raise a new ground against prose re-cut to
+  satisfy that batch. Prose that did not change on frozen surface answers to
+  this rule rather than the round rules: it is never reopened in this
+  change, though a defect noticed there is still recorded under `Deferred`.
+- **A rewrite's own defects are always reportable.** A defect the re-cut
+  itself introduced is a finding on any ground, whatever the batch named — a
+  private-symbol or body comment as much as a false claim, a lost
+  load-bearing rationale, an unnecessary reflow, or a line pushed past one.
+  The prohibition above bars re-litigating prose the batch settled, never
+  reporting a defect the fix created. A round-1 batch that found nothing
+  names no rules and restricts nothing — every prose rule stays live for
+  prose that changes later. The rewrite cap below bounds the loop, not a
+  limit on correctness.
 - **Stop prose churn.** Once a comment has been rewritten twice at review
   request, propose no further rewrite of it: report the artifact under `Churn`
   for the architect to settle by dictating or deleting the text. Count rewrites

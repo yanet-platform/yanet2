@@ -113,7 +113,7 @@ Conventions: `.claude/conventions/go.md` — read it before writing Go. Addition
 - [ ] `go build ./...` — must compile cleanly.
 - [ ] `go test -count=1 <affected-package-paths...>` — run uncached tests for every changed or affected Go package, including packages under `bindings/go/`, `devices/`, root `tests/`, and `modules/*/tests/`.
 - [ ] When concurrency or race behavior is relevant, `go test -race -count=10 -run '<targeted test pattern>' <affected-package-paths...>` — repeat a targeted test 10–20 times for each relevant package. Do not race unrelated packages.
-- [ ] All new exported types have doc comments ending with period.
+- [ ] A doc comment is never required, but a new exported type that has one keeps it to one line, ending with a period.
 - [ ] CGO: `runtime.Pinner` used for Go memory passed to C.
 - [ ] CGO: `C.CString` paired with `defer C.free`.
 - [ ] Service: mutex held during backend call + cache update.
