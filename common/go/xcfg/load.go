@@ -81,18 +81,28 @@ func LoadConfig[T any](path string, options ...Option) (*T, error) {
 
 // Decode deserializes YAML data into dst and then recursively validates all
 // fields that implement "validatable".
+// It also rejects a key present with a null value, whether or not WithKnownFields is set.
 func Decode(buf []byte, dst any, options ...Option) error {
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
+	f, err := walkDocument(buf, reflect.TypeOf(dst))
+	if err != nil {
+		return err
+	}
 	if opts.KnownFields {
-		if err := checkKnownKeys(buf, reflect.TypeOf(dst)); err != nil {
+		if err := unknownKeysError(f.Unknown); err != nil {
 			return err
 		}
+	}
+	if err := nullValuesError(f.Nulls); err != nil {
+		return err
+	}
 
-		// The checkKnownKeys helper runs first so an unknown key always reports
+	if opts.KnownFields {
+		// The walk above runs first so an unknown key always reports
 		// through its operator-facing message rather than yaml.v3's own. This decode
 		// is what actually populates dst.
 		dec := yaml.NewDecoder(bytes.NewReader(buf))

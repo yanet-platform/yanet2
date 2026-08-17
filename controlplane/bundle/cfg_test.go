@@ -70,3 +70,23 @@ func Test_NewBundle_ConfiguredModuleWithBadPath_FailsNamingModule(t *testing.T) 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "decap module")
 }
+
+// Test_Decode_NullModuleBlock_Rejected asserts that a null module block is rejected naming the module.
+func Test_Decode_NullModuleBlock_Rejected(t *testing.T) {
+	var cfg struct {
+		Modules bundle.ModulesConfig `yaml:"modules"`
+	}
+	err := xcfg.Decode([]byte("modules:\n  route:\n"), &cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "modules.route")
+}
+
+// Test_Decode_NullDeviceBlock_Rejected asserts that a null device block is rejected naming the device.
+func Test_Decode_NullDeviceBlock_Rejected(t *testing.T) {
+	var cfg struct {
+		Devices bundle.DevicesConfig `yaml:"devices"`
+	}
+	err := xcfg.Decode([]byte("devices:\n  plain:\n"), &cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "devices.plain")
+}

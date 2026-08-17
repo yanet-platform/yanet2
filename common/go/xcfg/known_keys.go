@@ -1,6 +1,7 @@
 package xcfg
 
 import (
+	"encoding"
 	"fmt"
 	"maps"
 	"reflect"
@@ -14,6 +15,8 @@ var yamlNodeType = reflect.TypeFor[yaml.Node]()
 
 var yamlUnmarshalerType = reflect.TypeFor[yaml.Unmarshaler]()
 
+var textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
+
 // walkableType is implemented by a wrapper whose keys decode into a
 // different type than the wrapper itself, such as Optional[T], so the walk
 // can check that type's fields instead of stopping at isOpaqueToWalk.
@@ -24,11 +27,23 @@ type walkableType interface {
 // mergeTag is the resolved tag yaml.v3 assigns to a "<<" merge key.
 const mergeTag = "!!merge"
 
+const nullTag = "!!null"
+
 // unknownKey records one mapping key with no matching field, along with the
 // document line it sits on, so the reported error can point straight at it.
 type unknownKey struct {
 	Path string
 	Line int
+}
+
+type nullValue struct {
+	Path string
+	Line int
+}
+
+type findings struct {
+	Unknown []unknownKey
+	Nulls   []nullValue
 }
 
 // CheckKnownKeys reports every YAML mapping key in data that has no matching
@@ -44,20 +59,31 @@ func CheckKnownKeys[T any](data []byte) error {
 	return checkKnownKeys(data, reflect.TypeFor[T]())
 }
 
-// checkKnownKeys drives the same walk as CheckKnownKeys against a
-// reflect.Type, letting Decode reuse it for a destination value's runtime
-// type without a type parameter.
+// checkKnownKeys drives the same walk as CheckKnownKeys against the
+// reflect.Type its type parameter resolves to.
 func checkKnownKeys(data []byte, t reflect.Type) error {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	collected, err := walkDocument(data, t)
+	if err != nil {
 		return err
 	}
+	return unknownKeysError(collected.Unknown)
+}
+
+func walkDocument(data []byte, t reflect.Type) (*findings, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	collected := &findings{}
 	if len(doc.Content) == 0 {
-		return nil
+		return collected, nil
 	}
 
-	var unknown []unknownKey
-	walkKnownKeys(doc.Content[0], t, "", &unknown, map[*yaml.Node]bool{})
+	walkKnownKeys(doc.Content[0], t, "", collected, map[*yaml.Node]bool{})
+	return collected, nil
+}
+
+func unknownKeysError(unknown []unknownKey) error {
 	if len(unknown) == 0 {
 		return nil
 	}
@@ -72,8 +98,39 @@ func checkKnownKeys(data []byte, t reflect.Type) error {
 	return fmt.Errorf("unknown keys specified: %s", strings.Join(parts, ", "))
 }
 
+func nullValuesError(nulls []nullValue) error {
+	if len(nulls) == 0 {
+		return nil
+	}
+	if len(nulls) == 1 {
+		return fmt.Errorf("key %q at line %d has no value; give it a body or remove the key", nulls[0].Path, nulls[0].Line)
+	}
+
+	parts := make([]string, len(nulls))
+	for idx, null := range nulls {
+		parts[idx] = fmt.Sprintf("%q at line %d", null.Path, null.Line)
+	}
+	return fmt.Errorf("keys with no value: %s", strings.Join(parts, ", "))
+}
+
+func isTransparentToWalk(t reflect.Type) bool {
+	if t.Kind() == reflect.Interface || t == yamlNodeType {
+		return false
+	}
+	if wt, ok := reflect.Zero(t).Interface().(walkableType); ok {
+		return isTransparentToWalk(wt.WalkType())
+	}
+	if isOpaqueToWalk(t) {
+		return false
+	}
+	if reflect.PointerTo(t).Implements(textUnmarshalerType) {
+		return false
+	}
+	return t.Kind() == reflect.Struct || t.Kind() == reflect.Map
+}
+
 // walkKnownKeys matches node's shape against t, appending the dotted path of
-// every mapping key that has no corresponding field to unknown.
+// every mapping key that has no corresponding field to collected.
 //
 // visiting holds the alias targets already on the current descent path, so
 // a self-referential merge anchor is caught here instead of recursing
@@ -81,10 +138,11 @@ func checkKnownKeys(data []byte, t reflect.Type) error {
 // not into a node tree, and LoadConfig catches it separately, so stopping
 // silently is enough. The entry is removed on return, so a legitimate
 // anchor reused at sibling paths is still walked at each site.
-func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]unknownKey, visiting map[*yaml.Node]bool) {
+func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, collected *findings, visiting map[*yaml.Node]bool) {
 	if node == nil {
 		return
 	}
+	line := node.Line
 	if node.Kind == yaml.AliasNode {
 		target := node.Alias
 		if target == nil || visiting[target] {
@@ -95,6 +153,13 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]unkn
 		node = target
 	}
 
+	if node.ShortTag() == nullTag {
+		if t.Kind() != reflect.Pointer && isTransparentToWalk(t) {
+			collected.Nulls = append(collected.Nulls, nullValue{Path: path, Line: line})
+		}
+		return
+	}
+
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -102,7 +167,7 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]unkn
 		return
 	}
 	if wt, ok := reflect.Zero(t).Interface().(walkableType); ok {
-		walkKnownKeys(node, wt.WalkType(), path, unknown, visiting)
+		walkKnownKeys(node, wt.WalkType(), path, collected, visiting)
 		return
 	}
 	if isOpaqueToWalk(t) {
@@ -111,11 +176,13 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]unkn
 
 	switch node.Kind {
 	case yaml.MappingNode:
-		walkMappingNode(node, t, path, unknown, visiting)
+		walkMappingNode(node, t, path, collected, visiting)
 	case yaml.SequenceNode:
-		walkSequenceNode(node, t, path, unknown, visiting)
+		walkSequenceNode(node, t, path, collected, visiting)
 	}
 }
+
+type mappingResolver func(key string) (reflect.Type, bool)
 
 // walkMappingNode checks a YAML mapping node against a struct or map type.
 //
@@ -123,69 +190,146 @@ func walkKnownKeys(node *yaml.Node, t reflect.Type, path string, unknown *[]unkn
 // against, so it is skipped without reporting — for example a mapping
 // value against a plain scalar field is a shape mismatch that yaml.v3
 // itself rejects on the strict decode path.
-func walkMappingNode(node *yaml.Node, t reflect.Type, path string, unknown *[]unknownKey, visiting map[*yaml.Node]bool) {
+func walkMappingNode(node *yaml.Node, t reflect.Type, path string, collected *findings, visiting map[*yaml.Node]bool) {
+	var resolve mappingResolver
+	skipComplexKey := false
 	switch t.Kind() {
 	case reflect.Struct:
 		fields, inlineElem := collectFields(t)
-		for idx := 0; idx+1 < len(node.Content); idx += 2 {
-			keyNode, valueNode := node.Content[idx], node.Content[idx+1]
-			if keyNode.Tag == mergeTag {
-				walkMergeValue(valueNode, t, path, unknown, visiting)
-				continue
+		skipComplexKey = true
+		resolve = func(key string) (reflect.Type, bool) {
+			if fieldType, ok := fields[key]; ok {
+				return fieldType, true
 			}
-			// A complex key (a YAML sequence or mapping key) has no scalar
-			// name to check against a field or record as unknown.
-			if keyNode.Kind == yaml.SequenceNode || keyNode.Kind == yaml.MappingNode {
-				continue
+			if inlineElem != nil {
+				return inlineElem, true
 			}
-
-			fieldPath := joinPath(path, keyNode.Value)
-			fieldType, ok := fields[keyNode.Value]
-			switch {
-			case ok:
-				walkKnownKeys(valueNode, fieldType, fieldPath, unknown, visiting)
-			case inlineElem != nil:
-				walkKnownKeys(valueNode, inlineElem, fieldPath, unknown, visiting)
-			default:
-				*unknown = append(*unknown, unknownKey{Path: fieldPath, Line: keyNode.Line})
-			}
+			return nil, false
 		}
 	case reflect.Map:
 		elemType := t.Elem()
-		for idx := 0; idx+1 < len(node.Content); idx += 2 {
-			fieldPath := joinPath(path, node.Content[idx].Value)
-			walkKnownKeys(node.Content[idx+1], elemType, fieldPath, unknown, visiting)
+		resolve = func(key string) (reflect.Type, bool) {
+			return elemType, true
 		}
+	default:
+		return
+	}
+
+	claimed := map[string]bool{}
+	mergeValue := walkMappingKeys(node, resolve, skipComplexKey, path, collected, visiting, claimed)
+	if mergeValue != nil {
+		walkMergeValue(mergeValue, resolve, skipComplexKey, path, collected, visiting, claimed)
 	}
 }
 
-// walkMergeValue walks a "<<" merge key's value against t, the struct type
-// of the mapping it merges into, since merged keys land in that mapping
-// rather than under a field of their own.
+func isMergeKey(keyNode *yaml.Node) bool {
+	if keyNode.Kind != yaml.ScalarNode || keyNode.Value != "<<" {
+		return false
+	}
+	return keyNode.Tag == "" || keyNode.Tag == "!" || keyNode.ShortTag() == mergeTag
+}
+
+func mappingKeyName(keyNode *yaml.Node) string {
+	if keyNode.Kind == yaml.AliasNode && keyNode.Alias != nil {
+		return keyNode.Alias.Value
+	}
+	return keyNode.Value
+}
+
+type mappingKeyEntry struct {
+	ValueNode *yaml.Node
+	Line      int
+}
+
+func walkMappingKeys(node *yaml.Node, resolve mappingResolver, skipComplexKey bool, path string, collected *findings, visiting map[*yaml.Node]bool, claimed map[string]bool) *yaml.Node {
+	var mergeValue *yaml.Node
+	var order []string
+	last := map[string]mappingKeyEntry{}
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		keyNode, valueNode := node.Content[idx], node.Content[idx+1]
+		if isMergeKey(keyNode) {
+			mergeValue = valueNode
+			continue
+		}
+		if skipComplexKey && (keyNode.Kind == yaml.SequenceNode || keyNode.Kind == yaml.MappingNode) {
+			continue
+		}
+		key := mappingKeyName(keyNode)
+		if !claimed[key] {
+			order = append(order, key)
+		}
+		claimed[key] = true
+		last[key] = mappingKeyEntry{ValueNode: valueNode, Line: keyNode.Line}
+	}
+	for _, key := range order {
+		entry := last[key]
+		walkMappingEntry(resolve, key, entry.Line, entry.ValueNode, path, collected, visiting)
+	}
+	return mergeValue
+}
+
+func walkMappingEntry(resolve mappingResolver, key string, line int, valueNode *yaml.Node, path string, collected *findings, visiting map[*yaml.Node]bool) {
+	fieldPath := joinPath(path, key)
+	if fieldType, ok := resolve(key); ok {
+		walkKnownKeys(valueNode, fieldType, fieldPath, collected, visiting)
+		return
+	}
+	collected.Unknown = append(collected.Unknown, unknownKey{Path: fieldPath, Line: line})
+}
+
+// walkMergeValue walks a "<<" merge key's value, resolving each merged
+// key's value against the receiving mapping via resolve, since merged
+// keys land in that mapping rather than under a field of their own.
 //
 // The value can also be a scalar or a sequence of scalars — shapes YAML
 // permits, though neither carries keys to check. A sequence value is
 // walked in place rather than routed through walkSequenceNode, since its
-// elements share t rather than a slice element type.
-func walkMergeValue(node *yaml.Node, t reflect.Type, path string, unknown *[]unknownKey, visiting map[*yaml.Node]bool) {
+// elements share resolve rather than a slice element type.
+func walkMergeValue(node *yaml.Node, resolve mappingResolver, skipComplexKey bool, path string, collected *findings, visiting map[*yaml.Node]bool, claimed map[string]bool) {
+	if node.ShortTag() == nullTag {
+		return
+	}
 	if node.Kind == yaml.SequenceNode {
 		for _, item := range node.Content {
-			walkKnownKeys(item, t, path, unknown, visiting)
+			if item.ShortTag() == nullTag {
+				continue
+			}
+			walkMergeSource(item, resolve, skipComplexKey, path, collected, visiting, claimed)
 		}
 		return
 	}
-	walkKnownKeys(node, t, path, unknown, visiting)
+	walkMergeSource(node, resolve, skipComplexKey, path, collected, visiting, claimed)
+}
+
+func walkMergeSource(node *yaml.Node, resolve mappingResolver, skipComplexKey bool, path string, collected *findings, visiting map[*yaml.Node]bool, claimed map[string]bool) {
+	if node.Kind == yaml.AliasNode {
+		target := node.Alias
+		if target == nil || visiting[target] {
+			return
+		}
+		visiting[target] = true
+		defer delete(visiting, target)
+		node = target
+	}
+	if node.Kind != yaml.MappingNode {
+		return
+	}
+
+	mergeValue := walkMappingKeys(node, resolve, skipComplexKey, path, collected, visiting, claimed)
+	if mergeValue != nil {
+		walkMergeValue(mergeValue, resolve, skipComplexKey, path, collected, visiting, claimed)
+	}
 }
 
 // walkSequenceNode checks each element of a YAML sequence node against a
 // slice or array type's element type.
-func walkSequenceNode(node *yaml.Node, t reflect.Type, path string, unknown *[]unknownKey, visiting map[*yaml.Node]bool) {
+func walkSequenceNode(node *yaml.Node, t reflect.Type, path string, collected *findings, visiting map[*yaml.Node]bool) {
 	if t.Kind() != reflect.Slice && t.Kind() != reflect.Array {
 		return
 	}
 	elemType := t.Elem()
 	for idx, item := range node.Content {
-		walkKnownKeys(item, elemType, fmt.Sprintf("%s[%d]", path, idx), unknown, visiting)
+		walkKnownKeys(item, elemType, fmt.Sprintf("%s[%d]", path, idx), collected, visiting)
 	}
 }
 

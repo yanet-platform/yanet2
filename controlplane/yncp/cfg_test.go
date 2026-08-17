@@ -84,6 +84,22 @@ func Test_ExplicitNullGateway_FailsValidation(t *testing.T) {
 	}
 }
 
+// Test_NullTopLevelModules_FailsValidation asserts that a null top-level "modules:" block is rejected naming modules and its line.
+func Test_NullTopLevelModules_FailsValidation(t *testing.T) {
+	cfg := yncp.DefaultConfig()
+	err := xcfg.Decode([]byte("gateway:\n  instance_id: 0\nmodules:\n"), cfg)
+	require.Error(t, err)
+	require.Equal(t, `key "modules" at line 3 has no value; give it a body or remove the key`, err.Error())
+}
+
+// Test_NullTopLevelDevices_FailsValidation asserts that a null top-level "devices:" block is rejected naming devices and its line.
+func Test_NullTopLevelDevices_FailsValidation(t *testing.T) {
+	cfg := yncp.DefaultConfig()
+	err := xcfg.Decode([]byte("gateway:\n  instance_id: 0\ndevices:\n"), cfg)
+	require.Error(t, err)
+	require.Equal(t, `key "devices" at line 3 has no value; give it a body or remove the key`, err.Error())
+}
+
 // Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields asserts that a key
 // nested inside a module's own block, not just at the document's top level,
 // is rejected when loading through the director's WithKnownFields path.
