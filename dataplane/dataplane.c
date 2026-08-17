@@ -32,6 +32,7 @@
 #include "lib/dataplane/config/bootstrap.h"
 #include "lib/dataplane/config/counter_storage.h"
 #include "lib/dataplane/config/module_loader.h"
+#include "lib/dataplane/config/object_loader.h"
 #include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/packet/data.h"
@@ -576,6 +577,18 @@ dataplane_init(
 		     ++i) {
 			if (dp_load_device(
 				    instance->dp_config, bin_hndl, devices[i]
+			    ) == -1) {
+				return -1;
+			}
+		}
+
+		static const char *objects[] = {
+			"fwstate_map_v4", "fwstate_map_v6"
+		};
+		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
+		     ++i) {
+			if (dp_load_object(
+				    instance->dp_config, bin_hndl, objects[i]
 			    ) == -1) {
 				return -1;
 			}

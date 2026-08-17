@@ -2,14 +2,20 @@ package fwstatemap_test
 
 import (
 	"errors"
+	"io"
+	"math"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/objects/fwstate/bindings/go/cfwstate"
 	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
@@ -85,6 +91,121 @@ func TestClampBatchSize(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, fwstatemap.ClampBatchSize(tc.in))
+		})
+	}
+}
+
+// TestValidateMapName verifies that names the fixed-size C registry cannot store are rejected.
+func TestValidateMapName(t *testing.T) {
+	cases := []struct {
+		name    string
+		mapName string
+		wantErr bool
+	}{
+		{name: "empty rejected", mapName: "", wantErr: true},
+		{name: "normal name passes", mapName: "fwstate0-v4"},
+		{name: "longest name passes", mapName: strings.Repeat("a", 79)},
+		{name: "name at limit rejected", mapName: strings.Repeat("a", 80), wantErr: true},
+		{name: "far over limit rejected", mapName: strings.Repeat("a", 200), wantErr: true},
+		{name: "embedded NUL rejected", mapName: "a\x00b", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fwstatemap.ValidateMapName(tc.mapName)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
+// TestResolveCreateWorkerCount verifies that the per-worker sizing is derived from, and matched against, the dataplane worker count.
+func TestResolveCreateWorkerCount(t *testing.T) {
+	dpCount := func() uint32 { return 4 }
+
+	cases := []struct {
+		name         string
+		workerCount  uint32
+		dpWorkerFunc func() uint32
+		want         uint16
+		wantErr      bool
+	}{
+		{
+			name:        "zero derives the dataplane count",
+			workerCount: 0, dpWorkerFunc: dpCount, want: 4,
+		},
+		{
+			name:        "matching explicit value passes",
+			workerCount: 4, dpWorkerFunc: dpCount, want: 4,
+		},
+		{
+			name:        "mismatching explicit value rejected",
+			workerCount: 1, dpWorkerFunc: dpCount, wantErr: true,
+		},
+		{
+			name:        "above dataplane count rejected",
+			workerCount: 8, dpWorkerFunc: dpCount, wantErr: true,
+		},
+		{
+			name:        "agentless zero still rejected",
+			workerCount: 0, dpWorkerFunc: nil, wantErr: true,
+		},
+		{
+			name:        "agentless explicit value passes",
+			workerCount: 2, dpWorkerFunc: nil, want: 2,
+		},
+		{
+			name:        "agentless out of range rejected",
+			workerCount: 65536, dpWorkerFunc: nil, wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := fwstatemap.ResolveCreateWorkerCount(tc.workerCount, tc.dpWorkerFunc)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				require.Equal(t, tc.want, got)
+				return
+			}
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
+// TestResolveReadIndex verifies the forward-cursor rejection and the backward start-cursor translation.
+func TestResolveReadIndex(t *testing.T) {
+	cases := []struct {
+		name     string
+		backward bool
+		index    int64
+		want     int64
+		wantErr  bool
+	}{
+		{name: "forward zero passes", index: 0, want: 0},
+		{name: "forward positive passes", index: 42, want: 42},
+		{name: "forward negative rejected", index: -1, wantErr: true},
+		{name: "forward min rejected", index: math.MinInt64, wantErr: true},
+		{name: "backward zero becomes upper bound", backward: true, index: 0, want: math.MaxInt64},
+		{name: "backward continuation passes", backward: true, index: 7, want: 7},
+		{name: "backward exhausted sentinel passes", backward: true, index: -1, want: -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := fwstatemap.ResolveReadIndex(tc.backward, tc.index)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				require.Equal(t, tc.want, got)
+				return
+			}
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
 }
@@ -322,4 +443,74 @@ func TestListMapsConcurrent(t *testing.T) {
 		})
 	}
 	require.NoError(t, group.Wait())
+}
+
+type fakeListEntriesStream struct {
+	grpc.BidiStreamingServer[fwstatemappb.ListEntriesRequest, fwstatemappb.ListEntriesResponse]
+	requests  []*fwstatemappb.ListEntriesRequest
+	responses []*fwstatemappb.ListEntriesResponse
+}
+
+func (m *fakeListEntriesStream) Recv() (*fwstatemappb.ListEntriesRequest, error) {
+	if len(m.requests) == 0 {
+		return nil, io.EOF
+	}
+	req := m.requests[0]
+	m.requests = m.requests[1:]
+	return req, nil
+}
+
+func (m *fakeListEntriesStream) Send(
+	resp *fwstatemappb.ListEntriesResponse,
+) error {
+	m.responses = append(m.responses, resp)
+	return nil
+}
+
+// TestListEntriesEmptyMapTerminates verifies that both dump directions end on a map with no entries.
+func TestListEntriesEmptyMapTerminates(t *testing.T) {
+	h, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("fwstatemap-test", 0, 16*datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	svc := fwstatemap.NewFWStateMapService(agent)
+	_, err = svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+		Name:             "empty-v4",
+		Kind:             fwstatemappb.Kind_V4,
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name      string
+		direction fwstatemappb.Direction
+	}{
+		{name: "backward", direction: fwstatemappb.Direction_BACKWARD},
+		{name: "forward", direction: fwstatemappb.Direction_FORWARD},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := &fakeListEntriesStream{
+				requests: []*fwstatemappb.ListEntriesRequest{{
+					MapName:   "empty-v4",
+					Direction: tc.direction,
+					BatchSize: 10,
+				}},
+			}
+			require.NoError(t, svc.ListEntries(stream))
+			require.Len(t, stream.responses, 1)
+			require.Empty(t, stream.responses[0].GetEntries())
+			require.False(t, stream.responses[0].GetHasMore())
+		})
+	}
 }

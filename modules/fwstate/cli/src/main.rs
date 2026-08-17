@@ -4,10 +4,15 @@ use core::{
 };
 use std::collections::HashMap;
 
-use args::{DeleteCmd, DirectionArg, EntriesCmd, Family, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
+use args::{
+    DeleteCmd, DirectionArg, EntriesCmd, Family, LinkCmd, MapCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd,
+};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, IpAddress, Metric as ProtoMetric};
+use fwstatemappb::{
+    CreateMapRequest, DeleteMapRequest, ListMapsRequest, fw_state_map_service_client::FwStateMapServiceClient,
+};
 use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
@@ -35,11 +40,21 @@ pub mod fwstatepb {
     tonic::include_proto!("modules.fwstate.controlplane.fwstatepb.v1");
 }
 
+#[allow(clippy::std_instead_of_core, non_snake_case)]
+pub mod fwstatemappb {
+    use serde::Serialize;
+
+    tonic::include_proto!("objects.fwstate.controlplane.fwstatemappb.v1");
+}
+
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
 
 /// The fully-qualified gRPC service name for the metrics service.
 const METRICS_SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.MetricsService";
+
+/// The fully-qualified gRPC service name for the fwstate-map service.
+const MAP_SERVICE_NAME: &str = "objects.fwstate.controlplane.fwstatemappb.v1.FWStateMapService";
 
 /// FWState module CLI.
 #[derive(Debug, Clone, Parser)]
@@ -67,6 +82,7 @@ fn parse_ipv6(s: &str) -> Result<IpAddress, String> {
 pub struct FWStateService {
     service: Service<FwStateServiceClient<LayeredChannel>>,
     metrics: Service<MetricsServiceClient<LayeredChannel>>,
+    maps: Service<FwStateMapServiceClient<LayeredChannel>>,
 }
 
 /// State an `entries` dump carries across its batches and both maps.
@@ -120,8 +136,13 @@ impl FWStateService {
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         });
+        let maps = Service::new(&conn, MAP_SERVICE_NAME, |channel| {
+            FwStateMapServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
 
-        Ok(Self { service, metrics })
+        Ok(Self { service, metrics, maps })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -500,6 +521,83 @@ impl FWStateService {
 
         Ok(())
     }
+
+    pub async fn manage_maps(&mut self, cmd: MapCmd) -> Result<(), Error> {
+        match cmd {
+            MapCmd::Create(cmd) => self.map_create(cmd).await,
+            MapCmd::Delete(cmd) => self.map_delete(cmd).await,
+            MapCmd::List(cmd) => self.map_list(cmd).await,
+        }
+    }
+
+    pub async fn map_create(&mut self, cmd: args::MapCreateCmd) -> Result<(), Error> {
+        let request = CreateMapRequest {
+            name: cmd.map_name.clone(),
+            kind: match cmd.kind {
+                args::MapKind::V4 => fwstatemappb::Kind::V4.into(),
+                args::MapKind::V6 => fwstatemappb::Kind::V6.into(),
+            },
+            index_size: cmd.index_size.unwrap_or(0),
+            extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
+            worker_count: cmd.worker_count.unwrap_or(0),
+        };
+        log::trace!("CreateMapRequest: {request:?}");
+        self.maps
+            .client()
+            .create_map(request)
+            .await
+            .map_err(self.maps.status("map create"))?;
+
+        output::success("map create", format_args!("Created fwstate-map {}.", cmd.map_name));
+
+        Ok(())
+    }
+
+    pub async fn map_delete(&mut self, cmd: args::MapDeleteCmd) -> Result<(), Error> {
+        let request = DeleteMapRequest { name: cmd.map_name.clone() };
+        log::trace!("DeleteMapRequest: {request:?}");
+        self.maps
+            .client()
+            .delete_map(request)
+            .await
+            .map_err(self.maps.status("map delete"))?;
+
+        output::success("map delete", format_args!("Deleted fwstate-map {}.", cmd.map_name));
+
+        Ok(())
+    }
+
+    pub async fn map_list(&mut self, _cmd: args::MapListCmd) -> Result<(), Error> {
+        let request = ListMapsRequest {};
+        let response = self
+            .maps
+            .client()
+            .list_maps(request)
+            .await
+            .map_err(self.maps.status("map list"))?
+            .into_inner();
+
+        output::data(
+            || &response.maps,
+            || {
+                if response.maps.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No fwstate-map objects found."),
+                        format_args!("create one with 'yanet-cli-fwstate map create --name <name> --kind <v4|v6>'"),
+                    );
+                    return;
+                }
+
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response.maps)
+                        .expect("fwstate-map list JSON serialization must not fail")
+                );
+            },
+        );
+
+        Ok(())
+    }
 }
 
 /// Formats an address and port as an endpoint, bracketing IPv6.
@@ -794,6 +892,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
         ModeCmd::Entries(cmd) => service.list_entries(cmd, format).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
+        ModeCmd::Map { command } => service.manage_maps(command).await,
     }
 }
 

@@ -186,6 +186,8 @@ type Config struct {
 	// PluginDir is the directory scanned for module .so plugins. An empty
 	// value loads only the statically-linked built-ins.
 	PluginDir string
+	// ObjectsToLoad registers standalone shared-memory object types (e.g. "fwstate_map_v4") in the dataplane config.
+	ObjectsToLoad []string
 	// Workers optionally assigns each worker's device and queue.
 	//
 	// When nil, every worker defaults to device 0 with queue id equal to
@@ -268,6 +270,9 @@ func NewHarness(cfg Config) (*Harness, error) {
 	cDevicesToLoad, freeDevicesToLoad := toCStringArray(cfg.DevicesToLoad)
 	defer freeDevicesToLoad()
 
+	cObjectsToLoad, freeObjectsToLoad := toCStringArray(cfg.ObjectsToLoad)
+	defer freeObjectsToLoad()
+
 	cCfg := C.struct_dataplane_ut_config{
 		cp_memory:             C.size_t(cfg.CPMemory),
 		dp_memory:             C.size_t(cfg.DPMemory),
@@ -275,6 +280,7 @@ func NewHarness(cfg Config) (*Harness, error) {
 		device_count:          C.size_t(len(cfg.Devices)),
 		module_count:          C.size_t(len(cfg.Modules)),
 		devices_to_load_count: C.size_t(len(cfg.DevicesToLoad)),
+		objects_to_load_count: C.size_t(len(cfg.ObjectsToLoad)),
 	}
 
 	// Assign C-heap copies of the pointer arrays so the C struct contains
@@ -293,6 +299,11 @@ func NewHarness(cfg Config) (*Harness, error) {
 		cArr := C.alloc_cptr_array(&cDevicesToLoad[0], C.size_t(len(cDevicesToLoad)))
 		defer C.free_cptr_array(cArr)
 		cCfg.devices_to_load = cArr
+	}
+	if len(cfg.ObjectsToLoad) > 0 {
+		cArr := C.alloc_cptr_array(&cObjectsToLoad[0], C.size_t(len(cObjectsToLoad)))
+		defer C.free_cptr_array(cArr)
+		cCfg.objects_to_load = cArr
 	}
 	if cfg.PluginDir != "" {
 		cPluginDir := C.CString(cfg.PluginDir)

@@ -82,6 +82,7 @@ message CreateMapRequest {
   Kind kind = 2;
   uint32 index_size = 3;
   uint32 extra_bucket_count = 4;
+  // worker_count sizes the per-worker state; zero derives the dataplane's current worker count.
   uint32 worker_count = 5;
 }
 

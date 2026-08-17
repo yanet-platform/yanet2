@@ -1,4 +1,5 @@
+subdir('api')
+
 if not dataplane_only
-  subdir('api')
   subdir('controlplane')
 endif

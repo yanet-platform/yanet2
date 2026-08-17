@@ -29,7 +29,64 @@ pub enum ModeCmd {
     Entries(EntriesCmd),
     /// Show fwstate metrics
     Metrics(MetricsCmd),
+    /// Manage standalone fwstate-map objects
+    Map {
+        #[clap(subcommand)]
+        command: MapCmd,
+    },
 }
+
+/// Address family of a fwstate-map object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum MapKind {
+    /// IPv4 state table
+    V4,
+    /// IPv6 state table
+    V6,
+}
+
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum MapCmd {
+    /// Create a named fwstate-map and publish it
+    Create(MapCreateCmd),
+    /// Delete a named fwstate-map
+    Delete(MapDeleteCmd),
+    /// List registered fwstate-map objects
+    List(MapListCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapCreateCmd {
+    /// Name of the fwstate-map to create
+    #[arg(long = "name", short = 'n')]
+    pub map_name: String,
+
+    /// Address family of the state table this map owns
+    #[arg(long)]
+    pub kind: MapKind,
+
+    /// Size of the hash table index (0 uses the service default)
+    #[arg(long)]
+    pub index_size: Option<u32>,
+
+    /// Number of extra collision buckets (0 uses the service default)
+    #[arg(long)]
+    pub extra_bucket_count: Option<u32>,
+
+    /// Per-worker state sizing (0 derives the dataplane worker count)
+    #[arg(long)]
+    pub worker_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapDeleteCmd {
+    /// Name of the fwstate-map to delete
+    #[arg(long = "name", short = 'n')]
+    pub map_name: String,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct MapListCmd {}
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {

@@ -12,6 +12,7 @@ import (
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
+	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 const (
@@ -50,6 +51,7 @@ type ACLModule struct {
 	metricsService        *MetricsService
 	fwstateService        *fwstate.FWStateService
 	fwstateMetricsService *fwstate.MetricsService
+	mapService            *fwstatemap.FWStateMapService
 }
 
 // NewACLModule creates a new ACL module instance.
@@ -98,6 +100,11 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 	)
 	fwstateMetricsService := fwstate.NewMetricsService(fwstateService)
 
+	mapService := fwstatemap.NewFWStateMapService(
+		agent,
+		fwstatemap.WithLog(log),
+	)
+
 	return &ACLModule{
 		cfg:                   cfg,
 		shm:                   shm,
@@ -106,6 +113,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 		metricsService:        metricsService,
 		fwstateService:        fwstateService,
 		fwstateMetricsService: fwstateMetricsService,
+		mapService:            mapService,
 	}, nil
 }
 
@@ -123,6 +131,7 @@ func (m *ACLModule) ServicesNames() []string {
 		aclpb.MetricsService_ServiceDesc.ServiceName,
 		fwstate.FWStateServiceName,
 		fwstate.FWStateMetricsServiceName,
+		fwstatemap.ServiceName,
 	}
 }
 
@@ -131,6 +140,7 @@ func (m *ACLModule) RegisterService(server *grpc.Server) {
 	aclpb.RegisterMetricsServiceServer(server, m.metricsService)
 	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
 	fwstatepb.RegisterMetricsServiceServer(server, m.fwstateMetricsService)
+	m.mapService.Register(server)
 }
 
 // UnaryServerInterceptors returns the gRPC unary interceptors for this module.
@@ -140,6 +150,9 @@ func (m *ACLModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 		interceptors = append(interceptors, si)
 	}
 	if si := m.fwstateService.UnaryServerInterceptor(); si != nil {
+		interceptors = append(interceptors, si)
+	}
+	if si := m.mapService.UnaryServerInterceptor(); si != nil {
 		interceptors = append(interceptors, si)
 	}
 	return interceptors

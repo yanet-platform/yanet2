@@ -3,13 +3,16 @@ package fwstatemap
 // FWStateMapService.mu is the only lock in this service. Every RPC and
 // ReclaimStaleLayers acquires it for the whole operation: CreateMap and
 // InsertLayer mutate the in-memory map registry and the shared-memory
-// layer chain atomically, and ListEntries snapshots a config value under
-// it before releasing it for the cursor read. There are no collaborating
-// services to order against in this standalone objects controlplane.
+// layer chain atomically, and ListEntries runs its cursor read under it
+// so a concurrent DeleteMap or layer reclamation cannot free the fwtable
+// or a layer mid-read. There are no collaborating services to order
+// against in this standalone objects controlplane.
 
 import (
 	"context"
 	"io"
+	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +31,8 @@ import (
 // maxWorkerCount is the highest value accepted for worker_count, matching
 // the width of the C-side uint16 parameter of fwstate_map insert_layer.
 const maxWorkerCount uint32 = 65535
+
+const maxMapNameLen = 80
 
 const (
 	// DefaultListEntriesBatchSize is the batch size used when the caller
@@ -228,10 +233,14 @@ func (m *FWStateMapService) CreateMap(
 	req *fwstatemappb.CreateMapRequest,
 ) (*fwstatemappb.CreateMapResponse, error) {
 	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "map name is required")
+	if err := ValidateMapName(name); err != nil {
+		return nil, err
 	}
-	if err := ValidateWorkerCount(req.GetWorkerCount()); err != nil {
+
+	workerCount, err := ResolveCreateWorkerCount(
+		req.GetWorkerCount(), m.dpWorkerCountOf(),
+	)
+	if err != nil {
 		return nil, err
 	}
 	kind := kindFromProto(req.GetKind())
@@ -258,7 +267,7 @@ func (m *FWStateMapService) CreateMap(
 	if err := mapConfig.CreateMap(
 		req.GetIndexSize(),
 		req.GetExtraBucketCount(),
-		uint16(req.GetWorkerCount()),
+		workerCount,
 	); err != nil {
 		mapConfig.Free()
 		m.log.Error("failed to create fwstate-map table",
@@ -378,7 +387,10 @@ func (m *FWStateMapService) InsertLayer(
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "map name is required")
 	}
-	if err := ValidateWorkerCount(req.GetWorkerCount()); err != nil {
+	workerCount, err := ResolveCreateWorkerCount(
+		req.GetWorkerCount(), m.dpWorkerCountOf(),
+	)
+	if err != nil {
 		return nil, err
 	}
 
@@ -393,7 +405,7 @@ func (m *FWStateMapService) InsertLayer(
 	if err := fwMap.Config().InsertLayer(
 		req.GetIndexSize(),
 		req.GetExtraBucketCount(),
-		uint16(req.GetWorkerCount()),
+		workerCount,
 	); err != nil {
 		m.log.Error("failed to insert fwstate-map layer",
 			zap.String("map", name), zap.Error(err))
@@ -427,6 +439,20 @@ func (m *FWStateMapService) ListEntries(
 		}
 
 		count := ClampBatchSize(req.GetBatchSize())
+		if req.GetDirection() == fwstatemappb.Direction_BACKWARD {
+			backward = true
+		} else if req.GetDirection() == fwstatemappb.Direction_FORWARD {
+			backward = false
+		} else {
+			return status.Error(codes.InvalidArgument, "invalid direction")
+		}
+
+		index, err := ResolveReadIndex(backward, req.GetIndex())
+		if err != nil {
+			return err
+		}
+
+		now := uint64(time.Now().UnixNano())
 
 		m.mu.Lock()
 		fwMap, ok := m.maps[mapName]
@@ -436,10 +462,6 @@ func (m *FWStateMapService) ListEntries(
 		}
 
 		mapCfg := *fwMap.Config()
-		m.mu.Unlock()
-
-		now := uint64(time.Now().UnixNano())
-		backward := req.GetDirection() == fwstatemappb.Direction_BACKWARD
 
 		var entries []cfwstate.CursorEntry
 		var newIndex int64
@@ -448,16 +470,32 @@ func (m *FWStateMapService) ListEntries(
 		if backward {
 			entries, newIndex, hasMore, err = mapCfg.ReadBackward(
 				req.GetLayerIndex(),
-				req.GetIndex(), req.GetIncludeExpired(),
+				index, req.GetIncludeExpired(),
 				now, count,
 			)
 		} else {
 			entries, newIndex, hasMore, err = mapCfg.ReadForward(
 				req.GetLayerIndex(),
-				req.GetIndex(), req.GetIncludeExpired(),
+				index, req.GetIncludeExpired(),
 				now, count,
 			)
 		}
+
+		if err == nil && backward && newIndex == 0 {
+			var tail []cfwstate.CursorEntry
+			tail, newIndex, hasMore, err = mapCfg.ReadBackward(
+				req.GetLayerIndex(),
+				0, req.GetIncludeExpired(),
+				now, 1,
+			)
+			entries = append(entries, tail...)
+		}
+
+		if backward && len(entries) == 0 {
+			hasMore = false
+		}
+
+		m.mu.Unlock()
 
 		if err != nil {
 			return status.Errorf(codes.Internal, "cursor read failed: %v", err)
@@ -533,6 +571,64 @@ func ValidateWorkerCount(workerCount uint32) error {
 		return status.Errorf(codes.InvalidArgument, "worker_count %d exceeds maximum %d", workerCount, maxWorkerCount)
 	}
 	return nil
+}
+
+func (m *FWStateMapService) dpWorkerCountOf() func() uint32 {
+	if m.agent == nil {
+		return nil
+	}
+	return func() uint32 { return m.agent.DPConfig().WorkerCount() }
+}
+
+// ResolveCreateWorkerCount settles the per-worker sizing for CreateMap and InsertLayer, deriving a zero count from the dataplane's worker count and rejecting an explicit mismatch.
+func ResolveCreateWorkerCount(
+	workerCount uint32,
+	dpWorkerCount func() uint32,
+) (uint16, error) {
+	if dpWorkerCount != nil {
+		dpCount := dpWorkerCount()
+		if workerCount == 0 {
+			workerCount = dpCount
+		} else if workerCount != dpCount {
+			return 0, status.Errorf(
+				codes.InvalidArgument,
+				"worker_count %d does not match the dataplane worker count %d",
+				workerCount, dpCount,
+			)
+		}
+	}
+	if err := ValidateWorkerCount(workerCount); err != nil {
+		return 0, err
+	}
+	return uint16(workerCount), nil
+}
+
+// ValidateMapName rejects names that cannot round-trip through the fixed-size C object registry.
+func ValidateMapName(name string) error {
+	if name == "" {
+		return status.Error(codes.InvalidArgument, "map name is required")
+	}
+	if len(name) >= maxMapNameLen {
+		return status.Errorf(codes.InvalidArgument, "map name must be shorter than %d bytes", maxMapNameLen)
+	}
+	if strings.IndexByte(name, 0) != -1 {
+		return status.Error(codes.InvalidArgument, "map name must not contain NUL bytes")
+	}
+	return nil
+}
+
+// ResolveReadIndex rejects negative forward cursors and maps a zero backward cursor to the scan's upper bound.
+func ResolveReadIndex(backward bool, index int64) (int64, error) {
+	if backward {
+		if index == 0 {
+			return math.MaxInt64, nil
+		}
+		return index, nil
+	}
+	if index < 0 {
+		return 0, status.Error(codes.InvalidArgument, "index must not be negative for forward reads")
+	}
+	return index, nil
 }
 
 // MapStatsToProto converts bindings-level map stats into the proto form.
