@@ -82,6 +82,9 @@ Provides technical guidance on: RFC compliance, DPDK APIs, packet formats, proto
 
 Reviews code quality and verifies task completeness: conventions, safety, builds, tests.
 **Use after**: implementation is done, to verify everything works and meets standards.
+**Never split**: the reviewer is one agent, never split per language or per scope — blocking findings concentrate on cross-language seams, so a per-language reviewer would only ever see one end of every cross-layer assumption, and a review's round state (the first round's complete blocking set, the frozen surface, the per-artifact rewrite cap) has a single owner by construction.
+**Dispatch tier**: set the model tier at dispatch through the `Agent` tool's `model` parameter, never by editing the reviewer's own charter — pass `sonnet` only for a diff confined to TypeScript or to the Rust CLI that touches no packet path, no shared-memory or ABI surface, no CGO boundary, and no concurrent code (a spawned task or thread, mutably shared state across them, a channel, or a lock — not `async`/`await` used purely sequentially); omit `model` otherwise, and always on those four surfaces, which leaves the reviewer's own default in force.
+**Second pass**: on a diff touching the packet path, a shared-memory/ABI surface, or the CGO boundary, dispatch a second reviewer as a deliberately independent full-scope pass — tell it in that brief that it is full scope — and merge the two finding sets yourself, routing, once, any finding both raise at the higher of the two severities; this mandate to dispatch a pair binds round 1 only, and from round 2 the merged set has one named owner, with `## Review-Fix Loop` item 4 governing unchanged.
 
 ### `planner` — Multi-Horizon Planning Partner (read-only on code, both repos, public-first)
 
