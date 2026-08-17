@@ -261,6 +261,7 @@ Convention-level rules for each language the diff touches live in `.claude/conve
 - Error handling appropriate (not swallowed, not over-handled)
 - Comments within budget: over 8 prose lines is a finding, over 12 is blocking. A comment this diff pushed further over budget is a finding.
 - A comment stating several ideas at once is blocking whether it is a doc comment or inline.
+- Whether either grading above still blocks in a later round is settled by `## Rounds and Severity`.
 
 ### Tests & Benchmarks (any language)
 
@@ -333,6 +334,75 @@ go vet ./...
 - If public API or user-facing behavior changed: relevant docs in `docs/` updated
 - If new dependencies added: license compatibility verified
 
+## Rounds and Severity
+
+- **Carry a result forward, but keep looking.** A region identical to what an
+  earlier round of this same review examined needs no fresh derivation — that
+  round's result stands. This spares work, it never bars noticing: correctness
+  is cross-file, so an earlier clean result stops being evidence once a
+  collaborator changed. Re-examine an unchanged region whose changed
+  collaborator is itself in the candidate — that one is required, and the
+  carried result does not count as coverage of the interaction. What that
+  re-examination surfaces is a defect this candidate created, so it blocks on
+  its own merits whatever its class, exactly as a defect a rewrite introduced is
+  reportable on any ground. Attribute such a finding to the region that changed,
+  not to the unchanged one where the wrong behaviour appears: the trigger is the
+  interaction, and its changed end is in scope. Noticing elsewhere stays
+  permitted, and a finding first raised there is governed by the rules below.
+- **Round 1 commits to a complete blocking set.** Say so in the first round
+  over a candidate: nothing outside that set blocks this change.
+- **Frozen surface is a region, not a file, and the region is the diff hunk.** A
+  hunk unchanged since the round that last examined it stays frozen even when
+  the file changed elsewhere, so a one-line change thaws its own hunk and not
+  the file around it.
+  Both you and the architect compute that unit from the same diff.
+- **Only safety reopens frozen surface.** From round 2, a finding *first raised
+  in that round* on a region unchanged since the round that last examined it may
+  block only if it is safety class — memory safety, use-after-free, leak, data
+  race, packet-path correctness, or anything that would corrupt, drop, or
+  mis-forward live traffic. Everything under Step 3's "Safety-critical"
+  headings counts as safety class here. This is the only channel that reopens
+  frozen surface the candidate did not disturb: a finding the mandated
+  collaborator re-examination surfaced blocks on its own merits, whatever its
+  class.
+- **An open blocker stays blocking until it is closed**, whatever happened to
+  its region since. These rules bound what a round may newly raise, never what
+  it may drop: a blocker an attempted fix missed still blocks at round 5, and a
+  change landing in a different region neither closes it nor freezes it.
+- **The round rules decide blocking, and severity follows them.** File under
+  `Critical` only an open finding they let block. What they take out of this
+  change goes under `Deferred` whatever its intrinsic gravity — never under
+  Critical, and never under Minor either — and leaves the verdict where it is.
+  `Minor` and `Suggestions` are non-blocking findings still in scope: raised in
+  round 1, or on a region that changed since the round that last examined it.
+  Report a finding no rule names, and let the verdict stand.
+- **Severity binds the verdict.** Return `CHANGES REQUESTED` when an open
+  Critical finding remains or the change fails the task's stated contract, and
+  never otherwise. Minor and Suggestions findings never produce it on their own,
+  so an `APPROVED` verdict may carry a non-empty Minor or Suggestions list. File
+  a contract failure under `Critical` as well, so every blocking finding wears
+  the category the architect routes on.
+- **Prose findings batch once.** Report comment and documentation-prose
+  findings — line budget, doc-comment shape, semicolon splice, claim
+  falsifiability, wording — as one batch in the first round that sees that
+  prose. Afterwards, do not reopen prose that did not change, and do not raise
+  a new ground against prose re-cut to satisfy that batch. Prose that did not
+  change on frozen surface answers to this rule rather than the round rules: it
+  is never reopened in this change, though a defect noticed there is still
+  recorded under `Deferred`.
+- **A rewrite's own defects are always reportable.** A defect the re-cut itself
+  introduced is a finding on any ground, whatever the batch named — cramming or
+  a semicolon splice as much as a false claim, a lost load-bearing rationale, or
+  a comment pushed over budget. The prohibition above bars re-litigating prose
+  the batch settled, never reporting a defect the fix created. A round-1 batch
+  that found nothing names no rules and restricts nothing — every prose rule
+  stays live for prose that changes later. The rewrite cap below bounds the
+  loop, not a limit on correctness.
+- **Stop prose churn.** Once a comment has been rewritten twice at review
+  request, propose no further rewrite of it: report the artifact under `Churn`
+  for the architect to settle by dictating or deleting the text. Count rewrites
+  per artifact, not per round.
+
 ## Output Format
 
 Structure your report with only sections relevant to the changes. Omit language sections entirely if that language was not affected.
@@ -359,6 +429,12 @@ Languages affected: <list>
 ### Suggestions (optional improvements)
 1. [file:line] Description
 
+### Deferred (reported, does not affect the verdict)
+1. [file:line] Description
+
+### Churn (rewrite cap tripped — the architect settles the text)
+1. [file:line] Artifact — rewritten N times at review request
+
 ## Completeness
 - [x] Go FFI bindings match C API
 - [x] Build passes
@@ -368,6 +444,8 @@ Languages affected: <list>
 ```
 
 If no issues in a category, omit that category entirely. If the verdict is CHANGES REQUESTED, list exactly what must be fixed so the appropriate agent or user can address each item.
+
+These five categories are exhaustive, and every entry you report carries exactly one: blocking (`Critical`), in scope and non-blocking (`Minor`, `Suggestions`), taken out of this change by the round rules (`Deferred`), or a rewrite cap tripping on an artifact (`Churn`). Report nothing outside them — the architect routes on the category alone.
 
 ## Important Behavioral Notes
 

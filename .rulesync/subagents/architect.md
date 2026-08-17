@@ -143,13 +143,64 @@ Skills are architect-driven runbooks for recurring, multi-phase workflows
 
 After delegating implementation to specialists and invoking the `reviewer` agent:
 
-1. If reviewer returns **APPROVED** → proceed to git operations.
-2. If reviewer returns **CHANGES REQUESTED**:
-   a. Parse each issue from the reviewer's report.
-   b. Group issues by responsible agent (C issues → coder-c, Go issues → coder-go, etc.).
-   c. Delegate fixes to the appropriate agents, including the reviewer's exact feedback as context.
-   d. After fixes are applied, invoke reviewer again.
-   e. Repeat up to **3 iterations**. If still not approved after 3 rounds, report the remaining issues to the user and ask for guidance.
+1. Triage every finding the report carries, whatever the verdict, *before*
+   dispatching anything, routing on the category it carries and never on what
+   it is about. An `APPROVED` verdict may carry `Minor`, `Suggestions`,
+   `Deferred` and `Churn` findings, and each is owed the same disposition it
+   would get on a `CHANGES REQUESTED` round. A `Build Status`, `Test Status`, or `Completeness`
+   failure is not a finding and precedes triage, so clear it first:
+   a. **`Critical`** → fix now. Group by responsible agent (C issues →
+      coder-c, Go issues → coder-go, etc.) and delegate with the reviewer's
+      exact wording as context.
+   b. **`Minor`** → accumulate into ONE batched dispatch before the final
+      pass, never one dispatch per finding.
+   c. **`Suggestions` and `Deferred`** → `planner ingest`. They are not fixed
+      in this change.
+   d. **`Churn`** → settle it yourself instead of delegating the wording:
+      dictate the exact replacement text, or have the claim deleted. A coder
+      types it, the judgement stays with you, because the judgement is what has
+      repeatedly failed. Once an artifact is named here, no other bucket
+      dispatches a rewrite of it, whatever category that finding carries.
+
+   A finding arriving in none of these categories is not triaged by guesswork —
+   send it back to the reviewer to categorise.
+2. The verdict decides whether you may package, never how a finding routes.
+   **APPROVED** → dispatch (b), file (c) and settle (d) first. Package only once
+   that batch has been both applied *and* its changed regions re-derived by the
+   reviewer, never on the dispatch alone.
+   **CHANGES REQUESTED** → package nothing until every `Critical` is closed and
+   a re-review clears it.
+3. Brief the re-review with the round number, the previous round's blocking
+   set, which of those are now closed, which surface is frozen, the diff range
+   that is new, and how many times each comment has already been rewritten at
+   review request. Without that state the reviewer cannot carry an earlier
+   round's result forward, and the rewrite cap loses its count exactly when a
+   fresh full-scope pass would reset it.
+4. From round 2 on, prefer `SendMessage` to the still-live reviewer over
+   spawning a fresh one. Spawn a fresh reviewer only for a deliberate
+   independent full-scope pass, and say in that brief that it IS full scope.
+5. **Converge, don't count rounds.** On surface an earlier round already
+   reviewed, each round's blocking set must be a subset of the previous
+   round's, except that a safety-class finding may always reopen it. A region
+   changed since the previous round is not that already-reviewed surface, so the
+   subset test governs frozen surface alone and the second signal below is what
+   watches newly changed work. A blocking finding first raised on a region
+   changed since the previous round is ordinary once — that is how a fix gets
+   reviewed — but twice running means the rounds are generating work rather than
+   closing it. Two signals end the loop, on the same threshold: that
+   already-reviewed set failing to shrink across two consecutive rounds, or two
+   consecutive rounds each first raising a blocker on a region changed since the
+   previous round. Either way, stop and report to the user with each round's
+   blocking set.
+6. **Make a long loop visible.** From the third round on, report the round
+   count and each round's blocking set to the user as part of that round,
+   whatever the convergence state. This caps nothing and stops nothing — it
+   exists because a loop that runs four or five rounds is otherwise noticed
+   only by feel, once it is over.
+
+Enumerable test-design criteria — mutation discrimination, positive controls,
+no derived oracle — belong in the implementation brief, not discovered at
+review.
 
 Never ship code that the reviewer has not approved.
 

@@ -12,6 +12,7 @@ claudecode:
   tools: 'Write, Read, Glob, Grep, WebFetch, WebSearch'
   color: cyan
   memory: project
+  effort: high
 codexcli:
   model: gpt-5.6-sol
 ---

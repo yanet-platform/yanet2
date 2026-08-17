@@ -367,7 +367,7 @@ func TestRIBReadiness_Syncing(t *testing.T) {
 	}
 }
 
-// TestRIBReadiness_SupersededSession tests the P2 concurrency fix: when a
+// TestRIBReadiness_SupersededSession tests the concurrency fix: when a
 // second FeedRIB stream starts (session B) and the old stream (session A) ends
 // afterwards, the stale OnSessionEnd from A must be ignored so that session B
 // can still progress to READY.

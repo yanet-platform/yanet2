@@ -22,7 +22,13 @@ At the start, record the approval fingerprint: exact base revision plus both man
 
 Classify every entry as `publish` or `local-only`. The review manifest contains both classes so local configuration and ignored task artifacts are not hidden from review; the publish manifest is the exact subset authorized for transfer, staging, commit, and PR. State both manifests and any exclusions before reviewing.
 
-Immediately before the verdict, recompute the approval fingerprint and the PR head guard when applicable. If any changed, discard the pass and restart on the new candidate. Never return `APPROVED` when the base is uncertain, an intended file was not inspected, or the base or candidate changed after the review began. A later review round covers the whole current candidate again, not only the files changed by the fix.
+Immediately before the verdict, recompute the approval fingerprint and the PR head guard when applicable. If any changed, discard the pass and restart on the new candidate. Never return `APPROVED` when the base is uncertain, an intended file was not inspected, or the base or candidate changed after the review began.
+
+An edit made after an approval — a batched `Minor` fix, typically — re-derives the regions it changed and carries the rest, instead of restarting the whole candidate. That carry is subject to the interaction rule above: an unchanged region whose collaborator the edit changed is re-examined too, and is not carried. The fingerprint is not narrowed by that: it stays per entry and must still be recomputed and seen to differ, because it is what stops an approval riding onto content nobody reviewed. What narrows is the re-derivation a difference costs, never the duty to notice one.
+
+A later round still covers every entry of the current candidate. A region of an entry whose content is identical to what an earlier round of this same review examined needs no fresh derivation: that round's result carries forward. A region that changed since is reviewed fresh, and a pass launched as an independent full-scope review is a new review that carries nothing forward.
+
+Carry-forward is a licence not to re-derive, never a bar on noticing. Identity is per region, but correctness is not: an earlier clean result stops being evidence once something that region interacts with has changed. Re-examine an unchanged region whose changed collaborator is itself in the candidate — that one is required, and the carried result does not count as coverage of the interaction. What that re-examination surfaces is a defect this candidate created, so it blocks on its own merits whatever its class, exactly as a defect a rewrite introduced is reportable on any ground. Attribute such a finding to the region that changed, not to the unchanged one where the wrong behaviour appears: the trigger is the interaction, and its changed end is in scope. Noticing elsewhere on frozen surface stays permitted, and a finding first raised there is governed by the round rules below.
 
 Staging, committing, amending, transferring, or pushing is a packaging transition, not a content approval. It may carry approval forward only after proving that the recorded base and publish fingerprint are identical on the packaged side and every local-only entry remains identical in its source location. A new commit SHA alone does not stale an equivalent approval; any fingerprint difference does.
 
@@ -82,13 +88,24 @@ Keep verification failures separate from code-review findings. A green command d
 
 After the clean-room pass, read existing PR reviews and inline threads through GitHub MCP when available. Reproduce each finding against the reviewed candidate. Add missed valid findings, reject false positives with evidence, and note which independently discovered issues overlap.
 
+## Keep the finding set converging
+
+- The first round over a candidate states that its blocking set is complete: nothing outside it blocks this change.
+- Frozen surface is measured by region, not by entry, and the region is the diff hunk: a hunk unchanged since the round that last examined it stays frozen even when the entry changed elsewhere. A one-line change thaws its own hunk and not the file around it, and both reviewer and requester compute that unit from the same diff.
+- From the second round on, a finding *first raised in that round* on a region unchanged since the round that last examined it may block only if it is safety class — memory safety, use-after-free, leak, data race, packet-path correctness, or anything that would corrupt, drop, or mis-forward live traffic. A class the reviewing charter grades always-Critical counts as safety class here too. This is the only channel that reopens frozen surface the candidate did not disturb: a finding the mandated collaborator re-examination surfaced blocks on its own merits, whatever its class.
+- An open blocking finding stays blocking until it is closed, whatever happened to its region since. These rules bound what a round may newly raise, never what it may drop: a blocker an attempted fix missed still blocks at round 5, and a change landing in a different region neither closes it nor freezes it.
+- Those rules decide blocking, and severity follows them. What they take out of this change is reported as `deferred` whatever its intrinsic gravity, and leaves the verdict where it is. A non-blocking finding keeps its own severity only while it is in scope: raised in the first round, or on a region that changed since the round that last examined it. Report a finding no rule names, and let the verdict stand.
+- Report comment and documentation-prose findings — line budget, doc-comment shape, semicolon splice, claim falsifiability, wording — as one batch in the first round that sees that prose. Afterwards, do not reopen prose that did not change, and do not raise a new ground against prose re-cut to satisfy that batch. Prose that did not change on frozen surface answers to this rule rather than the round rules: it is never reopened in this change, though a defect noticed there is still recorded as `deferred`.
+- A defect the rewrite itself introduced is a finding on any ground, whatever the batch named — cramming or a semicolon splice as much as a false claim, a lost load-bearing rationale, or a comment pushed over budget. The prohibition above bars re-litigating prose the batch settled, never reporting a defect the fix created. A first-round batch that found nothing names no rules and restricts nothing: every prose rule stays live for prose that changes later. What bounds the loop is the rewrite cap below, not a limit on correctness.
+- Once a comment has been rewritten twice at review request, propose no further rewrite of it: report the artifact as `churn` instead, for the requester to settle by dictating or deleting the text. Count rewrites per artifact, not per round.
+
 ## Decide the verdict
 
-Return `CHANGES REQUESTED` for any concrete correctness, safety, authorization, data-loss, compatibility, or required-integration defect. Suggestions remain non-blocking and must not obscure the verdict.
+Return `CHANGES REQUESTED` when a blocking finding is open, and never otherwise. A finding blocks when it is a concrete correctness, safety, authorization, data-loss, compatibility, or required-integration defect that the round rules above still let block, or when the change fails its stated brief. That list names what must block, so a finding graded `Minor` or `Suggestions` is by construction not in it. A finding those rules exclude is reported as `deferred` however grave, and leaves the verdict where it is. Suggestions remain non-blocking and must not obscure the verdict.
 
 Return `APPROVED` only when:
 
-- The complete candidate manifest was reviewed.
+- Every entry of the candidate manifest was covered, freshly or by a result carried forward from an earlier round of this same review, with no carried result standing in for an interaction whose other end changed in this candidate.
 - Every entry is explicitly classified as publish or local-only.
 - The terminal fingerprint check proves the base and candidate did not change during review.
 - Removed obligations were accounted for.
@@ -108,7 +125,7 @@ Use this compact report shape:
 - Approval fingerprint: <start and terminal base/manifests/modes/content match; PR head guard when applicable>
 
 ## Findings
-1. [P1/P2/P3] `path:line` — <defect>; trigger: <state/input> -> <wrong outcome>.
+1. [Critical/Minor/Suggestions/Deferred/Churn] `path:line` — <defect>; trigger: <state/input> -> <wrong outcome>.
 
 ## Coverage
 - <surface>: <contracts traced and probes run>.
@@ -121,3 +138,5 @@ Use this compact report shape:
 ```
 
 Lead with findings. Omit an empty Findings section only when the verdict is `APPROVED`; never replace coverage evidence with a generic “no issues found.”
+
+These categories are exhaustive, and every finding carries exactly one: `Critical` while it blocks, `Minor` when it is in scope and should be fixed, `Suggestions` when it is in scope and optional, `Deferred` once the round rules take it out of this change, `Churn` when the rewrite cap tripped on an artifact.
