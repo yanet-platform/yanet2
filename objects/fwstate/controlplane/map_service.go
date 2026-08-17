@@ -439,6 +439,7 @@ func (m *FWStateMapService) ListEntries(
 		}
 
 		count := ClampBatchSize(req.GetBatchSize())
+		var backward bool
 		if req.GetDirection() == fwstatemappb.Direction_BACKWARD {
 			backward = true
 		} else if req.GetDirection() == fwstatemappb.Direction_FORWARD {
