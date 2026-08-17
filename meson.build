@@ -26,6 +26,7 @@ endif
 # translation unit's ccache manifest.
 yanet_conf = configuration_data()
 yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
+yanet_conf.set('YANET_DEBUG', get_option('buildtype') == 'debug')
 yanet_conf.set('ENABLE_TRACE_LOG', get_option('trace').enabled())
 yanet_conf.set('MBUF_MAX_SIZE', get_option('mbuf_max_size'))
 

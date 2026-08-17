@@ -46,7 +46,20 @@ struct block_allocator_pool {
 	void *free_list;
 };
 
-typedef void *(*block_allocator_alloc_func)(size_t size, void *data);
+struct block_allocator;
+struct memory_owner;
+
+// Grows an allocator's arena supply by at least `need` bytes, returning 0
+// on success or -1 to fail the allocation. Runs with the allocator lock
+// released and may take that lock itself.
+//
+// Defined in common/memory_owner.h, which this header cannot include
+// (cycle through common/memory.h); every balloc consumer sees the
+// definition via that include chain.
+static inline int
+memory_owner_grow(
+	struct block_allocator *alloc, size_t need, struct memory_owner *owner
+);
 
 struct block_allocator {
 	struct block_allocator_pool pools[MEMORY_BLOCK_ALLOCATOR_EXP];
@@ -54,10 +67,23 @@ struct block_allocator {
 	// bitwise mask of not empty pools
 	uint32_t not_empty_mask;
 
-	// Guards the free lists above and, since every memory_context in a
-	// tree shares its root's block_allocator, the context tree splices in
-	// memory_context_init_from / memory_context_fini as well.
+	// Guards the free lists above and the memory-context tree splices
+	// in memory_context_init_from / memory_context_fini. Tree links are
+	// guarded by the allocator lock of the parent node they hang off,
+	// which is this one whenever parent and child share an allocator.
 	struct spinlock lock;
+
+	// Optional growth path for a free-list miss; a NULL offset keeps
+	// the fail-on-miss behaviour. memory_owner_init is the only
+	// installer: it binds an allocator to the owner embedding it, so
+	// grow_owner and &grow_owner->allocator are always the same pair.
+	//
+	// Never a code pointer: attached processes map the same code at
+	// different addresses under ASLR/PIE, so a stored function address
+	// would jump to garbage in another process. The owner is data and
+	// relocates through the offset; the callee is resolved by each
+	// process's own link.
+	struct memory_owner *grow_owner;
 };
 
 // FIXME: the routine must accept block sizes
@@ -72,6 +98,8 @@ block_allocator_init(struct block_allocator *allocator) {
 	}
 
 	allocator->not_empty_mask = 0;
+
+	SET_OFFSET_OF(&allocator->grow_owner, NULL);
 
 	spinlock_init(&allocator->lock);
 
@@ -178,13 +206,40 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	size_t pool_index = block_allocator_pool_index(allocator, size);
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
-	spinlock_lock(&allocator->lock);
+	// The loop scans, grows on a miss, and rescans. A failed grow is
+	// truthful — the parent cannot fund another granule — so it ends
+	// the retries, and the closing rescan covers a competitor
+	// installing concurrently. A successful grow is retried without a
+	// bound: each one consumes parent capacity, and a competitor
+	// stealing the just-installed block is demand-driven, so a fixed
+	// attempt count would still report a false exhaustion while the
+	// parent has capacity.
+	struct memory_owner *grow_owner = ADDR_OF(&allocator->grow_owner);
+	bool exhausted = false;
 
-	uint32_t mask = allocator->not_empty_mask >> pool_index;
-	if (unlikely(mask == 0)) {
+	uint32_t mask;
+	for (;;) {
+		spinlock_lock(&allocator->lock);
+
+		mask = allocator->not_empty_mask >> pool_index;
+		if (likely(mask != 0)) {
+			break;
+		}
 		spinlock_unlock(&allocator->lock);
-		return NULL;
+
+		if (grow_owner == NULL || exhausted) {
+			return NULL;
+		}
+
+		// Grow with the lock released: growth serializes on the
+		// owner lock for its whole body and first rescans under
+		// that lock, skipping the borrow when an installed arena
+		// already covers the request.
+		if (memory_owner_grow(allocator, size, grow_owner) != 0) {
+			exhausted = true;
+		}
 	}
+
 	size_t parent_pool_index = pool_index + __builtin_ctz(mask);
 
 	while (parent_pool_index-- > pool_index) {
@@ -237,16 +292,15 @@ block_allocator_bfree(
 	spinlock_unlock(&allocator->lock);
 }
 
+// Caller holds the allocator lock.
 static inline void
-block_allocator_put_arena(
+block_allocator_put_arena_locked(
 	struct block_allocator *allocator, void *arena, size_t size
 ) {
 	uintptr_t pos = (uintptr_t)arena;
 	pos = (pos + 7) & ~(uintptr_t)0x07; // round up to 8 byte boundary
 	uintptr_t end = (uintptr_t)arena + size;
 	end = end & ~(uintptr_t)0x07; // round down to 8 byte boundary
-
-	spinlock_lock(&allocator->lock);
 
 	while (pos < end) {
 		size_t align = (size_t)1 << __builtin_ctzll(pos);
@@ -275,7 +329,14 @@ block_allocator_put_arena(
 		);
 		pos += block_size;
 	}
+}
 
+static inline void
+block_allocator_put_arena(
+	struct block_allocator *allocator, void *arena, size_t size
+) {
+	spinlock_lock(&allocator->lock);
+	block_allocator_put_arena_locked(allocator, arena, size);
 	spinlock_unlock(&allocator->lock);
 }
 

@@ -176,9 +176,9 @@ agent_attach(
 	uint64_t arena_count =
 		(memory_limit + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
 		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
-	struct agent_arena *arenas = (struct agent_arena *)memory_balloc(
+	struct memory_arena *arenas = (struct memory_arena *)memory_balloc(
 		&cp_config->memory_context,
-		sizeof(struct agent_arena) * arena_count
+		sizeof(struct memory_arena) * arena_count
 	);
 	if (arenas == NULL) {
 		yanet_error_add(err, "failed to allocate memory for arenas");
@@ -187,7 +187,7 @@ agent_attach(
 		goto unlock;
 	}
 
-	memset(arenas, 0, sizeof(struct agent_arena) * arena_count);
+	memset(arenas, 0, sizeof(struct memory_arena) * arena_count);
 	SET_OFFSET_OF(&new_agent->arenas, arenas);
 
 	while (new_agent->arena_count < arena_count) {
@@ -297,9 +297,9 @@ agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 	// we need add one more arena in this case.
 
 	if (need_arena_count > agent->arena_count) {
-		struct agent_arena *arenas = memory_balloc(
+		struct memory_arena *arenas = memory_balloc(
 			&cp_config->memory_context,
-			need_arena_count * sizeof(struct agent_arena)
+			need_arena_count * sizeof(struct memory_arena)
 		);
 		if (arenas == NULL) {
 			yanet_error_add(err, "failed to allocate arenas array");
@@ -333,7 +333,7 @@ agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 					&cp_config->memory_context,
 					arenas,
 					need_arena_count *
-						sizeof(struct agent_arena)
+						sizeof(struct memory_arena)
 				);
 				ret = -1;
 				goto unlock;
@@ -356,7 +356,7 @@ agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 			);
 		}
 
-		struct agent_arena *prev_arenas = ADDR_OF(&agent->arenas);
+		struct memory_arena *prev_arenas = ADDR_OF(&agent->arenas);
 		for (size_t i = 0; i < agent->arena_count; ++i) {
 			SET_OFFSET_OF(
 				&arenas[i].data, ADDR_OF(&prev_arenas[i].data)
@@ -367,7 +367,7 @@ agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 		memory_bfree(
 			&cp_config->memory_context,
 			prev_arenas,
-			agent->arena_count * sizeof(struct agent_arena)
+			agent->arena_count * sizeof(struct memory_arena)
 		);
 		agent->arena_count = need_arena_count;
 	}
@@ -387,7 +387,7 @@ agent_cleanup(struct agent *agent) {
 	// memory_context_fini never touches freed arena memory.
 	memory_context_fini(&agent->memory_context);
 
-	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
+	struct memory_arena *arenas = ADDR_OF(&agent->arenas);
 	if (arenas) {
 		for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
 		     ++arena_idx) {
@@ -400,7 +400,7 @@ agent_cleanup(struct agent *agent) {
 		memory_bfree(
 			&cp_config->memory_context,
 			arenas,
-			sizeof(struct agent_arena) * agent->arena_count
+			sizeof(struct memory_arena) * agent->arena_count
 		);
 	}
 

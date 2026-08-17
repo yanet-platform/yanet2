@@ -5,6 +5,7 @@
 #include <sys/types.h>
 
 #include "common/memory.h"
+#include "common/memory_owner.h"
 
 #include "lib/errors/errors.h"
 
@@ -16,11 +17,6 @@ struct cp_device;
 struct cp_object;
 
 struct agent;
-
-struct agent_arena {
-	void *data;
-	uint64_t size;
-};
 
 struct agent_storage {
 	char name[80];
@@ -72,7 +68,7 @@ struct agent {
 	char name[80];
 
 	uint64_t arena_count;
-	struct agent_arena *arenas;
+	struct memory_arena *arenas;
 
 	struct agent_storage *storage;
 

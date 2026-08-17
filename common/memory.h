@@ -8,6 +8,18 @@
 #include "memory_block.h"
 #include "strutils.h"
 
+// The meson-generated header is absent for cgo compilation of Go packages
+// reaching this file, which runs without a configured build directory.
+// Only YANET_DEBUG is consumed below, so its absence just leaves the
+// wrong-allocator tripwire disabled, matching a release configuration.
+#if defined(__has_include)
+#if __has_include("yanet_build_config.h")
+#include "yanet_build_config.h"
+#endif
+#else
+#include "yanet_build_config.h"
+#endif
+
 struct memory_context {
 	struct block_allocator *block_allocator;
 	size_t balloc_count;
@@ -74,8 +86,9 @@ memory_context_init_from(
 	SET_OFFSET_OF(&context->parent, parent);
 	SET_OFFSET_OF(&context->first_child, NULL);
 
-	// Parent and child share the same block_allocator by construction, so
-	// its spinlock also guards this splice against concurrent siblings.
+	// The splice is a link on the parent node, so the parent's
+	// allocator lock guards it — even when the child itself goes on to
+	// allocate through a different, owner-bound allocator.
 	spinlock_lock(&allocator->lock);
 
 	// Insert at the head of the parent's child list. Capture the current
@@ -95,6 +108,38 @@ memory_context_init_from(
 // remaining children so finalising a parent before its children can never
 // leave a child pointing at freed memory. Idempotent and order-independent.
 static inline void
+memory_context_unlink_from_parent(
+	struct memory_context *self, struct memory_context *parent
+) {
+	// Walk the sibling chain and bridge over ourselves.
+	struct memory_context **cursor = &parent->first_child;
+	for (;;) {
+		struct memory_context *child = ADDR_OF(cursor);
+		if (child == NULL) {
+			break;
+		}
+		if (child == self) {
+			EQUATE_OFFSET(cursor, &self->next_sibling);
+			break;
+		}
+		cursor = &child->next_sibling;
+	}
+}
+
+// Detach any remaining children so their parent link never dangles after
+// our own storage is reused.
+static inline void
+memory_context_detach_children(struct memory_context *self) {
+	struct memory_context *child = ADDR_OF(&self->first_child);
+	while (child != NULL) {
+		struct memory_context *next = ADDR_OF(&child->next_sibling);
+		SET_OFFSET_OF(&child->parent, NULL);
+		SET_OFFSET_OF(&child->next_sibling, NULL);
+		child = next;
+	}
+}
+
+static inline void
 memory_context_fini(struct memory_context *self) {
 	// A zeroed offset reads back as NULL through ADDR_OF. A context that
 	// was already fini'd has no tree links left to touch. Return before
@@ -104,39 +149,40 @@ memory_context_fini(struct memory_context *self) {
 		return;
 	}
 
-	// Parent and child share the same block_allocator by construction, so
-	// its spinlock also guards the unlink and child-detach below against
-	// concurrent siblings.
-	spinlock_lock(&allocator->lock);
-
+	// The parent must stay alive across this call: reading self->parent
+	// unlocked relies on no concurrent fini of the parent itself, whose
+	// detach walk is what would rewrite this field.
 	struct memory_context *parent = ADDR_OF(&self->parent);
-	if (parent != NULL) {
-		// Walk the sibling chain and bridge over ourselves.
-		struct memory_context **cursor = &parent->first_child;
-		for (;;) {
-			struct memory_context *child = ADDR_OF(cursor);
-			if (child == NULL) {
-				break;
-			}
-			if (child == self) {
-				EQUATE_OFFSET(cursor, &self->next_sibling);
-				break;
-			}
-			cursor = &child->next_sibling;
+
+	if (parent == NULL) {
+		spinlock_lock(&allocator->lock);
+		memory_context_detach_children(self);
+		spinlock_unlock(&allocator->lock);
+	} else {
+		// Tree links hang off the parent node, so the unlink needs
+		// the PARENT's allocator lock. With per-owner allocators the
+		// child's own lock no longer equals it, while our child list
+		// is still guarded by our own allocator, hence two sections
+		// whenever the allocators differ. Sequential, never nested:
+		// no path takes these two locks in opposite orders.
+		struct block_allocator *parent_allocator =
+			ADDR_OF(&parent->block_allocator);
+
+		if (parent_allocator == allocator) {
+			spinlock_lock(&allocator->lock);
+			memory_context_unlink_from_parent(self, parent);
+			memory_context_detach_children(self);
+			spinlock_unlock(&allocator->lock);
+		} else {
+			spinlock_lock(&parent_allocator->lock);
+			memory_context_unlink_from_parent(self, parent);
+			spinlock_unlock(&parent_allocator->lock);
+
+			spinlock_lock(&allocator->lock);
+			memory_context_detach_children(self);
+			spinlock_unlock(&allocator->lock);
 		}
 	}
-
-	// Detach any remaining children so their parent link never dangles
-	// after our own storage is reused.
-	struct memory_context *child = ADDR_OF(&self->first_child);
-	while (child != NULL) {
-		struct memory_context *next = ADDR_OF(&child->next_sibling);
-		SET_OFFSET_OF(&child->parent, NULL);
-		SET_OFFSET_OF(&child->next_sibling, NULL);
-		child = next;
-	}
-
-	spinlock_unlock(&allocator->lock);
 
 	memset(self, 0, sizeof(*self));
 }
@@ -156,11 +202,28 @@ memory_balloc(struct memory_context *context, size_t size) {
 	return result;
 }
 
+#if defined(YANET_DEBUG)
+// Debug wrong-allocator tripwire. Declared here so memory_bfree can call
+// it ahead of the definition; struct memory_owner needs struct
+// memory_context, so the definition lives in common/memory_owner.h, which
+// this header pulls in at the very bottom.
+static inline void
+memory_owner_assert_block_owned(struct block_allocator *allocator, void *block);
+#endif
+
 static inline void
 memory_bfree(struct memory_context *context, void *block, size_t size) {
 	if (block == NULL || !size) {
 		return;
 	}
+#if defined(YANET_DEBUG)
+	// Freeing a foreign block through an owner-bound context corrupts
+	// the in-band free lists silently, so catch it while it is still
+	// cheap to name the culprit.
+	memory_owner_assert_block_owned(
+		ADDR_OF(&context->block_allocator), block
+	);
+#endif
 // Verified reproducing: gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, release
 // build flags (-O2 -g -Wall -Wextra -Werror -march=haswell -fPIC), e.g.
 // modules/acl/api/controlplane.c inlining memory_bfree into
@@ -218,3 +281,10 @@ memory_brealloc(
 	}
 	return new_data;
 }
+
+// Splits the include cycle with common/memory_owner.h: the owner struct
+// and its non-context-touching helpers sit above memory.h's needs, while
+// its grow/release helpers need struct memory_context from this header.
+// Including it here guarantees every user of memory_bfree also sees the
+// tripwire definition.
+#include "memory_owner.h"

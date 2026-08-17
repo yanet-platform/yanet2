@@ -100,6 +100,24 @@ balloc_thread_stress_test = executable(
 )
 test('balloc_thread_stress', balloc_thread_stress_test, suite: ['common'])
 
+memory_owner_test = executable(
+  'memory_owner_test',
+  ['memory_owner_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('memory_owner', memory_owner_test, suite: ['common'])
+
+memory_owner_thread_stress_test = executable(
+  'memory_owner_thread_stress_test',
+  ['memory_owner_thread_stress_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies + [thread_dep],
+)
+test('memory_owner_thread_stress', memory_owner_thread_stress_test, suite: ['common'])
+
 executable(
   'balloc_bench',
   ['balloc_bench.c'],
