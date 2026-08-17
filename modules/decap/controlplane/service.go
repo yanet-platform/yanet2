@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
@@ -95,9 +96,16 @@ func (m *DecapService) ShowConfig(
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	prefixes := make([]string, 0, len(entry.Prefixes))
+	prefixes := make([]*commonpb.ContiguousIPNetwork, 0, len(entry.Prefixes))
 	for _, p := range entry.Prefixes {
-		prefixes = append(prefixes, p.String())
+		network, err := commonpb.NewContiguousIPNetworkFromPrefix(p)
+		if err != nil {
+			return nil, status.Errorf(
+				codes.Internal,
+				"failed to convert prefix %q: %v", p, err,
+			)
+		}
+		prefixes = append(prefixes, network)
 	}
 
 	return &decappb.ShowConfigResponse{Prefixes: prefixes}, nil
@@ -115,14 +123,15 @@ func (m *DecapService) UpdateConfig(
 
 	prefixes := make([]netip.Prefix, 0, len(req.GetPrefixes()))
 	for _, p := range req.GetPrefixes() {
-		prefix, err := netip.ParsePrefix(p)
+		prefix, err := p.ToPrefix()
 		if err != nil {
 			return nil, status.Errorf(
 				codes.InvalidArgument,
-				"failed to parse prefix %q: %v", p, err,
+				"failed to convert prefix (addr=%x, prefix_len=%d): %v",
+				p.GetAddr().GetAddr(), p.GetPrefixLen(), err,
 			)
 		}
-		prefixes = append(prefixes, prefix.Masked())
+		prefixes = append(prefixes, prefix)
 	}
 
 	prefixes = slices.Compact(

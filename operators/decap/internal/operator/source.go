@@ -3,13 +3,14 @@ package operator
 import (
 	"go.uber.org/zap"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 // ModuleConfig holds the desired prefix set for one decap module config.
 type ModuleConfig struct {
 	Name     string
-	Prefixes []string
+	Prefixes []*commonpb.ContiguousIPNetwork
 }
 
 // State is the desired payload pushed by each reconcile pass.

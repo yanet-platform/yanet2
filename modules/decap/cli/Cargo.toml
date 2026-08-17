@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 netip = "0.3"
 bitmap = { path = "../../../common/rust/bitmap", version = "0.1" }
 log = "0.4"

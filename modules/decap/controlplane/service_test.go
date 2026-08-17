@@ -14,8 +14,31 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/google/go-cmp/cmp"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
+
+func mustNetworks(t *testing.T, cidrs ...string) []*commonpb.ContiguousIPNetwork {
+	t.Helper()
+	networks := make([]*commonpb.ContiguousIPNetwork, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		network, err := commonpb.ParseContiguousIPNetwork(cidr)
+		require.NoError(t, err)
+		networks = append(networks, network)
+	}
+	return networks
+}
+
+func networkStrings(t *testing.T, networks []*commonpb.ContiguousIPNetwork) []string {
+	t.Helper()
+	strs := make([]string, 0, len(networks))
+	for _, network := range networks {
+		prefix, err := network.ToPrefix()
+		require.NoError(t, err)
+		strs = append(strs, prefix.String())
+	}
+	return strs
+}
 
 var errInjectedBackend = errors.New("injected backend failure")
 
@@ -58,7 +81,7 @@ func Test_DecapService_UpdateAndShow(t *testing.T) {
 
 	resp, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
 		Name:     "decap0",
-		Prefixes: []string{prefix},
+		Prefixes: mustNetworks(t, prefix),
 	})
 	require.NotNil(t, resp)
 	require.NoError(t, err)
@@ -66,7 +89,9 @@ func Test_DecapService_UpdateAndShow(t *testing.T) {
 	show, err := svc.ShowConfig(t.Context(), &decappb.ShowConfigRequest{Name: "decap0"})
 	require.NotNil(t, show)
 	require.NoError(t, err)
-	require.Empty(t, cmp.Diff([]string{prefix}, show.Prefixes))
+	require.Len(t, show.Prefixes, 1)
+	require.Equal(t, []byte{10, 0, 0, 0}, show.Prefixes[0].GetAddr().GetAddr())
+	require.Equal(t, uint32(24), show.Prefixes[0].GetPrefixLen())
 }
 
 func Test_DecapService_UpdateFullyReplaces(t *testing.T) {
@@ -74,20 +99,20 @@ func Test_DecapService_UpdateFullyReplaces(t *testing.T) {
 
 	_, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
 		Name:     "decap0",
-		Prefixes: []string{"10.0.0.0/24", "10.0.1.0/24"},
+		Prefixes: mustNetworks(t, "10.0.0.0/24", "10.0.1.0/24"),
 	})
 	require.NoError(t, err)
 
 	_, err = svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
 		Name:     "decap0",
-		Prefixes: []string{"192.168.0.0/16"},
+		Prefixes: mustNetworks(t, "192.168.0.0/16"),
 	})
 	require.NoError(t, err)
 
 	show, err := svc.ShowConfig(t.Context(), &decappb.ShowConfigRequest{Name: "decap0"})
 	require.NotNil(t, show)
 	require.NoError(t, err)
-	require.Empty(t, cmp.Diff([]string{"192.168.0.0/16"}, show.Prefixes))
+	require.Empty(t, cmp.Diff([]string{"192.168.0.0/16"}, networkStrings(t, show.Prefixes)))
 }
 
 func Test_DecapService_ListUpdateList(t *testing.T) {
@@ -101,7 +126,7 @@ func Test_DecapService_ListUpdateList(t *testing.T) {
 
 	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
 		Name:     "decap0",
-		Prefixes: []string{"10.0.0.0/24"},
+		Prefixes: mustNetworks(t, "10.0.0.0/24"),
 	})
 	require.NoError(t, err)
 
@@ -118,7 +143,7 @@ func Test_DecapService_EmptyConfigName(t *testing.T) {
 	t.Run("UpdateConfig", func(t *testing.T) {
 		resp, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
 			Name:     "",
-			Prefixes: []string{"10.0.0.0/24"},
+			Prefixes: mustNetworks(t, "10.0.0.0/24"),
 		})
 		require.Nil(t, resp)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -132,14 +157,42 @@ func Test_DecapService_EmptyConfigName(t *testing.T) {
 }
 
 func Test_DecapService_InvalidPrefix(t *testing.T) {
-	svc := newTestService(t)
+	tests := []struct {
+		name    string
+		network *commonpb.ContiguousIPNetwork
+	}{
+		{
+			name: "address length is neither 4 nor 16 bytes",
+			network: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
+				PrefixLen: 24,
+			},
+		},
+		{
+			name: "prefix length exceeds address bit length",
+			network: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}},
+				PrefixLen: 33,
+			},
+		},
+	}
 
-	resp, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
-		Name:     "decap0",
-		Prefixes: []string{"not-a-prefix"},
-	})
-	require.Nil(t, resp)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newTestService(t)
+
+			resp, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
+				Name:     "decap0",
+				Prefixes: []*commonpb.ContiguousIPNetwork{tt.network},
+			})
+			require.Nil(t, resp)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+			list, err := svc.ListConfigs(t.Context(), &decappb.ListConfigsRequest{})
+			require.NoError(t, err)
+			assert.Empty(t, list.Configs)
+		})
+	}
 }
 
 func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
@@ -149,13 +202,13 @@ func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
 
 	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
 		Name:     name,
-		Prefixes: []string{"10.0.0.0/24"},
+		Prefixes: mustNetworks(t, "10.0.0.0/24"),
 	})
 	require.NoError(t, err)
 
 	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
 		Name:     name,
-		Prefixes: []string{"10.0.1.0/24"},
+		Prefixes: mustNetworks(t, "10.0.1.0/24"),
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.Internal, status.Code(err))
@@ -163,7 +216,7 @@ func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
 	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: name})
 	require.NotNil(t, show)
 	require.NoError(t, err)
-	require.Empty(t, cmp.Diff([]string{"10.0.0.0/24"}, show.Prefixes))
+	require.Empty(t, cmp.Diff([]string{"10.0.0.0/24"}, networkStrings(t, show.Prefixes)))
 }
 
 func Test_DecapService_DeduplicatePrefixes(t *testing.T) {
@@ -172,14 +225,14 @@ func Test_DecapService_DeduplicatePrefixes(t *testing.T) {
 
 	_, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
 		Name:     "decap0",
-		Prefixes: []string{prefix, prefix, prefix},
+		Prefixes: mustNetworks(t, prefix, prefix, prefix),
 	})
 	require.NoError(t, err)
 
 	show, err := svc.ShowConfig(t.Context(), &decappb.ShowConfigRequest{Name: "decap0"})
 	require.NotNil(t, show)
 	require.NoError(t, err)
-	require.Empty(t, cmp.Diff([]string{prefix}, show.Prefixes))
+	require.Empty(t, cmp.Diff([]string{prefix}, networkStrings(t, show.Prefixes)))
 }
 
 func Test_DecapService_ConcurrentAccess(t *testing.T) {
@@ -187,6 +240,8 @@ func Test_DecapService_ConcurrentAccess(t *testing.T) {
 
 	const goroutines = 10
 	const iterations = 100
+
+	networks := mustNetworks(t, "10.0.0.0/24")
 
 	g, ctx := errgroup.WithContext(t.Context())
 
@@ -196,7 +251,7 @@ func Test_DecapService_ConcurrentAccess(t *testing.T) {
 				name := fmt.Sprintf("config-%d-%d", idx, jdx)
 				_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
 					Name:     name,
-					Prefixes: []string{"10.0.0.0/24"},
+					Prefixes: networks,
 				})
 				if err != nil {
 					return err

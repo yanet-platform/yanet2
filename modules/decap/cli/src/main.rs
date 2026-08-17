@@ -177,7 +177,7 @@ impl DecapService {
     pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefixes.iter().map(|p| p.to_string()).collect(),
+            prefixes: cmd.prefixes.into_iter().map(Into::into).collect(),
         };
         log::trace!("update config request: {request:?}");
         let response = self

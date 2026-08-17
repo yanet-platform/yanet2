@@ -750,6 +750,11 @@ export type IPAddressWire = {
     addr?: string | number[] | Uint8Array;
 };
 
+// Wire-format shape of commonpb.ContiguousIPNetwork from the gRPC-JSON gateway: {network: "10.0.0.0/8"}.
+export type ContiguousIPNetworkWire = {
+    network?: string;
+};
+
 // Wire-format shape of an IP range as returned by the gRPC-JSON gateway.
 // Both endpoints are plain IP strings — Go's IPRange.MarshalJSON flattens
 // the nested IPAddress shape into top-level strings rather than nesting

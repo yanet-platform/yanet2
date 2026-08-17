@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package modules.decap.controlplane.decappb.v1;
 
+import "common/commonpb/v1/ipnetwork.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1;decappb";
 
 // DecapService is a service for decapsulation module.
@@ -26,12 +28,14 @@ message ListConfigsResponse { repeated string configs = 1; }
 message ShowConfigRequest { string name = 1; }
 
 // ShowConfigResponse contains the configuration details of the decap module.
-message ShowConfigResponse { repeated string prefixes = 1; }
+message ShowConfigResponse {
+  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 1;
+}
 
 // UpdateConfigRequest carries the full desired prefix set for the named config.
 message UpdateConfigRequest {
   string name = 1;
-  repeated string prefixes = 2;
+  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
 }
 
 // UpdateConfigResponse is the response to an UpdateConfig call.
