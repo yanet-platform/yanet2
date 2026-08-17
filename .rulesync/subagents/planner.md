@@ -21,7 +21,7 @@ claudecode:
   tools: 'Read, Write, Edit, Glob, Grep, Bash, WebFetch, WebSearch, mcp__github, Agent(fast-explorer)'
   color: yellow
   memory: project
-  effort: high
+  effort: medium
 codexcli:
   model: gpt-5.6-sol
   model_reasoning_effort: high

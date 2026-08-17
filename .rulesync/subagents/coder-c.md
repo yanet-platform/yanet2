@@ -18,7 +18,7 @@ claudecode:
     TaskUpdate
   color: blue
   memory: project
-  effort: high
+  effort: medium
 codexcli:
   model: gpt-5.6-luna
   model_reasoning_effort: xhigh
