@@ -42,7 +42,9 @@ dp_topology_set_device_rss(
 	// overflows a consumer's fixed-size stack buffer or under-reads a
 	// short key.
 	if (reta_size == 0 || reta_size > DP_TOPOLOGY_RSS_RETA_SIZE_MAX ||
-	    key_len < DP_TOPOLOGY_RSS_KEY_LEN_MIN) {
+	    (reta_size & (reta_size - 1)) != 0 ||
+	    key_len < DP_TOPOLOGY_RSS_KEY_LEN_MIN || key == NULL ||
+	    reta == NULL) {
 		return -1;
 	}
 

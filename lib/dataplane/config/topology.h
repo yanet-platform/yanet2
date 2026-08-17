@@ -76,10 +76,11 @@ dp_topology_alloc_devices(struct dp_config *dp_config, size_t count);
 // dp_config->memory_context.
 //
 // Enforces the contract every consumer of dp_port's RSS fields relies on:
-// reta_size must be in (0, DP_TOPOLOGY_RSS_RETA_SIZE_MAX] and key_len must
-// be at least DP_TOPOLOGY_RSS_KEY_LEN_MIN. A call outside that contract is
-// rejected outright — nothing is allocated or stored, and rss_valid stays
-// false — so the device falls back to its non-RSS-aware path instead of an
+// reta_size must be a power of two in (0, DP_TOPOLOGY_RSS_RETA_SIZE_MAX],
+// key_len must be at least DP_TOPOLOGY_RSS_KEY_LEN_MIN, and key and reta
+// must both be non-NULL. A call outside that contract is rejected
+// outright — nothing is allocated or stored, and rss_valid stays false — so
+// the device falls back to its non-RSS-aware path instead of an
 // out-of-contract report reaching a consumer. An out-of-range device_id is
 // rejected the same way.
 //
