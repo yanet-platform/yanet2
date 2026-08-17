@@ -1,11 +1,15 @@
 name: GLM Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Number of the pull request to review.
+        required: true
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -15,7 +19,6 @@ permissions:
 jobs:
   review:
     name: Review the pull request diff with GLM
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -29,11 +32,7 @@ jobs:
           GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
           GLM_API_URL: ${{ vars.GLM_API_URL || 'https://api.z.ai/api/coding/paas/v4/chat/completions' }}
           GLM_MODEL: ${{ vars.GLM_MODEL || 'glm-5.2' }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          PR_NUMBER: ${{ inputs.pr_number }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -42,6 +41,18 @@ jobs:
             echo "Secret GLM_API_KEY is not configured; skipping review."
             exit 0
           fi
+
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "pr_number must be a pull request number." >&2
+            exit 1
+          fi
+
+          pr=$(gh pr view "$PR_NUMBER" --json number,title,body,baseRefOid,headRefOid)
+          PR_TITLE=$(jq -r '.title' <<<"$pr")
+          PR_BODY=$(jq -r '.body // ""' <<<"$pr")
+          BASE_SHA=$(jq -r '.baseRefOid' <<<"$pr")
+          HEAD_SHA=$(jq -r '.headRefOid' <<<"$pr")
+          git fetch origin "$BASE_SHA" "$HEAD_SHA"
 
           merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           git diff "$merge_base" "$HEAD_SHA" \
@@ -81,10 +92,10 @@ jobs:
               *"|$conv|"*) continue ;;
             esac
             added="$added$conv|"
-            if [ -f "$conv" ]; then
+            if git cat-file -e "$BASE_SHA:$conv" 2>/dev/null; then
               conventions="$conventions
 
-          $(cat "$conv")"
+          $(git show "$BASE_SHA:$conv")"
             fi
           done < <(git diff --name-only "$merge_base" "$HEAD_SHA")
           [ -n "$conventions" ] || conventions="(none applicable)"
