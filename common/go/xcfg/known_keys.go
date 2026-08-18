@@ -126,7 +126,7 @@ func isTransparentToWalk(t reflect.Type) bool {
 	if reflect.PointerTo(t).Implements(textUnmarshalerType) {
 		return false
 	}
-	return t.Kind() == reflect.Struct || t.Kind() == reflect.Map
+	return t.Kind() == reflect.Struct || t.Kind() == reflect.Map || t.Kind() == reflect.Slice
 }
 
 // walkKnownKeys matches node's shape against t, appending the dotted path of

@@ -799,8 +799,16 @@ func Test_Decode_NullPositions(t *testing.T) {
 			},
 		},
 		{
-			name:  "slice field not reported",
-			input: "required: r\nnonemptystring: s\nnonzero: 1\nslice:\n",
+			name:     "slice field reported",
+			input:    "required: r\nnonemptystring: s\nnonzero: 1\nslice:\n",
+			wantErr:  true,
+			contains: []string{`"slice"`, "line 4"},
+			seed: func(cfg *nullArmsConfig) {
+				cfg.Slice = []knownKeysInner{{Addr: "default"}}
+			},
+			check: func(t *testing.T, cfg *nullArmsConfig) {
+				require.Equal(t, []knownKeysInner{{Addr: "default"}}, cfg.Slice)
+			},
 		},
 		{
 			name:  "yaml.Node field not reported",
