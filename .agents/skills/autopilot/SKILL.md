@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: >-
-  Drive one GitHub issue autonomously from unassigned to merged main: admit,
+  Drive one GitHub issue autonomously from admission to merged main: admit,
   decompose, worktree, delegate every change to specialists, verify through a
   reviewer APPROVED pass, publish with ship-pr, close the issue. Use when the
   user hands over an issue end to end ("/autopilot 1234", "реши issue 1234",
@@ -23,11 +23,11 @@ Take issue `<n>` (plus optional instructions) to merged `main` without asking fo
 
 ## Hard stops (report the stop and the one thing that would clear it)
 
-Ambiguous number (both repos hold it, no repo named) · issue closed or is a PR · `needs-architect` label · any assignee already set (`@me` = an earlier run took it; anyone else = externally owned) · `blocked` label or an open declared dependency · the deliverable is a decision, not a change (give the recommendation instead) · an external contract left to invent (proto fields, CLI surface, shm layout/ABI, on-wire format) · a REFUTED bug report (close as not_planned via planner, do not invent a fix).
+Ambiguous number (both repos hold it, no repo named) · issue closed or is a PR · `needs-architect` label · an issue assigned to someone other than `@me` (unassigned issues and issues assigned to `@me` may proceed) · `blocked` label or an open declared dependency · the deliverable is a decision, not a change (give the recommendation instead) · an external contract left to invent (proto fields, CLI surface, shm layout/ABI, on-wire format) · a REFUTED bug report (close as not_planned via planner, do not invent a fix).
 
 ## Pipeline
 
-0. **Admit.** Resolve `<n>` (`gh issue view <n> --repo yanet-platform/yanet2` then `yanet2-private`); check the hard stops; `planner start <n>`.
+0. **Admit.** Resolve `<n>` (`gh issue view <n> --repo yanet-platform/yanet2` then `yanet2-private`); check the hard stops and the assignee, allowing no assignee or `@me` and stopping for any other assignee; `planner start <n>`.
 1. **Understand.** Read the code the issue touches; send `fast-explorer` for bounded facts. A reported defect goes to `bug-hunter confirm` first; a speedup deliverable goes to `performance-engineer` for a baseline first. Decompose into file-scoped briefs in layer order — C API, proto + Go, Rust CLI, web UI — naming every shared surface and its consumers (defining grep, generated and gitignored trees included).
 2. **Worktree.** `AGENTS.md` → Worktrees; seed what the gates need (its own `build/` if a gate produces or consumes it, `node_modules` for web).
 3. **Delegate.** One brief = one coherent change; each names the worktree's absolute root, the property to reach, the files in scope, the gate, and where to stop and report. Sequential when briefs share files, parallel otherwise.
