@@ -310,26 +310,15 @@ counter_storage_new_page(struct memory_context *memory_context) {
 	return page;
 }
 
-// Initialize a counter_storage_pool to the zero-init state.
-//
-// Pool entries are allocated lazily on first counter registration, so there
-// is nothing to set up beyond zeroing the struct.
-static void
-counter_storage_pool_init(struct counter_storage_pool *self) {
-	memset(self, 0, sizeof(*self));
-}
-
 static void
 counter_storage_init(
 	struct memory_context *memory_context,
 	struct counter_storage *storage,
 	struct counter_registry *registry
 ) {
+	memset(storage, 0, sizeof(*storage));
 	SET_OFFSET_OF(&storage->memory_context, memory_context);
 	SET_OFFSET_OF(&storage->registry, registry);
-	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
-		counter_storage_pool_init(storage->pools + idx);
-	}
 }
 
 struct counter_storage *
@@ -420,15 +409,19 @@ counter_storage_spawn(
 					memory_context,
 					sizeof(struct counter_storage_block)
 				);
+			if (block == NULL) {
+				goto error;
+			}
+			memset(block, 0, sizeof(*block));
 			block->refcnt = 1;
+			SET_OFFSET_OF(new_blocks + idx, block);
+
 			struct counter_storage_page *pages =
 				counter_storage_new_page(memory_context);
 			if (pages == NULL) {
 				goto error;
 			}
 			SET_OFFSET_OF(&block->pages, pages);
-
-			SET_OFFSET_OF(new_blocks + idx, block);
 
 			++idx;
 		}

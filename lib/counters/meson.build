@@ -35,3 +35,13 @@ test_counters_histogram = executable(
 )
 test('counters', test_counters_histogram, suite: ['lib'])
 
+counter_storage_test = executable(
+  'counter_storage_test',
+  'storage_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep],
+  include_directories: yanet_rootdir,
+  link_language: 'c',
+)
+test('counter_storage_oom', counter_storage_test, suite: ['lib'])
