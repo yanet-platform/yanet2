@@ -102,6 +102,10 @@ subprojects/.wraplock
 .envrc
 .env
 
+# Local git hooks that extend the shared .githooks/ without forcing their
+# additions on every contributor.
+.githooks.local/
+
 # fuzzing
 timeout-*
 crash-*
