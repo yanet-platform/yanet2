@@ -1,20 +1,31 @@
 ---
 name: Feature request
-about: Suggest an idea for YANET
-title: ''
-labels: enhancement
+about: Propose one independently closable YANET outcome
+title: 'feat(<scope>): '
+labels: ''
+type: Feature
 assignees: ''
 
 ---
 
-**Motivation**
-What the problem is?
+<!-- Replace title placeholders and search existing issues and pull requests before submitting. -->
 
-**Possible solution**
-What you want to happen?
+## Motivation
 
-**Definition of done**
-What are the criteria for closing this issue?
+<!-- Explain the user or operator problem and why it matters. -->
 
-**Alternatives**
-Any alternative solutions or features you've considered.
+## Outcome
+
+<!-- State the observable result without locking in an unproven implementation. -->
+
+## Scope
+
+<!-- Bound one independently closable outcome and name what it does not include. -->
+
+## Acceptance
+
+<!-- List observable and verifiable completion criteria. -->
+
+<!-- - [ ] Observable completion criterion. -->
+
+<!-- Add Constraints, Out of scope, Alternatives, Evidence, or Source only when informative. -->
