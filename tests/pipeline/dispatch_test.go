@@ -109,10 +109,6 @@ func setupACLBackend(
 func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action uint32) {
 	t.Helper()
 
-	handle, err := backend.NewModule(name)
-	require.NoError(t, err)
-	t.Cleanup(handle.Free)
-
 	rule := cacl.AclRule{
 		Actions:       []cacl.AclAction{{Kind: action}},
 		Devices:       filter.Devices{{Name: "port0"}},
@@ -127,7 +123,9 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 		},
 		Fragment: filter.FragmentAny,
 	}
-	require.NoError(t, handle.UpdateRules([]cacl.AclRule{rule}, nil))
+	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, nil)
+	require.NoError(t, err)
+	t.Cleanup(handle.Free)
 	require.NoError(t, backend.UpdateModule(handle))
 }
 

@@ -88,10 +88,9 @@ func newACLDeleteTestConfig(
 ) *cacl.ModuleConfig {
 	testingTB.Helper()
 
-	config, err := cacl.NewModuleConfig(agent, name)
+	config, err := cacl.NewModuleConfig(agent, name, nil, nil)
 	require.NoError(testingTB, err)
 	testingTB.Cleanup(config.Free)
-	require.NoError(testingTB, config.UpdateRules(nil, nil))
 
 	return config
 }
@@ -122,13 +121,19 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 	const configName = "fwstate-config"
 
 	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-agent-instance")
-	config, err := fwstate.NewFWStateModuleConfig(agent, configName)
+	config, err := fwstate.NewFWStateModuleConfig(
+		agent,
+		configName,
+		nil,
+		nil,
+		&fwstatepb.MapConfig{
+			IndexSize:        1024,
+			ExtraBucketCount: 64,
+		},
+		1,
+	)
 	require.NoError(t, err)
 	t.Cleanup(config.Free)
-	require.NoError(t, config.CreateMaps(&fwstatepb.MapConfig{
-		IndexSize:        1024,
-		ExtraBucketCount: 64,
-	}, 1))
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
 
 	require.NoError(t, agent.DeleteModuleConfig(fwstateModuleType, configName))

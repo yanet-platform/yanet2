@@ -248,20 +248,8 @@ func (m *ACLService) createLinkedHandles(
 			return nil, fmt.Errorf("ACL config %q not found", name)
 		}
 
-		handle, err := m.backend.NewModule(name)
-		if err != nil {
-			for _, h := range newHandles {
-				h.Free()
-			}
-
-			return nil, fmt.Errorf("failed to create ACL module config %q: %w", name, err)
-		}
-
-		handle.SetFwStateConfig(fwstateConfig.AsFFIModule())
-
 		rules, err := convertRules(entry.published.rules)
 		if err != nil {
-			handle.Free()
 			for _, h := range newHandles {
 				h.Free()
 			}
@@ -275,14 +263,16 @@ func (m *ACLService) createLinkedHandles(
 			emitCfg = &emit
 		}
 
-		if err := handle.UpdateRules(rules, emitCfg); err != nil {
-			handle.Free()
+		handle, err := m.backend.NewModule(name, rules, emitCfg)
+		if err != nil {
 			for _, h := range newHandles {
 				h.Free()
 			}
 
-			return nil, fmt.Errorf("failed to update ACL module config %q: %w", name, err)
+			return nil, fmt.Errorf("failed to create ACL module config %q: %w", name, err)
 		}
+
+		handle.SetFwStateConfig(fwstateConfig.AsFFIModule())
 
 		newHandles[name] = handle
 	}

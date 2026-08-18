@@ -113,11 +113,10 @@ func applyACLRules(
 ) acl.ModuleHandle {
 	tb.Helper()
 
-	handle, err := backend.NewModule(name)
+	handle, err := backend.NewModule(name, rules, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(handle.Free)
 
-	require.NoError(tb, handle.UpdateRules(rules, nil))
 	require.NoError(tb, backend.UpdateModule(handle))
 	return handle
 }
@@ -1814,10 +1813,6 @@ func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
 	_, _, backend := setupACLHarness(t, []string{"port0"})
 
-	handle, err := backend.NewModule("reject4")
-	require.NoError(t, err)
-	t.Cleanup(handle.Free)
-
 	badMask := netip.AddrFrom4([4]byte{0xff, 0x00, 0xff, 0x00})
 	rules := []cacl.AclRule{
 		allow4Rule(
@@ -1827,7 +1822,7 @@ func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
 		),
 	}
 
-	err = handle.UpdateRules(rules, nil)
+	_, err := backend.NewModule("reject4", rules, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "non-contiguous")
 }
@@ -1837,10 +1832,6 @@ func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
 // time instead of being silently mis-classified.
 func TestACL_RejectsNonBiContiguousIPv6Mask(t *testing.T) {
 	_, _, backend := setupACLHarness(t, []string{"port0"})
-
-	handle, err := backend.NewModule("reject6")
-	require.NoError(t, err)
-	t.Cleanup(handle.Free)
 
 	badMask := netip.AddrFrom16([16]byte{
 		0xff, 0x00, 0xff, 0x00, 0, 0, 0, 0,
@@ -1854,7 +1845,7 @@ func TestACL_RejectsNonBiContiguousIPv6Mask(t *testing.T) {
 		),
 	}
 
-	err = handle.UpdateRules(rules, nil)
+	_, err := backend.NewModule("reject6", rules, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bi-contiguous")
 }

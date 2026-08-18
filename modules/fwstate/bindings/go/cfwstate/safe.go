@@ -165,62 +165,26 @@ type OutdatedLayers struct {
 	ptr unsafe.Pointer
 }
 
-// CreateMaps creates firewall state maps.
-func (m *ModuleConfig) CreateMaps(
+// InsertLayer prepends a new layer to the config's maps.
+//
+// This is a map-chain operation, not a config update: the config's sync
+// rules and links never change after construction; only the chain grows.
+func (m *ModuleConfig) InsertLayer(
 	mapConfig MapConfig,
 	workerCount uint16,
 ) error {
-	mapConfigChanged := false
-	mapsStats := m.GetMapsStats()
-	currentIndexSize := max(mapsStats.IPv4.IndexSize, mapsStats.IPv6.IndexSize)
-	currentExtraBucketCount := max(mapsStats.IPv4.ExtraBucketCount, mapsStats.IPv6.ExtraBucketCount)
-	mapsExist := currentIndexSize != 0
-	requestedIndexSize := uint32(C.align_up_pow2(C.uint64_t(mapConfig.IndexSize)))
-	requestedExtraBucketCount := uint32(C.align_up_pow2(C.uint64_t(mapConfig.ExtraBucketCount)))
-
-	if requestedIndexSize != 0 && requestedIndexSize != currentIndexSize {
-		mapConfigChanged = true
-		currentIndexSize = mapConfig.IndexSize
-	}
-	if requestedExtraBucketCount != 0 && requestedExtraBucketCount != currentExtraBucketCount {
-		mapConfigChanged = true
-		currentExtraBucketCount = mapConfig.ExtraBucketCount
-	}
-	if mapsExist {
-		if !mapConfigChanged {
-			return nil
-		}
-
-		if rc, cErr := C.fwstate_config_insert_new_layer(
-			m.asRawPtr(),
-			C.uint32_t(currentIndexSize),
-			C.uint32_t(currentExtraBucketCount),
-			C.uint16_t(workerCount),
-		); rc != 0 {
-			return fmt.Errorf("failed to insert new layer: error code=%d, cErr=%v", rc, cErr)
-		}
-
-		m.generation++
-		return nil
-	}
-
-	if rc, cErr := C.fwstate_config_create_maps(
+	rc, cErr := C.fwstate_config_insert_new_layer(
 		m.asRawPtr(),
-		C.uint32_t(currentIndexSize),
-		C.uint32_t(currentExtraBucketCount),
+		C.uint32_t(mapConfig.IndexSize),
+		C.uint32_t(mapConfig.ExtraBucketCount),
 		C.uint16_t(workerCount),
-	); rc != 0 {
-		return fmt.Errorf("failed to create maps: error code=%d, cErr=%v", rc, cErr)
+	)
+	if rc != 0 {
+		return fmt.Errorf("failed to insert new layer: error code=%d, cErr=%v", rc, cErr)
 	}
 
 	m.generation++
 	return nil
-}
-
-// SetSyncConfig sets the synchronization configuration.
-func (m *ModuleConfig) SetSyncConfig(req SyncConfig) {
-	cSyncConfig := req.toC()
-	C.fwstate_module_config_set_sync_config(m.asRawPtr(), &cSyncConfig)
 }
 
 // GetMapsStats retrieves IPv4 and IPv6 map stats.

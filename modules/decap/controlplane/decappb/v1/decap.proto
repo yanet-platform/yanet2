@@ -28,9 +28,7 @@ message ListConfigsResponse { repeated string configs = 1; }
 message ShowConfigRequest { string name = 1; }
 
 // ShowConfigResponse contains the configuration details of the decap module.
-message ShowConfigResponse {
-  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 1;
-}
+message ShowConfigResponse { repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 1; }
 
 // UpdateConfigRequest carries the full desired prefix set for the named config.
 message UpdateConfigRequest {

@@ -24,12 +24,12 @@ import (
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
-// shared memory. Operations on the handle mutate the underlying C config;
+// shared memory. The handle is fully built — rules compiled, emission
+// sync config installed — at construction and never updated afterwards;
 // Free releases it.
 type ModuleHandle interface {
 	Free()
 	AsFFIModule() ffi.ModuleConfig
-	UpdateRules(rules []cacl.AclRule, emitConfig *cfwstate.SyncEmitConfig) error
 	SetFwStateConfig(fw ffi.ModuleConfig)
 	TransferFwStateConfig(old ffi.ModuleConfig)
 	GetInfo() *cacl.AclConfigInfo
@@ -37,9 +37,14 @@ type ModuleHandle interface {
 
 // Backend abstracts shared-memory operations for the ACL service.
 type Backend interface {
-	// NewModule allocates a new ACL module config in shared memory.
-	// The returned handle is not yet published to the dataplane.
-	NewModule(name string) (ModuleHandle, error)
+	// NewModule allocates a new ACL module config in shared memory with
+	// the ruleset compiled into it. The returned handle is not yet
+	// published to the dataplane.
+	NewModule(
+		name string,
+		rules []cacl.AclRule,
+		emitConfig *cfwstate.SyncEmitConfig,
+	) (ModuleHandle, error)
 	// UpdateModule publishes handle to dp_config_gen so the dataplane
 	// picks it up on the next round.
 	UpdateModule(handle ModuleHandle) error
@@ -198,11 +203,10 @@ type ACLService struct {
 	// snapshot publishes stay totally ordered with map mutations. The
 	// snapshot rebuild calls GetInfo, a cgo accessor that copies a handful
 	// of integers out of an already-compiled C module, so it is cheap to
-	// run under mu.Lock. The long-running work (backend.NewModule,
-	// handle.UpdateRules, backend.UpdateModule, and the C compile they
-	// trigger) runs under the target entry's updateMu instead, outside any
-	// mu section, so a compile for one config never blocks a read or a
-	// compile for another.
+	// run under mu.Lock. The long-running work (backend.NewModule with
+	// its C compile, and backend.UpdateModule) runs under the target
+	// entry's updateMu instead, outside any mu section, so a compile for
+	// one config never blocks a read or a compile for another.
 	mu      sync.RWMutex
 	backend Backend
 	// configs maps a name to its entry. See configEntry for the entry
@@ -595,20 +599,15 @@ func (m *ACLService) UpdateConfig(
 			return err
 		}
 
-		handle, err := m.backend.NewModule(name)
-		if err != nil {
-			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
-		}
-
 		var emitCfg *cfwstate.SyncEmitConfig
 		if syncConfig != nil {
 			emit := syncConfig.ToC()
 			emitCfg = &emit
 		}
 
-		if err := handle.UpdateRules(rules, emitCfg); err != nil {
-			handle.Free()
-			return status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		handle, err := m.backend.NewModule(name, rules, emitCfg)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
 		}
 
 		fwstateName := ""

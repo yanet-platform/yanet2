@@ -41,7 +41,7 @@ type providerAction struct {
 	entered      chan struct{}
 	release      <-chan struct{}
 	linkedConfig []ffi.ModuleConfig
-	mapConfig    *fwstatepb.MapConfig
+	insertLayer  *fwstatepb.MapConfig
 	err          error
 }
 type mutationEvent struct{ operation, phase string }
@@ -78,8 +78,8 @@ func (m *blockingACLProvider) RelinkConfigs(
 	if action.release != nil {
 		<-action.release
 	}
-	if action.err == nil && action.mapConfig != nil {
-		action.err = config.CreateMaps(action.mapConfig, 1)
+	if action.err == nil && action.insertLayer != nil {
+		action.err = config.InsertLayer(action.insertLayer, 1)
 	}
 	if action.err != nil {
 		return action.err
@@ -178,7 +178,10 @@ func TestFWStateReadsDoNotWaitForRelink(t *testing.T) {
 	tasks := newAsyncTasks(t)
 	provider := newBlockingACLProvider()
 	service := fwstate.NewFWStateService(agent, provider)
-	provider.relinks <- providerAction{entered: make(chan struct{}), mapConfig: &fwstatepb.MapConfig{IndexSize: 2048, ExtraBucketCount: 64}}
+	provider.relinks <- providerAction{
+		entered:     make(chan struct{}),
+		insertLayer: &fwstatepb.MapConfig{IndexSize: 2048, ExtraBucketCount: 64},
+	}
 	_, err := service.UpdateConfig(t.Context(), concurrencyUpdateRequest(name, 1024, 9999))
 	require.NoError(t, err)
 	releaseChannel := make(chan struct{})

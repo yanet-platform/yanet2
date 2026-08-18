@@ -108,9 +108,23 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	);
 }
 
+static int
+acl_module_compile_rules(
+	struct cp_module *cp_module,
+	struct acl_rule *acl_rules,
+	uint32_t rule_count,
+	const struct fwstate_sync_emit_config *emit_config,
+	yanet_error **err
+);
+
 struct cp_module *
 acl_module_config_init(
-	struct agent *agent, const char *name, yanet_error **err
+	struct agent *agent,
+	const char *name,
+	struct acl_rule *acl_rules,
+	uint32_t rule_count,
+	const struct fwstate_sync_emit_config *emit_config,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		(struct acl_module_config *)memory_balloc(
@@ -153,7 +167,7 @@ acl_module_config_init(
 	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
 
 	// Initialize fwstate_cfg with NULL pointers and zero the emission
-	// sync config, which acl_module_config_update overwrites with the
+	// sync config, which acl_module_config_init overwrites with the
 	// caller's config when one is given.
 	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
 	memset(&config->sync_config, 0, sizeof(struct fwstate_sync_emit_config)
@@ -213,6 +227,19 @@ acl_module_config_init(
 			return NULL;
 		}
 		*counters[i].dst = id;
+	}
+
+	// A config handle is built exactly once: the ruleset is compiled
+	// before the module is ever visible to a registry. A compile
+	// failure tears the whole module down through the registered
+	// destructor, which frees every partial allocation the compile
+	// made — the same state a caller-side Free of a failed update
+	// used to reach.
+	if (acl_module_compile_rules(
+		    &config->cp_module, acl_rules, rule_count, emit_config, err
+	    )) {
+		acl_module_config_destroy(&config->cp_module);
+		return NULL;
 	}
 
 	return &config->cp_module;
@@ -647,8 +674,13 @@ acl_module_init_net6_share(
 	return 0;
 }
 
-int
-acl_module_config_update(
+// Compile the ruleset into a freshly initialized ACL module config.
+//
+// Static on purpose: the only entry point is acl_module_config_init,
+// which owns the config's whole lifetime — a second update of a built
+// config is not part of the module's contract.
+static int
+acl_module_compile_rules(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t rule_count,
@@ -854,8 +886,7 @@ acl_module_config_update(
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
 
 	// Copy the emission sync config that drives CREATE_STATE frames, or
-	// clear the one a previous update installed so a reused config emits
-	// none.
+	// leave the zeroed one in place so the config emits none.
 	if (emit_config != NULL) {
 		config->sync_config = *emit_config;
 	} else {
@@ -903,7 +934,7 @@ acl_module_config_set_fwstate_config(
 	);
 
 	// Only the borrowed maps cross over. The emission sync config comes
-	// from acl_module_config_update.
+	// from acl_module_config_init.
 	EQUATE_OFFSET(
 		&config->fwstate_cfg.fw4state, &fwstate_config->cfg.fw4state
 	);

@@ -4,6 +4,7 @@
 #include "fwstate_cp.h"
 
 #include "common/container_of.h"
+#include "common/numutils.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/errors/errors.h"
 #include "lib/fwstate/config.h"
@@ -38,7 +39,7 @@ fwstate_config_fini(struct fwstate_config *config, struct agent *agent) {
 }
 
 // Set default timeout values for fwstate configuration
-static void
+void
 fwstate_config_set_defaults(struct fwstate_sync_config *config) {
 	memset(config, 0, sizeof(struct fwstate_sync_config));
 	config->timeouts.tcp_syn_ack = FW_STATE_DEFAULT_TIMEOUT;
@@ -52,9 +53,24 @@ fwstate_config_set_defaults(struct fwstate_sync_config *config) {
 static void
 fwstate_module_config_destroy(struct cp_module *cp_module);
 
+static int
+fwstate_module_setup_maps(
+	struct fwstate_module_config *config,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+);
+
 struct cp_module *
 fwstate_module_config_new(
-	struct agent *agent, const char *name, yanet_error **err
+	struct agent *agent,
+	const char *name,
+	struct cp_module *old,
+	const struct fwstate_sync_config *sync_config,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count,
+	yanet_error **err
 ) {
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)memory_balloc(
@@ -155,24 +171,36 @@ fwstate_module_config_new(
 		*counters[i].dst = id;
 	}
 
+	// One-shot construction: propagate the replaced config's sync
+	// config and borrowed map offsets (or start from defaults for a
+	// fresh config), install the caller's final sync config, then
+	// create or grow the maps. Nothing mutates the config afterwards.
+	if (old != NULL) {
+		struct fwstate_module_config *old_config = container_of(
+			old, struct fwstate_module_config, cp_module
+		);
+		config->sync_config = old_config->sync_config;
+		EQUATE_OFFSET(&config->cfg.fw4state, &old_config->cfg.fw4state);
+		EQUATE_OFFSET(&config->cfg.fw6state, &old_config->cfg.fw6state);
+	}
+
+	if (sync_config != NULL) {
+		config->sync_config = *sync_config;
+	}
+
+	if (fwstate_module_setup_maps(
+		    config, index_size, extra_bucket_count, worker_count
+	    )) {
+		yanet_error_add(err, "failed to setup fwstate maps");
+		// The propagated map offsets are borrowed from old: clear
+		// them so the destructor frees no borrowed chain.
+		config->cfg.fw4state = NULL;
+		config->cfg.fw6state = NULL;
+		fwstate_module_config_destroy(&config->cp_module);
+		return NULL;
+	}
+
 	return &config->cp_module;
-}
-
-void
-fwstate_module_config_propogate(
-	struct cp_module *new_cp_module, struct cp_module *old_cp_module
-) {
-	struct fwstate_module_config *new = container_of(
-		new_cp_module, struct fwstate_module_config, cp_module
-	);
-
-	struct fwstate_module_config *old = container_of(
-		old_cp_module, struct fwstate_module_config, cp_module
-	);
-
-	new->sync_config = old->sync_config;
-	EQUATE_OFFSET(&new->cfg.fw4state, &old->cfg.fw4state);
-	EQUATE_OFFSET(&new->cfg.fw6state, &old->cfg.fw6state);
 }
 
 static void
@@ -210,7 +238,9 @@ fwstate_module_config_detach_maps(struct cp_module *cp_module) {
 	config->cfg.fw6state = NULL;
 }
 
-int
+// Create the config's firewall state maps. Static on purpose: the only
+// entry point is fwstate_module_config_new.
+static int
 fwstate_config_create_maps(
 	struct cp_module *cp_module,
 	uint32_t index_size,
@@ -262,6 +292,9 @@ fwstate_config_create_maps(
 	return 0;
 }
 
+// Prepend a new layer to the config's maps: a map-chain operation, not
+// a config update — the config's sync rules and links never change
+// after construction.
 int
 fwstate_config_insert_new_layer(
 	struct cp_module *cp_module,
@@ -316,14 +349,67 @@ fwstate_config_insert_new_layer(
 	return 0;
 }
 
-void
-fwstate_module_config_set_sync_config(
-	struct cp_module *cp_module, struct fwstate_sync_config *sync_config
+// Decide between creating fresh maps and growing the propagated ones
+// with a new layer: a requested size that differs from the propagated
+// maps' aligned current size prepends a new layer carrying the raw
+// requested sizes; equal or zero sizes keep the chain untouched. A zero
+// worker count leaves the config unmapped — the module then counts and
+// drops that family's sync frames without inserting.
+static int
+fwstate_module_setup_maps(
+	struct fwstate_module_config *config,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
 ) {
-	struct fwstate_module_config *config = container_of(
-		cp_module, struct fwstate_module_config, cp_module
+	struct cp_module *cp_module = &config->cp_module;
+
+	if (worker_count == 0) {
+		return 0;
+	}
+
+	if (config->cfg.fw4state == NULL) {
+		return fwstate_config_create_maps(
+			cp_module, index_size, extra_bucket_count, worker_count
+		);
+	}
+
+	fwmap_stats_t stats_v4 = fwstate_config_get_map_stats(cp_module, false);
+	fwmap_stats_t stats_v6 = fwstate_config_get_map_stats(cp_module, true);
+	uint32_t current_index_size = stats_v4.index_size > stats_v6.index_size
+					      ? stats_v4.index_size
+					      : stats_v6.index_size;
+	uint32_t current_extra_bucket_count =
+		stats_v4.extra_bucket_count > stats_v6.extra_bucket_count
+			? stats_v4.extra_bucket_count
+			: stats_v6.extra_bucket_count;
+
+	uint32_t requested_index_size = (uint32_t)align_up_pow2(index_size);
+	uint32_t requested_extra_bucket_count =
+		(uint32_t)align_up_pow2(extra_bucket_count);
+
+	bool map_config_changed = false;
+	if (requested_index_size != 0 &&
+	    requested_index_size != current_index_size) {
+		map_config_changed = true;
+		current_index_size = index_size;
+	}
+	if (requested_extra_bucket_count != 0 &&
+	    requested_extra_bucket_count != current_extra_bucket_count) {
+		map_config_changed = true;
+		current_extra_bucket_count = extra_bucket_count;
+	}
+
+	if (!map_config_changed) {
+		return 0;
+	}
+
+	return fwstate_config_insert_new_layer(
+		cp_module,
+		current_index_size,
+		current_extra_bucket_count,
+		worker_count
 	);
-	config->sync_config = *sync_config;
 }
 
 struct fwmap_stats

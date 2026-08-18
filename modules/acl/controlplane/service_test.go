@@ -81,7 +81,7 @@ func (m *fakeHandle) Name() string {
 	return m.name
 }
 
-// Rules returns a copy of the rules passed to UpdateRules.
+// Rules returns a copy of the rules the handle was constructed with.
 func (m *fakeHandle) Rules() []cacl.AclRule {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -93,16 +93,7 @@ func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
 	return ffi.ModuleConfig{}
 }
 
-func (m *fakeHandle) UpdateRules(rules []cacl.AclRule, emitConfig *cfwstate.SyncEmitConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.rules = rules
-	m.emitConfig = emitConfig
-	return nil
-}
-
-// EmitConfig returns the emit config passed to the last UpdateRules call,
+// EmitConfig returns the emit config the handle was constructed with,
 // so a test can assert a relink carried the stored sync config over.
 func (m *fakeHandle) EmitConfig() *cfwstate.SyncEmitConfig {
 	m.mu.Lock()
@@ -260,10 +251,9 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	moduleNames := []string{"acl0", "a", "b", "c", "d"}
 	moduleConfigs := make([]ffi.ModuleConfig, 0, len(moduleNames))
 	for _, name := range moduleNames {
-		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name)
+		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, nil)
 		require.NoError(testingTB, moduleErr)
 		testingTB.Cleanup(moduleConfig.Free)
-		require.NoError(testingTB, moduleConfig.UpdateRules(nil, nil))
 		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
 	}
 	require.NoError(testingTB, agent.UpdateModules(moduleConfigs))
@@ -299,7 +289,11 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	return harness, agent
 }
 
-func (m *fakeBackend) NewModule(name string) (acl.ModuleHandle, error) {
+func (m *fakeBackend) NewModule(
+	name string,
+	rules []cacl.AclRule,
+	emitConfig *cfwstate.SyncEmitConfig,
+) (acl.ModuleHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -307,7 +301,7 @@ func (m *fakeBackend) NewModule(name string) (acl.ModuleHandle, error) {
 		return nil, m.newModuleErr
 	}
 
-	h := &fakeHandle{name: name}
+	h := &fakeHandle{name: name, rules: rules, emitConfig: emitConfig}
 	m.created = append(m.created, h)
 	return h, nil
 }
@@ -380,8 +374,6 @@ func unwrapFakeHandle(handle acl.ModuleHandle) *fakeHandle {
 	switch typedHandle := handle.(type) {
 	case *fakeHandle:
 		return typedHandle
-	case *compileBlockingHandle:
-		return unwrapFakeHandle(typedHandle.ModuleHandle)
 	default:
 		return nil
 	}
@@ -404,16 +396,17 @@ func (m *fakeBackend) DeleteCalls() int {
 }
 
 // compileBlock synchronizes one blocked compile with the test: entered
-// signals that UpdateRules has started, release lets it return.
+// signals that the compile inside NewModule has started, release lets it
+// return.
 type compileBlock struct {
 	entered chan struct{}
 	release chan struct{}
 }
 
 // compileBlockingBackend wraps fakeBackend so a test can arm a specific
-// config name's next UpdateRules call to block until released, proving
+// config name's next NewModule compile to block until released, proving
 // overlap or ordering between compiles via channel synchronization instead
-// of timing. Every UpdateRules call, blocked or not, is recorded in
+// of timing. Every NewModule call, blocked or not, is recorded in
 // entryOrder for tests that only need to assert relative ordering.
 type compileBlockingBackend struct {
 	*fakeBackend
@@ -430,9 +423,9 @@ func newCompileBlockingBackend() *compileBlockingBackend {
 	}
 }
 
-// blockCompile arms the next UpdateRules call for name to block until the
+// blockCompile arms the next NewModule compile for name to block until the
 // returned release function is called. The returned channel closes once
-// that call has entered UpdateRules.
+// that call has entered the compile.
 func (m *compileBlockingBackend) blockCompile(name string) (<-chan struct{}, func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -448,7 +441,7 @@ func (m *compileBlockingBackend) blockCompile(name string) (<-chan struct{}, fun
 	})
 }
 
-// recordEntry logs that UpdateRules for name has started and returns and
+// recordEntry logs that the compile for name has started and returns and
 // consumes any block armed for name.
 func (m *compileBlockingBackend) recordEntry(name string) *compileBlock {
 	m.mu.Lock()
@@ -461,7 +454,7 @@ func (m *compileBlockingBackend) recordEntry(name string) *compileBlock {
 	return block
 }
 
-// entryOrder returns the config names in the order their UpdateRules calls
+// entryOrder returns the config names in the order their compiles
 // started.
 func (m *compileBlockingBackend) entryOrder() []string {
 	m.mu.Lock()
@@ -470,30 +463,17 @@ func (m *compileBlockingBackend) entryOrder() []string {
 	return append([]string(nil), m.entries...)
 }
 
-func (m *compileBlockingBackend) NewModule(name string) (acl.ModuleHandle, error) {
-	handle, err := m.fakeBackend.NewModule(name)
-	if err != nil {
-		return nil, err
-	}
-
-	return &compileBlockingHandle{ModuleHandle: handle, backend: m, name: name}, nil
-}
-
-// compileBlockingHandle records and optionally blocks its UpdateRules call
-// before delegating to the wrapped fakeHandle.
-type compileBlockingHandle struct {
-	acl.ModuleHandle
-	backend *compileBlockingBackend
-	name    string
-}
-
-func (m *compileBlockingHandle) UpdateRules(rules []cacl.AclRule, emitConfig *cfwstate.SyncEmitConfig) error {
-	block := m.backend.recordEntry(m.name)
+func (m *compileBlockingBackend) NewModule(
+	name string,
+	rules []cacl.AclRule,
+	emitConfig *cfwstate.SyncEmitConfig,
+) (acl.ModuleHandle, error) {
+	block := m.recordEntry(name)
 	if block != nil {
 		close(block.entered)
 		<-block.release
 	}
-	return m.ModuleHandle.UpdateRules(rules, emitConfig)
+	return m.fakeBackend.NewModule(name, rules, emitConfig)
 }
 
 func newTestService(b acl.Backend) *acl.ACLService {
@@ -984,7 +964,7 @@ func TestDeleteConfig_WaitsBehindInFlightCreate(t *testing.T) {
 		updateDone <- err
 	}()
 
-	waitOnChan(t, entered, "create did not reach UpdateRules")
+	waitOnChan(t, entered, "create did not reach the compile")
 
 	deleteDone := make(chan error, 1)
 	go func() {
@@ -1298,7 +1278,7 @@ func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
 
 // TestUpdateConfig_CompilesInParallel verifies that UpdateConfig calls for
 // different names compile concurrently: both are proven to be inside
-// UpdateRules at the same time via channel synchronization, not timing.
+// compiles at the same time via channel synchronization, not timing.
 func TestUpdateConfig_CompilesInParallel(t *testing.T) {
 	backend := newCompileBlockingBackend()
 	svc := newTestService(backend)
@@ -1322,9 +1302,9 @@ func TestUpdateConfig_CompilesInParallel(t *testing.T) {
 	}()
 
 	// Neither release fires until both signal that they are inside
-	// UpdateRules, so a pass here proves the two compiles overlapped.
-	waitOnChan(t, enteredA, "config \"a\" did not reach UpdateRules")
-	waitOnChan(t, enteredB, "config \"b\" did not reach UpdateRules")
+	// compile, so a pass here proves the two compiles overlapped.
+	waitOnChan(t, enteredA, "config \"a\" did not reach the compile")
+	waitOnChan(t, enteredB, "config \"b\" did not reach the compile")
 
 	releaseA()
 	releaseB()
@@ -1365,7 +1345,7 @@ func TestShowAndListConfigs_DoNotWaitForCompile(t *testing.T) {
 		updateDone <- err
 	}()
 
-	waitOnChan(t, entered, "update did not reach UpdateRules")
+	waitOnChan(t, entered, "update did not reach the compile")
 
 	type showResult struct {
 		resp *aclpb.ShowConfigResponse
@@ -1413,7 +1393,7 @@ func TestShowAndListConfigs_DoNotWaitForCompile(t *testing.T) {
 }
 
 // TestUpdateConfig_SameNameSerializes verifies that two UpdateConfig calls
-// for the same name serialize: the second cannot reach UpdateRules until the
+// for the same name serialize: the second cannot reach the compile until the
 // first has released the per-name lock, which is proven by lock acquisition
 // order rather than a sleep-based race check.
 func TestUpdateConfig_SameNameSerializes(t *testing.T) {
@@ -1431,11 +1411,11 @@ func TestUpdateConfig_SameNameSerializes(t *testing.T) {
 		doneFirst <- err
 	}()
 
-	waitOnChan(t, enteredFirst, "first update did not reach UpdateRules")
+	waitOnChan(t, enteredFirst, "first update did not reach the compile")
 
 	// Arm a second block before starting the second call: since the first
 	// block was already consumed, this block will only fire once the second
-	// call reaches UpdateRules on its own turn.
+	// call reaches the compile on its own turn.
 	enteredSecond, releaseSecond := backend.blockCompile("a")
 	t.Cleanup(releaseSecond)
 
@@ -1454,10 +1434,10 @@ func TestUpdateConfig_SameNameSerializes(t *testing.T) {
 		t.Fatal("first UpdateConfig did not finish after release")
 	}
 
-	// The second call can only reach UpdateRules by acquiring the per-name
+	// The second call can only reach the compile by acquiring the per-name
 	// lock, which the first call releases only when it returns above — so
 	// this signal firing at all proves the ordering, not merely its timing.
-	waitOnChan(t, enteredSecond, "second update did not reach UpdateRules after the first finished")
+	waitOnChan(t, enteredSecond, "second update did not reach the compile after the first finished")
 
 	releaseSecond()
 

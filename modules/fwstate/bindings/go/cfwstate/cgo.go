@@ -29,21 +29,84 @@ type ModuleConfig struct {
 	generation uint64
 }
 
-// NewModuleConfig creates a new FWState module configuration.
-func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
+// DefaultSyncConfig returns the C-side default receive-side sync
+// configuration, the baseline a fresh config starts from before the
+// caller's request is merged over it.
+func DefaultSyncConfig() SyncConfig {
+	var cSyncConfig C.struct_fwstate_sync_config
+	C.fwstate_config_set_defaults(&cSyncConfig)
+	return newSyncConfigFromC(&cSyncConfig)
+}
+
+// NewModuleConfig creates an FWState module configuration fully built in
+// one step: a config handle is constructed once and never updated
+// afterwards.
+//
+// old names the config this one replaces, or nil for a fresh config.
+// From old the sync config and the borrowed map offsets propagate; with
+// old nil the maps are created fresh from mapConfig. When old is given,
+// its maps are kept unless mapConfig asks for a different aligned size
+// pair, in which case a new layer with the requested sizes is prepended.
+//
+// syncConfig is the final receive-side sync config to install, or nil to
+// keep the propagated or default one. A zero workerCount leaves the
+// config unmapped: no maps are created and the propagated chain, if
+// any, is kept as is.
+func NewModuleConfig(
+	agent *ffi.Agent,
+	name string,
+	old *ModuleConfig,
+	syncConfig *SyncConfig,
+	mapConfig MapConfig,
+	workerCount uint16,
+) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
+	var cOld *C.struct_cp_module
+	if old != nil {
+		cOld = old.asRawPtr()
+	}
+
+	var cSync *C.struct_fwstate_sync_config
+	if syncConfig != nil {
+		cSyncConfig := syncConfig.toC()
+		cSync = &cSyncConfig
+	}
+
 	var cErr *C.yanet_error
-	ptr := C.fwstate_module_config_new((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
+	ptr := C.fwstate_module_config_new(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		cOld,
+		cSync,
+		C.uint32_t(mapConfig.IndexSize),
+		C.uint32_t(mapConfig.ExtraBucketCount),
+		C.uint16_t(workerCount),
+		&cErr,
+	)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to initialize FWState module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
-	return &ModuleConfig{
+	m := &ModuleConfig{
 		name: name,
 		ptr:  ffi.NewModuleConfig(unsafe.Pointer(ptr)),
-	}, nil
+	}
+
+	// Generation mirrors the former CreateMaps bookkeeping: fresh maps
+	// start at 1, a propagated config keeps the old generation and
+	// advances it exactly when the map sizes changed.
+	if old != nil {
+		m.generation = old.generation
+		if old.GetMapConfig() != m.GetMapConfig() {
+			m.generation++
+		}
+	} else {
+		m.generation = 1
+	}
+
+	return m, nil
 }
 
 func (m *ModuleConfig) Name() string {
@@ -60,10 +123,6 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 
 func (m *ModuleConfig) Generation() uint64 {
 	return m.generation
-}
-
-func (m *ModuleConfig) PropagateConfig(old *ModuleConfig) {
-	C.fwstate_module_config_propogate(m.asRawPtr(), old.asRawPtr())
 }
 
 func (m *ModuleConfig) DetachMaps() {

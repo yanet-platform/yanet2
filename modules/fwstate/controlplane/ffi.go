@@ -14,28 +14,48 @@ type CursorEntry = cfwstate.CursorEntry
 type OutdatedLayers = cfwstate.OutdatedLayers
 type mapStats = cfwstate.MapStats
 
-func NewFWStateModuleConfig(agent *ffi.Agent, name string) (*FwStateConfig, error) {
-	moduleCfg, err := cfwstate.NewModuleConfig(agent, name)
+func NewFWStateModuleConfig(
+	agent *ffi.Agent,
+	name string,
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	mapConfig *fwstatepb.MapConfig,
+	workerCount uint16,
+) (*FwStateConfig, error) {
+	var oldModule *cfwstate.ModuleConfig
+	current := cfwstate.DefaultSyncConfig()
+	if old != nil {
+		oldModule = old.ModuleConfig
+		current = old.ModuleConfig.GetSyncConfig()
+	}
+
+	var finalSync *cfwstate.SyncConfig
+	if syncConfig != nil {
+		// The request's zero fields inherit the propagated or default
+		// values, exactly the values a second update used to merge.
+		merged := syncConfig.ToCWithDefaults(current)
+		finalSync = &merged
+	}
+
+	moduleCfg, err := cfwstate.NewModuleConfig(
+		agent,
+		name,
+		oldModule,
+		finalSync,
+		mapConfig.ToC(),
+		workerCount,
+	)
 	if err != nil {
 		return nil, err
 	}
 	return &FwStateConfig{ModuleConfig: moduleCfg}, nil
 }
 
-func (m *FwStateConfig) CreateMaps(
+func (m *FwStateConfig) InsertLayer(
 	mapConfig *fwstatepb.MapConfig,
 	workerCount uint16,
 ) error {
-	return m.ModuleConfig.CreateMaps(mapConfig.ToC(), workerCount)
-}
-
-func (m *FwStateConfig) PropagateConfig(old *FwStateConfig) {
-	m.ModuleConfig.PropagateConfig(old.ModuleConfig)
-}
-
-func (m *FwStateConfig) SetSyncConfig(req *fwstatepb.SyncConfig) {
-	cfg := req.ToCWithDefaults(m.ModuleConfig.GetSyncConfig())
-	m.ModuleConfig.SetSyncConfig(cfg)
+	return m.ModuleConfig.InsertLayer(mapConfig.ToC(), workerCount)
 }
 
 func (m *FwStateConfig) GetSyncConfig() *fwstatepb.SyncConfig {

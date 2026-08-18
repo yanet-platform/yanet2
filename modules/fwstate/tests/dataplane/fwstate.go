@@ -47,45 +47,44 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 		panic("failed to allocate agent")
 	}
 
-	// Use the proper API to create the module config
+	// Use the proper API to create the module config: one-shot
+	// construction installs the sync settings and creates the maps.
 	cName := C.CString("test")
 	defer C.free(unsafe.Pointer(cName))
 
-	var cErr *C.yanet_error
-	cpModule := C.fwstate_module_config_new(agent, cName, &cErr)
-	if cpModule == nil {
-		panic(fmt.Sprintf("failed to initialize fwstate module config: %v", cerrors.FromC(unsafe.Pointer(cErr))))
-	}
-
-	// Create maps using the proper API
-	rc := C.fwstate_config_create_maps(
-		cpModule,
-		C.uint32_t(1024),
-		C.uint32_t(64),
-		C.uint16_t(1),
-	)
-	if rc != 0 {
-		panic(fmt.Sprintf("failed to create maps: rc=%d", rc))
-	}
-
-	// Get the fwstate_module_config to set sync settings
-	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
+	var syncConfig C.struct_fwstate_sync_config
+	C.fwstate_config_set_defaults(&syncConfig)
 
 	// Configure sync settings
 	// Multicast IPv6 address: ff02::1
 	multicastAddr := [16]C.uint8_t{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
 	for i := range 16 {
-		m.sync_config.dst_addr_multicast[i] = multicastAddr[i]
+		syncConfig.dst_addr_multicast[i] = multicastAddr[i]
 	}
-	m.sync_config.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
+	syncConfig.port_multicast = C.uint16_t(0x0f27) // 9999 in network byte order
 
 	// Set timeouts (in nanoseconds)
-	m.sync_config.timeouts.tcp_syn_ack = C.uint64_t(120e9)
-	m.sync_config.timeouts.tcp_syn = C.uint64_t(120e9)
-	m.sync_config.timeouts.tcp_fin = C.uint64_t(120e9)
-	m.sync_config.timeouts.tcp = C.uint64_t(120e9)
-	m.sync_config.timeouts.udp = C.uint64_t(30e9)
-	m.sync_config.timeouts.default_ = C.uint64_t(16e9)
+	syncConfig.timeouts.tcp_syn_ack = C.uint64_t(120e9)
+	syncConfig.timeouts.tcp_syn = C.uint64_t(120e9)
+	syncConfig.timeouts.tcp_fin = C.uint64_t(120e9)
+	syncConfig.timeouts.tcp = C.uint64_t(120e9)
+	syncConfig.timeouts.udp = C.uint64_t(30e9)
+	syncConfig.timeouts.default_ = C.uint64_t(16e9)
+
+	var cErr *C.yanet_error
+	cpModule := C.fwstate_module_config_new(
+		agent,
+		cName,
+		nil,
+		&syncConfig,
+		C.uint32_t(1024),
+		C.uint32_t(64),
+		C.uint16_t(1),
+		&cErr,
+	)
+	if cpModule == nil {
+		panic(fmt.Sprintf("failed to initialize fwstate module config: %v", cerrors.FromC(unsafe.Pointer(cErr))))
+	}
 
 	// Link the counter registry and spawn a per-worker counter storage once,
 	// so counter values accumulate across fwstateHandlePackets calls.

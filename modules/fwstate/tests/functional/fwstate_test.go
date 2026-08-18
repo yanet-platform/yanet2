@@ -63,11 +63,7 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 	t.Helper()
 
-	modCfg, err := cfwstate.NewModuleConfig(agent, name)
-	require.NoError(t, err)
-	t.Cleanup(modCfg.Free)
-
-	modCfg.SetSyncConfig(cfwstate.SyncConfig{
+	syncConfig := cfwstate.SyncConfig{
 		DstAddrMulticast: [16]byte{
 			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
 		},
@@ -78,12 +74,21 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 		Tcp:           uint64(120e9),
 		Udp:           uint64(30e9),
 		Default:       uint64(16e9),
-	})
+	}
 
-	require.NoError(t, modCfg.CreateMaps(cfwstate.MapConfig{
-		IndexSize:        1024,
-		ExtraBucketCount: 64,
-	}, 1))
+	modCfg, err := cfwstate.NewModuleConfig(
+		agent,
+		name,
+		nil,
+		&syncConfig,
+		cfwstate.MapConfig{
+			IndexSize:        1024,
+			ExtraBucketCount: 64,
+		},
+		1,
+	)
+	require.NoError(t, err)
+	t.Cleanup(modCfg.Free)
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
 }

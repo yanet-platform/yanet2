@@ -16,14 +16,40 @@ struct layermap_list;
 // Opaque handle for outdated layers that need to be freed
 typedef struct fwstate_outdated_layers fwstate_outdated_layers_t;
 
+// Set the C-side default receive-side sync timeouts.
+void
+fwstate_config_set_defaults(struct fwstate_sync_config *config);
+
+// Allocate an fwstate module config fully built in one step: a config
+// handle is created once and never updated afterwards.
+//
+// old names the config this one replaces, or NULL for a fresh config.
+// From old the sync config and the borrowed map offsets propagate; with
+// old NULL the maps are created fresh from index_size and
+// extra_bucket_count (zero falls back to the fwmap defaults) and the
+// sync config starts from fwstate_config_set_defaults.
+//
+// When old is given, its maps are kept unless the aligned
+// index_size/extra_bucket_count pair differs from the sizes the
+// propagated maps carry, in which case a new layer with the requested
+// sizes is prepended to both chains.
+//
+// sync_config is the final receive-side sync config to install, or NULL
+// to keep the propagated or default one. A zero worker_count leaves the
+// config unmapped: no maps are created and the propagated chain, if
+// any, is kept as is.
+//
+// Returns NULL with err set on failure; nothing is left allocated.
 struct cp_module *
 fwstate_module_config_new(
-	struct agent *agent, const char *name, yanet_error **err
-);
-
-void
-fwstate_module_config_propogate(
-	struct cp_module *new_cp_module, struct cp_module *old_cp_module
+	struct agent *agent,
+	const char *name,
+	struct cp_module *old,
+	const struct fwstate_sync_config *sync_config,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count,
+	yanet_error **err
 );
 
 void
@@ -32,27 +58,15 @@ fwstate_module_config_free(struct cp_module *cp_module);
 void
 fwstate_module_config_detach_maps(struct cp_module *cp_module);
 
-// Create firewall state maps for the configuration
-int
-fwstate_config_create_maps(
-	struct cp_module *cp_module,
-	uint32_t index_size,
-	uint32_t extra_bucket_count,
-	uint16_t worker_count
-);
-
-// Insert new layer to existing firewall state maps
+// Prepend a new layer to the config's existing maps. This grows the map
+// chain only: the config's sync rules and links never change after
+// construction.
 int
 fwstate_config_insert_new_layer(
 	struct cp_module *cp_module,
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
 	uint16_t worker_count
-);
-
-void
-fwstate_module_config_set_sync_config(
-	struct cp_module *cp_module, struct fwstate_sync_config *sync_config
 );
 
 struct fwmap_stats

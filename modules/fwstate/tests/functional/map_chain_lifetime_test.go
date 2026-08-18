@@ -46,10 +46,7 @@ func mapChainAgentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name strin
 func newMapChainConfig(t *testing.T, agent *ffi.Agent, name string) *cfwstate.ModuleConfig {
 	t.Helper()
 
-	modCfg, err := cfwstate.NewModuleConfig(agent, name)
-	require.NoError(t, err)
-
-	modCfg.SetSyncConfig(cfwstate.SyncConfig{
+	syncConfig := cfwstate.SyncConfig{
 		DstAddrMulticast: [16]byte{
 			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
 		},
@@ -60,12 +57,20 @@ func newMapChainConfig(t *testing.T, agent *ffi.Agent, name string) *cfwstate.Mo
 		Tcp:           uint64(120e9),
 		Udp:           uint64(30e9),
 		Default:       uint64(16e9),
-	})
+	}
 
-	require.NoError(t, modCfg.CreateMaps(cfwstate.MapConfig{
-		IndexSize:        1024,
-		ExtraBucketCount: 64,
-	}, 1))
+	modCfg, err := cfwstate.NewModuleConfig(
+		agent,
+		name,
+		nil,
+		&syncConfig,
+		cfwstate.MapConfig{
+			IndexSize:        1024,
+			ExtraBucketCount: 64,
+		},
+		1,
+	)
+	require.NoError(t, err)
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
 
@@ -111,13 +116,18 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	require.Len(t, entriesBefore, 1)
 	keyBefore := entriesBefore[0].Key
 
-	v2, err := cfwstate.NewModuleConfig(agent, "fw0")
+	v2, err := cfwstate.NewModuleConfig(
+		agent,
+		"fw0",
+		v1,
+		nil,
+		cfwstate.MapConfig{
+			IndexSize:        1024,
+			ExtraBucketCount: 64,
+		},
+		1,
+	)
 	require.NoError(t, err)
-	v2.PropagateConfig(v1)
-	require.NoError(t, v2.CreateMaps(cfwstate.MapConfig{
-		IndexSize:        1024,
-		ExtraBucketCount: 64,
-	}, 1))
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{v2.AsFFIModule()}))
 
 	afterPublish := mapChainAgentRootMemoryNode(t, shm, agentName)
@@ -128,7 +138,9 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	// The construction is straddled by a checkpoint, so a premature drain of the
 	// first generation there cannot be masked by that config's own later release
 	// landing on the same count.
-	other, err := cfwstate.NewModuleConfig(agent, "fw1")
+	// Zero worker count: an unmapped config, the same footprint the
+	// pre-merge construction used to leave.
+	other, err := cfwstate.NewModuleConfig(agent, "fw1", nil, nil, cfwstate.MapConfig{}, 0)
 	require.NoError(t, err)
 
 	afterUnrelatedCreate := mapChainAgentRootMemoryNode(t, shm, agentName)
@@ -160,7 +172,7 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	//
 	// This is the exact call that would have destroyed its map chain out from
 	// under the new generation, had the earlier detach not already run.
-	other2, err := cfwstate.NewModuleConfig(agent, "fw2")
+	other2, err := cfwstate.NewModuleConfig(agent, "fw2", nil, nil, cfwstate.MapConfig{}, 0)
 	require.NoError(t, err)
 	t.Cleanup(other2.Free)
 

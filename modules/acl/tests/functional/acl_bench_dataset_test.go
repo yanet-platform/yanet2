@@ -691,12 +691,9 @@ func datasetBenchSetup(b *testing.B) *datasetBenchState {
 		}
 		backend := acl.NewBackend(agent)
 
-		handle, err := backend.NewModule("dataset")
+		handle, err := backend.NewModule("dataset", rules, nil)
 		if err != nil {
 			datasetBenchErr = err
-			return
-		}
-		if datasetBenchErr = handle.UpdateRules(rules, nil); datasetBenchErr != nil {
 			return
 		}
 		if datasetBenchErr = backend.UpdateModule(handle); datasetBenchErr != nil {
@@ -845,12 +842,9 @@ func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
 		}
 		backend := acl.NewBackend(agent)
 
-		handle, err := backend.NewModule("dataset")
+		handle, err := backend.NewModule("dataset", rules, nil)
 		if err != nil {
 			topoBenchErr = err
-			return
-		}
-		if topoBenchErr = handle.UpdateRules(rules, nil); topoBenchErr != nil {
 			return
 		}
 		if topoBenchErr = backend.UpdateModule(handle); topoBenchErr != nil {

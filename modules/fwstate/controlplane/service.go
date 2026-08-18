@@ -249,16 +249,7 @@ func (m *FWStateService) UpdateConfig(
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
 	err := m.withMutation("update", func() error {
-		newConfig, err := NewFWStateModuleConfig(m.agent, name)
-		if err != nil {
-			m.log.Error("failed to create fwstate config",
-				zap.String("config", name),
-				zap.Error(err),
-			)
-			return status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
-		}
-
-		oldConfig, err := m.prepareUpdate(name, newConfig, req)
+		oldConfig, newConfig, err := m.prepareUpdate(name, req)
 		if err != nil {
 			return err
 		}
@@ -294,41 +285,49 @@ func (m *FWStateService) UpdateConfig(
 	return &fwstatepb.UpdateConfigResponse{}, nil
 }
 
+// prepareUpdate builds the replacement config for name in one step: the
+// old config's sync config and map chain propagate, the request's sync
+// config merges over them, and the maps are created or grown. The state
+// lock stays held so the old handle cannot disappear mid-construction.
 func (m *FWStateService) prepareUpdate(
 	name string,
-	newConfig *FwStateConfig,
 	req *fwstatepb.UpdateConfigRequest,
-) (*FwStateConfig, error) {
+) (*FwStateConfig, *FwStateConfig, error) {
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
 
 	oldConfig := m.configs[name]
-	if oldConfig != nil {
-		newConfig.PropagateConfig(oldConfig)
-	}
-
-	// Set sync config
-	newConfig.SetSyncConfig(req.SyncConfig)
-
-	// Validate sync config after setting
-	syncConfig := newConfig.GetSyncConfig()
-	if err := validateSyncConfig(syncConfig); err != nil {
-		newConfig.DetachMaps()
-		newConfig.Free()
-		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-	}
 
 	dpConfig := m.agent.DPConfig()
-
-	if err := newConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount())); err != nil {
-		newConfig.DetachMaps() // in order not to pull them out from under the feet of another module
-		newConfig.Free()
-		m.log.Error("failed to create fwstate maps", zap.String("config", name), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to create fwstate maps: %v", err)
+	newConfig, err := NewFWStateModuleConfig(
+		m.agent,
+		name,
+		oldConfig,
+		req.SyncConfig,
+		req.MapConfig,
+		uint16(dpConfig.WorkerCount()),
+	)
+	if err != nil {
+		m.log.Error("failed to create fwstate config",
+			zap.String("config", name),
+			zap.Error(err),
+		)
+		return nil, nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
 	}
 
-	return oldConfig, nil
+	// Validate the installed sync config: the request's zero fields were
+	// merged over the propagated or default values at construction.
+	if err := validateSyncConfig(newConfig.GetSyncConfig()); err != nil {
+		if oldConfig != nil {
+			// The map offsets are borrowed from the old config.
+			newConfig.DetachMaps()
+		}
+		newConfig.Free()
+		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
+		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
+
+	return oldConfig, newConfig, nil
 }
 
 func (m *FWStateService) publishUpdate(

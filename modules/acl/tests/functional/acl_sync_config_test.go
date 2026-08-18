@@ -69,11 +69,10 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
 
-	handle, err := backend.NewModule("sync-emit")
+	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, syncEmitConfig())
 	require.NoError(t, err)
 	t.Cleanup(handle.Free)
 
-	require.NoError(t, handle.UpdateRules([]cacl.AclRule{rule}, syncEmitConfig()))
 	require.NoError(t, backend.UpdateModule(handle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
 
@@ -83,10 +82,9 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 }
 
 // TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig verifies the
-// nil contract of the exported binding: a later UpdateRules with a nil emit
-// config clears the previously installed one on the same handle, so the
-// published config emits no state-sync frames instead of crafting them to
-// the stale destination.
+// nil contract of the exported binding: a replacement config constructed
+// with a nil emit config emits no state-sync frames, instead of crafting
+// them to the destination the previous config installed.
 func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 	rule := allow4Rule(
 		filter.IPNets{filter.UnspecifiedIPv4},
@@ -95,22 +93,45 @@ func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 	)
 	rule.Actions = []cacl.AclAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
 
-	// The same handle compiles the rules twice, and the second compile
-	// allocates fresh filter tables in the module arena next to the
-	// first, so the harness carries a larger agent arena (the sizes the
-	// net6-share tests proved under ASan).
+	// The replacement constructs a second config in the same module
+	// arena next to the first, so the harness carries a larger agent
+	// arena (the sizes the net6-share tests proved under ASan).
 	h, agent, backend := setupACLHarnessSized(t, []string{"port0"}, 192*datasize.MB, 48*datasize.MB)
 
-	handle, err := backend.NewModule("sync-emit")
+	emitHandle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, syncEmitConfig())
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
-
-	require.NoError(t, handle.UpdateRules([]cacl.AclRule{rule}, syncEmitConfig()))
-	require.NoError(t, handle.UpdateRules([]cacl.AclRule{rule}, nil))
-	require.NoError(t, backend.UpdateModule(handle))
+	t.Cleanup(emitHandle.Free)
+	require.NoError(t, backend.UpdateModule(emitHandle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
 
 	result, err := h.HandlePackets(syncStatePacket(t))
+	require.NoError(t, err)
+	require.Len(t, result.Output, 2, "the emit config must drive a state-sync frame first")
+
+	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, nil)
+	require.NoError(t, err)
+	t.Cleanup(handle.Free)
+
+	// A module publish waits for a worker round to acknowledge the new
+	// generation, and only HandlePackets drives rounds in this harness.
+	// Drive bare rounds until the replacement publish completes.
+	publishDone := make(chan error, 1)
+	go func() {
+		publishDone <- backend.UpdateModule(handle)
+	}()
+	publishing := true
+	for publishing {
+		select {
+		case err := <-publishDone:
+			require.NoError(t, err)
+			publishing = false
+		default:
+			_, err := h.HandlePackets()
+			require.NoError(t, err)
+		}
+	}
+
+	result, err = h.HandlePackets(syncStatePacket(t))
 	require.NoError(t, err)
 	require.Len(t, result.Output, 1, "a nil emit config must clear the previously installed one")
 }

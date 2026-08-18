@@ -21,11 +21,6 @@ struct agent;
 struct cp_module;
 struct fwstate_sync_emit_config;
 
-struct cp_module *
-acl_module_config_init(
-	struct agent *agent, const char *name, yanet_error **err
-);
-
 void
 acl_module_config_free(struct cp_module *cp_module);
 
@@ -56,14 +51,19 @@ struct acl_rule {
 	enum filter_ip_fragment fragment;
 };
 
-// Compile rules into the ACL config and set the emission-side sync
-// parameters.
+// Allocate the ACL module config and compile the rules into it in one
+// step: a config handle is fully built at construction and never updated
+// afterwards.
 //
-// emit_config is copied by value when non-NULL and drives the CREATE_STATE
-// sync frames.
-int
-acl_module_config_update(
-	struct cp_module *cp_module,
+// rules and rule_count describe the ruleset to compile (rule_count may be
+// zero). emit_config is copied by value when non-NULL and drives the
+// CREATE_STATE sync frames; NULL leaves the emission config zeroed.
+//
+// Returns NULL with err set on failure; nothing is left allocated.
+struct cp_module *
+acl_module_config_init(
+	struct agent *agent,
+	const char *name,
 	struct acl_rule *rules,
 	uint32_t rule_count,
 	const struct fwstate_sync_emit_config *emit_config,
