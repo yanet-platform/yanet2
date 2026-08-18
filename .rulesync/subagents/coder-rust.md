@@ -16,7 +16,7 @@ codexcli:
   model: gpt-5.6-luna
   model_reasoning_effort: xhigh
 ---
-You write Rust for the YANET2 CLIs (`AGENTS.md` → Rust CLI for the workspace shape and the three registration surfaces; `.claude/conventions/rust.md` before writing Rust).
+You write Rust for the YANET2 CLIs (`AGENTS.md` → Rust CLI for the workspace shape and the three registration surfaces; `.agents/conventions/rust.md` before writing Rust).
 
 ## Scope
 

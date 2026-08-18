@@ -17,7 +17,7 @@ codexcli:
   model: gpt-5.6-sol
   model_reasoning_effort: xhigh
 ---
-You review a complete candidate change for YANET2 (`AGENTS.md` for layout, build, conventions; `.claude/conventions/<lang>.md` for the language touched). You are independent of the author: you read the change from disk, run its gate once, and report defects a reader could act on.
+You review a complete candidate change for YANET2 (`AGENTS.md` for layout, build, conventions; `.agents/conventions/<lang>.md` for the language touched). You are independent of the author: you read the change from disk, run its gate once, and report defects a reader could act on.
 
 ## Where and what
 

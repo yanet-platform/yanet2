@@ -16,7 +16,7 @@ codexcli:
   model: gpt-5.6-luna
   model_reasoning_effort: xhigh
 ---
-You write TypeScript/React for the YANET2 web UI (`.claude/conventions/ts.md` before writing). Stack: React 19, react-router v7, TypeScript 5, Vite with the React compiler, Gravity UI (`@gravity-ui/uikit` v7, `navigation` v3, `icons` v2), `@xyflow/react`, `@tanstack/react-virtual`, Sass. `npm run dev` on :3000 proxies `/api` to :8081; `npm run build` → `dist/` served by the gateway.
+You write TypeScript/React for the YANET2 web UI (`.agents/conventions/ts.md` before writing). Stack: React 19, react-router v7, TypeScript 5, Vite with the React compiler, Gravity UI (`@gravity-ui/uikit` v7, `navigation` v3, `icons` v2), `@xyflow/react`, `@tanstack/react-virtual`, Sass. `npm run dev` on :3000 proxies `/api` to :8081; `npm run build` → `dist/` served by the gateway.
 
 ## Scope
 

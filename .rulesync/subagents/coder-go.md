@@ -17,7 +17,7 @@ codexcli:
   model: gpt-5.6-luna
   model_reasoning_effort: xhigh
 ---
-You write Go for YANET2 (`AGENTS.md` for layout and build; `.claude/conventions/go.md` before writing Go).
+You write Go for YANET2 (`AGENTS.md` for layout and build; `.agents/conventions/go.md` before writing Go).
 
 ## Scope
 

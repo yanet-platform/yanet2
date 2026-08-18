@@ -17,7 +17,7 @@ codexcli:
   model: gpt-5.6-luna
   model_reasoning_effort: xhigh
 ---
-You write C for the YANET2 dataplane (`AGENTS.md` for layout and build; `.claude/conventions/c.md` before writing C — it holds the module invariants: `cp_module` first field, `container_of()` from `ectx->module`, `memory_balloc`/`memory_bfree` pairing, packet bounds checks, `#pragma once`, `static`/`static inline`).
+You write C for the YANET2 dataplane (`AGENTS.md` for layout and build; `.agents/conventions/c.md` before writing C — it holds the module invariants: `cp_module` first field, `container_of()` from `ectx->module`, `memory_balloc`/`memory_bfree` pairing, packet bounds checks, `#pragma once`, `static`/`static inline`).
 
 ## Scope
 

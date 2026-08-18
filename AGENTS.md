@@ -60,7 +60,7 @@ Agents: charters are authored in `.rulesync/subagents/*.md` (`make ai/agents` ge
 
 ## Conventions
 
-Language rules: `.claude/conventions/{go,rust,c,ts}.md` — read the one for the language you touch.
+Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch.
 
 - C-only changes still need `go test -count=1` and a clean `meson compile`: Go can link a stale C archive. A shared-memory layout or `YANET_MODULE_ABI_VERSION` change needs `go clean -cache`, removal of standalone CGO binaries and of `/dev/hugepages/yanet*`.
 - Test logic and invariants, not human-readable CLI output (ASCII-only paths and canonical MAC/hex rendering are contracts and may be tested).

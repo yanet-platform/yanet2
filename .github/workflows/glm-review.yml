@@ -82,10 +82,10 @@ jobs:
           added="|"
           while IFS= read -r name; do
             case $name in
-              *.c|*.h) conv=.claude/conventions/c.md ;;
-              *.go) conv=.claude/conventions/go.md ;;
-              *.rs) conv=.claude/conventions/rust.md ;;
-              *.ts|*.tsx) conv=.claude/conventions/ts.md ;;
+              *.c|*.h) conv=.agents/conventions/c.md ;;
+              *.go) conv=.agents/conventions/go.md ;;
+              *.rs) conv=.agents/conventions/rust.md ;;
+              *.ts|*.tsx) conv=.agents/conventions/ts.md ;;
               *) continue ;;
             esac
             case $added in
