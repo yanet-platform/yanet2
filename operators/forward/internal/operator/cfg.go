@@ -13,12 +13,12 @@ import (
 
 // Config is the top-level YAML configuration for yanet-forward-operator.
 type Config struct {
-	Logging   logging.Config             `yaml:"logging"`
-	Server    *operator.GRPCServerConfig `yaml:"server"`
-	Gateways  []operator.GatewayConfig   `yaml:"gateways"`
-	Register  operator.RegisterConfig    `yaml:"register"`
-	Reconcile operator.ReconcileConfig   `yaml:"reconcile"`
-	Functions []FunctionConfig           `yaml:"functions"`
+	Logging   logging.Config            `yaml:"logging"`
+	Server    operator.GRPCServerConfig `yaml:"server"`
+	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
+	Register  operator.RegisterConfig   `yaml:"register"`
+	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
+	Functions []FunctionConfig          `yaml:"functions"`
 }
 
 // Default resets the config to built-in defaults.
@@ -74,7 +74,7 @@ func DefaultConfig() *Config {
 		Logging: logging.Config{
 			Level: zapcore.InfoLevel,
 		},
-		Server: &operator.GRPCServerConfig{
+		Server: operator.GRPCServerConfig{
 			Endpoint: xcfg.MustNonEmptyString("[::1]:50003"),
 		},
 		Reconcile: operator.ReconcileConfig{

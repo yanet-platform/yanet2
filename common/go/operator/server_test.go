@@ -48,7 +48,7 @@ func TestGRPCServer_Run_ShutsDownWithOpenStream(t *testing.T) {
 		return ynpb.ReadinessService_ServiceDesc.ServiceName
 	}
 
-	server, serviceNames := NewGRPCServer(&GRPCServerConfig{}, []ServiceRegistrar{registrar}, WithGRPCLog(zap.NewNop()))
+	server, serviceNames := NewGRPCServer(GRPCServerConfig{}, []ServiceRegistrar{registrar}, WithGRPCLog(zap.NewNop()))
 	require.Equal(t, []string{ynpb.ReadinessService_ServiceDesc.ServiceName}, serviceNames)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

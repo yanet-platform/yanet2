@@ -32,7 +32,6 @@ func WithGRPCLog(log *zap.Logger) GRPCServerOption {
 
 // GRPCServer wraps a grpc.Server with the operator's service set.
 type GRPCServer struct {
-	cfg    *GRPCServerConfig
 	server *grpc.Server
 	log    *zap.Logger
 }
@@ -41,7 +40,7 @@ type GRPCServer struct {
 // registrars applied to a fresh grpc.Server and returns registered
 // service names.
 func NewGRPCServer(
-	cfg *GRPCServerConfig,
+	cfg GRPCServerConfig,
 	services []ServiceRegistrar,
 	options ...GRPCServerOption,
 ) (*GRPCServer, []string) {
@@ -57,7 +56,6 @@ func NewGRPCServer(
 	}
 
 	return &GRPCServer{
-		cfg:    cfg,
 		server: server,
 		log:    opts.Log,
 	}, serviceNames

@@ -35,12 +35,12 @@ const (
 
 // Config is the top-level YAML configuration for yanet-route-operator.
 type Config struct {
-	Logging   logging.Config             `yaml:"logging"`
-	Server    *operator.GRPCServerConfig `yaml:"server"`
-	Gateways  []operator.GatewayConfig   `yaml:"gateways"`
-	Register  operator.RegisterConfig    `yaml:"register"`
-	Reconcile operator.ReconcileConfig   `yaml:"reconcile"`
-	Static    StaticConfig               `yaml:"static"`
+	Logging   logging.Config            `yaml:"logging"`
+	Server    operator.GRPCServerConfig `yaml:"server"`
+	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
+	Register  operator.RegisterConfig   `yaml:"register"`
+	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
+	Static    StaticConfig              `yaml:"static"`
 	// Function is the single gateway-side network function published by
 	// this operator. Re-applied every reconcile pass — idempotent updates.
 	Function       FunctionConfig       `yaml:"function"`
@@ -113,7 +113,7 @@ func DefaultConfig() *Config {
 		Logging: logging.Config{
 			Level: zapcore.InfoLevel,
 		},
-		Server: &operator.GRPCServerConfig{
+		Server: operator.GRPCServerConfig{
 			Endpoint: xcfg.MustNonEmptyString("localhost:50002"),
 		},
 		Reconcile: operator.ReconcileConfig{

@@ -10,7 +10,7 @@ import (
 )
 
 type grpcServerOption struct {
-	Config   *GRPCServerConfig
+	Config   GRPCServerConfig
 	Services []ServiceRegistrar
 }
 
@@ -86,7 +86,7 @@ func WithGateways(register RegisterConfig, gateways ...GatewayConfig) Option {
 // metrics or operator APIs without director registration.
 //
 // When this option is not supplied, the operator does not bind a listener.
-func WithGRPCServer(cfg *GRPCServerConfig, services ...ServiceRegistrar) Option {
+func WithGRPCServer(cfg GRPCServerConfig, services ...ServiceRegistrar) Option {
 	return func(o *options) {
 		o.GRPCServer = &grpcServerOption{
 			Config:   cfg,
