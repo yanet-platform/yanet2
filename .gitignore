@@ -136,6 +136,7 @@ deploy/packages/
 ### AI ###
 .ai
 .cursor/
+.pi/
 
 # Worktree symlinks: a worktree may symlink these trees into the main
 # checkout, and a directory-only pattern does not match a symlink.

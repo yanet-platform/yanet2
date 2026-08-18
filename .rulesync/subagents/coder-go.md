@@ -12,7 +12,7 @@ claudecode:
     Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, WebFetch, TaskGet, TaskList, TaskUpdate
   color: blue
   memory: project
-  effort: medium
+  effort: xhigh
 codexcli:
   model: gpt-5.6-luna
   model_reasoning_effort: xhigh
