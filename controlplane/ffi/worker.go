@@ -7,9 +7,9 @@ import "C"
 import "fmt"
 
 const (
-	workerCounterSingleValueIdx  = C.uint64_t(0)
-	workerCounterPacketsValueIdx = C.uint64_t(0)
-	workerCounterBytesValueIdx   = C.uint64_t(1)
+	singleValueIdx = 0
+	packetsIdx     = 0
+	bytesIdx       = 1
 )
 
 type WorkerCounter struct {
@@ -32,118 +32,59 @@ type WorkerCounter struct {
 }
 
 func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
-	counters := C.yanet_get_worker_counters(m.ptr)
-	if counters == nil {
+	rawCounters := m.RawWorkerCounters()
+	if rawCounters == nil {
 		return nil, fmt.Errorf("failed to get worker counters")
 	}
-	defer C.yanet_counter_handle_list_free(counters)
 
-	counterByName := map[string]*C.struct_counter_handle{}
-	for idx := range counters.count {
-		handle := C.yanet_get_counter(counters, idx)
-		if handle == nil {
-			continue
-		}
-		counterByName[C.GoString(&handle.name[0])] = handle
+	counterSet, err := NewCounterSet(rawCounters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to index worker counters: %w", err)
 	}
 
-	rxBurstsHandle := counterByName["rx_bursts"]
-	iterationsHandle := counterByName["iterations"]
-	rxHandle := counterByName["rx"]
-	txHandle := counterByName["tx"]
-	remoteRxHandle := counterByName["remote_rx"]
-	remoteTxHandle := counterByName["remote_tx"]
-	localTxDropsHandle := counterByName["local_tx_drops"]
-	remoteTxDropsHandle := counterByName["remote_tx_drops"]
-	// The "drops" name is the dataplane counter-registry name backing Disposed. A
-	// mismatched rename leaves dropsHandle nil, crashing the dereference below.
-	dropsHandle := counterByName["drops"]
+	rxBursts := counterSet.Lookup("rx_bursts", 0).Require()
+	iterations := counterSet.Lookup("iterations", 1).Require()
+	rx := counterSet.Lookup("rx", 2).Require()
+	tx := counterSet.Lookup("tx", 2).Require()
+	remoteRx := counterSet.Lookup("remote_rx", 2).Require()
+	remoteTx := counterSet.Lookup("remote_tx", 2).Require()
+	localTxDrops := counterSet.Lookup("local_tx_drops", 1).Require()
+	remoteTxDrops := counterSet.Lookup("remote_tx_drops", 1).Require()
+	drops := counterSet.Lookup("drops", 1).Require()
 
-	workerCount := counters.instance_count
-	result := make([]WorkerCounter, workerCount)
-	for idx := range workerCount {
+	if err := counterSet.Err(); err != nil {
+		return nil, fmt.Errorf("failed to resolve worker counters: %w", err)
+	}
+
+	workers := counterSet.Instances()
+	result := make([]WorkerCounter, workers)
+	for idx := range workers {
 		var metadata C.struct_worker_counter_metadata
-		if C.yanet_get_worker_counter_metadata(m.ptr, idx, &metadata) != 0 {
+		if C.yanet_get_worker_counter_metadata(m.ptr, C.uint64_t(idx), &metadata) != 0 {
 			return nil, fmt.Errorf(
-				"failed to get worker counter metadata for worker %d",
-				uint64(idx),
+				"failed to get metadata for worker at index %d",
+				idx,
 			)
 		}
 
-		worker := WorkerCounter{
-			WorkerIdx: uint32(idx),
-			Iterations: uint64(C.yanet_get_counter_value(
-				iterationsHandle.values,
-				workerCounterSingleValueIdx,
-				idx,
-			)),
-			RxPackets: uint64(C.yanet_get_counter_value(
-				rxHandle.values,
-				workerCounterPacketsValueIdx,
-				idx,
-			)),
-			RxBytes: uint64(C.yanet_get_counter_value(
-				rxHandle.values,
-				workerCounterBytesValueIdx,
-				idx,
-			)),
-			TxPackets: uint64(C.yanet_get_counter_value(
-				txHandle.values,
-				workerCounterPacketsValueIdx,
-				idx,
-			)),
-			TxBytes: uint64(C.yanet_get_counter_value(
-				txHandle.values,
-				workerCounterBytesValueIdx,
-				idx,
-			)),
-			RemoteRxPackets: uint64(C.yanet_get_counter_value(
-				remoteRxHandle.values,
-				workerCounterPacketsValueIdx,
-				idx,
-			)),
-			RemoteTxPackets: uint64(C.yanet_get_counter_value(
-				remoteTxHandle.values,
-				workerCounterPacketsValueIdx,
-				idx,
-			)),
-			LocalTxDrops: uint64(C.yanet_get_counter_value(
-				localTxDropsHandle.values,
-				workerCounterSingleValueIdx,
-				idx,
-			)),
-			RemoteTxDrops: uint64(C.yanet_get_counter_value(
-				remoteTxDropsHandle.values,
-				workerCounterSingleValueIdx,
-				idx,
-			)),
-			Disposed: uint64(C.yanet_get_counter_value(
-				dropsHandle.values,
-				workerCounterSingleValueIdx,
-				idx,
-			)),
+		result[idx] = WorkerCounter{
+			WorkerIdx:       uint32(idx),
+			CoreID:          uint32(metadata.core_id),
+			DeviceID:        uint32(metadata.device_id),
+			QueueID:         uint32(metadata.queue_id),
+			MaxBurstSize:    uint32(metadata.rx_burst_size),
+			RxBursts:        rxBursts.InstanceValues(idx),
+			Iterations:      iterations.Value(idx, singleValueIdx),
+			RxPackets:       rx.Value(idx, packetsIdx),
+			RxBytes:         rx.Value(idx, bytesIdx),
+			TxPackets:       tx.Value(idx, packetsIdx),
+			TxBytes:         tx.Value(idx, bytesIdx),
+			RemoteRxPackets: remoteRx.Value(idx, packetsIdx),
+			RemoteTxPackets: remoteTx.Value(idx, packetsIdx),
+			LocalTxDrops:    localTxDrops.Value(idx, singleValueIdx),
+			RemoteTxDrops:   remoteTxDrops.Value(idx, singleValueIdx),
+			Disposed:        drops.Value(idx, singleValueIdx),
 		}
-
-		rxBurstSize := uint32(metadata.rx_burst_size) + 1
-		worker.RxBursts = make([]uint64, rxBurstSize)
-		for burstIdx := C.uint64_t(0); burstIdx < rxBurstsHandle.size; burstIdx++ {
-			worker.RxBursts[burstIdx] = uint64(C.yanet_get_counter_value(
-				rxBurstsHandle.values,
-				burstIdx,
-				idx,
-			))
-		}
-
-		if rxBurstSize > 0 {
-			worker.MaxBurstSize = rxBurstSize - 1
-		}
-
-		worker.CoreID = uint32(metadata.core_id)
-		worker.DeviceID = uint32(metadata.device_id)
-		worker.QueueID = uint32(metadata.queue_id)
-		worker.MaxBurstSize = uint32(metadata.rx_burst_size)
-
-		result[idx] = worker
 	}
 
 	return result, nil

@@ -54,8 +54,6 @@ loopindex:common/go/xnetip/netwithmask.go:NetWithMask.ToPrefix:i:1  # legacy: re
 loopindex:controlplane/builtin/counters.go:makeHistogram:i:1  # legacy: rename to idx
 loopindex:controlplane/ffi/agent.go:Agent.UpdateDevices:i:1  # legacy: rename to idx
 loopindex:controlplane/ffi/agent.go:Agent.UpdateModules:i:1  # legacy: rename to idx
-loopindex:controlplane/ffi/shm.go:DPConfig.ModuleCounters:i:1  # legacy: rename to idx
-loopindex:controlplane/ffi/shm.go:DPConfig.PerformanceCounters:i:1  # legacy: rename to idx
 loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:1  # legacy: rename to idx
 loopindex:controlplane/internal/xgrpc/interceptor.go:protoMarshaler.MarshalLogObject:i:2  # legacy: rename to idx
 loopindex:modules/balancer2/bindings/go/cbalancer2/cgo.go:Balancer.UpdateVSRealStates:i:1  # legacy: rename to idx
