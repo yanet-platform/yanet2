@@ -1,9 +1,9 @@
 #include "cp_object.h"
 
 #include "common/container_of.h"
-#include "dataplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 
 #include <string.h>
 

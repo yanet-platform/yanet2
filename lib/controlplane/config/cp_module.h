@@ -3,11 +3,11 @@
 #include "common/container_of.h"
 #include "common/memory.h"
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/defines.h"
-#include "controlplane/config/registry.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/defines.h"
+#include "lib/controlplane/config/registry.h"
 
 #include "lib/dataplane/counters/module.h"
 #include "lib/errors/errors.h"

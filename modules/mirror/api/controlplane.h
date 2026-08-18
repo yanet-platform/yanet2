@@ -2,11 +2,11 @@
 
 #include <stdint.h>
 
-#include <filter/rule.h>
+#include <lib/filter/rule.h>
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 
-#include "controlplane/config/defines.h"
+#include "lib/controlplane/config/defines.h"
 
 #include "lib/errors/errors.h"
 

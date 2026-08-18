@@ -1,6 +1,6 @@
 package plain
 
-//#cgo CFLAGS: -I../../../ -I../../../lib
+//#cgo CFLAGS: -I../../../
 //#cgo LDFLAGS: -L../../../build/devices/plain/api -ldev_plain_api
 //#cgo LDFLAGS: -L../../../build/lib/logging/ -llogging
 //

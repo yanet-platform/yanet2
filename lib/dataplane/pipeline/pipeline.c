@@ -2,14 +2,14 @@
 
 #include "common/numutils.h"
 
-#include "counters/histogram.h"
+#include "lib/counters/histogram.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
-#include "dataplane/config/zone.h"
-#include "dataplane/packet/packet.h"
-#include "dataplane/time/tsc.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/time/tsc.h"
 
 #include <rte_cycles.h>
 

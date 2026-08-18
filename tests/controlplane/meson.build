@@ -9,7 +9,7 @@ config_gen_test = executable(
     lib_config_cp_dep,
     lib_config_dp_dep,
   ],
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
 )
 test('config_gen', config_gen_test, suite: ['controlplane'])
 
@@ -25,6 +25,6 @@ agent_memory_tree_test = executable(
     lib_config_dp_dep,
     lib_agent_cp_dep,
   ],
-  include_directories: [yanet_libdir, yanet_rootdir],
+  include_directories: yanet_rootdir,
 )
 test('agent_memory_tree', agent_memory_tree_test, suite: ['controlplane'])

@@ -1,6 +1,6 @@
 package dataplane
 
-//#cgo CFLAGS: -I../../.. -I../../../lib
+//#cgo CFLAGS: -I../../..
 //#cgo LDFLAGS: -L../../../build/lib/utils -llib_utils
 //#cgo LDFLAGS: -L../../../build/lib/dataplane/packet -lpacket
 //

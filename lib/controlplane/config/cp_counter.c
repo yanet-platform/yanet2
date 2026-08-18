@@ -3,7 +3,7 @@
 #include "common/memory.h"
 
 #include "common/memory_address.h"
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
 #include <stdlib.h>
 #include <string.h>

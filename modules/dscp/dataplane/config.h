@@ -1,8 +1,8 @@
 #pragma once
 
 #include "common/lpm.h"
-#include "controlplane/config/cp_module.h"
-#include "dataplane/packet/dscp.h"
+#include "lib/controlplane/config/cp_module.h"
+#include "lib/dataplane/packet/dscp.h"
 
 struct dscp_module_config {
 	struct cp_module cp_module;

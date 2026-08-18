@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "controlplane/config/cp_module.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/config/cp_module.h"
+#include "lib/dataplane/config/zone.h"
 #include "modules/mirror/api/controlplane.h"
 #include "modules/mirror/dataplane/config.h"
 #include "modules/mirror/dataplane/dataplane.h"

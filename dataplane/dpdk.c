@@ -12,7 +12,7 @@
 #include <rte_eth_ring.h>
 #include <rte_ethdev.h>
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 struct eal_args {
 	char buf[1024];

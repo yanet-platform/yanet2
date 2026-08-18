@@ -20,7 +20,7 @@ foreach target_name, target_info : fuzzing_targets
     link_args: yanet_link_args + fuzz_args,
     sources: [target_info['source']] + nofuzz_sources,
     dependencies: [libdpdk_dep] + target_info['deps'],
-    include_directories: [yanet_rootdir, yanet_libdir, target_info['module_dir']],
+    include_directories: [yanet_rootdir, target_info['module_dir']],
     link_language: 'c',
   )
   

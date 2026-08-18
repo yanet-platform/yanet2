@@ -21,7 +21,7 @@ lib_agent_cp = static_library(
 lib_agent_cp_dep = declare_dependency(
   link_with: lib_agent_cp,
   dependencies: [lib_errors_dep],
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
 )
 
 test_agent_attach = executable(

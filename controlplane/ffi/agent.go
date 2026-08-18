@@ -1,6 +1,6 @@
 package ffi
 
-//#cgo CFLAGS: -I../../ -I../../lib
+//#cgo CFLAGS: -I../../
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
@@ -16,7 +16,7 @@ package ffi
 //
 //#define _GNU_SOURCE
 //#include "api/agent.h"
-//#include "controlplane/agent/agent.h"
+//#include "lib/controlplane/agent/agent.h"
 import "C"
 import (
 	"fmt"

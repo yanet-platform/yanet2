@@ -11,7 +11,7 @@
 
 #include "common/test_assert.h"
 
-#include "controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_module.h"
 
 #include <string.h>
 

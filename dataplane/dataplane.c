@@ -1,7 +1,7 @@
 #include "dataplane.h"
 
 #include "config.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include "numa.h"
 
 #include <stdbool.h>
@@ -21,9 +21,9 @@
 
 #include "common/hugepages.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/zone.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 
 #include "dataplane/device.h"
 #include "dataplane/worker.h"

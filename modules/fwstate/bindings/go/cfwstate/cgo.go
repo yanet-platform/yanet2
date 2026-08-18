@@ -1,7 +1,6 @@
 package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/modules/fwstate/api -lfwstate_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //

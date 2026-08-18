@@ -1,6 +1,6 @@
 package fwstate_test
 
-//#cgo CFLAGS: -I../../../../ -I../../../../lib
+//#cgo CFLAGS: -I../../../../
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
 //#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
 //

@@ -18,9 +18,6 @@ lib_module_dp = static_library(
 
 lib_module_dp_dep = declare_dependency(
   link_with: [lib_module_dp],
-  include_directories: [
-    yanet_libdir,
-    yanet_rootdir,
-  ],
+  include_directories: yanet_rootdir,
   dependencies: dependencies,
 )

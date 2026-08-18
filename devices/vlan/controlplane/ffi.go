@@ -1,6 +1,6 @@
 package vlan
 
-//#cgo CFLAGS: -I../../../ -I../../../lib
+//#cgo CFLAGS: -I../../../
 //#cgo LDFLAGS: -L../../../build/devices/vlan/api -ldev_vlan_api
 //#cgo LDFLAGS: -L../../../build/lib/logging/ -llogging
 //

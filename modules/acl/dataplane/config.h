@@ -1,6 +1,6 @@
 #pragma once
 
-#include "controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_module.h"
 
 #include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"

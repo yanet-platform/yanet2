@@ -14,8 +14,8 @@
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 
-#include "controlplane/agent/agent.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/dataplane/config/zone.h"
 
 const uint32_t default_snaplen = MBUF_MAX_SIZE;
 const uint32_t max_ring_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;

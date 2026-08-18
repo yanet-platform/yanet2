@@ -1,7 +1,6 @@
 package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#include <stdlib.h>
 //#include "lib/fwstate/fwstate_cursor.h"
 import "C"

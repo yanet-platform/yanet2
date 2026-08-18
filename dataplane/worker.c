@@ -33,8 +33,8 @@
  *  - anything else
  */
 
-#include "dataplane/time/clock.h"
 #include "errors.h"
+#include "lib/dataplane/time/clock.h"
 #include "yanet_build_config.h"
 
 #include "worker.h"
@@ -57,7 +57,7 @@
 #include "lib/dataplane/worker/round.h"
 #include "lib/dataplane/worker/tx_pipe.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 #include <rte_ethdev.h>
 

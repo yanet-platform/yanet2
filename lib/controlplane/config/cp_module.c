@@ -3,12 +3,12 @@
 #include "api/counter.h"
 #include "common/container_of.h"
 
-#include "counters/counters.h"
-#include "counters/histogram.h"
-#include "dataplane/config/zone.h"
+#include "lib/counters/counters.h"
+#include "lib/counters/histogram.h"
+#include "lib/dataplane/config/zone.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/zone.h"
 
 #include <stdio.h>
 

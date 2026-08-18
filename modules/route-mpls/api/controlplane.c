@@ -6,7 +6,7 @@
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 
 #include "lib/filter/compiler.h"
 

@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "controlplane/config/econtext.h"
+#include "lib/controlplane/config/econtext.h"
 
 #include "cp_device.h"
 #include "cp_module.h"

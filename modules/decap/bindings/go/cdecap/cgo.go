@@ -1,6 +1,6 @@
 package cdecap
 
-//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/decap/api -ldecap_cp
 //
 // #include "api/agent.h"

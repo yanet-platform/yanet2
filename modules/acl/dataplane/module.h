@@ -1,7 +1,7 @@
 #pragma once
 
-#include "controlplane/config/cp_module.h"
-#include <filter/filter.h>
+#include "lib/controlplane/config/cp_module.h"
+#include <lib/filter/filter.h>
 
 struct acl_module_config {
 	struct cp_module cp_module;

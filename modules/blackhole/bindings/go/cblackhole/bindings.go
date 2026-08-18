@@ -2,7 +2,6 @@
 package cblackhole
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/modules/blackhole/api -lblackhole_cp
 //
 //#include "api/agent.h"

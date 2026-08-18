@@ -11,11 +11,11 @@
 
 #include "common/lpm.h"
 #include "common/memory.h"
-#include "controlplane/config/econtext.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
+#include "lib/controlplane/config/econtext.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/logging/log.h"
 

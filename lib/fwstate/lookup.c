@@ -4,8 +4,8 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
-#include "dataplane/packet/packet.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include "fwmap_typed.h"
 #include "layermap.h"

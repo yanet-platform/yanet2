@@ -11,8 +11,8 @@
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 
-#include "controlplane/agent/agent.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/dataplane/config/zone.h"
 
 static void
 cp_device_trafgen_destroy(struct cp_device *cp_device);

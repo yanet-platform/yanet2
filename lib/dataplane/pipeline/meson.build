@@ -18,6 +18,6 @@ lib_pipeline_dp = static_library(
 
 lib_pipeline_dp_dep = declare_dependency(
   link_with: [lib_pipeline_dp],
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
   dependencies: dependencies,
 )

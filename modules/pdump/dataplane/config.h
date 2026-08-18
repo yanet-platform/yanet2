@@ -1,6 +1,6 @@
 #pragma once
 
-#include "controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_module.h"
 
 #include "mode.h"
 #include "ring.h"

@@ -2,10 +2,10 @@
 
 #include "common/container_of.h"
 
-#include "controlplane/agent/agent.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/dataplane/config/zone.h"
 
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/config/zone.h"
 
 int
 cp_device_config_init(

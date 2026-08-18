@@ -22,14 +22,14 @@
 
 #include "common/test_assert.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/zone.h"
 #include "devices/plain/api/controlplane.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/zone.h"
 
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 #include <stdio.h>
 #include <stdlib.h>

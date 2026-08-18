@@ -2,10 +2,10 @@
 
 #include "config.h"
 
-#include "dataplane/module/module.h"
-#include "dataplane/packet/decap.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/decap.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 

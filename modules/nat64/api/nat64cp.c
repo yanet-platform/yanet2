@@ -15,10 +15,10 @@
 #include "common/memory_address.h"
 #include "common/strutils.h"
 #include "lib/errors/errors.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
-#include "controlplane/agent/agent.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/dataplane/config/zone.h"
 
 static void
 nat64_module_config_destroy(struct cp_module *cp_module) {

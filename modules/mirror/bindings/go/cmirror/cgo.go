@@ -1,7 +1,6 @@
 package cmirror
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/modules/mirror/api -lmirror_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //

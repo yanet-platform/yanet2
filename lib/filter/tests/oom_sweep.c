@@ -19,7 +19,7 @@
 
 #include "lib/filter/tests/helpers.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 #include <stdint.h>
 #include <stdlib.h>

@@ -19,7 +19,7 @@ lib_lib_utils = static_library(
 
 lib_lib_utils_dep = declare_dependency(
   link_with: lib_lib_utils,
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
   dependencies: dependencies
 )
 

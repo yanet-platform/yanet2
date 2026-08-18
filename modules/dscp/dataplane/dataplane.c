@@ -3,13 +3,13 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include "dataplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 
-#include "dataplane/module/module.h"
-#include "dataplane/packet/dscp.h"
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/dscp.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
 static int

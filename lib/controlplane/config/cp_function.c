@@ -2,8 +2,8 @@
 
 #include "common/container_of.h"
 
-#include "controlplane/config/cp_chain.h"
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/config/cp_chain.h"
+#include "lib/controlplane/config/zone.h"
 
 #include "lib/errors/errors.h"
 

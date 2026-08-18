@@ -2,7 +2,7 @@
 
 #include "lib/filter/tests/helpers.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include <fcntl.h>
 #include <limits.h>
 #include <netinet/in.h>
@@ -14,7 +14,7 @@
 
 #include <common/rng.h>
 
-#include <filter/compiler.h>
+#include <lib/filter/compiler.h>
 
 FILTER_COMPILER_DECLARE(filter_sign, net4_dst, port_dst, proto_range);
 

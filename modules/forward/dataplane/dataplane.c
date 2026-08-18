@@ -3,15 +3,15 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <filter/query.h>
+#include <lib/filter/query.h>
 
-#include "controlplane/config/econtext.h"
+#include "lib/controlplane/config/econtext.h"
 
-#include "dataplane/config/zone.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
-#include "dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/pipeline.h"
 
 FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
 

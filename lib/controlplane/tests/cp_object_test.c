@@ -9,15 +9,15 @@
 #include "common/memory_block.h"
 #include "common/test_assert.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/cp_object.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_object.h"
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 #include <stdio.h>
 #include <stdlib.h>

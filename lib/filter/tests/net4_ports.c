@@ -5,7 +5,7 @@
 #include "lib/filter/tests/helpers.h"
 #include "lib/utils/packet.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdio.h>

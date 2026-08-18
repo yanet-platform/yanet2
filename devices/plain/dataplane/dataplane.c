@@ -6,10 +6,10 @@
 
 #include "lib/dataplane/device/device.h"
 
-#include "dataplane/packet/packet.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
 
-#include "dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/pipeline/pipeline.h"
 
 static void
 plain_input_handle(

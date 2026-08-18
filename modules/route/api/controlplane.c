@@ -6,7 +6,7 @@
 #include "common/exp_array.h"
 #include "common/lpm.h"
 
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 
 enum fib_iter_phase {
 	fib_iter_phase_start = 0,

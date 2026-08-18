@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dataplane/module/module.h"
+#include "lib/dataplane/module/module.h"
 
 struct module *
 new_module_fwstate();

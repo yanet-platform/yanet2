@@ -16,12 +16,12 @@
 #include "common/spinlock.h"
 #include "common/strutils.h"
 
-#include "controlplane/config/cp_module.h"
-#include "controlplane/config/cp_object.h"
-#include "controlplane/config/zone.h"
-#include "counters/counters.h"
-#include "dataplane/config/zone.h"
-#include "dataplane/pipeline/econtext.h"
+#include "lib/controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_object.h"
+#include "lib/controlplane/config/zone.h"
+#include "lib/counters/counters.h"
+#include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/pipeline/econtext.h"
 
 #include "lib/errors/errors.h"
 

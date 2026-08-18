@@ -1,10 +1,10 @@
 package croute
 
-//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/route/api -lroute_cp
 //
 //#include "api/agent.h"
-//#include "counters/counters.h"
+//#include "lib/counters/counters.h"
 //#include "modules/route/api/controlplane.h"
 import "C"
 

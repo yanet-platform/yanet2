@@ -2,7 +2,7 @@
 
 #include "common/container_of.h"
 
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/config/zone.h"
 
 #include "lib/errors/errors.h"
 

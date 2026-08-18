@@ -27,8 +27,8 @@
 #include "lib/filter/filter.h"
 #include "lib/filter/query.h"
 #include "lib/filter/tests/helpers.h"
+#include "lib/logging/log.h"
 #include "lib/utils/packet.h"
-#include "logging/log.h"
 
 #include <assert.h>
 #include <getopt.h>

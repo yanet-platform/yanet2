@@ -1,6 +1,6 @@
 package croutempls
 
-//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/route-mpls/api -lroute_mpls_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //

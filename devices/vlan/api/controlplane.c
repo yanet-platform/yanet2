@@ -6,7 +6,7 @@
 
 #include "common/container_of.h"
 
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 
 #include "lib/errors/errors.h"
 

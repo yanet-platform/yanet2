@@ -1,7 +1,6 @@
 package cbalancer2
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/modules/balancer2/api -lbalancer2_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //

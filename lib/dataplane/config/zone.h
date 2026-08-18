@@ -4,15 +4,15 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "dataplane/device/device.h"
-#include "dataplane/module/module.h"
-#include "dataplane/object/object.h"
+#include "lib/dataplane/device/device.h"
+#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/object/object.h"
 
-#include "dataplane/time/clock.h"
+#include "lib/dataplane/time/clock.h"
 
-#include "dataplane/config/topology.h"
+#include "lib/dataplane/config/topology.h"
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 
 struct cp_config;
 struct rte_mempool;

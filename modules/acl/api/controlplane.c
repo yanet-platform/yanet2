@@ -8,15 +8,15 @@
 #include "../dataplane/config.h"
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 
 #include "common/container_of.h"
 
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 
-#include <filter/compiler.h>
+#include <lib/filter/compiler.h>
 
 FILTER_COMPILER_DECLARE(ACL_FILTER_VLAN_TAG, device, vlan);
 

@@ -6,7 +6,7 @@
 #include "common/buildinfo.h"
 #include "config.h"
 #include "dataplane.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include "yanet_build_stamp.h"
 
 static void

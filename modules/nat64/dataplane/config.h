@@ -3,7 +3,7 @@
 #include "common/lpm.h"
 #include "common/network.h"
 
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/config/zone.h"
 
 /**
  * @brief Structure representing a mapping from IPv4 to IPv6

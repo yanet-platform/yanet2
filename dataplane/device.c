@@ -7,7 +7,7 @@
 #include "common/strutils.h"
 #include "dpdk.h"
 #include "lib/dataplane/config/topology.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 // Maximum RSS key / RETA sizes we are willing to stage on the stack while
 // querying the NIC. RTE_ETH_RSS_RETA_SIZE_512 (the largest table any driver

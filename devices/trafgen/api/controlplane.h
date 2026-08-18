@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "controlplane/config/cp_device.h"
+#include "lib/controlplane/config/cp_device.h"
 
 struct agent;
 struct cp_device;

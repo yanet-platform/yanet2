@@ -2,7 +2,6 @@ package dataplaneut
 
 /*
 #cgo CFLAGS: -I../../../
-#cgo CFLAGS: -I../../../lib
 #cgo CFLAGS: -I../../../build/subprojects/dpdk/lib
 #cgo CFLAGS: -I../../../build/lib/dataplane_ut
 

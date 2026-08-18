@@ -1,6 +1,6 @@
 package nat64_test
 
-//#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
+//#cgo CFLAGS: -I../../../.. -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/nat64/dataplane -lnat64_dp
 //#cgo LDFLAGS: -L../../../../build/modules/nat64/api -lnat64_cp
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket

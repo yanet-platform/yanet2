@@ -1,8 +1,8 @@
 #pragma once
 
-#include <filter/filter.h>
+#include <lib/filter/filter.h>
 
-#include "controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_module.h"
 
 #define MIRROR_MODE_NONE 0
 #define MIRROR_MODE_IN 1

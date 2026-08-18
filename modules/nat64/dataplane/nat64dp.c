@@ -46,11 +46,11 @@
 
 /* Project headers */
 #include "common.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/data.h"
-#include "dataplane/packet/icmp.h"
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/icmp.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "modules/nat64/dataplane/nat64dp.h"
 

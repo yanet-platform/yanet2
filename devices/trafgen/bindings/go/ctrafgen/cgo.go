@@ -1,7 +1,7 @@
 // Package ctrafgen is the Go binding for the trafgen device.
 package ctrafgen
 
-//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/devices/trafgen/api -ldev_trafgen_api
 //
 // #include "api/agent.h"

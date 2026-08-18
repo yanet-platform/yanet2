@@ -1,6 +1,6 @@
 package fwstate
 
-//#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
+//#cgo CFLAGS: -I../../../.. -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
 //#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters

@@ -8,16 +8,16 @@
 #include <rte_udp.h>
 
 #include "common/memory_address.h"
-#include "dataplane/module/module.h"
-#include "fwstate/fwmap_typed.h"
-#include "fwstate/layermap.h"
-#include "fwstate/types.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
-#include "logging/log.h"
+#include "lib/fwstate/fwmap_typed.h"
+#include "lib/fwstate/layermap.h"
+#include "lib/fwstate/types.h"
+#include "lib/logging/log.h"
 
 #include "config.h"
 

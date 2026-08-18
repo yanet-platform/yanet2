@@ -1,7 +1,6 @@
 package cacl
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/modules/acl/api -lacl_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging

@@ -19,7 +19,7 @@ lib_counters = static_library(
 
 lib_counters_dep = declare_dependency(
   link_with: [lib_counters],
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
   dependencies: dependencies,
 )
 

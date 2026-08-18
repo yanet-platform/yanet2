@@ -1,8 +1,8 @@
 #include <netinet/in.h>
 
 #include "common/test_assert.h"
-#include "dataplane/packet/packet.h"
-#include "logging/log.h"
+#include "lib/dataplane/packet/packet.h"
+#include "lib/logging/log.h"
 #include "packet.h"
 
 static int

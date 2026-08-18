@@ -5,7 +5,7 @@
 
 #include "common/test_assert.h"
 
-#include "dataplane/packet/data.h"
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
 /*

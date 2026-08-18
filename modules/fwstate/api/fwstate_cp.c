@@ -4,7 +4,7 @@
 #include "fwstate_cp.h"
 
 #include "common/container_of.h"
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 #include "lib/errors/errors.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap_typed.h"

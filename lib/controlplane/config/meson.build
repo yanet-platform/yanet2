@@ -29,5 +29,5 @@ lib_config_cp = static_library(
 lib_config_cp_dep = declare_dependency(
   link_with: lib_config_cp,
   dependencies : [lib_counters_dep, lib_errors_dep],
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
 )

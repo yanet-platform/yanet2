@@ -7,17 +7,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "controlplane/config/econtext.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
-#include "dataplane/time/clock.h"
-#include "dataplane/worker/worker.h"
-#include "fwstate/lookup.h"
-#include "fwstate/sync.h"
+#include "lib/controlplane/config/econtext.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
-#include "logging/log.h"
+#include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/time/clock.h"
+#include "lib/dataplane/worker/worker.h"
+#include "lib/fwstate/lookup.h"
+#include "lib/fwstate/sync.h"
+#include "lib/logging/log.h"
 
-#include <filter/query.h>
+#include <lib/filter/query.h>
 
 struct acl_module {
 	struct module module;

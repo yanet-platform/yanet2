@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "controlplane/config/cp_object.h"
+#include "lib/controlplane/config/cp_object.h"
 
 #include "lib/errors/errors.h"
 #include "lib/fwstate/fwmap.h"

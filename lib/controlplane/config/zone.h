@@ -7,18 +7,18 @@
 
 #include "common/memory.h"
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 
-#include "dataplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 
-#include "controlplane/config/cp_chain.h"
-#include "controlplane/config/cp_device.h"
-#include "controlplane/config/cp_function.h"
-#include "controlplane/config/cp_module.h"
-#include "controlplane/config/cp_object.h"
-#include "controlplane/config/cp_pipeline.h"
+#include "lib/controlplane/config/cp_chain.h"
+#include "lib/controlplane/config/cp_device.h"
+#include "lib/controlplane/config/cp_function.h"
+#include "lib/controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_object.h"
+#include "lib/controlplane/config/cp_pipeline.h"
 
-#include "controlplane/config/cp_counter.h"
+#include "lib/controlplane/config/cp_counter.h"
 
 #include "lib/errors/errors.h"
 

@@ -26,6 +26,6 @@ lib_packet_dp_dep = declare_dependency(
   link_args: yanet_link_args,
   link_with: lib_packet_dp,
   dependencies: dependencies,
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
 )
 

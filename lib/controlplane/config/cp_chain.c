@@ -1,6 +1,6 @@
 #include "cp_chain.h"
 
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/config/zone.h"
 
 #include <assert.h>
 #include <stdio.h>

@@ -3,10 +3,10 @@
 #include "common/memory_block.h"
 #include "common/test_assert.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/econtext.h"
-#include "controlplane/config/zone.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/econtext.h"
+#include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/errors/errors.h"
 
 #include <assert.h>

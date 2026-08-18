@@ -4,13 +4,13 @@
 
 #include "config.h"
 
-#include <filter/compiler.h>
+#include <lib/filter/compiler.h>
 
 #include "common/container_of.h"
 #include "lib/errors/errors.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/cp_module.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_module.h"
 
 FILTER_COMPILER_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
 

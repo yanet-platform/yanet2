@@ -31,12 +31,12 @@
 #include "common.h"
 #include "common/memory.h"
 #include "dataplane/dpdk.h"
-#include "dataplane/module/module.h"
 #include "dataplane/nat64dp.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/pipeline/econtext.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include "test.h"
 
 #ifdef DEBUG_NAT64

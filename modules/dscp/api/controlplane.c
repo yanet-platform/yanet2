@@ -9,8 +9,8 @@
 #include "common/strutils.h"
 #include "lib/errors/errors.h"
 
-#include "controlplane/agent/agent.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/dataplane/config/zone.h"
 
 static void
 dscp_module_config_destroy(struct cp_module *cp_module) {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config.h"
-#include "dataplane/module/module.h"
+#include "lib/dataplane/module/module.h"
 
 /**
  * @brief NAT64 module structure

@@ -11,7 +11,7 @@
 #include <rte_ip.h>
 #include <rte_udp.h>
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"

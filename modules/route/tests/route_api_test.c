@@ -15,10 +15,10 @@
 #include "api/agent.h"
 #include "common/memory_block.h"
 #include "common/test_assert.h"
-#include "controlplane/agent/agent.h"
+#include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include "modules/route/api/controlplane.h"
 
 #include <stdio.h>

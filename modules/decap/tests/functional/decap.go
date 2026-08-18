@@ -1,12 +1,12 @@
 package decap_test
 
 /*
-#cgo CFLAGS: -I../../../../ -I../../../../lib
+#cgo CFLAGS: -I../../../../
 #cgo LDFLAGS: -L../../../../build/lib/controlplane/config -lconfig_cp
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/zone.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 
 // yanet_test_pin_current_gen mirrors the pin half of the unlocked-reader
 // pattern used to read counters: lock, acquire a pin on the currently

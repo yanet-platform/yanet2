@@ -2,7 +2,7 @@
 
 #include "lib/utils/packet.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 #include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
@@ -13,7 +13,7 @@
 
 #include <common/rng.h>
 
-#include <filter/query.h>
+#include <lib/filter/query.h>
 
 FILTER_QUERY_DECLARE(filter_sign, net4_dst, port_dst, proto_range);
 

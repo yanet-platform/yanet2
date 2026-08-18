@@ -1,7 +1,6 @@
 package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo CFLAGS: -I../../../../../lib
 //#include "lib/fwstate/fwmap.h"
 import "C"
 

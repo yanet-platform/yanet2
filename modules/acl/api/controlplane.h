@@ -4,7 +4,7 @@
 
 #include "lib/filter/rule.h"
 
-#include "counters/counters.h"
+#include "lib/counters/counters.h"
 
 #include "lib/errors/errors.h"
 

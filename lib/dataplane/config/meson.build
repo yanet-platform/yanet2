@@ -28,7 +28,7 @@ lib_config_dp = static_library(
 
 lib_config_dp_dep = declare_dependency(
   link_with: [lib_config_dp],
-  include_directories: yanet_libdir,
+  include_directories: yanet_rootdir,
   dependencies: dependencies,
 )
 
@@ -43,8 +43,5 @@ lib_module_abi_export_sources = files('plugin_abi_export.c')
 
 lib_module_abi_export_dep = declare_dependency(
   sources: lib_module_abi_export_sources,
-  include_directories: [
-    yanet_libdir,
-    yanet_rootdir,
-  ],
+  include_directories: yanet_rootdir,
 )

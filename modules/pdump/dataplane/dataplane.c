@@ -3,13 +3,13 @@
 #include <bpf_impl.h>
 #include <rte_bpf.h>
 
-#include "dataplane/config/zone.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
 
-#include "controlplane/config/econtext.h"
+#include "lib/controlplane/config/econtext.h"
 
 #include "ring.h"
 

@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/config/zone.h"
 
 // Per-worker generation state.
 //

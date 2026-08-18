@@ -1,7 +1,7 @@
 #pragma once
 
-#include <filter/filter.h>
-#include <filter/query.h>
+#include <lib/filter/filter.h>
+#include <lib/filter/query.h>
 
 // Declare filter for IPv4 nets
 

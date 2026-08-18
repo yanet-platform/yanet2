@@ -10,9 +10,9 @@
 #include "common/memory_block.h"
 #include "common/test_assert.h"
 
-#include "controlplane/agent/agent.h"
-#include "controlplane/config/cp_module.h"
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_module.h"
+#include "lib/controlplane/config/zone.h"
 
 #include "modules/decap/api/controlplane.h"
 #include "modules/forward/api/controlplane.h"
@@ -20,7 +20,7 @@
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 
-#include "logging/log.h"
+#include "lib/logging/log.h"
 
 #include <stdio.h>
 

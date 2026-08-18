@@ -3,9 +3,9 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <filter/query.h>
+#include <lib/filter/query.h>
 
-#include "controlplane/config/econtext.h"
+#include "lib/controlplane/config/econtext.h"
 
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
