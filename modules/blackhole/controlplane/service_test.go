@@ -36,7 +36,7 @@ func newTestService(t *testing.T) *BlackholeService {
 	return NewBlackholeService(&mockBackend{})
 }
 
-// flakyBackend succeeds on the first UpdateModule call and fails thereafter.
+// flakyBackend succeeds on the first update call and fails thereafter.
 type flakyBackend struct {
 	numCalls atomic.Int64
 }
@@ -52,6 +52,8 @@ func (m *flakyBackend) DeleteModule(name string) error {
 	return nil
 }
 
+// Test_BlackholeService_UpdateAndShow verifies that a created config is
+// visible to a later read under the same name.
 func Test_BlackholeService_UpdateAndShow(t *testing.T) {
 	svc := newTestService(t)
 
@@ -65,6 +67,8 @@ func Test_BlackholeService_UpdateAndShow(t *testing.T) {
 	require.Equal(t, "blackhole0", show.Name)
 }
 
+// Test_BlackholeService_ListUpdateList verifies that listing reflects an
+// empty store, then the entry added by an update, in that order.
 func Test_BlackholeService_ListUpdateList(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
@@ -83,6 +87,8 @@ func Test_BlackholeService_ListUpdateList(t *testing.T) {
 	assert.Equal(t, []string{"blackhole0"}, list.Configs)
 }
 
+// Test_BlackholeService_DeleteConfig verifies that deleting a config removes
+// it so a later read returns NotFound.
 func Test_BlackholeService_DeleteConfig(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
@@ -98,6 +104,8 @@ func Test_BlackholeService_DeleteConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// Test_BlackholeService_DeleteMissing verifies that deleting an absent config
+// returns NotFound without mutating the store.
 func Test_BlackholeService_DeleteMissing(t *testing.T) {
 	svc := newTestService(t)
 
@@ -106,6 +114,8 @@ func Test_BlackholeService_DeleteMissing(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// Test_BlackholeService_EmptyConfigName verifies that creating, reading, and
+// deleting all reject an empty name as InvalidArgument.
 func Test_BlackholeService_EmptyConfigName(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
@@ -129,6 +139,8 @@ func Test_BlackholeService_EmptyConfigName(t *testing.T) {
 	})
 }
 
+// Test_BlackholeService_UpdateFailureAtomic verifies that a failed update
+// leaves the previously applied config intact and queryable.
 func Test_BlackholeService_UpdateFailureAtomic(t *testing.T) {
 	svc := NewBlackholeService(&flakyBackend{})
 	ctx := t.Context()
@@ -147,6 +159,8 @@ func Test_BlackholeService_UpdateFailureAtomic(t *testing.T) {
 	require.Equal(t, name, show.Name)
 }
 
+// Test_BlackholeService_ConcurrentAccess verifies that interleaved creates,
+// lists, and reads from many goroutines do not race or lose entries.
 func Test_BlackholeService_ConcurrentAccess(t *testing.T) {
 	svc := newTestService(t)
 
