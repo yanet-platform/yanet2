@@ -11,7 +11,6 @@
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 #include "dataplane/time/clock.h"
-#include "dataplane/worker.h"
 #include "dataplane/worker/worker.h"
 #include "fwstate/lookup.h"
 #include "fwstate/sync.h"
