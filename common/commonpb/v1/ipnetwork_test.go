@@ -162,6 +162,38 @@ func TestParseContiguousIPNetwork_Invalid(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestContiguousIPNetwork_SliceConversions verifies that slice conversion
+// masks host bits and preserves IPv4 and IPv6 prefixes in both directions.
+func TestContiguousIPNetwork_SliceConversions(t *testing.T) {
+	prefixes := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.1/24"),
+		netip.MustParsePrefix("2001:db8::1/32"),
+	}
+	want := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/24"),
+		netip.MustParsePrefix("2001:db8::/32"),
+	}
+
+	networks, err := commonpb.NetworksFromPrefixes(prefixes)
+	require.NoError(t, err)
+
+	got, err := commonpb.PrefixesFromNetworks(networks)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+// TestContiguousIPNetwork_SliceConversions_Invalid verifies that conversion
+// errors identify the failing prefix position.
+func TestContiguousIPNetwork_SliceConversions_Invalid(t *testing.T) {
+	_, err := commonpb.NetworksFromPrefixes([]netip.Prefix{{}})
+	require.ErrorContains(t, err, "prefixes[0]")
+
+	_, err = commonpb.PrefixesFromNetworks([]*commonpb.ContiguousIPNetwork{{
+		Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
+	}})
+	require.ErrorContains(t, err, "prefixes[0]")
+}
+
 // TestContiguousIPNetwork_AsLogValue asserts the log-friendly string form,
 // including the "invalid" fallback for an undecodable message.
 func TestContiguousIPNetwork_AsLogValue(t *testing.T) {

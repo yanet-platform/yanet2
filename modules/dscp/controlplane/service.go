@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
@@ -105,9 +106,9 @@ func (m *DscpService) ShowConfig(
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
 
-	prefixes := make([]string, 0, len(config.Prefixes))
-	for _, p := range config.Prefixes {
-		prefixes = append(prefixes, p.String())
+	prefixes, err := commonpb.NetworksFromPrefixes(config.Prefixes)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
 	}
 
 	response.Config = &dscppb.Config{
@@ -130,9 +131,9 @@ func (m *DscpService) AddPrefixes(
 	}
 
 	name := request.GetName()
-	toAdd, err := parsePrefixes(request.GetPrefixes())
+	toAdd, err := commonpb.PrefixesFromNetworks(request.GetPrefixes())
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
 	m.mu.Lock()
@@ -151,10 +152,7 @@ func (m *DscpService) AddPrefixes(
 	)
 
 	if err := m.updateModuleConfig(name, cfg); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
+		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &dscppb.AddPrefixesResponse{}, nil
@@ -169,9 +167,9 @@ func (m *DscpService) RemovePrefixes(
 	}
 
 	name := request.GetName()
-	toRemove, err := parsePrefixes(request.GetPrefixes())
+	toRemove, err := commonpb.PrefixesFromNetworks(request.GetPrefixes())
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
 	m.mu.Lock()
@@ -192,10 +190,7 @@ func (m *DscpService) RemovePrefixes(
 	)
 
 	if err := m.updateModuleConfig(name, cfg); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
+		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &dscppb.RemovePrefixesResponse{}, nil
@@ -226,10 +221,7 @@ func (m *DscpService) SetDscpMarking(
 	}
 
 	if err := m.updateModuleConfig(name, cfg); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
+		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &dscppb.SetDscpMarkingResponse{}, nil
@@ -255,21 +247,4 @@ func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 	}
 
 	return nil
-}
-
-func parsePrefixes(prefixes []string) ([]netip.Prefix, error) {
-	out := make([]netip.Prefix, 0, len(prefixes))
-	for _, p := range prefixes {
-		prefix, err := netip.ParsePrefix(p)
-		if err != nil {
-			return nil, status.Errorf(
-				codes.InvalidArgument,
-				"failed to parse prefix %q: %v", p, err,
-			)
-		}
-
-		out = append(out, prefix.Masked())
-	}
-
-	return out, nil
 }

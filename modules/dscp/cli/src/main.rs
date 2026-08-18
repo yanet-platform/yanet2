@@ -3,6 +3,7 @@ use clap_complete::{
     CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
+use commonpb::pb::ContiguousIpNetwork;
 use dscppb::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
@@ -207,7 +208,7 @@ impl DscpService {
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Error> {
         let request = AddPrefixesRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            prefixes: cmd.prefix.iter().copied().map(ContiguousIpNetwork::from).collect(),
         };
         log::trace!("AddPrefixesRequest: {request:?}");
         let response = self
@@ -230,7 +231,7 @@ impl DscpService {
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Error> {
         let request = RemovePrefixesRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            prefixes: cmd.prefix.iter().copied().map(ContiguousIpNetwork::from).collect(),
         };
         log::trace!("RemovePrefixesRequest: {request:?}");
         let response = self

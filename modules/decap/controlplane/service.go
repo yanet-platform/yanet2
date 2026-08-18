@@ -96,16 +96,9 @@ func (m *DecapService) ShowConfig(
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	prefixes := make([]*commonpb.ContiguousIPNetwork, 0, len(entry.Prefixes))
-	for _, p := range entry.Prefixes {
-		network, err := commonpb.NewContiguousIPNetworkFromPrefix(p)
-		if err != nil {
-			return nil, status.Errorf(
-				codes.Internal,
-				"failed to convert prefix %q: %v", p, err,
-			)
-		}
-		prefixes = append(prefixes, network)
+	prefixes, err := commonpb.NetworksFromPrefixes(entry.Prefixes)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
 	}
 
 	return &decappb.ShowConfigResponse{Prefixes: prefixes}, nil
@@ -121,17 +114,9 @@ func (m *DecapService) UpdateConfig(
 		return nil, errConfigNameRequired
 	}
 
-	prefixes := make([]netip.Prefix, 0, len(req.GetPrefixes()))
-	for _, p := range req.GetPrefixes() {
-		prefix, err := p.ToPrefix()
-		if err != nil {
-			return nil, status.Errorf(
-				codes.InvalidArgument,
-				"failed to convert prefix (addr=%x, prefix_len=%d): %v",
-				p.GetAddr().GetAddr(), p.GetPrefixLen(), err,
-			)
-		}
-		prefixes = append(prefixes, prefix)
+	prefixes, err := commonpb.PrefixesFromNetworks(req.GetPrefixes())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
 	prefixes = slices.Compact(
@@ -146,10 +131,7 @@ func (m *DecapService) UpdateConfig(
 
 	cfg := &config{Prefixes: prefixes}
 	if err := m.updateConfig(name, cfg); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
+		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &decappb.UpdateConfigResponse{}, nil

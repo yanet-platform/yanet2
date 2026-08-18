@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package modules.dscp.controlplane.dscppb.v1;
 
+import "common/commonpb/v1/ipnetwork.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1;dscppb";
 
 // DscpService is a service for Differentiated Services Code Point module.
@@ -22,7 +24,7 @@ service DscpService {
 }
 
 message Config {
-  repeated string prefixes = 2;
+  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
   DscpConfig dscp_config = 3;
 }
 
@@ -49,7 +51,7 @@ message ShowConfigResponse { Config config = 1; }
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.
 message AddPrefixesRequest {
   string name = 1;
-  repeated string prefixes = 2;
+  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
 }
 message AddPrefixesResponse {}
 
@@ -57,7 +59,7 @@ message AddPrefixesResponse {}
 // module.
 message RemovePrefixesRequest {
   string name = 1;
-  repeated string prefixes = 2;
+  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
 }
 message RemovePrefixesResponse {}
 
