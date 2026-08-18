@@ -66,10 +66,13 @@ func Test_GatewayWithoutInstanceID_FailsValidation(t *testing.T) {
 	require.Contains(t, err.Error(), "gateway.instance_id")
 }
 
-// Test_ExplicitNullGateway_FailsValidation asserts that a document clearing
-// the defaulted gateway block, either as a bare "gateway:" key or as an
-// explicit "gateway: null", fails to load with an error naming the gateway
-// instead of panicking on a nil dereference downstream.
+// Test_ExplicitNullGateway_FailsValidation asserts that a bare "gateway:" key
+// or an explicit "gateway: null" is rejected by the null-block check.
+//
+// The field is a plain value, so a cleared block is no longer representable
+// and the rejection needs no hand-written validation. A null block used to
+// decode into a nil pointer that panicked on the first dereference; the
+// loader's null-block check now fails the document with the key and line.
 func Test_ExplicitNullGateway_FailsValidation(t *testing.T) {
 	for name, input := range map[string]string{
 		"bare key":   "gateway:\n",
@@ -79,7 +82,7 @@ func Test_ExplicitNullGateway_FailsValidation(t *testing.T) {
 			cfg := yncp.DefaultConfig()
 			err := xcfg.Decode([]byte(input), cfg)
 			require.Error(t, err)
-			require.Contains(t, err.Error(), "gateway")
+			require.Equal(t, `key "gateway" at line 1 has no value; give it a body or remove the key`, err.Error())
 		})
 	}
 }

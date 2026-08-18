@@ -147,7 +147,7 @@ func WithListener(listener net.Listener) GatewayOption {
 //
 // Think of it as gRPC middleware if it were a single process.
 type Gateway struct {
-	cfg              *Config
+	cfg              Config
 	server           *grpc.Server
 	listener         net.Listener
 	services         []Service
@@ -158,7 +158,7 @@ type Gateway struct {
 }
 
 // NewGateway creates a new Gateway API.
-func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
+func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	opts := newGatewayOptions()
 	for _, o := range options {
 		o(opts)
@@ -166,10 +166,8 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	log := opts.Log
 	registry := NewBackendRegistry()
 
-	// The endpoint is what the gateway's own loopback dial, TLS SNI host, and
-	// out-of-process service registration target. It follows the injected
-	// listener's real address when one is supplied, and cfg.Server.Endpoint
-	// otherwise, without ever mutating cfg, which the caller owns.
+	// The endpoint backs loopback dial, SNI host, and registration; it
+	// follows the injected listener, else the configured server endpoint.
 	endpoint := cfg.Server.Endpoint
 	if opts.Listener != nil {
 		endpoint = opts.Listener.Addr().String()

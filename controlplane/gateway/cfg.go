@@ -74,9 +74,14 @@ func (m *RegistryConfig) Validate() error {
 	return nil
 }
 
+// Default resets the config to built-in defaults.
+func (m *Config) Default() {
+	*m = DefaultConfig()
+}
+
 // DefaultConfig returns a Config with sensible defaults.
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() Config {
+	return Config{
 		Server: ServerConfig{
 			Endpoint: "[::1]:8080",
 		},
