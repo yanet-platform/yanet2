@@ -154,18 +154,38 @@ dataplane_connect_devices(
 	struct dataplane *dataplane,
 	uint64_t connection_count,
 	struct dataplane_connection_config *connections
-)
-
-{
+) {
 	for (uint64_t conn_idx = 0; conn_idx < connection_count; ++conn_idx) {
 		struct dataplane_connection_config *connection =
 			connections + conn_idx;
-		// FIXME device id should be verified
-		dataplane_connect_device(
-			dataplane,
-			dataplane->devices + connection->src_device_id,
-			dataplane->devices + connection->dst_device_id
-		);
+		if (connection->src_device_id >= dataplane->device_count) {
+			LOG(ERROR,
+			    "connection %lu: source device id %lu out of "
+			    "range (device count %u)",
+			    conn_idx,
+			    connection->src_device_id,
+			    dataplane->device_count);
+			return -1;
+		}
+		if (connection->dst_device_id >= dataplane->device_count) {
+			LOG(ERROR,
+			    "connection %lu: destination device_id %lu out of "
+			    "range (device count %u)",
+			    conn_idx,
+			    connection->dst_device_id,
+			    dataplane->device_count);
+			return -1;
+		}
+		if (dataplane_connect_device(
+			    dataplane,
+			    dataplane->devices + connection->src_device_id,
+			    dataplane->devices + connection->dst_device_id
+		    )) {
+			LOG(ERROR,
+			    "failed to configure connection %lu",
+			    conn_idx);
+			return -1;
+		}
 	}
 
 	return 0;
@@ -650,12 +670,15 @@ dataplane_init(
 	    )) {
 		LOG(ERROR, "failed to create devices");
 		return -1;
-	};
+	}
 
 	LOG(INFO, "connect devices");
-	dataplane_connect_devices(
-		dataplane, config->connection_count, config->connections
-	);
+	if (dataplane_connect_devices(
+		    dataplane, config->connection_count, config->connections
+	    )) {
+		LOG(ERROR, "failed to connect devices");
+		return -1;
+	}
 
 	// init dataplane port counter
 	for (uint32_t instance_idx = 0;
