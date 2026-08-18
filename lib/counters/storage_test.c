@@ -2,6 +2,7 @@
 //
 // Poisoned single-block and zeroed multi-block sweeps reach both unsafe paths.
 
+#include "common/asan.h"
 #include "common/memory.h"
 #include "common/memory_block.h"
 #include "common/test_assert.h"
@@ -143,6 +144,7 @@ run_oom_sweep(
 	for (size_t arena_size = MIN_SWEPT_ARENA_SIZE;
 	     arena_size <= MAX_SWEPT_ARENA_SIZE;
 	     arena_size += SWEPT_ARENA_SIZE_STEP) {
+		asan_unpoison_memory_region(arena, arena_size);
 		memset(arena, arena_fill, arena_size);
 
 		struct block_allocator allocator;
