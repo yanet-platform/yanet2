@@ -1,3 +1,48 @@
+abigen_pkg = './lib/dataplane/config/abi/cmd/abigen'
+
+# `go run`, not a built abigen binary: nothing with a churning mtime to track.
+abigen_run = [go, 'run', '-C', meson.project_source_root(), abigen_pkg]
+
+# `-C` above moves abigen's cwd to repo root, so its own paths must be absolute.
+abi_manifest_dataplane_c_path = join_paths(meson.current_build_dir(), 'abi_manifest_dataplane.c')
+abi_manifest_dataplane_txt_path = join_paths(meson.current_build_dir(), 'abi_manifest.txt')
+abi_manifest_dataplane_dep_path = join_paths(meson.current_build_dir(), 'abi_manifest_dataplane.d')
+
+# global_build_root, not project_build_root: meson only ever writes
+# compile_commands.json at the outermost build directory.
+#
+# When this tree is consumed as a subproject, project_build_root() resolves
+# to a subprojects/<name>/ directory that never gets a compile_commands.json
+# of its own.
+abi_compile_commands = join_paths(meson.global_build_root(), 'compile_commands.json')
+
+# The dataplane binary hashes its own whole public surface, under a symbol
+# prefix distinct from a plugin's so RTLD_GLOBAL can never resolve a
+# plugin's dlsym to the binary's own table.
+abi_manifest_dataplane_ct = custom_target(
+  'abi_manifest_dataplane',
+  output: [
+    'abi_manifest_dataplane.c',
+    'abi_manifest.txt',
+  ],
+  command: abigen_run + [
+    '-compile-commands', abi_compile_commands,
+    '-repo-root', meson.project_source_root(),
+    '-symbol-prefix', 'yanet_dataplane_abi_',
+    '-emit-c', abi_manifest_dataplane_c_path,
+    '-o', abi_manifest_dataplane_txt_path,
+    '-depfile', abi_manifest_dataplane_dep_path,
+  ],
+  depfile: 'abi_manifest_dataplane.d',
+  build_by_default: true,
+)
+
+abi_manifest_dataplane_c = abi_manifest_dataplane_ct[0]
+
+# A plugin's own ABI table is generated from its own translation units in
+# "-plugin" mode, not shared: see lib/tests/dataplane/abi_plugin/good for
+# the pattern a module .so target follows to build and export one.
+
 dependencies = [
   lib_module_dp_dep,
   lib_pipeline_dp_dep,
@@ -20,6 +65,7 @@ sources = files(
 lib_config_dp = static_library(
   'config_dp',
   sources,
+  abi_manifest_dataplane_c,
   c_args: yanet_c_args,
   link_args: yanet_link_args,
   dependencies: dependencies,
@@ -30,18 +76,4 @@ lib_config_dp_dep = declare_dependency(
   link_with: [lib_config_dp],
   include_directories: yanet_rootdir,
   dependencies: dependencies,
-)
-
-# Source that exports a module .so's compiled-against ABI version, for a
-# future module shared_module() target to pull in. Deliberately kept out
-# of lib_config_dp: linking it into every statically-linked built-in
-# module would make the final dataplane binary define
-# yanet_module_abi_version more than once. A shared_module() target picks
-# this up by adding lib_module_abi_export_sources to its own sources (or
-# lib_module_abi_export_dep to its dependencies) exactly once per .so.
-lib_module_abi_export_sources = files('plugin_abi_export.c')
-
-lib_module_abi_export_dep = declare_dependency(
-  sources: lib_module_abi_export_sources,
-  include_directories: yanet_rootdir,
 )

@@ -62,7 +62,7 @@ Agents: charters are authored in `.rulesync/subagents/*.md` (`make ai/agents` ge
 
 Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch. Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
 
-- C-only changes still need `go test -count=1` and a clean `meson compile`: Go can link a stale C archive. A shared-memory layout or `YANET_MODULE_ABI_VERSION` change needs `go clean -cache`, removal of standalone CGO binaries and of `/dev/hugepages/yanet*`.
+- C-only changes still need `go test -count=1` and a clean `meson compile`: Go can link a stale C archive. A shared-memory layout or dataplane <-> module `.so` ABI manifest change needs `go clean -cache`, removal of standalone CGO binaries and of `/dev/hugepages/yanet*`.
 - Test logic and invariants, not human-readable CLI output (ASCII-only paths and canonical MAC/hex rendering are contracts and may be tested).
 - Race tests need targeted `-run` repetition (~10–20 runs); one `-race` pass can miss it.
 - `modules/*/tests/vm` exit code 127/3 means binaries are not staged, not a product defect.

@@ -60,7 +60,7 @@ option(
   'dataplane_only',
   type: 'boolean',
   value: false,
-  description: 'Build only the dataplane binary, skip Go/protobuf targets.',
+  description: 'Build only the dataplane binary, skip protobuf/controlplane Go targets (Go itself is still required to build the ABI manifest tool).',
 )
 
 option(

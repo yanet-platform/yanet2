@@ -75,9 +75,11 @@ configure_file(output: build_stamp, configuration: yanet_stamp)
 
 dataplane_only = get_option('dataplane_only')
 
+# Required even for dataplane_only: builds the abigen ABI-manifest tool.
+go = find_program('go', required: true)
+
 if not dataplane_only
   # Define common programs once to avoid duplication
-  go = find_program('go', required: true)
   protoc = find_program('protoc', required: true)
   find_program('protoc-gen-go', required: true, version: '>=1.36.5')
   find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')

@@ -9,13 +9,14 @@
 #include <sys/stat.h>
 
 #include "common/strutils.h"
-#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/config/plugin_abi.h"
 #include "lib/logging/log.h"
 
 #define PLUGIN_SO_PREFIX "lib"
 #define PLUGIN_SO_SUFFIX "_dp.so"
 
 // Extract module name from filename: "libnat44_dp.so" -> "nat44".
+//
 // Returns 0 on success, -1 if the filename does not match.
 static int
 plugin_name_from_filename(const char *filename, char *name, size_t name_len) {
@@ -43,20 +44,113 @@ plugin_name_from_filename(const char *filename, char *name, size_t name_len) {
 	return 0;
 }
 
-// Read a plugin's exported YANET_MODULE_ABI_VERSION_SYMBOL value.
-//
-// Returns 0 and sets *out to the exported version on success, -1 if the
-// plugin does not export the symbol.
+enum {
+	DP_PLUGIN_ABI_TABLE_MISSING = -1,
+	DP_PLUGIN_ABI_COUNT_MISSING = -2,
+	DP_PLUGIN_ABI_COUNT_IMPLAUSIBLE = -3,
+};
+
+#define DP_PLUGIN_ABI_MAX_ENTITIES 100000
+
 static int
-dp_plugin_abi_version(void *dl_handle, uint32_t *out) {
+dp_plugin_abi_table(
+	void *dl_handle, const struct yanet_abi_entity **entities, size_t *count
+) {
 	dlerror();
-	uint32_t *version =
-		(uint32_t *)dlsym(dl_handle, YANET_MODULE_ABI_VERSION_SYMBOL);
-	if (version == NULL || dlerror() != NULL) {
+	const struct yanet_abi_entity *table = (const struct yanet_abi_entity *)
+		dlsym(dl_handle, YANET_MODULE_ABI_ENTITIES_SYMBOL);
+	if (table == NULL || dlerror() != NULL) {
+		return DP_PLUGIN_ABI_TABLE_MISSING;
+	}
+
+	dlerror();
+	const size_t *count_ptr =
+		(const size_t *)dlsym(dl_handle, YANET_MODULE_ABI_COUNT_SYMBOL);
+	if (count_ptr == NULL || dlerror() != NULL) {
+		return DP_PLUGIN_ABI_COUNT_MISSING;
+	}
+	if (*count_ptr == 0 || *count_ptr > DP_PLUGIN_ABI_MAX_ENTITIES) {
+		return DP_PLUGIN_ABI_COUNT_IMPLAUSIBLE;
+	}
+
+	*entities = table;
+	*count = *count_ptr;
+	return 0;
+}
+
+static const struct yanet_abi_entity *
+dp_dataplane_abi_lookup(const char *name) {
+	size_t lo = 0, hi = yanet_dataplane_abi_count_v1;
+	while (lo < hi) {
+		size_t mid = lo + (hi - lo) / 2;
+		int cmp =
+			strcmp(yanet_dataplane_abi_entities_v1[mid].name, name);
+		if (cmp == 0) {
+			return &yanet_dataplane_abi_entities_v1[mid];
+		}
+		if (cmp < 0) {
+			lo = mid + 1;
+		} else {
+			hi = mid;
+		}
+	}
+	return NULL;
+}
+
+static int
+dp_plugin_abi_check(void *dl_handle, const char *name, const char *so_path) {
+	const struct yanet_abi_entity *plugin_entities = NULL;
+	size_t plugin_count = 0;
+	int rc =
+		dp_plugin_abi_table(dl_handle, &plugin_entities, &plugin_count);
+	if (rc == DP_PLUGIN_ABI_TABLE_MISSING ||
+	    rc == DP_PLUGIN_ABI_COUNT_MISSING) {
+		LOG(ERROR,
+		    "plugin %s (%s) does not export a %s/%s table this binary "
+		    "understands; refusing to load a plugin with unknown or "
+		    "differently versioned dataplane ABI",
+		    name,
+		    so_path,
+		    YANET_MODULE_ABI_ENTITIES_SYMBOL,
+		    YANET_MODULE_ABI_COUNT_SYMBOL);
+		return -1;
+	}
+	if (rc == DP_PLUGIN_ABI_COUNT_IMPLAUSIBLE) {
+		LOG(ERROR,
+		    "plugin %s (%s) exports an implausible %s count; refusing "
+		    "to load a plugin with a corrupt ABI table",
+		    name,
+		    so_path,
+		    YANET_MODULE_ABI_COUNT_SYMBOL);
 		return -1;
 	}
 
-	*out = *version;
+	for (size_t i = 0; i < plugin_count; i++) {
+		const struct yanet_abi_entity *want = &plugin_entities[i];
+		const struct yanet_abi_entity *have =
+			dp_dataplane_abi_lookup(want->name);
+		if (have == NULL) {
+			LOG(ERROR,
+			    "plugin %s (%s) references %s, which this "
+			    "dataplane does not export; refusing to load a "
+			    "plugin built against a different dataplane ABI",
+			    name,
+			    so_path,
+			    want->name);
+			return -1;
+		}
+		if (strcmp(have->hash, want->hash) != 0) {
+			LOG(ERROR,
+			    "plugin %s (%s) ABI mismatch on %s: dataplane "
+			    "hash %s, plugin built for %s",
+			    name,
+			    so_path,
+			    want->name,
+			    have->hash,
+			    want->hash);
+			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -117,25 +211,7 @@ dp_load_plugins(const char *plugin_dir, struct plugin_registry *registry) {
 			goto fail;
 		}
 
-		uint32_t found_version = 0;
-		if (dp_plugin_abi_version(dl, &found_version) != 0) {
-			LOG(ERROR,
-			    "plugin %s (%s) does not export the %s symbol; "
-			    "refusing to load a plugin with unknown "
-			    "dataplane ABI version",
-			    name,
-			    so_path,
-			    YANET_MODULE_ABI_VERSION_SYMBOL);
-			goto fail;
-		}
-		if (found_version != YANET_MODULE_ABI_VERSION) {
-			LOG(ERROR,
-			    "plugin %s (%s) ABI version mismatch: dataplane "
-			    "expects %u, plugin was built for %u",
-			    name,
-			    so_path,
-			    (unsigned)YANET_MODULE_ABI_VERSION,
-			    (unsigned)found_version);
+		if (dp_plugin_abi_check(dl, name, so_path) != 0) {
 			goto fail;
 		}
 
