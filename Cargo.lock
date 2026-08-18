@@ -3089,6 +3089,7 @@ dependencies = [
  "erased-serde",
  "http",
  "humantime",
+ "libc",
  "log",
  "prost",
  "prost-types",
