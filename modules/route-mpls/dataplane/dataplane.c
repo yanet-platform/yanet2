@@ -94,32 +94,26 @@ route_mpls_handle_packets(
 	ip4_idx = 0;
 	ip6_idx = 0;
 
+	struct target **targets = ADDR_OF(&module_config->targets);
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
+		// No lookup result — not IP, or IP no rule covers — passes on;
+		// popping it without re-queueing would leak the packet.
 		struct target *target = NULL;
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			if (ip4_result[ip4_idx] == FILTER_RULE_INVALID) {
-				++ip4_idx;
-				continue;
+			if (ip4_result[ip4_idx] != FILTER_RULE_INVALID) {
+				target = ADDR_OF(targets + ip4_result[ip4_idx]);
 			}
-
-			target =
-				ADDR_OF(ADDR_OF(&module_config->targets) +
-					ip4_result[ip4_idx]);
 
 			++ip4_idx;
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			if (ip6_result[ip6_idx] == FILTER_RULE_INVALID) {
-				++ip6_idx;
-				continue;
+			if (ip6_result[ip6_idx] != FILTER_RULE_INVALID) {
+				target = ADDR_OF(targets + ip6_result[ip6_idx]);
 			}
-
-			target =
-				ADDR_OF(ADDR_OF(&module_config->targets) +
-					ip6_result[ip6_idx]);
 
 			++ip6_idx;
 		}

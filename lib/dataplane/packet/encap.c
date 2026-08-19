@@ -241,6 +241,24 @@ packet_mpls_encap(
 	return 0;
 }
 
+// One's complement sum of the UDP pseudo-header for 4-byte (IPv4) or
+// 16-byte (IPv6) addresses and the network-order UDP length.
+//
+// The pseudo-header is the two addresses, the protocol number zero-padded
+// to a 16-bit word and the UDP datagram length, all in network order — the
+// IPv6 form folds the same way once its zero words are dropped.
+static uint32_t
+udp_pseudo_header_cksum(
+	const uint8_t *src_ip,
+	const uint8_t *dst_ip,
+	size_t addr_len,
+	rte_be16_t udp_len
+) {
+	rte_be16_t proto = rte_cpu_to_be_16(IPPROTO_UDP);
+	return csum(src_ip, addr_len) + csum(dst_ip, addr_len) +
+	       csum(&proto, sizeof(proto)) + csum(&udp_len, sizeof(udp_len));
+}
+
 int
 packet_ip4_encap_udp(
 	struct packet *packet,
@@ -265,7 +283,7 @@ packet_ip4_encap_udp(
 	ip_header.hdr_checksum = 0;
 	memcpy(&ip_header.src_addr, src_ip, 4);
 	memcpy(&ip_header.dst_addr, dst_ip, 4);
-	ip_header.hdr_checksum = csum(&ip_header, sizeof(ip_header));
+	ip_header.hdr_checksum = rte_ipv4_cksum(&ip_header);
 
 	struct rte_udp_hdr udp_header;
 	memcpy(&udp_header.src_port, src_port, 2);
@@ -275,11 +293,9 @@ packet_ip4_encap_udp(
 			packet->network_header.offset);
 	udp_header.dgram_cksum = 0;
 
-	uint16_t ip_proto_csum = 0;
-	memcpy(&ip_proto_csum, &ip_header.next_proto_id, 1);
-	uint32_t ip_hdr_cksum = csum(src_ip, 4) + csum(dst_ip, 4) +
-				csum(&ip_header.total_length, 2) +
-				ip_proto_csum;
+	uint32_t ip_hdr_cksum = udp_pseudo_header_cksum(
+		src_ip, dst_ip, 4, udp_header.dgram_len
+	);
 	uint32_t udp_hdr_cksum = csum(&udp_header, sizeof(udp_header));
 	// FIXME: should we track a csum for the entire packet payload?
 	uint32_t payload_cksum =
@@ -337,10 +353,9 @@ packet_ip6_encap_udp(
 			packet->network_header.offset);
 	udp_header.dgram_cksum = 0;
 
-	uint16_t ip_proto_csum = 0;
-	memcpy(&ip_proto_csum, &ip_header.proto, 1);
-	uint32_t ip_hdr_cksum = csum(src_ip, 16) + csum(dst_ip, 16) +
-				csum(&ip_header.payload_len, 2) + ip_proto_csum;
+	uint32_t ip_hdr_cksum = udp_pseudo_header_cksum(
+		src_ip, dst_ip, 16, udp_header.dgram_len
+	);
 	uint32_t udp_hdr_cksum = csum(&udp_header, sizeof(udp_header));
 	// FIXME: should we track the entire packet payload?
 	uint32_t payload_cksum =
