@@ -552,6 +552,7 @@ dataplane_init(
 			"route_mpls",
 			"blackhole",
 			"mirror",
+			"balancer2",
 		};
 
 		for (size_t i = 0;
