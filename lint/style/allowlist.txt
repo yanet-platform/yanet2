@@ -268,7 +268,6 @@ testpkg:operators/route/internal/operator/service_route_test.go:operator:1  # le
 testpkg:operators/route/internal/rib/rib_test.go:rib:1  # legacy: migrate to the external test package
 testpkg:operators/route/internal/rib/routes_test.go:rib:1  # legacy: migrate to the external test package
 zapkey:modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing:ringIdx:1  # legacy: rename the zap field key to snake_case
-zapkey:modules/pdump/controlplane/service.go:PdumpService.SetConfig:defaultSnaplen:1  # legacy: rename the zap field key to snake_case
 zapkey:operators/bird-adapter/internal/bird/export.go:Export.Run:isTimeout:1  # legacy: rename the zap field key to snake_case
 zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:removedCount:1  # legacy: rename the zap field key to snake_case
 zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:removedCount:2  # legacy: rename the zap field key to snake_case

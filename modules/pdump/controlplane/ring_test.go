@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
@@ -829,6 +830,280 @@ func TestRingBufferStressTest(t *testing.T) {
 		}
 		// Should not panic or deadlock
 	})
+}
+
+// runPdumpAsync starts a tracked task and returns its buffered result channel.
+func runPdumpAsync[T any](tasks *errgroup.Group, run func() T) <-chan T {
+	result := make(chan T, 1)
+	tasks.Go(func() error {
+		result <- run()
+		return nil
+	})
+	return result
+}
+
+type testReadDumpStream struct {
+	grpc.ServerStream
+
+	ctx           context.Context
+	contextCalled chan struct{}
+}
+
+// Context exposes when a streaming request has entered the handler.
+func (m *testReadDumpStream) Context() context.Context {
+	close(m.contextCalled)
+	return m.ctx
+}
+
+func (m *testReadDumpStream) Send(*pdumppb.Record) error {
+	return nil
+}
+
+// verifies that deletion releases state inspection while retaining mutation
+// ordering until readers stop.
+func Test_PdumpService_DeleteConfig_AllowsShowConfigDuringReaderDrain(t *testing.T) {
+	var tasks errgroup.Group
+
+	service := NewPdumpService(nil)
+	name := "capture"
+	config := defaultModuleConfig()
+	config.Ring.workers = []*workerArea{{}}
+	service.configs[name] = config
+
+	readerCanceled := make(chan struct{})
+	readerDone := make(chan bool)
+	service.ringReaders = []ringReader{{
+		Name: name,
+		Ring: config.Ring,
+		Cancel: func(error) {
+			close(readerCanceled)
+		},
+		DoneCh: readerDone,
+	}}
+
+	deleteDone := runPdumpAsync(&tasks, func() error {
+		_, err := service.DeleteConfig(
+			t.Context(),
+			&pdumppb.DeleteConfigRequest{Name: name},
+		)
+		return err
+	})
+
+	select {
+	case <-readerCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("config deletion did not cancel the reader")
+	}
+
+	if service.mutationMu.TryLock() {
+		service.mutationMu.Unlock()
+		t.Fatal("config deletion released the mutation lock during reader drain")
+	}
+
+	showDone := runPdumpAsync(&tasks, func() error {
+		_, err := service.ShowConfig(
+			t.Context(),
+			&pdumppb.ShowConfigRequest{Name: name},
+		)
+		return err
+	})
+
+	select {
+	case err := <-showDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("ShowConfig remained blocked during reader drain")
+	}
+
+	select {
+	case <-deleteDone:
+		t.Fatal("config deletion completed before the reader stopped")
+	default:
+	}
+	close(readerDone)
+	select {
+	case err := <-deleteDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("config deletion did not complete after the reader stopped")
+	}
+
+	require.NoError(t, tasks.Wait())
+}
+
+// verifies that an update keeps the old published config visible until reader
+// drain finishes.
+func Test_PdumpService_SetConfig_PreservesPublishedConfigDuringReaderDrain(t *testing.T) {
+	var tasks errgroup.Group
+
+	service := NewPdumpService(nil)
+	name := "capture"
+	config := defaultModuleConfig()
+	config.Filter = "old"
+	service.configs[name] = config
+
+	readerCanceled := make(chan struct{})
+	readerDone := make(chan bool)
+	service.ringReaders = []ringReader{{
+		Name: name,
+		Ring: config.Ring,
+		Cancel: func(error) {
+			close(readerCanceled)
+		},
+		DoneCh: readerDone,
+	}}
+
+	updateDone := runPdumpAsync(&tasks, func() error {
+		_, err := service.SetConfig(
+			t.Context(),
+			&pdumppb.SetConfigRequest{
+				Name: name,
+				Config: &pdumppb.Config{
+					Filter: "new",
+				},
+				UpdateMask: &pdumppb.FieldMask{Paths: []string{"filter"}},
+			},
+		)
+		return err
+	})
+
+	select {
+	case <-readerCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("config update did not cancel the reader")
+	}
+
+	if service.mutationMu.TryLock() {
+		service.mutationMu.Unlock()
+		t.Fatal("config update released the lifecycle lock during reader drain")
+	}
+
+	response, err := service.ShowConfig(
+		t.Context(),
+		&pdumppb.ShowConfigRequest{Name: name},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "old", response.Config.Filter)
+
+	select {
+	case <-updateDone:
+		t.Fatal("config update completed before the reader stopped")
+	default:
+	}
+
+	close(readerDone)
+	select {
+	case err := <-updateDone:
+		require.ErrorContains(t, err, "pdump agent is required")
+	case <-time.After(time.Second):
+		t.Fatal("config update did not complete")
+	}
+
+	response, err = service.ShowConfig(
+		t.Context(),
+		&pdumppb.ShowConfigRequest{Name: name},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "new", response.Config.Filter)
+	require.NoError(t, tasks.Wait())
+}
+
+// verifies that reader registration acquires lifecycle ownership before it
+// accesses the published ring.
+func Test_PdumpService_ReadDump_AcquiresLifecycleLockBeforeStateLock(t *testing.T) {
+	var tasks errgroup.Group
+
+	service := NewPdumpService(nil)
+	name := "capture"
+	config := defaultModuleConfig()
+	config.Ring = createTestRingBuffer(t, 1).rb
+	service.configs[name] = config
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stream := &testReadDumpStream{
+		ctx:           ctx,
+		contextCalled: make(chan struct{}),
+	}
+
+	service.mu.Lock()
+	stateLocked := true
+	defer func() {
+		if stateLocked {
+			service.mu.Unlock()
+		}
+	}()
+
+	readDone := runPdumpAsync(&tasks, func() error {
+		return service.ReadDump(
+			&pdumppb.ReadDumpRequest{Name: name},
+			stream,
+		)
+	})
+
+	select {
+	case <-stream.contextCalled:
+	case <-time.After(time.Second):
+		t.Fatal("ReadDump did not enter the handler")
+	}
+
+	require.Eventually(t, func() bool {
+		if service.mutationMu.TryLock() {
+			service.mutationMu.Unlock()
+			runtime.Gosched()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond)
+
+	service.mu.Unlock()
+	stateLocked = false
+	cancel()
+
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("ReadDump did not stop after context cancellation")
+	}
+	require.NoError(t, tasks.Wait())
+}
+
+// verifies that every matching reader is canceled before any completion is
+// awaited.
+func Test_PdumpService_StopRingReaders_CancelsAllMatchingReaders(t *testing.T) {
+	service := NewPdumpService(nil)
+	name := "capture"
+	firstCanceled := make(chan struct{})
+	secondCanceled := make(chan struct{})
+	service.ringReaders = []ringReader{
+		{
+			Name: name,
+			Cancel: func(error) {
+				close(firstCanceled)
+			},
+			DoneCh: make(chan bool),
+		},
+		{
+			Name: name,
+			Cancel: func(error) {
+				close(secondCanceled)
+			},
+			DoneCh: make(chan bool),
+		},
+	}
+
+	doneChannels := service.stopRingReaders(name, context.Canceled)
+	require.Len(t, doneChannels, 2)
+	select {
+	case <-firstCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("first reader was not canceled")
+	}
+	select {
+	case <-secondCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("second reader was not canceled")
+	}
 }
 
 // BenchmarkWorkerAreaRead benchmarks the read performance

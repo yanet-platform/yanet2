@@ -32,9 +32,10 @@ const (
 type PdumpService struct {
 	pdumppb.UnimplementedPdumpServiceServer
 
-	mu      sync.Mutex              // Protects concurrent access to agent, configs, and ringReaders.
-	agent   *ffi.Agent              // FFI agent used for data plane interaction.
-	configs map[string]*pdumpConfig // Map storing the active configuration for each pdump module, keyed by name.
+	mu         sync.RWMutex            // Protects concurrent access to configs and ringReaders.
+	mutationMu sync.Mutex              // Serializes mutations and reader registration.
+	agent      *ffi.Agent              // FFI agent used for data plane interaction.
+	configs    map[string]*pdumpConfig // Map storing the active configuration for each pdump module, keyed by name.
 	// Slice of active ring buffer readers, each corresponding to an ongoing ReadDump stream.
 	// Used to manage and terminate these readers during config updates or shutdown.
 	ringReaders []ringReader
@@ -118,9 +119,8 @@ func (m *PdumpService) ListConfigs(
 		Configs: make([]string, 0),
 	}
 
-	// Lock configs store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	for name := range m.configs {
 		response.Configs = append(response.Configs, name)
@@ -139,9 +139,8 @@ func (m *PdumpService) ShowConfig(
 		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
 
-	// Lock configs store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	config, ok := m.configs[name]
 	if !ok {
@@ -173,70 +172,21 @@ func (m *PdumpService) SetConfig(
 		return nil, fmt.Errorf("config is required")
 	}
 
-	// Lock configs store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
 
-	newConfig := *defaultModuleConfig()
-	config, ok := m.configs[name]
-	if ok {
-		// Create a copy of the config to ensure atomic updates.
-		newRing := newConfig.Ring // Preserve the new ring.
-		newConfig = *config
-		newRing.PerWorkerSize = newConfig.Ring.PerWorkerSize
-		newRing.ReadChunkSize = newConfig.Ring.ReadChunkSize
-		newConfig.Ring = newRing // Restore the new ring.
+	err := m.updateConfig(
+		name,
+		request,
+		func() error {
+			return m.updateModuleConfig(name)
+		},
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	if request.UpdateMask != nil && len(request.UpdateMask.Paths) > 0 {
-		for _, path := range request.UpdateMask.Paths {
-			switch path {
-			case "filter":
-				newConfig.Filter = request.Config.GetFilter()
-			case "mode":
-				// Sets the packet capture mode, determining whether to capture
-				// incoming, dropped, or both types of packets.
-
-				mode := request.Config.GetMode()
-				if mode > maxMode {
-					return nil, fmt.Errorf("unknown pdump mode %b (max known %b)", mode, maxMode)
-				}
-				if mode == 0 {
-					mode = defaultMode
-				}
-
-				newConfig.DumpMode = mode
-			case "snaplen":
-				// Sets the maximum number of bytes to capture per packet.
-				// If the provided snaplen is zero, it defaults to the system's default value.
-
-				snaplen := request.Config.GetSnaplen()
-				if snaplen == 0 {
-					m.log.Info("snaplen is zero, resetting to default value", zap.Uint32("defaultSnaplen", defaultSnaplen))
-					snaplen = defaultSnaplen
-				}
-
-				newConfig.Snaplen = snaplen
-			case "ring_size":
-				// Configures the ring buffer size for each worker.
-				// The size must fall within the range [minRingSize, maxRingSize].
-				size := request.Config.GetRingSize()
-				if size < uint32(minRingSize.Bytes()) || size > maxRingSize {
-					return nil, fmt.Errorf("ring size %s not in range [%s, %s]",
-						datasize.ByteSize(size), minRingSize, datasize.ByteSize(maxRingSize))
-				}
-
-				newConfig.Ring.PerWorkerSize = size
-			default:
-				return nil, fmt.Errorf("unknown path '%s'", path)
-			}
-		}
-	}
-	// If the updateMask is empty and no configuration exists for the key,
-	// a default configuration will be created.
-	m.configs[name] = &newConfig
-
-	return &pdumppb.SetConfigResponse{}, m.updateModuleConfig(name)
+	return &pdumppb.SetConfigResponse{}, nil
 }
 
 // DeleteConfig removes a packet capture configuration.
@@ -249,44 +199,38 @@ func (m *PdumpService) DeleteConfig(
 		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
 
+	m.mu.RLock()
 	config, ok := m.configs[name]
+	m.mu.RUnlock()
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	// Terminate all active ring readers for this config to prevent memory
-	// access violations, as deleting the module will deallocate shared ring
-	// buffers.
-	for _, rr := range m.ringReaders {
-		if rr.Name == name {
-			rr.Cancel(fmt.Errorf("terminated by config deletion"))
-			m.log.Info("waiting for ring reader to complete",
+	err := m.withReaderDrain(
+		name,
+		fmt.Errorf("terminated by config deletion"),
+		func() error {
+			// Delete the module config from the data plane if it exists.
+			if config.FFIModule != nil {
+				if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
+					return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+				}
+				config.Free()
+			}
+
+			delete(m.configs, name)
+			m.log.Info("deleted pdump config",
 				zap.String("name", name),
 			)
-			<-rr.DoneCh
-		}
-	}
-
-	// Remove terminated ring readers from the slice.
-	m.ringReaders = slices.DeleteFunc(m.ringReaders, func(rr ringReader) bool {
-		return rr.Name == name
-	})
-
-	// Delete the module config from the data plane if it exists.
-	if config.FFIModule != nil {
-		if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
-		}
-		config.Free()
-	}
-
-	delete(m.configs, name)
-	m.log.Info("deleted pdump config",
-		zap.String("name", name),
+			return nil
+		},
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	return &pdumppb.DeleteConfigResponse{}, nil
 }
@@ -321,37 +265,14 @@ func (m *PdumpService) transferConfigParameters(
 	return nil
 }
 
-// updateModuleConfig applies the current configuration to the specified module.
-// This function assumes m.mu is already locked by the caller.
-// The process involves:
-//  1. Terminating all active ring readers to prevent memory access violations,
-//     as reconfiguring a module can deallocate shared ring buffers.
-//  2. Creating a new FFI module configuration object.
-//  3. Applying the stored settings (capture mode, snaplen, filter, ring buffer parameters)
-//     from m.configs to the FFI configuration.
-//  4. Updating the data plane module via the FFI interface with the new configuration.
-//  5. Freeing the old FFI module after successful update.
+// updateModuleConfig publishes the current configuration after all readers of
+// the previous ring have stopped and the state lock has been reacquired.
 func (m *PdumpService) updateModuleConfig(
 	name string,
 ) error {
-	// The caller holds m.mu while this update runs.
-	// Stop active ring readers before updating the module configuration.
-	// The update can free shared ring buffers, so readers must finish first.
-	// Otherwise they could access freed memory.
-
-	// First pass: terminate matching ring readers and wait for completion
-	for _, rr := range m.ringReaders {
-		if rr.Name == name {
-			rr.Cancel(fmt.Errorf("terminated by config update"))
-			m.log.Info("waiting for ring reader to complete", zap.String("name", name))
-			<-rr.DoneCh
-		}
+	if m.agent == nil {
+		return fmt.Errorf("pdump agent is required")
 	}
-
-	// Remove terminated ring readers from the slice.
-	m.ringReaders = slices.DeleteFunc(m.ringReaders, func(rr ringReader) bool {
-		return rr.Name == name
-	})
 
 	m.log.Debug("update config", zap.String("module", name))
 
@@ -409,29 +330,12 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 	if name == "" {
 		return status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
-	m.mu.Lock()
-	config, ok := m.configs[name]
-	if !ok {
-		m.mu.Unlock()
-		return fmt.Errorf("config for %s does not exist", name)
-	}
-	if config.Ring.WorkerCount() == 0 {
-		m.mu.Unlock()
-		return fmt.Errorf("config for %s is not initialized properly", name)
-	}
-	// Clone the ring buffer configuration to ensure thread safety.
-	// This allows multiple concurrent ReadDump requests for the same module
-	// without interfering with each other's read positions.
-	ringCopy := config.Ring.Clone()
-
-	// Create a buffered channel for packet records to decouple ring reading from stream sending
 	recordCh := make(chan *pdumppb.Record, 16)
-	cancel := m.spawnRingReaders(ctx, name, ringCopy, recordCh)
+	cancel, err := m.registerRingReaders(ctx, name, recordCh)
+	if err != nil {
+		return err
+	}
 	defer cancel(fmt.Errorf("streaming completed"))
-
-	// We can unlock only after spawning ring readers, as appending ringReader requires
-	// a reader pointing to valid shared memory.
-	m.mu.Unlock()
 
 	// Main streaming loop: forward packets from ring readers to gRPC client
 	for {
@@ -454,6 +358,142 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 			m.log.Info("pdump service shut down; closing ReadDump request")
 			return nil
 		}
+	}
+}
+
+// registerRingReaders validates the config and registers readers while
+// preventing a concurrent config lifecycle operation from publishing a new
+// ring buffer before registration completes.
+func (m *PdumpService) registerRingReaders(
+	ctx context.Context,
+	name string,
+	recordCh chan<- *pdumppb.Record,
+) (context.CancelCauseFunc, error) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	config, ok := m.configs[name]
+	if !ok {
+		return nil, fmt.Errorf("config for %s does not exist", name)
+	}
+	if config.Ring.WorkerCount() == 0 {
+		return nil, fmt.Errorf("config for %s is not initialized properly", name)
+	}
+	// Clone the ring buffer configuration to ensure thread safety.
+	// This allows multiple concurrent ReadDump requests for the same module
+	// without interfering with each other's read positions.
+	ringCopy := config.Ring.Clone()
+
+	return m.spawnRingReaders(ctx, name, ringCopy, recordCh), nil
+}
+
+func (m *PdumpService) updateConfig(
+	name string,
+	request *pdumppb.SetConfigRequest,
+	publish func() error,
+) error {
+	newConfig, err := m.prepareConfig(name, request)
+	if err != nil {
+		return err
+	}
+
+	return m.withReaderDrain(
+		name,
+		fmt.Errorf("terminated by config update"),
+		func() error {
+			m.configs[name] = newConfig
+			return publish()
+		},
+	)
+}
+
+func (m *PdumpService) prepareConfig(name string, request *pdumppb.SetConfigRequest) (*pdumpConfig, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	newConfig := *defaultModuleConfig()
+	config, ok := m.configs[name]
+	if ok {
+		// Create a copy of the config to ensure atomic updates.
+		newRing := newConfig.Ring // Preserve the new ring.
+		newConfig = *config
+		newRing.PerWorkerSize = newConfig.Ring.PerWorkerSize
+		newRing.ReadChunkSize = newConfig.Ring.ReadChunkSize
+		newConfig.Ring = newRing // Restore the new ring.
+	}
+
+	if request.UpdateMask != nil && len(request.UpdateMask.Paths) > 0 {
+		for _, path := range request.UpdateMask.Paths {
+			switch path {
+			case "filter":
+				newConfig.Filter = request.Config.GetFilter()
+			case "mode":
+				mode := request.Config.GetMode()
+				if mode > maxMode {
+					return nil, fmt.Errorf("unknown pdump mode %b (max known %b)", mode, maxMode)
+				}
+				if mode == 0 {
+					mode = defaultMode
+				}
+				newConfig.DumpMode = mode
+			case "snaplen":
+				snaplen := request.Config.GetSnaplen()
+				if snaplen == 0 {
+					m.log.Info("snaplen is zero, resetting to default value", zap.Uint32("default_snaplen", defaultSnaplen))
+					snaplen = defaultSnaplen
+				}
+				newConfig.Snaplen = snaplen
+			case "ring_size":
+				size := request.Config.GetRingSize()
+				if size < uint32(minRingSize.Bytes()) || size > maxRingSize {
+					return nil, fmt.Errorf("ring size %s not in range [%s, %s]",
+						datasize.ByteSize(size), minRingSize, datasize.ByteSize(maxRingSize))
+				}
+				newConfig.Ring.PerWorkerSize = size
+			default:
+				return nil, fmt.Errorf("unknown path '%s'", path)
+			}
+		}
+	}
+	return &newConfig, nil
+}
+
+func (m *PdumpService) stopRingReaders(name string, cause error) []chan bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	doneChannels := make([]chan bool, 0)
+	for _, rr := range m.ringReaders {
+		if rr.Name != name {
+			continue
+		}
+		rr.Cancel(cause)
+		doneChannels = append(doneChannels, rr.DoneCh)
+	}
+	m.ringReaders = slices.DeleteFunc(m.ringReaders, func(rr ringReader) bool {
+		return rr.Name == name
+	})
+	return doneChannels
+}
+
+// withReaderDrain waits for readers before publishing state while the caller
+// holds the lifecycle lock.
+func (m *PdumpService) withReaderDrain(name string, cause error, publish func() error) error {
+	doneChannels := m.stopRingReaders(name, cause)
+	m.waitRingReaders(name, doneChannels)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return publish()
+}
+
+func (m *PdumpService) waitRingReaders(name string, doneChannels []chan bool) {
+	for _, doneChannel := range doneChannels {
+		m.log.Info("waiting for ring reader to complete", zap.String("name", name))
+		<-doneChannel
 	}
 }
 
