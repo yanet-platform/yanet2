@@ -258,23 +258,48 @@ impl TryFrom<IpNetwork> for pb::ContiguousIpNetwork {
     }
 }
 
+/// Decodes the address and prefix length a `ContiguousIpNetwork` carries.
+///
+/// Shared by both network conversions below so the wire validation lives in
+/// one place and the two decode paths cannot drift apart.
+fn decode_ip_network(net: &pb::ContiguousIpNetwork) -> Result<(IpAddr, u8), Box<dyn Error>> {
+    let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+    let addr = IpAddr::try_from(addr)?;
+    let prefix_len: u8 = net
+        .prefix_len
+        .try_into()
+        .map_err(|_| format!("invalid prefix length {}: exceeds 255", net.prefix_len))?;
+
+    Ok((addr, prefix_len))
+}
+
 impl TryFrom<&pb::ContiguousIpNetwork> for IpNetwork {
     type Error = Box<dyn Error>;
 
     /// Masks host bits to `prefix_len` rather than rejecting them.
     fn try_from(net: &pb::ContiguousIpNetwork) -> Result<Self, Self::Error> {
-        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
-        let addr = IpAddr::try_from(addr)?;
-        let prefix_len: u8 = net
-            .prefix_len
-            .try_into()
-            .map_err(|_| format!("invalid prefix length {}: exceeds 255", net.prefix_len))?;
+        let (addr, prefix_len) = decode_ip_network(net)?;
 
         let result = match addr {
             IpAddr::V4(v4) => IpNetwork::try_from((v4, prefix_len)),
             IpAddr::V6(v6) => IpNetwork::try_from((v6, prefix_len)),
         };
         result.map_err(|e| format!("invalid prefix length {prefix_len}: {e}").into())
+    }
+}
+
+impl TryFrom<&pb::ContiguousIpNetwork> for Contiguous<IpNetwork> {
+    type Error = Box<dyn Error>;
+
+    /// Masks host bits to `prefix_len`, like the [`IpNetwork`] conversion.
+    ///
+    /// A mask built from a prefix length is contiguous by construction, so
+    /// this never has to reject a non-contiguous mask.
+    fn try_from(net: &pb::ContiguousIpNetwork) -> Result<Self, Self::Error> {
+        let (addr, prefix_len) = decode_ip_network(net)?;
+
+        Contiguous::<IpNetwork>::try_from((addr, prefix_len))
+            .map_err(|e| format!("invalid prefix length {prefix_len}: {e}").into())
     }
 }
 
@@ -648,6 +673,53 @@ mod test {
         assert_eq!(32, msg.prefix_len);
         let got = IpNetwork::try_from(&msg).unwrap();
         assert_eq!(*net, got);
+    }
+
+    /// The `Contiguous<IpNetwork>` decode accepts exactly what the bare
+    /// `IpNetwork` one does, since both go through `decode_ip_network`, and
+    /// keeps the contiguity guarantee in the type.
+    #[test]
+    fn contiguous_ip_network_contiguous_round_trip() {
+        for cidr in ["10.0.0.0/24", "2001:db8::/32"] {
+            let net = Contiguous::<IpNetwork>::parse(cidr).unwrap();
+            let msg = pb::ContiguousIpNetwork::from(net);
+            let got = Contiguous::<IpNetwork>::try_from(&msg).unwrap();
+            assert_eq!(net, got, "round trip must preserve {cidr}");
+        }
+    }
+
+    /// Mirrors [`contiguous_ip_network_try_from_masks_host_bits_v4`] for the
+    /// `Contiguous<IpNetwork>` decode.
+    #[test]
+    fn contiguous_ip_network_contiguous_try_from_masks_host_bits() {
+        let msg = pb::ContiguousIpNetwork {
+            addr: Some(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))),
+            prefix_len: 24,
+        };
+        let got = Contiguous::<IpNetwork>::try_from(&msg).unwrap();
+        assert_eq!(Contiguous::<IpNetwork>::parse("10.0.0.0/24").unwrap(), got);
+    }
+
+    /// Both decodes reject the same malformed messages, since the shared
+    /// `decode_ip_network` is what rejects them.
+    #[test]
+    fn contiguous_ip_network_contiguous_try_from_rejects_malformed() {
+        let malformed = [
+            pb::ContiguousIpNetwork { addr: None, prefix_len: 24 },
+            pb::ContiguousIpNetwork {
+                addr: Some(pb::IpAddress { addr: vec![10, 0, 0] }),
+                prefix_len: 24,
+            },
+            pb::ContiguousIpNetwork {
+                addr: Some(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)))),
+                prefix_len: 33,
+            },
+        ];
+
+        for msg in &malformed {
+            assert!(Contiguous::<IpNetwork>::try_from(msg).is_err(), "must reject {msg:?}");
+            assert!(IpNetwork::try_from(msg).is_err(), "must reject {msg:?}");
+        }
     }
 
     /// `Display` alone would hide a wrong-family or unmasked encoding, so

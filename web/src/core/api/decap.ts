@@ -1,17 +1,17 @@
 import { createService, type CallOptions } from './client';
-import type { ContiguousIPNetworkWire } from '../utils/netip';
+import type { ContiguousIPNetwork } from '../utils/netip';
 
 export interface ShowConfigRequest {
     name?: string;
 }
 
 export interface ShowConfigResponse {
-    prefixes?: ContiguousIPNetworkWire[];
+    prefixes?: ContiguousIPNetwork[];
 }
 
 export interface DecapUpdateConfigRequest {
     name?: string;
-    prefixes?: ContiguousIPNetworkWire[];
+    prefixes?: ContiguousIPNetwork[];
 }
 
 export interface DecapUpdateConfigResponse { }

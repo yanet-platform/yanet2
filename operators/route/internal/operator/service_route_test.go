@@ -15,6 +15,16 @@ import (
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
+// mustNetwork builds the wire prefix message from a CIDR string.
+func mustNetwork(t *testing.T, s string) *commonpb.ContiguousIPNetwork {
+	t.Helper()
+
+	network, err := commonpb.ParseContiguousIPNetwork(s)
+	require.NoError(t, err)
+
+	return network
+}
+
 // TestShowRoutes_StaticECMP_BothBest verifies that two static ECMP nexthops
 // for the same prefix both carry is_best=true.
 func TestShowRoutes_StaticECMP_BothBest(t *testing.T) {
@@ -25,7 +35,7 @@ func TestShowRoutes_StaticECMP_BothBest(t *testing.T) {
 
 	_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
 		Name:         "route0",
-		Prefix:       "10.0.0.0/24",
+		Prefix:       mustNetwork(t, "10.0.0.0/24"),
 		NexthopAddrs: []*commonpb.IPAddress{nh1, nh2},
 		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
 	})
@@ -48,7 +58,7 @@ func TestShowRoutes_BirdDifferentPref_OnlyBetterIsBest(t *testing.T) {
 	// Insert the lower-Pref route first so ordering is not insertion-order.
 	_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
 		Name:         "route0",
-		Prefix:       "10.1.0.0/24",
+		Prefix:       mustNetwork(t, "10.1.0.0/24"),
 		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.2"))},
 		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
 	})
@@ -128,7 +138,7 @@ func TestLookupRoute_ThreeWay(t *testing.T) {
 	t.Run("matching route", func(t *testing.T) {
 		_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
 			Name:         "route0",
-			Prefix:       "10.0.0.0/24",
+			Prefix:       mustNetwork(t, "10.0.0.0/24"),
 			NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1"))},
 			SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
 		})
@@ -136,7 +146,9 @@ func TestLookupRoute_ThreeWay(t *testing.T) {
 
 		resp, err := svc.LookupRoute(t.Context(), &operatorpb.LookupRouteRequest{Name: "route0", IpAddr: addr})
 		require.NoError(t, err)
-		require.Equal(t, "10.0.0.0/24", resp.GetPrefix())
+		matched, err := resp.GetPrefix().ToPrefix()
+		require.NoError(t, err)
+		require.Equal(t, netip.MustParsePrefix("10.0.0.0/24"), matched)
 		require.Len(t, resp.GetRoutes(), 1)
 	})
 }
@@ -146,7 +158,7 @@ func TestInsertRoute_NonStaticMultipleNexthops_InvalidArgument(t *testing.T) {
 
 	req := &operatorpb.InsertRouteRequest{
 		Name:   "route0",
-		Prefix: "10.0.0.0/24",
+		Prefix: mustNetwork(t, "10.0.0.0/24"),
 		NexthopAddrs: []*commonpb.IPAddress{
 			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1")),
 			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.2")),
@@ -159,6 +171,80 @@ func TestInsertRoute_NonStaticMultipleNexthops_InvalidArgument(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	require.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// TestInsertRoute_MalformedPrefix_InvalidArgument verifies that a prefix
+// the shared type cannot decode never reaches the RIB.
+//
+// Every malformed shape stays on the InvalidArgument path, and a rejected
+// insert leaves no RIB behind for the named config.
+func TestInsertRoute_MalformedPrefix_InvalidArgument(t *testing.T) {
+	nexthops := []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1"))}
+
+	testCases := []struct {
+		name   string
+		prefix *commonpb.ContiguousIPNetwork
+	}{
+		{
+			name:   "missing prefix",
+			prefix: nil,
+		},
+		{
+			name:   "missing addr",
+			prefix: &commonpb.ContiguousIPNetwork{PrefixLen: 24},
+		},
+		{
+			name:   "addr of invalid length",
+			prefix: &commonpb.ContiguousIPNetwork{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0}}, PrefixLen: 24},
+		},
+		{
+			name:   "prefix length beyond address family",
+			prefix: &commonpb.ContiguousIPNetwork{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}}, PrefixLen: 33},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			svc := NewRouteService(neigh.NewNeighTable())
+
+			_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
+				Name:         "route0",
+				Prefix:       testCase.prefix,
+				NexthopAddrs: nexthops,
+				SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
+			})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+			_, ok := svc.ribs.Get("route0")
+			require.False(t, ok, "a rejected insert must not create a RIB")
+		})
+	}
+}
+
+// TestInsertRoute_HostBitsAreMasked verifies that host bits below the
+// prefix length are masked off before the route reaches the RIB.
+//
+// The route is therefore stored, and reported back, under its network
+// address rather than under the address the caller sent.
+func TestInsertRoute_HostBitsAreMasked(t *testing.T) {
+	svc := NewRouteService(neigh.NewNeighTable())
+
+	_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
+		Name: "route0",
+		// 10.0.0.7/24 with host bits deliberately left set.
+		Prefix:       &commonpb.ContiguousIPNetwork{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 7}}, PrefixLen: 24},
+		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1"))},
+		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
+	})
+	require.NoError(t, err)
+
+	resp, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+	require.NoError(t, err)
+	require.Len(t, resp.GetRoutes(), 1)
+
+	prefix, err := resp.GetRoutes()[0].GetPrefix().ToPrefix()
+	require.NoError(t, err)
+	require.Equal(t, netip.MustParsePrefix("10.0.0.0/24"), prefix)
 }
 
 // TestShowRoutes_ConfiguredModule_NoRIBYet_Success verifies that ShowRoutes

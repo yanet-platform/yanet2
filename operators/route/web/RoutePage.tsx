@@ -14,7 +14,7 @@ import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
 import RouteDrawer from './RouteDrawer';
 import LookupDrawer from './LookupDrawer';
-import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
+import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily, routePrefix, toWirePrefix } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
 import { FamilyFilter } from '@yanet/core/components/VirtualTable';
 import '@yanet/core/styles/chrome.scss';
@@ -73,13 +73,13 @@ const RoutePage: React.FC = () => {
         }
 
         if (conflictsOnly) {
-            res = res.filter((r) => (conflictMap.get(r.prefix || '') ?? 1) > 1);
+            res = res.filter((r) => (conflictMap.get(routePrefix(r)) ?? 1) > 1);
         }
 
         const q = search.trim().toLowerCase();
         if (q) {
             res = res.filter((r) =>
-                (r.prefix || '').toLowerCase().includes(q) ||
+                routePrefix(r).toLowerCase().includes(q) ||
                 ipAddressToString(r.next_hop).toLowerCase().includes(q) ||
                 ipAddressToString(r.peer).toLowerCase().includes(q)
             );
@@ -165,7 +165,7 @@ const RoutePage: React.FC = () => {
                 if (op.type === 'delete') {
                     await API.route.deleteRoute({
                         name: currentConfig,
-                        prefix: op.prefix,
+                        prefix: toWirePrefix(op.prefix),
                         nexthop_addrs: [op.nexthop],
                         do_flush: false,
                         source_id: RouteSourceID.STATIC,
@@ -173,7 +173,7 @@ const RoutePage: React.FC = () => {
                 } else {
                     await API.route.insertRoute({
                         name: currentConfig,
-                        prefix: op.prefix,
+                        prefix: toWirePrefix(op.prefix),
                         nexthop_addrs: op.nexthops,
                         do_flush: op.doFlush,
                         source_id: RouteSourceID.STATIC,
@@ -190,14 +190,15 @@ const RoutePage: React.FC = () => {
     }, [currentConfig, reload, drawer.mode, drawer.route]);
 
     const handleDeleteRoute = useCallback(async (route: Route): Promise<void> => {
-        if (!route.prefix || !route.next_hop) {
+        const prefix = routePrefix(route);
+        if (!prefix || !route.next_hop) {
             toaster.warning('route-delete-invalid', 'Route has no prefix or next-hop');
             return;
         }
         try {
             await API.route.deleteRoute({
                 name: currentConfig,
-                prefix: route.prefix,
+                prefix: toWirePrefix(prefix),
                 nexthop_addrs: [route.next_hop],
                 do_flush: true,
                 source_id: RouteSourceID.STATIC,
@@ -238,21 +239,22 @@ const RoutePage: React.FC = () => {
         let skipped = 0;
         let deleted = 0;
         for (const route of routes) {
-            if (!route.prefix || !route.next_hop) {
+            const prefix = routePrefix(route);
+            if (!prefix || !route.next_hop) {
                 skipped++;
                 continue;
             }
             try {
                 await API.route.deleteRoute({
                     name: currentConfig,
-                    prefix: route.prefix,
+                    prefix: toWirePrefix(prefix),
                     nexthop_addrs: [route.next_hop],
                     do_flush: true,
                     source_id: RouteSourceID.STATIC,
                 });
                 deleted++;
             } catch (err) {
-                toaster.error('bulk-delete-error', `Failed to delete route ${route.prefix}`, err);
+                toaster.error('bulk-delete-error', `Failed to delete route ${prefix}`, err);
             }
         }
         await reload();
@@ -280,7 +282,7 @@ const RoutePage: React.FC = () => {
 
     const handleShowInTable = useCallback((prefix: string): void => {
         handleClearFilters();
-        const matchedRow = allRows.find((r) => r.prefix === prefix);
+        const matchedRow = allRows.find((r) => routePrefix(r) === prefix);
         if (matchedRow) {
             const id = getRouteId(matchedRow);
             setFlashRowId(null);
@@ -373,9 +375,9 @@ const RoutePage: React.FC = () => {
     const routeRowAdapter = useMemo((): RowAdapter<Route> => ({
         rows: allRows,
         getId: getRouteId,
-        getLabel: (r) => r.prefix || '(no prefix)',
+        getLabel: (r) => routePrefix(r) || '(no prefix)',
         getSub: (r) => ipAddressToString(r.next_hop) || '—',
-        searchText: (r) => (r.prefix || '') + ' ' + ipAddressToString(r.next_hop),
+        searchText: (r) => routePrefix(r) + ' ' + ipAddressToString(r.next_hop),
         onSelect: (id) => handleJumpToRow(id),
         icon: '→',
         max: 7,

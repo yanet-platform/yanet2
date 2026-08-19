@@ -4,7 +4,7 @@ import { toaster } from '@yanet/core/utils';
 import { stringToIPAddress, ipAddressToString } from '@yanet/core/utils/netip';
 import { parseIPAddress } from '@yanet/core/utils';
 import type { Route } from '@yanet/core/api/routes';
-import { bestPathReason } from './utils';
+import { bestPathReason, routePrefix } from './utils';
 import { BestPill, SourceChip } from './cells';
 
 export interface LookupDrawerProps {
@@ -67,7 +67,7 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                 ip_addr: ipAddr,
             });
             setResult({
-                prefix: res.prefix ?? '',
+                prefix: res.prefix?.network ?? '',
                 routes: res.routes ?? [],
             });
         } catch (err) {
@@ -212,7 +212,7 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                                                         <BestPill isBest={r.is_best ?? false} />
                                                     </td>
                                                     <td className="yn-cell-mono yn-cell-strong">
-                                                        {r.prefix || '—'}
+                                                        {routePrefix(r) || '—'}
                                                     </td>
                                                     <td className="yn-cell-mono yn-cell-muted">
                                                         {ipAddressToString(r.next_hop) || '—'}

@@ -1,7 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, prefixIPFamily, groupByPrefix, filterByFamily, bestPathReason, getRouteId } from './utils';
-import { stringToIPAddress } from '@yanet/core/utils/netip';
+import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, prefixIPFamily, groupByPrefix, filterByFamily, bestPathReason, getRouteId, routePrefix, toWirePrefix } from './utils';
+import { stringToIPAddress, type ContiguousIPNetwork } from '@yanet/core/utils/netip';
 import type { Route } from '@yanet/core/api/routes';
+
+/** Builds the wire prefix message a server response carries. */
+const net = (cidr: string): ContiguousIPNetwork => ({ network: cidr });
+
+describe('routePrefix', () => {
+    it('reads the CIDR string out of the wire message', () => {
+        expect(routePrefix({ prefix: net('10.0.0.0/8') })).toBe('10.0.0.0/8');
+    });
+
+    it('yields an empty string when the server sent no prefix', () => {
+        expect(routePrefix({})).toBe('');
+        expect(routePrefix({ prefix: {} })).toBe('');
+    });
+
+    it('round-trips through toWirePrefix', () => {
+        expect(routePrefix({ prefix: toWirePrefix('2001:db8::/32') })).toBe('2001:db8::/32');
+    });
+});
 
 describe('planRouteSubmit', () => {
     const ip = (s: string) => stringToIPAddress(s)!;
@@ -39,7 +57,7 @@ describe('planRouteSubmit', () => {
     });
 
     it('edit mode, no key change: produces a single insert op without delete', () => {
-        const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
+        const original: Route = { prefix: net('10.0.0.0/8'), next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
             { prefix: '10.0.0.0/8', nexthopIps: [ip('192.168.1.1')], doFlush: false },
@@ -52,7 +70,7 @@ describe('planRouteSubmit', () => {
     });
 
     it('edit mode, prefix changed: produces delete then insert', () => {
-        const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
+        const original: Route = { prefix: net('10.0.0.0/8'), next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
             { prefix: '172.16.0.0/12', nexthopIps: [ip('192.168.1.1')], doFlush: false },
@@ -72,7 +90,7 @@ describe('planRouteSubmit', () => {
     });
 
     it('edit mode, nexthop changed: produces delete then insert', () => {
-        const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
+        const original: Route = { prefix: net('10.0.0.0/8'), next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
             { prefix: '10.0.0.0/8', nexthopIps: [ip('10.0.0.1')], doFlush: true },
@@ -89,7 +107,7 @@ describe('planRouteSubmit', () => {
     });
 
     it('edit mode, both prefix and nexthop changed: produces delete then insert', () => {
-        const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
+        const original: Route = { prefix: net('10.0.0.0/8'), next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
             { prefix: '172.16.0.0/12', nexthopIps: [ip('10.0.0.1')], doFlush: false },
@@ -116,7 +134,7 @@ describe('planRouteSubmit', () => {
     });
 
     it('edit mode, original has no next_hop: skips delete, produces only insert', () => {
-        const original: Route = { prefix: '10.0.0.0/8' };
+        const original: Route = { prefix: net('10.0.0.0/8') };
         const ops = planRouteSubmit(
             'edit',
             { prefix: '172.16.0.0/12', nexthopIps: [ip('192.168.1.1')], doFlush: false },
@@ -173,8 +191,8 @@ describe('sortComparators', () => {
     const makeRoute = (overrides: Partial<Route>): Route => ({ ...overrides });
 
     it('prefix: sorts lexicographically by prefix string', () => {
-        const a = makeRoute({ prefix: '10.0.0.0/8' });
-        const b = makeRoute({ prefix: '192.168.0.0/16' });
+        const a = makeRoute({ prefix: net('10.0.0.0/8') });
+        const b = makeRoute({ prefix: net('192.168.0.0/16') });
         expect(sortComparators.prefix(a, b)).toBeLessThan(0);
         expect(sortComparators.prefix(b, a)).toBeGreaterThan(0);
         expect(sortComparators.prefix(a, a)).toBe(0);
@@ -215,9 +233,9 @@ describe('prefixIPFamily', () => {
 describe('groupByPrefix', () => {
     it('groups routes with the same prefix together', () => {
         const routes: Route[] = [
-            { prefix: '10.0.0.0/8' },
-            { prefix: '::/0' },
-            { prefix: '10.0.0.0/8' },
+            { prefix: net('10.0.0.0/8') },
+            { prefix: net('::/0') },
+            { prefix: net('10.0.0.0/8') },
         ];
         const m = groupByPrefix(routes);
         expect(m.get('10.0.0.0/8')).toHaveLength(2);
@@ -231,9 +249,9 @@ describe('groupByPrefix', () => {
 
 describe('filterByFamily', () => {
     const routes: Route[] = [
-        { prefix: '::/0' },
-        { prefix: '0.0.0.0/0' },
-        { prefix: '2001:db8::/32' },
+        { prefix: net('::/0') },
+        { prefix: net('0.0.0.0/0') },
+        { prefix: net('2001:db8::/32') },
     ];
 
     it('returns all routes for family "all"', () => {
@@ -243,13 +261,13 @@ describe('filterByFamily', () => {
     it('returns only IPv6 routes for family "v6"', () => {
         const v6 = filterByFamily(routes, 'v6');
         expect(v6).toHaveLength(2);
-        expect(v6.every((r) => r.prefix?.includes(':'))).toBe(true);
+        expect(v6.every((r) => routePrefix(r).includes(':'))).toBe(true);
     });
 
     it('returns only IPv4 routes for family "v4"', () => {
         const v4 = filterByFamily(routes, 'v4');
         expect(v4).toHaveLength(1);
-        expect(v4[0].prefix).toBe('0.0.0.0/0');
+        expect(routePrefix(v4[0])).toBe('0.0.0.0/0');
     });
 });
 
@@ -281,7 +299,7 @@ describe('bestPathReason', () => {
 
 describe('getRouteId', () => {
     const base: Route = {
-        prefix: '::/0',
+        prefix: net('::/0'),
         next_hop: { addr: 'fe80::a1a' },
         peer: { addr: '::' },
         route_distinguisher: '',
@@ -318,7 +336,7 @@ describe('getRouteId', () => {
     });
 
     it('missing optional fields fall back to 0 or empty string, not "undefined"', () => {
-        const minimal: Route = { prefix: '10.0.0.0/8' };
+        const minimal: Route = { prefix: net('10.0.0.0/8') };
         const id = getRouteId(minimal);
         expect(id).not.toContain('undefined');
         // next_hop.addr='' peer.addr='' rd='' source=0 pref=0 peerAs=0 originAs=0 med=0 asPathLen=0

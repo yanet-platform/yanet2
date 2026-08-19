@@ -1,7 +1,16 @@
 import type { Route } from '@yanet/core/api/routes';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '@yanet/core/utils';
-import { ipAddressToString, type IPAddressWire } from '@yanet/core/utils/netip';
+import { ipAddressToString, type ContiguousIPNetwork, type IPAddressWire } from '@yanet/core/utils/netip';
 import type { RouteSortableColumn, IPFamily } from './types';
+
+/** Reads a route's destination prefix as a CIDR string.
+ *
+ * Empty when the server sent no prefix — the page keeps prefixes as strings
+ * everywhere below this boundary. */
+export const routePrefix = (route: Route): string => route.prefix?.network ?? '';
+
+/** Wraps a CIDR string into the wire prefix message. */
+export const toWirePrefix = (prefix: string): ContiguousIPNetwork => ({ network: prefix });
 
 export interface RouteSubmitParams {
     prefix: string;
@@ -25,11 +34,12 @@ export const planRouteSubmit = (
     originalNexthopStr: string,
 ): RouteSubmitOp[] => {
     const ops: RouteSubmitOp[] = [];
+    const originalPrefix = original ? routePrefix(original) : '';
     const keyChanged = mode === 'edit'
         && !!original
-        && (original.prefix !== params.prefix || originalNexthopStr !== newNexthopStr);
-    if (keyChanged && original?.prefix && original.next_hop) {
-        ops.push({ type: 'delete', prefix: original.prefix, nexthop: original.next_hop });
+        && (originalPrefix !== params.prefix || originalNexthopStr !== newNexthopStr);
+    if (keyChanged && originalPrefix && original?.next_hop) {
+        ops.push({ type: 'delete', prefix: originalPrefix, nexthop: original.next_hop });
     }
     ops.push({ type: 'insert', prefix: params.prefix, nexthops: params.nexthopIps, doFlush: params.doFlush });
     return ops;
@@ -39,7 +49,7 @@ export const ROUTE_SOURCES = ['Unknown', 'Static', 'BIRD'] as const;
 
 /** Returns a stable string key for a route row. */
 export const getRouteId = (route: Route): string =>
-    `${route.prefix ?? ''}_${String(route.next_hop?.addr ?? '')}_${String(route.peer?.addr ?? '')}_${route.route_distinguisher ?? ''}_${route.source ?? 0}_${route.pref ?? 0}_${route.peer_as ?? 0}_${route.origin_as ?? 0}_${route.med ?? 0}_${route.as_path_len ?? 0}`;
+    `${routePrefix(route)}_${String(route.next_hop?.addr ?? '')}_${String(route.peer?.addr ?? '')}_${route.route_distinguisher ?? ''}_${route.source ?? 0}_${route.pref ?? 0}_${route.peer_as ?? 0}_${route.origin_as ?? 0}_${route.med ?? 0}_${route.as_path_len ?? 0}`;
 
 /** Validates a CIDR prefix string. Returns an error message or undefined when valid. */
 export const validatePrefix = (prefix: string): string | undefined => {
@@ -92,7 +102,7 @@ export const prefixIPFamily = (prefix: string): IPFamily => {
 export const groupByPrefix = (routes: Route[]): Map<string, Route[]> => {
     const m = new Map<string, Route[]>();
     for (const r of routes) {
-        const key = r.prefix || '';
+        const key = routePrefix(r);
         const group = m.get(key);
         if (group) {
             group.push(r);
@@ -106,7 +116,7 @@ export const groupByPrefix = (routes: Route[]): Map<string, Route[]> => {
 /** Filters routes by IP family. Returns all routes when family is 'all'. */
 export const filterByFamily = (routes: Route[], family: IPFamily): Route[] => {
     if (family === 'all') return routes;
-    return routes.filter((r) => prefixIPFamily(r.prefix || '') === family);
+    return routes.filter((r) => prefixIPFamily(routePrefix(r)) === family);
 };
 
 /** Returns a human-readable reason why the first candidate beats the second,
@@ -151,7 +161,7 @@ export const bestPathReason = (cands: Route[]): string => {
 
 /** Sort comparators for each sortable column. */
 export const sortComparators: Record<RouteSortableColumn, (a: Route, b: Route) => number> = {
-    prefix: (a, b) => (a.prefix || '').localeCompare(b.prefix || ''),
+    prefix: (a, b) => routePrefix(a).localeCompare(routePrefix(b)),
     next_hop: (a, b) => ipAddressToString(a.next_hop).localeCompare(ipAddressToString(b.next_hop)),
     peer: (a, b) => ipAddressToString(a.peer).localeCompare(ipAddressToString(b.peer)),
     is_best: (a, b) => (a.is_best ? 1 : 0) - (b.is_best ? 1 : 0),

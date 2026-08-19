@@ -3,7 +3,6 @@ package operatorpb
 import (
 	"fmt"
 	"math"
-	"net/netip"
 	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -11,7 +10,10 @@ import (
 )
 
 // FromRIBRoute converts an internal rib.Route to the wire Route message.
-func FromRIBRoute(route *rib.Route, isBest bool) *Route {
+//
+// Returns an error if the route carries an invalid prefix, which the
+// structured wire message cannot represent.
+func FromRIBRoute(route *rib.Route, isBest bool) (*Route, error) {
 	communities := make([]*LargeCommunity, 0, len(route.LargeCommunities))
 	for _, c := range route.LargeCommunities {
 		communities = append(communities, convertLargeCommunity(c))
@@ -22,8 +24,13 @@ func FromRIBRoute(route *rib.Route, isBest bool) *Route {
 		peer = commonpb.NewIPAddressFromAddr(route.Peer)
 	}
 
+	prefix, err := commonpb.NewContiguousIPNetworkFromPrefix(route.Prefix)
+	if err != nil {
+		return nil, fmt.Errorf("invalid prefix %q: %w", route.Prefix, err)
+	}
+
 	return &Route{
-		Prefix:           route.Prefix.String(),
+		Prefix:           prefix,
 		NextHop:          commonpb.NewIPAddressFromAddr(route.NextHop),
 		Peer:             peer,
 		PeerAs:           route.PeerAS,
@@ -35,7 +42,7 @@ func FromRIBRoute(route *rib.Route, isBest bool) *Route {
 		IsBest:           isBest,
 		GlobalId:         route.GlobalID,
 		Ifindex:          route.Ifindex,
-	}
+	}, nil
 }
 
 func convertLargeCommunity(community rib.LargeCommunity) *LargeCommunity {
@@ -48,13 +55,16 @@ func convertLargeCommunity(community rib.LargeCommunity) *LargeCommunity {
 
 // ToRIBRoute converts a wire Route message to the internal rib.Route
 // representation.
+//
+// The prefix is masked to its prefix length, so host bits set by the
+// sender never reach the RIB.
 func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 	if route == nil {
 		return nil, fmt.Errorf("update.Route cannot be nil")
 	}
-	prefix, err := netip.ParsePrefix(route.GetPrefix())
+	prefix, err := route.GetPrefix().ToPrefix()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid prefix: %w", err)
 	}
 	nexthop, err := route.GetNextHop().ToAddr()
 	if err != nil {

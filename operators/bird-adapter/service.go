@@ -444,10 +444,19 @@ func (m *AdapterService) processBirdImport(
 				continue
 			}
 
-			err := (*currentStream).Send(&routepb.Update{
+			route, err := rib.ToPBRoute(&routes[idx])
+			if err != nil {
+				clientLog.Debug("route cannot be converted to protobuf, skip",
+					zap.String("prefix", routes[idx].Prefix.String()),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			err = (*currentStream).Send(&routepb.Update{
 				Name:     name,
 				IsDelete: routes[idx].ToRemove,
-				Route:    rib.ToPBRoute(&routes[idx]),
+				Route:    route,
 			})
 			if err != nil {
 				// This error stops bird.Export, triggering reconnection in runBirdImportLoop

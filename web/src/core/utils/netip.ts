@@ -751,7 +751,7 @@ export type IPAddressWire = {
 };
 
 // Wire-format shape of commonpb.ContiguousIPNetwork from the gRPC-JSON gateway: {network: "10.0.0.0/8"}.
-export type ContiguousIPNetworkWire = {
+export type ContiguousIPNetwork = {
     network?: string;
 };
 

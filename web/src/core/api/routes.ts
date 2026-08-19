@@ -1,6 +1,6 @@
 import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
-import type { IPAddressWire, IPRangeWire } from '../utils/netip';
+import type { ContiguousIPNetwork, IPAddressWire, IPRangeWire } from '../utils/netip';
 
 // Route types
 
@@ -17,7 +17,7 @@ export interface LargeCommunity {
 }
 
 export interface Route {
-    prefix?: string;
+    prefix?: ContiguousIPNetwork;
     next_hop?: IPAddressWire;
     peer?: IPAddressWire;
     route_distinguisher?: string | number; // uint64
@@ -46,7 +46,7 @@ export interface ShowRoutesResponse {
 
 export interface InsertRouteRequest {
     name?: string;
-    prefix?: string;
+    prefix?: ContiguousIPNetwork;
     nexthop_addrs?: IPAddressWire[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
@@ -57,7 +57,7 @@ export interface InsertRouteResponse {
 
 export interface DeleteRouteRequest {
     name?: string;
-    prefix?: string;
+    prefix?: ContiguousIPNetwork;
     nexthop_addrs?: IPAddressWire[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
@@ -107,7 +107,7 @@ export interface LookupRouteRequest {
 }
 
 export interface LookupRouteResponse {
-    prefix?: string;
+    prefix?: ContiguousIPNetwork;
     routes?: Route[];
 }
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Route } from '@yanet/core/api/routes';
 import { ipAddressToString } from '@yanet/core/utils/netip';
-import { getRouteId } from './utils';
+import { getRouteId, routePrefix } from './utils';
 import { BestPill, SourceChip, FamilyBadge, ConflictBadge } from './cells';
 import type { RouteSortableColumn, RouteSortState } from './types';
 import { VirtualTable } from '@yanet/core/components/VirtualTable';
@@ -44,10 +44,11 @@ export const RIBTable: React.FC<RIBTableProps> = ({
             gridTrack: 'minmax(190px, 1.3fr)',
             sortKey: 'prefix',
             renderCell: (route) => {
-                const prefixConflictCount = conflictMap?.get(route.prefix || '') ?? 1;
+                const prefix = routePrefix(route);
+                const prefixConflictCount = conflictMap?.get(prefix) ?? 1;
                 return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 9, overflow: 'hidden' }}>
-                        {route.prefix && <FamilyBadge prefix={route.prefix} />}
+                        {prefix && <FamilyBadge prefix={prefix} />}
                         <span
                             className="yn-cell-mono"
                             style={{
@@ -59,7 +60,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                                 fontWeight: route.is_best ? 600 : 500,
                                 color: route.is_best ? 'var(--yn-text)' : 'var(--yn-text-2)',
                             }}
-                        >{route.prefix || '-'}</span>
+                        >{prefix || '-'}</span>
                         {prefixConflictCount > 1 && <ConflictBadge count={prefixConflictCount} />}
                     </div>
                 );

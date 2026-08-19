@@ -16,6 +16,7 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
 };
 use colored::Colorize;
+use commonpb::pb::ContiguousIpNetwork;
 use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -323,7 +324,7 @@ impl RouteService {
 
         let request = InsertRouteRequest {
             name: cmd.name.clone(),
-            prefix: cmd.prefix.to_string(),
+            prefix: Some(ContiguousIpNetwork::from(cmd.prefix)),
             nexthop_addrs,
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
@@ -361,7 +362,7 @@ impl RouteService {
 
         let request = DeleteRouteRequest {
             name: cmd.name.clone(),
-            prefix: cmd.prefix.to_string(),
+            prefix: Some(ContiguousIpNetwork::from(cmd.prefix)),
             nexthop_addrs,
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
@@ -448,12 +449,14 @@ impl Display for Communities {
 }
 
 /// A destination prefix as reported by the server: either successfully
-/// parsed, or the raw string that failed to parse.
+/// decoded, or the debug rendering of the wire message that failed to
+/// decode.
 ///
-/// The malformed case keeps the original string instead of discarding it, so
-/// two different malformed values never compare equal and are never grouped
-/// into the same ECMP set. Every parsed value orders before every malformed
-/// one. Malformed values order lexicographically by their raw string.
+/// The malformed case keeps a rendering of the original message instead of
+/// discarding it, so two different malformed values never compare equal and
+/// are never grouped into the same ECMP set. Every parsed value orders
+/// before every malformed one. Malformed values order lexicographically by
+/// that rendering.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PrefixValue {
     Parsed(Contiguous<IpNetwork>),
@@ -550,9 +553,9 @@ pub struct RouteEntry {
 impl From<operatorpb::Route> for RouteEntry {
     fn from(route: operatorpb::Route) -> Self {
         let communities = route.large_communities.into_iter().map(|c| c.into()).collect();
-        let prefix = match Contiguous::<IpNetwork>::parse(&route.prefix) {
-            Ok(prefix) => PrefixValue::Parsed(prefix),
-            Err(..) => PrefixValue::Malformed(route.prefix),
+        let prefix = match route.prefix.as_ref().map(Contiguous::<IpNetwork>::try_from) {
+            Some(Ok(prefix)) => PrefixValue::Parsed(prefix),
+            _ => PrefixValue::Malformed(format!("{:?}", route.prefix)),
         };
 
         Self {
@@ -625,14 +628,17 @@ where
 mod test {
     use super::*;
 
-    /// `next_hop`/`peer` need no `serialize_with` override: a plain
-    /// `Option<commonpb::pb::IpAddress>` field already serializes as the
-    /// plain address string, or `null` when absent, through that type's
-    /// own `Serialize` impl. This pins that output byte-for-byte.
+    /// `prefix`/`next_hop`/`peer` need no `serialize_with` override: plain
+    /// `Option<commonpb::pb::ContiguousIpNetwork>` and
+    /// `Option<commonpb::pb::IpAddress>` fields already serialize as the
+    /// CIDR or plain address string, or `null` when absent, through those
+    /// types' own `Serialize` impls. This pins that output byte-for-byte,
+    /// including that the structured prefix still renders as the same
+    /// `"10.0.0.0/8"` string the wire string field used to produce.
     #[test]
-    fn route_next_hop_and_peer_serialize_without_a_field_override() {
+    fn route_prefix_next_hop_and_peer_serialize_without_a_field_override() {
         let route = operatorpb::Route {
-            prefix: "10.0.0.0/8".to_owned(),
+            prefix: Some("10.0.0.0/8".parse().unwrap()),
             next_hop: Some(commonpb::pb::IpAddress::from(IpAddr::V4(core::net::Ipv4Addr::new(
                 192, 0, 2, 1,
             )))),
@@ -747,20 +753,59 @@ mod test {
         entry_with(PrefixValue::Malformed(prefix_str.to_string()), source, is_best)
     }
 
-    /// A malformed prefix string from the server converts into a
-    /// `RouteEntry` carrying the raw string, instead of aborting the
-    /// process.
+    /// A prefix the server sends as a message that cannot be decoded --
+    /// missing, wrong `addr` length, or a prefix length past the family
+    /// bound -- converts into a `RouteEntry` carrying the malformed marker,
+    /// instead of aborting the process.
     #[test]
     fn route_entry_from_malformed_prefix_does_not_panic() {
-        let route = operatorpb::Route {
-            prefix: "not-a-prefix".to_owned(),
-            is_best: true,
-            ..Default::default()
+        let malformed = [
+            None,
+            Some(ContiguousIpNetwork { addr: None, prefix_len: 8 }),
+            Some(ContiguousIpNetwork {
+                addr: Some(commonpb::pb::IpAddress { addr: vec![10, 0, 0] }),
+                prefix_len: 8,
+            }),
+            Some(ContiguousIpNetwork {
+                addr: Some(commonpb::pb::IpAddress { addr: vec![10, 0, 0, 0] }),
+                prefix_len: 33,
+            }),
+        ];
+
+        for prefix in malformed {
+            let route = operatorpb::Route {
+                prefix,
+                is_best: true,
+                ..Default::default()
+            };
+
+            let entry = RouteEntry::from(route);
+
+            assert!(
+                matches!(entry.prefix.0, PrefixValue::Malformed(..)),
+                "expected a malformed prefix, got {:?}",
+                entry.prefix.0
+            );
+            assert_eq!("invalid", entry.prefix.0.to_string());
+        }
+    }
+
+    /// Two prefixes that both fail to decode stay distinct values, so
+    /// `annotate_ecmp_groups` never folds unrelated malformed routes into
+    /// one ECMP group.
+    #[test]
+    fn route_entry_malformed_prefixes_stay_distinct() {
+        let entry_of = |addr: Vec<u8>| {
+            RouteEntry::from(operatorpb::Route {
+                prefix: Some(ContiguousIpNetwork {
+                    addr: Some(commonpb::pb::IpAddress { addr }),
+                    prefix_len: 8,
+                }),
+                ..Default::default()
+            })
         };
 
-        let entry = RouteEntry::from(route);
-
-        assert_eq!(PrefixValue::Malformed("not-a-prefix".to_owned()), entry.prefix.0);
+        assert_ne!(entry_of(vec![10, 0, 0]).prefix.0, entry_of(vec![10, 0]).prefix.0);
     }
 
     /// Two best routes sharing a prefix are marked with ECMP size 2; a prefix

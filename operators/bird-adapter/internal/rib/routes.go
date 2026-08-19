@@ -103,7 +103,11 @@ func convertLargeCommunity(community LargeCommunity) *routepb.LargeCommunity {
 	}
 }
 
-func ToPBRoute(route *Route) *routepb.Route {
+// ToPBRoute converts an adapter Route to the wire Route message.
+//
+// Returns an error if the route carries an invalid prefix, which the
+// structured wire message cannot represent.
+func ToPBRoute(route *Route) (*routepb.Route, error) {
 	communities := make([]*routepb.LargeCommunity, 0, len(route.LargeCommunities))
 	for _, c := range route.LargeCommunities {
 		communities = append(communities, convertLargeCommunity(c))
@@ -121,8 +125,13 @@ func ToPBRoute(route *Route) *routepb.Route {
 		originAS = route.ASPath[len(route.ASPath)-1]
 	}
 
+	prefix, err := commonpb.NewContiguousIPNetworkFromPrefix(route.Prefix)
+	if err != nil {
+		return nil, fmt.Errorf("invalid prefix %q: %w", route.Prefix, err)
+	}
+
 	return &routepb.Route{
-		Prefix:           route.Prefix.String(),
+		Prefix:           prefix,
 		NextHop:          commonpb.NewIPAddressFromAddr(route.NextHop),
 		Peer:             peer,
 		PeerAs:           peerAS,
@@ -134,7 +143,7 @@ func ToPBRoute(route *Route) *routepb.Route {
 		LargeCommunities: communities,
 		GlobalId:         route.GlobalID,
 		Ifindex:          route.Ifindex,
-	}
+	}, nil
 }
 
 func ToPBMPLSRoute(route *Route, source netip.Addr) *routemplspb.Rule {

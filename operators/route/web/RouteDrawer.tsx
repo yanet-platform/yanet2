@@ -3,7 +3,7 @@ import { Button, Icon, Switch } from '@gravity-ui/uikit';
 import { Plus, TrashBin } from '@gravity-ui/icons';
 import { DraftItemDrawer } from '@yanet/core/components/draft';
 import { ipAddressToString } from '@yanet/core/utils/netip';
-import { validatePrefix, validateNexthop } from './utils';
+import { validatePrefix, validateNexthop, routePrefix } from './utils';
 import type { Route } from '@yanet/core/api/routes';
 import { CidrPrefixField } from '@yanet/core/components';
 import { BestPill, SourceChip } from './cells';
@@ -49,7 +49,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
 
     useEffect(() => {
         if (open) {
-            setPrefix(mode === 'edit' && route ? (route.prefix || '') : '');
+            setPrefix(mode === 'edit' && route ? routePrefix(route) : '');
             setNexthopRows(
                 mode === 'edit' && route
                     ? [makeRow(ipAddressToString(route.next_hop))]
@@ -58,7 +58,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             setDoFlush(false);
             setSubmitting(false);
         }
-    }, [open, mode, route?.prefix, route?.next_hop]);
+    }, [open, mode, route?.prefix?.network, route?.next_hop]);
 
     const nexthopErrors = nexthopRows.map((row) => validateNexthop(row.value));
     const prefixError = validatePrefix(prefix);

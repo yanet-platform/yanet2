@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	"github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -156,7 +157,11 @@ func (m *RouteService) ShowRoutes(
 
 			bestMask := routesList.BestPerSourceMask()
 			for idx, r := range routesList.Routes {
-				response.Routes = append(response.Routes, operatorpb.FromRIBRoute(&r, bestMask[idx]))
+				route, err := operatorpb.FromRIBRoute(&r, bestMask[idx])
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "failed to convert route: %v", err)
+				}
+				response.Routes = append(response.Routes, route)
 			}
 		}
 	}
@@ -191,14 +196,23 @@ func (m *RouteService) LookupRoute(
 		return &operatorpb.LookupRouteResponse{}, nil
 	}
 
+	matched, err := commonpb.NewContiguousIPNetworkFromPrefix(prefix)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert matched prefix %q: %v", prefix, err)
+	}
+
 	response := &operatorpb.LookupRouteResponse{
-		Prefix: prefix.String(),
+		Prefix: matched,
 		Routes: make([]*operatorpb.Route, 0, len(routes.Routes)),
 	}
 
 	bestMask := routes.BestPerSourceMask()
 	for idx, r := range routes.Routes {
-		response.Routes = append(response.Routes, operatorpb.FromRIBRoute(&r, bestMask[idx]))
+		route, err := operatorpb.FromRIBRoute(&r, bestMask[idx])
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to convert route: %v", err)
+		}
+		response.Routes = append(response.Routes, route)
 	}
 
 	return response, nil
@@ -213,9 +227,9 @@ func (m *RouteService) InsertRoute(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	prefix, err := netip.ParsePrefix(req.GetPrefix())
+	prefix, err := req.GetPrefix().ToPrefix()
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix %q: %v", req.GetPrefix(), err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix: %v", err)
 	}
 
 	addrs := req.GetNexthopAddrs()
@@ -268,9 +282,9 @@ func (m *RouteService) DeleteRoute(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	prefix, err := netip.ParsePrefix(req.GetPrefix())
+	prefix, err := req.GetPrefix().ToPrefix()
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix: %v", err)
 	}
 
 	addrs := req.GetNexthopAddrs()
