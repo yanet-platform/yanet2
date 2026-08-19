@@ -53,6 +53,7 @@ jobs:
           go-version-file: go.mod
 
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: protobuf-compiler libpcap-dev
 

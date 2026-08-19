@@ -1,5 +1,5 @@
 name: 'apt packages (cached)'
-description: 'Refresh the apt index, then install packages via cache-apt-pkgs-action'
+description: 'Restore cached apt packages before refreshing the Ubuntu package index'
 
 inputs:
   packages:
@@ -9,14 +9,92 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: refresh apt index
+    # The probe must match the pinned package action's cache-key contract.
+    #
+    # A hit lets package restoration proceed without contacting Ubuntu; a miss
+    # refreshes package metadata before installation and cache creation.
+    - name: derive package cache key
+      id: package-cache-key
       shell: bash
-      run: sudo apt-get update
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
 
-    # On a cache hit this action extracts archives rather than installing, so the dpkg
-    # database will not list the packages and a dpkg presence check cannot work here.
-    # Refreshing the index above prevents a failed install being cached as an empty result.
-    - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        read -r -a packages <<< "$PACKAGES"
+        if ! metadata=$(
+          apt-cache --quiet=0 --no-all-versions show "${packages[@]}" 2>/dev/null
+        ); then
+          echo "::notice::package metadata is incomplete; skipping the cache probe"
+          echo "key=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        normalized=$(
+          awk '
+            /^Package: / { package = substr($0, 10) }
+            /^Version: / {
+              if (package != "") {
+                print package "=" substr($0, 10)
+                package = ""
+              }
+            }
+          ' <<< "$metadata" | LC_ALL=C sort | paste -sd ' ' -
+        )
+
+        requested_count=${#packages[@]}
+        resolved_count=$(wc -w <<< "$normalized")
+        if [[ -z "$normalized" || "$requested_count" -ne "$resolved_count" ]]; then
+          echo "::notice::not every package resolved from local metadata; skipping the cache probe"
+          echo "key=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # These fields mirror the pinned package action's cache-key schema.
+        value="${normalized} @ 2 3"
+        architecture=$(arch)
+        if [[ "$architecture" != "x86_64" ]]; then
+          value="${value} ${architecture}"
+        fi
+        digest=$(printf '%s\n' "$value" | md5sum | cut -d ' ' -f 1)
+        echo "key=cache-apt-pkgs_${digest}" >> "$GITHUB_OUTPUT"
+
+    # The immutable revision matches the cache client embedded by the package action.
+    - name: look up package cache
+      id: package-cache-lookup
+      if: steps.package-cache-key.outputs.key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/cache-apt-pkgs
+        key: ${{ steps.package-cache-key.outputs.key }}
+        lookup-only: true
+
+    - name: refresh apt index after cache miss
+      if: steps.package-cache-lookup.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Hosted runner mirrors can accept a request and then stop sending data.
+        # Bound each refresh so a transient stall gets a clean retry.
+        for attempt in 1 2 3; do
+          echo "Refreshing apt index (attempt ${attempt}/3)"
+          if sudo timeout --kill-after=10s 90s apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 \
+            update; then
+            break
+          fi
+          if [[ "$attempt" == 3 ]]; then
+            echo "::error::apt index refresh failed after 3 attempts"
+            exit 1
+          fi
+          sleep "$((attempt * 5))"
+        done
+
+    # Keep this revision aligned with the cache-key derivation and lookup above.
+    - uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9
       with:
         packages: ${{ inputs.packages }}
         version: 2

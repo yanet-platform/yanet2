@@ -29,6 +29,7 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 

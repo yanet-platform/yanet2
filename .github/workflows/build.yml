@@ -64,6 +64,7 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
@@ -109,6 +110,7 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
@@ -148,6 +150,7 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
@@ -285,6 +288,7 @@ jobs:
           cache: true
 
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev
 

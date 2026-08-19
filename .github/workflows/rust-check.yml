@@ -56,6 +56,7 @@ jobs:
           shared-key: rust-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: protobuf-compiler
       - run: cargo test --workspace
@@ -78,6 +79,7 @@ jobs:
           shared-key: rust-check
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
         with:
           packages: protobuf-compiler
       - run: cargo clippy --workspace -- -D warnings
