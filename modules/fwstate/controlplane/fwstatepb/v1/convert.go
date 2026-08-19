@@ -76,10 +76,7 @@ func (m *SyncConfig) ToCWithDefaults(current cfwstate.SyncConfig) cfwstate.SyncC
 	if cfg.Default == 0 {
 		cfg.Default = current.Default
 	}
-	// The sync_suppress_timeout field is optional: a request that omits it (nil,
-	// e.g. from a client unaware of the field) inherits the current window, while
-	// an explicit value — including zero, the documented disable — overrides.
-	if m.SyncSuppressTimeout == nil {
+	if cfg.SyncSuppressTimeout == 0 {
 		cfg.SyncSuppressTimeout = current.SyncSuppressTimeout
 	}
 
@@ -97,7 +94,7 @@ func FromCSyncConfig(cfg cfwstate.SyncConfig) *SyncConfig {
 		Tcp:                 cfg.Tcp,
 		Udp:                 cfg.Udp,
 		Default:             cfg.Default,
-		SyncSuppressTimeout: &cfg.SyncSuppressTimeout,
+		SyncSuppressTimeout: cfg.SyncSuppressTimeout,
 	}
 }
 

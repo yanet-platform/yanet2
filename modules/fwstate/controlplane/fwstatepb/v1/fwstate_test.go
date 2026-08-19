@@ -10,9 +10,6 @@ import (
 
 const cfwstateTTL48Max = cfwstate.TTL48Max
 
-// u64Ptr is a convenience for setting optional uint64 proto fields in tests.
-func u64Ptr(v uint64) *uint64 { return &v }
-
 func TestValidateSyncConfigTimeouts(t *testing.T) {
 	valid := &SyncConfig{
 		TcpSynAck: 120e9,
@@ -48,7 +45,7 @@ func TestValidateSyncConfigTimeoutsSuppressOverflow(t *testing.T) {
 	// overflows the 48-bit field.
 	overflowing := &SyncConfig{
 		Tcp:                 cfwstateTTL48Max,
-		SyncSuppressTimeout: u64Ptr(1),
+		SyncSuppressTimeout: 1,
 	}
 	err := overflowing.ValidateTimeouts()
 	require.Error(t, err)
@@ -59,6 +56,6 @@ func TestValidateSyncConfigTimeoutsSuppressOverflow(t *testing.T) {
 	require.NoError(t, (&SyncConfig{Tcp: cfwstateTTL48Max}).ValidateTimeouts())
 	require.NoError(t, (&SyncConfig{
 		Tcp:                 120e9,
-		SyncSuppressTimeout: u64Ptr(8e9),
+		SyncSuppressTimeout: 8e9,
 	}).ValidateTimeouts())
 }

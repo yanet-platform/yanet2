@@ -38,41 +38,32 @@ func TestSyncConfig_ToCWithDefaults(t *testing.T) {
 	})
 }
 
-// TestSyncSuppressTimeoutRoundTrip verifies that sync_suppress_timeout, an
-// optional field, behaves correctly through the Pb->C->Pb round-trip and the
-// ToCWithDefaults merge: an explicit value (including zero = disable)
-// overrides, while an absent field inherits the current window.
+// TestSyncSuppressTimeoutRoundTrip verifies that sync_suppress_timeout
+// behaves correctly through the Pb->C->Pb round-trip and the
+// ToCWithDefaults merge: a non-zero value overrides, while a zero value
+// inherits the current window.
 func TestSyncSuppressTimeoutRoundTrip(t *testing.T) {
 	const suppress uint64 = 8e9
 
 	t.Run("round_trip", func(t *testing.T) {
-		pb := &SyncConfig{SyncSuppressTimeout: u64Ptr(suppress)}
+		pb := &SyncConfig{SyncSuppressTimeout: suppress}
 		got := FromCSyncConfig(pb.ToC())
 		require.Equal(t, suppress, got.GetSyncSuppressTimeout())
 	})
 
-	t.Run("explicit_zero_disables", func(t *testing.T) {
-		// An explicit zero is the documented disable value and must override,
-		// not inherit, the current window.
-		current := cfwstate.SyncConfig{SyncSuppressTimeout: suppress}
-		pb := &SyncConfig{SyncSuppressTimeout: u64Ptr(0)}
-		cfg := pb.ToCWithDefaults(current)
-		require.Equal(t, uint64(0), cfg.SyncSuppressTimeout)
-	})
-
-	t.Run("explicit_override", func(t *testing.T) {
-		current := cfwstate.SyncConfig{SyncSuppressTimeout: suppress}
-		pb := &SyncConfig{SyncSuppressTimeout: u64Ptr(1e9)}
-		cfg := pb.ToCWithDefaults(current)
-		require.Equal(t, uint64(1e9), cfg.SyncSuppressTimeout)
-	})
-
-	t.Run("absent_inherits", func(t *testing.T) {
-		// A client that omits the field (nil) keeps the current window, so an
-		// older web form does not silently disable suppression.
+	t.Run("zero_inherits", func(t *testing.T) {
+		// Zero is indistinguishable from omitted and inherits the current
+		// window, like every other scalar in the merge.
 		current := cfwstate.SyncConfig{SyncSuppressTimeout: suppress}
 		pb := &SyncConfig{}
 		cfg := pb.ToCWithDefaults(current)
 		require.Equal(t, suppress, cfg.SyncSuppressTimeout)
+	})
+
+	t.Run("explicit_override", func(t *testing.T) {
+		current := cfwstate.SyncConfig{SyncSuppressTimeout: suppress}
+		pb := &SyncConfig{SyncSuppressTimeout: 1e9}
+		cfg := pb.ToCWithDefaults(current)
+		require.Equal(t, uint64(1e9), cfg.SyncSuppressTimeout)
 	})
 }

@@ -167,9 +167,6 @@ message SyncConfig {
   // whose new expiry lands within this window of the current one is discarded
   // (the fwmap record is left untouched), debouncing refreshes for busy
   // sessions. Every entry TTL is inflated by this value so the effective
-  // keep-alive never falls below the configured timeout. Zero disables it.
-  //
-  // Optional so that clients unaware of the field (an older web form) can omit
-  // it and keep the current window, while an explicit zero disables it.
-  optional uint64 sync_suppress_timeout = 13;
+  // keep-alive never falls below the configured timeout.
+  uint64 sync_suppress_timeout = 13;
 }

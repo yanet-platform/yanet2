@@ -172,7 +172,7 @@ pub struct UpdateCmd {
 
     /// Sync suppression window: skip redundant state-sync refreshes whose
     /// new expiry lands within this window of the current one (e.g., "8s").
-    /// "0s" disables suppression.
+    /// Omitted or zero keeps the currently configured window.
     #[arg(long, value_parser = parse_duration)]
     pub sync_suppress_timeout: Option<Duration>,
 }

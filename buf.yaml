@@ -26,3 +26,9 @@ breaking:
     - PACKAGE
   ignore:
     - modules/balancer2
+  # sync_suppress_timeout intentionally dropped proto3 optional presence; the
+  # wire format (field 13, varint) is unchanged. Drop this waiver once main
+  # carries the plain field.
+  ignore_only:
+    FIELD_SAME_CARDINALITY:
+      - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto
