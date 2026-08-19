@@ -1,0 +1,64 @@
+name: Go Race
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - ".github/workflows/go-race.yml"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "**/*.go"
+      - ".github/workflows/go-race.yml"
+
+concurrency:
+  # The run_id fallback keeps non-PR runs from cancelling each other.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  go-race:
+    name: Run Go race tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/apt-packages
+        timeout-minutes: 10
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+
+      - uses: hendrikmuhs/ccache-action@v1.2.18
+        name: ccache
+        with:
+          key: ${{ runner.os }}-go-race-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      - name: Install Go Protobuf Plugins
+        uses: ./.github/actions/protoc-plugins
+
+      - name: Build YANET
+        run: |
+          meson setup build -Dbuildtype=debug -Doptimization=0
+          make dataplane
+
+      - name: Run Go race tests
+        run: |
+          set -euo pipefail
+          packages=$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
+          go test -race -count=1 $packages
