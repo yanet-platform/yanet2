@@ -117,8 +117,8 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 1. Create the fwstate-map objects the configs below link by name.
 	fw.Run("Create_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIFWState + " map create --name fwstate0-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
-			framework.CLIFWState + " map create --name fwstate0-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate0-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate0-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 		}
 		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "fwstate-map creation failed")
@@ -489,8 +489,8 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 	// 1. Create the fwstate-map objects and configure fwstate.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIFWState + " map create --name fwstate_udp-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
-			framework.CLIFWState + " map create --name fwstate_udp-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate_udp-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate_udp-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 			framework.CLIFWState + " update --name fwstate_udp" +
 				" --map-name-v4 fwstate_udp-v4" +
 				" --map-name-v6 fwstate_udp-v6" +
@@ -737,8 +737,8 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 1. Create the fwstate-map objects and configure the fwstate module.
 	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIFWState + " map create --name fwstate_ext-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
-			framework.CLIFWState + " map create --name fwstate_ext-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate_ext-v4 --kind v4 --index-size 1024 --extra-bucket-count 64",
+			framework.CLIFWStateMap + " create --name fwstate_ext-v6 --kind v6 --index-size 1024 --extra-bucket-count 64",
 			framework.CLIFWState + " update --name fwstate_ext" +
 				" --map-name-v4 fwstate_ext-v4" +
 				" --map-name-v6 fwstate_ext-v6" +

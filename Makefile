@@ -40,6 +40,7 @@ CLI_MODULES := \
 	device-trafgen \
 	dscp \
 	fwstate \
+	fwstatemap \
 	mirror \
 	route \
 	route-mpls \

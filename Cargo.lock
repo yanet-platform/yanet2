@@ -3355,6 +3355,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-fwstatemap"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "log",
+ "prost",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+ "yanet-commonpb",
+]
+
+[[package]]
 name = "yanet-cli-gateway"
 version = "0.1.0"
 dependencies = [
