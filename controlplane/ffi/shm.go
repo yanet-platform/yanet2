@@ -25,6 +25,10 @@ type SharedMemory struct {
 	ptr *C.struct_yanet_shm
 }
 
+// NewSharedMemoryFromRaw wraps an opaque C shared-memory handle.
+//
+// The pointer is the process-local handle the C API hands out, not the
+// segment itself; it must only be used through the C API.
 func NewSharedMemoryFromRaw(ptr unsafe.Pointer) *SharedMemory {
 	return &SharedMemory{ptr: (*C.struct_yanet_shm)(ptr)}
 }
@@ -35,7 +39,7 @@ func AttachSharedMemory(path string) (*SharedMemory, error) {
 	defer C.free(unsafe.Pointer(cPath))
 
 	ptr, err := C.yanet_shm_attach(cPath)
-	if err != nil {
+	if ptr == nil {
 		return nil, fmt.Errorf(
 			"failed to attach to shared memory %q: %w",
 			path,
@@ -50,18 +54,28 @@ func AttachSharedMemory(path string) (*SharedMemory, error) {
 //
 // Every agent attached to the segment must be closed before detaching,
 // because the mapping is unmapped and a later agent operation would fault.
+// The mapping length travels inside the handle, so detaching works at any
+// point after a successful attach, including before the dataplane has
+// written the segment header. The handle is consumed whatever the outcome,
+// so a second call is a no-op.
 func (m *SharedMemory) Detach() error {
-	if m.ptr != nil {
-		if _, err := C.yanet_shm_detach(m.ptr); err != nil {
-			return fmt.Errorf("failed to detach shared memory: %w", err)
-		}
+	if m.ptr == nil {
+		return nil
+	}
 
-		m.ptr = nil
+	ptr := m.ptr
+	m.ptr = nil
+	if rc, err := C.yanet_shm_detach(ptr); rc != 0 {
+		return fmt.Errorf("failed to detach shared memory: %w", err)
 	}
 
 	return nil
 }
 
+// AsRawPtr returns the opaque C shared-memory handle.
+//
+// The pointer is the process-local handle, not the segment itself; it must
+// only be used through the C API.
 func (m *SharedMemory) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }

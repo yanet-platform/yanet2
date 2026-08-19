@@ -37,6 +37,11 @@
 struct dataplane_ut {
 	void *arena;
 	size_t arena_size;
+	// Shared-memory handle over the arena, handed out to agents.
+	//
+	// Owned by the harness: it is never detached, because the arena is
+	// heap memory that the harness frees itself.
+	struct yanet_shm shm;
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
 	struct agent *agent;
@@ -119,6 +124,8 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 	memset(ut->arena, 0, ut->arena_size);
+	ut->shm.base = ut->arena;
+	ut->shm.size = ut->arena_size;
 
 	// Lay out dp_config and cp_config inside the arena.
 	if (dp_storage_init(
@@ -436,8 +443,7 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 
 struct yanet_shm *
 dataplane_ut_shm(struct dataplane_ut *ut) {
-	// The arena base address serves as the opaque shm handle.
-	return (struct yanet_shm *)ut->arena;
+	return &ut->shm;
 }
 
 void

@@ -46,10 +46,12 @@ yanet_shm_attach(const char *path);
 
 // Detaches from YANET shared memory segment.
 //
-// Releases all resources associated with the shared memory handle.
-// After this call, the handle becomes invalid and must not be used.
-//
-// @param shm Handle to shared memory segment obtained from yanet_shm_attach()
+// Unmaps exactly the range that yanet_shm_attach() mapped, regardless of how
+// far the dataplane has got in initialising the segment, and frees the
+// handle. The handle must be one returned by yanet_shm_attach() and not NULL;
+// after this call it becomes invalid and must not be used, whatever the
+// outcome. Returns 0 on success, -1 with errno set if the mapping could not
+// be released.
 int
 yanet_shm_detach(struct yanet_shm *shm);
 

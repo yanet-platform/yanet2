@@ -64,7 +64,9 @@ void
 dataplane_ut_free(struct dataplane_ut *ut);
 
 // Return the shared-memory handle backing this harness.
-// Suitable for passing to agent_attach.
+//
+// Suitable for passing to agent_attach. The handle is owned by the harness
+// and lives until dataplane_ut_free; it must not be detached.
 struct yanet_shm *
 dataplane_ut_shm(struct dataplane_ut *ut);
 

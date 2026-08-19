@@ -1,6 +1,7 @@
 #include "agent.h"
 
 #include <linux/mman.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -44,42 +45,45 @@ yanet_shm_attach(const char *path) {
 		return NULL;
 	}
 
-	void *ptr = mmap(
-		NULL, stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0
-	);
+	size_t size = (size_t)stat.st_size;
+	void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	close(fd);
 	if (ptr == MAP_FAILED) {
 		return NULL;
 	}
 
-	struct yanet_shm *shm = (struct yanet_shm *)ptr;
+	struct yanet_shm *shm = malloc(sizeof(*shm));
+	if (shm == NULL) {
+		int saved_errno = errno;
+		munmap(ptr, size);
+		errno = saved_errno;
+		return NULL;
+	}
+	shm->base = ptr;
+	shm->size = size;
 	return shm;
 }
 
 int
 yanet_shm_detach(struct yanet_shm *shm) {
-	// calculate total size of shared memory
-	size_t size = 0;
-	struct dp_config *dp_config = (struct dp_config *)shm;
-	uint32_t instance_count = dp_config->instance_count;
-	for (uint32_t instance_idx = 0; instance_idx < instance_count;
-	     ++instance_idx) {
-		size += dp_config->storage_size;
-		dp_config = dp_config_nextk(dp_config, 1);
-	}
-
-	return munmap(shm, size);
+	// The handle is released whatever the unmap reports: a caller has no
+	// way to retry with a better length, so keeping the handle alive
+	// would only turn a leaked mapping into a dangling pointer as well.
+	int rc = munmap(shm->base, shm->size);
+	free(shm);
+	return rc;
 }
 
 struct dp_config *
 yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx) {
-	return dp_config_nextk((struct dp_config *)shm, instance_idx);
+	return dp_config_nextk((struct dp_config *)shm->base, instance_idx);
 }
 
 int
 agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx) {
 	uint32_t count = __atomic_load_n(
-		&((struct dp_config *)shm)->instance_count, __ATOMIC_ACQUIRE
+		&((struct dp_config *)shm->base)->instance_count,
+		__ATOMIC_ACQUIRE
 	);
 	if (instance_idx >= count) {
 		return 0;

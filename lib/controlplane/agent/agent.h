@@ -17,6 +17,19 @@ struct cp_object;
 
 struct agent;
 
+// Process-local handle to a mapped shared-memory segment.
+//
+// Carries the mapping length next to its base address so that releasing
+// the segment never depends on what the segment header says: the dataplane
+// sizes the storage file long before it fills the header in, and a detach
+// in that window must still unmap exactly what was mapped. A harness that
+// backs the segment with its own memory embeds this struct and hands out a
+// pointer to it; such a handle must never be detached.
+struct yanet_shm {
+	void *base;
+	size_t size;
+};
+
 struct agent_arena {
 	void *data;
 	uint64_t size;
