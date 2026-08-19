@@ -1,8 +1,11 @@
 package xcfg_test
 
 import (
+	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -231,6 +234,186 @@ name: x
 	require.Contains(t, err.Error(), "base.bogus")
 	require.Contains(t, err.Error(), "inner.bogus")
 	require.Contains(t, err.Error(), "a.bogus")
+}
+
+// aliasExpansionDocument returns a doubling merge DAG and a shadowed fallback.
+func aliasExpansionDocument(levels int) []byte {
+	var document strings.Builder
+	document.WriteString("good: &good\n  value:\n    addr: kept\n")
+	document.WriteString("a0: &a0\n  value:\n    addr: base\n")
+	for level := 1; level <= levels; level++ {
+		fmt.Fprintf(
+			&document,
+			"a%d: &a%d\n  <<: [*a%d, *a%d]\n",
+			level,
+			level,
+			level-1,
+			level-1,
+		)
+	}
+	document.WriteString("shadowed:\n  <<: [*good, {value: }]\n")
+	return []byte(document.String())
+}
+
+// Test_Decode_ExcessiveAliasExpansion_NativeError verifies that a merge DAG
+// reaches the native guard with and without known-field checking.
+//
+// The shadowed null fallback ensures an exhausted preflight cannot manufacture
+// its own error by continuing after it skips a higher-priority alias.
+func Test_Decode_ExcessiveAliasExpansion_NativeError(t *testing.T) {
+	input := aliasExpansionDocument(30)
+	testCases := []struct {
+		name    string
+		options []xcfg.Option
+	}{
+		{
+			name: "without known-field checking returns native error",
+		},
+		{
+			name:    "with known-field checking returns native error",
+			options: []xcfg.Option{xcfg.WithKnownFields()},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			decoded := make(chan error, 1)
+			go func() {
+				var config map[string]map[string]knownKeysInner
+				decoded <- xcfg.Decode(input, &config, testCase.options...)
+			}()
+
+			select {
+			case err := <-decoded:
+				require.EqualError(t, err, "yaml: document contains excessive aliasing")
+			case <-time.After(time.Second):
+				t.Fatal("decoding did not terminate within one second")
+			}
+		})
+	}
+}
+
+type deepAliasNode struct {
+	// Next follows the preceding anchored mapping.
+	Next *deepAliasNode `yaml:"next"`
+}
+
+type deepAliasConfig struct {
+	// Anchors keeps physical definitions opaque to the decoder.
+	Anchors yaml.Node `yaml:"anchors"`
+	// Root exposes the anchored chain as transparent configuration.
+	Root deepAliasNode `yaml:"root"`
+}
+
+// deepAliasPathDocument returns an anchored chain with a growing field path.
+func deepAliasPathDocument(levels int) []byte {
+	var document strings.Builder
+	document.WriteString("anchors:\n  a0: &a0 {}\n")
+	for level := 1; level <= levels; level++ {
+		fmt.Fprintf(
+			&document,
+			"  a%d: &a%d {next: *a%d}\n",
+			level,
+			level,
+			level-1,
+		)
+	}
+	fmt.Fprintf(&document, "root: *a%d\n", levels)
+	return []byte(document.String())
+}
+
+// Test_Decode_DeepAliasPath_NativeErrorBeforePathExpansion verifies that a
+// growing field path reaches the native alias guard without quadratic delay.
+func Test_Decode_DeepAliasPath_NativeErrorBeforePathExpansion(t *testing.T) {
+	input := deepAliasPathDocument(20_000)
+	decoded := make(chan error, 1)
+	go func() {
+		var config deepAliasConfig
+		decoded <- xcfg.Decode(input, &config)
+	}()
+
+	select {
+	case err := <-decoded:
+		require.EqualError(t, err, "yaml: document contains excessive aliasing")
+	case <-time.After(5 * time.Second):
+		t.Fatal("decoding did not terminate within five seconds")
+	}
+}
+
+type opaqueAliasConfig struct {
+	// Anchor holds the large opaque YAML value.
+	Anchor yaml.Node `yaml:"anchor"`
+	// Copies holds aliases that reuse the opaque value.
+	Copies []yaml.Node `yaml:"copies"`
+	// Block is a transparent field whose null must still be rejected.
+	Block knownKeysInner `yaml:"block"`
+}
+
+// opaqueAliasReuseDocument returns a large opaque anchor before a null block.
+func opaqueAliasReuseDocument(anchorValues, copies int) []byte {
+	var document strings.Builder
+	document.WriteString("anchor: &large [")
+	for value := range anchorValues {
+		if value > 0 {
+			document.WriteByte(',')
+		}
+		fmt.Fprintf(&document, "%d", value)
+	}
+	document.WriteString("]\ncopies:\n")
+	for range copies {
+		document.WriteString("  - *large\n")
+	}
+	document.WriteString("block:\n")
+	return []byte(document.String())
+}
+
+// Test_Decode_OpaqueAliasReuse_LaterNullStillRejected verifies that reusing a
+// large opaque anchor cannot hide a later body-less block.
+func Test_Decode_OpaqueAliasReuse_LaterNullStillRejected(t *testing.T) {
+	input := opaqueAliasReuseDocument(1_001, 100)
+	var config opaqueAliasConfig
+	err := xcfg.Decode(input, &config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `"block"`)
+	require.Contains(t, err.Error(), "has no value")
+}
+
+type transparentAliasConfig struct {
+	// Anchor holds the large transparent YAML mapping.
+	Anchor map[string]string `yaml:"anchor"`
+	// Copies holds aliases that must be inspected as mappings.
+	Copies []map[string]string `yaml:"copies"`
+	// Block is a transparent field whose null must still be rejected.
+	Block knownKeysInner `yaml:"block"`
+}
+
+// transparentAliasReuseDocument returns a reused mapping before a null block.
+func transparentAliasReuseDocument(anchorEntries, copies int) []byte {
+	var document strings.Builder
+	document.WriteString("anchor: &large {")
+	for entry := range anchorEntries {
+		if entry > 0 {
+			document.WriteByte(',')
+		}
+		fmt.Fprintf(&document, "k%d: value", entry)
+	}
+	document.WriteString("}\ncopies:\n")
+	for range copies {
+		document.WriteString("  - *large\n")
+	}
+	document.WriteString("block:\n")
+	return []byte(document.String())
+}
+
+// Test_Decode_TransparentAliasReuse_LaterNullStillRejected verifies that a
+// native-accepted expansion cannot truncate checks of later fields.
+func Test_Decode_TransparentAliasReuse_LaterNullStillRejected(t *testing.T) {
+	input := transparentAliasReuseDocument(1_001, 50)
+	var config transparentAliasConfig
+	err := xcfg.Decode(input, &config)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `"block"`)
+	require.Contains(t, err.Error(), "has no value")
 }
 
 func Test_CheckKnownKeys_UntaggedFieldLowercasedNameNotFlagged(t *testing.T) {

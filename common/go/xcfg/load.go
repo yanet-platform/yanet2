@@ -88,35 +88,63 @@ func Decode(buf []byte, dst any, options ...Option) error {
 		o(opts)
 	}
 
-	f, err := walkDocument(buf, reflect.TypeOf(dst))
+	collected, complete, err := walkDocument(
+		buf,
+		reflect.TypeOf(dst),
+		maxAliasExpansionWork,
+	)
 	if err != nil {
 		return err
 	}
 	if opts.KnownFields {
-		if err := unknownKeysError(f.Unknown); err != nil {
+		if err := unknownKeysError(collected.Unknown); err != nil {
 			return err
 		}
 	}
-	if err := nullValuesError(f.Nulls); err != nil {
+	if err := nullValuesError(collected.Nulls); err != nil {
 		return err
 	}
 
-	if opts.KnownFields {
-		// The walk above runs first so an unknown key always reports
-		// through its operator-facing message rather than yaml.v3's own. This decode
-		// is what actually populates dst.
-		dec := yaml.NewDecoder(bytes.NewReader(buf))
-		dec.KnownFields(true)
-		if err := dec.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+	decoded := false
+	if !complete {
+		if err := decodeYAML(buf, dst, false); err != nil {
 			return err
 		}
-	} else {
-		if err := yaml.Unmarshal(buf, dst); err != nil {
+		decoded = true
+
+		collected, _, err = walkDocument(buf, reflect.TypeOf(dst), 0)
+		if err != nil {
+			return err
+		}
+		if opts.KnownFields {
+			if err := unknownKeysError(collected.Unknown); err != nil {
+				return err
+			}
+		}
+		if err := nullValuesError(collected.Nulls); err != nil {
 			return err
 		}
 	}
 
+	if !decoded {
+		if err := decodeYAML(buf, dst, opts.KnownFields); err != nil {
+			return err
+		}
+	}
 	return validate(reflect.ValueOf(dst), "")
+}
+
+func decodeYAML(buf []byte, dst any, knownFields bool) error {
+	if !knownFields {
+		return yaml.Unmarshal(buf, dst)
+	}
+
+	decoder := yaml.NewDecoder(bytes.NewReader(buf))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func validate(v reflect.Value, path string) error {
