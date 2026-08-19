@@ -1,5 +1,6 @@
 #include "counters.h"
 
+#include "common/memory_address.h"
 #include "common/numutils.h"
 #include "common/strutils.h"
 
@@ -75,6 +76,11 @@ counter_registry_lookup_index(
 	}
 
 	return (uint64_t)-1;
+}
+
+uint64_t
+counter_registry_lookup_size(struct counter_registry *registry, uint64_t idx) {
+	return ADDR_OF(&registry->names)[idx].size;
 }
 
 static int

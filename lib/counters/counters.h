@@ -51,6 +51,14 @@ counter_registry_register(
 	yanet_error **err
 );
 
+uint64_t
+counter_registry_lookup_index(
+	struct counter_registry *registry, const char *name
+);
+
+uint64_t
+counter_registry_lookup_size(struct counter_registry *registry, uint64_t idx);
+
 void
 counter_registry_fini(struct counter_registry *registry);
 

@@ -89,6 +89,7 @@ dataplane_device_start(
 	for (uint32_t wrk_idx = 0; wrk_idx < device->worker_count; ++wrk_idx) {
 		struct dataplane_worker *worker = device->workers + wrk_idx;
 		if (dataplane_worker_start(worker)) {
+			LOG(ERROR, "failed to start worker %u", wrk_idx);
 			return -1;
 		}
 	}
