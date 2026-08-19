@@ -5,7 +5,6 @@ package cfwstate
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
-//#include "common/numutils.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
 //#include "lib/fwstate/config.h"
 //#include "lib/fwstate/fwmap.h"

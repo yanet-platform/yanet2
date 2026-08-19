@@ -56,11 +56,11 @@ verify_constants(void) {
 	assert(FWMAP_BUCKET_SIZE == sizeof(fwmap_bucket_t));
 
 	/* Chunk index max size must be power of 2 for efficient masking */
-	assert(align_up_pow2(FWMAP_CHUNK_INDEX_MAX_SIZE) ==
+	assert(next_power_of_two(FWMAP_CHUNK_INDEX_MAX_SIZE) ==
 	       FWMAP_CHUNK_INDEX_MAX_SIZE);
 
 	/* Chunk mask must be one less than a power of 2 */
-	assert(align_up_pow2(FWMAP_CHUNK_INDEX_MASK + 1) ==
+	assert(next_power_of_two(FWMAP_CHUNK_INDEX_MASK + 1) ==
 	       FWMAP_CHUNK_INDEX_MASK + 1);
 
 	printf("  Constants verification passed\n");

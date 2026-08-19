@@ -36,7 +36,7 @@ range_collector_init(
 static inline void
 range_collector_free(struct range_collector *collector, uint8_t key_size) {
 	if (collector->mask_count) {
-		uint64_t capacity = 1 << uint64_log_up(collector->mask_count);
+		uint64_t capacity = next_power_of_two(collector->mask_count);
 		memory_bfree(
 			ADDR_OF(&collector->memory_context),
 			ADDR_OF(&collector->masks),

@@ -384,9 +384,12 @@ fwstate_module_setup_maps(
 			? stats_v4.extra_bucket_count
 			: stats_v6.extra_bucket_count;
 
-	uint32_t requested_index_size = (uint32_t)align_up_pow2(index_size);
+	uint32_t requested_index_size =
+		index_size ? (uint32_t)next_power_of_two(index_size) : 0;
 	uint32_t requested_extra_bucket_count =
-		(uint32_t)align_up_pow2(extra_bucket_count);
+		extra_bucket_count
+			? (uint32_t)next_power_of_two(extra_bucket_count)
+			: 0;
 
 	bool map_config_changed = false;
 	if (requested_index_size != 0 &&

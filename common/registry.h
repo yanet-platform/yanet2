@@ -349,7 +349,7 @@ value_registry_fini(struct value_registry *registry) {
 	}
 
 	if (registry->range_count) {
-		uint64_t capacity = 1 << uint64_log_up(registry->range_count);
+		uint64_t capacity = next_power_of_two(registry->range_count);
 
 		memory_bfree(
 			memory_context,

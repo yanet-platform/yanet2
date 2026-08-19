@@ -5,6 +5,7 @@
 #include "key_value.h"
 
 #include "../../container_of.h"
+#include "../../numutils.h"
 
 #define TTLMAP_FOUND (0b01)
 #define TTLMAP_INSERTED (0b10)
@@ -131,12 +132,7 @@ static inline size_t
 __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 	size_t buckets = (kv_entries + __TTLMAP_BUCKET_ENTRIES - 1) /
 			 __TTLMAP_BUCKET_ENTRIES;
-	size_t max_bit = 63 - __builtin_clzll(buckets);
-	if (buckets != (1ull << max_bit)) {
-		++max_bit;
-	}
-	size_t res = 1ull << max_bit;
-	return res;
+	return next_power_of_two(buckets);
 }
 
 #define __TTLMAP_BUCKET_FIND_WITH_ID(map_ptr, bucket_id, key_type, value_type) \

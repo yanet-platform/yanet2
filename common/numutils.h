@@ -24,23 +24,19 @@ uint64_log_down(uint64_t value) {
 	return sizeof(long long) * 8 - 1 - __builtin_clzll(value);
 }
 
-/**
- * @brief Align number up to next power of 2
- * @param x Input number
- * @return Next power of 2, or 0 if overflow
- */
+// next_power_of_two returns the smallest power of two not less than the input.
+//
+// Zero maps to one. Values above 2^63 saturate at 2^63 because the next
+// power would overflow the return type.
 static inline uint64_t
-align_up_pow2(uint64_t x) {
-	// Hacker's delight 2nd Chapter 3. Power-of-2 Boundaries
-	// Rounding Up
-	x--;
-	x |= x >> 1;
-	x |= x >> 2;
-	x |= x >> 4;
-	x |= x >> 8;
-	x |= x >> 16;
-	x |= x >> 32;
-	return x + 1;
+next_power_of_two(uint64_t value) {
+	if (value <= 1) {
+		return 1;
+	}
+	if (value > (1ull << 63)) {
+		return 1ull << 63;
+	}
+	return 1ull << (64 - __builtin_clzll(value - 1));
 }
 
 /**

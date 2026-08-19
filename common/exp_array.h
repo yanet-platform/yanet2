@@ -42,7 +42,7 @@ mem_array_free_exp(
 		return;
 	}
 
-	uint64_t capacity = 1 << uint64_log_up(count);
+	uint64_t capacity = next_power_of_two(count);
 	memory_bfree(memory_context, array, capacity * item_size);
 }
 
@@ -59,7 +59,7 @@ mem_array_alloc_exp(
 		}
 		return NULL;
 	}
-	uint64_t capacity = 1 << uint64_log_up(count);
+	uint64_t capacity = next_power_of_two(count);
 	if (res_capacity) {
 		*res_capacity = capacity;
 	}

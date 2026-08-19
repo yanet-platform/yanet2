@@ -1,6 +1,15 @@
 dependencies = [lib_common_dep, lib_logging_dep]
 thread_dep = dependency('threads')
 
+numutils_test = executable(
+  'numutils_test',
+  ['numutils_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('numutils', numutils_test, suite: ['common'])
+
 lpm_test = executable(
   'lpm_test',
   ['lpm_test.c',],

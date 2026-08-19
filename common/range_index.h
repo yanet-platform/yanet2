@@ -117,7 +117,7 @@ range_index_free(struct range_index *range_index) {
 		radix_free(&range_index->radix);
 		return;
 	}
-	uint64_t capacity = 1 << uint64_log_up(range_index->count);
+	uint64_t capacity = next_power_of_two(range_index->count);
 	memory_bfree(
 		ADDR_OF(&range_index->memory_context),
 		ADDR_OF(&range_index->values),

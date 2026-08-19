@@ -750,7 +750,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 		index_size = 16;
 	}
 	// Ensure index_size is a power of 2.
-	index_size = align_up_pow2(index_size);
+	index_size = next_power_of_two(index_size);
 	if (!index_size) {
 		errno = EINVAL;
 		return NULL;
@@ -770,7 +770,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 			errno = EINVAL;
 			return NULL;
 		}
-		extra_size = align_up_pow2(extra_size);
+		extra_size = next_power_of_two(extra_size);
 	}
 
 	uint32_t keys_per_chunk = FWMAP_CHUNK_MAX_SIZE / config.key_size;

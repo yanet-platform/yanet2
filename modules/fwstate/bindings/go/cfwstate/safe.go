@@ -3,7 +3,6 @@ package cfwstate
 //#include "lib/fwstate/config.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
-//#include "common/numutils.h"
 import "C"
 
 import (
