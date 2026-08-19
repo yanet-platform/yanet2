@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 type userName = string
@@ -41,13 +42,17 @@ func (m *IdentityProvider) Name() string {
 	return "file"
 }
 
-// GetIdentity retrieves an identity by username.
-func (m *IdentityProvider) GetIdentity(
+// ResolveIdentity retrieves an identity by the subject's account lookup name.
+func (m *IdentityProvider) ResolveIdentity(
 	ctx context.Context,
-	username string,
+	subject core.Subject,
 ) (Identity, error) {
+	if subject.Login == "" {
+		return Identity{}, ErrSubjectUnsupported
+	}
+
 	view := m.identities.View()
-	identity, ok := view.Lookup(username)
+	identity, ok := view.Lookup(subject.Login)
 	if !ok {
 		return Identity{}, ErrIdentityNotFound
 	}

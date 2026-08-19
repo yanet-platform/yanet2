@@ -82,13 +82,9 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 
 // Authenticate validates the SSH key token and returns authentication info.
 //
-// Verification steps:
-//  1. Parse and validate token fields.
-//  2. Check timestamp window (replay protection).
-//  3. Check method binding (token.Method == reqInfo.FullMethod).
-//  4. Look up public keys for the username.
-//  5. Verify SSH signature against known keys.
-//  6. Return AuthInfo with the username.
+// Validation covers request binding and freshness before checking the token
+// signature against the locally registered keys. The claimed username becomes
+// the local account lookup name.
 func (m *Authenticator) Authenticate(
 	ctx context.Context,
 	rawToken string,
@@ -138,7 +134,7 @@ func (m *Authenticator) Authenticate(
 	)
 
 	return &core.AuthInfo{
-		Username:   token.Username,
+		Subject:    core.NewLocalSubject(token.Username),
 		AuthMethod: "sshkey",
 	}, nil
 }

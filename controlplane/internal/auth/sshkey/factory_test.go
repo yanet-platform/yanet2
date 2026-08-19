@@ -113,7 +113,10 @@ func TestNewFromConfig(t *testing.T) {
 
 	authInfo, err := authenticator.Authenticate(t.Context(), token, requestInfo)
 	require.NoError(t, err)
-	require.Equal(t, &core.AuthInfo{Username: "alice", AuthMethod: "sshkey"}, authInfo)
+	require.Equal(t, &core.AuthInfo{
+		Subject:    core.NewLocalSubject("alice"),
+		AuthMethod: "sshkey",
+	}, authInfo)
 }
 
 // TestNewFromConfigTimeWindow verifies that time_window from the config is

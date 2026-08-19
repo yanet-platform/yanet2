@@ -7,6 +7,9 @@ import (
 var (
 	// ErrIdentityNotFound is returned when a requested identity does not exist.
 	ErrIdentityNotFound = errors.New("identity not found")
+	// ErrSubjectUnsupported is returned when a provider cannot resolve the
+	// authenticated subject shape.
+	ErrSubjectUnsupported = errors.New("authenticated subject unsupported")
 )
 
 // Identity represents a user account with authentication and authorization

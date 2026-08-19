@@ -207,15 +207,16 @@ func (m *Manager) Authenticate(
 	return nil, fmt.Errorf("no authenticator supports the given token")
 }
 
-// buildPrincipal resolves the identity and assembles a Principal from AuthInfo.
+// buildPrincipal resolves an authenticated subject into its authorization
+// context.
 func (m *Manager) buildPrincipal(
 	ctx context.Context,
 	authInfo *core.AuthInfo,
 ) (*core.Principal, error) {
-	// Anonymous path: skip identity resolution.
+	// Anonymous requests do not have an account identity to resolve.
 	if authInfo.AuthMethod == "none" {
 		return &core.Principal{
-			User:        authInfo.Username,
+			User:        authInfo.Subject.Identifier,
 			Groups:      []string{},
 			AuthMethod:  authInfo.AuthMethod,
 			AuthTime:    time.Now(),
@@ -227,19 +228,19 @@ func (m *Manager) buildPrincipal(
 		return nil, fmt.Errorf("no identity provider configured")
 	}
 
-	ident, err := m.identityProvider.GetIdentity(ctx, authInfo.Username)
+	ident, err := m.identityProvider.ResolveIdentity(ctx, authInfo.Subject)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
-			"identity lookup failed for user %q: %v",
-			authInfo.Username, err,
+			"identity lookup failed for subject %q from issuer %q: %v",
+			authInfo.Subject.Identifier, authInfo.Subject.Issuer, err,
 		)
 	}
 
 	if ident.Disabled {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
-			"account %q is disabled", authInfo.Username,
+			"account %q is disabled", ident.Username,
 		)
 	}
 

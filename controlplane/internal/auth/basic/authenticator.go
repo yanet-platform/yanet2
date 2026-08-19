@@ -66,7 +66,7 @@ func (m *BasicAuthenticator) Authenticate(
 	}
 
 	return &core.AuthInfo{
-		Username:   username,
+		Subject:    core.NewLocalSubject(username),
 		AuthMethod: "basic",
 	}, nil
 }

@@ -69,7 +69,10 @@ func TestNewFromConfig(t *testing.T) {
 
 	authInfo, err := authenticator.Authenticate(t.Context(), validToken, requestInfo)
 	require.NoError(t, err)
-	require.Equal(t, &core.AuthInfo{Username: "alice", AuthMethod: "basic"}, authInfo)
+	require.Equal(t, &core.AuthInfo{
+		Subject:    core.NewLocalSubject("alice"),
+		AuthMethod: "basic",
+	}, authInfo)
 
 	wrongToken := basicToken("alice", "wrong-password")
 	_, err = authenticator.Authenticate(t.Context(), wrongToken, requestInfo)

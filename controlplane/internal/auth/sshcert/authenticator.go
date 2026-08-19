@@ -112,19 +112,9 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 // Authenticate validates the SSH certificate token and returns authentication
 // info.
 //
-// Verification steps:
-//  1. Parse and validate token fields.
-//  2. Check timestamp window (replay protection).
-//  3. Check method binding.
-//  4. Parse SSH certificate from token.
-//  5. Check key type (ecdsa-sha2-nistp256 only).
-//  6. Check certificate type (UserCert).
-//  7. Check certificate validity period.
-//  8. Verify CA signature.
-//  9. Check KRL.
-//  10. Extract username from principals.
-//  11. Verify token signature.
-//  12. Return AuthInfo with the username.
+// Validation covers request binding and freshness, certificate constraints,
+// CA trust, revocation, and the token signature. The first certificate
+// principal becomes the local account lookup name.
 func (m *Authenticator) Authenticate(
 	ctx context.Context,
 	rawToken string,
@@ -221,7 +211,7 @@ func (m *Authenticator) Authenticate(
 	)
 
 	return &core.AuthInfo{
-		Username:   username,
+		Subject:    core.NewLocalSubject(username),
 		AuthMethod: "sshcert",
 	}, nil
 }

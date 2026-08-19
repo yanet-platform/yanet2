@@ -29,7 +29,7 @@ func TestParseToken(t *testing.T) {
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }
 
 func authenticateRawKeyToken(t *testing.T, raw string) error {

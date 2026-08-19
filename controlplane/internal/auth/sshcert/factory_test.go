@@ -206,7 +206,10 @@ func TestNewFromConfigCASources(t *testing.T) {
 
 			authInfo, err := authenticator.Authenticate(t.Context(), token, requestInfo)
 			require.NoError(t, err)
-			require.Equal(t, &core.AuthInfo{Username: "alice", AuthMethod: "sshcert"}, authInfo)
+			require.Equal(t, &core.AuthInfo{
+				Subject:    core.NewLocalSubject("alice"),
+				AuthMethod: "sshcert",
+			}, authInfo)
 		})
 	}
 
@@ -252,7 +255,10 @@ func TestNewFromConfigKRLSource(t *testing.T) {
 
 		authInfo, err := authenticator.Authenticate(t.Context(), token, requestInfo)
 		require.NoError(t, err)
-		require.Equal(t, &core.AuthInfo{Username: "alice", AuthMethod: "sshcert"}, authInfo)
+		require.Equal(t, &core.AuthInfo{
+			Subject:    core.NewLocalSubject("alice"),
+			AuthMethod: "sshcert",
+		}, authInfo)
 	})
 }
 

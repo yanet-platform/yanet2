@@ -67,8 +67,11 @@ func TestNoneAuthenticator_Authenticate(t *testing.T) {
 				t.Fatal("Authenticate() returned nil authInfo")
 			}
 
-			if authInfo.Username != "anonymous" {
-				t.Errorf("authInfo.Username = %q, want %q", authInfo.Username, "anonymous")
+			if authInfo.Subject != core.NewLocalSubject("anonymous") {
+				t.Errorf(
+					"authInfo.Subject = %#v, want local anonymous subject",
+					authInfo.Subject,
+				)
 			}
 
 			if authInfo.AuthMethod != "none" {

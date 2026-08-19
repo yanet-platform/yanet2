@@ -91,7 +91,7 @@ func TestAuthenticate_Ed25519(t *testing.T) {
 
 	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 	assert.Equal(t, "sshkey", authInfo.AuthMethod)
 }
 
@@ -106,7 +106,7 @@ func TestAuthenticate_RSA(t *testing.T) {
 
 	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "bob", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("bob"), authInfo.Subject)
 	assert.Equal(t, "sshkey", authInfo.AuthMethod)
 }
 
@@ -121,7 +121,7 @@ func TestAuthenticate_ECDSA(t *testing.T) {
 
 	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "charlie", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("charlie"), authInfo.Subject)
 	assert.Equal(t, "sshkey", authInfo.AuthMethod)
 }
 
@@ -209,7 +209,7 @@ func TestAuthenticate_NilRequestInfo(t *testing.T) {
 
 	authInfo, err := auth.Authenticate(context.Background(), token, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }
 
 func TestAuthenticate_EmptyFullMethod(t *testing.T) {
@@ -223,5 +223,5 @@ func TestAuthenticate_EmptyFullMethod(t *testing.T) {
 	emptyReqInfo := &core.RequestInfo{}
 	authInfo, err := auth.Authenticate(context.Background(), token, emptyReqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }

@@ -6,12 +6,18 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // Provider provides access to identities from a specific source.
 type Provider interface {
 	Name() string
-	GetIdentity(ctx context.Context, username string) (Identity, error)
+	// ResolveIdentity derives an account identity from an authenticated subject.
+	ResolveIdentity(
+		ctx context.Context,
+		subject core.Subject,
+	) (Identity, error)
 }
 
 // CompositeIdentityProvider implements chain of responsibility pattern.
@@ -60,18 +66,27 @@ func (m *CompositeIdentityProvider) Name() string {
 	return "composite"
 }
 
-// GetIdentity tries each provider until one succeeds.
-func (m *CompositeIdentityProvider) GetIdentity(ctx context.Context, username string) (Identity, error) {
+// ResolveIdentity tries each provider until one resolves the subject.
+func (m *CompositeIdentityProvider) ResolveIdentity(
+	ctx context.Context,
+	subject core.Subject,
+) (Identity, error) {
+	matchedSubject := false
 	for _, provider := range m.providers {
-		identity, err := provider.GetIdentity(ctx, username)
+		identity, err := provider.ResolveIdentity(ctx, subject)
 		if err == nil {
 			m.log.Debug("identity found",
-				zap.String("username", username),
+				zap.String("username", identity.Username),
 				zap.String("provider", provider.Name()),
 			)
 			return identity, nil
 		}
 
+		if errors.Is(err, ErrSubjectUnsupported) {
+			continue
+		}
+
+		matchedSubject = true
 		if errors.Is(err, ErrIdentityNotFound) {
 			continue
 		}
@@ -83,5 +98,8 @@ func (m *CompositeIdentityProvider) GetIdentity(ctx context.Context, username st
 		return Identity{}, fmt.Errorf("provider %s: %w", provider.Name(), err)
 	}
 
+	if !matchedSubject {
+		return Identity{}, ErrSubjectUnsupported
+	}
 	return Identity{}, ErrIdentityNotFound
 }

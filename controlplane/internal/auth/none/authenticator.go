@@ -34,7 +34,7 @@ func (m *NoneAuthenticator) Authenticate(
 	reqInfo *core.RequestInfo,
 ) (*core.AuthInfo, error) {
 	return &core.AuthInfo{
-		Username:   "anonymous",
+		Subject:    core.NewLocalSubject("anonymous"),
 		AuthMethod: "none",
 	}, nil
 }

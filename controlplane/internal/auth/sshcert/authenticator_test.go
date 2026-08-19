@@ -74,7 +74,7 @@ func TestAuthenticator_HappyPath(t *testing.T) {
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 	assert.Equal(t, "sshcert", authInfo.AuthMethod)
 }
 
@@ -325,7 +325,7 @@ func TestAuthenticator_NopRevocationChecker(t *testing.T) {
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 	assert.Equal(t, "sshcert", authInfo.AuthMethod)
 }
 
