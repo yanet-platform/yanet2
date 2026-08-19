@@ -3,6 +3,7 @@ package rib
 import (
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -11,6 +12,49 @@ import (
 func newTestRIB(t *testing.T) *RIB {
 	t.Helper()
 	return NewRIB()
+}
+
+// birdRoute builds a BGP path identified by the given peer and global ID, as
+// BIRD identity is the peer and global ID pair rather than the nexthop.
+func birdRoute(prefix netip.Prefix, peer string, globalID uint32, sessionID uint64) Route {
+	return Route{
+		SessionID: sessionID,
+		Prefix:    prefix,
+		NextHop:   netip.MustParseAddr("2001:db8:ff::1"),
+		Peer:      netip.MustParseAddr(peer),
+		GlobalID:  globalID,
+		SourceID:  RouteSourceBird,
+		UpdatedAt: time.Now(),
+	}
+}
+
+// peersForPrefix returns the peers of the routes stored for the given prefix,
+// in RIB order.
+func peersForPrefix(t *testing.T, r *RIB, prefix netip.Prefix) []netip.Addr {
+	t.Helper()
+	var peers []netip.Addr
+	for _, route := range routesForPrefix(t, r, prefix) {
+		peers = append(peers, route.Peer)
+	}
+	return peers
+}
+
+// countDump returns the prefix and route totals actually stored in the RIB,
+// asserting on the way that every stored key is a usable prefix.
+func countDump(t *testing.T, r *RIB) (prefixes int, routes int) {
+	t.Helper()
+	for prefix, list := range r.DumpRoutes().Dump() {
+		require.True(t, prefix.IsValid(), "RIB must not store an invalid prefix")
+		prefixes++
+		routes += len(list.Routes)
+	}
+	return prefixes, routes
+}
+
+// runCleanup runs a cleanup pass for the given session with no TTL delay.
+func runCleanup(t *testing.T, r *RIB, sessionID uint64) {
+	t.Helper()
+	r.CleanupTask(sessionID, make(chan bool), 0)
 }
 
 // routesForPrefix returns the routes stored for the given prefix, or nil if the
@@ -98,4 +142,94 @@ func TestRemoveUnicastRoute_StaticSingle(t *testing.T) {
 
 	routes = routesForPrefix(t, r, pfx)
 	require.Nil(t, routes, "prefix entry must be absent after removing the sole nexthop")
+}
+
+// Test_RIB_CleanupTask_MultiPathPrefixPartiallyStale verifies that a cleanup
+// pass drops every expired path of a prefix and keeps the later-session one.
+//
+// Cleanup walks the routes of one prefix while the removal of an earlier path
+// shifts the very slice it walks, so the surviving path must be neither
+// skipped nor mistaken for a removal candidate.
+func Test_RIB_CleanupTask_MultiPathPrefixPartiallyStale(t *testing.T) {
+	pfx := netip.MustParsePrefix("2001:db8::/64")
+	fresh := netip.MustParseAddr("2001:db8::d")
+
+	r := newTestRIB(t)
+	r.Update(
+		birdRoute(pfx, "2001:db8::a", 1, 1),
+		birdRoute(pfx, "2001:db8::b", 2, 1),
+		birdRoute(pfx, "2001:db8::c", 3, 1),
+		birdRoute(pfx, fresh.String(), 4, 2),
+	)
+	require.Len(t, routesForPrefix(t, r, pfx), 4, "setup: all four paths must be present")
+
+	runCleanup(t, r, 1)
+
+	require.Equal(t, []netip.Addr{fresh}, peersForPrefix(t, r, pfx),
+		"only the path of the later session may survive a cleanup of session 1")
+}
+
+// Test_RIB_CleanupTask_MultiPathPrefixFullyStale verifies that a cleanup pass
+// removes the prefix entirely once every one of its BGP paths has expired.
+func Test_RIB_CleanupTask_MultiPathPrefixFullyStale(t *testing.T) {
+	pfx := netip.MustParsePrefix("2001:db8::/64")
+
+	r := newTestRIB(t)
+	r.Update(
+		birdRoute(pfx, "2001:db8::a", 1, 1),
+		birdRoute(pfx, "2001:db8::b", 2, 1),
+		birdRoute(pfx, "2001:db8::c", 3, 1),
+	)
+	require.Len(t, routesForPrefix(t, r, pfx), 3, "setup: all three paths must be present")
+
+	runCleanup(t, r, 1)
+
+	require.Nil(t, routesForPrefix(t, r, pfx),
+		"prefix entry must be absent once all of its paths expired")
+}
+
+// Test_RIB_CleanupTask_KeepsStaticRoute verifies that a cleanup pass leaves a
+// static route sharing a prefix with expired BGP paths in place.
+//
+// Staleness is scoped to BIRD-sourced routes, and a static route carries no
+// session, so no session number may ever expire it.
+func Test_RIB_CleanupTask_KeepsStaticRoute(t *testing.T) {
+	pfx := netip.MustParsePrefix("2001:db8::/64")
+	nh := netip.MustParseAddr("2001:db8::ffff")
+
+	r := newTestRIB(t)
+	r.Update(
+		birdRoute(pfx, "2001:db8::a", 1, 1),
+		birdRoute(pfx, "2001:db8::b", 2, 1),
+	)
+	require.NoError(t, r.AddUnicastRoute(pfx, nh, RouteSourceStatic))
+
+	runCleanup(t, r, 1)
+
+	routes := routesForPrefix(t, r, pfx)
+	require.Len(t, routes, 1, "the static route must be the only survivor")
+	require.Equal(t, RouteSourceStatic, routes[0].SourceID)
+	require.Equal(t, nh, routes[0].NextHop)
+}
+
+// Test_RIB_CleanupTask_StatsMatchContents verifies that the counters reported
+// after a cleanup pass agree with what the RIB actually holds.
+func Test_RIB_CleanupTask_StatsMatchContents(t *testing.T) {
+	stale := netip.MustParsePrefix("2001:db8:1::/64")
+	mixed := netip.MustParsePrefix("2001:db8:2::/64")
+
+	r := newTestRIB(t)
+	r.Update(
+		birdRoute(stale, "2001:db8::a", 1, 1),
+		birdRoute(stale, "2001:db8::b", 2, 1),
+		birdRoute(mixed, "2001:db8::a", 3, 1),
+		birdRoute(mixed, "2001:db8::b", 4, 2),
+	)
+
+	runCleanup(t, r, 1)
+
+	prefixes, routes := countDump(t, r)
+	stats := r.Stats()
+	require.Equal(t, prefixes, stats.Prefixes, "prefix counter must match the stored prefixes")
+	require.Equal(t, routes, stats.Routes, "route counter must match the stored routes")
 }

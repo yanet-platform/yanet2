@@ -143,9 +143,16 @@ func (m *MapTrie[K, Q, V]) Matches(query Q) []K {
 // The function first normalizes the prefix with masking, then either inserts a new
 // value using the onEmpty callback or updates an existing value using the onUpdate
 // callback.
+//
+// A key whose significant bit count falls outside the addressable range is
+// rejected and neither callback runs, so a malformed key costs a caller its
+// entry rather than the whole process.
 func (m *MapTrie[K, Q, V]) InsertOrUpdate(prefix K, onEmpty func() V, onUpdate func(V) V) {
 	prefix = prefix.Masked()
 	bits := prefix.Bits()
+	if bits < 0 || bits >= len(m) {
+		return
+	}
 
 	if currValue, ok := m[bits][prefix]; ok {
 		m[bits][prefix] = onUpdate(currValue)
@@ -169,9 +176,15 @@ func (m *MapTrie[K, Q, V]) Len() int {
 
 // UpdateOrDelete updates existing entry and deletes it from the MapTrie if update
 // indicates that updated entry becomes empty.
+//
+// A key whose significant bit count falls outside the addressable range matches
+// no entry, so the update callback does not run.
 func (m *MapTrie[K, Q, V]) UpdateOrDelete(prefix K, update func(V) (V, bool)) {
 	prefix = prefix.Masked()
 	bits := prefix.Bits()
+	if bits < 0 || bits >= len(m) {
+		return
+	}
 
 	if value, ok := m[bits][prefix]; ok {
 		if newValue, zero := update(value); zero {
@@ -183,6 +196,11 @@ func (m *MapTrie[K, Q, V]) UpdateOrDelete(prefix K, update func(V) (V, bool)) {
 }
 
 // Dump creates a flat map containing all prefixes and their values from the MapTrie.
+//
+// Values are copied by assignment, so a value carrying a slice, a map or a
+// pointer still shares that storage with the trie. Mutating what such a value
+// points at mutates the trie; a caller that intends to modify a dumped value
+// must deep-copy it first.
 func (m MapTrie[K, Q, V]) Dump() map[K]V {
 	out := make(map[K]V, m.Len())
 

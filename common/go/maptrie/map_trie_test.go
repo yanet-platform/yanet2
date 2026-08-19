@@ -427,6 +427,38 @@ func Test_MapTrie_InsertMany(t *testing.T) {
 	}
 }
 
+// Test_MapTrie_InsertOrUpdate_InvalidKey verifies that inserting a key with no
+// significant bit count stores nothing instead of crashing the process.
+//
+// The trie indexes its level array by the bit count of the key, and a
+// zero-value prefix reports minus one, so an unchecked index would take the
+// whole process down on a key a caller built by mistake.
+func Test_MapTrie_InsertOrUpdate_InvalidKey(t *testing.T) {
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
+
+	require.NotPanics(t, func() {
+		trie.InsertOrUpdate(netip.Prefix{}, onEmpty(1), onUpdate(1))
+	})
+	assert.Equal(t, 0, trie.Len(), "an invalid key must not become a stored entry")
+}
+
+// Test_MapTrie_UpdateOrDelete_InvalidKey verifies that updating a key with no
+// significant bit count neither crashes nor invokes the update callback.
+func Test_MapTrie_UpdateOrDelete_InvalidKey(t *testing.T) {
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
+	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(1), onUpdate(1))
+
+	called := false
+	require.NotPanics(t, func() {
+		trie.UpdateOrDelete(netip.Prefix{}, func(v int) (int, bool) {
+			called = true
+			return v, false
+		})
+	})
+	assert.False(t, called, "an invalid key matches no entry, so the update must not run")
+	assert.Equal(t, 1, trie.Len(), "an invalid key must not disturb the stored entries")
+}
+
 var benchDataInsertuniqAddrs, benchDataInsertuniqPrefixes = initTestData(1_000_000, 400_000, false)
 
 func Benchmark_MapTrie_InsertUniq(b *testing.B) {

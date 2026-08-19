@@ -186,6 +186,12 @@ func (m *RIB) Update(routes ...Route) {
 	m.stats.OnChanged()
 }
 
+// update applies the given routes to the RIB, inserting each one or removing
+// it when it is marked as withdrawn. The caller must hold the write lock.
+//
+// The routes must not share storage with anything the RIB already holds: a
+// removal rewrites the path list of the affected entry, and a caller passing
+// that same list would have it change underneath the walk.
 func (m *RIB) update(routes ...Route) {
 	for _, route := range routes {
 		if route.ToRemove {
@@ -267,7 +273,20 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 		}
 	}()
 
-	for _, routeList := range m.routes.Dump() {
+	isStale := func(route Route) bool {
+		return route.SourceID == RouteSourceBird && route.SessionID <= sessionID
+	}
+
+	// Take the prefixes first so the pass walks a snapshot rather than the
+	// structure it rewrites.
+	prefixes := make([]netip.Prefix, 0, m.routes.Len())
+	for bits := range m.routes {
+		for prefix := range m.routes[bits] {
+			prefixes = append(prefixes, prefix)
+		}
+	}
+
+	for _, prefix := range prefixes {
 		select {
 		case <-quit:
 			m.log.Info("RIB: cleanup task interrupted during cleanup",
@@ -278,14 +297,35 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 		default:
 		}
 
-		for idx := range routeList.Routes {
-			if routeList.Routes[idx].SourceID == RouteSourceBird &&
-				routeList.Routes[idx].SessionID <= sessionID {
-				removedCount++
-				routeList.Routes[idx].ToRemove = true
+		m.routes.UpdateOrDelete(prefix, func(rl RoutesList) (RoutesList, bool) {
+			stale := 0
+			for _, route := range rl.Routes {
+				if isStale(route) {
+					stale++
+				}
 			}
-		}
-		m.update(routeList.Routes...)
+			if stale == 0 {
+				return rl, false
+			}
+
+			removedCount += stale
+			m.stats.OnRouteRemoved(stale)
+
+			if stale == len(rl.Routes) {
+				m.stats.OnPrefixRemoved()
+				return rl, true
+			}
+
+			// Give the survivors an array of their own, so that the path list
+			// of an entry is never rewritten in place.
+			kept := make([]Route, 0, len(rl.Routes)-stale)
+			for _, route := range rl.Routes {
+				if !isStale(route) {
+					kept = append(kept, route)
+				}
+			}
+			return RoutesList{Routes: kept}, false
+		})
 	}
 
 	m.log.Info("RIB: cleanup task completed",
