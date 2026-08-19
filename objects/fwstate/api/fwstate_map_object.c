@@ -206,6 +206,15 @@ fwstate_map_v4_object_table(const struct cp_object *cp_object) {
 	return &self->table;
 }
 
+uint64_t
+fwstate_map_v4_object_generation(const struct cp_object *cp_object) {
+	struct fwstate_map_v4_object *self = container_of(
+		cp_object, struct fwstate_map_v4_object, cp_object
+	);
+
+	return self->generation;
+}
+
 int
 fwstate_map_v4_object_insert_layer(
 	struct fwstate_map_v4_object *self,
@@ -215,7 +224,7 @@ fwstate_map_v4_object_insert_layer(
 ) {
 	struct agent *agent = ADDR_OF(&self->cp_object.agent);
 
-	return map_insert_layer(
+	int rc = map_insert_layer(
 		&self->table,
 		&agent->memory_context,
 		map_v4_init_keys,
@@ -223,13 +232,21 @@ fwstate_map_v4_object_insert_layer(
 		extra_bucket_count,
 		worker_count
 	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
 }
 
 int
 fwstate_map_v4_object_unlink_stale_layers(
 	struct fwstate_map_v4_object *self, uint64_t now
 ) {
-	return fwtable_unlink_stale_cp(&self->table, now);
+	int rc = fwtable_unlink_stale_cp(&self->table, now);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
 }
 
 void
@@ -331,6 +348,15 @@ fwstate_map_v6_object_table(const struct cp_object *cp_object) {
 	return &self->table;
 }
 
+uint64_t
+fwstate_map_v6_object_generation(const struct cp_object *cp_object) {
+	struct fwstate_map_v6_object *self = container_of(
+		cp_object, struct fwstate_map_v6_object, cp_object
+	);
+
+	return self->generation;
+}
+
 int
 fwstate_map_v6_object_insert_layer(
 	struct fwstate_map_v6_object *self,
@@ -340,7 +366,7 @@ fwstate_map_v6_object_insert_layer(
 ) {
 	struct agent *agent = ADDR_OF(&self->cp_object.agent);
 
-	return map_insert_layer(
+	int rc = map_insert_layer(
 		&self->table,
 		&agent->memory_context,
 		map_v6_init_keys,
@@ -348,13 +374,21 @@ fwstate_map_v6_object_insert_layer(
 		extra_bucket_count,
 		worker_count
 	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
 }
 
 int
 fwstate_map_v6_object_unlink_stale_layers(
 	struct fwstate_map_v6_object *self, uint64_t now
 ) {
-	return fwtable_unlink_stale_cp(&self->table, now);
+	int rc = fwtable_unlink_stale_cp(&self->table, now);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
 }
 
 void

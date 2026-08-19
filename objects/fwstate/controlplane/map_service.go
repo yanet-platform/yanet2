@@ -496,6 +496,12 @@ func (m *FWStateMapService) ListEntries(
 			hasMore = false
 		}
 
+		// Snapshot the generation before unlocking: the label must
+		// describe the chain the batch was read from, and after the
+		// unlock a concurrent DeleteMap can free the object, making
+		// any further dereference through mapCfg a use-after-free.
+		generation := mapCfg.Generation()
+
 		m.mu.Unlock()
 
 		if err != nil {
@@ -511,7 +517,7 @@ func (m *FWStateMapService) ListEntries(
 			Entries:    pbEntries,
 			HasMore:    hasMore,
 			Index:      newIndex,
-			Generation: mapCfg.Generation(),
+			Generation: generation,
 		}
 
 		if err := stream.Send(resp); err != nil {

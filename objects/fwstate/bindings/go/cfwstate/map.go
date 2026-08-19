@@ -115,16 +115,26 @@ func (m Kind) ObjectType() string {
 // owns a single fwtable_t for one address family. The object is
 // registered under (ObjectType(), Name()) and published via Publish.
 type MapObjectConfig struct {
-	name       string
-	kind       Kind
-	generation uint64
-	ptr        *C.struct_cp_object
+	name string
+	kind Kind
+	ptr  *C.struct_cp_object
 }
 
-// Generation returns the generation counter, incremented on layer insert
-// or trim.
+// Generation returns the C-side generation counter, incremented on every
+// layer insert and stale-layer trim, so every handle resolving the same
+// published object observes the same value.
+//
+// The value is only meaningful while the caller keeps the object alive:
+// reads through this handle must not race Free, and table walks must be
+// serialized against layer rotation by the owning service's mutex.
 func (m *MapObjectConfig) Generation() uint64 {
-	return m.generation
+	if m.ptr == nil {
+		return 0
+	}
+	if m.kind == KindV6 {
+		return uint64(C.fwstate_map_v6_object_generation(m.ptr))
+	}
+	return uint64(C.fwstate_map_v4_object_generation(m.ptr))
 }
 
 // NewMapObjectConfig creates a new standalone fwstate-map object for the
@@ -206,7 +216,6 @@ func (m *MapObjectConfig) insertLayer(
 			"failed to insert fwstate-map layer: error code=%d", rc,
 		)
 	}
-	m.generation++
 	return nil
 }
 
@@ -274,7 +283,6 @@ func (m *MapObjectConfig) UnlinkStaleLayers(now uint64) error {
 	if rc != 0 {
 		return fmt.Errorf("failed to unlink stale layers: error code=%d", rc)
 	}
-	m.generation++
 	return nil
 }
 

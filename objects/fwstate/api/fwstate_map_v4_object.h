@@ -24,6 +24,11 @@ struct fwstate_map_v4_object {
 	struct cp_object cp_object;
 
 	fwtable_t table;
+
+	// Bumped on every layer insert and stale-layer trim, so a reader
+	// batching over the table can detect that the chain it is walking
+	// changed under it.
+	uint64_t generation;
 };
 
 // RAII lifecycle for struct fwstate_map_v4_object.
@@ -67,6 +72,11 @@ fwstate_map_v4_object_config_free(struct cp_object *cp_object);
 // Return the address of the object's fwtable field.
 fwtable_t *
 fwstate_map_v4_object_table(const struct cp_object *cp_object);
+
+// Return the object's generation counter, bumped on every layer insert
+// and stale-layer trim.
+uint64_t
+fwstate_map_v4_object_generation(const struct cp_object *cp_object);
 
 // Insert a new layer into the object's table chain.
 int
