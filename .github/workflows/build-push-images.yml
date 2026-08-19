@@ -20,6 +20,8 @@ jobs:
         with:
           submodules: true
 
+      - uses: ./.github/actions/apt-failover
+
       - name: Fetch git history for versioning
         run: |
           git fetch --prune --unshallow --tags --filter=blob:none origin \
@@ -38,6 +40,7 @@ jobs:
           cache-targets: false
 
       - name: Install packaging tools
+        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts

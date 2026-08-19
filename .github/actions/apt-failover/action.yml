@@ -1,0 +1,22 @@
+name: 'apt mirror failover'
+description: >-
+  Make apt fail over from a stalled hosted-runner mirror instead of hanging.
+  The ubuntu-* images resolve the Ubuntu sources through a three-mirror list
+  (azure.archive.ubuntu.com first), but apt's stock 3 retries with a 120 s
+  timeout re-attempt a dead mirror for every index file and every .deb, one
+  host queue at a time, so a single stalled mirror turns apt-get update into a
+  25+ minute step. No retries and a short timeout let the list fail over once.
+  Same values actions/runner-images#14584 proposes for the image itself; a
+  system-wide drop-in also covers the apt calls inside third-party actions.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Bound apt mirror retries
+      shell: bash
+      run: |
+        sudo tee /etc/apt/apt.conf.d/99-ci-mirror-failover >/dev/null <<'EOF'
+        Acquire::Retries "0";
+        Acquire::http::Timeout "15";
+        Acquire::https::Timeout "15";
+        EOF

@@ -16,6 +16,7 @@ on:
       - "**/Cargo.lock"
       - ".github/workflows/rust-check.yml"
       - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -25,6 +26,7 @@ on:
       - "**/Cargo.lock"
       - ".github/workflows/rust-check.yml"
       - ".github/actions/apt-packages/**"
+      - ".github/actions/apt-failover/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}

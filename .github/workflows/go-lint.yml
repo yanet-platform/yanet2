@@ -9,6 +9,7 @@ on:
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
+      - '.github/actions/apt-failover/**'
       - '.github/actions/protoc-plugins/**'
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
+      - '.github/actions/apt-failover/**'
       - '.github/actions/protoc-plugins/**'
 
 concurrency:
