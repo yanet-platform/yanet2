@@ -504,15 +504,6 @@ dataplane_worker_init(
 	// Initialize zero rx connections
 	worker->write_ctx.rx_pipe_count = 0;
 
-	// Prepare counter registry
-	counter_registry_init(
-		&dp_config->worker_counters, &dp_config->memory_context, 0
-	);
-
-	if (worker_counters_register(dp_config)) {
-		return -1;
-	}
-
 	return 0;
 
 error_mempool:

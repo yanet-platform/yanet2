@@ -37,6 +37,7 @@
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/worker/counters.h"
 #include "lib/logging/log.h"
 
 #include <unistd.h>
@@ -785,6 +786,25 @@ dataplane_init(
 
 		dp_config->instance_idx = instance_idx;
 		dp_config->instance_count = dataplane->instance_count;
+
+		if (counter_registry_init(
+			    &dp_config->worker_counters,
+			    &dp_config->memory_context,
+			    0
+		    )) {
+			LOG(ERROR,
+			    "failed to initialize worker counter registry for "
+			    "instance %u",
+			    instance_idx);
+			return -1;
+		}
+		if (worker_counters_register(dp_config)) {
+			LOG(ERROR,
+			    "failed to register worker counters for instance "
+			    "%u",
+			    instance_idx);
+			return -1;
+		}
 
 		struct cp_config *cp_config = instance->cp_config;
 		if (dp_counter_storage_init(
