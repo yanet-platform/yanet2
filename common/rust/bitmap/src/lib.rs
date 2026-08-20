@@ -77,10 +77,11 @@ where
         // which is equivalent to `1 << r`.
         //
         // But unlike bit shift, when combined with the following `xor` operator, it
-        // compiles with a single blsr instruction.
+        // compiles with a single blsr instruction (the named method documents the
+        // lowering).
         //
         // Which makes this function ~30% faster.
-        let t = word & word.wrapping_neg();
+        let t = word.isolate_lowest_one();
         word ^= t;
 
         f(r)?;
