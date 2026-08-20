@@ -33,11 +33,14 @@ type Option func(*options)
 
 type options struct {
 	KnownFields bool
+	Env         bool
+	EnvPrefix   string
 }
 
 func newOptions() *options {
 	return &options{
 		KnownFields: false,
+		EnvPrefix:   DefaultEnvPrefix,
 	}
 }
 
@@ -52,6 +55,39 @@ func newOptions() *options {
 func WithKnownFields() Option {
 	return func(o *options) {
 		o.KnownFields = true
+	}
+}
+
+// WithEnv lets an environment variable override the value a key holds in the
+// document.
+//
+// A variable is named after the path its key sits at, prefixed with
+// DefaultEnvPrefix, upper-cased, with every separator replaced by an
+// underscore: server.endpoint reads YANET_SERVER_ENDPOINT and
+// gateways[0].endpoint reads YANET_GATEWAYS_0_ENDPOINT. A list element beyond
+// the ones the file defines is appended, so a deployment can add a gateway
+// without shipping a different file, and dropping one is a matter of not
+// naming it rather than blanking it out.
+//
+// An override is applied to the document before it is decoded, so the value
+// still passes through the destination type's own decoding and validation: an
+// empty NonEmptyString is rejected whether it came from the file or the
+// environment.
+func WithEnv() Option {
+	return func(o *options) {
+		o.Env = true
+	}
+}
+
+// WithEnvPrefix overrides the prefix WithEnv expects, for a binary that must
+// not read the shared YANET_ namespace.
+//
+// An empty prefix asks for the unprefixed namespace, where server.endpoint
+// reads SERVER_ENDPOINT.
+func WithEnvPrefix(prefix string) Option {
+	return func(o *options) {
+		o.Env = true
+		o.EnvPrefix = prefix
 	}
 }
 
@@ -87,10 +123,29 @@ func Decode(buf []byte, dst any, options ...Option) error {
 	for _, o := range options {
 		o(opts)
 	}
+	dstType := reflect.TypeOf(dst)
+	if dstType == nil {
+		return fmt.Errorf("destination must not be nil")
+	}
+
+	if opts.Env {
+		// Applied before the known-keys walk so an override lands under
+		// the same scrutiny as a key written in the file.
+		overlaid, err := applyEnv(
+			buf,
+			dst,
+			opts.EnvPrefix,
+			environ(opts.EnvPrefix),
+		)
+		if err != nil {
+			return err
+		}
+		buf = overlaid
+	}
 
 	collected, complete, err := walkDocument(
 		buf,
-		reflect.TypeOf(dst),
+		dstType,
 		maxAliasExpansionWork,
 	)
 	if err != nil {
@@ -112,7 +167,7 @@ func Decode(buf []byte, dst any, options ...Option) error {
 		}
 		decoded = true
 
-		collected, _, err = walkDocument(buf, reflect.TypeOf(dst), 0)
+		collected, _, err = walkDocument(buf, dstType, 0)
 		if err != nil {
 			return err
 		}

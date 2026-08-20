@@ -3,6 +3,7 @@ package xcfg
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"gopkg.in/yaml.v3"
 )
@@ -52,6 +53,20 @@ func (m NonEmptyString) Validate() error {
 // String implements fmt.Stringer.
 func (m NonEmptyString) String() string {
 	return m.v
+}
+
+// EnvType implements envTyped, telling the environment overlay in env.go that
+// this wrapper configures a plain string, so an override is emitted as a
+// quoted scalar rather than resolved as YAML. Without it an endpoint such as
+// "[::1]:8080" would be read as a flow sequence.
+func (m NonEmptyString) EnvType() reflect.Type {
+	return reflect.TypeFor[string]()
+}
+
+// EnvValue implements envValued, exposing the current wrapped default to the
+// environment overlay.
+func (m NonEmptyString) EnvValue() reflect.Value {
+	return reflect.ValueOf(m.v)
 }
 
 // MarshalYAML implements yaml.Marshaler.

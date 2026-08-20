@@ -3,6 +3,7 @@ package xcfg
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,6 +29,29 @@ func (m Required[T]) Unwrap() T {
 // String implements fmt.Stringer.
 func (m Required[T]) String() string {
 	return fmt.Sprint(m.v)
+}
+
+// EnvType implements envTyped, so a required value may be supplied from the
+// environment. The override goes through UnmarshalYAML like any other value,
+// which is what marks it explicitly set.
+func (m Required[T]) EnvType() reflect.Type {
+	return reflect.TypeFor[T]()
+}
+
+// EnvValue implements envValued, exposing the current wrapped default to the
+// environment overlay.
+func (m Required[T]) EnvValue() reflect.Value {
+	return reflect.ValueOf(m.v)
+}
+
+// EnvIsSet reports whether the wrapped value was supplied explicitly.
+func (m Required[T]) EnvIsSet() bool {
+	return m.set
+}
+
+// Elem exposes the wrapped value for recursive validation.
+func (m *Required[T]) Elem() reflect.Value {
+	return reflect.ValueOf(&m.v).Elem()
 }
 
 // Validate checks that the value was set explicitly.
