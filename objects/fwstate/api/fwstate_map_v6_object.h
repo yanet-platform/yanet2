@@ -58,14 +58,17 @@ fwstate_map_v6_object_free(
 );
 
 // Registration convenience: allocate + init and return the cp_object
-// pointer for agent_update_objects. On failure the object is fully
-// cleaned up and NULL is returned.
+// pointer for agent_update_objects. Reclaims this type's parked entries
+// before allocating. On failure the object is fully cleaned up and NULL
+// is returned.
 struct cp_object *
 fwstate_map_v6_object_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
-// Free handler matching the cp_object destruction pattern.
+// Drop the reference construction took on the caller's behalf; the object
+// parks on its agent's list at zero references and is destroyed by the
+// next construction of its own type.
 void
 fwstate_map_v6_object_config_free(struct cp_object *cp_object);
 

@@ -107,6 +107,14 @@ struct agent {
 	// plain and vlan devices keeps each type's entries for that type's own
 	// next construction.
 	struct cp_device *parked_devices;
+
+	// Head of this agent's list of shared objects parked after their
+	// reference count reached zero.
+	//
+	// Follows the same discipline as the device list above: an object
+	// type's construction call reclaims only matching entries, leaving
+	// other types' entries parked for their own next construction.
+	struct cp_object *parked_objects;
 };
 
 struct dp_config *
