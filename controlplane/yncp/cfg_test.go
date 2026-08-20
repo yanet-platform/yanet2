@@ -46,6 +46,35 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	require.Equal(t, uint32(0), cfg.Gateway.InstanceID.Unwrap())
 }
 
+// Test_ShippedDefaultConfig_OmittedBackendEndpointsUseEphemeralPorts verifies
+// that omitted backend endpoints inherit loopback port-zero defaults.
+func Test_ShippedDefaultConfig_OmittedBackendEndpointsUseEphemeralPorts(t *testing.T) {
+	config, err := xcfg.LoadConfig[yncp.Config](
+		"../etc/yanet/controlplane.d/default.yaml",
+	)
+	require.NoError(t, err)
+
+	endpoints := map[string]string{
+		"route module":      config.Modules.Route.Unwrap().Endpoint.Unwrap(),
+		"route MPLS module": config.Modules.RouteMPLS.Unwrap().Endpoint.Unwrap(),
+		"decap module":      config.Modules.Decap.Unwrap().Endpoint.Unwrap(),
+		"DSCP module":       config.Modules.DSCP.Unwrap().Endpoint.Unwrap(),
+		"forward module":    config.Modules.Forward.Unwrap().Endpoint.Unwrap(),
+		"mirror module":     config.Modules.Mirror.Unwrap().Endpoint.Unwrap(),
+		"NAT64 module":      config.Modules.NAT64.Unwrap().Endpoint.Unwrap(),
+		"pdump module":      config.Modules.Pdump.Unwrap().Endpoint.Unwrap(),
+		"ACL module":        config.Modules.ACL.Unwrap().Endpoint.Unwrap(),
+		"blackhole module":  config.Modules.Blackhole.Unwrap().Endpoint.Unwrap(),
+		"plain device":      config.Devices.Plain.Unwrap().Endpoint.Unwrap(),
+		"VLAN device":       config.Devices.Vlan.Unwrap().Endpoint.Unwrap(),
+	}
+	for name, endpoint := range endpoints {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, "[::1]:0", endpoint)
+		})
+	}
+}
+
 // Test_ModuleWithoutInstanceID_FailsValidation asserts that a listed module
 // omitting instance_id fails with a dotted path naming that module.
 func Test_ModuleWithoutInstanceID_FailsValidation(t *testing.T) {

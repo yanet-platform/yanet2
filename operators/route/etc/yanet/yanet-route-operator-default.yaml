@@ -4,10 +4,6 @@
 logging:
   level: debug
 
-# gRPC server exposed by the operator.
-server:
-  endpoint: "[::1]:50002"
-
 # One entry per dataplane instance (typically one per NUMA node).
 gateways:
   - name: numa0

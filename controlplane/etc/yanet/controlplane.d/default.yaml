@@ -64,60 +64,48 @@ modules:
     memory_path: *memory_path
     # Memory requirements for a single FIB-push transaction.
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   route-mpls:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   decap:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   dscp:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   forward:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   mirror:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   nat64:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   pdump:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   acl:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 8GB
-    endpoint: "[::1]:0"
   blackhole:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 4MB
-    endpoint: "[::1]:0"
 devices:
   plain:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"
   vlan:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
-    endpoint: "[::1]:0"

@@ -29,9 +29,14 @@ func Test_ShippedPrefixesDefault_NoUnknownKeys(t *testing.T) {
 	require.NoError(t, xcfg.CheckKnownKeys[yamlPrefixFile](data))
 }
 
-func TestDefaultConfig_ServerEndpoint(t *testing.T) {
-	cfg := DefaultConfig()
-	require.Equal(t, "[::1]:50004", cfg.Server.Endpoint.Unwrap())
+// Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort verifies
+// that the shipped file inherits the loopback port-zero listener endpoint.
+func Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort(t *testing.T) {
+	config, err := xcfg.LoadConfig[Config](
+		"../../etc/yanet/yanet-decap-operator-default.yaml",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "[::1]:0", config.Server.Endpoint.Unwrap())
 }
 
 func TestFunctionConfig_IgnorePdump_DefaultsTrue(t *testing.T) {

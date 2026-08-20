@@ -17,3 +17,13 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, xcfg.CheckKnownKeys[operator.Config](data))
 }
+
+// Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort verifies
+// that the shipped file inherits the loopback port-zero listener endpoint.
+func Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort(t *testing.T) {
+	config, err := xcfg.LoadConfig[operator.Config](
+		"../../etc/yanet/yanet-pipeline-operator-default.yaml",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "[::1]:0", config.Server.Endpoint.Unwrap())
+}

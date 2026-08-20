@@ -1,9 +1,6 @@
 logging:
   level: info
 
-server:
-  endpoint: "[::1]:50003"
-
 gateways:
   - name: numa0
     endpoint: "[::1]:8080"

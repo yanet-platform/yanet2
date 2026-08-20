@@ -1,9 +1,6 @@
 logging:
   level: debug
 
-server:
-  endpoint: "[::1]:50001"
-
 gateways:
   - name: numa0
     endpoint: "[::1]:8080"

@@ -114,7 +114,7 @@ func DefaultConfig() *Config {
 			Level: zapcore.InfoLevel,
 		},
 		Server: operator.GRPCServerConfig{
-			Endpoint: xcfg.MustNonEmptyString("localhost:50002"),
+			Endpoint: xcfg.MustNonEmptyString("[::1]:0"),
 		},
 		Reconcile: operator.ReconcileConfig{
 			Interval:       xcfg.MustNonZero(operator.DefaultReconcileInterval),
