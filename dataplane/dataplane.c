@@ -798,7 +798,10 @@ dataplane_init(
 			    instance_idx);
 			return -1;
 		}
-		if (worker_counters_register(dp_config)) {
+		struct worker_counter_ids counter_ids;
+		if (worker_counters_register(
+			    &dp_config->worker_counters, &counter_ids
+		    )) {
 			LOG(ERROR,
 			    "failed to register worker counters for instance "
 			    "%u",
@@ -812,6 +815,8 @@ dataplane_init(
 		    ) != 0) {
 			return -1;
 		}
+
+		worker_counters_bind(dp_config, &counter_ids);
 
 		for (uint64_t device_idx = 0;
 		     device_idx < dataplane->device_count;

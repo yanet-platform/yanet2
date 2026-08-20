@@ -514,37 +514,6 @@ error_mempool:
 
 int
 dataplane_worker_start(struct dataplane_worker *worker) {
-
-	struct dp_worker *dp_worker = worker->dp_worker;
-	struct dp_config *dp_config = worker->instance->dp_config;
-	struct counter_storage **worker_counter_storages =
-		ADDR_OF_NONNULL(&dp_config->worker_counter_storages);
-	struct counter_storage *worker_counter_storage =
-		ADDR_OF_NONNULL(worker_counter_storages + dp_worker->idx);
-	// FIXME: do not use hard-coded counter identifiers
-	dp_worker->iterations = counter_get_address(0, worker_counter_storage);
-
-	dp_worker->rx_count =
-		counter_get_address(1, worker_counter_storage) + 0;
-	dp_worker->rx_size = counter_get_address(1, worker_counter_storage) + 1;
-
-	dp_worker->tx_count =
-		counter_get_address(2, worker_counter_storage) + 0;
-	dp_worker->tx_size = counter_get_address(2, worker_counter_storage) + 1;
-
-	dp_worker->remote_rx_count =
-		counter_get_address(3, worker_counter_storage) + 0;
-
-	dp_worker->remote_tx_count =
-		counter_get_address(4, worker_counter_storage) + 0;
-	dp_worker->rx_bursts = counter_get_address(5, worker_counter_storage);
-
-	dp_worker->local_tx_drops =
-		counter_get_address(6, worker_counter_storage);
-	dp_worker->remote_tx_drops =
-		counter_get_address(7, worker_counter_storage);
-	dp_worker->drop_count = counter_get_address(8, worker_counter_storage);
-
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);
 

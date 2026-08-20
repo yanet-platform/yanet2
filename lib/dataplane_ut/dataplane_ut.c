@@ -50,46 +50,6 @@ struct dataplane_ut {
 	struct plugin_registry plugins;
 };
 
-// Counter indices used by wire_worker_counters to address the
-// standard worker counter slots by their registration order.
-enum {
-	WORKER_CTR_ITERATIONS = 0,
-	WORKER_CTR_RX = 1,
-	WORKER_CTR_TX = 2,
-	WORKER_CTR_REMOTE_RX = 3,
-	WORKER_CTR_REMOTE_TX = 4,
-	WORKER_CTR_RX_BURSTS = 5,
-};
-
-// Wire counter address pointers for a single dp_worker.
-//
-// The worker's counter storage must already be spawned and wired into
-// dp_config before calling this.
-static void
-wire_worker_counters(struct dp_worker *dp_worker, struct dp_config *dp_config) {
-	struct counter_storage *storage = ADDR_OF_NONNULL(
-		ADDR_OF_NONNULL(&dp_config->worker_counter_storages) +
-		dp_worker->idx
-	);
-
-	dp_worker->iterations =
-		counter_get_address(WORKER_CTR_ITERATIONS, storage);
-
-	dp_worker->rx_count = counter_get_address(WORKER_CTR_RX, storage) + 0;
-	dp_worker->rx_size = counter_get_address(WORKER_CTR_RX, storage) + 1;
-
-	dp_worker->tx_count = counter_get_address(WORKER_CTR_TX, storage) + 0;
-	dp_worker->tx_size = counter_get_address(WORKER_CTR_TX, storage) + 1;
-
-	dp_worker->remote_rx_count =
-		counter_get_address(WORKER_CTR_REMOTE_RX, storage) + 0;
-
-	dp_worker->remote_tx_count =
-		counter_get_address(WORKER_CTR_REMOTE_TX, storage) + 0;
-	dp_worker->rx_bursts =
-		counter_get_address(WORKER_CTR_RX_BURSTS, storage);
-}
-
 struct dataplane_ut *
 dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	if (cfg == NULL) {
@@ -267,14 +227,15 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	}
 	SET_OFFSET_OF(&ut->cp_config->cp_config_gen, cp_config_gen);
 
-	// Register the standard worker counters used by the pipeline.
-	// Sizes and names mirror production worker.c::worker_register_counter.
 	counter_registry_init(
 		&ut->dp_config->worker_counters,
 		&ut->dp_config->memory_context,
 		0
 	);
-	if (worker_counters_register(ut->dp_config) == -1) {
+	struct worker_counter_ids counter_ids;
+	if (worker_counters_register(
+		    &ut->dp_config->worker_counters, &counter_ids
+	    ) == -1) {
 		LOG(ERROR,
 		    "dataplane_ut_new: failed to register worker counters");
 		dataplane_ut_free(ut);
@@ -366,10 +327,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 		dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
-		wire_worker_counters(dp_worker, ut->dp_config);
-
 		SET_OFFSET_OF(dp_workers + idx, dp_worker);
 	}
+
+	worker_counters_bind(ut->dp_config, &counter_ids);
 
 	// Skipped when device_count == 0: the implicit device 0 (see above)
 	// has no dp_topology slot, so per-device worker counts stay
