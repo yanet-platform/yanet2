@@ -7,7 +7,10 @@
 //! To render an error call `output::failure(&err)` — that function owns all
 //! formatting logic and reads the global output context set by `output::init`.
 
-use core::fmt::{self, Display, Formatter};
+use core::{
+    fmt::{self, Display, Formatter},
+    ops::{Deref, DerefMut},
+};
 
 use tonic::{Code, Status};
 
@@ -64,8 +67,25 @@ impl Display for ErrorKind {
 }
 
 /// A structured CLI error ready to be rendered via `output::failure`.
+///
+/// The payload sits behind a pointer: nearly every fallible signature in
+/// the CLI workspace fails with this type, and carrying the fields in value
+/// position grew each of those results past the size where
+/// `clippy::result_large_err` starts flagging them.
 #[derive(Debug)]
 pub struct Error {
+    inner: Box<ErrorInner>,
+}
+
+/// The fields of an [`Error`], in the allocation its pointer owns.
+///
+/// Field access on an error value lands here through deref, so in-crate
+/// callers read and mutate the fields as if they lived on the error itself.
+/// Public in name only: the deref target of a public type must be public
+/// too, and with every field crate-internal the type is nameable from
+/// other crates and unusable there.
+#[derive(Debug)]
+pub struct ErrorInner {
     /// The user-facing action being attempted (e.g. `"insert"`, `"show"`).
     pub(crate) action: String,
     /// Categorised error kind.
@@ -86,6 +106,20 @@ pub struct Error {
     pub(crate) raw_code: Option<String>,
     /// Raw gRPC message (may differ from `message` after normalisation).
     pub(crate) raw_message: Option<String>,
+}
+
+impl Deref for Error {
+    type Target = ErrorInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for Error {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl Error {
@@ -109,14 +143,16 @@ impl Error {
         let hint = default_hint(kind);
 
         Self {
-            action,
-            kind,
-            message: message.clone(),
-            endpoint: Some(endpoint),
-            service: Some(service),
-            hint,
-            raw_code: Some(format!("{code:?}")),
-            raw_message: Some(message),
+            inner: Box::new(ErrorInner {
+                action,
+                kind,
+                message: message.clone(),
+                endpoint: Some(endpoint),
+                service: Some(service),
+                hint,
+                raw_code: Some(format!("{code:?}")),
+                raw_message: Some(message),
+            }),
         }
     }
 
@@ -139,14 +175,16 @@ impl Error {
         };
 
         Self {
-            action,
-            kind,
-            message,
-            endpoint: Some(endpoint),
-            service: None,
-            hint,
-            raw_code: None,
-            raw_message: None,
+            inner: Box::new(ErrorInner {
+                action,
+                kind,
+                message,
+                endpoint: Some(endpoint),
+                service: None,
+                hint,
+                raw_code: None,
+                raw_message: None,
+            }),
         }
     }
 
@@ -166,14 +204,16 @@ impl Error {
         message: impl Into<String>,
     ) -> Self {
         Self {
-            action: action.into(),
-            kind,
-            message: message.into(),
-            endpoint: Some(endpoint.into()),
-            service: None,
-            hint: default_hint(kind),
-            raw_code: None,
-            raw_message: None,
+            inner: Box::new(ErrorInner {
+                action: action.into(),
+                kind,
+                message: message.into(),
+                endpoint: Some(endpoint.into()),
+                service: None,
+                hint: default_hint(kind),
+                raw_code: None,
+                raw_message: None,
+            }),
         }
     }
 
@@ -196,24 +236,24 @@ impl Error {
     /// — the readiness CLI, say, which can name the services the gateway
     /// actually has. A multi-line hint renders as aligned continuation lines.
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
-        self.hint = Some(hint.into());
+        self.inner.hint = Some(hint.into());
 
         self
     }
 
     /// The category this error was mapped to.
     pub fn kind(&self) -> ErrorKind {
-        self.kind
+        self.inner.kind
     }
 
     /// The human-readable message from the RPC or transport layer.
     pub fn message(&self) -> &str {
-        &self.message
+        &self.inner.message
     }
 
     /// Process exit code for this error.
     pub fn exit_code(&self) -> i32 {
-        self.kind.exit_code()
+        self.inner.kind.exit_code()
     }
 }
 
@@ -336,6 +376,15 @@ mod test {
         metadata.insert("x-yanet-error-reason", "service-unregistered".parse().unwrap());
 
         Status::with_metadata(Code::NotFound, message, metadata)
+    }
+
+    /// verifies that an error stays within two machine words, the ceiling
+    /// that keeps `clippy::result_large_err` — 176 bytes for the payload
+    /// before it was boxed — silent on every workspace signature that
+    /// fails with this type.
+    #[test]
+    fn test_error_size_stays_within_two_words() {
+        assert!(core::mem::size_of::<Error>() <= 2 * core::mem::size_of::<usize>());
     }
 
     #[test]
