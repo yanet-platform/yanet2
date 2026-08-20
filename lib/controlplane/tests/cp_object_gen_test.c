@@ -142,8 +142,9 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	);
 
 	// Deleting each object from the live generation drops its last
-	// reference (the prior generation is freed by the install), so the
-	// free callback decrements loaded_object_count for each.
+	// generation reference (the prior generation is freed by the
+	// install), so each delete mirrors the drop into
+	// loaded_object_count.
 	TEST_ASSERT_SUCCESS(
 		agent_delete_object(agent, "test", "lookup-1", &err),
 		"delete_object(lookup-1) failed: %s",
@@ -185,9 +186,10 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 // the replacement's counter registry inherits the prior object's counter
 // definitions via counter_registry_link. Delete removes the object from
 // the live generation. Across the update/replace/delete gen swaps each
-// released object's last reference drops in the registry free callback,
-// so loaded_object_count returns to zero; the arena is then returned to
-// its pre-test size by tearing each object down explicitly.
+// swap mirrors its generation-reference changes into loaded_object_count,
+// so the count returns to zero once every object retires; the arena is
+// then returned to its pre-test size by tearing each object down
+// explicitly.
 static int
 test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
@@ -257,8 +259,8 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	// Replace obj1 with a fresh object of the same name: the slot index
 	// is preserved and the replacement inherits obj1's counter. obj1 is
 	// still referenced by the prior generation until that generation is
-	// freed by the install, at which point its last reference drops and
-	// the free callback decrements loaded_object_count.
+	// freed by the install; the replace and the retire each mirror their
+	// reference change into loaded_object_count and the two cancel.
 	struct cp_object *new_obj1 = (struct cp_object *)memory_balloc(
 		&agent->memory_context, sizeof(struct cp_object)
 	);

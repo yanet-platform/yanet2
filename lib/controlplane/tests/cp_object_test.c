@@ -33,8 +33,8 @@
 // Lifecycle symmetry: allocate+init then fini+reclaim, plus the zero-init
 // fini no-op. The agent arena must return to its pre-test size.
 //
-// loaded_object_count is registry-refcount-based, so init/fini do not touch
-// it and the count stays zero across a direct init/fini pair.
+// loaded_object_count tracks only generation references, so the creator's
+// own reference never touches it and init/fini leave the count at zero.
 static int
 test_cp_object_lifecycle(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
@@ -101,10 +101,10 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 // Stable name index across registry_copy, slot-preserving upsert-replace,
 // and delete+reinsert; counter continuity via counter_registry_link.
 //
-// loaded_object_count tracks registry refcounts: each upsert bumps the
-// count, the free callback (fired only when an item's refcount reaches
-// zero) decrements it. After every registry that referenced the objects
-// is finalized the count returns to zero.
+// loaded_object_count tracks generation references: each copy, upsert, and
+// delete mirrors the reference it adds or drops into the owning agent, and
+// finalizing every registry that referenced the objects returns the count
+// to zero.
 static int
 test_cp_object_index_stability(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
@@ -190,8 +190,8 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 
 	// registry_copy is slot-by-slot, so indices survive into the copy.
-	// Each copied item gains a reference, so loaded_object_count is
-	// unchanged by the copy itself.
+	// Each copied item gains a generation reference, so the count rises
+	// by one per referenced object.
 	struct cp_object_registry copied;
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_copy(
@@ -202,8 +202,8 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_EQUAL(
 		agent->loaded_object_count,
-		2,
-		"registry_copy must not change loaded_object_count"
+		4,
+		"registry_copy must mirror a generation reference per object"
 	);
 
 	uint64_t index;
@@ -229,9 +229,8 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// Replace foo in the copy: slot-preserving, and the replacement
 	// inherits the old counter definition via counter_registry_link.
 	//
-	// foo is still referenced by the original registry, so freeing its
-	// slot in the copy only drops its refcount by one (no free callback,
-	// no count decrement); foo2's upsert bumps the count.
+	// foo2 gains the copy's generation reference while foo loses it, so
+	// the two changes cancel and the count stays at four.
 	struct cp_object *foo2 = (struct cp_object *)memory_balloc(
 		&agent->memory_context, sizeof(struct cp_object)
 	);
@@ -248,8 +247,8 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_EQUAL(
 		agent->loaded_object_count,
-		3,
-		"loaded_object_count must be 3 after upsert(foo2) replaces "
+		4,
+		"loaded_object_count must stay 4 after upsert(foo2) replaces "
 		"foo in one of two registries"
 	);
 	TEST_ASSERT_SUCCESS(
@@ -269,7 +268,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 
 	// Delete and reinsert bar in the copy: bar is still referenced by
 	// the original registry, so the delete drops only the copy's
-	// reference (no free callback). The reinserted bar2 bumps the count.
+	// generation reference. The reinserted bar2 gains one back.
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_delete(&copied, "test", "bar"),
 		"delete(bar) failed"
@@ -322,9 +321,10 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"registry_lookup(foo) must return the replacement"
 	);
 
-	// Finalizing both registries drops every reference: foo2 and bar2
-	// retire from the copy, foo and bar retire from the original. The
-	// free callback fires for each, returning loaded_object_count to zero.
+	// Finalizing both registries drops every generation reference: foo2
+	// and bar2 retire from the copy, foo and bar retire from the original,
+	// returning loaded_object_count to zero. The creator holds its own
+	// reference on each object, so nothing parks here yet.
 	cp_object_registry_fini(&copied);
 	cp_object_registry_fini(&registry);
 	TEST_ASSERT_EQUAL(
@@ -338,6 +338,10 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// objects' storage: each object lives in the agent's arena until
 	// the agent itself is reclaimed. Tear them down explicitly so the
 	// arena returns to its pre-test size.
+	cp_object_release(foo);
+	cp_object_release(bar);
+	cp_object_release(foo2);
+	cp_object_release(bar2);
 	cp_object_fini(foo);
 	memory_bfree(&agent->memory_context, foo, sizeof(*foo));
 	cp_object_fini(bar);

@@ -194,10 +194,8 @@ run_binding_survives_earlier_registration_test(void) {
 		{"remote rx", dp_worker.remote_rx_count, "remote_rx", 0},
 		{"remote tx", dp_worker.remote_tx_count, "remote_tx", 0},
 		{"rx bursts", dp_worker.rx_bursts, "rx_bursts", 0},
-		{"local tx drops",
-		 dp_worker.local_tx_drops,
-		 "local_tx_drops",
-		 0},
+		{"local tx drops", dp_worker.local_tx_drops, "local_tx_drops", 0
+		},
 		{"remote tx drops",
 		 dp_worker.remote_tx_drops,
 		 "remote_tx_drops",
@@ -268,10 +266,8 @@ main(void) {
 	if (failed == 0) {
 		LOG(INFO, "all %zu worker_counters tests passed", total);
 	} else {
-		LOG(ERROR,
-		    "%zu/%zu worker_counters tests failed",
-		    failed,
-		    total);
+		LOG(ERROR, "%zu/%zu worker_counters tests failed", failed, total
+		);
 	}
 
 	return failed == 0 ? TEST_SUCCESS : TEST_FAILED;
