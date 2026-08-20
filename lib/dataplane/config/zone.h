@@ -13,6 +13,7 @@
 #include "lib/dataplane/config/topology.h"
 
 #include "lib/counters/counters.h"
+#include "lib/dataplane/worker/counters.h"
 
 struct cp_config;
 struct rte_mempool;
@@ -72,6 +73,14 @@ struct dp_worker {
 	// initialized on the start of the current
 	// loop round.
 	uint64_t current_time;
+
+	// Registry-assigned identifiers of the standard worker counters.
+	//
+	// Captured once when the counters are registered and consumed when the
+	// address pointers below are resolved, so addressing follows the
+	// registry-assigned identifiers instead of a hard-coded registration
+	// order.
+	struct worker_counters counters;
 
 	uint64_t *iterations;
 

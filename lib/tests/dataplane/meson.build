@@ -110,3 +110,18 @@ worker_clone_test = executable(
   include_directories: yanet_rootdir,
 )
 test('worker_clone', worker_clone_test, suite: 'lib_worker')
+
+worker_counters_test = executable(
+  'worker_counters_test',
+  'worker_counters_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_worker_dp_dep,
+    lib_counters_dep,
+    lib_common_dep,
+    lib_logging_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('worker_counters', worker_counters_test, suite: 'lib_worker')

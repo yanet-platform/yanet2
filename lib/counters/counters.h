@@ -51,6 +51,14 @@ counter_registry_register(
 	yanet_error **err
 );
 
+// Resolves the identifier of a registered counter by name.
+//
+// Returns COUNTER_INVALID when no counter is registered under the name.
+uint64_t
+counter_registry_lookup_index(
+	struct counter_registry *registry, const char *name
+);
+
 void
 counter_registry_fini(struct counter_registry *registry);
 
