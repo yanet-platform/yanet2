@@ -165,6 +165,11 @@ acl_handle_packets(
 		module_ectx, acl_config->rules_registry_idx
 	);
 
+	// Rule counters are resolved per matched target; hoisting the lookup
+	// array leaves a single hop per packet.
+	struct counter_value_handle **rules_handles =
+		ADDR_OF_NONNULL(&rules_storage->counter_value_handles);
+
 	uint64_t *pass_cnt = counter_get_address(
 		acl_config->action_allow_counter_id, counter_storage
 	);
@@ -195,6 +200,10 @@ acl_handle_packets(
 
 	uint64_t *non_term_cnt = counter_get_address(
 		acl_config->action_non_term_counter_id, counter_storage
+	);
+
+	uint64_t *no_match_cnt = counter_get_address(
+		acl_config->no_match_counter_id, counter_storage
 	);
 
 	// Time in nanoseconds is sufficient for keeping state up to 500 years
@@ -508,9 +517,11 @@ acl_handle_packets(
 				}
 				case ACTION_COUNT: {
 					uint64_t *counters =
-						counter_get_address(
-							target->counter_id,
-							rules_storage
+						counter_handle_get_value(
+							ADDR_OF_NONNULL(
+								rules_handles +
+								target->counter_id
+							)
 						);
 					counters[0] += 1;
 					counters[1] += pkt_len;
@@ -601,10 +612,7 @@ acl_handle_packets(
 				packet_front_output(packet_front, sync_pkt);
 			}
 		} else {
-			uint64_t *c = counter_get_address(
-				acl_config->no_match_counter_id, counter_storage
-			);
-			c[0] += 1;
+			no_match_cnt[0] += 1;
 
 			packet_front_drop(packet_front, packet);
 		}
