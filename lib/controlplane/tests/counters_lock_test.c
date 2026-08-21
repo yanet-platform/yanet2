@@ -18,6 +18,7 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_pipeline.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/controlplane/tests/counter_surface.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
@@ -78,7 +79,7 @@ reader_thread(void *arg) {
 			&args->in_progress, true, memory_order_release
 		);
 		struct counter_handle_list *list = yanet_get_counters_by_tags(
-			args->dp_config, tags, 2, NULL, -1, NULL
+			args->dp_config, tags, 2, NULL, NULL
 		);
 		atomic_store_explicit(
 			&args->in_progress, false, memory_order_release
@@ -97,142 +98,6 @@ reader_thread(void *arg) {
 	}
 	atomic_store_explicit(&args->done, true, memory_order_release);
 	return NULL;
-}
-
-static int
-install_pipelines(
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *name_prefix,
-	size_t count
-) {
-	yanet_error *err = NULL;
-	struct cp_pipeline_config **cfgs = calloc(count, sizeof(*cfgs));
-	TEST_ASSERT_NOT_NULL(cfgs, "failed to allocate pipeline config array");
-
-	for (size_t idx = 0; idx < count; ++idx) {
-		cfgs[idx] = calloc(1, sizeof(struct cp_pipeline_config));
-		TEST_ASSERT_NOT_NULL(
-			cfgs[idx], "failed to allocate pipeline config %zu", idx
-		);
-		snprintf(
-			cfgs[idx]->name,
-			CP_PIPELINE_NAME_LEN,
-			"%s-%zu",
-			name_prefix,
-			idx
-		);
-		cfgs[idx]->length = 0;
-	}
-
-	int rc = cp_config_update_pipelines(
-		dp_config, cp_config, count, cfgs, &err
-	);
-
-	for (size_t idx = 0; idx < count; ++idx) {
-		free(cfgs[idx]);
-	}
-	free(cfgs);
-
-	TEST_ASSERT_SUCCESS(
-		rc,
-		"update_pipelines failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	return TEST_SUCCESS;
-}
-
-// Install a device with every pipeline named using the given prefix and
-// index.
-//
-// Each pipeline is wired as an equal-weight input, so a counter registry
-// lookup for that device under the pipeline kind tag matches one storage
-// per pipeline, per worker. Reinstalling the same pipeline set always
-// allocates a fresh pipeline object and counter registry per name, so it
-// genuinely retires the previous generation's matched storages.
-static int
-install_device(
-	struct agent *agent,
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *device_name,
-	const char *pipeline_prefix,
-	size_t pipeline_count
-) {
-	yanet_error *err = NULL;
-	struct cp_device_plain_config *cfg = cp_device_plain_config_new(
-		device_name, pipeline_count, 0, &err
-	);
-	TEST_ASSERT_NOT_NULL(
-		cfg,
-		"device config new failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	char name[CP_PIPELINE_NAME_LEN];
-	for (size_t idx = 0; idx < pipeline_count; ++idx) {
-		snprintf(name, sizeof(name), "%s-%zu", pipeline_prefix, idx);
-		int rc = cp_device_plain_config_set_input_pipeline(
-			cfg, idx, name, 1
-		);
-		TEST_ASSERT_EQUAL(
-			rc, 0, "set_input_pipeline failed at index %zu", idx
-		);
-	}
-
-	struct cp_device *dev = cp_device_plain_new(agent, cfg, &err);
-	cp_device_plain_config_free(cfg);
-	TEST_ASSERT_NOT_NULL(
-		dev,
-		"device new failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-
-	struct cp_device *devs[] = {dev};
-	int rc = cp_config_update_devices(dp_config, cp_config, 1, devs, &err);
-	TEST_ASSERT_SUCCESS(
-		rc,
-		"update_devices failed: %s",
-		err ? yanet_error_message(err) : "?"
-	);
-	// Drop the construction reference: the live generation holds the
-	// device from here on.
-	cp_device_plain_free(dev);
-	return TEST_SUCCESS;
-}
-
-// Install a pipeline set and a device wired to it under the same name
-// prefix, the pairing every test below needs to give a counter registry
-// lookup something to match.
-static int
-install_counter_surface(
-	struct agent *agent,
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *device_name,
-	const char *pipeline_prefix,
-	size_t pipeline_count
-) {
-	TEST_ASSERT_SUCCESS(
-		install_pipelines(
-			dp_config, cp_config, pipeline_prefix, pipeline_count
-		),
-		"failed to install pipelines for %s",
-		pipeline_prefix
-	);
-	TEST_ASSERT_SUCCESS(
-		install_device(
-			agent,
-			dp_config,
-			cp_config,
-			device_name,
-			pipeline_prefix,
-			pipeline_count
-		),
-		"failed to install device %s",
-		device_name
-	);
-	return TEST_SUCCESS;
 }
 
 static uint64_t
@@ -391,7 +256,7 @@ race_reader_thread(void *arg) {
 				    LOCK_TEST_COUNTERS_PER_PIPELINE;
 	for (uint64_t i = 0; i < RACE_TEST_READ_CYCLES; ++i) {
 		struct counter_handle_list *list = yanet_get_counters_by_tags(
-			state->dp_config, tags, 2, NULL, -1, NULL
+			state->dp_config, tags, 2, NULL, NULL
 		);
 		if (list == NULL || list->count != expected_matches) {
 			if (list != NULL) {
@@ -571,7 +436,7 @@ test_repeated_swap_no_generation_leak(struct yanet_shm *shm) {
 
 	for (unsigned i = 0; i < LEAK_TEST_CYCLES; ++i) {
 		struct counter_handle_list *list = yanet_get_counters_by_tags(
-			dp_config, tags, 2, NULL, -1, NULL
+			dp_config, tags, 2, NULL, NULL
 		);
 		TEST_ASSERT_NOT_NULL(
 			list, "read failed unexpectedly at cycle %u", i

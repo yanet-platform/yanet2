@@ -6,8 +6,8 @@ import (
 	"math"
 	"net/netip"
 
+	"github.com/yanet-platform/xnetip"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -27,8 +27,11 @@ type SessionTimeouts struct {
 // the encapsulation source (for the IPIP/GRE tunnel). Its mask may be any
 // (possibly non-contiguous) bitmask, and its address family must match Dst.
 type RealConfig struct {
-	Dst         netip.Addr
-	Src         xnetip.NetWithMask
+	// Dst is the backend destination address.
+	Dst netip.Addr
+	// Src is required and must match the destination address family.
+	Src *xnetip.Network
+	// CounterName names the optional per-backend counter.
 	CounterName string
 }
 

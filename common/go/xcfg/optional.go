@@ -70,6 +70,25 @@ func (m Optional[T]) WalkType() reflect.Type {
 	return reflect.TypeFor[T]()
 }
 
+// EnvType implements envTyped, letting the environment overlay in env.go
+// address the wrapped value's own fields.
+//
+// An override materialises the optional value: naming a key under an absent
+// Optional makes it present, since the overlay writes the key into the
+// document and UnmarshalYAML then seeds T with its Default.
+func (m Optional[T]) EnvType() reflect.Type {
+	return reflect.TypeFor[T]()
+}
+
+// EnvValue implements envValued, exposing a present wrapped default to the
+// environment overlay.
+func (m Optional[T]) EnvValue() reflect.Value {
+	if m.v == nil {
+		return reflect.Value{}
+	}
+	return reflect.ValueOf(m.v).Elem()
+}
+
 // Elem implements validatableElem, letting validate in load.go recurse into
 // the wrapped value's own fields under Optional's own dotted path.
 //

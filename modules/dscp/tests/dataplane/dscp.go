@@ -39,13 +39,15 @@ import "C"
 import (
 	"net/netip"
 	"runtime"
+	"testing"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
+	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	"github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/testutils"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
 var (
@@ -55,11 +57,14 @@ var (
 )
 
 func buildLPMs(
+	t testing.TB,
 	prefixes []netip.Prefix,
 	memCtx *C.struct_memory_context,
 	lpm4 *C.struct_lpm,
 	lpm6 *C.struct_lpm,
 ) {
+	t.Helper()
+
 	lpm4Name := C.CString("lpm_v4")
 	C.lpm_init(lpm4, memCtx, lpm4Name)
 	C.free(unsafe.Pointer(lpm4Name))
@@ -69,15 +74,18 @@ func buildLPMs(
 	C.free(unsafe.Pointer(lpm6Name))
 
 	for _, prefix := range prefixes {
+		network, ok := xnetip.NetworkFromPrefix(prefix)
+		require.True(t, ok, "prefix must be valid: %v", prefix)
+
 		if prefix.Addr().Is4() {
 			ipv4 := prefix.Addr().As4()
-			mask := xnetip.LastAddr(prefix).As4()
+			mask := network.LastAddr().As4()
 			from := (*C.uint8_t)(&ipv4[0])
 			to := (*C.uint8_t)(&mask[0])
 			C.lpm_insert(lpm4, 4, from, to, 1)
 		} else {
 			ipv6 := prefix.Addr().As16()
-			mask := xnetip.LastAddr(prefix).As16()
+			mask := network.LastAddr().As16()
 			from := (*C.uint8_t)(&ipv6[0])
 			to := (*C.uint8_t)(&mask[0])
 			C.lpm_insert(lpm6, 16, from, to, 1)
@@ -85,7 +93,15 @@ func buildLPMs(
 	}
 }
 
-func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx testutils.MemoryContext) *C.struct_dscp_module_config {
+func dscpModuleConfig(
+	t testing.TB,
+	prefixes []netip.Prefix,
+	flag uint8,
+	dscp uint8,
+	memCtx testutils.MemoryContext,
+) *C.struct_dscp_module_config {
+	t.Helper()
+
 	m := (*C.struct_dscp_module_config)(C.memory_balloc(
 		(*C.struct_memory_context)(memCtx.AsRawPtr()),
 		C.sizeof_struct_dscp_module_config,
@@ -95,7 +111,13 @@ func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx testutil
 	}
 	C.memset(unsafe.Pointer(m), 0, C.sizeof_struct_dscp_module_config)
 
-	buildLPMs(prefixes, (*C.struct_memory_context)(memCtx.AsRawPtr()), &m.lpm_v4, &m.lpm_v6)
+	buildLPMs(
+		t,
+		prefixes,
+		(*C.struct_memory_context)(memCtx.AsRawPtr()),
+		&m.lpm_v4,
+		&m.lpm_v6,
+	)
 
 	m.dscp = C.struct_dscp_config{
 		flag: C.uint8_t(flag),

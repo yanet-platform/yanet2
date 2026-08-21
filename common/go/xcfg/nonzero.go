@@ -3,6 +3,7 @@ package xcfg
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +47,18 @@ func (m NonZero[T]) Unwrap() T {
 // String implements fmt.Stringer.
 func (m NonZero[T]) String() string {
 	return fmt.Sprint(m.v)
+}
+
+// EnvType implements envTyped, letting the environment overlay in env.go
+// configure the wrapped value instead of treating the wrapper as opaque.
+func (m NonZero[T]) EnvType() reflect.Type {
+	return reflect.TypeFor[T]()
+}
+
+// EnvValue implements envValued, exposing the current wrapped default to the
+// environment overlay.
+func (m NonZero[T]) EnvValue() reflect.Value {
+	return reflect.ValueOf(m.v)
 }
 
 // Validate checks that the value is not zero.

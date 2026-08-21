@@ -2,10 +2,13 @@ package ffi
 
 //#cgo CFLAGS: -I../../
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
+//#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent_counters
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
 //#cgo LDFLAGS: -L../../build/lib/errors -lerrors
+//#cgo LDFLAGS: -L../../build/lib/counters -lcounter_pattern
+//#cgo LDFLAGS: -L../../build/subprojects/regex -lrure
 //#include "api/agent.h"
 //#include "api/counter.h"
 import "C"

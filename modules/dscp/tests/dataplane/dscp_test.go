@@ -134,7 +134,7 @@ func TestDSCP(t *testing.T) {
 				memCtx := testutils.NewMemoryContext("dscp_test", datasize.MB)
 				defer memCtx.Free()
 
-				m := dscpModuleConfig(prefixes, c.flag, c.mark, memCtx)
+				m := dscpModuleConfig(t, prefixes, c.flag, c.mark, memCtx)
 				result := dscpHandlePackets(m, pkt)
 				require.NotEmpty(t, result.Output, "result.Output")
 

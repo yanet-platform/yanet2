@@ -14,10 +14,10 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
@@ -138,6 +138,9 @@ func toFIBEntries(tb testing.TB, entries []FIBEntry) []*routepb.FIBEntry {
 
 	pbEntries := make([]*routepb.FIBEntry, 0, len(entries))
 	for _, e := range entries {
+		network, ok := xnetip.NetworkFromPrefix(e.Prefix)
+		require.True(tb, ok)
+
 		nexthops := make([]*routepb.FIBNexthop, 0, len(e.Nexthops))
 		for _, nh := range e.Nexthops {
 			nexthops = append(nexthops, &routepb.FIBNexthop{
@@ -147,7 +150,7 @@ func toFIBEntries(tb testing.TB, entries []FIBEntry) []*routepb.FIBEntry {
 				Counter: nh.Counter,
 			})
 		}
-		ipRange, err := commonpb.NewIPRange(e.Prefix.Addr(), xnetip.LastAddr(e.Prefix))
+		ipRange, err := commonpb.NewIPRange(e.Prefix.Addr(), network.LastAddr())
 		require.NoError(tb, err)
 		pbEntries = append(pbEntries, &routepb.FIBEntry{
 			Range:    ipRange,

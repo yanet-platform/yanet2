@@ -42,7 +42,8 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser, Default)]
 pub struct ByTagsCmd {
-    #[arg(short, long = "name")]
+    /// Counter name to show, as an exact name or a Rust regex pattern.
+    #[arg(short, long = "name", value_name = "PATTERN")]
     pub names: Vec<String>,
     #[arg(short, long)]
     pub device: Option<String>,

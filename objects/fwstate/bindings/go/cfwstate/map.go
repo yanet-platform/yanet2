@@ -304,9 +304,12 @@ func (m *MapObjectConfig) FreeStaleLayers() error {
 	return nil
 }
 
-// Free releases the underlying C memory via the fwstate-map free handler.
+// Free drops the reference construction took on the caller's behalf.
 //
-// Safe to call multiple times: subsequent calls are no-ops.
+// Safe to call multiple times: subsequent calls are no-ops. The object is
+// not destroyed on the spot: once its last reference drops it parks on
+// the agent's list, and the next construction of the same object type
+// reclaims it.
 func (m *MapObjectConfig) Free() {
 	if ptr := m.asRawPtr(); ptr != nil {
 		if m.kind == KindV6 {

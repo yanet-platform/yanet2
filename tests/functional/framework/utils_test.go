@@ -108,9 +108,8 @@ func TestPrefixRange(t *testing.T) {
 	}
 }
 
-// TestPrefixRange_MalformedPrefix verifies that PrefixRange reports an error
-// for a prefix netip.ParsePrefix itself rejects, rather than propagating a
-// zero-value range.
+// TestPrefixRange_MalformedPrefix verifies that malformed network text is
+// rejected rather than producing a zero-value range.
 func TestPrefixRange_MalformedPrefix(t *testing.T) {
 	_, _, err := framework.PrefixRange("not-a-prefix")
 

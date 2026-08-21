@@ -1,6 +1,7 @@
 package dscp
 
 import (
+	"cmp"
 	"context"
 	"net/netip"
 	"slices"
@@ -10,7 +11,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
@@ -147,7 +147,7 @@ func (m *DscpService) AddPrefixes(
 	cfg.Prefixes = slices.Compact(
 		slices.SortedFunc(
 			slices.Values(slices.Concat(cfg.Prefixes, toAdd)),
-			xnetip.PrefixCompare,
+			comparePrefixes,
 		),
 	)
 
@@ -156,6 +156,13 @@ func (m *DscpService) AddPrefixes(
 	}
 
 	return &dscppb.AddPrefixesResponse{}, nil
+}
+
+func comparePrefixes(first, second netip.Prefix) int {
+	return cmp.Or(
+		first.Addr().Compare(second.Addr()),
+		cmp.Compare(first.Bits(), second.Bits()),
+	)
 }
 
 func (m *DscpService) RemovePrefixes(

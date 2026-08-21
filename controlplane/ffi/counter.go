@@ -11,6 +11,7 @@ package ffi
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -183,7 +184,7 @@ func (m *DPConfig) ChainCounters(
 
 // ModuleCounters returns module counters, optionally filtered by name.
 //
-// If counterQuery is nil or empty, returns all counters.
+// If counterQuery is nil or empty, returns all counters, a refused one none.
 func (m *DPConfig) ModuleCounters(
 	deviceName string,
 	pipelineName string,
@@ -206,10 +207,13 @@ func (m *DPConfig) ModuleCounters(
 	cModuleName := C.CString(moduleName)
 	defer C.free(unsafe.Pointer(cModuleName))
 
-	var cQueryPtr **C.char
-	queryCount := C.size_t(^uintptr(0))
-	cQuery := make([]*C.char, len(counterQuery))
+	if ValidateQuery(counterQuery) != nil {
+		return nil
+	}
+
+	var query *C.struct_counter_query
 	if len(counterQuery) > 0 {
+		cQuery := make([]*C.char, len(counterQuery))
 		for idx, name := range counterQuery {
 			cQuery[idx] = C.CString(name)
 		}
@@ -218,8 +222,16 @@ func (m *DPConfig) ModuleCounters(
 				C.free(unsafe.Pointer(ptr))
 			}
 		}()
-		cQueryPtr = &cQuery[0]
-		queryCount = C.size_t(len(counterQuery))
+
+		if C.yanet_counter_query_compile(
+			&cQuery[0],
+			C.size_t(len(cQuery)),
+			&query,
+			nil,
+		) != C.YANET_COUNTER_QUERY_OK {
+			return nil
+		}
+		defer C.yanet_counter_query_free(query)
 	}
 
 	counters := C.yanet_get_module_counters(
@@ -230,8 +242,7 @@ func (m *DPConfig) ModuleCounters(
 		cChainName,
 		cModuleType,
 		cModuleName,
-		cQueryPtr,
-		queryCount,
+		query,
 	)
 	defer C.yanet_counter_handle_list_free(counters)
 
@@ -317,6 +328,24 @@ type CounterTag struct {
 	Value string
 }
 
+// ErrInvalidQuery reports a counter query the matcher refused to compile.
+var ErrInvalidQuery = errors.New("invalid counter query")
+
+// ValidateQuery rejects a query a C string cannot carry, such as one with a NUL.
+func ValidateQuery(query []string) error {
+	for idx, pattern := range query {
+		if strings.ContainsRune(pattern, 0) {
+			return fmt.Errorf(
+				"%w: pattern %d contains a NUL byte",
+				ErrInvalidQuery,
+				idx,
+			)
+		}
+	}
+
+	return nil
+}
+
 // CounterGroup is a set of counters that share the same tag set.
 type CounterGroup struct {
 	Tags     []CounterTag
@@ -324,12 +353,16 @@ type CounterGroup struct {
 }
 
 // CountersByTags returns counters matching every predicate in tags and at
-// least one name in query. A nil or empty tags slice imposes no per-tag
+// least one pattern in query. A nil or empty tags slice imposes no per-tag
 // constraint. A nil or empty query matches any counter name.
 func (m *DPConfig) CountersByTags(
 	tags []CounterTag,
 	query []string,
 ) ([]CounterGroup, error) {
+	if err := ValidateQuery(query); err != nil {
+		return nil, err
+	}
+
 	cTags := make([]C.struct_counter_tag, len(tags))
 	for idx, tag := range tags {
 		cKey := C.CString(tag.Key)
@@ -349,13 +382,26 @@ func (m *DPConfig) CountersByTags(
 	if len(cTags) > 0 {
 		cTagsPtr = &cTags[0]
 	}
-	var cQueryPtr **C.char
-	var queryCount C.size_t
+	var compiled *C.struct_counter_query
 	if len(cQuery) > 0 {
-		cQueryPtr = &cQuery[0]
-		queryCount = C.size_t(len(cQuery))
-	} else {
-		queryCount = C.size_t(^uint64(0))
+		var cQueryErr *C.yanet_error
+		res := C.yanet_counter_query_compile(
+			&cQuery[0],
+			C.size_t(len(cQuery)),
+			&compiled,
+			&cQueryErr,
+		)
+		if res != C.YANET_COUNTER_QUERY_OK {
+			err := cerrors.FromC(unsafe.Pointer(cQueryErr))
+			if res == C.YANET_COUNTER_QUERY_REJECTED {
+				return nil, fmt.Errorf(
+					"%w: %w", ErrInvalidQuery, err,
+				)
+			}
+
+			return nil, err
+		}
+		defer C.yanet_counter_query_free(compiled)
 	}
 
 	var cErr *C.yanet_error
@@ -363,8 +409,7 @@ func (m *DPConfig) CountersByTags(
 		m.ptr,
 		cTagsPtr,
 		C.size_t(len(cTags)),
-		cQueryPtr,
-		queryCount,
+		compiled,
 		&cErr,
 	)
 	if counters == nil {

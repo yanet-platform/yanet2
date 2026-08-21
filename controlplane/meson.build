@@ -67,7 +67,9 @@ custom_target(
         lib_dev_trafgen_api,
         lib_dev_trafgen_dp,
         lib_filter_compiler,
-    ],
+        lib_agent_counters,
+        lib_counter_pattern,
+    ] + librure_targets,
     install: true,
     install_dir: get_option('bindir'),
 )

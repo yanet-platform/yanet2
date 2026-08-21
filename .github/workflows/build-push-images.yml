@@ -29,7 +29,7 @@ jobs:
             || true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       # Only the cargo home is cached. Debuild removes the target directory
       # before the build starts, so an entry holding it would be wasted.

@@ -1,0 +1,9 @@
+[wrap-git]
+url = https://github.com/rust-lang/regex
+revision = 2aaa18dfaeda7a07202f1c8a0d7a7a10116d5153
+depth = 1
+directory = regex
+patch_directory = regex
+
+[provide]
+rure = rure_dep

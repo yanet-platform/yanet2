@@ -1,4 +1,9 @@
-package filterpb
+// Package filterpbconv translates protobuf filter messages into cgo-bound
+// filter values.
+//
+// Keeping the translation in this bridge package lets message-only consumers
+// avoid the C toolchain.
+package filterpbconv
 
 import (
 	"net/netip"
@@ -7,10 +12,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 )
 
 // ToDevices converts protobuf Device messages to filter Devices.
-func ToDevices(pb []*Device) (filter.Devices, error) {
+func ToDevices(pb []*filterpb.Device) (filter.Devices, error) {
 	out := make(filter.Devices, len(pb))
 	for idx := range pb {
 		out[idx] = filter.Device{
@@ -23,7 +29,7 @@ func ToDevices(pb []*Device) (filter.Devices, error) {
 
 // ToNet4s converts protobuf IPNet messages to filter IPNets, keeping only IPv4
 // entries.
-func ToNet4s(pb []*IPNet) (filter.IPNets, error) {
+func ToNet4s(pb []*filterpb.IPNet) (filter.IPNets, error) {
 	out := make(filter.IPNets, 0, len(pb))
 
 	for idx := range pb {
@@ -43,7 +49,7 @@ func ToNet4s(pb []*IPNet) (filter.IPNets, error) {
 
 // ToNet6s converts protobuf IPNet messages to filter IPNets, keeping only IPv6
 // entries.
-func ToNet6s(pb []*IPNet) (filter.IPNets, error) {
+func ToNet6s(pb []*filterpb.IPNet) (filter.IPNets, error) {
 	out := make(filter.IPNets, 0, len(pb))
 
 	for idx := range pb {
@@ -61,7 +67,9 @@ func ToNet6s(pb []*IPNet) (filter.IPNets, error) {
 	return out, nil
 }
 
-func ToIPNet(pb *IPNet) (filter.IPNet, error) {
+// ToIPNet validates the address family and mask shape before returning a
+// filter network value.
+func ToIPNet(pb *filterpb.IPNet) (filter.IPNet, error) {
 	addr, ok := netip.AddrFromSlice(pb.Addr)
 	if !ok {
 		return filter.IPNet{}, status.Error(
@@ -106,7 +114,7 @@ func ToIPNet(pb *IPNet) (filter.IPNet, error) {
 
 // ToNet4sFromPrefixes converts protobuf IPPrefix messages to filter
 // IPNets, keeping only IPv4 entries.
-func ToNet4sFromPrefixes(pb []*IPPrefix) (filter.IPNets, error) {
+func ToNet4sFromPrefixes(pb []*filterpb.IPPrefix) (filter.IPNets, error) {
 	prefixes := make([]netip.Prefix, 0, len(pb))
 
 	for _, p := range pb {
@@ -130,7 +138,7 @@ func ToNet4sFromPrefixes(pb []*IPPrefix) (filter.IPNets, error) {
 
 // ToNet6sFromPrefixes converts protobuf IPPrefix messages to filter
 // IPNets, keeping only IPv6 entries.
-func ToNet6sFromPrefixes(pb []*IPPrefix) (filter.IPNets, error) {
+func ToNet6sFromPrefixes(pb []*filterpb.IPPrefix) (filter.IPNets, error) {
 	prefixes := make([]netip.Prefix, 0, len(pb))
 
 	for _, p := range pb {
@@ -153,7 +161,7 @@ func ToNet6sFromPrefixes(pb []*IPPrefix) (filter.IPNets, error) {
 }
 
 // ToPortRanges converts protobuf PortRange messages to filter PortRanges.
-func ToPortRanges(pb []*PortRange) (filter.PortRanges, error) {
+func ToPortRanges(pb []*filterpb.PortRange) (filter.PortRanges, error) {
 	out := make(filter.PortRanges, len(pb))
 
 	for idx := range pb {
@@ -191,7 +199,7 @@ func ToPortRanges(pb []*PortRange) (filter.PortRanges, error) {
 
 // ToProtoRanges converts protobuf ProtoRange messages to filter
 // ProtoRanges.
-func ToProtoRanges(pb []*ProtoRange) (filter.ProtoRanges, error) {
+func ToProtoRanges(pb []*filterpb.ProtoRange) (filter.ProtoRanges, error) {
 	out := make(filter.ProtoRanges, len(pb))
 
 	for idx := range pb {
@@ -228,7 +236,7 @@ func ToProtoRanges(pb []*ProtoRange) (filter.ProtoRanges, error) {
 }
 
 // ToVlanRanges converts protobuf VlanRange messages to filter VlanRanges.
-func ToVlanRanges(pb []*VlanRange) (filter.VlanRanges, error) {
+func ToVlanRanges(pb []*filterpb.VlanRange) (filter.VlanRanges, error) {
 	out := make(filter.VlanRanges, len(pb))
 
 	for idx := range pb {
@@ -257,16 +265,16 @@ func ToVlanRanges(pb []*VlanRange) (filter.VlanRanges, error) {
 }
 
 // ToFragment converts protobuf Fragment message to filter Fragment.
-func ToFragment(pb *Fragment) (filter.Fragment, error) {
+func ToFragment(pb *filterpb.Fragment) (filter.Fragment, error) {
 	if pb == nil {
 		return filter.FragmentAny, nil
 	}
 	switch pb.Kind {
-	case FragmentKind_Any:
+	case filterpb.FragmentKind_Any:
 		return filter.FragmentAny, nil
-	case FragmentKind_None:
+	case filterpb.FragmentKind_None:
 		return filter.FragmentNone, nil
-	case FragmentKind_Frag:
+	case filterpb.FragmentKind_Frag:
 		return filter.FragmentFrag, nil
 	}
 

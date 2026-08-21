@@ -1,6 +1,7 @@
 package decap
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/netip"
@@ -11,7 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
@@ -122,7 +122,7 @@ func (m *DecapService) UpdateConfig(
 	prefixes = slices.Compact(
 		slices.SortedFunc(
 			slices.Values(prefixes),
-			xnetip.PrefixCompare,
+			comparePrefixes,
 		),
 	)
 
@@ -135,6 +135,13 @@ func (m *DecapService) UpdateConfig(
 	}
 
 	return &decappb.UpdateConfigResponse{}, nil
+}
+
+func comparePrefixes(first, second netip.Prefix) int {
+	return cmp.Or(
+		first.Addr().Compare(second.Addr()),
+		cmp.Compare(first.Bits(), second.Bits()),
+	)
 }
 
 // updateConfig calls the backend to publish cfg and, on success, frees the old

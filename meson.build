@@ -134,6 +134,16 @@ if get_option('fuzzing').enabled()
   yanet_cgo_ldflags += cgo_flags
 endif
 
+# gRPC-only operators never touch shared memory and link no cgo.
+#
+# Building them with cgo disabled turns a stray import of a module control
+# plane or of the FFI bindings into a loud build failure; with cgo on it
+# would silently restore the cgo link, which meson cannot see and which
+# then fails only as an ordering-dependent "cannot find -l<lib>" error.
+# Because it snapshots the Go build environment above, it must stay
+# below the last assignment to that environment.
+yanet_go_nocgo_env = yanet_go_env + {'CGO_ENABLED': '0'}
+
 yanet_rootdir = include_directories('.')
 
 # Initialize fuzzing targets dictionary

@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"time"
 
-	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 )
 
 // NeighbourEntry stores information about a neighbor with resolved hardware
@@ -29,4 +29,9 @@ type NeighbourEntry struct {
 	Priority uint32
 }
 
-type HardwareRoute = route.HardwareRoute
+// HardwareRoute is the dataplane's Layer 2 forwarding identity carried by
+// a neighbour entry.
+//
+// It aliases the route module's leaf type so that both sides share one
+// definition without the operator linking the route control plane.
+type HardwareRoute = hwroute.HardwareRoute

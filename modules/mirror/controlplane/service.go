@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
@@ -118,27 +118,27 @@ func (m *MirrorService) UpdateConfig(
 			return nil, status.Error(codes.InvalidArgument, "rule action is required")
 		}
 
-		devices, err := filterpb.ToDevices(reqRule.Devices)
+		devices, err := filterpbconv.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
 		}
-		vlanRanges, err := filterpb.ToVlanRanges(reqRule.VlanRanges)
+		vlanRanges, err := filterpbconv.ToVlanRanges(reqRule.VlanRanges)
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := filterpb.ToNet4s(reqRule.Srcs)
+		src4s, err := filterpbconv.ToNet4s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := filterpb.ToNet4s(reqRule.Dsts)
+		dst4s, err := filterpbconv.ToNet4s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := filterpb.ToNet6s(reqRule.Srcs)
+		src6s, err := filterpbconv.ToNet6s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := filterpb.ToNet6s(reqRule.Dsts)
+		dst6s, err := filterpbconv.ToNet6s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
