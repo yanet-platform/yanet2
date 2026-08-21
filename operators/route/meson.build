@@ -27,15 +27,7 @@ if not get_option('fuzzing').enabled()
           route_protoc_gen,
           common_readiness_protoc_gen,
           route_operator_readiness_protoc_gen,
-
-          # cgo linker deps, which meson cannot see: a cgo link line is a
-          # plain string to it. The operator reaches controlplane/ffi for
-          # one type in modules/route/controlplane and nothing else, so
-          # moving that type to a leaf package leaves it pure Go and
-          # retires this entry.
-          lib_agent_counters,
-          lib_counter_pattern,
-      ] + librure_targets,
+      ],
       install: true,
       install_dir: get_option('bindir'),
   )
