@@ -209,6 +209,14 @@ cp_config_gen_release(
 	}
 }
 
+// Publishes a fully built configuration generation and retires the one it
+// replaces.
+//
+// Failure is reported only by steps that run before publication, which
+// leaves the configuration in use untouched and the generation being
+// installed unobserved by any worker, so the caller may reclaim it.
+// Success is reported only once every worker has taken the new generation,
+// so the replaced one is executed nowhere and is safe to reclaim.
 static inline int
 cp_config_gen_install(
 	struct dp_config *dp_config,
