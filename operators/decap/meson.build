@@ -19,7 +19,7 @@ if not get_option('fuzzing').enabled()
           '-o', '@OUTPUT@',
           join_paths(meson.current_source_dir(), 'cmd', 'yanet-decap-operator'),
       ],
-      env: yanet_go_env,
+      env: yanet_go_nocgo_env,
       build_by_default: true,
       build_always_stale: true,
       depends: [

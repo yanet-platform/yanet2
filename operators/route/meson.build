@@ -3,8 +3,8 @@ install_data(
     install_dir: '/etc/yanet2',
 )
 
-# Skip route-operator when fuzzing — no CGO but still gets sanitizer flags
-# that interfere with the fuzzing build.
+# Not a fuzz target, and nothing in the fuzz suite runs it, so the
+# fuzzing configuration skips it to save build time.
 if not get_option('fuzzing').enabled()
   custom_target(
       'yanet-route-operator',
@@ -17,7 +17,7 @@ if not get_option('fuzzing').enabled()
           '-o', '@OUTPUT@',
           join_paths(meson.current_source_dir(), 'cmd', 'yanet-route-operator'),
       ],
-      env: yanet_go_env,
+      env: yanet_go_nocgo_env,
       build_by_default: true,
       build_always_stale: true,
       depends: [
