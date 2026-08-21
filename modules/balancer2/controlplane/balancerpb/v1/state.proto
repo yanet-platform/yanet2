@@ -25,7 +25,7 @@ message BalancerState {
 }
 
 message VsState {
-  // VsConfig.reals and VsConfig.allowed_sources are meaningless here
+  // VsConfig.reals is meaningless here; per-real state is reported in reals.
   VsConfig config = 1;
   VsStats stats = 2;
   uint64 active_sessions = 3;

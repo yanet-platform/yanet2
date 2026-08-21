@@ -258,7 +258,8 @@ impl From<Real> for balancerpb::RealConfig {
                 ip: ip_to_bytes(real.ip),
                 port: u32::from(real.port),
             }),
-            weight: real.weight,
+            weight: Some(real.weight),
+            enabled: None,
             src: Some(IpNet::from(real.src)),
         }
     }
