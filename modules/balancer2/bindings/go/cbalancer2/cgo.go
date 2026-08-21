@@ -16,9 +16,9 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/yanet-platform/xnetip"
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -306,20 +306,17 @@ func (m *RealConfig) cBuild() (cRealConfig, error) {
 	if !m.Dst.IsValid() {
 		return cRealConfig{}, errors.New("destination address is invalid")
 	}
-	if !m.Src.IsValid() {
+	if m.Src == nil {
 		return cRealConfig{}, errors.New("source network is invalid")
 	}
-	if m.Dst.Is4() != m.Src.Addr.Is4() {
+	if m.Dst.Is4() != m.Src.Is4() {
 		return cRealConfig{}, errors.New(
 			"destination and source address families differ",
 		)
 	}
 
 	cDst, family := netipToCNetAddr(m.Dst)
-	cSrc, err := netWithMaskToCNet(m.Src)
-	if err != nil {
-		return cRealConfig{}, fmt.Errorf("source net: %w", err)
-	}
+	cSrc := networkToCNet(*m.Src)
 	out := cRealConfig{
 		c: C.struct_balancer_real_config{
 			dst:       cDst,
@@ -453,27 +450,24 @@ func netipToCNetAddr(addr netip.Addr) (C.struct_net_addr, C.enum_ip_family) {
 	return cAddr, C.ip_family_ip6
 }
 
-func netWithMaskToCNet(n xnetip.NetWithMask) (C.struct_net, error) {
-	var cNet C.struct_net
-	addr := n.Addr
+func networkToCNet(network xnetip.Network) C.struct_net {
+	var result C.struct_net
+	address := network.Addr()
+	mask := network.Mask()
 
-	if addr.Is4() {
-		if len(n.Mask) != 4 {
-			return cNet, fmt.Errorf("mask length %d does not match IPv4", len(n.Mask))
-		}
-		v4 := addr.As4()
-		layout := (*[8]byte)(unsafe.Pointer(&cNet))
-		copy(layout[0:4], v4[:])
-		copy(layout[4:8], n.Mask)
-		return cNet, nil
+	if network.Is4() {
+		addressBytes := address.As4()
+		maskBytes := mask.As4()
+		layout := (*[8]byte)(unsafe.Pointer(&result))
+		copy(layout[0:4], addressBytes[:])
+		copy(layout[4:8], maskBytes[:])
+		return result
 	}
 
-	if len(n.Mask) != 16 {
-		return cNet, fmt.Errorf("mask length %d does not match IPv6", len(n.Mask))
-	}
-	v6 := addr.As16()
-	layout := (*[32]byte)(unsafe.Pointer(&cNet))
-	copy(layout[0:16], v6[:])
-	copy(layout[16:32], n.Mask)
-	return cNet, nil
+	addressBytes := address.As16()
+	maskBytes := mask.As16()
+	layout := (*[32]byte)(unsafe.Pointer(&result))
+	copy(layout[0:16], addressBytes[:])
+	copy(layout[16:32], maskBytes[:])
+	return result
 }

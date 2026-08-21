@@ -813,8 +813,8 @@ const lastAddrOfPrefix = (addrBits: bigint, prefixLen: number, totalBits: number
 };
 
 // Decompose an IP range into the minimal set of CIDR prefix strings.
-// Mirrors xnetip.RangeToCIDRs from the Go common library.
-// Returns [] for missing/invalid ranges or family-mismatched endpoints.
+//
+// Missing, invalid, or family-mismatched endpoints produce an empty result.
 export const ipRangeToCIDRs = (range: IPRangeWire | undefined): string[] => {
     if (!range) return [];
 

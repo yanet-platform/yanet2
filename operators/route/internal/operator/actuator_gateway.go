@@ -9,9 +9,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
@@ -156,6 +156,11 @@ func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
 
 // fibEntryToProto converts an internal FIBEntry to the wire range format.
 func fibEntryToProto(entry FIBEntry) (*routepb.FIBEntry, error) {
+	network, ok := xnetip.NetworkFromPrefix(entry.Prefix)
+	if !ok {
+		return nil, fmt.Errorf("invalid prefix %q", entry.Prefix)
+	}
+
 	nexthops := make([]*routepb.FIBNexthop, len(entry.Nexthops))
 	for idx, nh := range entry.Nexthops {
 		nexthops[idx] = &routepb.FIBNexthop{
@@ -165,7 +170,7 @@ func fibEntryToProto(entry FIBEntry) (*routepb.FIBEntry, error) {
 		}
 	}
 
-	ipRange, err := commonpb.NewIPRange(entry.Prefix.Addr(), xnetip.LastAddr(entry.Prefix))
+	ipRange, err := commonpb.NewIPRange(entry.Prefix.Addr(), network.LastAddr())
 	if err != nil {
 		return nil, err
 	}

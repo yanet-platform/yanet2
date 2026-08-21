@@ -50,7 +50,6 @@ loopindex:common/go/metrics/map_test.go:BenchmarkMetrics:i:1  # legacy: rename t
 loopindex:common/go/metrics/map_test.go:TestMetricMapConcurrent:i:1  # legacy: rename to idx
 loopindex:common/go/metrics/map_test.go:TestMetricMapMetrics:i:1  # legacy: rename to idx
 loopindex:common/go/xcfg/load.go:validate:i:1  # legacy: rename to idx
-loopindex:common/go/xnetip/netwithmask.go:NetWithMask.ToPrefix:i:1  # legacy: rename to idx
 loopindex:controlplane/builtin/counters.go:makeHistogram:i:1  # legacy: rename to idx
 loopindex:controlplane/ffi/agent.go:Agent.UpdateDevices:i:1  # legacy: rename to idx
 loopindex:controlplane/ffi/agent.go:Agent.UpdateModules:i:1  # legacy: rename to idx
@@ -157,10 +156,6 @@ receiver:common/go/metrics/metric.go:Labels.Clone:1  # legacy: rename the receiv
 receiver:common/go/metrics/metric.go:Labels.Equals:1  # legacy: rename the receiver to m
 receiver:common/go/metrics/metric.go:MetricID.Clone:1  # legacy: rename the receiver to m
 receiver:common/go/metrics/metric.go:MetricID.Equals:1  # legacy: rename the receiver to m
-receiver:common/go/xnetip/netwithmask.go:NetWithMask.IsValid:1  # legacy: rename the receiver to m
-receiver:common/go/xnetip/netwithmask.go:NetWithMask.MaskBytes:1  # legacy: rename the receiver to m
-receiver:common/go/xnetip/netwithmask.go:NetWithMask.String:1  # legacy: rename the receiver to m
-receiver:common/go/xnetip/netwithmask.go:NetWithMask.ToPrefix:1  # legacy: rename the receiver to m
 receiver:lib/utils/go/packet.go:Packet.Data:1  # legacy: rename the receiver to m
 receiver:lib/utils/go/packet.go:Packet.Info:1  # legacy: rename the receiver to m
 receiver:lib/utils/go/packet.go:PacketData.asRaw:1  # legacy: rename the receiver to m
@@ -237,7 +232,6 @@ testpkg:common/go/xcfg/load_test.go:xcfg:1  # legacy: migrate to the external te
 testpkg:common/go/xcfg/nonempty_test.go:xcfg:1  # legacy: migrate to the external test package
 testpkg:common/go/xcfg/nonzero_test.go:xcfg:1  # legacy: migrate to the external test package
 testpkg:common/go/xgrpc/graceful_test.go:xgrpc:1  # legacy: migrate to the external test package
-testpkg:common/go/xnetip/netip_test.go:xnetip:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/xgrpc/interceptor_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:controlplane/internal/xgrpc/method_test.go:xgrpc:1  # legacy: migrate to the external test package
 testpkg:devices/plain/controlplane/service_test.go:plain:1  # legacy: migrate to the external test package
