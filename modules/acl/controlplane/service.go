@@ -14,7 +14,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -404,39 +404,39 @@ func labeler(fullMethod string, req any) metrics.Labels {
 func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 	rules := make([]cacl.AclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
-		devices, err := filterpb.ToDevices(reqRule.Devices)
+		devices, err := filterpbconv.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
 		}
-		vlanRanges, err := filterpb.ToVlanRanges(reqRule.VlanRanges)
+		vlanRanges, err := filterpbconv.ToVlanRanges(reqRule.VlanRanges)
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := filterpb.ToNet4s(reqRule.Srcs)
+		src4s, err := filterpbconv.ToNet4s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := filterpb.ToNet4s(reqRule.Dsts)
+		dst4s, err := filterpbconv.ToNet4s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := filterpb.ToNet6s(reqRule.Srcs)
+		src6s, err := filterpbconv.ToNet6s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := filterpb.ToNet6s(reqRule.Dsts)
+		dst6s, err := filterpbconv.ToNet6s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		protoRanges, err := filterpb.ToProtoRanges(reqRule.ProtoRanges)
+		protoRanges, err := filterpbconv.ToProtoRanges(reqRule.ProtoRanges)
 		if err != nil {
 			return nil, err
 		}
-		srcPortRanges, err := filterpb.ToPortRanges(reqRule.SrcPortRanges)
+		srcPortRanges, err := filterpbconv.ToPortRanges(reqRule.SrcPortRanges)
 		if err != nil {
 			return nil, err
 		}
-		dstPortRanges, err := filterpb.ToPortRanges(reqRule.DstPortRanges)
+		dstPortRanges, err := filterpbconv.ToPortRanges(reqRule.DstPortRanges)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +444,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid actions in rule: %v", err)
 		}
-		fragment, err := filterpb.ToFragment(reqRule.Fragment)
+		fragment, err := filterpbconv.ToFragment(reqRule.Fragment)
 		if err != nil {
 			return nil, err
 		}
