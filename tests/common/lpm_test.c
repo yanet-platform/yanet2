@@ -103,6 +103,133 @@ test_overlapping_prefixes(void) {
 	return rc;
 }
 
+static uint64_t
+batch_test_rand(uint64_t *state) {
+	uint64_t x = *state;
+	x ^= x << 13;
+	x ^= x >> 7;
+	x ^= x << 17;
+	*state = x;
+	return x;
+}
+
+// Batched lookup must return exactly what the single-key walk returns,
+// for every key and across lane-chunk boundaries (partial last chunk).
+static int
+test_lookup_batch_matches_scalar(void) {
+	void *arena = malloc(16 << 20);
+	if (arena == NULL) {
+		return -1;
+	}
+
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	block_allocator_put_arena(&ba, arena, 16 << 20);
+
+	struct memory_context mctx;
+	memory_context_init(&mctx, "lpm_batch", &ba);
+
+	int rc = -1;
+	uint64_t rand_state = 0x12345678;
+
+	uint8_t prefixes[300][16];
+	size_t counts[] = {1, 31, 32, 33, 100, 1000};
+	uint8_t *keys = malloc(1000 * 16);
+	uint32_t *results = malloc(1000 * sizeof(uint32_t));
+	if (keys == NULL || results == NULL) {
+		goto out;
+	}
+
+	for (int key_size = 16; key_size > 0; key_size -= 12) {
+		struct lpm tree;
+		if (lpm_init(&tree, &mctx, "lpm")) {
+			goto out;
+		}
+
+		// Prefixes at every depth, alternating full-range tail bytes
+		// with single-byte tails so both page splits and slot runs are
+		// covered.
+		for (size_t i = 0; i < 300; i++) {
+			uint8_t depth =
+				1 + batch_test_rand(&rand_state) % key_size;
+			memset(prefixes[i], 0x00, 16);
+			for (uint8_t b = 0; b < depth; b++) {
+				prefixes[i][b] =
+					(uint8_t)batch_test_rand(&rand_state);
+			}
+			uint8_t from[16], to[16];
+			memcpy(from, prefixes[i], depth);
+			memset(from + depth, 0x00, key_size - depth);
+			memcpy(to, prefixes[i], depth);
+			memset(to + depth, 0xff, key_size - depth);
+			if (lpm_insert(&tree, key_size, from, to, i)) {
+				lpm_free(&tree);
+				goto out;
+			}
+		}
+
+		for (size_t c = 0; c < sizeof(counts) / sizeof(counts[0]);
+		     c++) {
+			size_t count = counts[c];
+			for (size_t k = 0; k < count; k++) {
+				// Alternate keys inside an inserted prefix
+				// (narrow-tail randomization) with keys fully
+				// outside the mapped space (default value hit).
+				size_t idx = batch_test_rand(&rand_state) % 300;
+				if (k % 3 != 0) {
+					memcpy(keys + k * key_size,
+					       prefixes[idx],
+					       key_size);
+					for (uint8_t b = key_size - 2;
+					     b < key_size;
+					     b++) {
+						keys[k * key_size +
+						     b] ^= (uint8_t
+						)batch_test_rand(&rand_state);
+					}
+				} else {
+					for (uint8_t b = 0; b < key_size; b++) {
+						keys[k * key_size +
+						     b] = (uint8_t
+						)batch_test_rand(&rand_state);
+					}
+				}
+			}
+
+			lpm_lookup_batch(&tree, key_size, keys, results, count);
+			for (size_t k = 0; k < count; k++) {
+				uint32_t scalar = lpm_lookup(
+					&tree, key_size, keys + k * key_size
+				);
+				if (scalar != results[k]) {
+					fprintf(stdout,
+						"key_size %d count %zu key "
+						"%zu: "
+						"batch %u != scalar %u\n",
+						key_size,
+						count,
+						k,
+						results[k],
+						scalar);
+					lpm_free(&tree);
+					goto out;
+				}
+			}
+		}
+
+		lpm_free(&tree);
+	}
+
+	rc = 0;
+
+out:
+	free(keys);
+	free(results);
+	memory_context_fini(&mctx);
+	free(arena);
+	return rc;
+}
+
 int
 main(int argc, char **argv) {
 	(void)argc;
@@ -110,6 +237,11 @@ main(int argc, char **argv) {
 
 	if (test_overlapping_prefixes()) {
 		fprintf(stdout, "test_overlapping_prefixes: FAILED\n");
+		return -1;
+	}
+
+	if (test_lookup_batch_matches_scalar()) {
+		fprintf(stdout, "test_lookup_batch_matches_scalar: FAILED\n");
 		return -1;
 	}
 

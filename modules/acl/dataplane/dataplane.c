@@ -302,11 +302,14 @@ acl_handle_packets(
 		struct net6_share_dir *share_src = &acl_config->net6_share_src;
 		struct net6_share_dir *share_dst = &acl_config->net6_share_dst;
 
-		// Classify each v6 address half once on the union tries.
-		uint32_t src_hi[count];
-		uint32_t src_lo[count];
-		uint32_t dst_hi[count];
-		uint32_t dst_lo[count];
+		// Classify each v6 address half once on the union tries. The
+		// keys are packed per half so the batched walk can interleave
+		// each trie's dependent page chains across the batch instead of
+		// stalling on every hop of every packet.
+		uint8_t src_hi_keys[count][8];
+		uint8_t src_lo_keys[count][8];
+		uint8_t dst_hi_keys[count][8];
+		uint8_t dst_lo_keys[count][8];
 
 		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
 			struct rte_mbuf *mbuf =
@@ -321,11 +324,29 @@ acl_handle_packets(
 			const uint8_t *daddr =
 				(const uint8_t *)ipv6_hdr->dst_addr;
 
-			src_hi[idx] = lpm8_lookup(&share_src->hi, saddr);
-			src_lo[idx] = lpm8_lookup(&share_src->lo, saddr + 8);
-			dst_hi[idx] = lpm8_lookup(&share_dst->hi, daddr);
-			dst_lo[idx] = lpm8_lookup(&share_dst->lo, daddr + 8);
+			memcpy(src_hi_keys[idx], saddr, 8);
+			memcpy(src_lo_keys[idx], saddr + 8, 8);
+			memcpy(dst_hi_keys[idx], daddr, 8);
+			memcpy(dst_lo_keys[idx], daddr + 8, 8);
 		}
+
+		uint32_t src_hi[count];
+		uint32_t src_lo[count];
+		uint32_t dst_hi[count];
+		uint32_t dst_lo[count];
+
+		lpm8_lookup_batch(
+			&share_src->hi, src_hi_keys[0], src_hi, ip6_idx
+		);
+		lpm8_lookup_batch(
+			&share_src->lo, src_lo_keys[0], src_lo, ip6_idx
+		);
+		lpm8_lookup_batch(
+			&share_dst->hi, dst_hi_keys[0], dst_hi, ip6_idx
+		);
+		lpm8_lookup_batch(
+			&share_dst->lo, dst_lo_keys[0], dst_lo, ip6_idx
+		);
 
 		const uint32_t *src_hi_a = ADDR_OF(&share_src->remap_hi_a);
 		const uint32_t *src_lo_a = ADDR_OF(&share_src->remap_lo_a);
