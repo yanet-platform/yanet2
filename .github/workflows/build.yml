@@ -157,9 +157,7 @@ jobs:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
