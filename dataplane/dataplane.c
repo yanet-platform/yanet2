@@ -47,6 +47,11 @@
 
 #define DEFAULT_NET_RING_LEN 1024
 
+// Number of dropped mbufs staged before a bulk release; matches the batch
+// size the DPDK bulk free keeps per mempool internally, so a full stage
+// drains as a single mempool put.
+#define DROPPED_MBUF_CHUNK 64
+
 static int
 dataplane_worker_connect(
 	struct dataplane *dataplane,
@@ -918,13 +923,27 @@ dataplane_drop_packets(
 	struct dataplane *dataplane, struct packet_list *packets
 ) {
 	(void)dataplane;
+
+	// Each packet descriptor lives inside its mbuf data buffer, so
+	// freeing one destroys the link to the next dropped packet.
+	struct rte_mbuf *mbufs[DROPPED_MBUF_CHUNK];
+	unsigned int count = 0;
+
 	struct packet *packet = packet_list_first(packets);
 	while (packet != NULL) {
-		// Freeing packet will destroy the `next` field to
 		struct packet *drop_packet = packet;
 		packet = packet->next;
 
-		struct rte_mbuf *mbuf = packet_to_mbuf(drop_packet);
-		rte_pktmbuf_free(mbuf);
+		mbufs[count] = packet_to_mbuf(drop_packet);
+		count += 1;
+
+		if (count == DROPPED_MBUF_CHUNK) {
+			rte_pktmbuf_free_bulk(mbufs, count);
+			count = 0;
+		}
+	}
+
+	if (count > 0) {
+		rte_pktmbuf_free_bulk(mbufs, count);
 	}
 }
