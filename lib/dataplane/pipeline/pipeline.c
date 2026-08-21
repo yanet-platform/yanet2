@@ -11,7 +11,76 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/time/tsc.h"
 
+#include <stdbool.h>
+#include <string.h>
+
 #include <rte_cycles.h>
+#include <rte_prefetch.h>
+
+// Number of leading hash-demux destinations whose list tails are held in
+// local storage during one demux pass.
+#define DEMUX_TAIL_CACHE 16
+
+// One destination's locally built packet list.
+//
+// Appending each packet straight to its destination's shared schedule list
+// reloads the list tail and the packet/byte tallies from shared state for
+// every packet. A demux pass instead links packets through these locally
+// held tails, prefetching the next packet while it runs, and splices each
+// finished list into its destination once. Destinations beyond the cache
+// are appended directly.
+struct demux_list {
+	struct packet *head;
+	struct packet **tail;
+	uint64_t count;
+	uint64_t bytes;
+};
+
+static inline void
+demux_list_add(struct demux_list *demux, struct packet *packet) {
+	if (demux->head == NULL) {
+		demux->head = packet;
+	} else {
+		*demux->tail = packet;
+	}
+	demux->tail = &packet->next;
+	demux->count += 1;
+	demux->bytes += packet->data_len;
+}
+
+// Splice a locally built list into a schedule's input list.
+static inline void
+demux_list_splice_input(
+	struct packet_front *schedule, const struct demux_list *demux
+) {
+	*demux->tail = NULL;
+
+	struct packet_list list = {
+		.first = demux->head,
+		.last = demux->tail,
+	};
+	packet_list_concat(&schedule->input, &list);
+
+	schedule->input_count += demux->count;
+	schedule->input_bytes += demux->bytes;
+}
+
+// Splice a locally built list into a schedule's output list.
+static inline void
+demux_list_splice_output(
+	struct packet_front *schedule, const struct demux_list *demux
+) {
+	*demux->tail = NULL;
+
+	struct packet_list list = {
+		.first = demux->head,
+		.last = demux->tail,
+	};
+	packet_list_concat(&schedule->output, &list);
+
+	schedule->output_count += demux->count;
+	schedule->output_bytes += demux->bytes;
+}
 
 static inline void
 counter_add_packets_bytes(
@@ -206,31 +275,56 @@ function_ectx_run_single_chain(
 
 // Demultiplex packets across the function's chains by hash.
 //
-// Each chain is processed on its own packet front and the results are merged
-// back into the caller's front.
+// The routing table is a power of two, so selection masks the flow hash
+// instead of dividing it. Each chain is processed on its own packet front
+// and the results are merged back into the caller's front.
 static void
 function_ectx_run_chains(
 	struct dp_worker *dp_worker,
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	struct packet *packet = packet_list_pop(&packet_front->output);
-	while (packet != NULL) {
-		uint64_t map_idx = packet->hash % function_ectx->chain_map_size;
+	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	const uint64_t map_mask = function_ectx->chain_map_size - 1;
 
-		struct chain_ectx *chain_ectx =
-			ADDR_OF(function_ectx->chain_map + map_idx);
-		packet_front_input(&chain_ectx->schedule, packet);
+	struct demux_list lists[DEMUX_TAIL_CACHE];
 
-		packet = packet_list_pop(&packet_front->output);
+	struct packet *packet = packet_list_first(&packet_front->output);
+	bool lists_live = packet != NULL;
+	if (lists_live) {
+		memset(lists, 0, sizeof(lists));
 	}
+
+	while (packet != NULL) {
+		struct packet *next = packet->next;
+		rte_prefetch0(next);
+
+		uint64_t chain_idx =
+			function_ectx->chain_map[packet->hash & map_mask];
+
+		if (chain_idx < DEMUX_TAIL_CACHE) {
+			demux_list_add(&lists[chain_idx], packet);
+		} else {
+			struct chain_ectx *chain_ectx =
+				ADDR_OF(chains + chain_idx);
+			packet_front_input(&chain_ectx->schedule, packet);
+		}
+
+		packet = next;
+	}
+	packet_list_init(&packet_front->output);
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
 
-	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
-
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
 		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
+
+		if (lists_live && idx < DEMUX_TAIL_CACHE &&
+		    lists[idx].head != NULL) {
+			demux_list_splice_input(
+				&chain_ectx->schedule, &lists[idx]
+			);
+		}
 
 		chain_ectx_process(
 			dp_worker, chain_ectx, &chain_ectx->schedule
@@ -388,8 +482,9 @@ device_entry_ectx_dispatch_single(
 
 // Demultiplex the handler output across the entry's pipelines by hash.
 //
-// Each pipeline is processed on its own packet front and the results are merged
-// back into the caller's front.
+// The routing table is a power of two, so selection masks the flow hash
+// instead of dividing it. Each pipeline is processed on its own packet
+// front and the results are merged back into the caller's front.
 static inline void
 device_entry_ectx_dispatch_many(
 	struct dp_worker *dp_worker,
@@ -397,24 +492,46 @@ device_entry_ectx_dispatch_many(
 	struct packet_front *packet_front
 ) {
 	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
+	const uint64_t map_mask = entry_ectx->pipeline_map_size - 1;
 
-	struct packet *packet = packet_list_pop(&packet_front->output);
-	while (packet != NULL) {
-		uint64_t pipeline_idx =
-			entry_ectx->pipeline_map
-				[packet->hash % entry_ectx->pipeline_map_size];
+	struct demux_list lists[DEMUX_TAIL_CACHE];
 
-		struct pipeline_ectx *pipeline_ectx =
-			ADDR_OF(pipelines + pipeline_idx);
-		packet_front_output(&pipeline_ectx->schedule, packet);
-
-		packet = packet_list_pop(&packet_front->output);
+	struct packet *packet = packet_list_first(&packet_front->output);
+	bool lists_live = packet != NULL;
+	if (lists_live) {
+		memset(lists, 0, sizeof(lists));
 	}
+
+	while (packet != NULL) {
+		struct packet *next = packet->next;
+		rte_prefetch0(next);
+
+		uint64_t pipeline_idx =
+			entry_ectx->pipeline_map[packet->hash & map_mask];
+
+		if (pipeline_idx < DEMUX_TAIL_CACHE) {
+			demux_list_add(&lists[pipeline_idx], packet);
+		} else {
+			struct pipeline_ectx *pipeline_ectx =
+				ADDR_OF(pipelines + pipeline_idx);
+			packet_front_output(&pipeline_ectx->schedule, packet);
+		}
+
+		packet = next;
+	}
+	packet_list_init(&packet_front->output);
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
 
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
 		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
+
+		if (lists_live && idx < DEMUX_TAIL_CACHE &&
+		    lists[idx].head != NULL) {
+			demux_list_splice_output(
+				&pipeline_ectx->schedule, &lists[idx]
+			);
+		}
 
 		pipeline_ectx_process(
 			dp_worker, pipeline_ectx, &pipeline_ectx->schedule
