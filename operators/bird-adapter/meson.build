@@ -5,8 +5,8 @@ install_data(
 
 bird_adapter_ld_flags = '-X github.com/yanet-platform/yanet2/operators/bird-adapter/internal/version.version=' + yanet_version
 
-# Skip bird-adapter when fuzzing — it does not use CGO but still gets sanitizer
-# flags that interfere with the fuzzing build.
+# Not a fuzz target, and nothing in the fuzz suite runs it, so the
+# fuzzing configuration skips it to save build time.
 if not get_option('fuzzing').enabled()
   custom_target(
       'yanet-bird-adapter',
@@ -19,7 +19,7 @@ if not get_option('fuzzing').enabled()
           '-o', '@OUTPUT@',
           join_paths(meson.current_source_dir(), 'cmd', 'yanet-bird-adapter'),
       ],
-      env: yanet_go_env,
+      env: yanet_go_nocgo_env,
       build_by_default: true,
       build_always_stale: true,
       depends: [
