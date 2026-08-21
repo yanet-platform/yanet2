@@ -77,7 +77,7 @@ func RunOperator[C any](
 	path string,
 	factory func(*C, *zap.Logger) (Runnable, error),
 ) error {
-	cfg, err := xcfg.LoadConfig[C](path)
+	cfg, err := xcfg.LoadConfig[C](path, xcfg.WithEnv())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

@@ -123,7 +123,7 @@ func (m *BIRDConfig) Validate() error {
 }
 
 func runServer() error {
-	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath, xcfg.WithKnownFields())
+	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath, xcfg.WithKnownFields(), xcfg.WithEnv())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
