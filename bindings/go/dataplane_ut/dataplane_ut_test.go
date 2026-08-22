@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
@@ -228,7 +229,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 	}
 	moduleHandle, err := backend.UpdateModule("demux", []cforward.ForwardRule{rule})
 	require.NoError(t, err)
-	t.Cleanup(moduleHandle.Free)
+	t.Cleanup(func() { _ = moduleHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: "demux",
@@ -248,7 +249,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 
 	// Port 0 has no output pipeline: the rule never targets it, so an
 	// unmatched packet has nowhere to go but drop.
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:  "port0",
 			Input: []ffi.DevicePipelineConfig{{Name: "demux", Weight: 1}},
@@ -258,7 +259,8 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 			Input:  []ffi.DevicePipelineConfig{{Name: "demux", Weight: 1}},
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out", Weight: 1}},
 		},
-	}))
+	})
+	require.NoError(t, err)
 
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),

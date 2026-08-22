@@ -20,12 +20,13 @@ const (
 )
 
 // TestFailedPublish_LeavesCallersModuleIntact guards a failed publish after
-// upsert, keeping the creator's own reference usable afterward.
+// upsert, keeping the caller's handle usable afterward.
 //
-// Only a construction of decap's type drains the park list, never a
-// release. A final construction after every intervening call proves both
-// releases actually parked their configs, rather than one of them having
-// leaked outside the park list.
+// A module whose publish failed was never registered in a live
+// generation, so it is dangling throughout: only its owner's free may
+// destroy it, and that free succeeds immediately. The checkpoints below
+// prove the failed publish itself destroyed nothing and that the module
+// stayed a valid, usable config until its owner freed it.
 func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	h, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(failedPublishCPSize),
@@ -77,14 +78,11 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	afterFailedPublish := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
 		t, afterCreate.BFreeCount, afterFailedPublish.BFreeCount,
-		"a failed publish must not destroy the module while the creator's own reference is still held",
+		"a failed publish must not destroy the module: only its owner's free may",
 	)
 
-	// Create an unrelated config: creation is the only call that drains
-	// the park list.
-	//
-	// This checkpoint proves the tracked module's creator reference kept
-	// it out of that list rather than merely arriving late.
+	// Create an unrelated config and free it: never published, so it is
+	// dangling, and its owner's free destroys exactly this one config.
 	other, err := cdecap.NewModuleConfig(agent, "decap1")
 	require.NoError(t, err)
 
@@ -98,8 +96,8 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 
 	afterUnrelatedFree := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
-		t, afterUnrelatedCreate.BFreeCount, afterUnrelatedFree.BFreeCount,
-		"releasing the unrelated config must park it, not destroy it immediately",
+		t, afterUnrelatedCreate.BFreeCount+1, afterUnrelatedFree.BFreeCount,
+		"the unrelated config is dangling, so its owner's free must destroy it",
 	)
 
 	// The module must still be a valid, uncorrupted config, not merely an
@@ -114,19 +112,18 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 
 	afterModFree := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
-		t, afterUnrelatedFree.BFreeCount, afterModFree.BFreeCount,
-		"the caller's own release must park mod, not destroy it immediately",
+		t, afterUnrelatedFree.BFreeCount+1, afterModFree.BFreeCount,
+		"the failed-publish module is dangling, so its owner's free must destroy it",
 	)
 
-	// Construct decap's type once more: the only trigger that drains the
-	// park list, which now holds both the unrelated config and the tracked
-	// module.
+	// Construct decap's type once more: nothing is left for it to
+	// destroy, since each earlier config was destroyed by its own owner.
 	_, err = cdecap.NewModuleConfig(agent, "decap2")
 	require.NoError(t, err)
 
 	afterDrain := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
-		t, afterModFree.BFreeCount+2, afterDrain.BFreeCount,
-		"decap's next construction must drain both the unrelated config and mod",
+		t, afterModFree.BFreeCount, afterDrain.BFreeCount,
+		"a new construction must destroy nothing: every earlier config was already destroyed by its own owner",
 	)
 }

@@ -2,6 +2,7 @@ package fwstate
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -128,6 +129,12 @@ type FWStateService struct {
 	stateMu  sync.RWMutex
 	agent    *ffi.Agent
 	configs  map[string]*FwStateConfig
+
+	// deferred holds superseded fwstate configs whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []*FwStateConfig
 	observer MutationObserver
 	metrics  *grpcmetrics.ServerMetrics
 
@@ -226,13 +233,19 @@ func (m *FWStateService) UpdateConfig(
 		m.log.Debug("update fwstate module config", zap.String("config", name))
 
 		if err := m.publishUpdate(name, newConfig); err != nil {
-			newConfig.Free()
+			if err := newConfig.Free(); err != nil {
+				m.log.Error("failed to free unpublished fwstate config",
+					zap.String("config", name), zap.Error(err))
+			}
 			m.log.Error("failed to publish fwstate config", zap.String("config", name), zap.Error(err))
 			return classifyPublishError(err)
 		}
 
+		// The publish retired the generations holding this service's
+		// deferred configs; retry them, then retire the displaced one.
+		m.reclaimDeferred()
 		if oldConfig != nil {
-			oldConfig.Free()
+			m.parkOrFree(oldConfig)
 		}
 
 		m.log.Info("successfully updated FWState module", zap.String("config", name))
@@ -408,7 +421,11 @@ func (m *FWStateService) DeleteConfig(
 		}
 
 		m.unpublishConfig(name)
-		config.Free()
+
+		// The delete retired the generation holding the published
+		// config; retry the deferred ones, then retire this one.
+		m.reclaimDeferred()
+		m.parkOrFree(config)
 		m.log.Info("successfully deleted FWState module config", zap.String("name", name))
 		return nil
 	})
@@ -494,4 +511,37 @@ func isAllZeroBytes(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// parkOrFree frees the config when it is dangling and parks it for
+// retry when a live generation still references it. The caller must hold
+// m.updateMu.
+func (m *FWStateService) parkOrFree(config *FwStateConfig) {
+	if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, config)
+	}
+}
+
+// ReclaimDeferred retries every deferred config, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *FWStateService) ReclaimDeferred() {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.updateMu.
+func (m *FWStateService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, config := range m.deferred {
+		if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, config)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

@@ -11,6 +11,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 )
 
 // Memory sizes and topology for the allocation-count regression harness.
@@ -58,10 +59,11 @@ func bulkCopyProbe(t *testing.T, workerCount uint64) (allocs uint64, matched int
 		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: name}))
 		input[idx] = ffi.DevicePipelineConfig{Name: name, Weight: 1}
 	}
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: input,
-	}}))
+	}})
+	require.NoError(t, err)
 
 	dp := h.SharedMemory().DPConfig(0)
 

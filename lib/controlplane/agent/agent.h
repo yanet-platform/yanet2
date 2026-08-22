@@ -52,11 +52,13 @@ struct agent {
 	uint64_t gen;
 	// Count of live generation references to this agent's modules.
 	//
-	// Excludes the initial reference a module construction call holds for
-	// its own creator, since a creator that dies never releases it and
-	// counting it would block reclaim forever. Every place that adds or
-	// removes such a reference keeps this count in step, so it reflects
-	// only references that can outlive the creator.
+	// Modules, devices and objects carry no creator reference: their
+	// reference counts, and these mirrors of them, count only registry
+	// references from live configuration generations, which can outlive
+	// the creating process. An item whose count reaches zero is
+	// dangling — known only to its owner — and its memory returns either
+	// through the owner's typed destroy or, if the owner is gone, with
+	// this agent's wholesale reclaim.
 	uint64_t loaded_module_count;
 	uint64_t loaded_device_count;
 	// Count of this agent's shared objects that still hold a reference
@@ -69,18 +71,6 @@ struct agent {
 	// one wholesale operation with no way to tear objects down
 	// individually first.
 	uint64_t loaded_object_count;
-	// Count of this agent's parked-module teardowns currently running
-	// outside the configuration lock.
-	//
-	// Set before the lock is released to run a batch of parked
-	// destructors and cleared once they return. The reclaim guard treats
-	// a nonzero count as a live reference, because those destructors
-	// still touch this agent's arena even though the generation counts
-	// above already read zero for them. A process that dies mid-teardown
-	// leaves this above zero forever, leaking that one superseded arena
-	// rather than risking a destructor running against memory that has
-	// already been freed.
-	uint64_t parked_teardown_count;
 	struct agent *prev;
 	char name[80];
 
@@ -88,33 +78,6 @@ struct agent {
 	struct agent_arena *arenas;
 
 	struct agent_storage *storage;
-
-	// Head of this agent's list of modules parked after their reference
-	// count reached zero.
-	//
-	// Parked entries await destruction until the next construction call
-	// for their module type reclaims them. A control plane can reuse one
-	// agent across more than one service, so this list may mix module
-	// types. Each type's construction reclaims only matching entries,
-	// leaving the rest parked for their own type's turn.
-	struct cp_module *parked_modules;
-
-	// Head of this agent's list of devices parked after their reference
-	// count reached zero.
-	//
-	// Follows the same discipline as the module list above: a device type's
-	// construction call reclaims only matching entries, so a list shared by
-	// plain and vlan devices keeps each type's entries for that type's own
-	// next construction.
-	struct cp_device *parked_devices;
-
-	// Head of this agent's list of shared objects parked after their
-	// reference count reached zero.
-	//
-	// Follows the same discipline as the device list above: an object
-	// type's construction call reclaims only matching entries, leaving
-	// other types' entries parked for their own next construction.
-	struct cp_object *parked_objects;
 };
 
 struct dp_config *

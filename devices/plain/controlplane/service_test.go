@@ -16,10 +16,8 @@ import (
 // UpdateDevice calls do not leak shared-memory arena space.
 //
 // Each update after the first supersedes the previous generation's device;
-// freeing that handle parks it on the agent, and the next update's
-// construction reclaims the parked entry. Exactly one parked device's worth
-// of space stays held between updates, so free bytes must settle after the
-// first supersede instead of decreasing indefinitely.
+// freeing that handle destroys it once it is dangling, so the arena must
+// settle after the first supersede instead of decreasing indefinitely.
 func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
@@ -49,9 +47,9 @@ func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 		require.NoError(t, err)
 
 		freeBytes := freeBytesForAgent(t, shm, "plain")
-		// The first supersede parks the old device without destroying
-		// it, so its space stays held once; every later construction
-		// reclaims the previous parked entry before parking a new one.
+		// The first supersede is measured before anything was freed
+		// against it; every later update destroys its superseded
+		// predecessor, so free bytes must hold steady from there on.
 		if idx > 1 {
 			require.Equalf(
 				t,
@@ -68,12 +66,11 @@ func TestUpdateDevice_ReclaimsSupersededDevice(t *testing.T) {
 }
 
 // TestUpdateDevice_ReclaimsAcrossMultipleNames verifies that tracking and
-// parking superseded handles works independently per device name.
+// retiring superseded handles works independently per device name.
 //
 // Two names are created and then updated for two more rounds: every
-// construction reclaims whatever the previous round parked for its own
-// name, so after the first superseding round the arena holds exactly one
-// parked device's worth of space and stops shrinking.
+// update destroys the device it supersedes for its own name, so after
+// the first superseding round the arena stops shrinking.
 func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
@@ -103,10 +100,9 @@ func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 		}
 
 		freeBytes := freeBytesForAgent(t, shm, "plain")
-		// The first superseding round parks each name's old device
-		// without destroying it, so its space stays held once; every
-		// later construction reclaims the previous parked entry
-		// before parking a new one.
+		// The first superseding round is measured before anything was
+		// freed against it; every later update destroys the devices it
+		// supersedes, so free bytes must hold steady from there on.
 		if round > 1 {
 			require.Equalf(
 				t,

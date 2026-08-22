@@ -10,6 +10,7 @@ package fwstatemap
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"sync"
@@ -155,10 +156,15 @@ func (m *FWStateMap) Config() *cfwstate.MapObjectConfig { return m.config }
 type FWStateMapService struct {
 	fwstatemappb.UnimplementedFWStateMapServiceServer
 
-	mu      sync.Mutex
-	agent   *ffi.Agent
-	maps    map[string]*FWStateMap
-	metrics *grpcmetrics.ServerMetrics
+	mu sync.Mutex
+	// deferred holds superseded map objects whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []*cfwstate.MapObjectConfig
+	agent    *ffi.Agent
+	maps     map[string]*FWStateMap
+	metrics  *grpcmetrics.ServerMetrics
 
 	// barrier advances the dataplane to a new config generation and waits
 	// for every worker to observe it, acting as the RCU grace period that
@@ -342,14 +348,20 @@ func (m *FWStateMapService) CreateMap(
 		req.GetExtraBucketCount(),
 		workerCount,
 	); err != nil {
-		mapConfig.Free()
+		if err := mapConfig.Free(); err != nil {
+			m.log.Error("failed to free unpublished fwstate-map",
+				zap.String("map", name), zap.Error(err))
+		}
 		m.log.Error("failed to create fwstate-map table",
 			zap.String("map", name), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to create fwstate-map table: %v", err)
 	}
 
 	if err := mapConfig.Publish(m.agent); err != nil {
-		mapConfig.Free()
+		if err := mapConfig.Free(); err != nil {
+			m.log.Error("failed to free unpublished fwstate-map",
+				zap.String("map", name), zap.Error(err))
+		}
 		m.log.Error("failed to publish fwstate-map",
 			zap.String("map", name), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to publish fwstate-map: %v", err)
@@ -413,7 +425,12 @@ func (m *FWStateMapService) DeleteMap(
 		return nil, status.Errorf(codes.Internal, "failed to delete fwstate-map: %v", err)
 	}
 
-	fwMap.Config().Free()
+	// The delete retired the generation holding the published object;
+	// retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	if err := fwMap.Config().Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, fwMap.Config())
+	}
 	delete(m.maps, name)
 
 	m.log.Info("successfully deleted fwstate-map", zap.String("map", name))
@@ -797,4 +814,28 @@ func NewFWStateMapServiceForTest(
 		m.barrier = barrier
 	}
 	return m
+}
+
+// ReclaimDeferred retries every deferred map object, dropping the ones
+// whose generations have drained and keeping the rest deferred. It is
+// the reclamation handler for this service's superseded objects; the
+// service itself runs it after each successful delete, and anything else
+// may call it at any time.
+func (m *FWStateMapService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *FWStateMapService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, config := range m.deferred {
+		if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, config)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
@@ -96,7 +97,7 @@ func newPublishedFWStateMaps(
 		require.NoError(t, err)
 		require.NoError(t, mapObject.CreateMap(indexSize, 64, 1))
 		require.NoError(t, mapObject.Publish(agent))
-		t.Cleanup(mapObject.Free)
+		t.Cleanup(func() { _ = mapObject.Free() })
 		return mapObject
 	}
 
@@ -119,7 +120,7 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 		mapV6.Name(),
 	)
 	require.NoError(t, err)
-	t.Cleanup(modCfg.Free)
+	t.Cleanup(func() { _ = modCfg.Free() })
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
 }
@@ -152,7 +153,7 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 	}
 	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: name,
@@ -174,11 +175,12 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: name, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 // buildSyncPacketLayers returns the gopacket layers for a fwstate sync packet:

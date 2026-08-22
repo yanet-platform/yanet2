@@ -45,14 +45,7 @@ dscp_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "dscp",
-		    name,
-		    dscp_module_config_destroy,
-		    err
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "dscp", name, err)) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -86,9 +79,14 @@ dscp_module_config_new(
 	return &config->cp_module;
 }
 
-void
-dscp_module_config_free(struct cp_module *cp_module) {
-	cp_module_release(cp_module);
+int
+dscp_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	dscp_module_config_destroy(cp_module);
+	return 0;
 }
 
 int

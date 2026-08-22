@@ -18,6 +18,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -79,7 +80,7 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 	}
 	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -99,11 +100,12 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 		Functions: []string{configName},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 func applyDecapConfig(
@@ -117,7 +119,7 @@ func applyDecapConfig(
 
 	handle, err := backend.UpdateModule(name, prefixes)
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 	wireDecapPipeline(t, agent, name)
 }
 

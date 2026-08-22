@@ -1,6 +1,10 @@
 package blackhole
 
 import (
+	"errors"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+
 	"context"
 	"sync"
 
@@ -14,7 +18,7 @@ var errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is 
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 // Backend abstracts shared memory operations.
@@ -33,15 +37,22 @@ type config struct {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *config) Free() {
-	if m.Module != nil {
-		m.Module.Free()
+func (m *config) Free() error {
+	if m.Module == nil {
+		return nil
 	}
+	return m.Module.Free()
 }
 
 // BlackholeService implements the BlackholeService gRPC server.
 type BlackholeService struct {
 	blackholepb.UnimplementedBlackholeServiceServer
+
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []ModuleHandle
 
 	mu      sync.Mutex
 	backend Backend
@@ -126,8 +137,10 @@ func (m *BlackholeService) updateConfig(name string) error {
 		return err
 	}
 
+	m.reclaimDeferred()
+
 	if old, ok := m.configs[name]; ok {
-		old.Free()
+		m.parkOrFree(old.Module)
 	}
 
 	m.configs[name] = &config{Module: mod}
@@ -161,9 +174,45 @@ func (m *BlackholeService) DeleteConfig(
 		)
 	}
 
-	entry.Free()
+	// The delete retired the generation holding the published module;
+	// retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	m.parkOrFree(entry.Module)
 
 	delete(m.configs, name)
 
 	return &blackholepb.DeleteConfigResponse{Deleted: true}, nil
+}
+
+// parkOrFree frees the handle when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.mu.
+func (m *BlackholeService) parkOrFree(handle ModuleHandle) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *BlackholeService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *BlackholeService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

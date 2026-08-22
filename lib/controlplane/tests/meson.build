@@ -143,9 +143,9 @@ cp_object_gen_test = executable(
 
 test('cp_object_gen', cp_object_gen_test, suite: ['lib'])
 
-parked_modules_test = executable(
-  'parked_modules_test',
-  ['parked_modules_test.c'],
+dangling_modules_test = executable(
+  'dangling_modules_test',
+  ['dangling_modules_test.c'],
   c_args: yanet_c_args,
   link_args: yanet_link_args + [
     '-Wl,-E',
@@ -166,11 +166,11 @@ parked_modules_test = executable(
   include_directories: yanet_rootdir,
 )
 
-test('parked_modules', parked_modules_test, suite: ['lib'])
+test('dangling_modules', dangling_modules_test, suite: ['lib'])
 
-parked_devices_test = executable(
-  'parked_devices_test',
-  ['parked_devices_test.c'],
+dangling_devices_test = executable(
+  'dangling_devices_test',
+  ['dangling_devices_test.c'],
   c_args: yanet_c_args,
   link_args: yanet_link_args + [
     '-Wl,-E',
@@ -191,11 +191,11 @@ parked_devices_test = executable(
   include_directories: yanet_rootdir,
 )
 
-test('parked_devices', parked_devices_test, suite: ['lib'])
+test('dangling_devices', dangling_devices_test, suite: ['lib'])
 
-parked_objects_test = executable(
-  'parked_objects_test',
-  ['parked_objects_test.c'],
+dangling_objects_test = executable(
+  'dangling_objects_test',
+  ['dangling_objects_test.c'],
   c_args: yanet_c_args,
   link_args: yanet_link_args + [
     '-Wl,-E',
@@ -214,4 +214,4 @@ parked_objects_test = executable(
   include_directories: yanet_rootdir,
 )
 
-test('parked_objects', parked_objects_test, suite: ['lib'])
+test('dangling_objects', dangling_objects_test, suite: ['lib'])

@@ -12,6 +12,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 )
 
 // benchBatchSizes lists the packet-batch sizes swept by each sub-benchmark.
@@ -55,11 +56,12 @@ func BenchmarkPipelineRound(b *testing.B) {
 	require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(b, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "bench", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(b, err)
 
 	eth := layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},

@@ -8,7 +8,7 @@ import (
 )
 
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 var _ ModuleHandle = (*cnat64.ModuleConfig)(nil)
@@ -35,30 +35,40 @@ func (m *backend) UpdateModule(name string, config *NAT64Config) (ModuleHandle, 
 
 	for _, prefix := range config.Prefixes {
 		if err := module.AddPrefix(prefix); err != nil {
-			module.Free()
+			if err := module.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("failed to add prefix: %w", err)
 		}
 	}
 
 	for _, mapping := range config.Mappings {
 		if err := module.AddMapping(mapping.IPv4, mapping.IPv6, mapping.PrefixIndex); err != nil {
-			module.Free()
+			if err := module.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("failed to add mapping: %w", err)
 		}
 	}
 
 	if err := module.SetDropUnknown(config.DropUnknownPrefix, config.DropUnknownMapping); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to set drop unknown flags: %w", err)
 	}
 
 	if err := module.SetMTU(config.MTU.IPv4MTU, config.MTU.IPv6MTU); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to set MTU: %w", err)
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 

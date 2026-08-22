@@ -20,6 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
@@ -125,11 +126,12 @@ func wirePipeline(
 	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(tb, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(tb, err)
 }
 
 // toFIBEntries converts test-domain FIB entries to their wire form.
@@ -174,7 +176,7 @@ func applyFIB(
 
 	handle, err := backend.UpdateModule(name, toFIBEntries(tb, entries))
 	require.NoError(tb, err)
-	tb.Cleanup(handle.Free)
+	tb.Cleanup(func() { _ = handle.Free() })
 	return handle
 }
 
@@ -547,7 +549,7 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy1",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "test", Weight: 1}},
@@ -558,7 +560,8 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 			Input:  []ffi.DevicePipelineConfig{{Name: "test", Weight: 1}},
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy1", Weight: 1}},
 		},
-	}))
+	})
+	require.NoError(t, err)
 
 	// Build four identical packets and inject explicit hashes: two packets
 	// with hash=0 must hit hop0 and two with hash=1 must hit hop1.

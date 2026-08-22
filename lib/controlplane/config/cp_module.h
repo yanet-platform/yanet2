@@ -23,13 +23,6 @@ struct module_performance_counter;
  */
 struct cp_module;
 
-/*
- * Callback used to free module configuration data.
- * Agent creating a module configuration should provide the callback
- * to free replaced module data after configuration update.
- */
-typedef void (*cp_module_free_handler)(struct cp_module *cp_module);
-
 struct cp_module_device {
 	char name[CP_DEVICE_NAME_LEN];
 };
@@ -110,16 +103,6 @@ struct cp_module {
 	// resolved to per-worker object execution contexts at build time.
 	uint64_t object_count;
 	struct cp_module_object *objects;
-
-	// Link to the next module parked on the same agent's list, once this
-	// module's reference count reaches zero.
-	//
-	// Only the zero-transition handler sets it, and only a later reclaim
-	// for this module's own type reads it. It stays unset until that
-	// transition happens. The parked list's tail refers to itself
-	// instead of ending at null, so a parked entry's link is never null
-	// — which also marks that this module is already parked.
-	struct cp_module *parked_next;
 };
 
 /**
@@ -167,19 +150,16 @@ cp_module_link_object(
 /**
  * Initialize a module configuration structure.
  *
- * Sets up counters and associates the module with the given agent. Before
- * any of that allocates, this reclaims whatever the agent parked for this
- * type since the last such call, using the destructor supplied here, so a
- * recreation under memory pressure benefits from the space a parked
- * instance would free rather than failing before reaching that reclaim.
- * The destructor is used only for this call and never stored. A different
- * type sharing the same agent is left for its own next call to collect.
+ * Sets up counters and associates the module with the given agent. The
+ * module starts with a zero reference count: it is dangling, known only to
+ * its creator, and invisible to every generation until an upsert registers
+ * it. A failed construction must be unwound by the module's own typed
+ * destroy routine.
  *
  * @param cp_module Pointer to the module configuration to initialize
  * @param agent Pointer to the controlplane agent owning this module
  * @param module_type Type identifier for the module
  * @param module_name Name identifier for the module
- * @param destroy Destructor for a parked module of this same type
  * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
@@ -189,7 +169,6 @@ cp_module_init(
 	struct agent *agent,
 	const char *module_type,
 	const char *module_name,
-	cp_module_free_handler destroy,
 	yanet_error **err
 );
 
@@ -216,35 +195,26 @@ cp_module_counter_registry(
 	yanet_error **err
 );
 
-// The single handler for a module reference count reaching zero, reached
-// the same way from a registry drop or an explicit release.
+// Try to take a dangling module out of circulation for destruction.
 //
-// Parks the module on its agent's list instead of destroying it, because
-// this generic layer does not know the module's type, and an agent can
-// host more than one type at once — as when acl and fwstate share one.
-// The module's own type-specific reclaim destroys it later.
+// A module's reference count is the number of live configuration
+// generations that registered it; construction never takes a reference of
+// its own. Zero therefore means dangling: the module is registered
+// nowhere, no reader can reach it, and only its owner — the module code
+// that knows its type and destructor — still knows it exists.
 //
-// Idempotent: once set, a parked entry's link is never null again, so a
-// duplicate transition leaves it in place instead of relinking it. Every
-// caller already holds the configuration lock, so this handler must not
-// take it itself.
-void
-cp_module_registry_item_free_cb(struct registry_item *item, void *data);
-
-// Drop the reference construction took on the caller's behalf.
+// Returns 0 when the count is zero, granting the caller the exclusive
+// right to run the module's typed destroy routine immediately (registry
+// slots are the only source of references, and a zero-count module sits in
+// none of them, so no later operation can re-reference it). Returns -1
+// with errno EAGAIN while a live generation still holds the module; the
+// caller must keep its handle and retry once the generations drain.
 //
-// The zero-transition handler runs only when this drop is the last
-// reference, so a caller must not assume the call freed anything: a live
-// or pinned configuration generation may still hold the module. A module
-// parked here is not destroyed on the spot — the next construction call
-// for the same type reclaims it, or it is freed along with the agent's
-// arena.
-//
-// Takes the module's own agent's configuration lock itself, unlike the
-// registry-driven path to the same handler, which already runs under
-// that lock.
-void
-cp_module_release(struct cp_module *cp_module);
+// The count is read under the configuration lock, which every registry
+// mutation also runs under, so the answer is stable against concurrent
+// generation installs and releases in other processes.
+int
+cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err);
 
 struct cp_module_registry {
 	struct memory_context *memory_context;

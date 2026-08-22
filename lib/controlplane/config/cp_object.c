@@ -6,6 +6,7 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"
 
+#include <errno.h>
 #include <string.h>
 
 int
@@ -65,13 +66,6 @@ cp_object_init(
 		goto err_out;
 	}
 
-	// Take the creator's reference only after construction succeeds.
-	//
-	// A failed construction leaves nothing to unbalance. This reference
-	// is never mirrored into the live-reference count: a dead creator
-	// must not hold it above zero.
-	registry_item_ref(&self->config_item);
-
 	return 0;
 
 err_out:
@@ -125,9 +119,9 @@ cp_object_registry_copy(
 	// Mirror each copied item's new generation reference into its own
 	// agent.
 	//
-	// This keeps the per-agent live count tracking references from a
-	// live configuration generation rather than the creator's own hold,
-	// which a dead creator would otherwise never release.
+	// The reference count now counts exactly these registry references,
+	// so the per-agent live count and the items' reference counts move in
+	// lockstep: both track only references that can outlive a creator.
 	for (uint64_t idx = 0; idx < new_registry->registry.capacity; ++idx) {
 		struct cp_object *object =
 			cp_object_registry_get(new_registry, idx);
@@ -143,27 +137,8 @@ cp_object_registry_copy(
 	return 0;
 }
 
-void
-cp_object_registry_item_free_cb(struct registry_item *item, void *data) {
-	struct cp_object *object =
-		container_of(item, struct cp_object, config_item);
-	struct agent *agent = ADDR_OF(&object->agent);
-	if (agent == NULL) {
-		return;
-	}
-
-	if (ADDR_OF(&object->parked_next) != NULL) {
-		return;
-	}
-
-	struct cp_object *head = ADDR_OF(&agent->parked_objects);
-	SET_OFFSET_OF(&object->parked_next, (head != NULL) ? head : object);
-	SET_OFFSET_OF(&agent->parked_objects, object);
-	(void)data;
-}
-
-void
-cp_object_release(struct cp_object *self) {
+int
+cp_object_try_destroy(struct cp_object *self, yanet_error **err) {
 	struct agent *agent = ADDR_OF(&self->agent);
 	struct cp_config *cp_config =
 		(agent != NULL) ? ADDR_OF(&agent->cp_config) : NULL;
@@ -171,76 +146,36 @@ cp_object_release(struct cp_object *self) {
 	if (cp_config != NULL) {
 		cp_config_lock(cp_config);
 	}
-	registry_item_unref(
-		&self->config_item, cp_object_registry_item_free_cb, NULL
-	);
+
+	uint64_t refcnt = self->config_item.refcnt;
+
+	if (refcnt == 0) {
+		// Reserve the item against a racing re-registration before
+		// releasing the lock: a publisher holding a stale copied
+		// handle could otherwise install this pointer into a new
+		// generation between this check and the typed destroy.
+		registry_item_mark_destroying(&self->config_item);
+	}
+
 	if (cp_config != NULL) {
 		cp_config_unlock(cp_config);
 	}
-}
 
-void
-cp_object_drain_parked(
-	struct agent *agent,
-	const char *object_type,
-	cp_object_free_handler destroy
-) {
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-
-	cp_config_lock(cp_config);
-
-	// Splice the target type's entries into a local list, leaving the
-	// rest linked in place for their own type's next call.
-	//
-	// A spliced-out tail leaves its former predecessor pointing at itself
-	// as the new end of the list, so a parked entry's link is never null.
-	struct cp_object *owned = NULL;
-	struct cp_object *prev = NULL;
-	struct cp_object *cur = ADDR_OF(&agent->parked_objects);
-
-	while (cur != NULL) {
-		struct cp_object *raw_next = ADDR_OF(&cur->parked_next);
-		struct cp_object *next = (raw_next == cur) ? NULL : raw_next;
-
-		if (!strncmp(cur->type, object_type, sizeof(cur->type))) {
-			if (prev == NULL) {
-				SET_OFFSET_OF(&agent->parked_objects, next);
-			} else {
-				SET_OFFSET_OF(
-					&prev->parked_next,
-					(next != NULL) ? next : prev
-				);
-			}
-			SET_OFFSET_OF(&cur->parked_next, owned);
-			owned = cur;
-		} else {
-			prev = cur;
-		}
-
-		cur = next;
+	if (refcnt != 0) {
+		// errno is set last, right before the return, so the error
+		// formatting above cannot clobber what the caller reads.
+		yanet_error_add(
+			err,
+			"object '%s:%s' is still referenced by a live "
+			"generation",
+			self->type,
+			self->name
+		);
+		errno = EAGAIN;
+		return -1;
 	}
 
-	if (owned == NULL) {
-		cp_config_unlock(cp_config);
-		return;
-	}
-
-	// Pin the agent's arena for the destroy loop below, still under the
-	// same lock the splice above ran under, so the reclaim guard can never
-	// observe the entries detached but the pin not yet set.
-	agent->parked_teardown_count += 1;
-
-	cp_config_unlock(cp_config);
-
-	while (owned != NULL) {
-		struct cp_object *next = ADDR_OF(&owned->parked_next);
-		destroy(owned);
-		owned = next;
-	}
-
-	cp_config_lock(cp_config);
-	agent->parked_teardown_count -= 1;
-	cp_config_unlock(cp_config);
+	return 0;
 }
 
 void
@@ -248,11 +183,12 @@ cp_object_registry_fini(struct cp_object_registry *registry) {
 	// Mirror each remaining item's dropped generation reference into its
 	// own agent before releasing it.
 	//
-	// The callback this teardown invokes only parks each item at zero
-	// references instead of adjusting the live count itself, so this
-	// loop mirrors the drop first. The same allocation-failure guard
-	// applies as elsewhere: a registry whose backing storage never
-	// allocated reports a nonzero capacity with nothing to walk.
+	// The zero transition releases nothing: an item that leaves its last
+	// registry becomes dangling and is destroyed by its owner's next free
+	// attempt, or reclaimed with the agent's arena if that owner is gone.
+	// The same allocation-failure guard applies as elsewhere: a registry
+	// whose backing storage never allocated reports a nonzero capacity
+	// with nothing to walk.
 	if (ADDR_OF(&registry->registry.items) != NULL) {
 		for (uint64_t idx = 0; idx < registry->registry.capacity;
 		     ++idx) {
@@ -268,9 +204,7 @@ cp_object_registry_fini(struct cp_object_registry *registry) {
 		}
 	}
 
-	registry_fini(
-		&registry->registry, cp_object_registry_item_free_cb, NULL
-	);
+	registry_fini(&registry->registry, NULL, NULL);
 }
 
 struct cp_object *
@@ -347,6 +281,16 @@ cp_object_registry_upsert(
 	struct cp_object *new_object,
 	yanet_error **err
 ) {
+	if (registry_item_is_destroying(&new_object->config_item)) {
+		yanet_error_add(
+			err,
+			"object '%s' is being destroyed by its owner; "
+			"re-registering it is a use of a freed handle",
+			new_object->name
+		);
+		return -1;
+	}
+
 	struct cp_object *old_object =
 		cp_object_registry_lookup(registry, object_type, object_name);
 
@@ -395,7 +339,7 @@ cp_object_registry_upsert(
 		    cp_object_registry_item_cmp,
 		    &cmp_data,
 		    &new_object->config_item,
-		    cp_object_registry_item_free_cb,
+		    NULL,
 		    NULL
 	    )) {
 		yanet_error_add(err, "failed to replace object in registry");
@@ -434,7 +378,7 @@ cp_object_registry_delete(
 		    cp_object_registry_item_cmp,
 		    &cmp_data,
 		    NULL,
-		    cp_object_registry_item_free_cb,
+		    NULL,
 		    NULL
 	    )) {
 		return -1;

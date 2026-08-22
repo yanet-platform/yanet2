@@ -1599,8 +1599,7 @@ agent_free_unused_agents_locked(struct agent *agent) {
 
 		if (prev_agent->loaded_module_count == 0 &&
 		    prev_agent->loaded_device_count == 0 &&
-		    prev_agent->loaded_object_count == 0 &&
-		    prev_agent->parked_teardown_count == 0) {
+		    prev_agent->loaded_object_count == 0) {
 			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
 			agent_cleanup(prev_agent);
 			continue;

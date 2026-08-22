@@ -95,14 +95,7 @@ route_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "route",
-		    name,
-		    route_module_config_destroy,
-		    err
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "route", name, err)) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -139,8 +132,8 @@ route_module_config_new(
 		// configuration data is already fully set up and the type's
 		// own destructor can safely walk it. No reference beyond the
 		// caller's own has been taken and no registry has observed
-		// the module yet, so going through the public free would
-		// only park it instead of destroying it.
+		// the module yet, so it is dangling and either path
+		// destroys it identically.
 		route_module_config_destroy(&config->cp_module);
 		return NULL;
 	}
@@ -221,9 +214,14 @@ route_module_config_destroy(struct cp_module *cp_module) {
 	);
 }
 
-void
-route_module_config_free(struct cp_module *cp_module) {
-	cp_module_release(cp_module);
+int
+route_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	route_module_config_destroy(cp_module);
+	return 0;
 }
 
 int

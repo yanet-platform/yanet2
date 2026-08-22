@@ -33,6 +33,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -125,7 +126,7 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 	}
 	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "", nil)
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 	require.NoError(t, backend.UpdateModule(handle))
 }
 
@@ -158,11 +159,12 @@ func TestZeroWeightFunctionDropsAllPackets(t *testing.T) {
 		Functions: []string{configName},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	const packetCount = 4
 	pkts := make([]gopacket.Packet, packetCount)
@@ -227,11 +229,12 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 		Functions: []string{aclA, aclB},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: pipelineAB, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	const packetCount = 5
 	pkts := make([]gopacket.Packet, packetCount)
@@ -286,11 +289,12 @@ func TestZeroWeightDeviceEntryDropsAllPackets(t *testing.T) {
 
 	// Bind the input pipeline with weight 0, which leaves the device entry's
 	// pipeline-map size at 0, so every packet is unroutable.
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 0}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	const packetCount = 4
 	pkts := make([]gopacket.Packet, packetCount)
@@ -335,7 +339,7 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 		forwardName, []cforward.ForwardRule{rule},
 	)
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -355,11 +359,12 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 		Functions: []string{configName},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	const packetCount = 5
 	pkts := make([]gopacket.Packet, packetCount)
@@ -392,11 +397,12 @@ func TestEmptyPipelineDeviceDropsAllPackets(t *testing.T) {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
 	// The device input binds no pipeline at all, so the entry has nothing to
 	// dispatch to.
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	const packetCount = 4
 	pkts := make([]gopacket.Packet, packetCount)

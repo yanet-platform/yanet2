@@ -323,8 +323,8 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 
 	// Finalizing both registries drops every generation reference: foo2
 	// and bar2 retire from the copy, foo and bar retire from the original,
-	// returning loaded_object_count to zero. The creator holds its own
-	// reference on each object, so nothing parks here yet.
+	// returning loaded_object_count to zero. Every object is now dangling
+	// at a zero reference count, known only to this test.
 	cp_object_registry_fini(&copied);
 	cp_object_registry_fini(&registry);
 	TEST_ASSERT_EQUAL(
@@ -335,13 +335,27 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 
 	// The registries released their references but did not free the
-	// objects' storage: each object lives in the agent's arena until
-	// the agent itself is reclaimed. Tear them down explicitly so the
-	// arena returns to its pre-test size.
-	cp_object_release(foo);
-	cp_object_release(bar);
-	cp_object_release(foo2);
-	cp_object_release(bar2);
+	// objects' storage: each object lives in the agent's arena until its
+	// owner destroys it or the agent itself is reclaimed. Take each
+	// dangling object out of circulation and tear it down explicitly so
+	// the arena returns to its pre-test size.
+	yanet_error *free_err = NULL;
+	TEST_ASSERT_SUCCESS(
+		cp_object_try_destroy(foo, &free_err),
+		"dangling object must be destroyable"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_try_destroy(bar, &free_err),
+		"dangling object must be destroyable"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_try_destroy(foo2, &free_err),
+		"dangling object must be destroyable"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_try_destroy(bar2, &free_err),
+		"dangling object must be destroyable"
+	);
 	cp_object_fini(foo);
 	memory_bfree(&agent->memory_context, foo, sizeof(*foo));
 	cp_object_fini(bar);

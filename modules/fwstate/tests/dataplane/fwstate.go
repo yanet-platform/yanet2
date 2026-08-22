@@ -40,8 +40,8 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *
 	// the whole structure, not just the memory context, and wires the object
 	// registry the harness's own link-name lookups resolve against.
 	//
-	// Every module construction now walks the agent's parked-list head, and an
-	// unzeroed head reads as stale bytes rather than a valid empty list.
+	// The dangling-free protocol and the loaded counts all read agent fields
+	// an unzeroed structure would leave as stale bytes.
 	cStubAgent := C.CString("stub agent")
 	defer C.free(unsafe.Pointer(cStubAgent))
 

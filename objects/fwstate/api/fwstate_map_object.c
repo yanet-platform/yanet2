@@ -117,8 +117,9 @@ map_insert_layer(
 
 // --- IPv4 object -------------------------------------------------------------
 
-// Parked-entry destructor: tears the object down and returns its storage
-// to the agent arena.
+// Typed destructor: tears the object down and returns its storage to the
+// agent arena. Runs only on a dangling object, after
+// fwstate_map_v4_object_config_free wins the try-destroy race.
 static void
 fwstate_map_v4_object_destroy(struct cp_object *cp_object) {
 	struct fwstate_map_v4_object *self = container_of(
@@ -183,13 +184,6 @@ struct cp_object *
 fwstate_map_v4_object_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
-	// Reclaim this type's parked entries before the wrapper allocation:
-	// a parked instance can be most of the arena, so reclaiming it first
-	// can be the difference between success and failure under pressure.
-	cp_object_drain_parked(
-		agent, FWSTATE_MAP_V4_OBJECT_TYPE, fwstate_map_v4_object_destroy
-	);
-
 	struct fwstate_map_v4_object *self = fwstate_map_v4_object_new(agent);
 	if (self == NULL) {
 		yanet_error_add(
@@ -207,9 +201,16 @@ fwstate_map_v4_object_config_new(
 	return &self->cp_object;
 }
 
-void
-fwstate_map_v4_object_config_free(struct cp_object *cp_object) {
-	cp_object_release(cp_object);
+int
+fwstate_map_v4_object_config_free(
+	struct cp_object *cp_object, yanet_error **err
+) {
+	if (cp_object_try_destroy(cp_object, err)) {
+		return -1;
+	}
+
+	fwstate_map_v4_object_destroy(cp_object);
+	return 0;
 }
 
 fwtable_t *
@@ -273,8 +274,9 @@ fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
 
 // --- IPv6 object -------------------------------------------------------------
 
-// Parked-entry destructor: tears the object down and returns its storage
-// to the agent arena.
+// Typed destructor: tears the object down and returns its storage to the
+// agent arena. Runs only on a dangling object, after
+// fwstate_map_v6_object_config_free wins the try-destroy race.
 static void
 fwstate_map_v6_object_destroy(struct cp_object *cp_object) {
 	struct fwstate_map_v6_object *self = container_of(
@@ -339,13 +341,6 @@ struct cp_object *
 fwstate_map_v6_object_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
-	// Reclaim this type's parked entries before the wrapper allocation:
-	// a parked instance can be most of the arena, so reclaiming it first
-	// can be the difference between success and failure under pressure.
-	cp_object_drain_parked(
-		agent, FWSTATE_MAP_V6_OBJECT_TYPE, fwstate_map_v6_object_destroy
-	);
-
 	struct fwstate_map_v6_object *self = fwstate_map_v6_object_new(agent);
 	if (self == NULL) {
 		yanet_error_add(
@@ -363,9 +358,16 @@ fwstate_map_v6_object_config_new(
 	return &self->cp_object;
 }
 
-void
-fwstate_map_v6_object_config_free(struct cp_object *cp_object) {
-	cp_object_release(cp_object);
+int
+fwstate_map_v6_object_config_free(
+	struct cp_object *cp_object, yanet_error **err
+) {
+	if (cp_object_try_destroy(cp_object, err)) {
+		return -1;
+	}
+
+	fwstate_map_v6_object_destroy(cp_object);
+	return 0;
 }
 
 fwtable_t *

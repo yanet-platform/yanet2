@@ -2,6 +2,7 @@ package forward
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"unicode/utf8"
@@ -10,13 +11,14 @@ import (
 	"google.golang.org/grpc/status"
 
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 // Backend abstracts shared memory operations.
@@ -39,18 +41,25 @@ type forwardConfig struct {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *forwardConfig) Free() {
-	if m.Module != nil {
-		m.Module.Free()
+func (m *forwardConfig) Free() error {
+	if m.Module == nil {
+		return nil
 	}
+	return m.Module.Free()
 }
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
-	mu      sync.RWMutex
-	backend Backend
-	configs map[string]forwardConfig
+	mu sync.RWMutex
+
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []ModuleHandle
+	backend  Backend
+	configs  map[string]forwardConfig
 }
 
 func NewForwardService(backend Backend) *ForwardService {
@@ -204,8 +213,10 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
+	m.reclaimDeferred()
+
 	if oldModule, ok := m.configs[name]; ok {
-		oldModule.Free()
+		m.parkOrFree(oldModule.Module)
 	}
 
 	m.configs[name] = forwardConfig{
@@ -234,9 +245,46 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 
-	config.Free()
+	m.reclaimDeferred()
+	m.parkOrFree(config.Module)
 
 	delete(m.configs, name)
 
 	return &forwardpb.DeleteConfigResponse{Deleted: true}, nil
+}
+
+// parkOrFree frees the handle when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.mu.
+func (m *ForwardService) parkOrFree(handle ModuleHandle) {
+	if handle == nil {
+		return
+	}
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *ForwardService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *ForwardService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

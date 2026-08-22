@@ -218,8 +218,8 @@ agent_delete_device(
 // Update shared objects in the active configuration generation.
 //
 // Each object in objects is upserted by name into the new generation; an
-// existing object with the same name is replaced and parked on its creating
-// agent until the retiring generation no longer references it.
+// existing object with the same name is replaced and turns dangling once
+// the retiring generation releases it, awaiting its owner's free.
 //
 // @return 0 on success, -1 on error.
 int

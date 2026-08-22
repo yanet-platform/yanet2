@@ -43,7 +43,9 @@ func (m *backend) UpdateDevice(
 	if err := m.agent.UpdateDevices(
 		[]ffi.ShmDeviceConfig{device.AsFFIDevice()},
 	); err != nil {
-		device.Free()
+		if err := device.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update device %q: %w", name, err)
 	}
 

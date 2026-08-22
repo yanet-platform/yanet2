@@ -17,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
@@ -77,7 +78,7 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	}
 	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: name,
@@ -94,11 +95,12 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: name, Functions: []string{name}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: name, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 func mustAddPrefix(t *testing.T, svc *nat64.NAT64Service, name string, prefix [12]byte) {

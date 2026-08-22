@@ -15,6 +15,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
@@ -454,12 +455,12 @@ func deployRules(t *testing.T, rules []croutempls.Rule) *dataplaneut.Harness {
 
 	handle, err := routempls.NewBackend(agent).UpdateModule(mplsConfigName, rules)
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 
 	sinkName := mplsConfigName + "-sink"
 	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllForwardRules(mplsDevice))
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: mplsConfigName,
@@ -482,11 +483,12 @@ func deployRules(t *testing.T, rules []croutempls.Rule) *dataplaneut.Harness {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   mplsDevice,
 		Input:  []ffi.DevicePipelineConfig{{Name: mplsConfigName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	return harness
 }

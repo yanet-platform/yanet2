@@ -19,6 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -115,7 +116,7 @@ func applyACLRules(
 
 	handle, err := backend.NewModule(name, rules, "", "", nil)
 	require.NoError(tb, err)
-	tb.Cleanup(handle.Free)
+	tb.Cleanup(func() { _ = handle.Free() })
 
 	require.NoError(tb, backend.UpdateModule(handle))
 	return handle
@@ -153,7 +154,7 @@ func wireACLPipeline(
 	}
 	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
 	require.NoError(tb, err)
-	tb.Cleanup(sinkHandle.Free)
+	tb.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -175,11 +176,12 @@ func wireACLPipeline(
 	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(tb, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   device,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(tb, err)
 }
 
 // aclCounterPath returns the CounterPath for an ACL module in the test topology.

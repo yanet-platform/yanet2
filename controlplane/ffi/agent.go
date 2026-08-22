@@ -77,16 +77,6 @@ func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
-// Release drops the construction reference the C constructor took.
-//
-// When this is the last reference, the device parks on its agent until the
-// next construction of the same device type reclaims it.
-func (m ShmDeviceConfig) Release() {
-	if m.ptr != nil {
-		C.cp_device_release(m.ptr)
-	}
-}
-
 type Agent struct {
 	name string
 	ptr  *C.struct_agent
@@ -200,83 +190,6 @@ func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
 	return nil
 }
 
-func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
-	configs := make([]ShmDeviceConfig, 0, len(devices))
-
-	// This helper owns the construction references of every device it
-	// creates, so drop them once the update resolves: on success the live
-	// generation holds the only remaining reference, and on failure the
-	// release parks each device for the next construction to reclaim.
-	defer func() {
-		for idx := range configs {
-			configs[idx].Release()
-		}
-	}()
-
-	for idx := range devices {
-		device := &devices[idx]
-
-		name := device.Name
-		input := device.Input
-		output := device.Output
-
-		cName := C.CString(name)
-		defer C.free(unsafe.Pointer(cName))
-
-		var cErr *C.struct_yanet_error
-		cCfg := C.cp_device_plain_config_new(
-			cName,
-			C.uint64_t(len(input)),
-			C.uint64_t(len(output)),
-			&cErr,
-		)
-		if cerr := cerrors.FromC(unsafe.Pointer(cErr)); cerr != nil {
-			return fmt.Errorf("failed to initialize plain device config: %w", cerr)
-		}
-		defer C.cp_device_plain_config_free(cCfg)
-
-		for idx := range input {
-			pipeline := &input[idx]
-			cName := C.CString(pipeline.Name)
-			defer C.free(unsafe.Pointer(cName))
-			C.cp_device_plain_config_set_input_pipeline(
-				cCfg,
-				C.uint64_t(idx),
-				cName,
-				C.uint64_t(pipeline.Weight),
-			)
-		}
-
-		for idx := range output {
-			pipeline := &output[idx]
-			cName := C.CString(pipeline.Name)
-			defer C.free(unsafe.Pointer(cName))
-			C.cp_device_plain_config_set_output_pipeline(
-				cCfg,
-				C.uint64_t(idx),
-				cName,
-				C.uint64_t(pipeline.Weight),
-			)
-		}
-
-		ptr := C.cp_device_plain_new(
-			(*C.struct_agent)(m.AsRawPtr()),
-			cCfg,
-			&cErr,
-		)
-		if ptr == nil {
-			return fmt.Errorf(
-				"failed to create plain device: %w",
-				cerrors.FromC(unsafe.Pointer(cErr)),
-			)
-		}
-
-		configs = append(configs, NewShmDeviceConfig(unsafe.Pointer(ptr)))
-	}
-
-	return m.UpdateDevices(configs)
-}
-
 // TODO: (*Agent).UpdateVlanDevices
 
 // UpdateDevices attaches the given pipelines to the given device IDs.
@@ -360,5 +273,6 @@ func (m *Agent) DeleteModuleConfig(moduleType, configName string) error {
 			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}
+
 	return nil
 }

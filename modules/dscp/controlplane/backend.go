@@ -33,18 +33,24 @@ func (m *backend) UpdateModule(
 
 	for _, prefix := range prefixes {
 		if err := module.PrefixAdd(prefix); err != nil {
-			module.Free()
+			if err := module.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("failed to add prefix: %w", err)
 		}
 	}
 
 	if err := module.SetDscpMarking(flag, mark); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to set DSCP marking: %w", err)
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 

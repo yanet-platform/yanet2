@@ -28,7 +28,7 @@ type ModuleHandle interface {
 	// FIBRangeCountV6 returns the number of IPv6 FIB ranges, equivalent
 	// to counting the IPv6 entries of DumpFIB but far cheaper.
 	FIBRangeCountV6() uint64
-	Free()
+	Free() error
 }
 
 // Compile-time assertion that *croute.ModuleConfig satisfies the
@@ -93,11 +93,15 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 	for _, entry := range entries {
 		start, end, err := entry.GetRange().ToRange()
 		if err != nil {
-			module.Free()
+			if err := module.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("failed to parse range: %w", err)
 		}
 		if start.Compare(end) > 0 {
-			module.Free()
+			if err := module.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("range start %q is greater than end %q", start, end)
 		}
 
@@ -105,7 +109,9 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 		for _, nh := range entry.GetNexthops() {
 			hardwareRoute, err := newHardwareRoute(nh)
 			if err != nil {
-				module.Free()
+				if err := module.Free(); err != nil {
+					return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+				}
 				return nil, fmt.Errorf("failed to parse nexthop %v: %w", nh, err)
 			}
 
@@ -117,7 +123,9 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 				// for this identity would have agreed on.
 				added, err := module.AddRoute(hardwareRoute.SourceMAC[:], hardwareRoute.DestinationMAC[:], hardwareRoute.Device, nh.GetCounter())
 				if err != nil {
-					module.Free()
+					if err := module.Free(); err != nil {
+						return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+					}
 					return nil, fmt.Errorf("failed to add hardware route: %w", err)
 				}
 				idx = uint32(added)
@@ -134,7 +142,9 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 		if !ok {
 			added, err := module.AddRouteList(key.AsSlice())
 			if err != nil {
-				module.Free()
+				if err := module.Free(); err != nil {
+					return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+				}
 				return nil, fmt.Errorf("failed to add route list: %w", err)
 			}
 			listIdx = uint32(added)
@@ -142,13 +152,17 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 		}
 
 		if err := module.AddRange(start, end, listIdx); err != nil {
-			module.Free()
+			if err := module.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("failed to add range [%s, %s]: %w", start, end, err)
 		}
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update modules: %w", err)
 	}
 

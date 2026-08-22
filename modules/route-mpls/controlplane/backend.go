@@ -10,7 +10,7 @@ import (
 // ModuleHandle is a handle to a route-mpls module configuration in shared
 // memory.
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 // Compile-time assertion that *croutempls.ModuleConfig satisfies the
@@ -46,12 +46,16 @@ func (m *backend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHand
 	}
 
 	if err := module.Update(rules); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to publish module config: %w", err)
 	}
 

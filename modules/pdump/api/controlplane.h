@@ -43,8 +43,12 @@ pdump_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
-void
-pdump_module_config_free(struct cp_module *module);
+// Destroy the module when it is dangling, per cp_module_try_destroy.
+//
+// Returns -1 with errno EAGAIN while a live generation still references
+// the module; the caller must keep its handle and retry later.
+int
+pdump_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 // Set filter compiles and sets new bpf filter for the pdump module
 int

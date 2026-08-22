@@ -90,7 +90,7 @@ func newFWStateTestMaps(
 		require.NoError(testingTB, err)
 		require.NoError(testingTB, mapObject.CreateMap(indexSize, 64, 1))
 		require.NoError(testingTB, mapObject.Publish(agent))
-		testingTB.Cleanup(mapObject.Free)
+		testingTB.Cleanup(func() { _ = mapObject.Free() })
 		return mapObject
 	}
 
@@ -110,7 +110,7 @@ func newACLDeleteTestConfig(
 
 	config, err := cacl.NewModuleConfig(agent, name, nil, "", "", nil)
 	require.NoError(testingTB, err)
-	testingTB.Cleanup(config.Free)
+	testingTB.Cleanup(func() { _ = config.Free() })
 
 	return config
 }
@@ -176,7 +176,7 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 		maps.v6Name(),
 	)
 	require.NoError(t, err)
-	t.Cleanup(config.Free)
+	t.Cleanup(func() { _ = config.Free() })
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
 
 	require.NoError(t, agent.DeleteModuleConfig(fwstateModuleType, configName))

@@ -3,6 +3,7 @@ package dscp
 import (
 	"cmp"
 	"context"
+	"errors"
 	"net/netip"
 	"slices"
 	"sync"
@@ -11,12 +12,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 // Backend abstracts shared memory operations.
@@ -29,9 +31,15 @@ type Backend interface {
 type DscpService struct {
 	dscppb.UnimplementedDscpServiceServer
 
-	mu      sync.RWMutex
-	backend Backend
-	configs map[string]*config
+	mu sync.RWMutex
+
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []ModuleHandle
+	backend  Backend
+	configs  map[string]*config
 }
 
 type config struct {
@@ -43,10 +51,11 @@ type config struct {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *config) Free() {
-	if m.Module != nil {
-		m.Module.Free()
+func (m *config) Free() error {
+	if m.Module == nil {
+		return nil
 	}
+	return m.Module.Free()
 }
 
 func (m *config) Clone() *config {
@@ -245,7 +254,8 @@ func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 		return err
 	}
 
-	cfg.Free()
+	m.reclaimDeferred()
+	m.parkOrFree(cfg.Module)
 
 	m.configs[name] = &config{
 		Prefixes: cfg.Prefixes,
@@ -254,4 +264,40 @@ func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 	}
 
 	return nil
+}
+
+// parkOrFree frees the handle when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.mu.
+func (m *DscpService) parkOrFree(handle ModuleHandle) {
+	if handle == nil {
+		return
+	}
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *DscpService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *DscpService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

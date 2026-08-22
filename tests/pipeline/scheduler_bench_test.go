@@ -23,6 +23,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
@@ -128,7 +129,7 @@ func wireRedirect(
 	}
 	handle, err := backend.UpdateModule(name, []cforward.ForwardRule{rule})
 	require.NoError(b, err)
-	b.Cleanup(handle.Free)
+	b.Cleanup(func() { _ = handle.Free() })
 
 	require.NoError(b, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: name,
@@ -169,7 +170,8 @@ func wireRedirect(
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_" + dev, Weight: 1}},
 		})
 	}
-	require.NoError(b, agent.UpdatePlainDevices(devices))
+	_, err = plain.UpdateDevices(agent, devices)
+	require.NoError(b, err)
 }
 
 func buildBench(

@@ -40,33 +40,36 @@ func setupACLFWStateHarness(tb testing.TB) (*ffi.Agent, acl.Backend) {
 	return agent, backend
 }
 
-// TestACL_FWStateAgentSharing_ParkedModuleSurvivesUnrelatedDrain reproduces
-// production agent sharing where fwstate parks during an ACL drain.
+// TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule reproduces
+// production agent sharing on the dangling-free protocol.
 //
 // The acl module attaches one agent and hands it to both the ACL and
-// fwstate services. The sequence mirrors the fwstate service's own release
-// path, followed by a delete that retires the generation still pinning it,
-// parking the module before the ACL update runs. A drain call must stay
-// scoped to its own module type: destroying the parked fwstate module with
-// the wrong destructor would corrupt the arena during the filter
-// compiler's teardown.
-func TestACL_FWStateAgentSharing_ParkedModuleSurvivesUnrelatedDrain(t *testing.T) {
+// fwstate services. The sequence mirrors the fwstate service's own
+// release path: the owner's free is refused while the published
+// generation still references the module, and the delete that retires
+// that generation lets the pending free destroy it through fwstate's own
+// typed destructor. An ACL update on the shared agent must neither
+// destroy nor corrupt the fwstate module: destruction is scoped to the
+// owner that knows the type, never to whatever else shares the arena.
+func TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule(t *testing.T) {
 	agent, backend := setupACLFWStateHarness(t)
 
 	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0", nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwCfg.AsFFIModule()}))
 
-	// Release the creator's reference while the published generation
-	// still holds fw0: it must not park yet.
+	// The owner's free attempt is refused while the published generation
+	// still references fw0, and is queued for a retry.
 	fwCfg.Free()
 
-	// Retiring the generation that still references fw0 is what actually
-	// parks it.
+	// Retiring the generation that still references fw0 is what lets the
+	// queued free succeed: the delete retries it on its way out and
+	// fwstate's own destructor destroys the module.
 	require.NoError(t, agent.DeleteModuleConfig("fwstate", "fw0"))
 
-	// An ACL update on the shared agent must not touch the parked fwstate
-	// module: its own drain call is filtered to the acl type.
+	// An ACL update on the shared agent must not touch anything but its
+	// own acl modules: destruction runs only through each owner's own
+	// free path.
 	rules := []cacl.AclRule{
 		allow4Rule(
 			filter.IPNets{filter.UnspecifiedIPv4},

@@ -26,11 +26,6 @@ cp_device_vlan_new(
 	const struct cp_device_vlan_config *config,
 	yanet_error **err
 ) {
-	// Reclaim this type's parked entries before the wrapper allocation:
-	// a parked instance can be most of the arena, so reclaiming it first
-	// can be the difference between success and failure under pressure.
-	cp_device_drain_parked(agent, "vlan", cp_device_vlan_destroy);
-
 	struct cp_device_vlan *cp_device_vlan =
 		(struct cp_device_vlan *)memory_balloc(
 			&agent->memory_context, sizeof(struct cp_device_vlan)
@@ -61,9 +56,14 @@ cp_device_vlan_new(
 	return &cp_device_vlan->cp_device;
 }
 
-void
-cp_device_vlan_free(struct cp_device *cp_device) {
-	cp_device_release(cp_device);
+int
+cp_device_vlan_free(struct cp_device *cp_device, yanet_error **err) {
+	if (cp_device_try_destroy(cp_device, err)) {
+		return -1;
+	}
+
+	cp_device_vlan_destroy(cp_device);
+	return 0;
 }
 
 struct cp_device_vlan_config *

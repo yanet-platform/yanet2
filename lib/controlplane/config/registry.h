@@ -4,11 +4,18 @@
 
 struct registry_item {
 	uint64_t refcnt;
+	// Set by registry_item_mark_destroying once an owner won the right
+	// to destroy this dangling item, so a racing re-registration of the
+	// same pointer can be refused instead of referencing memory the
+	// owner is about to free. Mutated only under the configuration
+	// lock, like refcnt.
+	uint64_t destroying;
 };
 
 static inline void
 registry_item_init(struct registry_item *item) {
 	item->refcnt = 0;
+	item->destroying = 0;
 }
 
 static inline void
@@ -16,8 +23,27 @@ registry_item_ref(struct registry_item *item) {
 	item->refcnt += 1;
 }
 
+// Mark a zero-reference item as taken for destruction by its owner.
+//
+// Must run under the configuration lock; the caller must have observed
+// the reference count at zero under that same lock.
+static inline void
+registry_item_mark_destroying(struct registry_item *item) {
+	item->destroying = 1;
+}
+
+static inline int
+registry_item_is_destroying(const struct registry_item *item) {
+	return item->destroying != 0;
+}
+
 typedef void (*registry_item_free_func)(struct registry_item *item, void *data);
 
+// Drop one reference. A NULL free_func makes the zero transition a no-op:
+// the item stays alive, dangling, and only its owner may destroy it. Every
+// mutation of a registry or its items' reference counts runs under the
+// configuration lock, so an owner reading the count under that lock sees a
+// value no concurrent registry operation can still change.
 static inline void
 registry_item_unref(
 	struct registry_item *item,
@@ -25,7 +51,7 @@ registry_item_unref(
 	void *free_func_data
 ) {
 	item->refcnt -= 1;
-	if (!item->refcnt) {
+	if (!item->refcnt && free_func != NULL) {
 		free_func(item, free_func_data);
 	}
 }

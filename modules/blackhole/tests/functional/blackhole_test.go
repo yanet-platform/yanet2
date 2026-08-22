@@ -13,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
 )
 
@@ -54,7 +55,7 @@ func setupBlackholeHarness(
 
 	mod, err := cblackhole.NewModuleConfig(agent, configName)
 	require.NoError(t, err)
-	t.Cleanup(mod.Free)
+	t.Cleanup(func() { _ = mod.Free() })
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{mod.AsFFIModule()}))
 
@@ -89,11 +90,12 @@ func wirePipeline(
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 // TestBlackhole_DropsAllPackets verifies that the blackhole module drops every

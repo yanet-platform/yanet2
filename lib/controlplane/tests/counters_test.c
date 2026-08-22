@@ -21,6 +21,7 @@
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,9 +93,16 @@ install_device(
 		"update_devices failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
-	// Drop the construction reference: the live generation holds the
-	// device from here on.
-	cp_device_plain_free(dev);
+	// The live generation references the device from here on, so an
+	// owner free attempt is answered with EAGAIN and the handle would be
+	// retried once the generations drain. The arena is reclaimed wholesale
+	// at teardown.
+	yanet_error *free_err = NULL;
+	TEST_ASSERT(
+		cp_device_plain_free(dev, &free_err) == -1 && errno == EAGAIN,
+		"freeing a generation-referenced device must fail with EAGAIN"
+	);
+	yanet_error_free(free_err);
 	return TEST_SUCCESS;
 }
 

@@ -7,6 +7,7 @@ package nat64_test
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 //#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
 /*
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,11 +30,10 @@ cp_module_init(
 	struct agent *agent,
 	const char *module_type,
 	const char *module_name,
-	cp_module_free_handler destroy,
 	yanet_error **err
 ) {
 	(void)cp_module, (void)agent, (void)module_type, (void)module_name,
-		(void)destroy, (void)err;
+		(void)err;
 	return -1;
 }
 
@@ -42,36 +42,18 @@ cp_module_fini(struct cp_module *cp_module) {
 	(void)cp_module;
 }
 
-// cp_module_registry_item_free_cb and cp_module_release are no longer
-// header-only, so this harness supplies its own stand-ins.
-//
-// The stub agent above has no real configuration zone, so this mock
-// reproduces the production algorithm without the config lock the real
+// cp_module_try_destroy is no longer header-only, so this harness supplies
+// a stand-in. The stub agent above has no real configuration zone, so this
+// mock reproduces the production check without the config lock the real
 // implementation takes around it.
-void
-cp_module_registry_item_free_cb(struct registry_item *item, void *data) {
-	struct cp_module *module =
-		container_of(item, struct cp_module, config_item);
-	struct agent *agent = ADDR_OF(&module->agent);
-	if (agent == NULL) {
-		return;
+int
+cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
+	(void)err;
+	if (cp_module->config_item.refcnt != 0) {
+		errno = EAGAIN;
+		return -1;
 	}
-
-	if (ADDR_OF(&module->parked_next) != NULL) {
-		return;
-	}
-
-	struct cp_module *head = ADDR_OF(&agent->parked_modules);
-	SET_OFFSET_OF(&module->parked_next, (head != NULL) ? head : module);
-	SET_OFFSET_OF(&agent->parked_modules, module);
-	(void)data;
-}
-
-void
-cp_module_release(struct cp_module *cp_module) {
-	registry_item_unref(
-		&cp_module->config_item, cp_module_registry_item_free_cb, NULL
-	);
+	return 0;
 }
 
 // nat64dp.c registers an RTE log type at load time and logs through the

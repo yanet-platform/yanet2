@@ -8,7 +8,9 @@ package cdscp
 import "C"
 
 import (
+	"errors"
 	"fmt"
+	"syscall"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -42,11 +44,30 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-func (m *ModuleConfig) Free() {
-	if ptr := m.asRawPtr(); ptr != nil {
-		C.dscp_module_config_free(ptr)
-		m.ptr = ffi.ModuleConfig{}
+// Free destroys the module config when it is dangling — referenced by no live
+// configuration generation — and reports nil. While a live generation
+// still references it the free is refused with ffi.ErrStillReferenced
+// and the handle stays usable: the caller must remember it and free it
+// again once the generations holding it drain. Safe to call multiple
+// times: subsequent calls are no-ops reporting nil.
+func (m *ModuleConfig) Free() error {
+	ptr := m.asRawPtr()
+	if ptr == nil {
+		return nil
 	}
+	var cErr *C.yanet_error
+	rc, errno := C.dscp_module_config_free(ptr, &cErr)
+	if rc == 0 {
+		m.ptr = ffi.ModuleConfig{}
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		// The refused attempt allocated an error chain; release it
+		// rather than leaking one per attempt. The object is intact.
+		C.yanet_error_free(cErr)
+		return ffi.ErrStillReferenced
+	}
+	return fmt.Errorf("failed to free module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 }
 
 func (m *ModuleConfig) prefixAdd4(addrStart [4]byte, addrEnd [4]byte) error {

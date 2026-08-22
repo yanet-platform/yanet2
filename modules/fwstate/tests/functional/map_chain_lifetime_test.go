@@ -66,12 +66,12 @@ func newMapChainConfig(
 //
 // The map objects own the tables, so republishing the module config keeps
 // the linked objects' chains and the entry in them. Between the publish
-// and the old generation's free, it constructs a module of this type on
-// an unrelated name, modeling a concurrent update racing this one. The
-// first generation still holds its own creator reference at that point,
-// so the unrelated construction drains nothing of it. A release never
-// drains by itself; only a further construction after the free drains
-// the park list.
+// and the old generation's free, it constructs and frees a module of this
+// type on an unrelated name, modeling a concurrent update racing this
+// one. The unrelated module was never published, so it is dangling and
+// its owner's free destroys it on the spot — and must touch nothing else:
+// no code path other than each config's own owner may destroy it, so the
+// entry must still be live when the new config takes over.
 func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 	h, agent := setupFWStateHarness(t)
 	shm := h.SharedMemory()
@@ -113,12 +113,9 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 
 	afterPublish := mapChainAgentRootMemoryNode(t, shm, agentName)
 
-	// Construct a module of this type on an unrelated name, the only call that
-	// drains the park list.
-	//
-	// The construction is straddled by a checkpoint, so a premature drain of
-	// the first generation there cannot be masked by that config's own later
-	// release landing on the same count.
+	// Construct a module of this type on an unrelated name and free it
+	// right away. It was never published, so it is dangling: the free
+	// must destroy exactly this one config and nothing else.
 	other, err := cfwstate.NewModuleConfig(agent, "fw1", nil, "", "")
 	require.NoError(t, err)
 
@@ -132,29 +129,34 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 
 	afterUnrelatedFree := mapChainAgentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
-		t, afterUnrelatedCreate.BFreeCount, afterUnrelatedFree.BFreeCount,
-		"releasing the unrelated config must park it, not destroy it immediately",
+		t, afterUnrelatedCreate.BFreeCount+1, afterUnrelatedFree.BFreeCount,
+		"the unrelated config is dangling, so its owner's free must destroy it",
 	)
 
+	// v1 lost its last generation reference when v2 was published, so it
+	// is dangling here too: its owner's free destroys it, and the map
+	// objects it was linked to stay untouched.
 	v1.Free()
-	t.Cleanup(v2.Free)
+	t.Cleanup(func() { _ = v2.Free() })
 
 	afterV1Free := mapChainAgentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
-		t, afterUnrelatedFree.BFreeCount, afterV1Free.BFreeCount,
-		"releasing v1 must park it, not destroy it immediately",
+		t, afterUnrelatedFree.BFreeCount+1, afterV1Free.BFreeCount,
+		"v1 is dangling, so its owner's free must destroy it",
 	)
 
-	// Construct a module of this type once more, draining both the unrelated
-	// config and the first generation.
+	// One more construction of this type must find nothing left to
+	// destroy: each earlier config was already destroyed by its own
+	// owner, and the linked map objects were never theirs to destroy.
 	other2, err := cfwstate.NewModuleConfig(agent, "fw2", nil, "", "")
 	require.NoError(t, err)
-	t.Cleanup(other2.Free)
+	t.Cleanup(func() { _ = other2.Free() })
 
 	afterDrain := mapChainAgentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
-		t, afterV1Free.BFreeCount+2, afterDrain.BFreeCount,
-		"fwstate's next construction must drain both the unrelated config and v1",
+		t, afterV1Free.BFreeCount, afterDrain.BFreeCount,
+		"a new construction must destroy nothing: every earlier config "+
+			"was already destroyed by its own owner",
 	)
 
 	statsAfter := mapV6.GetStats()

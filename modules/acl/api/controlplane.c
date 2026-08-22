@@ -137,14 +137,7 @@ acl_module_config_init(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "acl",
-		    name,
-		    acl_module_config_destroy,
-		    err
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "acl", name, err)) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -254,9 +247,14 @@ acl_module_config_init(
 	return &config->cp_module;
 }
 
-void
-acl_module_config_free(struct cp_module *cp_module) {
-	cp_module_release(cp_module);
+int
+acl_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	acl_module_config_destroy(cp_module);
+	return 0;
 }
 
 typedef int (*acl_rule_check_func)(const struct acl_rule *acl_rule);

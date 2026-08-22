@@ -1,6 +1,7 @@
 package decap_test
 
 import (
+	"errors"
 	"math"
 	"net/netip"
 	"testing"
@@ -33,6 +34,33 @@ func newLifetimeHarness(t *testing.T) *dataplaneut.Harness {
 	return h
 }
 
+// parked holds handles whose free was refused because a live generation
+// still referenced them, mirroring what each module control plane keeps:
+// the owner remembers the handle and retries it once the generations
+// drain.
+type parked []decap.ModuleHandle // owner: the test itself
+
+// freeOrPark frees the handle when it is dangling and parks it when the
+// free is refused.
+func (m *parked) freeOrPark(handle decap.ModuleHandle) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		*m = append(*m, handle)
+	}
+}
+
+// retry re-frees every parked handle, dropping the ones whose
+// generations have drained.
+func (m *parked) retry() {
+	kept := (*m)[:0]
+	for _, handle := range *m {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear((*m)[len(kept):])
+	*m = kept
+}
+
 // agentRootMemoryNode returns the named agent's own root memory-context
 // node.
 //
@@ -63,12 +91,12 @@ func agentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name string) ffi.A
 }
 
 // TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy verifies that
-// releasing a module's creator handle does not tear it down while the
+// the owner's free attempt does not tear a module down while the
 // currently published generation still references it.
 //
-// A regression that frees unconditionally on release would advance the
-// agent's root context free count by one right after release, even though
-// nothing has yet superseded the generation this module is published in.
+// A regression that frees unconditionally would advance the agent's root
+// context free count by one right after the attempt, even though nothing
+// has yet superseded the generation this module is published in.
 func TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy(t *testing.T) {
 	h := newLifetimeHarness(t)
 	shm := h.SharedMemory()
@@ -84,22 +112,25 @@ func TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy(t *testing.T) {
 
 	before := agentRootMemoryNode(t, shm, "cpml-live")
 
-	handle.Free()
+	var parkedHandles parked
+	parkedHandles.freeOrPark(handle)
 
 	after := agentRootMemoryNode(t, shm, "cpml-live")
 	require.Equalf(
 		t, before.BFreeCount, after.BFreeCount,
-		"creator release destroyed the module while the live generation still referenced it",
+		"the free attempt destroyed the module while the live generation still referenced it",
 	)
+	require.Len(t, parkedHandles, 1, "the refused handle must be parked with its owner")
 }
 
-// TestModuleLifetime_Superseded_DestroyedOnNextOwnAPICall guards a superseded
-// module's destroy timing.
+// TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires guards a
+// superseded module's destroy timing.
 //
-// Publishing "decap0" a second time parks the first module, but only the next
-// construction of decap's type drains that park list and destroys it, never a
-// release by itself.
-func TestModuleLifetime_Superseded_DestroyedOnNextOwnAPICall(t *testing.T) {
+// Publishing "decap0" a second time retires the generation that
+// referenced the first module, leaving it dangling. The owner's pending
+// free — refused while the module was still referenced — succeeds once
+// the update itself runs it again on the way out, and never before.
+func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) {
 	h := newLifetimeHarness(t)
 	shm := h.SharedMemory()
 
@@ -122,29 +153,40 @@ func TestModuleLifetime_Superseded_DestroyedOnNextOwnAPICall(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	// The second publish retired the generation referencing the first
+	// module, so the owner's retry of its parked free destroys it.
+	var parkedHandles parked
+	parkedHandles.freeOrPark(first)
+	parkedHandles.retry()
+	require.Empty(t, parkedHandles, "the first module must be destroyed once its generation retired")
+
 	afterPublish := agentRootMemoryNode(t, shm, "cpml-supersede")
 	require.Equalf(
-		t, mid.BFreeCount, afterPublish.BFreeCount,
-		"the superseded module was destroyed before decap's own API drained it",
+		t, mid.BFreeCount+1, afterPublish.BFreeCount,
+		"the superseded module must be destroyed once the owner retries after the retiring update",
 	)
 
-	second.Free()
+	// The second module is the live generation's own entry: its free
+	// attempt is refused, destroys nothing, and is parked with the owner.
+	parkedHandles.freeOrPark(second)
+	require.Len(t, parkedHandles, 1, "the live generation's module must be parked, not destroyed")
 
 	afterSecondRelease := agentRootMemoryNode(t, shm, "cpml-supersede")
 	require.Equalf(
-		t, mid.BFreeCount, afterSecondRelease.BFreeCount,
-		"releasing the live generation's own creator handle destroyed the parked module by itself",
+		t, afterPublish.BFreeCount, afterSecondRelease.BFreeCount,
+		"the live generation's own module must not be destroyed by its refused free",
 	)
 
 	_, err = backend.UpdateModule(
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")},
 	)
 	require.NoError(t, err)
+	parkedHandles.retry()
 
 	afterThirdCreate := agentRootMemoryNode(t, shm, "cpml-supersede")
 	require.Equalf(
-		t, mid.BFreeCount+1, afterThirdCreate.BFreeCount,
-		"the superseded module was not destroyed once decap's own API constructed again",
+		t, afterSecondRelease.BFreeCount+1, afterThirdCreate.BFreeCount,
+		"the second module must be destroyed once the owner retries after the retiring update",
 	)
 }
 
@@ -152,8 +194,11 @@ func TestModuleLifetime_Superseded_DestroyedOnNextOwnAPICall(t *testing.T) {
 // destruction under a pinned reader generation.
 //
 // An unlocked counters reader's pin on a superseded generation defers that
-// module's destruction until the pin drops, and destruction then still needs
-// decap's own API to run before it happens, exactly once.
+// module's destruction until the pin drops. Dropping the pin releases the
+// generation in the reader's own context, where no owner code runs, so
+// destruction still waits for the owner's next update to retry the
+// pending free — at which point every superseded module of the round is
+// destroyed, exactly once each.
 func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	h := newLifetimeHarness(t)
 	shm := h.SharedMemory()
@@ -168,7 +213,11 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
 	)
 	require.NoError(t, err)
-	first.Free()
+
+	var parkedHandles parked
+	parkedHandles.freeOrPark(first)
+	require.Len(t, parkedHandles, 1,
+		"the pinned generation's module must be parked, not destroyed")
 
 	// Pin the generation that publishes the first module before superseding
 	// it, the same way an unlocked counters reader would.
@@ -180,7 +229,8 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")},
 	)
 	require.NoError(t, err)
-	second.Free()
+	parkedHandles.freeOrPark(second)
+	parkedHandles.retry()
 
 	afterSecond := agentRootMemoryNode(t, shm, "cpml-pinned")
 	require.Equalf(
@@ -193,7 +243,7 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	afterUnpin := agentRootMemoryNode(t, shm, "cpml-pinned")
 	require.Equalf(
 		t, mid.BFreeCount, afterUnpin.BFreeCount,
-		"dropping the pin destroyed the module directly, without decap's own API draining it",
+		"dropping the pin must not destroy the module directly: only its owner's free may",
 	)
 
 	_, err = backend.UpdateModule(
@@ -201,9 +251,15 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	// The pin dropped and the third publish retired the second module's
+	// generation, so the owner's retry destroys both parked handles.
+	parkedHandles.retry()
+	require.Empty(t, parkedHandles,
+		"both parked modules must be destroyed once their generations drained")
+
 	afterThird := agentRootMemoryNode(t, shm, "cpml-pinned")
 	require.Equalf(
-		t, mid.BFreeCount+1, afterThird.BFreeCount,
-		"the module was not destroyed once the pin dropped and decap's own API ran again",
+		t, mid.BFreeCount+2, afterThird.BFreeCount,
+		"the superseded modules must be destroyed once the owner retries after their generations drained",
 	)
 }

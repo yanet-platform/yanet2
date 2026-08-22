@@ -3,10 +3,13 @@ package decap
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
 	"sync"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,7 +24,7 @@ var (
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 // Backend abstracts shared memory operations.
@@ -38,20 +41,28 @@ type config struct {
 
 // Free releases the module handle held by the config.
 //
-// It is safe to call even when no handle is held.
-func (m *config) Free() {
-	if m.Module != nil {
-		m.Module.Free()
+// It is safe to call even when no handle is held. The result is the
+// handle's: nil when destroyed, ffi.ErrStillReferenced when a live
+// generation still references it and the caller must remember it.
+func (m *config) Free() error {
+	if m.Module == nil {
+		return nil
 	}
+	return m.Module.Free()
 }
 
 // DecapService implements the DecapService gRPC server.
 type DecapService struct {
 	decappb.UnimplementedDecapServiceServer
 
-	mu      sync.Mutex
-	backend Backend
-	configs map[string]*config
+	mu sync.Mutex
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []ModuleHandle
+	backend  Backend
+	configs  map[string]*config
 }
 
 // NewDecapService constructs a DecapService backed by the given Backend.
@@ -144,16 +155,20 @@ func comparePrefixes(first, second netip.Prefix) int {
 	)
 }
 
-// updateConfig calls the backend to publish cfg and, on success, frees the old
-// module handle and stores the new config. The caller must hold m.mu.
+// updateConfig calls the backend to publish cfg, retries this service's
+// deferred handles (the publish retired the generations that were
+// holding them), frees or defers the old module handle, and stores the
+// new config. The caller must hold m.mu.
 func (m *DecapService) updateConfig(name string, cfg *config) error {
 	mod, err := m.backend.UpdateModule(name, cfg.Prefixes)
 	if err != nil {
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
 
+	m.reclaimDeferred()
+
 	if old, ok := m.configs[name]; ok {
-		old.Free()
+		m.parkOrFree(old)
 	}
 
 	m.configs[name] = &config{
@@ -162,4 +177,37 @@ func (m *DecapService) updateConfig(name string, cfg *config) error {
 	}
 
 	return nil
+}
+
+// parkOrFree frees the handle when it is dangling and parks it for
+// retry when a live generation still references it. The caller must hold
+// m.mu.
+func (m *DecapService) parkOrFree(handle ModuleHandle) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *DecapService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *DecapService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

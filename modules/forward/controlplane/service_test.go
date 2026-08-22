@@ -23,7 +23,9 @@ import (
 
 type mockModuleHandle struct{}
 
-func (m *mockModuleHandle) Free() {}
+func (m *mockModuleHandle) Free() error {
+	return nil
+}
 
 type mockBackend struct{}
 

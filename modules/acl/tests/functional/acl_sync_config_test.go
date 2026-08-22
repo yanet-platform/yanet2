@@ -71,7 +71,7 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 
 	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 
 	require.NoError(t, backend.UpdateModule(handle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
@@ -100,7 +100,7 @@ func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 
 	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 	require.NoError(t, backend.UpdateModule(handle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
 
@@ -110,7 +110,7 @@ func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 
 	handle, err = backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", nil)
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 
 	// A module publish waits for a worker round to acknowledge the new
 	// generation, and only HandlePackets drives rounds in this harness.

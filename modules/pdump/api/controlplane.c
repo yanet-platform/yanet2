@@ -163,14 +163,7 @@ pdump_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "pdump",
-		    name,
-		    pdump_module_config_destroy,
-		    err
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "pdump", name, err)) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -204,9 +197,14 @@ pdump_module_config_new(
 	return &config->cp_module;
 }
 
-void
-pdump_module_config_free(struct cp_module *module) {
-	cp_module_release(module);
+int
+pdump_module_config_free(struct cp_module *module, yanet_error **err) {
+	if (cp_module_try_destroy(module, err)) {
+		return -1;
+	}
+
+	pdump_module_config_destroy(module);
+	return 0;
 }
 
 int

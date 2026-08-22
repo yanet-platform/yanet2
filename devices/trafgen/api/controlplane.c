@@ -23,11 +23,6 @@ cp_device_trafgen_new(
 	const struct cp_device_trafgen_config *config,
 	yanet_error **err
 ) {
-	// Reclaim this type's parked entries before the wrapper allocation:
-	// a parked instance can be most of the arena, so reclaiming it first
-	// can be the difference between success and failure under pressure.
-	cp_device_drain_parked(agent, "trafgen", cp_device_trafgen_destroy);
-
 	struct cp_device_trafgen *cp_device_trafgen =
 		(struct cp_device_trafgen *)memory_balloc(
 			&agent->memory_context, sizeof(struct cp_device_trafgen)
@@ -66,7 +61,7 @@ cp_device_trafgen_new(
 			yanet_error_add(err, "failed to allocate worker state");
 			// Construction failed before registration, so no
 			// other holder can observe this device: destroy it
-			// directly instead of parking it.
+			// directly here.
 			cp_device_trafgen_destroy(&cp_device_trafgen->cp_device
 			);
 			return NULL;
@@ -79,9 +74,14 @@ cp_device_trafgen_new(
 	return &cp_device_trafgen->cp_device;
 }
 
-void
-cp_device_trafgen_free(struct cp_device *cp_device) {
-	cp_device_release(cp_device);
+int
+cp_device_trafgen_free(struct cp_device *cp_device, yanet_error **err) {
+	if (cp_device_try_destroy(cp_device, err)) {
+		return -1;
+	}
+
+	cp_device_trafgen_destroy(cp_device);
+	return 0;
 }
 
 // Destroy a trafgen device: the subclass buffers, the base resources,

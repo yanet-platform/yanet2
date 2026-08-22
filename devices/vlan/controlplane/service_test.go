@@ -16,10 +16,8 @@ import (
 // calls do not leak shared-memory arena space.
 //
 // Each update after the first supersedes the previous generation's device;
-// freeing that handle parks it on the agent, and the next update's
-// construction reclaims the parked entry. Exactly one parked device's worth
-// of space stays held between updates, so free bytes must settle after the
-// first supersede instead of decreasing indefinitely.
+// freeing that handle destroys it once it is dangling, so the arena must
+// settle after the first supersede instead of decreasing indefinitely.
 func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(datasize.MB * 32),
@@ -50,9 +48,9 @@ func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 		require.NoError(t, err)
 
 		freeBytes := freeBytesForAgent(t, shm, "vlan")
-		// The first supersede parks the old device without destroying
-		// it, so its space stays held once; every later construction
-		// reclaims the previous parked entry before parking a new one.
+		// The first supersede is measured before anything was freed
+		// against it; every later update destroys its superseded
+		// predecessor, so free bytes must hold steady from there on.
 		if idx > 1 {
 			require.Equalf(
 				t,

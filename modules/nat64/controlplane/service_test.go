@@ -19,8 +19,9 @@ type mockHandle struct {
 	freed bool
 }
 
-func (m *mockHandle) Free() {
+func (m *mockHandle) Free() error {
 	m.freed = true
+	return nil
 }
 
 type mockBackend struct {

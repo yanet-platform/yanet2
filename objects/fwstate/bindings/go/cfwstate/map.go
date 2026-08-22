@@ -55,7 +55,9 @@ package cfwstate
 import "C"
 
 import (
+	"errors"
 	"fmt"
+	"syscall"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -310,21 +312,37 @@ func (m *MapObjectConfig) FreeStaleLayers() error {
 	return nil
 }
 
-// Free drops the reference construction took on the caller's behalf.
-//
-// Safe to call multiple times: subsequent calls are no-ops. The object is
-// not destroyed on the spot: once its last reference drops it parks on
-// the agent's list, and the next construction of the same object type
-// reclaims it.
-func (m *MapObjectConfig) Free() {
-	if ptr := m.asRawPtr(); ptr != nil {
-		if m.kind == KindV6 {
-			C.fwstate_map_v6_object_config_free(ptr)
-		} else {
-			C.fwstate_map_v4_object_config_free(ptr)
-		}
-		m.ptr = nil
+// Free destroys the object when it is dangling — referenced by no live
+// configuration generation — and reports nil. While a live generation
+// still references it the free is refused with ffi.ErrStillReferenced
+// and the handle stays usable: the caller must remember it and free it
+// again once the generations holding it drain. Safe to call multiple
+// times: subsequent calls are no-ops reporting nil.
+func (m *MapObjectConfig) Free() error {
+	ptr := m.asRawPtr()
+	if ptr == nil {
+		return nil
 	}
+	kind := m.kind
+	var cErr *C.yanet_error
+	var rc C.int
+	var errno error
+	if kind == KindV6 {
+		rc, errno = C.fwstate_map_v6_object_config_free(ptr, &cErr)
+	} else {
+		rc, errno = C.fwstate_map_v4_object_config_free(ptr, &cErr)
+	}
+	if rc == 0 {
+		m.ptr = nil
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		// The refused attempt allocated an error chain; release it
+		// rather than leaking one per attempt. The object is intact.
+		C.yanet_error_free(cErr)
+		return ffi.ErrStillReferenced
+	}
+	return fmt.Errorf("failed to free map object: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 }
 
 // Publish upserts this object into a new dataplane configuration generation
@@ -355,6 +373,7 @@ func (m *MapObjectConfig) Publish(agent *ffi.Agent) error {
 			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}
+
 	return nil
 }
 
@@ -373,6 +392,7 @@ func DeleteMapObject(agent *ffi.Agent, objectType, objectName string) error {
 		cObjectName,
 		&cErr,
 	)
+
 	if rc != 0 {
 		return fmt.Errorf(
 			"failed to delete object type %q name %q: %w",

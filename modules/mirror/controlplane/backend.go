@@ -26,12 +26,16 @@ func (m *backend) UpdateModule(name string, rules []cmirror.MirrorRule) (ModuleH
 	}
 
 	if err := module.Update(rules); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		module.Free()
+		if err := module.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 

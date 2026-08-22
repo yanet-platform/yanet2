@@ -22,6 +22,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -59,11 +60,12 @@ type fakeHandle struct {
 	transferred bool
 }
 
-func (m *fakeHandle) Free() {
+func (m *fakeHandle) Free() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.freeCount++
+	return nil
 }
 
 // FreeCount returns how many times Free has been called, so a test can
@@ -247,7 +249,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	for _, name := range moduleNames {
 		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, "", "", nil)
 		require.NoError(testingTB, moduleErr)
-		testingTB.Cleanup(moduleConfig.Free)
+		testingTB.Cleanup(func() { _ = moduleConfig.Free() })
 		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
 	}
 	require.NoError(testingTB, agent.UpdateModules(moduleConfigs))
@@ -275,10 +277,11 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 		Name:      "pipeline0",
 		Functions: []string{"function0"},
 	}))
-	require.NoError(testingTB, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
-	}}))
+	}})
+	require.NoError(testingTB, err)
 
 	return harness, agent
 }

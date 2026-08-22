@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
@@ -78,10 +80,11 @@ type configEntry struct {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *configEntry) Free() {
-	if m.Handle != nil {
-		m.Handle.Free()
+func (m *configEntry) Free() error {
+	if m.Handle == nil {
+		return nil
 	}
+	return m.Handle.Free()
 }
 
 // RouteService is the gRPC service implementation backing the slim
@@ -90,6 +93,12 @@ type RouteService struct {
 	routepb.UnimplementedRouteServiceServer
 
 	backend Backend
+
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []ModuleHandle
 
 	// shmLock serializes shared-memory mutations and protects the
 	// configs map.
@@ -267,7 +276,8 @@ func (m *RouteService) DeleteConfig(
 	if err := m.backend.DeleteModule(name); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
-	entry.Free()
+	m.reclaimDeferred()
+	m.parkOrFree(entry.Handle)
 	delete(m.configs, name)
 
 	return &routepb.DeleteConfigResponse{}, nil
@@ -419,8 +429,10 @@ func (m *RouteService) UpdateFIB(
 		nexthopCounterNames = nil
 	}
 
+	m.reclaimDeferred()
+
 	if old, ok := m.configs[name]; ok {
-		old.Free()
+		m.parkOrFree(old.Handle)
 	}
 
 	// The counts are read once, here, off the handle just published: the
@@ -508,4 +520,37 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 	}
 
 	return result
+}
+
+// parkOrFree frees the handle when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.shmLock.
+func (m *RouteService) parkOrFree(handle ModuleHandle) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *RouteService) ReclaimDeferred() {
+	m.shmLock.Lock()
+	defer m.shmLock.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.shmLock.
+func (m *RouteService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

@@ -28,7 +28,9 @@ func (m *backend) UpdateModule(name string) (ModuleHandle, error) {
 	if err := m.agent.UpdateModules(
 		[]ffi.ModuleConfig{mod.AsFFIModule()},
 	); err != nil {
-		mod.Free()
+		if err := mod.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module %q: %w", name, err)
 	}
 

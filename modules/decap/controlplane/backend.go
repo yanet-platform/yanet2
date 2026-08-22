@@ -28,7 +28,9 @@ func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHand
 
 	for _, prefix := range prefixes {
 		if err := mod.PrefixAdd(prefix); err != nil {
-			mod.Free()
+			if err := mod.Free(); err != nil {
+				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+			}
 			return nil, fmt.Errorf("failed to add prefix %v: %w", prefix, err)
 		}
 	}
@@ -36,7 +38,9 @@ func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHand
 	if err := m.agent.UpdateModules(
 		[]ffi.ModuleConfig{mod.AsFFIModule()},
 	); err != nil {
-		mod.Free()
+		if err := mod.Free(); err != nil {
+			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+		}
 		return nil, fmt.Errorf("failed to update module %q: %w", name, err)
 	}
 

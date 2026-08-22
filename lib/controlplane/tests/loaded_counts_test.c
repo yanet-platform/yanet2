@@ -10,8 +10,9 @@
  * use-after-free.
  *
  * The counts follow generation references: a copy, an upsert and a delete
- * adjust them where the reference changes hands, and the free callback only
- * parks a device whose last reference dropped. This test drives the full
+ * adjust them where the reference changes hands, and a zero reference
+ * count only means the item is dangling, owned by whoever created it. This
+ * test drives the full
  * update path: it puts a device into the live generation (upsert),
  * supersedes the owning agent, and checks that reclamation is withheld while
  * the count is non-zero and proceeds once the device leaves the live
@@ -31,6 +32,7 @@
 
 #include "lib/logging/log.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,8 +40,10 @@
 #define LOADED_COUNTS_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
 
 // Install a plain device owned by agent, mirroring the plain control
-// plane: construct, update, then drop the construction reference so the
-// live generation holds the only remaining reference.
+// plane: construct, then update so the live generation holds the only
+// reference. The owner's free attempt afterwards is answered with EAGAIN,
+// exactly as it is in production, and the handle would be retried once
+// the generations drain.
 static int
 install_device(
 	struct agent *agent,
@@ -69,10 +73,16 @@ install_device(
 		"update_devices failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
-	// Drop the construction reference. If the update displaced this
-	// agent's own older device, that older one already parked; this
-	// device stays held by the live generation.
-	cp_device_plain_free(dev);
+	// The live generation now references the device, so the owner's free
+	// attempt must fail with EAGAIN. If the update displaced this agent's
+	// own older device, that older one is already dangling at zero
+	// references, awaiting its owner's next free attempt.
+	yanet_error *free_err = NULL;
+	TEST_ASSERT(
+		cp_device_plain_free(dev, &free_err) == -1 && errno == EAGAIN,
+		"freeing a generation-referenced device must fail with EAGAIN"
+	);
+	yanet_error_free(free_err);
 	return TEST_SUCCESS;
 }
 
@@ -126,9 +136,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	);
 
 	// Agent B replaces dev0 with its own. Agent A's device loses its last
-	// reference when the superseded generation is freed, so it parks on
-	// A and A's loaded_device_count drops to zero. The device's memory
-	// remains in A's arena until A itself is reclaimed.
+	// reference when the superseded generation is freed, so it turns
+	// dangling and A's loaded_device_count drops to zero. The device's
+	// memory remains in A's arena until A itself is reclaimed.
 	TEST_ASSERT_SUCCESS(
 		install_device(agent_b, dp_config, cp_config, "dev0"),
 		"failed to replace dev0 under agent B"
@@ -146,7 +156,7 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	);
 
 	// Both counts now zero: reclamation may proceed, and agent A's arena
-	// (still holding the parked device's memory) is freed with it.
+	// (still holding the dangling device's memory) is freed with it.
 	agent_free_unused_agents(agent_b);
 	TEST_ASSERT_NULL(
 		ADDR_OF(&agent_b->prev),
@@ -211,9 +221,14 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		"re-inserting the same device must not double-count"
 	);
 
-	// Drop the construction reference, as the control plane does after an
-	// update: the live generation keeps holding the device.
-	cp_device_plain_free(dev);
+	// The live generation keeps holding the device, so the owner's free
+	// attempt is answered with EAGAIN, as the control plane would see it.
+	yanet_error *free_err = NULL;
+	TEST_ASSERT(
+		cp_device_plain_free(dev, &free_err) == -1 && errno == EAGAIN,
+		"freeing a generation-referenced device must fail with EAGAIN"
+	);
+	yanet_error_free(free_err);
 
 	return TEST_SUCCESS;
 }

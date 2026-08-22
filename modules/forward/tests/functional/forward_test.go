@@ -1,6 +1,7 @@
 package forward_test
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
@@ -76,7 +78,7 @@ func applyRules(
 
 	handle, err := backend.UpdateModule(name, rules)
 	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	t.Cleanup(func() { _ = handle.Free() })
 	return handle
 }
 
@@ -132,7 +134,7 @@ func wireForwardPipeline(
 	primarySink := configName + "-sink"
 	primarySinkHandle, err := fwdBackend.UpdateModule(primarySink, catchAllForwardRules(primaryDevice))
 	require.NoError(t, err)
-	t.Cleanup(primarySinkHandle.Free)
+	t.Cleanup(func() { _ = primarySinkHandle.Free() })
 
 	// Extra device sinks: each gets its own input pipeline with a forward
 	// sink so packets re-routed via ModeIn reach the output stage.
@@ -140,7 +142,7 @@ func wireForwardPipeline(
 		sinkName := configName + "-sink-" + dev
 		sinkHandle, err := fwdBackend.UpdateModule(sinkName, catchAllForwardRules(dev))
 		require.NoError(t, err)
-		t.Cleanup(sinkHandle.Free)
+		t.Cleanup(func() { _ = sinkHandle.Free() })
 
 		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 			Name: sinkName,
@@ -207,7 +209,8 @@ func wireForwardPipeline(
 		})
 	}
 
-	require.NoError(t, agent.UpdatePlainDevices(allDevices))
+	_, err = plain.UpdateDevices(agent, allDevices)
+	require.NoError(t, err)
 }
 
 // fwdEtherLayers returns shared Ethernet, IPv4, IPv6, and ICMPv4 layer
@@ -715,10 +718,11 @@ func TestForward_MinAction(t *testing.T) {
 // under ASAN red zones; fewer rules round both into the same pool and hide a
 // leak in either array from BlockAllocatorFreeSize.
 //
-// Releasing a handle only parks it: reclaim happens on the type's next
-// construction, not on release. Each round below publishes and releases one
-// "forward0" generation, and that construction drains the round before it, so
-// from round 1 the arena holds two generations' worth of rules and every
+// A published handle's free is refused and recorded; the next round's
+// publish retires the previous generation and the update's own retry of
+// the pending free destroys that round's module. Each round below
+// publishes and frees one "forward0" generation, so from round 1 the
+// arena holds one published generation plus one queued free, and every
 // round's free byte count must match the last.
 func TestForwardConfigMemoryLeak(t *testing.T) {
 	_, agent, _ := setupForwardHarness(t, []string{"port0"})
@@ -732,6 +736,7 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 		}
 	}
 
+	var parkedHandles modulePark
 	var baseline uint64
 	for round := range 4 {
 		module, err := cforward.NewModuleConfig(agent, "forward0")
@@ -742,11 +747,16 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 			agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}),
 			"round %d: publish failed", round,
 		)
-		module.Free()
+		// The publish retired the previous round's generation, so the
+		// owner's retry of the parked handle destroys that round's
+		// module; this round's handle is then freed — destroyed when
+		// dangling, parked while the new generation references it.
+		parkedHandles.retry()
+		parkedHandles.freeOrPark(module)
 
 		if round == 0 {
-			// Nothing is parked yet for this round's construction to
-			// drain, so this round's shape isn't comparable to later ones.
+			// No superseded generation exists yet, so this round's
+			// shape isn't comparable to later ones.
 			continue
 		}
 
@@ -760,4 +770,30 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 			)
 		}
 	}
+}
+
+// modulePark holds module handles whose free was refused because a live
+// generation still referenced them, mirroring what the module control
+// plane keeps: the owner remembers the handle and retries it once the
+// generations drain.
+type modulePark []forward.ModuleHandle
+
+func (m *modulePark) freeOrPark(handle forward.ModuleHandle) {
+	if handle == nil {
+		return
+	}
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		*m = append(*m, handle)
+	}
+}
+
+func (m *modulePark) retry() {
+	kept := (*m)[:0]
+	for _, handle := range *m {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear((*m)[len(kept):])
+	*m = kept
 }

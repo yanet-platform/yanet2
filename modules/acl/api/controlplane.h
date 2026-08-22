@@ -21,8 +21,12 @@ struct agent;
 struct cp_module;
 struct fwstate_sync_emit_config;
 
-void
-acl_module_config_free(struct cp_module *cp_module);
+// Destroy the module when it is dangling, per cp_module_try_destroy.
+//
+// Returns -1 with errno EAGAIN while a live generation still references
+// the module; the caller must keep its handle and retry later.
+int
+acl_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 struct acl_action {
 	enum acl_rule_action_kind kind;

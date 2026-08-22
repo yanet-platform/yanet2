@@ -26,6 +26,7 @@
 
 #include "lib/logging/log.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -629,9 +630,20 @@ install_device_with_pipeline(
 	}
 	struct cp_device *devs[] = {dev};
 	int rc = cp_config_update_devices(dp_config, cp_config, 1, devs, err);
-	// Drop the construction reference: on success the live generation
-	// holds the device, on failure it parks on the agent.
-	cp_device_plain_free(dev);
+	// On success the live generation references the device and the free
+	// attempt is answered with EAGAIN for a later retry; on failure the
+	// device was never registered, is dangling at zero references, and
+	// the free destroys it on the spot.
+	yanet_error *free_err = NULL;
+	int free_rc = cp_device_plain_free(dev, &free_err);
+	yanet_error_free(free_err);
+	if (rc == 0) {
+		if (!(free_rc == -1 && errno == EAGAIN)) {
+			return -1;
+		}
+	} else if (free_rc != 0) {
+		return -1;
+	}
 	return rc;
 }
 

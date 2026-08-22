@@ -87,12 +87,7 @@ route_mpls_module_config_new(
 	}
 
 	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "route-mpls",
-		    name,
-		    route_mpls_module_config_destroy,
-		    err
+		    &config->cp_module, agent, "route-mpls", name, err
 	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
@@ -111,9 +106,14 @@ route_mpls_module_config_new(
 	return &config->cp_module;
 }
 
-void
-route_mpls_module_config_free(struct cp_module *cp_module) {
-	cp_module_release(cp_module);
+int
+route_mpls_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	route_mpls_module_config_destroy(cp_module);
+	return 0;
 }
 
 typedef int (*route_mpls_rule_check_func)(

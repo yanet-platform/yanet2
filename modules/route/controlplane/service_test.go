@@ -54,8 +54,9 @@ func (m *fakeHandle) FIBRangeCountV6() uint64 {
 	return m.rangesV6
 }
 
-func (m *fakeHandle) Free() {
+func (m *fakeHandle) Free() error {
 	m.freed = true
+	return nil
 }
 
 // fakeBackend is an in-memory implementation of route.Backend.

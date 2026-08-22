@@ -10,12 +10,11 @@
 // structure behind it, not just a bare memory context, such as one that
 // constructs a module through its own control-plane API.
 //
-// The allocator does not zero what it hands out, and the parked-module
-// reclaim folded into production module construction reads an
-// uninitialized agent's list head as a live pointer. Zeroing the whole
-// structure, not just that one field, keeps a field a later change adds
-// starting at zero too, matching what a freshly attached production
-// agent gets.
+// The allocator does not zero what it hands out, and the production
+// module lifecycle this harness runs reads agent fields like the loaded
+// counts, which stale bytes would corrupt. Zeroing the whole structure,
+// not just any one field, keeps a field a later change adds starting at
+// zero too, matching what a freshly attached production agent gets.
 //
 // The stand-in also wires a minimal dp_config carrying the fwstate
 // module type and the fwstate-map object types, and a cp_config holding

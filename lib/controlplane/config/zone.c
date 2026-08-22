@@ -1071,29 +1071,17 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 				"failed to upsert device '%s'",
 				device_config.name
 			);
-			// The bootstrap holds the configuration lock
-			// throughout, so drop the construction reference
-			// the lock-holding way: a plain unref, whose
-			// zero-transition parking leaves the unregistered
-			// device on the agent instead of leaking it into
-			// the arena untracked.
-			registry_item_unref(
-				&cp_device->config_item,
-				cp_device_registry_item_free_cb,
-				NULL
+			// The upsert failed, so the device was never
+			// registered: it is dangling at a zero reference count
+			// and nobody else knows it exists. Destroy it here.
+			cp_device_fini(cp_device);
+			memory_bfree(
+				&agent->memory_context,
+				cp_device,
+				sizeof(struct cp_device)
 			);
 			goto error;
 		}
-
-		// The bootstrap holds no creator handle beyond this
-		// registration and already holds the configuration lock, so
-		// spend the construction reference with a plain unref and
-		// leave the registry's generation reference as the only one.
-		registry_item_unref(
-			&cp_device->config_item,
-			cp_device_registry_item_free_cb,
-			NULL
-		);
 	}
 
 	return cp_config_gen;

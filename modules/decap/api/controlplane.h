@@ -14,8 +14,12 @@ decap_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
-void
-decap_module_config_free(struct cp_module *cp_module);
+// Destroy the module when it is dangling, per cp_module_try_destroy.
+//
+// Returns -1 with errno EAGAIN while a live generation still references
+// the module; the caller must keep its handle and retry later.
+int
+decap_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 int
 decap_module_config_data_init(

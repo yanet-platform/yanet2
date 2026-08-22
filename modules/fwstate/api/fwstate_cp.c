@@ -114,12 +114,7 @@ fwstate_module_config_new(
 	}
 
 	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    FWSTATE_MODULE_NAME,
-		    name,
-		    fwstate_module_config_destroy,
-		    err
+		    &config->cp_module, agent, FWSTATE_MODULE_NAME, name, err
 	    )) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
@@ -238,9 +233,14 @@ fwstate_module_config_destroy(struct cp_module *cp_module) {
 	);
 }
 
-void
-fwstate_module_config_free(struct cp_module *cp_module) {
-	cp_module_release(cp_module);
+int
+fwstate_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	fwstate_module_config_destroy(cp_module);
+	return 0;
 }
 
 struct fwstate_sync_config

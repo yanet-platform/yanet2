@@ -19,12 +19,12 @@ cp_device_plain_new(
 	yanet_error **err
 );
 
-// Drop the creator's construction reference.
+// Destroy the device when it is dangling, per cp_device_try_destroy.
 //
-// Parks the device on its agent when this is the last reference, leaving
-// destruction to the next plain-device construction's reclaim.
-void
-cp_device_plain_free(struct cp_device *cp_device);
+// Returns -1 with errno EAGAIN while a live generation still references
+// the device; the caller must keep its handle and retry later.
+int
+cp_device_plain_free(struct cp_device *cp_device, yanet_error **err);
 
 struct cp_device_plain_config *
 cp_device_plain_config_new(

@@ -3,6 +3,7 @@ package nat64
 import (
 	"bytes"
 	"context"
+	"errors"
 	"maps"
 	"math"
 	"net/netip"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
@@ -41,10 +43,16 @@ func WithNAT64ServiceLog(log *zap.Logger) NAT64ServiceOption {
 type NAT64Service struct {
 	nat64pb.UnimplementedNAT64ServiceServer
 
-	mu      sync.Mutex
-	backend Backend
-	configs map[string]config
-	log     *zap.Logger
+	mu sync.Mutex
+
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []ModuleHandle
+	backend  Backend
+	configs  map[string]config
+	log      *zap.Logger
 }
 
 type config struct {
@@ -55,10 +63,11 @@ type config struct {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *config) Free() {
-	if m.Module != nil {
-		m.Module.Free()
+func (m *config) Free() error {
+	if m.Module == nil {
+		return nil
 	}
+	return m.Module.Free()
 }
 
 func (m config) Clone() config {
@@ -398,7 +407,8 @@ func (m *NAT64Service) updateModuleConfig(name string, inst config) error {
 		return err
 	}
 
-	inst.Free()
+	m.reclaimDeferred()
+	m.parkOrFree(inst.Module)
 	inst.Module = module
 	m.configs[name] = inst
 
@@ -417,4 +427,40 @@ func adjustMappingsAfterPrefixRemove(mappings []Mapping, removed uint32) []Mappi
 		out = append(out, mapping)
 	}
 	return out
+}
+
+// parkOrFree frees the handle when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.mu.
+func (m *NAT64Service) parkOrFree(handle ModuleHandle) {
+	if handle == nil {
+		return
+	}
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *NAT64Service) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *NAT64Service) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

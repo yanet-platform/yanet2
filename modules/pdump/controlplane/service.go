@@ -8,6 +8,7 @@ package pdump
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -36,6 +37,12 @@ type PdumpService struct {
 	mutationMu sync.Mutex              // Serializes mutations and reader registration.
 	agent      *ffi.Agent              // FFI agent used for data plane interaction.
 	configs    map[string]*pdumpConfig // Map storing the active configuration for each pdump module, keyed by name.
+
+	// deferred holds superseded module handles whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []*pdumpConfig
 	// Slice of active ring buffer readers, each corresponding to an ongoing ReadDump stream.
 	// Used to manage and terminate these readers during config updates or shutdown.
 	ringReaders []ringReader
@@ -56,10 +63,11 @@ type pdumpConfig struct {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *pdumpConfig) Free() {
-	if m.FFIModule != nil {
-		m.FFIModule.Free()
+func (m *pdumpConfig) Free() error {
+	if m.FFIModule == nil {
+		return nil
 	}
+	return m.FFIModule.Free()
 }
 
 type ringReader struct {
@@ -218,7 +226,12 @@ func (m *PdumpService) DeleteConfig(
 				if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
 					return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 				}
-				config.Free()
+
+				// The delete retired the generation holding this
+				// config; retry the deferred ones, then retire this
+				// one.
+				m.reclaimDeferred()
+				m.parkOrFree(config)
 			}
 
 			delete(m.configs, name)
@@ -285,19 +298,29 @@ func (m *PdumpService) updateModuleConfig(
 
 	if modConfig != nil {
 		if err := m.transferConfigParameters(name, modConfig, ffiConfig); err != nil {
-			ffiConfig.Free()
+			if err := ffiConfig.Free(); err != nil {
+				m.log.Error("failed to free unpublished pdump module",
+					zap.String("name", name), zap.Error(err))
+			}
 			return err
 		}
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{ffiConfig.AsFFIModule()}); err != nil {
-		ffiConfig.Free()
+		if err := ffiConfig.Free(); err != nil {
+			m.log.Error("failed to free unpublished pdump module",
+				zap.String("name", name), zap.Error(err))
+		}
 		return fmt.Errorf("failed to update module %s: %w", name, err)
 	}
 
-	// Free old FFI module after successful update
+	// The update retired the generation holding the old module, so
+	// retry this service's deferred handles, then retire the old module
+	// itself: freed outright when dangling, parked while a pinned
+	// generation still references it.
+	m.reclaimDeferred()
 	if modConfig != nil {
-		modConfig.Free()
+		m.parkOrFree(modConfig)
 	}
 
 	// Update the stored FFI module reference
@@ -535,4 +558,37 @@ func defaultModuleConfig() *pdumpConfig {
 			ReadChunkSize: uint32(defaultReadChunkSize.Bytes()),
 		},
 	}
+}
+
+// parkOrFree frees the config when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.mu.
+func (m *PdumpService) parkOrFree(handle *pdumpConfig) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred config, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *PdumpService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *PdumpService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

@@ -48,6 +48,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -885,7 +886,7 @@ func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 	}
 	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
 	require.NoError(tb, err)
-	tb.Cleanup(sinkHandle.Free)
+	tb.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -927,7 +928,8 @@ func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy-out", Weight: 1}},
 		})
 	}
-	require.NoError(tb, agent.UpdatePlainDevices(devices))
+	_, err = plain.UpdateDevices(agent, devices)
+	require.NoError(tb, err)
 }
 
 // BenchmarkACLDatasetTopo replays the dataset traffic through the

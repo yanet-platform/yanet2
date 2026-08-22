@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
@@ -56,9 +57,14 @@ type config struct {
 type TrafgenService struct {
 	trafgenpb.UnimplementedTrafgenServiceServer
 
-	mu      sync.Mutex
-	backend Backend
-	configs map[string]*config
+	mu sync.Mutex
+	// deferred holds superseded devices whose free was refused because
+	// a live configuration generation still referenced them. This
+	// service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []*ctrafgen.DeviceConfig
+	backend  Backend
+	configs  map[string]*config
 }
 
 // NewTrafgenService constructs a TrafgenService backed by the given Backend.
@@ -245,9 +251,10 @@ func (m *TrafgenService) SetRate(
 // apply publishes the full device state through the backend and, on success,
 // stores the new config. The caller must hold m.mu.
 //
-// The superseded handle's Free only drops its construction reference: the
-// device parks on the agent, and the next trafgen construction reclaims it.
-// This mirrors how the module control planes retire superseded configs.
+// The publish retired the generations holding this service's deferred
+// devices; they are retried here, and the superseded handle is retired
+// after: freed outright when dangling, parked while a pinned generation
+// still references it.
 func (m *TrafgenService) apply(
 	name string,
 	packets [][]byte,
@@ -276,8 +283,9 @@ func (m *TrafgenService) apply(
 		Handle:     handle,
 	}
 
+	m.reclaimDeferred()
 	if oldHandle != nil {
-		oldHandle.Free()
+		m.parkOrFree(oldHandle)
 	}
 
 	return nil
@@ -351,4 +359,37 @@ func parsePcap(pcap []byte) ([][]byte, error) {
 	}
 
 	return packets, nil
+}
+
+// parkOrFree frees the device when it is dangling and parks it for
+// retry when a live generation still references it. The caller must
+// hold m.mu.
+func (m *TrafgenService) parkOrFree(handle *ctrafgen.DeviceConfig) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every deferred device, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this service's superseded devices; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *TrafgenService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *TrafgenService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }

@@ -26,14 +26,7 @@ blackhole_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    config,
-		    agent,
-		    "blackhole",
-		    name,
-		    blackhole_module_config_destroy,
-		    error
-	    )) {
+	if (cp_module_init(config, agent, "blackhole", name, error)) {
 		yanet_error_add(error, "failed to init module");
 		memory_bfree(&agent->memory_context, config, sizeof(*config));
 		return NULL;
@@ -42,7 +35,12 @@ blackhole_module_config_new(
 	return config;
 }
 
-void
-blackhole_module_config_free(struct cp_module *config) {
-	cp_module_release(config);
+int
+blackhole_module_config_free(struct cp_module *config, yanet_error **err) {
+	if (cp_module_try_destroy(config, err)) {
+		return -1;
+	}
+
+	blackhole_module_config_destroy(config);
+	return 0;
 }

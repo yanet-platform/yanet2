@@ -2,6 +2,7 @@ package acl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ import (
 // sync config installed — at construction and never updated afterwards;
 // Free releases it.
 type ModuleHandle interface {
-	Free()
+	Free() error
 	AsFFIModule() ffi.ModuleConfig
 	GetInfo() *cacl.AclConfigInfo
 }
@@ -122,10 +123,11 @@ func (m *aclConfig) SyncConfig() *aclpb.SyncConfig {
 // Free releases the module handle held by the config.
 //
 // It is safe to call even when no handle is held.
-func (m *aclConfig) Free() {
-	if m.acl != nil {
-		m.acl.Free()
+func (m *aclConfig) Free() error {
+	if m.acl == nil {
+		return nil
 	}
+	return m.acl.Free()
 }
 
 // configEntry holds the per-name state that lives outside m.mu: the lock
@@ -216,6 +218,12 @@ type ACLService struct {
 	metrics *grpcmetrics.ServerMetrics
 
 	metricsState *aclMetricsState
+
+	// deferred holds superseded acl configs whose free was refused
+	// because a live configuration generation still referenced them.
+	// This service is their owner: it retries them on its next update,
+	// through ReclaimDeferred, and nothing else remembers them.
+	deferred []*aclConfig
 
 	log *zap.Logger
 }
@@ -597,7 +605,10 @@ func (m *ACLService) UpdateConfig(
 		}
 
 		if err := m.backend.UpdateModule(handle); err != nil {
-			handle.Free()
+			if err := handle.Free(); err != nil {
+				m.log.Error("failed to free unpublished acl module",
+					zap.Error(err))
+			}
 			return classifyUpdateError(err)
 		}
 
@@ -617,8 +628,11 @@ func (m *ACLService) UpdateConfig(
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
 
+		// The publish retired the generations holding this service's
+		// deferred configs; retry them, then retire the displaced one.
+		m.ReclaimDeferred()
 		if oldConfig != nil {
-			oldConfig.Free()
+			m.parkOrFree(oldConfig)
 		}
 
 		resp = &aclpb.UpdateConfigResponse{}
@@ -741,7 +755,10 @@ func (m *ACLService) DeleteConfig(
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
 
-		config.Free()
+		// The delete retired the generation holding the published
+		// config; retry the deferred ones, then retire this one.
+		m.ReclaimDeferred()
+		m.parkOrFree(config)
 
 		return nil
 	})
@@ -830,4 +847,38 @@ func (m *ACLService) GetRulesCounters(
 	}
 
 	return &aclpb.GetRulesCountersResponse{Counters: result}, nil
+}
+
+// parkOrFree frees the config when it is dangling and parks it for
+// retry when a live generation still references it.
+func (m *ACLService) parkOrFree(config *aclConfig) {
+	if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.mu.Lock()
+		m.deferred = append(m.deferred, config)
+		m.mu.Unlock()
+	}
+}
+
+// ReclaimDeferred retries every deferred config, dropping the ones whose
+// generations have drained and keeping the rest deferred. It is the
+// reclamation handler for this module's superseded configs; the service
+// itself runs it after each successful publish, and anything else may
+// call it at any time.
+func (m *ACLService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must
+// hold m.mu.
+func (m *ACLService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, config := range m.deferred {
+		if err := config.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, config)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }
