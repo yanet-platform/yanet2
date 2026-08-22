@@ -5,7 +5,7 @@ use aclpb::{
     DeleteConfigRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
-use args::{DeleteCmd, MetricsCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, MetricsCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use serde::{Deserialize, Serialize};
@@ -563,6 +563,40 @@ impl ACLService {
 
         Ok(())
     }
+
+    pub async fn metrics_rules(&mut self, cmd: MetricsRulesCmd) -> Result<(), Error> {
+        let tags = cmd
+            .tags
+            .iter()
+            .map(|entry| parse_tag(entry))
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|message| Error::invalid_argument("metrics-rules", self.metrics.endpoint(), message))?;
+
+        let response = self
+            .metrics
+            .client()
+            .get_metrics_rules(GetMetricsRequest { tags })
+            .await
+            .map_err(self.metrics.status("metrics-rules"))?
+            .into_inner();
+
+        let metrics = response.metrics;
+
+        output::data(
+            || &metrics,
+            || {
+                if metrics.is_empty() {
+                    output::empty(format_args!("No ACL rule metrics found."));
+                    return;
+                }
+
+                let metrics: Vec<Metric> = metrics.iter().cloned().map(Metric::from_proto).collect();
+                print_metrics_table(&metrics)
+            },
+        );
+
+        Ok(())
+    }
 }
 
 /// Parses a `NAME=VALUE` tag entry into a [`MetricTag`].
@@ -588,6 +622,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
+        ModeCmd::MetricsRules(cmd) => service.metrics_rules(cmd).await,
         ModeCmd::RuleCounters(cmd) => service.rule_counters(cmd).await,
     }
 }

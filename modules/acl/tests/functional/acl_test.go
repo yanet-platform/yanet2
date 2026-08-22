@@ -15,6 +15,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
@@ -1214,6 +1215,61 @@ func TestACL_Counters(t *testing.T) {
 		require.NotContains(t, metricNames, "acl_rule_packets")
 		require.NotContains(t, metricNames, "acl_rule_bytes")
 		require.Contains(t, metricNames, "acl_action_allow_packets")
+
+		ruleMetrics, err := svc.RuleMetrics()
+		require.NoError(t, err)
+
+		byName := make(map[string]*commonpb.Metric, len(ruleMetrics))
+		for _, metric := range ruleMetrics {
+			byName[metric.GetName()] = metric
+			require.NotContains(t, metric.GetName(), "acl_action_")
+		}
+
+		rulePackets, ok := byName["acl_rule_packets"]
+		require.True(t, ok, "rule metrics must carry acl_rule_packets")
+		require.Equal(t, uint64(3), rulePackets.GetCounter())
+
+		ruleBytes, ok := byName["acl_rule_bytes"]
+		require.True(t, ok, "rule metrics must carry acl_rule_bytes")
+		require.Equal(t, 3*pktSize, ruleBytes.GetCounter())
+
+		labels := make(map[string]string, len(rulePackets.GetLabels()))
+		for _, label := range rulePackets.GetLabels() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		require.Equal(t, "svc_counter", labels["counter"])
+		require.Equal(t, "test", labels["config"])
+		require.Equal(t, "port0", labels["device"])
+
+		ruleMetricNames := func(tags ...*commonpb.MetricTag) []string {
+			t.Helper()
+
+			got, err := svc.RuleMetrics(tags...)
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(got))
+			for _, metric := range got {
+				names = append(names, metric.GetName())
+			}
+
+			return names
+		}
+
+		require.Contains(t,
+			ruleMetricNames(&commonpb.MetricTag{Name: "counter", Value: "svc_.*"}),
+			"acl_rule_packets",
+			"a counter pattern must reach the dataplane read and survive filtering",
+		)
+		require.Contains(t,
+			ruleMetricNames(&commonpb.MetricTag{Name: "counter", Value: "svc_counter"}),
+			"acl_rule_packets",
+		)
+		require.Empty(t, ruleMetricNames(&commonpb.MetricTag{Name: "counter", Value: "no_such_.*"}))
+		require.Contains(t,
+			ruleMetricNames(&commonpb.MetricTag{Name: "config", Value: "test"}),
+			"acl_rule_packets",
+		)
+		require.Empty(t, ruleMetricNames(&commonpb.MetricTag{Name: "config", Value: "other"}))
 
 		_, err = svc.GetRulesCounters(t.Context(), &aclpb.GetRulesCountersRequest{Name: "missing"})
 		require.Equal(t, codes.NotFound, status.Code(err))

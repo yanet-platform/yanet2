@@ -26,8 +26,10 @@ service ACLService {
 
 // MetricsService exposes ACL module metrics.
 service MetricsService {
-  // GetMetrics returns a snapshot of ACL module metrics.
+  // GetMetrics returns a snapshot of ACL module metrics, excluding per-rule counters.
   rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
+  // GetMetricsRules returns the per-rule counter metrics GetMetrics leaves out.
+  rpc GetMetricsRules(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 message UpdateConfigRequest {

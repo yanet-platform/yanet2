@@ -16,6 +16,8 @@ pub enum ModeCmd {
     Show(ShowCmd),
     /// Show ACL metrics
     Metrics(MetricsCmd),
+    /// Show per-rule ACL counter metrics
+    MetricsRules(MetricsRulesCmd),
     /// Show per-rule ACL counters
     RuleCounters(RuleCountersCmd),
 }
@@ -107,6 +109,17 @@ pub struct MetricsCmd {
     /// Show only metrics matching this category
     #[arg(long, short, value_enum)]
     pub name: Option<MetricName>,
+}
+
+#[derive(Debug, Clone, Parser, Default)]
+pub struct MetricsRulesCmd {
+    /// Server-side tag filter, e.g. --tag config=my-acl --tag counter=rule_.*
+    ///
+    /// The counter tag selects rule counters by pattern, in Rust regex syntax.
+    /// Every other tag matches a label exactly, except an empty value which
+    /// requires the label to be absent and `*` which requires it present.
+    #[arg(long = "tag", short = 't', value_name = "NAME=VALUE")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Parser, Default)]
