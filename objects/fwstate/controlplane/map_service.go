@@ -313,7 +313,10 @@ func (m *FWStateMapService) CreateMap(
 	if err != nil {
 		return nil, err
 	}
-	kind := kindFromProto(req.GetKind())
+	kind, err := kindFromProto(req.GetKind())
+	if err != nil {
+		return nil, err
+	}
 
 	m.log.Debug("create fwstate-map",
 		zap.String("map", name),
@@ -469,11 +472,11 @@ func (m *FWStateMapService) GetMapStats(
 // fwstate-map.
 //
 // The insert and the stale-layer reclamation are separate routines
-// bracketed by one config generation update: the new layer becomes the
-// active head, expired tails are unlinked, and a single published
-// generation that every worker advanced past both makes the rotation
-// durable and gates the release of the unlinked layers. mu stays held
-// across both.
+// bracketed by config generation updates: the new layer becomes the
+// active head, a first published generation that every worker advanced
+// past waits out inserts still targeting the previous head, expired
+// tails are unlinked, and a second generation gates the release of the
+// unlinked layers. mu stays held across both.
 func (m *FWStateMapService) InsertLayer(
 	ctx context.Context,
 	req *fwstatemappb.InsertLayerRequest,
@@ -610,26 +613,42 @@ func (m *FWStateMapService) ListEntries(
 	}, nil
 }
 
-// ReclaimStaleLayers unlinks expired layers, advances every dataplane
-// worker past a new config generation, then frees the unlinked layers.
+// ReclaimStaleLayers waits out in-flight inserts, unlinks expired
+// layers, advances every dataplane worker past a new config generation,
+// then frees the unlinked layers.
 //
-// UnlinkStaleLayers atomically moves stale layers from the active chain
-// to the fwtable's stale chain so new walks skip them, but a worker
-// already mid-chain-walk can still be reading a just-unlinked layer.
-// The barrier publishes a new generation and waits until every worker
-// changed generation, proving no in-flight walk can touch the unlinked
-// memory; only then does FreeStaleLayers release it.
+// The first barrier is the rotation grace period: a worker that loaded
+// the previous head before a layer insert published the new one may
+// still be inside fwtable_insert on that layer, before its deadline is
+// visible. Deciding expiry while such an insert is in flight can unlink
+// the layer as an expired tail; the worker then completes into a layer
+// no reader reaches, silently losing the synchronized state. Publishing
+// a generation and waiting for every worker to advance proves those
+// inserts finished, so the unlink decision sees final deadlines.
 //
-// If the barrier fails the parked layers stay allocated and are freed
-// by a later round after a successful barrier — a rare leak, never a
-// use-after-free. The caller must hold mu because unlink mutates the
-// shared map head chain. now is real-time nanoseconds, matching the
-// domain the dataplane stamps layer deadlines in.
+// UnlinkStaleLayers then atomically moves stale layers from the active
+// chain to the fwtable's stale chain so new walks skip them, but a
+// worker already mid-chain-walk can still be reading a just-unlinked
+// layer. A second barrier proves no in-flight walk can touch the
+// unlinked memory; only then does FreeStaleLayers release it.
+//
+// If either barrier fails the parked layers stay allocated and are
+// freed by a later round after a successful barrier — a rare leak,
+// never a use-after-free. The caller must hold mu because unlink
+// mutates the shared map head chain. now is real-time nanoseconds,
+// matching the domain the dataplane stamps layer deadlines in.
 func (m *FWStateMapService) ReclaimStaleLayers(
 	reclaimer MapLayerReclaimer,
 	mapCP cfwstate.MapObjectConfig,
 	now uint64,
 ) {
+	if err := m.barrier(mapCP); err != nil {
+		m.log.Error(
+			"generation barrier failed before stale-layer unlink; layers left on the active chain",
+			zap.Error(err),
+		)
+		return
+	}
 	if err := reclaimer.UnlinkStaleLayers(now); err != nil {
 		m.log.Error(
 			"failed to unlink stale layers; layers left on the active chain",
@@ -740,14 +759,18 @@ func MapStatsToProto(stats mapStats) *fwstatemappb.MapStats {
 	}
 }
 
-// kindFromProto converts the proto Kind enum to the cfwstate Kind used by
-// the C API.
-func kindFromProto(kind fwstatemappb.Kind) cfwstate.Kind {
+// kindFromProto converts the proto Kind enum to the cfwstate.Kind used
+// by the C API. An unknown discriminant is rejected: defaulting it to
+// IPv4 would silently provision an object of the wrong family, like an
+// unknown entry direction is rejected rather than guessed.
+func kindFromProto(kind fwstatemappb.Kind) (cfwstate.Kind, error) {
 	switch kind {
+	case fwstatemappb.Kind_V4:
+		return cfwstate.KindV4, nil
 	case fwstatemappb.Kind_V6:
-		return cfwstate.KindV6
+		return cfwstate.KindV6, nil
 	default:
-		return cfwstate.KindV4
+		return 0, status.Errorf(codes.InvalidArgument, "unknown map kind %d", kind)
 	}
 }
 

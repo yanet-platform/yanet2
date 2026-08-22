@@ -288,19 +288,24 @@ func (m *recordingReclaimer) frees() int {
 }
 
 // recordingBarrier captures generation-barrier invocations so the RCU
-// grace period between layer unlink and free can be asserted without a
-// live agent.
+// grace periods around layer unlink can be asserted without a live
+// agent. invoke returns the error at the matching index of errs (nil
+// for missing entries), letting tests fail only the pre- or post-unlink
+// barrier.
 type recordingBarrier struct {
 	mu    sync.Mutex
 	calls int
-	err   error
+	errs  []error
 }
 
 func (m *recordingBarrier) invoke(cfwstate.MapObjectConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls++
-	return m.err
+	if m.calls-1 < len(m.errs) {
+		return m.errs[m.calls-1]
+	}
+	return nil
 }
 
 func (m *recordingBarrier) count() int {
@@ -309,8 +314,9 @@ func (m *recordingBarrier) count() int {
 	return m.calls
 }
 
-// TestReclaimStaleLayers verifies that ReclaimStaleLayers unlinks stale
-// layers, runs the generation barrier, then frees the parked layers.
+// TestReclaimStaleLayers verifies that ReclaimStaleLayers runs the
+// grace barrier, unlinks stale layers, barriers again, then frees the
+// parked layers.
 func TestReclaimStaleLayers(t *testing.T) {
 	reclaimer := &recordingReclaimer{}
 	barrier := &recordingBarrier{}
@@ -320,14 +326,13 @@ func TestReclaimStaleLayers(t *testing.T) {
 	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 123456)
 
 	require.Equal(t, []uint64{123456}, reclaimer.unlinkCalls())
-	require.Equal(t, 1, barrier.count(), "generation barrier must run after unlink")
-	require.Equal(t, 1, reclaimer.frees(), "parked layers must be freed after the barrier")
+	require.Equal(t, 2, barrier.count(), "one barrier must run before unlink and one after it")
+	require.Equal(t, 1, reclaimer.frees(), "parked layers must be freed after the second barrier")
 }
 
-// TestReclaimStaleLayersUnlinkFailureSkipsBarrier verifies that an
-// unlink failure skips the generation barrier and the free without
-// panicking.
-func TestReclaimStaleLayersUnlinkFailureSkipsBarrier(t *testing.T) {
+// TestReclaimStaleLayersUnlinkFailureSkipsFree verifies that an unlink
+// failure runs no second barrier and frees nothing, without panicking.
+func TestReclaimStaleLayersUnlinkFailureSkipsFree(t *testing.T) {
 	reclaimer := &recordingReclaimer{unlinkErr: errors.New("unlink failed")}
 	barrier := &recordingBarrier{}
 
@@ -336,19 +341,23 @@ func TestReclaimStaleLayersUnlinkFailureSkipsBarrier(t *testing.T) {
 	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 0)
 
 	require.Equal(t, []uint64{0}, reclaimer.unlinkCalls())
-	require.Equal(t, 0, barrier.count(), "barrier must not run when unlink fails")
+	require.Equal(t, 1, barrier.count(), "only the grace barrier runs when unlink fails")
 	require.Equal(t, 0, reclaimer.frees(), "nothing was parked, so nothing is freed")
 }
 
-// TestReclaimStaleLayersBarrierRunsBeforeFree verifies that the
-// generation barrier elapses between unlink and free.
+// TestReclaimStaleLayersBarrierOrder verifies that the rotation grace
+// barrier precedes the unlink decision and the release barrier elapses
+// between unlink and free.
 //
-// Regression guard for a use-after-free: the fwmap layer chain is shared
-// memory walked across all config generations for fallback lookups. A
-// worker can be mid-walk on a just-unlinked layer at the moment
-// UnlinkStaleLayers parks it. Freeing before the grace period would
-// release memory a worker still reads.
-func TestReclaimStaleLayersBarrierRunsBeforeFree(t *testing.T) {
+// Regression guards for lost updates and a use-after-free: a worker
+// that loaded the previous head can still be mid-fwtable_insert on it,
+// before its deadline is visible — unlinking by that snapshot parks a
+// layer the worker then completes into, silently losing the state. And
+// the fwmap layer chain is shared memory walked across all config
+// generations for fallback lookups, so a worker can be mid-walk on a
+// just-unlinked layer at the moment UnlinkStaleLayers parks it; freeing
+// before the grace period would release memory a worker still reads.
+func TestReclaimStaleLayersBarrierOrder(t *testing.T) {
 	var eventsMu sync.Mutex
 	var events []string
 	record := func(event string) {
@@ -372,30 +381,49 @@ func TestReclaimStaleLayersBarrierRunsBeforeFree(t *testing.T) {
 	eventsMu.Lock()
 	require.Equal(
 		t,
-		[]string{"unlink", "barrier", "free"},
+		[]string{"barrier", "unlink", "barrier", "free"},
 		events,
-		"free must follow the generation barrier, never precede it",
+		"a barrier must wait out in-flight inserts before unlink, and free must follow the post-unlink barrier",
 	)
 	eventsMu.Unlock()
 }
 
+// TestReclaimStaleLayersGraceBarrierFailureSkipsUnlink verifies that a
+// failed grace barrier leaves every layer on the active chain: deciding
+// expiry while a worker is still mid-insert into the previous head
+// could unlink a layer that insert is about to complete into.
+func TestReclaimStaleLayersGraceBarrierFailureSkipsUnlink(t *testing.T) {
+	reclaimer := &recordingReclaimer{}
+	barrier := &recordingBarrier{errs: []error{errors.New("generation barrier failed")}}
+
+	svc := fwstatemap.NewFWStateMapServiceForTest(barrier.invoke)
+
+	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 1)
+
+	require.Empty(t, reclaimer.unlinkCalls(), "unlink must not run when the grace barrier fails")
+	require.Equal(t, 1, barrier.count())
+	require.Equal(t, 0, reclaimer.frees())
+}
+
 // TestReclaimStaleLayersBarrierFailureRetainsLayers verifies that a
-// failed generation barrier leaves the parked layers allocated.
+// failed post-unlink barrier leaves the parked layers allocated.
 //
 // Freeing after a failed barrier could release memory a worker still
 // walks; the layers must survive for a later round with a successful
 // barrier.
 func TestReclaimStaleLayersBarrierFailureRetainsLayers(t *testing.T) {
 	reclaimer := &recordingReclaimer{}
-	barrier := &recordingBarrier{err: errors.New("generation barrier failed")}
+	barrier := &recordingBarrier{
+		errs: []error{nil, errors.New("generation barrier failed")},
+	}
 
 	svc := fwstatemap.NewFWStateMapServiceForTest(barrier.invoke)
 
 	svc.ReclaimStaleLayers(reclaimer, cfwstate.MapObjectConfig{}, 1)
 
-	require.Equal(t, []uint64{1}, reclaimer.unlinkCalls(), "unlink runs unconditionally")
-	require.Equal(t, 1, barrier.count(), "barrier must run after unlink")
-	require.Equal(t, 0, reclaimer.frees(), "parked layers must be retained when the barrier fails")
+	require.Equal(t, []uint64{1}, reclaimer.unlinkCalls(), "unlink runs after a successful grace barrier")
+	require.Equal(t, 2, barrier.count(), "the grace barrier succeeds and the release barrier fails")
+	require.Equal(t, 0, reclaimer.frees(), "parked layers must be retained when the release barrier fails")
 }
 
 // TestListMapsEmpty verifies that a fresh service reports no maps.
@@ -425,6 +453,26 @@ func TestDeleteMapEmptyNameRejected(t *testing.T) {
 	_, err := svc.DeleteMap(t.Context(), &fwstatemappb.DeleteMapRequest{Name: ""})
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// TestCreateMapRejectsUnknownKind verifies that an unknown Kind
+// discriminant from a direct gRPC or HTTP client is rejected as
+// InvalidArgument instead of silently provisioning an IPv4 object of
+// the wrong family, mirroring the unknown-direction rejection.
+func TestCreateMapRejectsUnknownKind(t *testing.T) {
+	svc := fwstatemap.NewFWStateMapServiceForTest(nil)
+
+	_, err := svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+		Name:        "bad-kind",
+		Kind:        fwstatemappb.Kind(2),
+		WorkerCount: 1,
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	resp, listErr := svc.ListMaps(t.Context(), &fwstatemappb.ListMapsRequest{})
+	require.NoError(t, listErr)
+	require.Empty(t, resp.GetMaps(), "a rejected create must not register a map")
 }
 
 // TestListMapsConcurrent verifies that concurrent ListMaps calls on a

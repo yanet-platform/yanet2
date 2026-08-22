@@ -3,6 +3,7 @@ package acl
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -597,7 +598,7 @@ func (m *ACLService) UpdateConfig(
 
 		if err := m.backend.UpdateModule(handle); err != nil {
 			handle.Free()
-			return status.Errorf(codes.Internal, "failed to update module: %v", err)
+			return classifyUpdateError(err)
 		}
 
 		var storedSync *aclpb.SyncConfig
@@ -628,6 +629,22 @@ func (m *ACLService) UpdateConfig(
 	}
 
 	return resp, nil
+}
+
+// classifyUpdateError maps a failed module update to its gRPC status.
+//
+// The C generation install validates every declared object link against
+// the published objects and refuses the update with the exact error
+// text "linked object '<type>:<name>' not found for module
+// '<type>:<name>'". That refusal names a map the request asked for but
+// no published object provides — a client-input error, so it surfaces
+// as InvalidArgument with the C text intact, mirroring the fwstate
+// update path; every other update failure is internal.
+func classifyUpdateError(err error) error {
+	if strings.Contains(err.Error(), "linked object") {
+		return status.Errorf(codes.InvalidArgument, "failed to update module: %v", err)
+	}
+	return status.Errorf(codes.Internal, "failed to update module: %v", err)
 }
 
 func (m *ACLService) ShowConfig(

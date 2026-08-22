@@ -2,6 +2,7 @@ package acl_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -117,6 +118,7 @@ type fakeBackend struct {
 	created      []*fakeHandle
 	publishCalls int
 	newModuleErr error
+	updateErr    error
 	deleteErr    error
 	deleteCalls  int
 	dpConfig     *ffi.DPConfig
@@ -318,6 +320,10 @@ func (m *fakeBackend) UpdateModule(handle acl.ModuleHandle) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+
 	if unwrapped := unwrapFakeHandle(handle); unwrapped != nil {
 		m.modules[unwrapped.Name()] = unwrapped
 	}
@@ -359,6 +365,14 @@ func (m *fakeBackend) SetNewModuleErr(err error) {
 	defer m.mu.Unlock()
 
 	m.newModuleErr = err
+}
+
+// SetUpdateErr arms the next UpdateModule call to return err.
+func (m *fakeBackend) SetUpdateErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.updateErr = err
 }
 
 // ModuleCount returns the number of currently registered module handles.
@@ -655,6 +669,48 @@ func TestUpdateConfig_IdempotencyCountsSyncConfig(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, publishBefore+2, b.PublishCalls(), "dropping the sync config must publish")
+}
+
+// TestUpdateConfigClassifiesUpdateError verifies that a module update
+// failing with the generation install's linked-object refusal surfaces
+// as InvalidArgument naming the missing map, while any other update
+// failure stays Internal.
+//
+// A client typo in fwtable_name_v4 must be distinguishable from a
+// control-plane failure, mirroring the fwstate update path.
+func TestUpdateConfigClassifiesUpdateError(t *testing.T) {
+	request := &aclpb.UpdateConfigRequest{
+		Name:          "acl0",
+		Rules:         []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CHECK_STATE}}}},
+		FwtableNameV4: "missing-map",
+		FwtableNameV6: "missing-map6",
+		SyncConfig:    validTestSyncConfig(),
+	}
+
+	t.Run("linked object not found", func(t *testing.T) {
+		b := newFakeBackend()
+		svc := newTestService(b)
+		b.SetUpdateErr(errors.New(
+			"linked object 'fwstate_map_v4:missing-map' not found for module 'acl:acl0'",
+		))
+
+		_, err := svc.UpdateConfig(t.Context(), request)
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+		assert.Contains(t, err.Error(), "missing-map")
+		assertAllHandlesFreed(t, b)
+	})
+
+	t.Run("other failure", func(t *testing.T) {
+		b := newFakeBackend()
+		svc := newTestService(b)
+		b.SetUpdateErr(errors.New("dp_config_wait_for_gen timed out"))
+
+		_, err := svc.UpdateConfig(t.Context(), request)
+		require.Error(t, err)
+		assert.Equal(t, codes.Internal, status.Code(err))
+		assertAllHandlesFreed(t, b)
+	})
 }
 
 // TestUpdateConfig_CheckStateOnlyRulesNeedNoSyncConfig verifies that a
