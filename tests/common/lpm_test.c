@@ -133,6 +133,7 @@ test_lookup_batch_matches_scalar(void) {
 	uint64_t rand_state = 0x12345678;
 
 	uint8_t prefixes[300][16];
+	const int key_sizes[] = {16, 8, 4};
 	size_t counts[] = {1, 31, 32, 33, 100, 1000};
 	uint8_t *keys = malloc(1000 * 16);
 	uint32_t *results = malloc(1000 * sizeof(uint32_t));
@@ -140,7 +141,11 @@ test_lookup_batch_matches_scalar(void) {
 		goto out;
 	}
 
-	for (int key_size = 16; key_size > 0; key_size -= 12) {
+	// Covers the sizes the dataplane actually walks: 16-byte and 4-byte
+	// generic keys, and the 8-byte halves of the net6 classifiers.
+	for (size_t ks = 0; ks < sizeof(key_sizes) / sizeof(key_sizes[0]);
+	     ++ks) {
+		const int key_size = key_sizes[ks];
 		struct lpm tree;
 		if (lpm_init(&tree, &mctx, "lpm")) {
 			goto out;
