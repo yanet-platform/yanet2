@@ -8,14 +8,17 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
 // spyMetricsSource records the tags it receives and returns a fixed slice
 // of metrics for MetricsService wiring tests.
 type spyMetricsSource struct {
-	metrics []*commonpb.Metric
+	metrics     []*commonpb.Metric
+	ruleMetrics []*commonpb.Metric
 
 	receivedTags []*commonpb.MetricTag
+	receivedRule *aclpb.GetMetricsRulesRequest
 }
 
 type counterRead struct {
@@ -61,6 +64,11 @@ func (m *counterSpyBackend) CounterReads() []counterRead {
 func (m *spyMetricsSource) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	m.receivedTags = tags
 	return m.metrics, nil
+}
+
+func (m *spyMetricsSource) RuleMetrics(req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error) {
+	m.receivedRule = req
+	return m.ruleMetrics, nil
 }
 
 // verifies that an untagged scrape reads only the fixed counter set and
@@ -154,4 +162,34 @@ func TestMetricsServiceGetMetricsForwardsTags(t *testing.T) {
 			require.Equal(t, metrics, response.GetMetrics())
 		})
 	}
+}
+
+// TestMetricsServiceGetMetricsRulesUsesRuleSource verifies that
+// GetMetricsRules forwards its selectors to the rule source and returns what
+// that source produces, keeping the two reads apart.
+func TestMetricsServiceGetMetricsRulesUsesRuleSource(t *testing.T) {
+	structural := []*commonpb.Metric{
+		{
+			Name:  "acl_action_allow_packets",
+			Value: &commonpb.Metric_Counter{Counter: 42},
+		},
+	}
+	rules := []*commonpb.Metric{
+		{
+			Name:  "acl_rule_packets",
+			Value: &commonpb.Metric_Counter{Counter: 7},
+		},
+	}
+
+	request := &aclpb.GetMetricsRulesRequest{Config: "test", Device: "port0"}
+
+	source := &spyMetricsSource{metrics: structural, ruleMetrics: rules}
+	service := acl.NewMetricsService(source)
+
+	response, err := service.GetMetricsRules(t.Context(), request)
+
+	require.NoError(t, err)
+	require.Equal(t, request, source.receivedRule)
+	require.Nil(t, source.receivedTags)
+	require.Equal(t, rules, response.GetMetrics())
 }

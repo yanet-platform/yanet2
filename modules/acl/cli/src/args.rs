@@ -16,6 +16,8 @@ pub enum ModeCmd {
     Show(ShowCmd),
     /// Show ACL metrics
     Metrics(MetricsCmd),
+    /// Show per-rule ACL counter metrics
+    MetricsRules(MetricsRulesCmd),
     /// Show per-rule ACL counters
     RuleCounters(RuleCountersCmd),
 }
@@ -115,6 +117,25 @@ pub struct MetricsCmd {
     /// Show only metrics matching this category
     #[arg(long, short, value_enum)]
     pub name: Option<MetricName>,
+}
+
+#[derive(Debug, Clone, Parser, Default)]
+pub struct MetricsRulesCmd {
+    /// ACL config name; omit to match every config
+    #[arg(long = "config", short = 'c', add = ArgValueCandidates::new(crate::config_candidates))]
+    pub config: Option<String>,
+    /// Dataplane device name; omit to match every device
+    #[arg(long = "device", short = 'd')]
+    pub device: Option<String>,
+    /// Pipeline name; omit to match every pipeline
+    #[arg(long = "pipeline", short = 'p')]
+    pub pipeline: Option<String>,
+    /// Pipeline function name; omit to match every function
+    #[arg(long = "function", short = 'f')]
+    pub function: Option<String>,
+    /// Pipeline chain name; omit to match every chain
+    #[arg(long = "chain")]
+    pub chain: Option<String>,
 }
 
 #[derive(Debug, Clone, Parser, Default)]

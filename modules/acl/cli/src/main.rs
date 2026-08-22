@@ -2,10 +2,10 @@ use core::net::Ipv6Addr;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
-    DeleteConfigRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
+    DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest,
+    UpdateConfigRequest, acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
-use args::{DeleteCmd, MetricsCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, MetricsCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use serde::{Deserialize, Serialize};
@@ -89,6 +89,108 @@ fn print_counter_table(rows: Vec<CounterRow>) {
     }
 
     ync::display::print_table(builder.build());
+}
+
+/// A rule counter's location and its packet and byte totals.
+struct RuleCounterRow {
+    location: RuleLocation,
+    counter: String,
+    packets: Option<u64>,
+    bytes: Option<u64>,
+}
+
+/// The position a rule counter belongs to, kept as raw field values.
+type RuleLocation = (String, String, String, String, String);
+
+fn rule_label(metric: &commonpb::Metric, name: &str) -> String {
+    metric
+        .labels
+        .iter()
+        .find(|label| label.name == name)
+        .map_or_else(String::new, |label| label.value.clone())
+}
+
+/// Groups `acl_rule_packets` and `acl_rule_bytes` into one row per rule
+/// counter, keyed by the raw location fields and the `counter` label.
+///
+/// The metrics table renderer drops counter-labelled metrics, so rule
+/// metrics need their own pairing. Totals are read from the protobuf
+/// `uint64` directly, since routing them through `f64` would round a
+/// counter past 2^53.
+fn rule_counter_rows(metrics: &[commonpb::Metric]) -> Vec<RuleCounterRow> {
+    let mut order: Vec<(RuleLocation, String)> = Vec::new();
+    let mut rows: HashMap<(RuleLocation, String), RuleCounterRow> = HashMap::new();
+
+    for metric in metrics {
+        let counter = rule_label(metric, "counter");
+        if counter.is_empty() {
+            continue;
+        }
+
+        let location: RuleLocation = (
+            rule_label(metric, "config"),
+            rule_label(metric, "device"),
+            rule_label(metric, "pipeline"),
+            rule_label(metric, "function"),
+            rule_label(metric, "chain"),
+        );
+        let key = (location.clone(), counter.clone());
+
+        let row = rows.entry(key.clone()).or_insert_with(|| {
+            order.push(key);
+            RuleCounterRow {
+                location,
+                counter,
+                packets: None,
+                bytes: None,
+            }
+        });
+
+        let Some(commonpb::metric::Value::Counter(value)) = metric.value else {
+            continue;
+        };
+
+        if metric.name.ends_with("_packets") {
+            row.packets = Some(value);
+        } else if metric.name.ends_with("_bytes") {
+            row.bytes = Some(value);
+        }
+    }
+
+    order.into_iter().filter_map(|key| rows.remove(&key)).collect()
+}
+
+fn print_rule_metrics_table(metrics: &[commonpb::Metric]) {
+    let rows = rule_counter_rows(metrics);
+
+    let mut current: Option<&RuleLocation> = None;
+    let mut pending: Vec<CounterRow> = Vec::new();
+
+    for row in &rows {
+        if current != Some(&row.location) {
+            if current.is_some() {
+                print_counter_table(core::mem::take(&mut pending));
+                println!();
+            }
+            let (config, device, pipeline, function, chain) = &row.location;
+            println!(
+                "ACL RULE COUNTERS  config={config} device={device} pipeline={pipeline} function={function} chain={chain}"
+            );
+            println!();
+            current = Some(&row.location);
+        }
+
+        pending.push(CounterRow {
+            counter: row.counter.clone(),
+            packets: row.packets.map_or_else(|| "-".to_string(), metrics::format_number),
+            bytes: row.bytes.map_or_else(|| "-".to_string(), metrics::format_number),
+        });
+    }
+
+    if !pending.is_empty() {
+        print_counter_table(pending);
+        println!();
+    }
 }
 
 fn print_metrics_table(metrics: &[Metric]) {
@@ -599,6 +701,43 @@ impl ACLService {
 
         Ok(())
     }
+
+    pub async fn metrics_rules(&mut self, cmd: MetricsRulesCmd) -> Result<(), Error> {
+        let request = GetMetricsRulesRequest {
+            config: cmd.config.clone().unwrap_or_default(),
+            device: cmd.device.clone().unwrap_or_default(),
+            pipeline: cmd.pipeline.clone().unwrap_or_default(),
+            function: cmd.function.clone().unwrap_or_default(),
+            chain: cmd.chain.clone().unwrap_or_default(),
+        };
+
+        let response = self
+            .metrics
+            .client()
+            .get_metrics_rules(request)
+            .await
+            .map_err(self.metrics.status("metrics-rules"))?
+            .into_inner();
+
+        let metrics = response.metrics;
+
+        output::data(
+            || &metrics,
+            || {
+                if metrics.is_empty() {
+                    match cmd.config.as_deref() {
+                        Some(name) => output::empty(format_args!("No ACL rule metrics found for '{name}'.")),
+                        None => output::empty(format_args!("No ACL rule metrics found.")),
+                    }
+                    return;
+                }
+
+                print_rule_metrics_table(&metrics)
+            },
+        );
+
+        Ok(())
+    }
 }
 
 /// Parses a `NAME=VALUE` tag entry into a [`MetricTag`].
@@ -624,6 +763,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
+        ModeCmd::MetricsRules(cmd) => service.metrics_rules(cmd).await,
         ModeCmd::RuleCounters(cmd) => service.rule_counters(cmd).await,
     }
 }
@@ -665,6 +805,70 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn rule_metric(name: &str, config: &str, counter: &str, value: u64) -> commonpb::Metric {
+        commonpb::Metric {
+            name: name.to_string(),
+            value: Some(commonpb::metric::Value::Counter(value)),
+            labels: [
+                ("config", config),
+                ("device", "port0"),
+                ("pipeline", "p"),
+                ("function", "f"),
+                ("chain", "c"),
+                ("counter", counter),
+            ]
+            .into_iter()
+            .map(|(name, value)| commonpb::Label {
+                name: name.to_string(),
+                value: value.to_string(),
+            })
+            .collect(),
+        }
+    }
+
+    #[test]
+    fn pairs_rule_counters_the_metrics_table_would_drop() {
+        let metrics = vec![
+            rule_metric("acl_rule_packets", "test", "svc_counter", 3),
+            rule_metric("acl_rule_bytes", "test", "svc_counter", 300),
+            rule_metric("acl_rule_packets", "test", "other", 1),
+        ];
+
+        let rows = rule_counter_rows(&metrics);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].counter, "svc_counter");
+        assert_eq!(rows[0].packets, Some(3));
+        assert_eq!(rows[0].bytes, Some(300));
+        assert_eq!(rows[1].counter, "other");
+        assert_eq!(rows[1].packets, Some(1));
+        assert_eq!(rows[1].bytes, None);
+    }
+
+    #[test]
+    fn keeps_totals_beyond_f64_precision() {
+        let exact = (1_u64 << 53) + 1;
+        let metrics = vec![rule_metric("acl_rule_bytes", "test", "svc_counter", exact)];
+
+        let rows = rule_counter_rows(&metrics);
+
+        assert_eq!(rows[0].bytes, Some(exact));
+    }
+
+    #[test]
+    fn keeps_positions_whose_names_carry_field_markers() {
+        let metrics = vec![
+            rule_metric("acl_rule_packets", "a device=b", "svc_counter", 1),
+            rule_metric("acl_rule_packets", "a", "svc_counter", 2),
+        ];
+
+        let rows = rule_counter_rows(&metrics);
+
+        assert_eq!(rows.len(), 2, "two positions must not collapse into one row");
+        assert_eq!(rows[0].packets, Some(1));
+        assert_eq!(rows[1].packets, Some(2));
+    }
 
     #[test]
     fn deserialize_fixture_acl_yaml() {

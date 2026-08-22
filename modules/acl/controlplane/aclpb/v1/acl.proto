@@ -28,8 +28,10 @@ service ACLService {
 
 // MetricsService exposes ACL module metrics.
 service MetricsService {
-  // GetMetrics returns a snapshot of ACL module metrics.
+  // GetMetrics returns a snapshot of ACL module metrics, excluding per-rule counters.
   rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
+  // GetMetricsRules returns the per-rule counter metrics GetMetrics leaves out.
+  rpc GetMetricsRules(GetMetricsRulesRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 message UpdateConfigRequest {
@@ -139,6 +141,15 @@ message SyncConfig {
 message GetRulesCountersRequest {
   // Optional ACL configuration name.
   string name = 1;
+}
+
+// Positions to report per-rule counters of; an empty field matches every value.
+message GetMetricsRulesRequest {
+  string config = 1;
+  string device = 2;
+  string pipeline = 3;
+  string function = 4;
+  string chain = 5;
 }
 
 // One per-rule counter at the module position holding it.

@@ -1213,6 +1213,69 @@ func TestACL_Counters(t *testing.T) {
 		require.NotContains(t, metricNames, "acl_rule_bytes")
 		require.Contains(t, metricNames, "acl_action_allow_packets")
 
+		ruleMetrics, err := svc.RuleMetrics(&aclpb.GetMetricsRulesRequest{})
+		require.NoError(t, err)
+
+		byName := make(map[string]*commonpb.Metric, len(ruleMetrics))
+		for _, metric := range ruleMetrics {
+			byName[metric.GetName()] = metric
+			require.NotContains(t, metric.GetName(), "acl_action_")
+		}
+
+		rulePackets, ok := byName["acl_rule_packets"]
+		require.True(t, ok, "rule metrics must carry acl_rule_packets")
+		require.Equal(t, uint64(3), rulePackets.GetCounter())
+
+		ruleBytes, ok := byName["acl_rule_bytes"]
+		require.True(t, ok, "rule metrics must carry acl_rule_bytes")
+		require.Equal(t, 3*pktSize, ruleBytes.GetCounter())
+
+		labels := make(map[string]string, len(rulePackets.GetLabels()))
+		for _, label := range rulePackets.GetLabels() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		require.Equal(t, "svc_counter", labels["counter"])
+		require.Equal(t, "test", labels["config"])
+		require.Equal(t, "port0", labels["device"])
+
+		ruleMetricNames := func(req *aclpb.GetMetricsRulesRequest) []string {
+			t.Helper()
+
+			got, err := svc.RuleMetrics(req)
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(got))
+			for _, metric := range got {
+				names = append(names, metric.GetName())
+			}
+
+			return names
+		}
+
+		for _, selected := range []*aclpb.GetMetricsRulesRequest{
+			{Config: "test"},
+			{Device: "port0"},
+			{Pipeline: "test"},
+			{Function: "test"},
+			{Chain: "test_chain"},
+			{Config: "test", Device: "port0", Chain: "test_chain"},
+		} {
+			require.Contains(t, ruleMetricNames(selected), "acl_rule_packets",
+				"selector %v must select the installed position", selected,
+			)
+		}
+
+		for _, excluded := range []*aclpb.GetMetricsRulesRequest{
+			{Config: "other"},
+			{Device: "port9"},
+			{Chain: "other_chain"},
+			{Config: "test", Device: "port9"},
+		} {
+			require.Empty(t, ruleMetricNames(excluded),
+				"selector %v must exclude the installed position", excluded,
+			)
+		}
+
 		_, err = svc.GetRulesCounters(t.Context(), &aclpb.GetRulesCountersRequest{Name: "missing"})
 		require.Equal(t, codes.NotFound, status.Code(err))
 	})
