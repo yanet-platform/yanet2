@@ -115,3 +115,7 @@ devices:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
+  vxlan:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB

@@ -21,8 +21,9 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 }
 
 // Test_ShippedDefaultConfig_LoadsIntendedEnabledSet asserts that the shipped
-// default config starts all ten bundled modules plus the plain and vlan
-// devices, leaves trafgen disabled, and sets an explicit gateway instance.
+// default config starts all ten bundled modules plus the plain, vlan and
+// vxlan devices, leaves trafgen disabled, and sets an explicit gateway
+// instance.
 func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet/controlplane.d/default.yaml")
 	require.NoError(t, err)
@@ -40,6 +41,7 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 
 	require.NotNil(t, cfg.Devices.Plain.Unwrap())
 	require.NotNil(t, cfg.Devices.Vlan.Unwrap())
+	require.NotNil(t, cfg.Devices.Vxlan.Unwrap())
 	require.Nil(t, cfg.Devices.Trafgen.Unwrap())
 
 	require.NoError(t, cfg.Gateway.InstanceID.Validate())
@@ -67,6 +69,7 @@ func Test_ShippedDefaultConfig_OmittedBackendEndpointsUseEphemeralPorts(t *testi
 		"blackhole module":  config.Modules.Blackhole.Unwrap().Endpoint.Unwrap(),
 		"plain device":      config.Devices.Plain.Unwrap().Endpoint.Unwrap(),
 		"VLAN device":       config.Devices.Vlan.Unwrap().Endpoint.Unwrap(),
+		"VXLAN device":      config.Devices.Vxlan.Unwrap().Endpoint.Unwrap(),
 	}
 	for name, endpoint := range endpoints {
 		t.Run(name, func(t *testing.T) {
