@@ -251,6 +251,15 @@ vxlan_output_handle(
 			continue;
 		}
 
+		// The prepend lands in the head segment, whose data_len is its
+		// own 16-bit field: a single-segment frame the total-length
+		// check accepts could still wrap it, and rte_pktmbuf_prepend
+		// guards headroom only, not the enlarged head length.
+		if (rte_pktmbuf_data_len(mbuf) > UINT16_MAX - VXLAN_ENCAP_LEN) {
+			packet_front_drop(packet_front, packet);
+			continue;
+		}
+
 		struct rte_ether_hdr *ether_hdr = (struct rte_ether_hdr *)
 			rte_pktmbuf_prepend(mbuf, VXLAN_ENCAP_LEN);
 		if (ether_hdr == NULL) {

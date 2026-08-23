@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -79,14 +80,14 @@ func (m *DeviceVxlanService) UpdateDevice(
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
-	// A longer name would be truncated into the fixed C name buffer, so
-	// the cache entry keyed by the full name and the published dataplane
-	// device would disagree, and two long names sharing the truncated
-	// prefix would overwrite the same device.
-	if len(name) > DeviceNameMaxLength {
+	// A longer name would be truncated into the fixed C name buffer, and
+	// an embedded NUL would end it early; either way the cache entry
+	// keyed by the full Go string and the published dataplane device
+	// would disagree, and distinct names could collide on one C entry.
+	if len(name) > DeviceNameMaxLength || strings.ContainsRune(name, 0) {
 		return nil, status.Errorf(
 			codes.InvalidArgument,
-			"device name must be at most %d bytes",
+			"device name must be at most %d bytes without NUL",
 			DeviceNameMaxLength,
 		)
 	}
@@ -107,10 +108,10 @@ func (m *DeviceVxlanService) UpdateDevice(
 	}
 
 	// UpdateDevices publishes the new generation and waits for the
-	// dataplane to drop the old one, so the superseded device is no longer
-	// referenced and can be freed explicitly. This mirrors how the vlan
-	// control plane reclaims superseded device configs, instead of relying
-	// on a type-blind drain of the agent's unused list.
+	// dataplane to drop the old one. The superseded device is then
+	// released through the reference tracker: it parks on the agent if a
+	// reader still pins it, and the next vxlan construction reclaims it,
+	// the same lifecycle the vlan control plane gives its devices.
 	if old, ok := m.configs[name]; ok {
 		old.Free()
 	}

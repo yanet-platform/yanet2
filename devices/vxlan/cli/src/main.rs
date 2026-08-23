@@ -50,7 +50,7 @@ pub struct UpdateCmd {
     #[arg(short, long)]
     pub output: Vec<String>,
     /// VXLAN network identifier
-    #[arg(short, long)]
+    #[arg(long)]
     pub vni: u32,
     /// Outer UDP destination port
     #[arg(long)]
