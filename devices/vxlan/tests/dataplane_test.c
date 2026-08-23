@@ -165,7 +165,7 @@ build_vxlan_outer_frame(
 static struct rte_mbuf *
 frame_mbuf(uint16_t headroom, const uint8_t *frame, uint16_t frame_len) {
 	struct rte_mbuf *mbuf = alloc_mbuf(headroom, frame_len, 0);
-	if (mbuf != NULL) {
+	if (mbuf != NULL && frame != NULL) {
 		memcpy(rte_pktmbuf_mtod(mbuf, void *), frame, frame_len);
 	}
 	return mbuf;
@@ -364,6 +364,43 @@ run_decap_vlan_reset_test(device_handler handler) {
 	return TEST_SUCCESS;
 }
 
+// A single-segment frame the total-length check accepts can still be too
+// large for the head segment: prepending 50 bytes would overflow its 16-bit
+// data_len, which the headroom check inside rte_pktmbuf_prepend does not
+// guard, so the handler must drop it instead of wrapping the field.
+static int
+run_encap_head_overflow_drop_test(device_handler handler) {
+	// The largest frame the total-length check accepts (65535 minus the
+	// IPv4+UDP+VXLAN overhead): its head segment plus the 50-byte
+	// prepend exceeds 16 bits.
+	uint16_t overflow_len = UINT16_MAX - (sizeof(struct rte_ipv4_hdr) +
+					      sizeof(struct rte_udp_hdr) +
+					      sizeof(struct rte_vxlan_hdr));
+
+	struct packet packet;
+	struct rte_mbuf *mbuf =
+		frame_mbuf(RTE_PKTMBUF_HEADROOM, NULL, overflow_len);
+	TEST_ASSERT_NOT_NULL(mbuf, "alloc_mbuf returned NULL");
+	init_packet(&packet, mbuf);
+
+	struct packet_front pf;
+	run_handler(handler, &packet, &pf);
+	TEST_ASSERT_EQUAL(
+		(long)packet_front_output_count(&pf),
+		0L,
+		"a frame whose head segment would overflow must not be "
+		"encapsulated"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)packet_front_drop_count(&pf),
+		1L,
+		"a frame whose head segment would overflow must be dropped"
+	);
+	free_result(&pf);
+
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -392,8 +429,6 @@ main(void) {
 	struct agent *agent =
 		agent_attach(shm, 0, "vxlan-test", 1u << 22, &err);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
-
-	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
 	struct cp_device_vxlan_config *cfg =
 		cp_device_vxlan_config_new("tun0", 1, 1, &test_settings, &err);
@@ -432,19 +467,40 @@ main(void) {
 	if (res == TEST_SUCCESS) {
 		res = run_decap_vlan_reset_test(input_handler);
 	}
+	if (res == TEST_SUCCESS) {
+		res = run_encap_head_overflow_drop_test(output_handler);
+	}
 
-	// The device and its API objects must return every arena byte they
-	// took, so repeated updates cannot exhaust the agent memory.
+	size_t after_create =
+		block_allocator_free_size(&agent->block_allocator);
+
+	// Releasing the device parks it on the agent instead of destroying
+	// it, so the next construction must reclaim the parked entry whole:
+	// its free bytes then equal the first construction's, and repeated
+	// create/release cycles cannot exhaust the agent memory.
 	cp_device_vxlan_free(cp_device);
-	size_t after = block_allocator_free_size(&agent->block_allocator);
-	TEST_ASSERT_EQUAL(
-		(long)after,
-		(long)baseline,
-		"device free leaked shared-memory bytes: baseline=%zu "
-		"after=%zu",
-		baseline,
-		after
+
+	struct cp_device_vxlan_config *reclaim_cfg =
+		cp_device_vxlan_config_new("tun1", 1, 1, &test_settings, &err);
+	TEST_ASSERT_NOT_NULL(
+		reclaim_cfg, "cp_device_vxlan_config_new returned NULL"
 	);
+	struct cp_device *reclaimed =
+		cp_device_vxlan_new(agent, reclaim_cfg, &err);
+	TEST_ASSERT_NOT_NULL(reclaimed, "cp_device_vxlan_new returned NULL");
+	cp_device_vxlan_config_free(reclaim_cfg);
+
+	size_t after_reclaim =
+		block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after_reclaim,
+		(long)after_create,
+		"a parked device must return every arena byte on reclaim: "
+		"after_create=%zu after_reclaim=%zu",
+		after_create,
+		after_reclaim
+	);
+	cp_device_vxlan_free(reclaimed);
 
 	agent_detach(agent);
 	dataplane_ut_free(ut);

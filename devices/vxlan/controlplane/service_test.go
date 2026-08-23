@@ -60,9 +60,10 @@ func attachVxlanAgent(t *testing.T) (*ffi.SharedMemory, *ffi.Agent) {
 // UpdateDevice calls do not leak shared-memory arena space.
 //
 // Each update after the first retires the previous generation's device, and
-// the service frees it explicitly once the dataplane has dropped the old
-// generation. Free bytes must settle after the first update instead of
-// decreasing indefinitely.
+// the service releases it through the reference tracker. A retired device
+// whose generation reference is already dropped parks on the agent, and every
+// later construction reclaims the previous parked entry before parking a new
+// one, so free bytes must settle instead of decreasing indefinitely.
 func TestUpdateDevice_DrainsSupersededDevices(t *testing.T) {
 	shm, agent := attachVxlanAgent(t)
 
@@ -77,7 +78,10 @@ func TestUpdateDevice_DrainsSupersededDevices(t *testing.T) {
 		require.NoError(t, err)
 
 		freeBytes := freeBytesForAgent(t, shm, "vxlan")
-		if idx > 0 {
+		// The first supersede parks the old device without destroying
+		// it, so its space stays held once; every later construction
+		// reclaims the previous parked entry before parking a new one.
+		if idx > 1 {
 			require.Equalf(
 				t,
 				previousFreeBytes,
@@ -112,6 +116,12 @@ func TestUpdateDevice_InvalidArguments(t *testing.T) {
 			name: "name_beyond_device_name_limit",
 			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) {
 				request.Name = strings.Repeat("d", 80)
+			},
+		},
+		{
+			name: "name_with_embedded_nul",
+			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) {
+				request.Name = "tun0\x00suffix"
 			},
 		},
 		{
