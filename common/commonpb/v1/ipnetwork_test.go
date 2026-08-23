@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
@@ -272,6 +273,241 @@ func TestContiguousIPNetwork_UnmarshalJSON_Errors(t *testing.T) {
 			var m commonpb.ContiguousIPNetwork
 			err := json.Unmarshal([]byte(tt.input), &m)
 			require.Error(t, err)
+		})
+	}
+}
+
+// Test_ContiguousIPNetwork_ToContiguous_RoundTrip verifies that a CIDR block
+// of either family round-trips normalized, with a family-width wire address.
+func Test_ContiguousIPNetwork_ToContiguous_RoundTrip(t *testing.T) {
+	tests := []struct {
+		name      string
+		net       xnetip.Contiguous[xnetip.Network]
+		wantBytes []byte
+		wantBits  uint32
+	}{
+		{
+			name:      "IPv4 default route",
+			net:       xnetip.MustParseContiguous("0.0.0.0/0"),
+			wantBytes: []byte{0, 0, 0, 0},
+			wantBits:  0,
+		},
+		{
+			name:      "IPv4 subnet",
+			net:       xnetip.MustParseContiguous("10.0.0.0/24"),
+			wantBytes: []byte{10, 0, 0, 0},
+			wantBits:  24,
+		},
+		{
+			name:      "IPv4 host route",
+			net:       xnetip.MustParseContiguous("10.0.0.1/32"),
+			wantBytes: []byte{10, 0, 0, 1},
+			wantBits:  32,
+		},
+		{
+			name:      "IPv6 default route",
+			net:       xnetip.MustParseContiguous("::/0"),
+			wantBytes: make([]byte, 16),
+			wantBits:  0,
+		},
+		{
+			name:      "zero block is the IPv6 default route",
+			net:       xnetip.Contiguous[xnetip.Network]{},
+			wantBytes: make([]byte, 16),
+			wantBits:  0,
+		},
+		{
+			name:      "IPv6 subnet",
+			net:       xnetip.MustParseContiguous("2001:db8::/32"),
+			wantBytes: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			wantBits:  32,
+		},
+		{
+			name:      "IPv6 host route",
+			net:       xnetip.MustParseContiguous("2001:db8::1/128"),
+			wantBytes: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			wantBits:  128,
+		},
+		{
+			name:      "IPv4-mapped IPv6 stays sixteen bytes",
+			net:       xnetip.MustParseContiguous("::ffff:10.0.0.0/120"),
+			wantBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 10, 0, 0, 0},
+			wantBits:  120,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := commonpb.NewContiguousIPNetworkFromContiguous(tt.net)
+			require.Equal(t, tt.wantBytes, m.GetAddr().GetAddr())
+			require.Equal(t, tt.wantBits, m.GetPrefixLen())
+
+			got, err := m.ToContiguous()
+			require.NoError(t, err)
+			require.Equal(t, tt.net, got)
+		})
+	}
+}
+
+// Test_ContiguousIPNetwork_ToContiguous_HostBitsNormalized verifies that a
+// hand-built message with host bits set decodes to the masked block.
+func Test_ContiguousIPNetwork_ToContiguous_HostBitsNormalized(t *testing.T) {
+	tests := []struct {
+		name      string
+		addr      []byte
+		prefixLen uint32
+		want      string
+	}{
+		{name: "IPv4", addr: []byte{10, 0, 0, 1}, prefixLen: 24, want: "10.0.0.0/24"},
+		{
+			name:      "IPv6",
+			addr:      []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			prefixLen: 32,
+			want:      "2001:db8::/32",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: tt.addr},
+				PrefixLen: tt.prefixLen,
+			}
+			got, err := m.ToContiguous()
+			require.NoError(t, err)
+			require.Equal(t, xnetip.MustParseContiguous(tt.want), got)
+		})
+	}
+}
+
+// Test_ContiguousIPNetwork_ToContiguous_Errors verifies that a bad address or
+// an overlong prefix length is rejected, never decoded to the zero block.
+func Test_ContiguousIPNetwork_ToContiguous_Errors(t *testing.T) {
+	tests := []struct {
+		name      string
+		m         *commonpb.ContiguousIPNetwork
+		wantErrIs error
+	}{
+		{name: "zero message", m: &commonpb.ContiguousIPNetwork{}},
+		{name: "nil address", m: &commonpb.ContiguousIPNetwork{PrefixLen: 24}},
+		{
+			name: "empty address",
+			m: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{},
+				PrefixLen: 24,
+			},
+		},
+		{
+			name: "three byte address",
+			m: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
+				PrefixLen: 24,
+			},
+		},
+		{
+			name: "five byte address",
+			m: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5}},
+				PrefixLen: 24,
+			},
+		},
+		{
+			name: "IPv4 prefix length above 32",
+			m: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}},
+				PrefixLen: 33,
+			},
+			wantErrIs: xnetip.ErrCIDROverflow,
+		},
+		{
+			name: "IPv6 prefix length above 128",
+			m: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: make([]byte, 16)},
+				PrefixLen: 129,
+			},
+			wantErrIs: xnetip.ErrCIDROverflow,
+		},
+		{
+			name: "IPv4 prefix length at uint32 maximum",
+			m: &commonpb.ContiguousIPNetwork{
+				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}},
+				PrefixLen: ^uint32(0),
+			},
+			wantErrIs: xnetip.ErrCIDROverflow,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.m.ToContiguous()
+			require.Error(t, err)
+			if tt.wantErrIs != nil {
+				require.ErrorIs(t, err, tt.wantErrIs)
+			}
+			require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, got)
+		})
+	}
+}
+
+// Test_ContiguousIPNetwork_ToContiguous_FamilyExtraction verifies that the
+// decoded block unwraps into the family of its wire address width only.
+func Test_ContiguousIPNetwork_ToContiguous_FamilyExtraction(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantIPv4 bool
+	}{
+		{name: "IPv4 message unwraps to Network4", input: "10.0.0.0/24", wantIPv4: true},
+		{name: "IPv6 message unwraps to Network6", input: "2001:db8::/32", wantIPv4: false},
+		{
+			name:     "IPv4-mapped IPv6 message unwraps to Network6",
+			input:    "::ffff:10.0.0.0/120",
+			wantIPv4: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := commonpb.ParseContiguousIPNetwork(tt.input)
+			require.NoError(t, err)
+			net, err := m.ToContiguous()
+			require.NoError(t, err)
+			want := netip.MustParsePrefix(tt.input)
+
+			net4, ok4 := xnetip.ContiguousIPv4(net)
+			net6, ok6 := xnetip.ContiguousIPv6(net)
+			require.Equal(t, tt.wantIPv4, ok4)
+			require.Equal(t, !tt.wantIPv4, ok6)
+			if tt.wantIPv4 {
+				require.Equal(t, want, net4.Prefix())
+			} else {
+				require.Equal(t, want, net6.Prefix())
+			}
+		})
+	}
+}
+
+// Test_ContiguousIPNetwork_ToPrefix_MatchesToContiguous verifies that the
+// prefix view and the block view of one message name the same network.
+func Test_ContiguousIPNetwork_ToPrefix_MatchesToContiguous(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "IPv4", input: "10.0.0.1/24"},
+		{name: "IPv6", input: "2001:db8::1/32"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := commonpb.ParseContiguousIPNetwork(tt.input)
+			require.NoError(t, err)
+
+			prefix, err := m.ToPrefix()
+			require.NoError(t, err)
+			net, err := m.ToContiguous()
+			require.NoError(t, err)
+			require.Equal(t, prefix, net.Prefix())
 		})
 	}
 }

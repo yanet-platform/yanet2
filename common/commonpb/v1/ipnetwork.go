@@ -4,21 +4,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+
+	"github.com/yanet-platform/xnetip"
 )
+
+// NewContiguousIPNetworkFromContiguous creates a ContiguousIPNetwork from
+// an xnetip CIDR block.
+//
+// The conversion is total: the block is masked by its own invariant, so
+// the message carries the base address in the block's family width (four
+// bytes for IPv4, sixteen for IPv6) and the prefix length verbatim. The
+// inverse of ToContiguous.
+func NewContiguousIPNetworkFromContiguous(net xnetip.Contiguous[xnetip.Network]) *ContiguousIPNetwork {
+	return &ContiguousIPNetwork{
+		Addr:      NewIPAddressFromAddr(net.Network().Addr()),
+		PrefixLen: uint32(net.PrefixLen()),
+	}
+}
 
 // NewContiguousIPNetworkFromPrefix creates a ContiguousIPNetwork from a
 // netip.Prefix value, masking off any host bits.
 //
 // Returns an error if prefix is not valid.
 func NewContiguousIPNetworkFromPrefix(prefix netip.Prefix) (*ContiguousIPNetwork, error) {
-	if !prefix.IsValid() {
+	net, ok := xnetip.ContiguousFromPrefix(prefix)
+	if !ok {
 		return nil, fmt.Errorf("invalid prefix")
 	}
-	masked := prefix.Masked()
-	return &ContiguousIPNetwork{
-		Addr:      NewIPAddressFromAddr(masked.Addr()),
-		PrefixLen: uint32(masked.Bits()),
-	}, nil
+	return NewContiguousIPNetworkFromContiguous(net), nil
 }
 
 // ParseContiguousIPNetwork parses s as a CIDR prefix, masking off any host
@@ -65,25 +78,39 @@ func PrefixesFromNetworks(networks []*ContiguousIPNetwork) ([]netip.Prefix, erro
 	return prefixes, nil
 }
 
+// ToContiguous converts the ContiguousIPNetwork to an xnetip CIDR block.
+//
+// Returns an error if addr is missing or malformed, or if prefix_len
+// exceeds the address family's bit length; the latter wraps
+// xnetip.ErrCIDROverflow. The returned block is masked, so host bits never
+// leak out even if the message was constructed by hand, and the family
+// follows the address width: a sixteen-byte IPv4-mapped address stays
+// IPv6, consistently with IPAddress. The inverse of
+// NewContiguousIPNetworkFromContiguous.
+func (m *ContiguousIPNetwork) ToContiguous() (xnetip.Contiguous[xnetip.Network], error) {
+	addr, err := m.GetAddr().ToAddr()
+	if err != nil {
+		return xnetip.Contiguous[xnetip.Network]{}, fmt.Errorf("failed to parse network address: %w", err)
+	}
+	net, err := xnetip.ContiguousFromCIDR(addr, int(m.GetPrefixLen()))
+	if err != nil {
+		return xnetip.Contiguous[xnetip.Network]{}, fmt.Errorf("failed to build IP network: %w", err)
+	}
+	return net, nil
+}
+
 // ToPrefix converts the ContiguousIPNetwork back to a netip.Prefix value.
 //
 // Returns an error if addr is malformed or if prefix_len exceeds the
-// address family's bit length. The returned prefix is masked, so host bits
-// never leak out even if the message was constructed by hand.
+// address family's bit length, exactly when ToContiguous does. The returned
+// prefix is masked, so host bits never leak out even if the message was
+// constructed by hand.
 func (m *ContiguousIPNetwork) ToPrefix() (netip.Prefix, error) {
-	addr, err := m.GetAddr().ToAddr()
+	net, err := m.ToContiguous()
 	if err != nil {
-		return netip.Prefix{}, fmt.Errorf("failed to parse network address: %w", err)
+		return netip.Prefix{}, err
 	}
-	if m.GetPrefixLen() > uint32(addr.BitLen()) {
-		return netip.Prefix{}, fmt.Errorf(
-			"prefix length %d exceeds IPv%d address bit length %d",
-			m.GetPrefixLen(),
-			familyNum(addr),
-			addr.BitLen(),
-		)
-	}
-	return netip.PrefixFrom(addr, int(m.GetPrefixLen())).Masked(), nil
+	return net.Prefix(), nil
 }
 
 // AsLogValue implements xgrpc.ProtoLogValue for compact gRPC logging.
