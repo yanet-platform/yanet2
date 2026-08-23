@@ -79,6 +79,17 @@ func (m *DeviceVxlanService) UpdateDevice(
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
+	// A longer name would be truncated into the fixed C name buffer, so
+	// the cache entry keyed by the full name and the published dataplane
+	// device would disagree, and two long names sharing the truncated
+	// prefix would overwrite the same device.
+	if len(name) > DeviceNameMaxLength {
+		return nil, status.Errorf(
+			codes.InvalidArgument,
+			"device name must be at most %d bytes",
+			DeviceNameMaxLength,
+		)
+	}
 
 	settings, err := newSettings(request)
 	if err != nil {

@@ -2,6 +2,7 @@ package vxlan_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -108,6 +109,12 @@ func TestUpdateDevice_InvalidArguments(t *testing.T) {
 			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) { request.Name = "" },
 		},
 		{
+			name: "name_beyond_device_name_limit",
+			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) {
+				request.Name = strings.Repeat("d", 80)
+			},
+		},
+		{
 			name:   "vni_over_24_bits",
 			modify: func(request *vxlanpb.UpdateDeviceVxlanRequest) { request.Vni = 1 << 24 },
 		},
@@ -157,6 +164,36 @@ func TestUpdateDevice_InvalidArguments(t *testing.T) {
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
+}
+
+// TestUpdateDevice_NameLengthBoundary verifies that the longest name the
+// C device configuration can carry without truncation is accepted and
+// served back, while one byte more is rejected before any shared-memory
+// call.
+func TestUpdateDevice_NameLengthBoundary(t *testing.T) {
+	_, agent := attachVxlanAgent(t)
+
+	service := vxlan.NewDeviceVxlanService(agent)
+
+	longest := strings.Repeat("d", vxlan.DeviceNameMaxLength)
+	request := newTunnelRequest(longest)
+	_, err := service.UpdateDevice(t.Context(), request)
+	require.NoError(t, err)
+
+	response, err := service.GetDevice(
+		t.Context(),
+		&vxlanpb.GetDeviceVxlanRequest{Name: longest},
+	)
+	require.NoError(t, err)
+	require.Equal(t, longest, response.GetName())
+
+	overlong := strings.Repeat("d", vxlan.DeviceNameMaxLength+1)
+	updateResponse, err := service.UpdateDevice(
+		t.Context(),
+		newTunnelRequest(overlong),
+	)
+	require.Nil(t, updateResponse)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // TestUpdateDevice_ConcurrentUpdates verifies that concurrent callers cannot

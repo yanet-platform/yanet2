@@ -362,7 +362,8 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
     const name = device.id.name || '';
     const iconColor = manifest?.accentColor ?? 'var(--teal)';
     const kindTag = manifest?.kindTag(device) ?? device.type.toUpperCase();
-    const canSave = (device.isDirty || device.isNew) && !saving;
+    const canSave = (device.isDirty || device.isNew) && !saving
+        && (manifest?.extValid?.(device) ?? true);
     const serverDevice = name ? getServerDevice(name) : null;
 
     return (

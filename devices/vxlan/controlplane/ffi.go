@@ -21,6 +21,11 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
+// DeviceNameMaxLength is the longest device name the C configuration can
+// carry: cp_device_config_init truncates into a CP_DEVICE_NAME_LEN buffer,
+// which would silently publish a differently named dataplane device.
+const DeviceNameMaxLength = int(C.CP_DEVICE_NAME_LEN) - 1
+
 // Settings are the tunnel parameters copied verbatim into the shared-memory
 // configuration.
 //

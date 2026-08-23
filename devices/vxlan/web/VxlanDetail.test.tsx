@@ -232,23 +232,42 @@ describe('VxlanDetail editors', () => {
         });
     });
 
-    it('flags invalid input and keeps the last valid number for save', async () => {
+    it('flags invalid input and blocks save until every field is valid', async () => {
         const { device } = renderDetail(makeDevice(deviceType.createDefaults!()));
 
         fireEvent.change(screen.getByLabelText('VNI'), { target: { value: '42' } });
         fireEvent.change(screen.getByLabelText('VNI'), { target: { value: '4x2' } });
         expect(screen.getByText('whole number only')).toBeVisible();
+        // The invalid text reaches the ext, so Save is disabled for
+        // exactly what the editor shows instead of silently submitting
+        // the last valid number.
+        expect(deviceType.extValid?.(device())).toBe(false);
+        await expect(deviceType.save(device(), undefined)).rejects.toThrow();
+        expect(updateVxlan).not.toHaveBeenCalled();
 
+        fireEvent.change(screen.getByLabelText('Dst port'), { target: { value: '0' } });
+        expect(screen.getByText('1…65535')).toBeVisible();
+        expect(deviceType.extValid?.(device())).toBe(false);
+
+        fireEvent.change(screen.getByLabelText('VNI'), { target: { value: '42' } });
+        fireEvent.change(screen.getByLabelText('Dst port'), { target: { value: '4790' } });
         fireEvent.change(screen.getByLabelText('Src IP'), { target: { value: '300.0.0.1' } });
         expect(screen.getByText('IPv4 address only')).toBeVisible();
         // Src MAC, Dst MAC and Dst IP are still empty at this point.
         expect(screen.getAllByText('required')).toHaveLength(3);
+        expect(deviceType.extValid?.(device())).toBe(false);
+        await expect(deviceType.save(device(), undefined)).rejects.toThrow();
 
-        // Numbers keep their last valid value in the ext; text fields send
-        // exactly what the editor shows and the control plane rejects it.
+        fireEvent.change(screen.getByLabelText('Src MAC'), { target: { value: 'aa:bb:cc:dd:ee:ff' } });
+        fireEvent.change(screen.getByLabelText('Dst MAC'), { target: { value: '11:22:33:44:55:66' } });
+        fireEvent.change(screen.getByLabelText('Src IP'), { target: { value: '10.0.0.1' } });
+        fireEvent.change(screen.getByLabelText('Dst IP'), { target: { value: '10.0.0.2' } });
+        expect(deviceType.extValid?.(device())).toBe(true);
+
         await deviceType.save(device(), undefined);
+        expect(updateVxlan).toHaveBeenCalledTimes(1);
         expect(updateVxlan).toHaveBeenCalledWith(
-            expect.objectContaining({ vni: 42, src_ip: '300.0.0.1' }),
+            expect.objectContaining({ vni: 42, dst_port: 4790, src_ip: '10.0.0.1' }),
         );
     });
 
