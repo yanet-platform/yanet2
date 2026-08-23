@@ -1,10 +1,16 @@
 import './vxlan.scss';
 import { ApiError, devices, toDevicePayload } from '@yanet/core/api';
 import type { BaseDevice, DeviceTypeManifest } from '@yanet/core/registry';
-import { vxlanExt, resolvedExt, DEFAULT_DST_PORT } from './types';
+import { vxlanExt, isValidExt, resolvedExt, DEFAULT_DST_PORT } from './types';
 import { IconVxlan } from './icon';
 
+// The Save button stays disabled while any editor shows a value the
+// control plane would reject; save itself refuses the same ext, so a
+// programmatic caller cannot submit a stale last-valid number either.
 const save = async (device: BaseDevice): Promise<Record<string, unknown>> => {
+    if (!isValidExt(vxlanExt(device))) {
+        throw new Error('tunnel settings are incomplete or invalid');
+    }
     const ext = resolvedExt(device);
     const response = await devices.updateVxlan({
         name: device.id.name,
@@ -83,6 +89,7 @@ export const deviceType: DeviceTypeManifest = {
         dstIp: '',
     }),
     loadData,
+    extValid: (device) => isValidExt(vxlanExt(device)),
     extDirty: (device, snapshot) => {
         const current = vxlanExt(device);
         const clean = snapshot ? vxlanExt(snapshot) : undefined;

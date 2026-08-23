@@ -1,12 +1,13 @@
 /*
  * Dataplane coverage for the vxlan device input and output handlers.
  *
- * Permanent C tests because both cases are unreachable from Go. The
+ * Permanent C tests because these cases are unreachable from Go. The
  * harness packet builders hardwire data_off to RTE_PKTMBUF_HEADROOM (256)
  * and expose no headroom control, so the 50-byte encap prepend can never
  * fail from Go. And no Go-loadable module reads the transport header of
- * a non-IP-typed packet, so the decap reset of stale outer UDP transport
- * metadata cannot be asserted there.
+ * a non-IP-typed packet or the vlan id of an untagged frame, so the decap
+ * resets of the stale outer UDP transport metadata and VLAN id cannot be
+ * asserted there.
  */
 
 #include <stdint.h>
@@ -307,6 +308,62 @@ run_decap_transport_reset_test(device_handler handler) {
 	return TEST_SUCCESS;
 }
 
+// A matching frame that reaches the handler after a vlan device stripped
+// its outer tag carries the removed VLAN id in the metadata while the
+// bytes are untagged, and parse_packet leaves the id for an untagged inner
+// frame: only the explicit reset restores the fresh-packet state.
+static int
+run_decap_vlan_reset_test(device_handler handler) {
+	uint8_t inner[128];
+	uint16_t inner_len = build_inner_frame(inner);
+	uint8_t outer[192];
+	uint16_t outer_len = build_vxlan_outer_frame(outer, inner, inner_len);
+
+	struct packet packet;
+	struct rte_mbuf *mbuf =
+		frame_mbuf(RTE_PKTMBUF_HEADROOM, outer, outer_len);
+	TEST_ASSERT_NOT_NULL(mbuf, "alloc_mbuf returned NULL");
+	init_packet(&packet, mbuf);
+
+	// Seed the metadata a real RX parse of the outer frame leaves.
+	TEST_ASSERT_EQUAL(
+		parse_packet(&packet), 0, "the outer frame must parse"
+	);
+	// A vlan device configured for the tag strips it from the bytes
+	// without touching the parsed metadata, which is how a packet
+	// arrives at the vxlan handler with a vlan id over untagged IPv4.
+	packet.vlan = 100;
+
+	struct packet_front pf;
+	run_handler(handler, &packet, &pf);
+
+	TEST_ASSERT_EQUAL(
+		(long)packet_front_output_count(&pf),
+		1L,
+		"a valid vxlan frame must be decapsulated"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)packet_front_drop_count(&pf),
+		0L,
+		"a valid vxlan frame must not be dropped"
+	);
+
+	struct packet *decapped = packet_list_pop(&pf.output);
+	TEST_ASSERT_NOT_NULL(decapped, "the output list must hold the packet");
+	TEST_ASSERT_EQUAL(
+		(long)decapped->vlan,
+		0L,
+		"an untagged inner frame must not keep the stripped outer "
+		"vlan id (expected 0, got %u)",
+		decapped->vlan
+	);
+
+	free_packet(decapped);
+	free_result(&pf);
+
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -371,6 +428,9 @@ main(void) {
 	int res = run_encap_headroom_drop_test(output_handler);
 	if (res == TEST_SUCCESS) {
 		res = run_decap_transport_reset_test(input_handler);
+	}
+	if (res == TEST_SUCCESS) {
+		res = run_decap_vlan_reset_test(input_handler);
 	}
 
 	// The device and its API objects must return every arena byte they

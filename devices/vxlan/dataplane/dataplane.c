@@ -195,10 +195,12 @@ vxlan_input_handle(
 
 		// Re-run the standard parse so downstream pipelines see the
 		// inner frame's headers, hash and length; a malformed inner
-		// frame is dropped. parse_packet sets network_header for
-		// every frame but leaves transport_header untouched for a
-		// non-IP one (e.g. ARP), which must not keep the outer UDP
-		// type and offset, so reset it to the fresh-packet state.
+		// frame is dropped. parse_packet never overwrites the vlan id
+		// and the transport header of a frame that carries neither (an
+		// untagged non-IP inner frame), so reset both to the
+		// fresh-packet state — a stripped outer VLAN tag and the outer
+		// UDP header must not leak into the inner pipelines' filters.
+		packet->vlan = 0;
 		packet->transport_header.type = PACKET_HEADER_TYPE_UNKNOWN;
 		packet->transport_header.offset = 0;
 		if (parse_packet(packet)) {
