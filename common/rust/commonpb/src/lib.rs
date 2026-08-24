@@ -917,7 +917,7 @@ mod test {
     #[test]
     fn test_ipv4_address_conversion_network_byte_order() {
         let addr = pb::IPv4Address::from(Ipv4Addr::new(10, 1, 2, 3));
-        assert_eq!(0x0A010203, addr.addr);
+        assert_eq!(0x0a010203, addr.addr);
         assert_eq!(Ipv4Addr::new(10, 1, 2, 3), Ipv4Addr::from(&addr));
     }
 
@@ -927,7 +927,7 @@ mod test {
     fn test_ipv4_address_wire_bytes_golden() {
         use prost::Message;
 
-        let addr = pb::IPv4Address { addr: 0x0A010203 };
+        let addr = pb::IPv4Address { addr: 0x0a010203 };
         assert_eq!(vec![0x0d, 0x03, 0x02, 0x01, 0x0a], addr.encode_to_vec());
     }
 

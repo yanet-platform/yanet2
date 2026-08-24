@@ -23,8 +23,8 @@ func Test_NewIPv4AddressFromAddr_Valid(t *testing.T) {
 		want uint32
 	}{
 		{name: "zero address", addr: "0.0.0.0", want: 0x00000000},
-		{name: "broadcast", addr: "255.255.255.255", want: 0xFFFFFFFF},
-		{name: "asymmetric octets", addr: "10.1.2.3", want: 0x0A010203},
+		{name: "broadcast", addr: "255.255.255.255", want: 0xffffffff},
+		{name: "asymmetric octets", addr: "10.1.2.3", want: 0x0a010203},
 	}
 
 	for _, tt := range tests {
@@ -63,7 +63,7 @@ func Test_NewIPv4AddressFromAddr_RejectsNonIPv4(t *testing.T) {
 // byte becomes the most significant byte of the encoded value.
 func Test_NewIPv4Address_NetworkByteOrder(t *testing.T) {
 	ip := commonpb.NewIPv4Address([4]byte{10, 1, 2, 3})
-	require.Equal(t, uint32(0x0A010203), ip.Addr)
+	require.Equal(t, uint32(0x0a010203), ip.Addr)
 }
 
 // Test_IPv4Address_ToAddr_RoundTrip verifies that conversion to netip
