@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package common.commonpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
+
+// IPv4Address represents an IPv4 host address.
+//
+// Unlike IPAddress, the family is fixed by the type and every value is a
+// valid address: there is no malformed state to validate after decoding.
+message IPv4Address {
+  // The address as a big-endian u32 value.
+  //
+  // 10.1.2.3 is 0x0a010203.
+  fixed32 addr = 1;
+}

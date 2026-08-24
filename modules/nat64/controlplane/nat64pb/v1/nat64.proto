@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package modules.nat64.controlplane.nat64pb.v1;
 
-import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/ipv4addr.proto";
+import "common/commonpb/v1/ipv6addr.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1;nat64pb";
 

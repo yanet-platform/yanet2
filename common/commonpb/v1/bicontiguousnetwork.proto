@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package common.commonpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
+
+import "common/commonpb/v1/ipv6addr.proto";
+
+// BiContiguousIPv6Network represents an IPv6 network whose two 64-bit
+// mask halves are independently contiguous.
+//
+// This is the filter compiler's valid IPv6 class: each mask half is a
+// leading run of one bits, so a hole exactly at the /64 boundary is
+// expressible while a mask with a hole inside either half is
+// unrepresentable. Globally contiguous CIDR masks are the subset with
+// hi_prefix_len 64 or lo_prefix_len 0. An absent message means no
+// network. The wildcard ::/0 is the explicit all-zero encoding, and an
+// absent addr is the only malformed state.
+message BiContiguousIPv6Network {
+  // Network base address.
+  //
+  // MUST be present. Address bits not covered by the two half-masks are
+  // masked off on decode, so producers need not normalize.
+  IPv6Address addr = 1;
+  // Leading-ones run length of the high 64-bit mask half.
+  //
+  // MUST be <= 64.
+  uint32 hi_prefix_len = 2;
+  // Leading-ones run length of the low 64-bit mask half.
+  //
+  // MUST be <= 64.
+  uint32 lo_prefix_len = 3;
+}

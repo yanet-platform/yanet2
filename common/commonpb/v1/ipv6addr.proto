@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package common.commonpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
+
+// IPv6Address represents an IPv6 host address.
+//
+// Unlike IPAddress, the family is fixed by the type and every value is a
+// valid address: there is no malformed state to validate after decoding.
+// IPv4-mapped addresses belong to this family, distinct from the same
+// address in its IPv4Address form.
+message IPv6Address {
+  // Address bytes 0-7 as a big-endian u64.
+  //
+  // For 2a02:6b8:0:1::100 this is 0x2a0206b800000001.
+  fixed64 hi = 1;
+  // Address bytes 8-15 as a big-endian u64.
+  //
+  // For 2a02:6b8:0:1::100 this is 0x0000000000000100.
+  fixed64 lo = 2;
+}
