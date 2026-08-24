@@ -460,6 +460,62 @@ impl<'de> Deserialize<'de> for pb::IPv6Prefix {
     }
 }
 
+impl From<Ipv6Network> for pb::IPv6Network {
+    fn from(net: Ipv6Network) -> Self {
+        pb::IPv6Network {
+            addr: Some(pb::IPv6Address::from(*net.addr())),
+            mask: Some(pb::IPv6Address::from(*net.mask())),
+        }
+    }
+}
+
+impl TryFrom<&pb::IPv6Network> for Ipv6Network {
+    type Error = Box<dyn Error>;
+
+    fn try_from(net: &pb::IPv6Network) -> Result<Self, Self::Error> {
+        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+        let mask = net.mask.as_ref().ok_or("invalid IP network: missing mask")?;
+        Ok(Ipv6Network::new(Ipv6Addr::from(addr), Ipv6Addr::from(mask)))
+    }
+}
+
+impl Display for pb::IPv6Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match Ipv6Network::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::IPv6Network {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = Ipv6Network::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::IPv6Network {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::IPv6Network {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
 impl From<BiContiguous<Ipv6Network>> for pb::BiContiguousIPv6Network {
     fn from(net: BiContiguous<Ipv6Network>) -> Self {
         let mask = net.mask().to_bits();

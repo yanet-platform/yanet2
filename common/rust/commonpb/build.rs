@@ -4,9 +4,9 @@ use core::error::Error;
 ///
 /// The address messages, `MACAddress`, and the network messages
 /// (`ContiguousIPNetwork`, `IPv4Prefix`, `IPv6Prefix`, `IPv4Network`,
-/// `BiContiguousIPv6Network`) are deliberately absent: `src/lib.rs`
-/// hand-writes their `Serialize`/`Deserialize` impls to go straight to
-/// and from a plain string, and prost-build's attribute paths are
+/// `IPv6Network`, `BiContiguousIPv6Network`) are deliberately absent:
+/// `src/lib.rs` hand-writes their `Serialize`/`Deserialize` impls to go
+/// straight to and from a plain string, and prost-build's attribute paths are
 /// additive, not
 /// subtractive -- a blanket `message_attribute(".", ...)` cannot exclude
 /// a single message, so every other message is listed here individually
@@ -39,6 +39,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/commonpb/v1/contiguousnetwork.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4prefix.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4network.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6network.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6prefix.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/bicontiguousnetwork.proto");
 
@@ -71,6 +72,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "common/commonpb/v1/contiguousnetwork.proto",
             "common/commonpb/v1/ipv4prefix.proto",
             "common/commonpb/v1/ipv4network.proto",
+            "common/commonpb/v1/ipv6network.proto",
             "common/commonpb/v1/ipv6prefix.proto",
             "common/commonpb/v1/bicontiguousnetwork.proto",
         ],
