@@ -112,54 +112,6 @@ func ToIPNet(pb *filterpb.IPNet) (filter.IPNet, error) {
 	return net, nil
 }
 
-// ToNet4sFromPrefixes converts protobuf IPPrefix messages to filter
-// IPNets, keeping only IPv4 entries.
-func ToNet4sFromPrefixes(pb []*filterpb.IPPrefix) (filter.IPNets, error) {
-	prefixes := make([]netip.Prefix, 0, len(pb))
-
-	for _, p := range pb {
-		if len(p.Addr) != 4 && len(p.Addr) != 16 {
-			return nil, status.Error(
-				codes.InvalidArgument,
-				"invalid network address length",
-			)
-		}
-
-		if len(p.Addr) != 4 {
-			continue
-		}
-
-		addr, _ := netip.AddrFromSlice(p.Addr)
-		prefixes = append(prefixes, netip.PrefixFrom(addr, int(p.Length)))
-	}
-
-	return filter.Net4sFromPrefixes(prefixes)
-}
-
-// ToNet6sFromPrefixes converts protobuf IPPrefix messages to filter
-// IPNets, keeping only IPv6 entries.
-func ToNet6sFromPrefixes(pb []*filterpb.IPPrefix) (filter.IPNets, error) {
-	prefixes := make([]netip.Prefix, 0, len(pb))
-
-	for _, p := range pb {
-		if len(p.Addr) != 4 && len(p.Addr) != 16 {
-			return nil, status.Error(
-				codes.InvalidArgument,
-				"invalid network address length",
-			)
-		}
-
-		if len(p.Addr) != 16 {
-			continue
-		}
-
-		addr, _ := netip.AddrFromSlice(p.Addr)
-		prefixes = append(prefixes, netip.PrefixFrom(addr, int(p.Length)))
-	}
-
-	return filter.Net6sFromPrefixes(prefixes)
-}
-
 // ToPortRanges converts protobuf PortRange messages to filter PortRanges.
 func ToPortRanges(pb []*filterpb.PortRange) (filter.PortRanges, error) {
 	out := make(filter.PortRanges, len(pb))
