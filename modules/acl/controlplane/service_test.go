@@ -970,19 +970,16 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// mustV4Network builds a IPv4Prefix from a CIDR test literal.
-func mustV4Network(t *testing.T, cidr string) *commonpb.IPv4Prefix {
-	t.Helper()
-
-	network, err := commonpb.NewIPv4PrefixFromPrefix(netip.MustParsePrefix(cidr))
-	require.NoError(t, err)
-	return network
+// mustV4Network builds an IPv4Network from a test literal in the CIDR or
+// address/mask form.
+func mustV4Network(s string) *commonpb.IPv4Network {
+	return commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4(s))
 }
 
-// mustV6Network builds a BiContiguousIPv6Network from an xnetip test
-// literal, accepting the CIDR and address/mask forms.
-func mustV6Network(s string) *commonpb.BiContiguousIPv6Network {
-	return commonpb.NewBiContiguousIPv6NetworkFromBiContiguous(xnetip.MustParseBiContiguous(s))
+// mustV6Network builds an IPv6Network from a test literal in the CIDR or
+// address/mask form.
+func mustV6Network(s string) *commonpb.IPv6Network {
+	return commonpb.NewIPv6NetworkFrom6(xnetip.MustParseNetwork6(s))
 }
 
 // TestUpdateConfig_TypedNetworkLists verifies that a rule carrying only
@@ -994,23 +991,19 @@ func TestUpdateConfig_TypedNetworkLists(t *testing.T) {
 	backend := newFakeBackend()
 	svc := newTestService(backend)
 
-	source4 := mustV4Network(t, "192.0.2.0/24")
-	destination4 := mustV4Network(t, "198.51.100.0/24")
+	source4 := mustV4Network("192.0.2.0/24")
+	destination4 := mustV4Network("198.51.100.0/24")
 	source6 := mustV6Network("2001:db8::/32")
-	destination6 := &commonpb.BiContiguousIPv6Network{
-		Addr:        commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8:1::").As16()),
-		HiPrefixLen: 48,
-		LoPrefixLen: 16,
-	}
+	destination6 := mustV6Network("2001:db8:1::/ffff:ffff:ffff:0:ffff::")
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name: "acl0",
 		Rules: []*aclpb.Rule{{
 			Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
-			Sources4:      []*commonpb.IPv4Prefix{source4},
-			Sources6:      []*commonpb.BiContiguousIPv6Network{source6},
-			Destinations4: []*commonpb.IPv4Prefix{destination4},
-			Destinations6: []*commonpb.BiContiguousIPv6Network{destination6},
+			Sources4:      []*commonpb.IPv4Network{source4},
+			Sources6:      []*commonpb.IPv6Network{source6},
+			Destinations4: []*commonpb.IPv4Network{destination4},
+			Destinations6: []*commonpb.IPv6Network{destination6},
 		}},
 	})
 	require.NoError(t, err)
@@ -1035,7 +1028,7 @@ func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
 	backend := newFakeBackend()
 	svc := newTestService(backend)
 
-	typed := mustV4Network(t, "198.51.100.0/24")
+	typed := mustV4Network("198.51.100.0/24")
 
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name: "acl0",
@@ -1045,7 +1038,7 @@ func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
 				Addr: []byte{192, 0, 2, 0},
 				Mask: []byte{255, 255, 255, 0},
 			}},
-			Sources4: []*commonpb.IPv4Prefix{typed},
+			Sources4: []*commonpb.IPv4Network{typed},
 		}},
 	})
 	require.NoError(t, err)
@@ -1060,25 +1053,43 @@ func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
 	}, rules[0].Src4s)
 }
 
-// TestUpdateConfig_RejectsTypedV6HalfOverflow verifies that a half prefix
-// length above 64 is rejected before reaching the backend.
-func TestUpdateConfig_RejectsTypedV6HalfOverflow(t *testing.T) {
-	backend := newFakeBackend()
-	svc := newTestService(backend)
+// TestUpdateConfig_RejectsTypedOutOfClassMasks verifies that masks outside
+// the compiler classes are rejected before reaching the backend.
+func TestUpdateConfig_RejectsTypedOutOfClassMasks(t *testing.T) {
+	tests := []struct {
+		name string
+		rule *aclpb.Rule
+	}{
+		{
+			name: "non-contiguous IPv4",
+			rule: &aclpb.Rule{
+				Actions:  []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Sources4: []*commonpb.IPv4Network{mustV4Network("192.0.2.0/255.0.255.0")},
+			},
+		},
+		{
+			name: "IPv6 hole inside a half",
+			rule: &aclpb.Rule{
+				Actions:  []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Sources6: []*commonpb.IPv6Network{mustV6Network("2001:db8::/ffff:0:ffff::")},
+			},
+		},
+	}
 
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name: "acl0",
-		Rules: []*aclpb.Rule{{
-			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
-			Sources6: []*commonpb.BiContiguousIPv6Network{{
-				Addr:        commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8::").As16()),
-				HiPrefixLen: 65,
-			}},
-		}},
-	})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	assert.Equal(t, 0, backend.PublishCalls(), "backend must not be asked to publish")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			svc := newTestService(backend)
+
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: []*aclpb.Rule{tc.rule},
+			})
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Equal(t, 0, backend.PublishCalls(), "backend must not be asked to publish")
+		})
+	}
 }
 
 // TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports

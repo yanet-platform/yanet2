@@ -113,32 +113,51 @@ func ToIPNet(pb *filterpb.IPNet) (filter.IPNet, error) {
 	return net, nil
 }
 
-// ToNet4sFromContiguous converts family-typed contiguous IPv4 network
-// messages to filter IPNets.
-func ToNet4sFromContiguous(pb []*commonpb.IPv4Prefix) (filter.IPNets, error) {
-	prefixes, err := commonpb.PrefixesFromNetworks(pb)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 network: %v", err)
-	}
-
-	return filter.Net4sFromPrefixes(prefixes)
-}
-
-// ToNet6sFromBiContiguous converts family-typed bi-contiguous IPv6 network
-// messages to filter IPNets.
-func ToNet6sFromBiContiguous(pb []*commonpb.BiContiguousIPv6Network) (filter.IPNets, error) {
+// ToNet4sFromNetworks converts family-typed IPv4 network messages to
+// filter IPNets, enforcing the compiler's contiguous mask class.
+func ToNet4sFromNetworks(pb []*commonpb.IPv4Network) (filter.IPNets, error) {
 	out := make(filter.IPNets, 0, len(pb))
 
 	for idx := range pb {
-		net, err := pb[idx].ToBiContiguous()
+		net, err := pb[idx].ToNetwork4()
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 network at index %d: %v", idx, err)
+		}
+
+		ipNet := filter.IPNet{
+			Addr: net.Addr(),
+			Mask: net.Mask(),
+		}
+		if !ipNet.MaskIsValid() {
+			return nil, status.Errorf(codes.InvalidArgument, "network mask must be contiguous at index %d", idx)
+		}
+
+		out = append(out, ipNet)
+	}
+
+	return out, nil
+}
+
+// ToNet6sFromNetworks converts family-typed IPv6 network messages to
+// filter IPNets, enforcing the compiler's bi-contiguous mask class.
+func ToNet6sFromNetworks(pb []*commonpb.IPv6Network) (filter.IPNets, error) {
+	out := make(filter.IPNets, 0, len(pb))
+
+	for idx := range pb {
+		net, err := pb[idx].ToNetwork6()
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 network at index %d: %v", idx, err)
 		}
 
-		out = append(out, filter.IPNet{
-			Addr: net.Network().Addr(),
-			Mask: net.Network().Mask(),
-		})
+		ipNet := filter.IPNet{
+			Addr: net.Addr(),
+			Mask: net.Mask(),
+		}
+		if !ipNet.MaskIsValid() {
+			return nil, status.Errorf(codes.InvalidArgument, "network mask must be bi-contiguous at index %d", idx)
+		}
+
+		out = append(out, ipNet)
 	}
 
 	return out, nil

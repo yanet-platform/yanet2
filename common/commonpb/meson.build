@@ -15,7 +15,6 @@ common_proto_files = [
     join_paths(common_proto_dir, 'v1', 'ipv4network.proto'),
     join_paths(common_proto_dir, 'v1', 'ipv6network.proto'),
     join_paths(common_proto_dir, 'v1', 'ipv6prefix.proto'),
-    join_paths(common_proto_dir, 'v1', 'bicontiguousnetwork.proto'),
 ]
 
 # Generate protobuf files. The root include dir is required so that protos
@@ -37,7 +36,6 @@ common_protoc_gen = custom_target(
         'ipv4network.pb.go',
         'ipv6network.pb.go',
         'ipv6prefix.pb.go',
-        'bicontiguousnetwork.pb.go',
     ],
     input: common_proto_files,
     command: [

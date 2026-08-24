@@ -373,12 +373,12 @@ func labeler(fullMethod string, req any) metrics.Labels {
 
 // mergedNet4s decodes the IPv4 networks a rule carries in the legacy
 // mixed-family list and the typed list, legacy entries first.
-func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Prefix) (filter.IPNets, error) {
+func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Network) (filter.IPNets, error) {
 	nets, err := filterpbconv.ToNet4s(legacy)
 	if err != nil {
 		return nil, err
 	}
-	typedNets, err := filterpbconv.ToNet4sFromContiguous(typed)
+	typedNets, err := filterpbconv.ToNet4sFromNetworks(typed)
 	if err != nil {
 		return nil, err
 	}
@@ -388,12 +388,12 @@ func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Prefix) (filter
 
 // mergedNet6s decodes the IPv6 networks a rule carries in the legacy
 // mixed-family list and the typed list, legacy entries first.
-func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.BiContiguousIPv6Network) (filter.IPNets, error) {
+func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.IPv6Network) (filter.IPNets, error) {
 	nets, err := filterpbconv.ToNet6s(legacy)
 	if err != nil {
 		return nil, err
 	}
-	typedNets, err := filterpbconv.ToNet6sFromBiContiguous(typed)
+	typedNets, err := filterpbconv.ToNet6sFromNetworks(typed)
 	if err != nil {
 		return nil, err
 	}

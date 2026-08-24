@@ -707,21 +707,6 @@ rules:
     }
 
     #[test]
-    fn test_rules_yaml_rejects_noncontiguous_v4_source() {
-        let yaml = "rules:\n  - sources4:\n      - 192.0.2.0/255.0.255.0\n";
-
-        serde_yaml::from_str::<ACLConfig>(yaml).expect_err("a non-contiguous IPv4 mask must be rejected at parse time");
-    }
-
-    #[test]
-    fn test_rules_yaml_rejects_v6_hole_within_half() {
-        let yaml = "rules:\n  - sources6:\n      - \"2001:db8::/ffff:0:ffff::\"\n";
-
-        serde_yaml::from_str::<ACLConfig>(yaml)
-            .expect_err("an IPv6 mask with a hole inside a half must be rejected at parse time");
-    }
-
-    #[test]
     fn a_tag_entry_splits_on_the_first_equals() {
         let tag = parse_tag("config=my-acl").expect("a well-formed tag must parse");
 
