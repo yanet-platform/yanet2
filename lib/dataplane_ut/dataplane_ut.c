@@ -6,6 +6,7 @@
 #define DATAPLANE_UT_HIGH_GEN 1000000000000000ULL
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,7 @@
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
+#include "lib/utils/packet.h"
 
 struct dataplane_ut {
 	void *arena;
@@ -62,6 +64,16 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	}
 	if (cfg->worker_count < 1) {
 		LOG(ERROR, "dataplane_ut_new: worker_count must be at least 1");
+		return NULL;
+	}
+	if (cfg->packet_recirc_limit != 0 &&
+	    (cfg->packet_recirc_limit < PACKET_RECIRC_LIMIT_MIN ||
+	     cfg->packet_recirc_limit > PACKET_RECIRC_LIMIT_MAX)) {
+		LOG(ERROR,
+		    "dataplane_ut_new: packet_recirc_limit must be zero or in "
+		    "range %u..%u",
+		    (unsigned)PACKET_RECIRC_LIMIT_MIN,
+		    (unsigned)PACKET_RECIRC_LIMIT_MAX);
 		return NULL;
 	}
 
@@ -104,6 +116,9 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 
 	// Set instance_count — dp_storage_init leaves it at zero.
 	ut->dp_config->instance_count = 1;
+	ut->dp_config->packet_recirc_limit =
+		cfg->packet_recirc_limit == 0 ? PACKET_RECIRC_LIMIT_DEFAULT
+					      : cfg->packet_recirc_limit;
 
 	// Open the current binary so dlsym can resolve module/device symbols.
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
@@ -422,6 +437,30 @@ dataplane_ut_alloc_mbuf(struct dataplane_ut *ut) {
 	return rte_pktmbuf_alloc(ut->mempool);
 }
 
+static void
+dataplane_ut_packet_list_free(struct packet_list *list) {
+	struct packet *packet;
+	while ((packet = packet_list_pop(list)) != NULL) {
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (mbuf->pool != NULL) {
+			rte_pktmbuf_free(mbuf);
+		} else {
+			free_packet(packet);
+		}
+	}
+}
+
+void
+dataplane_ut_round_result_free(struct dataplane_ut_round_result *result) {
+	dataplane_ut_packet_list_free(&result->output);
+	dataplane_ut_packet_list_free(&result->drop);
+}
+
+size_t
+dataplane_ut_mempool_outstanding(struct dataplane_ut *ut) {
+	return test_mempool_outstanding(ut->mempool);
+}
+
 void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
@@ -501,19 +540,64 @@ dataplane_ut_run(
 	packet_list_concat(&result->drop, &packet_front.drop);
 }
 
-// Saved per-packet state used by dataplane_ut_run_rounds to reset each
-// packet before re-queuing it for the next round.
+// Saved per-packet state used by dataplane_ut_run_rounds.
 struct saved_packet {
 	struct packet *pkt;
-	uint16_t tx_device_id;
-	uint16_t rx_device_id;
-	// Payload snapshot (all segments) restored between rounds when
-	// requested, so header-mutating modules see fresh input every round.
+	struct packet state;
 	uint8_t *data;
 	uint32_t data_len;
+	uint16_t segment_count;
+	uint16_t first_data_off;
+	uint16_t first_data_len;
 };
 
-void
+static int
+saved_packet_restore(struct saved_packet *saved) {
+	*saved->pkt = saved->state;
+	saved->pkt->next = NULL;
+	if (saved->data == NULL) {
+		return 0;
+	}
+
+	struct rte_mbuf *mbuf = packet_to_mbuf(saved->pkt);
+	if (rte_pktmbuf_pkt_len(mbuf) != saved->data_len ||
+	    mbuf->nb_segs != saved->segment_count ||
+	    mbuf->data_off != saved->first_data_off ||
+	    mbuf->data_len != saved->first_data_len) {
+		return -EINVAL;
+	}
+
+	uint32_t offset = 0;
+	for (struct rte_mbuf *segment = mbuf; segment != NULL;
+	     segment = segment->next) {
+		if (segment->data_len > saved->data_len - offset) {
+			return -EINVAL;
+		}
+		memcpy(rte_pktmbuf_mtod(segment, void *),
+		       saved->data + offset,
+		       segment->data_len);
+		offset += segment->data_len;
+	}
+	return offset == saved->data_len ? 0 : -EINVAL;
+}
+
+static int
+saved_packets_rebuild(
+	struct saved_packet *saved, size_t count, struct packet_list *input
+) {
+	packet_list_init(input);
+	int result = 0;
+	for (size_t idx = 0; idx < count; ++idx) {
+		int rc = saved_packet_restore(&saved[idx]);
+		if (result == 0 && rc != 0) {
+			result = rc;
+		}
+		packet_list_add(input, saved[idx].pkt);
+	}
+	return result;
+}
+
+int
 dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
@@ -523,84 +607,85 @@ dataplane_ut_run_rounds(
 ) {
 	size_t count = (size_t)packet_list_count(input);
 	if (rounds == 0 || count == 0) {
-		return;
+		return 0;
 	}
 
-	struct saved_packet *saved =
-		malloc(count * sizeof(struct saved_packet));
+	struct saved_packet *saved = calloc(count, sizeof(struct saved_packet));
 	if (saved == NULL) {
-		return;
+		return -ENOMEM;
 	}
 
-	// Pop every packet out of input and record its initial routing state.
+	int result = 0;
+	int captured = 0;
+	size_t snapshot_count = 0;
+
+	// Capture before draining input so allocation failures leave it intact.
+	struct packet *pkt = packet_list_first(input);
 	for (size_t idx = 0; idx < count; ++idx) {
-		struct packet *pkt = packet_list_pop(input);
 		saved[idx].pkt = pkt;
-		saved[idx].tx_device_id = pkt->tx_device_id;
-		saved[idx].rx_device_id = pkt->rx_device_id;
-		saved[idx].data = NULL;
-		saved[idx].data_len = 0;
+		saved[idx].state = *pkt;
+		snapshot_count = idx + 1;
 		if (reset_payload) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
 			saved[idx].data_len = rte_pktmbuf_pkt_len(mbuf);
+			saved[idx].segment_count = mbuf->nb_segs;
+			saved[idx].first_data_off = mbuf->data_off;
+			saved[idx].first_data_len = mbuf->data_len;
 			saved[idx].data = malloc(saved[idx].data_len);
 			if (saved[idx].data == NULL) {
-				LOG(ERROR,
-				    "run_rounds: no memory for a payload "
-				    "snapshot; packet %zu runs without reset",
-				    idx);
-				continue;
+				result = -ENOMEM;
+				goto cleanup;
 			}
+
 			uint32_t offset = 0;
-			for (struct rte_mbuf *seg = mbuf; seg != NULL;
-			     seg = seg->next) {
+			for (struct rte_mbuf *segment = mbuf; segment != NULL;
+			     segment = segment->next) {
+				if (segment->data_len >
+				    saved[idx].data_len - offset) {
+					result = -EINVAL;
+					goto cleanup;
+				}
 				memcpy(saved[idx].data + offset,
-				       rte_pktmbuf_mtod(seg, void *),
-				       seg->data_len);
-				offset += seg->data_len;
+				       rte_pktmbuf_mtod(segment, void *),
+				       segment->data_len);
+				offset += segment->data_len;
+			}
+			if (offset != saved[idx].data_len) {
+				result = -EINVAL;
+				goto cleanup;
 			}
 		}
+		pkt = pkt->next;
 	}
+	captured = 1;
 
 	// Assumes a fixed packet set: handlers forward or drop without
 	// allocating, freeing, or replicating packets. dataplane_ut_run does
 	// not free dropped packets, so saved[idx].pkt stays valid every round.
-	for (uint64_t r = 0; r < rounds; ++r) {
-		// Rebuild input from the saved snapshot.
-		for (size_t idx = 0; idx < count; ++idx) {
-			struct packet *pkt = saved[idx].pkt;
-			pkt->next = NULL;
-			pkt->tx_device_id = saved[idx].tx_device_id;
-			pkt->rx_device_id = saved[idx].rx_device_id;
-			if (saved[idx].data != NULL) {
-				uint32_t offset = 0;
-				for (struct rte_mbuf *seg = packet_to_mbuf(pkt);
-				     seg != NULL;
-				     seg = seg->next) {
-					memcpy(rte_pktmbuf_mtod(seg, void *),
-					       saved[idx].data + offset,
-					       seg->data_len);
-					offset += seg->data_len;
-				}
-			}
-			packet_list_add(input, pkt);
+	for (uint64_t round = 0; round < rounds; ++round) {
+		result = saved_packets_rebuild(saved, count, input);
+		if (result != 0) {
+			break;
 		}
 
-		struct dataplane_ut_round_result result;
-		dataplane_ut_run(ut, worker, input, &result);
+		struct dataplane_ut_round_result round_result;
+		dataplane_ut_run(ut, worker, input, &round_result);
 	}
 
 	// Leave input holding all packets so the caller can free them.
-	for (size_t idx = 0; idx < count; ++idx) {
-		struct packet *pkt = saved[idx].pkt;
-		pkt->next = NULL;
-		pkt->tx_device_id = saved[idx].tx_device_id;
-		pkt->rx_device_id = saved[idx].rx_device_id;
-		packet_list_add(input, pkt);
+cleanup:
+	if (captured) {
+		int restore_result = saved_packets_rebuild(saved, count, input);
+		if (result == 0) {
+			result = restore_result;
+		}
+	}
+	for (size_t idx = 0; idx < snapshot_count; ++idx) {
 		free(saved[idx].data);
 	}
 
 	free(saved);
+	return result;
 }
 
 int

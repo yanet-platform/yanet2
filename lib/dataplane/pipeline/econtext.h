@@ -40,6 +40,7 @@ struct module_ectx {
 	uint64_t runtime_counter_storage_count;
 	struct counter_storage **runtime_counter_storages;
 	struct config_gen_ectx *config_gen_ectx;
+	uint16_t packet_recirc_limit;
 
 	uint64_t mc_index_size;
 	uint64_t *mc_index;
@@ -147,17 +148,17 @@ struct device_entry_ectx {
 	struct counter_value_handle *counter_packet_entry;
 	struct counter_value_handle *counter_packet_tx;
 	struct counter_value_handle *counter_packet_drop;
+	struct counter_value_handle *counter_packet_recirc_drop;
 	struct counter_value_handle *counter_packet_pending_input;
 	struct counter_value_handle *counter_packet_pending_output;
 	uint64_t pipeline_count;
 	struct pipeline_ectx **pipelines;
 	uint64_t pipeline_map_size;
-	// Per-entry scratch front the worker round demuxes traffic into.
+	// Per-entry inbox for packets awaiting processing.
 	//
-	// The round pops pending input/output for this device's entry point
-	// into this front, runs the entry, then merges the result back and
-	// leaves the front empty, so it is reused in place across rounds
-	// instead of being reinitialized on the stack every iteration.
+	// The worker detaches each batch before invoking the entry, so packets
+	// routed back here during processing remain queued for the next
+	// traversal.
 	struct packet_front schedule;
 	uint64_t pipeline_map[];
 };

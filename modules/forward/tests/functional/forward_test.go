@@ -503,6 +503,355 @@ func TestForward_ModeIn_IPv4(t *testing.T) {
 		ModuleName: "test",
 	}
 	dataplaneut.RequireModuleCounter(t, h, path, "rule0", 1, pktSize)
+
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port1"),
+	)
+	require.Equal(t, []uint64{0, 0}, deviceCounters["input_recirc_drop"])
+	require.Equal(t, []uint64{0, 0}, deviceCounters["output_recirc_drop"])
+}
+
+// verifies that a recurring ingress redirect terminates with an accounted drop.
+func Test_Forward_ModeInSelfTargetStopsAtStallLimit(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	rule := cforward.ForwardRule{
+		Target:  "port0",
+		Mode:    cforward.ModeIn,
+		Counter: "self",
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+	}
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	applyRules(t, backend, "test", []cforward.ForwardRule{rule})
+	wireForwardPipeline(t, agent, "port0", "test", nil)
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	require.Equal(
+		t,
+		[]uint64{1, pktSize},
+		deviceCounters["input_recirc_drop"],
+	)
+	require.Equal(
+		t,
+		[]uint64{5, 5 * pktSize},
+		deviceCounters["input_rx"],
+	)
+	require.Equal(t, []uint64{0, 0}, deviceCounters["output_recirc_drop"])
+}
+
+// verifies that an input recirculation drop is counted on the target device.
+func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	type route struct {
+		name   string
+		device string
+		target string
+	}
+	routes := []route{
+		{name: "loop0", device: "port0", target: "port1"},
+		{name: "loop1", device: "port1", target: "port0"},
+	}
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	for _, route := range routes {
+		applyRules(t, backend, route.name, []cforward.ForwardRule{{
+			Target:  route.target,
+			Mode:    cforward.ModeIn,
+			Counter: route.name,
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		}})
+		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+			Name: route.name,
+			Chains: []ffi.FunctionChainConfig{{
+				Weight: 1,
+				Chain: ffi.ChainConfig{
+					Name:    route.name + "_chain",
+					Modules: []ffi.ChainModuleConfig{{Type: "forward", Name: route.name}},
+				},
+			}},
+		}))
+		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+			Name:      route.name,
+			Functions: []string{route.name},
+		}))
+		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+			Name: "dummy_out_" + route.device,
+		}))
+	}
+
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+		{
+			Name:   "port0",
+			Input:  []ffi.DevicePipelineConfig{{Name: "loop0", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_port0", Weight: 1}},
+		},
+		{
+			Name:   "port1",
+			Input:  []ffi.DevicePipelineConfig{{Name: "loop1", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_port1", Weight: 1}},
+		},
+	}))
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	port0Counters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	port1Counters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port1"),
+	)
+	require.Equal(t, []uint64{0, 0}, port0Counters["input_recirc_drop"])
+	require.Equal(t, []uint64{0, 0}, port0Counters["output_recirc_drop"])
+	require.Equal(
+		t,
+		[]uint64{1, pktSize},
+		port1Counters["input_recirc_drop"],
+	)
+	require.Equal(t, []uint64{0, 0}, port1Counters["output_recirc_drop"])
+}
+
+// verifies that input and output redirects share one packet stall budget.
+func Test_Forward_MixedModeLoopSharesStallLimit(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	applyRules(t, backend, "to_input", []cforward.ForwardRule{{
+		Target:  "port1",
+		Mode:    cforward.ModeIn,
+		Counter: "to_input",
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+	}})
+	applyRules(t, backend, "to_output", []cforward.ForwardRule{{
+		Target:  "port0",
+		Mode:    cforward.ModeOut,
+		Counter: "to_output",
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+	}})
+
+	for _, name := range []string{"to_input", "to_output"} {
+		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+			Name: name,
+			Chains: []ffi.FunctionChainConfig{{
+				Weight: 1,
+				Chain: ffi.ChainConfig{
+					Name: name + "_chain",
+					Modules: []ffi.ChainModuleConfig{{
+						Type: "forward",
+						Name: name,
+					}},
+				},
+			}},
+		}))
+	}
+	for _, pipeline := range []struct {
+		name     string
+		function string
+	}{
+		{name: "to_input_in", function: "to_input"},
+		{name: "to_input_out", function: "to_input"},
+		{name: "to_output_in", function: "to_output"},
+	} {
+		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+			Name:      pipeline.name,
+			Functions: []string{pipeline.function},
+		}))
+	}
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name: "dummy_out_port1",
+	}))
+
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+		{
+			Name:   "port0",
+			Input:  []ffi.DevicePipelineConfig{{Name: "to_input_in", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "to_input_out", Weight: 1}},
+		},
+		{
+			Name:   "port1",
+			Input:  []ffi.DevicePipelineConfig{{Name: "to_output_in", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_port1", Weight: 1}},
+		},
+	}))
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	port0Counters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	port1Counters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port1"),
+	)
+	require.Equal(t, []uint64{0, 0}, port0Counters["output_recirc_drop"])
+	require.Equal(t, []uint64{0, 0}, port0Counters["input_recirc_drop"])
+	require.Equal(t, []uint64{1, pktSize}, port0Counters["input_rx"])
+	require.Equal(
+		t, []uint64{2, 2 * pktSize}, port0Counters["output_rx"],
+	)
+	require.Equal(
+		t, []uint64{2, 2 * pktSize}, port1Counters["input_rx"],
+	)
+	require.Equal(
+		t,
+		[]uint64{1, pktSize},
+		port1Counters["input_recirc_drop"],
+	)
+	require.Equal(t, []uint64{0, 0}, port1Counters["output_recirc_drop"])
+}
+
+// verifies that a recurring egress redirect terminates with an accounted drop.
+func Test_Forward_ModeOutSelfTargetStopsAtStallLimit(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	applyRules(t, backend, "feeder", catchAllForwardRules("port0"))
+	applyRules(t, backend, "loop", catchAllForwardRules("port0"))
+
+	for _, name := range []string{"feeder", "loop"} {
+		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+			Name: name,
+			Chains: []ffi.FunctionChainConfig{{
+				Weight: 1,
+				Chain: ffi.ChainConfig{
+					Name: name + "_chain",
+					Modules: []ffi.ChainModuleConfig{{
+						Type: "forward",
+						Name: name,
+					}},
+				},
+			}},
+		}))
+		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+			Name:      name,
+			Functions: []string{name},
+		}))
+	}
+
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
+		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
+	}}))
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	require.Equal(
+		t,
+		[]uint64{1, pktSize},
+		deviceCounters["output_recirc_drop"],
+	)
+	require.Equal(
+		t,
+		[]uint64{4, 4 * pktSize},
+		deviceCounters["output_rx"],
+	)
+	require.Equal(t, []uint64{0, 0}, deviceCounters["input_recirc_drop"])
+}
+
+// TestForward_ModeOutCrossDeviceLoopAttributesDropToTarget verifies an output
+// recirculation failure is charged to the entry the packet tried to enter.
+func TestForward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	packet := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	packetSize := uint64(len(packet.Data()))
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	routes := []struct {
+		name   string
+		target string
+	}{
+		{name: "feeder", target: "port1"},
+		{name: "loop0", target: "port1"},
+		{name: "loop1", target: "port0"},
+	}
+	for _, route := range routes {
+		applyRules(t, backend, route.name, []cforward.ForwardRule{{
+			Target:  route.target,
+			Mode:    cforward.ModeOut,
+			Counter: route.name,
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		}})
+		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+			Name: route.name,
+			Chains: []ffi.FunctionChainConfig{{
+				Weight: 1,
+				Chain: ffi.ChainConfig{
+					Name: route.name + "_chain",
+					Modules: []ffi.ChainModuleConfig{{
+						Type: "forward",
+						Name: route.name,
+					}},
+				},
+			}},
+		}))
+		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+			Name:      route.name,
+			Functions: []string{route.name},
+		}))
+	}
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+		{
+			Name:   "port0",
+			Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "loop0", Weight: 1}},
+		},
+		{
+			Name:   "port1",
+			Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "loop1", Weight: 1}},
+		},
+	}))
+
+	result, err := h.HandlePackets(packet)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	port0Counters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	port1Counters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port1"),
+	)
+	require.Equal(t, []uint64{0, 0}, port0Counters["output_recirc_drop"])
+	require.Equal(
+		t,
+		[]uint64{1, packetSize},
+		port1Counters["output_recirc_drop"],
+	)
 }
 
 // TestForward_UnmappedDevice verifies that a rule whose target device is not

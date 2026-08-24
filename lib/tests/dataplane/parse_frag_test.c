@@ -268,8 +268,20 @@ run_gre_accepted_case(bool inner_v6, uint16_t expect_ether_type) {
 		"outer network type is IPv4"
 	);
 	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	p.recirc_total_count = 7;
+	p.recirc_stall_count = 3;
 
 	TEST_ASSERT_EQUAL(packet_decap(&p), 0, "rc");
+	TEST_ASSERT_EQUAL(
+		p.recirc_total_count,
+		7,
+		"successful decap preserves total recirculation count"
+	);
+	TEST_ASSERT_EQUAL(
+		p.recirc_stall_count,
+		0,
+		"successful decap resets stalled recirculation count"
+	);
 	TEST_ASSERT_EQUAL(
 		p.network_header.type,
 		expect_ether_type,
@@ -287,6 +299,24 @@ run_gre_accepted_case(bool inner_v6, uint16_t expect_ether_type) {
 	);
 
 	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+static int
+assert_decap_failure_preserves_recirc(struct packet *packet) {
+	packet->recirc_total_count = 7;
+	packet->recirc_stall_count = 3;
+	TEST_ASSERT_EQUAL(packet_decap(packet), -1, "rc");
+	TEST_ASSERT_EQUAL(
+		packet->recirc_total_count,
+		7,
+		"failed decap preserves total recirculation count"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->recirc_stall_count,
+		3,
+		"failed decap preserves stalled recirculation count"
+	);
 	return TEST_SUCCESS;
 }
 
@@ -314,7 +344,10 @@ test_gre_reject_ver(void) {
 	struct packet p;
 	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->ver = 1;
-	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"failed decap changed recirculation state"
+	);
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
@@ -325,7 +358,10 @@ test_gre_reject_res1(void) {
 	struct packet p;
 	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->res1 = 1;
-	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"failed decap changed recirculation state"
+	);
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
@@ -336,7 +372,10 @@ test_gre_reject_res2(void) {
 	struct packet p;
 	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->res2 = 1;
-	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"failed decap changed recirculation state"
+	);
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
@@ -347,7 +386,10 @@ test_gre_reject_res3(void) {
 	struct packet p;
 	TEST_ASSERT_SUCCESS(build_gre_encapped(&p, false), "build");
 	pkt_gre(&p)->res3 = 1;
-	TEST_ASSERT_EQUAL(packet_decap(&p), -1, "rc");
+	TEST_ASSERT_SUCCESS(
+		assert_decap_failure_preserves_recirc(&p),
+		"failed decap changed recirculation state"
+	);
 	free_packet(&p);
 	return TEST_SUCCESS;
 }

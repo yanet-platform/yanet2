@@ -111,6 +111,7 @@ module_ectx_create(
 	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
 
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
+	module_ectx->packet_recirc_limit = dp_config->packet_recirc_limit;
 
 	struct dp_module *dp_module =
 		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
@@ -1127,6 +1128,13 @@ device_entry_ectx_create(
 		&device_entry_ectx->counter_packet_drop,
 		counter_get_value_handle(
 			cp_device_entry->counter_packet_drop, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_recirc_drop,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_recirc_drop,
+			counter_storage
 		)
 	);
 	SET_OFFSET_OF(

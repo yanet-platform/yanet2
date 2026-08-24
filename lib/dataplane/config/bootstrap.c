@@ -4,6 +4,7 @@
 #include "common/memory_address.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/packet/packet.h"
 
 int
 dp_storage_init(
@@ -19,6 +20,7 @@ dp_storage_init(
 
 	dp_config->numa_idx = numa_idx;
 	dp_config->instance_idx = instance_idx;
+	dp_config->packet_recirc_limit = PACKET_RECIRC_LIMIT_DEFAULT;
 	dp_config->storage_size = dp_memory + cp_memory;
 
 	block_allocator_init(&dp_config->block_allocator);

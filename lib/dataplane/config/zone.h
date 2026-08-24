@@ -117,6 +117,7 @@ struct dp_config {
 	 * Use it to attach workers
 	 */
 	uint32_t numa_idx;
+	uint16_t packet_recirc_limit;
 
 	uint64_t storage_size;
 

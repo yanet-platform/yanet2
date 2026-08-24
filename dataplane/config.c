@@ -7,6 +7,7 @@
 #include <yaml.h>
 
 #include "common/strutils.h"
+#include "lib/dataplane/packet/packet.h"
 
 static void
 print_scalar(const char *value, size_t length) {
@@ -40,6 +41,7 @@ parse_unsigned(
 	const char *field,
 	const char *value,
 	size_t length,
+	uint64_t min,
 	uint64_t max,
 	uint64_t *result
 ) {
@@ -53,13 +55,14 @@ parse_unsigned(
 	uintmax_t parsed = strtoumax(value, &end, 10);
 
 	if (*first == '-' || value == end || end != value + length ||
-	    errno == ERANGE || parsed > max) {
+	    errno == ERANGE || parsed < min || parsed > max) {
 		fprintf(stderr, "invalid %s value ", field);
 		print_scalar(value, length);
 		fprintf(stderr,
 			" (length %zu): expected an unsigned integer in range "
-			"0..%" PRIu64 "\n",
+			"%" PRIu64 "..%" PRIu64 "\n",
 			length,
+			min,
 			max);
 		return -1;
 	}
@@ -112,6 +115,7 @@ enum state {
 	state_dataplane,
 	state_dataplane_storage,
 	state_dataplane_dpdk_memory,
+	state_dataplane_packet_recirc_limit,
 	state_dataplane_iova_mode,
 
 	state_instances,
@@ -169,6 +173,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	}
 
 	memset(dataplane, 0, sizeof(*dataplane));
+	dataplane->packet_recirc_limit = PACKET_RECIRC_LIMIT_DEFAULT;
 
 	struct dataplane_instance_config *instance = NULL;
 	struct dataplane_device_config *device = NULL;
@@ -216,11 +221,27 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "dataplane.dpdk_memory",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT64_MAX,
 					    &dataplane->dpdk_memory
 				    ) != 0) {
 					goto error;
 				}
+				state = state_dataplane;
+				break;
+			case state_dataplane_packet_recirc_limit:
+				if (parse_unsigned(
+					    "dataplane.packet_recirc_limit",
+					    start,
+					    scalar_length,
+					    PACKET_RECIRC_LIMIT_MIN,
+					    PACKET_RECIRC_LIMIT_MAX,
+					    &value
+				    ) != 0) {
+					goto error;
+				}
+				dataplane->packet_recirc_limit =
+					(uint16_t)value;
 				state = state_dataplane;
 				break;
 			case state_dataplane_iova_mode:
@@ -259,6 +280,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "instances.numa_id",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT16_MAX,
 					    &value
 				    ) != 0) {
@@ -272,6 +294,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "instances.dp_memory",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT64_MAX,
 					    &instance->dp_memory
 				    ) != 0) {
@@ -284,6 +307,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "instances.cp_memory",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT64_MAX,
 					    &instance->cp_memory
 				    ) != 0) {
@@ -315,6 +339,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "devices.mtu",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT32_MAX,
 					    &value
 				    ) != 0) {
@@ -328,6 +353,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "devices.max_lro_packet_size",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT64_MAX,
 					    &device->max_lro_packet_size
 				    ) != 0) {
@@ -341,6 +367,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "devices.rss_hash",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT64_MAX,
 					    &device->rss_hash
 				    ) != 0) {
@@ -355,6 +382,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "workers.core_id",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT16_MAX,
 					    &value
 				    ) != 0) {
@@ -369,6 +397,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "workers.instance_id",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT16_MAX,
 					    &value
 				    ) != 0) {
@@ -383,6 +412,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "workers.rx_queue_len",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT16_MAX,
 					    &value
 				    ) != 0) {
@@ -397,6 +427,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "workers.tx_queue_len",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT16_MAX,
 					    &value
 				    ) != 0) {
@@ -411,6 +442,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					    "workers.num_mbufs",
 					    start,
 					    scalar_length,
+					    0,
 					    UINT32_MAX,
 					    &value
 				    ) != 0) {
@@ -446,6 +478,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_dataplane_storage;
 				} else if (!strcmp("dpdk_memory", start)) {
 					state = state_dataplane_dpdk_memory;
+				} else if (!strcmp("packet_recirc_limit",
+						   start)) {
+					state = state_dataplane_packet_recirc_limit;
 				} else if (!strcmp("iova_mode", start)) {
 					state = state_dataplane_iova_mode;
 				} else if (!strcmp("instances", start)) {

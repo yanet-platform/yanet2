@@ -92,6 +92,7 @@ fuzzing_params_init(
 
 	// Initialize module_ectx to zero
 	memset(&params->module_ectx, 0, sizeof(params->module_ectx));
+	params->module_ectx.packet_recirc_limit = PACKET_RECIRC_LIMIT_DEFAULT;
 
 	// Initialize stubs for route module
 	// Route module uses module_ectx_encode_device which accesses mc_index

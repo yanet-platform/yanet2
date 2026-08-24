@@ -1,9 +1,15 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 #define PACKET_HEADER_TYPE_UNKNOWN 0
+
+#define PACKET_RECIRC_STALL_LIMIT UINT8_C(4)
+#define PACKET_RECIRC_LIMIT_DEFAULT UINT16_C(16)
+#define PACKET_RECIRC_LIMIT_MIN UINT16_C(4)
+#define PACKET_RECIRC_LIMIT_MAX UINT16_C(256)
 
 enum packet_flag {
 	PACKET_FLAG_FRAGMENTED,
@@ -42,6 +48,9 @@ struct packet {
 	uint16_t flags;
 	uint16_t vlan;
 
+	uint16_t recirc_total_count;
+	uint8_t recirc_stall_count;
+
 	uint32_t flow_label; // 12 unused bits + 20 bits of the label
 
 	uint16_t fragment_offset;
@@ -53,6 +62,32 @@ struct packet {
 	struct network_header network_header;
 	struct transport_header transport_header;
 };
+
+// Consume one redirect from the packet's stall and lineage budgets.
+
+// Returns false when either budget is exhausted and leaves both counters
+// unchanged in that case.
+static inline bool
+packet_recirc_try_redirect(struct packet *packet, uint16_t limit) {
+	if (packet->recirc_total_count >= limit ||
+	    packet->recirc_stall_count >= PACKET_RECIRC_STALL_LIMIT) {
+		return false;
+	}
+
+	packet->recirc_total_count += 1;
+	packet->recirc_stall_count += 1;
+	return true;
+}
+
+// Mark an irreversible packet-layer removal as recirculation progress.
+
+// Callers must invoke this only after the packet bytes and parse metadata have
+// been updated successfully. It renews the stall allowance but never the
+// packet lineage budget.
+static inline void
+packet_recirc_mark_progress(struct packet *packet) {
+	packet->recirc_stall_count = 0;
+}
 
 struct packet_list {
 	struct packet *first;

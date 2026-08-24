@@ -508,6 +508,8 @@ dataplane_init(
 			    instance_idx);
 			return -1;
 		}
+		instance->dp_config->packet_recirc_limit =
+			config->packet_recirc_limit;
 
 		// System agent for this instance.
 		//

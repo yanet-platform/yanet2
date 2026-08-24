@@ -28,7 +28,7 @@ _Static_assert(
 	"struct dp_config size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
-	sizeof(struct packet) == 48,
+	sizeof(struct packet) == 56,
 	"struct packet size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
@@ -40,8 +40,12 @@ _Static_assert(
 	"struct cp_module size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
-	sizeof(struct module_ectx) == 136,
+	sizeof(struct module_ectx) == 144,
 	"struct module_ectx size changed, bump YANET_MODULE_ABI_VERSION"
+);
+_Static_assert(
+	sizeof(struct device_entry_ectx) == 216,
+	"struct device_entry_ectx size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
 	sizeof(struct config_gen_ectx) == 176,

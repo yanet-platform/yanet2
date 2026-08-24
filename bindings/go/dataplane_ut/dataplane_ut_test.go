@@ -1,6 +1,7 @@
 package dataplaneut
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -35,6 +36,21 @@ func TestHarnessLifecycle(t *testing.T) {
 
 	shm := h.SharedMemory()
 	require.NotNil(t, shm)
+}
+
+func TestNewHarnessRejectsInvalidPacketRecircLimit(t *testing.T) {
+	for _, limit := range []uint16{3, 257} {
+		t.Run(fmt.Sprintf("limit_%d", limit), func(t *testing.T) {
+			harness, err := NewHarness(Config{
+				CPMemory:          uint64(datasize.MB * 32),
+				DPMemory:          uint64(datasize.MB * 4),
+				WorkerCount:       1,
+				PacketRecircLimit: limit,
+			})
+			require.Error(t, err)
+			require.Nil(t, harness)
+		})
+	}
 }
 
 // TestTimeRoundTrip verifies that SetCurrentTime and CurrentTime agree and

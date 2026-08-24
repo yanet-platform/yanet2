@@ -32,15 +32,23 @@ const (
 )
 
 func setupDecapHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent, decap.Backend) {
+	return setupDecapHarnessWithLimit(t, 0)
+}
+
+func setupDecapHarnessWithLimit(
+	t *testing.T,
+	packetRecircLimit uint16,
+) (*dataplaneut.Harness, *ffi.Agent, decap.Backend) {
 	t.Helper()
 
 	h, err := dataplaneut.NewHarness(dataplaneut.Config{
-		CPMemory:      uint64(decapCPSize),
-		DPMemory:      uint64(decapDPSize),
-		WorkerCount:   1,
-		Devices:       []string{"port0"},
-		Modules:       []string{"decap", "forward"},
-		DevicesToLoad: []string{"plain"},
+		CPMemory:          uint64(decapCPSize),
+		DPMemory:          uint64(decapDPSize),
+		WorkerCount:       1,
+		PacketRecircLimit: packetRecircLimit,
+		Devices:           []string{"port0"},
+		Modules:           []string{"decap", "forward"},
+		DevicesToLoad:     []string{"plain"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(h.Free)
@@ -728,4 +736,264 @@ func TestDecap_NonIPPacket_UnchangedOutput(t *testing.T) {
 	require.Len(t, res.Output, 1)
 	require.Empty(t, res.Drop)
 	require.Equal(t, pkt.Data(), res.Output[0].RawData[:len(pkt.Data())])
+}
+
+// TestDecap_NestedIPIPRecirculatesPastStallLimit verifies that each successful
+// tunnel removal renews the no-progress allowance while the total lineage
+// budget still bounds the packet.
+func TestDecap_NestedIPIPRecirculatesPastStallLimit(t *testing.T) {
+	h, agent, decapBackend := setupDecapHarness(t)
+	decapHandle, err := decapBackend.UpdateModule(
+		"nested",
+		[]netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")},
+	)
+	require.NoError(t, err)
+	t.Cleanup(decapHandle.Free)
+
+	forwardBackend := forward.NewBackend(agent)
+	loopHandle, err := forwardBackend.UpdateModule("nested-loop", []cforward.ForwardRule{{
+		Target:  "port0",
+		Mode:    cforward.ModeIn,
+		Counter: "loop",
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("4.5.6.0/24")},
+	}})
+	require.NoError(t, err)
+	t.Cleanup(loopHandle.Free)
+
+	sinkHandle, err := forwardBackend.UpdateModule("nested-sink", []cforward.ForwardRule{
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink4",
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		},
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink_l2",
+			Devices: filter.Devices{{Name: "port0"}},
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(sinkHandle.Free)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "nested",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name: "nested_chain",
+				Modules: []ffi.ChainModuleConfig{
+					{Type: "decap", Name: "nested"},
+					{Type: "forward", Name: "nested-loop"},
+					{Type: "forward", Name: "nested-sink"},
+				},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "nested",
+		Functions: []string{"nested"},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "nested-dummy"}))
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: "nested", Weight: 1}},
+		Output: []ffi.DevicePipelineConfig{{Name: "nested-dummy", Weight: 1}},
+	}}))
+
+	pkt := nestedIPv4Packet(t, 5)
+	expected := nestedIPv4Packet(t, 0)
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	requireSingleOutputEquals(t, result, expected)
+}
+
+func nestedIPv4Packet(t *testing.T, outerCount int) gopacket.Packet {
+	t.Helper()
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	outer := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolIPv4,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("4.5.6.7"),
+	}
+	inner := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("198.51.100.1"),
+	}
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+	}
+
+	outers := make([]layers.IPv4, outerCount)
+	packetLayers := make([]gopacket.SerializableLayer, 0, outerCount+3)
+	packetLayers = append(packetLayers, &eth)
+	for idx := range outers {
+		outers[idx] = outer
+		packetLayers = append(packetLayers, &outers[idx])
+	}
+	packetLayers = append(packetLayers, &inner, &icmp)
+	return xpacket.LayersToPacket(t, packetLayers...)
+}
+
+// TestDecap_NestedIPIPStopsAtTotalLimit verifies every supported harness
+// limit reaches module execution and fails on the first redirect beyond it.
+func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		configured uint16
+		limit      uint16
+	}{
+		{name: "default", limit: 16},
+		{name: "minimum", configured: 4, limit: 4},
+		{name: "non_default", configured: 37, limit: 37},
+		{name: "maximum", configured: 256, limit: 256},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			limit := testCase.limit
+			h, agent, decapBackend := setupDecapHarnessWithLimit(t, testCase.configured)
+			decapHandle, err := decapBackend.UpdateModule(
+				"nested",
+				[]netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")},
+			)
+			require.NoError(t, err)
+			t.Cleanup(decapHandle.Free)
+
+			forwardHandle, err := forward.NewBackend(agent).UpdateModule(
+				"loop",
+				[]cforward.ForwardRule{{
+					Target:  "port0",
+					Mode:    cforward.ModeIn,
+					Counter: "loop",
+					Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+					Dst4s:   filter.IPNets{filter.MustParseIPNet("4.5.6.0/24")},
+				}},
+			)
+			require.NoError(t, err)
+			t.Cleanup(forwardHandle.Free)
+
+			require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+				Name: "nested",
+				Chains: []ffi.FunctionChainConfig{{
+					Weight: 1,
+					Chain: ffi.ChainConfig{
+						Name: "nested_chain",
+						Modules: []ffi.ChainModuleConfig{
+							{Type: "decap", Name: "nested"},
+							{Type: "forward", Name: "loop"},
+						},
+					},
+				}},
+			}))
+			require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+				Name:      "nested",
+				Functions: []string{"nested"},
+			}))
+			require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+			require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+				Name:   "port0",
+				Input:  []ffi.DevicePipelineConfig{{Name: "nested", Weight: 1}},
+				Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
+			}}))
+
+			packet := nestedIPv4Packet(t, int(limit)+2)
+			result, err := h.HandlePackets(packet)
+			require.NoError(t, err)
+			require.Empty(t, result.Output)
+			require.Len(t, result.Drop, 1)
+
+			packetSize := uint64(len(packet.Data()))
+			inputCount := uint64(limit) + 1
+			inputBytes := inputCount*packetSize -
+				20*uint64(limit)*inputCount/2
+			deviceCounters := dataplaneut.ValueCounters(
+				h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+			)
+			require.Equal(
+				t,
+				[]uint64{inputCount, inputBytes},
+				deviceCounters["input_rx"],
+			)
+			require.Equal(
+				t,
+				[]uint64{1, packetSize - uint64(limit+1)*20},
+				deviceCounters["input_recirc_drop"],
+			)
+		})
+	}
+}
+
+// TestDecap_MissDoesNotResetStallLimit verifies a no-op decap cannot renew
+// the no-progress allowance of a self-targeting forward loop.
+func TestDecap_MissDoesNotResetStallLimit(t *testing.T) {
+	h, agent, decapBackend := setupDecapHarness(t)
+	decapHandle, err := decapBackend.UpdateModule(
+		"miss",
+		[]netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")},
+	)
+	require.NoError(t, err)
+	t.Cleanup(decapHandle.Free)
+
+	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
+		"loop",
+		[]cforward.ForwardRule{{
+			Target:  "port0",
+			Mode:    cforward.ModeIn,
+			Counter: "loop",
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		}},
+	)
+	require.NoError(t, err)
+	t.Cleanup(forwardHandle.Free)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "miss",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name: "miss_chain",
+				Modules: []ffi.ChainModuleConfig{
+					{Type: "decap", Name: "miss"},
+					{Type: "forward", Name: "loop"},
+				},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "miss",
+		Functions: []string{"miss"},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: "miss", Weight: 1}},
+		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
+	}}))
+
+	packet := nestedIPv4Packet(t, 1)
+	result, err := h.HandlePackets(packet)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	packetSize := uint64(len(packet.Data()))
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	require.Equal(t, []uint64{5, 5 * packetSize}, deviceCounters["input_rx"])
+	require.Equal(t, []uint64{1, packetSize}, deviceCounters["input_recirc_drop"])
 }

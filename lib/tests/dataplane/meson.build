@@ -43,6 +43,16 @@ parse_frag_test = executable(
 )
 test('parse_frag', parse_frag_test, suite: 'lib_packet')
 
+packet_recirc_test = executable(
+  'packet_recirc_test',
+  'packet_recirc_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_logging_dep],
+  include_directories: yanet_rootdir,
+)
+test('packet_recirc', packet_recirc_test, suite: 'lib_packet')
+
 encap_dscp_test = executable(
   'encap_dscp_test',
   'encap_dscp_test.c',

@@ -1,5 +1,6 @@
 #include "assert.h"
 #include "config.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include <fcntl.h>
 #include <string.h>
@@ -60,6 +61,7 @@ static void
 test_numeric_field_maximum_values(void) {
 	const char yaml[] = "dataplane:\n"
 			    "  dpdk_memory: 18446744073709551615\n"
+			    "  packet_recirc_limit: 256\n"
 			    "  instances:\n"
 			    "    - numa_id: 65535\n"
 			    "      dp_memory: 18446744073709551615\n"
@@ -80,6 +82,7 @@ test_numeric_field_maximum_values(void) {
 	assert(rc == 0);
 
 	assert(config->dpdk_memory == UINT64_MAX);
+	assert(config->packet_recirc_limit == PACKET_RECIRC_LIMIT_MAX);
 	assert(config->instance_count == 1);
 	assert(config->instances[0].numa_idx == UINT16_MAX);
 	assert(config->instances[0].dp_memory == UINT64_MAX);
@@ -96,6 +99,40 @@ test_numeric_field_maximum_values(void) {
 	assert(config->devices[0].workers[0].num_mbufs == UINT32_MAX);
 
 	dataplane_config_free(config);
+}
+
+static void
+test_packet_recirc_limit_default_and_bounds(void) {
+	const char *yamls[] = {
+		"dataplane: {}\n",
+		"dataplane:\n  packet_recirc_limit: 4\n",
+		"dataplane:\n  packet_recirc_limit: 256\n",
+		"dataplane:\n  packet_recirc_limit: 37\n",
+	};
+	const uint16_t expected[] = {
+		PACKET_RECIRC_LIMIT_DEFAULT,
+		PACKET_RECIRC_LIMIT_MIN,
+		PACKET_RECIRC_LIMIT_MAX,
+		37,
+	};
+
+	for (size_t idx = 0; idx < sizeof(yamls) / sizeof(yamls[0]); ++idx) {
+		struct dataplane_config *config = NULL;
+		assert(parse_yaml(yamls[idx], &config) == 0);
+		assert(config->packet_recirc_limit == expected[idx]);
+		dataplane_config_free(config);
+	}
+
+	const char *invalid[] = {
+		"dataplane:\n  packet_recirc_limit: 3\n",
+		"dataplane:\n  packet_recirc_limit: 257\n",
+	};
+	for (size_t idx = 0; idx < sizeof(invalid) / sizeof(invalid[0]);
+	     ++idx) {
+		struct dataplane_config *config = NULL;
+		assert(parse_yaml(invalid[idx], &config) == -1);
+		assert(config == NULL);
+	}
 }
 
 static void
@@ -206,6 +243,7 @@ test_valid_config(void) {
 	int rc = dataplane_config_init(f, &config);
 	assert(rc == 0);
 
+	assert(config->packet_recirc_limit == 37);
 	assert(config->instance_count == 3);
 	check_instance(config->instances, 0, 1024, 2048);
 	check_instance(config->instances + 1, 1, 512, 128);
@@ -229,6 +267,7 @@ main(int argc, char **argv) {
 
 	test_valid_config();
 	test_numeric_field_maximum_values();
+	test_packet_recirc_limit_default_and_bounds();
 	test_numeric_field_ranges();
 	test_resolve_connections_unknown_device();
 	test_resolve_connections_duplicate_device();

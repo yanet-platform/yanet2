@@ -7,6 +7,7 @@ dependencies = [
   lib_config_cp_dep,
   lib_agent_cp_dep,
   lib_worker_dp_dep,
+  lib_lib_utils_dep,
   libdpdk_inc_dep,
 ]
 

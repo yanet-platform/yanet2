@@ -776,6 +776,59 @@ func TestRoute_DeviceTranslation_Drop(t *testing.T) {
 	require.Len(t, result.Drop, 1, "expected exactly one dropped packet")
 }
 
+// TestRoute_OutputSelfLoopStopsAtStallLimit verifies a route nexthop targeting
+// its own output entry terminates and attributes the drop to that entry.
+func TestRoute_OutputSelfLoopStopsAtStallLimit(t *testing.T) {
+	h, agent, backend := setupRouteHarness(t, "port0")
+	applyFIB(t, backend, "loop", []FIBEntry{{
+		Prefix:   netip.MustParsePrefix("10.0.0.0/24"),
+		Nexthops: []FIBNexthop{routeNextHop},
+	}})
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "loop",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name: "loop_chain",
+				Modules: []ffi.ChainModuleConfig{{
+					Type: "route",
+					Name: "loop",
+				}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "loop",
+		Functions: []string{"loop"},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "feeder",
+		Functions: []string{"loop"},
+	}))
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
+		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
+	}}))
+
+	packet := buildRouteIPv4Packet(t, "10.0.0.5", 64)
+	packetSize := uint64(len(packet.Data()))
+	result, err := h.HandlePackets(packet)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	require.Equal(
+		t,
+		[]uint64{1, packetSize},
+		deviceCounters["output_recirc_drop"],
+	)
+	require.Equal(t, []uint64{4, 4 * packetSize}, deviceCounters["output_rx"])
+}
+
 // routeCounterNames lists every per-outcome counter registered by the route
 // module in modules/route/api/controlplane.c.
 //

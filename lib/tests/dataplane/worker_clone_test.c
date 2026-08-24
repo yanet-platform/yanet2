@@ -6,6 +6,7 @@
 
 #include "common/test_assert.h"
 
+#include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/worker/worker.h"
@@ -67,6 +68,16 @@ assert_clone_correct(
 	TEST_ASSERT_EQUAL(clone->flags, src->flags, "flags preserved");
 	TEST_ASSERT_EQUAL(clone->vlan, src->vlan, "vlan preserved");
 	TEST_ASSERT_EQUAL(
+		clone->recirc_total_count,
+		src->recirc_total_count,
+		"recirculation total preserved"
+	);
+	TEST_ASSERT_EQUAL(
+		clone->recirc_stall_count,
+		src->recirc_stall_count,
+		"recirculation stall count preserved"
+	);
+	TEST_ASSERT_EQUAL(
 		clone->fragment_offset,
 		src->fragment_offset,
 		"fragment_offset preserved"
@@ -90,6 +101,8 @@ set_metadata(struct packet *p, uint32_t hash, uint16_t flags, uint16_t vlan) {
 	p->hash = hash;
 	p->flags = flags;
 	p->vlan = vlan;
+	p->recirc_total_count = 3;
+	p->recirc_stall_count = 2;
 	p->fragment_offset = 42;
 	p->rx_device_id = 7;
 	p->tx_device_id = 3;
@@ -127,6 +140,24 @@ test_multi_segment(struct rte_mempool *pool) {
 	struct packet *clone = worker_clone_packet(&dp_worker, &src);
 
 	int rc = assert_clone_correct(&src, clone, src.mbuf->pkt_len);
+	if (rc == TEST_SUCCESS) {
+		TEST_ASSERT(
+			packet_recirc_try_redirect(
+				clone, PACKET_RECIRC_LIMIT_DEFAULT
+			),
+			"clone must spend its inherited budget independently"
+		);
+		TEST_ASSERT_EQUAL(
+			src.recirc_total_count,
+			3,
+			"clone redirect must not change source total count"
+		);
+		TEST_ASSERT_EQUAL(
+			src.recirc_stall_count,
+			2,
+			"clone redirect must not change source stall count"
+		);
+	}
 
 	rte_pktmbuf_free(src.mbuf);
 	if (clone != NULL) {
@@ -141,6 +172,99 @@ err:
 		}
 	}
 	return TEST_FAILED;
+}
+
+static int
+test_packet_alloc_resets_metadata(struct rte_mempool *pool) {
+	struct dp_worker dp_worker = {0};
+	dp_worker.rx_mempool = pool;
+
+	test_mempool_poison(pool, 1);
+	struct packet *packet = worker_packet_alloc(&dp_worker);
+	test_mempool_poison(pool, 0);
+	TEST_ASSERT_NOT_NULL(packet, "packet allocation must succeed");
+	TEST_ASSERT_NULL(packet->next, "new packet chain pointer must be NULL");
+	TEST_ASSERT_EQUAL(packet->hash, 0, "new packet hash must be zero");
+	TEST_ASSERT_EQUAL(
+		packet->rx_device_id, 0, "new packet rx device must be zero"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->tx_device_id, 0, "new packet tx device must be zero"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->module_device_id,
+		0,
+		"new packet module device must be zero"
+	);
+	TEST_ASSERT_EQUAL(packet->flags, 0, "new packet flags must be zero");
+	TEST_ASSERT_EQUAL(packet->vlan, 0, "new packet vlan must be zero");
+	TEST_ASSERT_EQUAL(
+		packet->recirc_total_count,
+		0,
+		"new packet recirculation total must be zero"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->recirc_stall_count,
+		0,
+		"new packet recirculation stall count must be zero"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->fragment_offset,
+		0,
+		"new packet fragment offset must be zero"
+	);
+	TEST_ASSERT_EQUAL(
+		packet->data_len, 0, "new packet data length must be zero"
+	);
+	worker_packet_free(packet);
+	return TEST_SUCCESS;
+}
+
+static int
+test_recirc_drop_counts_full_packet(struct rte_mempool *pool) {
+	struct rte_mbuf *first = rte_pktmbuf_alloc(pool);
+	struct rte_mbuf *second = rte_pktmbuf_alloc(pool);
+	if (first == NULL || second == NULL) {
+		if (first != NULL) {
+			rte_pktmbuf_free(first);
+		}
+		if (second != NULL) {
+			rte_pktmbuf_free(second);
+		}
+		return TEST_FAILED;
+	}
+
+	const uint16_t first_len = 16;
+	const uint16_t second_len = 24;
+	if (rte_pktmbuf_append(first, first_len) == NULL ||
+	    rte_pktmbuf_append(second, second_len) == NULL) {
+		rte_pktmbuf_free(first);
+		rte_pktmbuf_free(second);
+		return TEST_FAILED;
+	}
+	first->next = second;
+	first->nb_segs = 2;
+	first->pkt_len = first_len + second_len;
+
+	struct packet packet = {
+		.mbuf = first,
+		.data_len = first_len,
+	};
+	struct device_entry_ectx entry = {0};
+	uint64_t counters[2] = {0, 0};
+	SET_OFFSET_OF(
+		&entry.counter_packet_recirc_drop,
+		(struct counter_value_handle *)counters
+	);
+
+	device_entry_ectx_count_recirc_drop(&entry, &packet);
+
+	TEST_ASSERT_EQUAL(counters[0], 1, "recirc drop packet count");
+	TEST_ASSERT_EQUAL(
+		counters[1], first_len + second_len, "recirc drop byte count"
+	);
+	rte_pktmbuf_free(first);
+	return TEST_SUCCESS;
 }
 
 /*
@@ -216,6 +340,10 @@ main(void) {
 		const char *name;
 		int (*fn)(struct rte_mempool *);
 	} tests[] = {
+		{"packet_alloc_resets_metadata",
+		 test_packet_alloc_resets_metadata},
+		{"recirc_drop_counts_full_packet",
+		 test_recirc_drop_counts_full_packet},
 		{"multi_segment", test_multi_segment},
 		{"jumbo", test_jumbo},
 	};

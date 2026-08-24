@@ -78,8 +78,13 @@ worker_pipeline_round(
 				continue;
 			}
 
+			// Detach the batch so redirects land in the reusable
+			// inbox.
+			struct packet_front active = *schedule;
+			packet_front_init(schedule);
+
 			device_ectx_process_input(
-				dp_worker, device_ectx, schedule
+				dp_worker, device_ectx, &active
 			);
 
 			/*
@@ -88,9 +93,9 @@ worker_pipeline_round(
 			 * The only chance for a packet to survive is being
 			 * routed into a device entry by a module.
 			 */
-			packet_front_drop_output(schedule);
+			packet_front_drop_output(&active);
 
-			packet_front_merge(packet_front, schedule);
+			packet_front_merge(packet_front, &active);
 		}
 
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
@@ -111,11 +116,16 @@ worker_pipeline_round(
 				continue;
 			}
 
+			// Detach the batch so redirects land in the reusable
+			// inbox.
+			struct packet_front active = *schedule;
+			packet_front_init(schedule);
+
 			device_ectx_process_output(
-				dp_worker, device_ectx, schedule
+				dp_worker, device_ectx, &active
 			);
 
-			packet_front_merge(packet_front, schedule);
+			packet_front_merge(packet_front, &active);
 		}
 
 		force_poll = 0;

@@ -166,8 +166,10 @@ fill_packet_net4(
 	uint8_t proto,
 	uint16_t flags
 ) {
-	packet->mbuf =
+	struct rte_mbuf *mbuf =
 		make_mbuf4(src_ip, dst_ip, src_port, dst_port, proto, flags);
+	memset(packet, 0, sizeof(*packet));
+	packet->mbuf = mbuf;
 	assert(packet->mbuf != NULL);
 	return parse_packet(packet);
 }
@@ -183,8 +185,10 @@ fill_packet_net6(
 	uint8_t proto,
 	uint16_t flags
 ) {
-	packet->mbuf =
+	struct rte_mbuf *mbuf =
 		make_mbuf6(src_ip, dst_ip, src_port, dst_port, proto, flags);
+	memset(packet, 0, sizeof(*packet));
+	packet->mbuf = mbuf;
 	assert(packet->mbuf != NULL);
 	return parse_packet(packet);
 }

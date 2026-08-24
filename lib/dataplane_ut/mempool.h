@@ -33,12 +33,13 @@ test_pool_enqueue(struct rte_mempool *mp, void *const *obj_table, unsigned n) {
 
 static int
 test_pool_dequeue(struct rte_mempool *mp, void **obj_table, unsigned n) {
+	const size_t poison = ((const size_t *)mp->pool_data)[1];
 	for (unsigned idx = 0; idx < n; idx++) {
 		void *ptr = aligned_alloc(64, mp->header_size + mp->elt_size);
 		if (ptr == NULL) {
 			rte_panic("failed to allocate object");
 		}
-		memset(ptr, 0, mp->header_size + mp->elt_size);
+		memset(ptr, poison ? 0xA5 : 0, mp->header_size + mp->elt_size);
 
 		struct rte_mempool_objhdr *hdr =
 			(struct rte_mempool_objhdr
@@ -77,14 +78,14 @@ test_mempool_create(void) {
 	rte_mempool_ops_table.num_ops = 0;
 	rte_mempool_register_ops(&test_pool_ops);
 
-	// The outstanding-object counter lives right after the private data,
-	// inside this same allocation, so every caller's plain free(mp) stays
-	// correct instead of leaking a separately-allocated counter.
+	// The outstanding-object counter and poison flag live right after the
+	// private data, inside this same allocation, so every caller's plain
+	// free(mp) stays correct instead of leaking separately-allocated state.
 	size_t private_data_size = sizeof(struct rte_pktmbuf_pool_private);
 	struct rte_mempool *mp =
 		calloc(1,
 		       sizeof(struct rte_mempool) + private_data_size +
-			       sizeof(size_t));
+			       2 * sizeof(size_t));
 	mp->flags |= RTE_MEMPOOL_F_POOL_CREATED;
 	mp->socket_id = 0;
 	mp->cache_size = 0;
@@ -112,4 +113,10 @@ test_mempool_free(struct rte_mempool *mp) {
 static inline size_t
 test_mempool_outstanding(const struct rte_mempool *mp) {
 	return *(const size_t *)mp->pool_data;
+}
+
+// Fill newly dequeued objects with a poison pattern for allocator tests.
+static inline void
+test_mempool_poison(struct rte_mempool *mp, int enabled) {
+	((size_t *)mp->pool_data)[1] = (size_t)enabled;
 }

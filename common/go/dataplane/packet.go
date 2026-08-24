@@ -10,6 +10,7 @@ package dataplane
 //#include "lib/utils/packet.h"
 import "C"
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"unsafe"
@@ -134,6 +135,7 @@ func (packet *Packet) Data() PacketData {
 
 func (packet *Packet) Info() *framework.PacketInfo {
 	data := packet.Data()
+	data.Payload = bytes.Clone(data.Payload)
 	info, err := framework.NewPacketParser().ParsePacket(data.Payload)
 	if err != nil {
 		msg := fmt.Sprintf("failed to parse packet: %v", err)

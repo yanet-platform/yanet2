@@ -23,6 +23,7 @@ struct cp_device_entry {
 	uint64_t counter_packet_entry;
 	uint64_t counter_packet_tx;
 	uint64_t counter_packet_drop;
+	uint64_t counter_packet_recirc_drop;
 	uint64_t counter_packet_pending_input;
 	uint64_t counter_packet_pending_output;
 	uint64_t pipeline_count;

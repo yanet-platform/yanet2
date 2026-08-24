@@ -185,12 +185,15 @@ type WorkerSpec struct {
 // WorkerCount must be >= 1.
 // Devices, Modules, DevicesToLoad, and ObjectsToLoad may be empty.
 type Config struct {
-	CPMemory      uint64
-	DPMemory      uint64
-	WorkerCount   uint64
-	Devices       []string
-	Modules       []string
-	DevicesToLoad []string
+	CPMemory    uint64
+	DPMemory    uint64
+	WorkerCount uint64
+	// PacketRecircLimit bounds total redirects per packet. Zero selects the
+	// production default; nonzero values use the production range.
+	PacketRecircLimit uint16
+	Devices           []string
+	Modules           []string
+	DevicesToLoad     []string
 	// ObjectsToLoad registers standalone shared-memory object types (e.g. "fwstate_map_v4") in the dataplane config.
 	ObjectsToLoad []string
 	// PluginDir is the directory scanned for module .so plugins. An empty
@@ -238,6 +241,16 @@ type Harness struct {
 // NewHarness constructs a Harness from cfg.
 // Free must be called when the test is done.
 func NewHarness(cfg Config) (*Harness, error) {
+	if cfg.PacketRecircLimit != 0 &&
+		(cfg.PacketRecircLimit < uint16(C.PACKET_RECIRC_LIMIT_MIN) ||
+			cfg.PacketRecircLimit > uint16(C.PACKET_RECIRC_LIMIT_MAX)) {
+		return nil, fmt.Errorf(
+			"packet recirculation limit %d is outside range %d..%d",
+			cfg.PacketRecircLimit,
+			uint16(C.PACKET_RECIRC_LIMIT_MIN),
+			uint16(C.PACKET_RECIRC_LIMIT_MAX),
+		)
+	}
 	if cfg.Workers != nil && uint64(len(cfg.Workers)) != cfg.WorkerCount {
 		return nil, fmt.Errorf(
 			"workers length %d does not match worker count %d",
@@ -285,6 +298,7 @@ func NewHarness(cfg Config) (*Harness, error) {
 		cp_memory:             C.size_t(cfg.CPMemory),
 		dp_memory:             C.size_t(cfg.DPMemory),
 		worker_count:          C.size_t(cfg.WorkerCount),
+		packet_recirc_limit:   C.uint16_t(cfg.PacketRecircLimit),
 		device_count:          C.size_t(len(cfg.Devices)),
 		module_count:          C.size_t(len(cfg.Modules)),
 		devices_to_load_count: C.size_t(len(cfg.DevicesToLoad)),
@@ -343,6 +357,11 @@ func NewHarness(cfg Config) (*Harness, error) {
 func (m *Harness) Free() {
 	C.dataplane_ut_free(m.ptr)
 	m.ptr = nil
+}
+
+// OutstandingMbufs returns mock-mempool allocations not yet reclaimed.
+func (m *Harness) OutstandingMbufs() uint64 {
+	return uint64(C.dataplane_ut_mempool_outstanding(m.ptr))
 }
 
 // SharedMemory returns the shared-memory handle backing this harness.
@@ -480,6 +499,7 @@ func (m *Harness) handleSegmentedPackets(
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
+	defer C.dataplane_ut_round_result_free(&result)
 
 	pinner.Pin(&result)
 
@@ -558,6 +578,7 @@ func (m *Harness) handlePackets(
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
+	defer C.dataplane_ut_round_result_free(&result)
 
 	pinner.Pin(&result)
 
@@ -681,7 +702,7 @@ func (m *Harness) Bench(
 	}
 
 	b.ResetTimer()
-	C.dataplane_ut_run_rounds(
+	rc := C.dataplane_ut_run_rounds(
 		m.ptr,
 		C.size_t(0),
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
@@ -689,6 +710,9 @@ func (m *Harness) Bench(
 		reset,
 	)
 	b.StopTimer()
+	if rc != 0 {
+		b.Fatalf("failed to recycle benchmark packets: rc=%d", rc)
+	}
 
 	elapsed := b.Elapsed()
 	if elapsed > 0 {

@@ -44,6 +44,7 @@ struct dataplane_connection_config {
 struct dataplane_config {
 	char storage[80];
 	uint64_t dpdk_memory;
+	uint16_t packet_recirc_limit;
 
 	// IOVA mode passed to DPDK EAL via --iova-mode.
 	// Empty string means "do not pass the flag" (EAL autodetect).

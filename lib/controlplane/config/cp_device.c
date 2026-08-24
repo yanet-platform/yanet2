@@ -244,6 +244,19 @@ cp_device_init(
 		goto err_out;
 	}
 
+	input->counter_packet_recirc_drop = counter_registry_register(
+		&self->counter_registry, "input_recirc_drop", 2, err
+	);
+	if (input->counter_packet_recirc_drop == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'input_recirc_drop' counter for "
+			"device '%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
 	input->counter_packet_pending_input = counter_registry_register(
 		&self->counter_registry, "input_pending_input", 2, err
 	);
@@ -317,6 +330,19 @@ cp_device_init(
 			err,
 			"failed to register 'output_drop' counter for device "
 			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_recirc_drop = counter_registry_register(
+		&self->counter_registry, "output_recirc_drop", 2, err
+	);
+	if (output->counter_packet_recirc_drop == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_recirc_drop' counter for "
+			"device '%s'",
 			cfg->name
 		);
 		goto err_out;

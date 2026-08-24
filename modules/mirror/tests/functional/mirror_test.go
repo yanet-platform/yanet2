@@ -339,6 +339,7 @@ func TestMirror_ModeOut_IPv4(t *testing.T) {
 	// port1 -> dummy output pipeline -> packet_front.output.
 	require.Len(t, result.Output, 2, "re-routed ModeOut packet plus its mirror copy must reach output")
 	require.Empty(t, result.Drop, "ModeOut packet with valid device must not be dropped")
+	require.Zero(t, h.OutstandingMbufs())
 
 	path := dataplaneut.CounterPath{
 		Device:     "port0",
@@ -636,6 +637,73 @@ func TestMirror_EmptyRound(t *testing.T) {
 	require.Empty(t, result.Output, "empty round produces no output")
 	require.Empty(t, result.Drop, "empty round produces no drops")
 	dataplaneut.RequireModuleCounter(t, h, path, "rule0", 0, 0)
+}
+
+// TestMirror_OutputSelfLoopHasBoundedPopulation verifies every clone inherits
+// its source budget, spends it independently, and is reclaimed after conversion.
+func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
+	eth, ip4, _, icmp := mirEtherLayers()
+	packet := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+
+	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
+	applyRules(t, backend, "loop", []cmirror.MirrorRule{{
+		Target:  "port0",
+		Mode:    cmirror.ModeOut,
+		Counter: "mirror",
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+	}})
+	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
+		"sink",
+		catchAllForwardRules("port0"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(forwardHandle.Free)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "loop",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name: "loop_chain",
+				Modules: []ffi.ChainModuleConfig{
+					{Type: "mirror", Name: "loop"},
+					{Type: "forward", Name: "sink"},
+				},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "loop",
+		Functions: []string{"loop"},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "feeder",
+		Functions: []string{"loop"},
+	}))
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
+		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
+	}}))
+
+	require.Zero(t, h.OutstandingMbufs())
+	result, err := h.HandlePackets(packet)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 32)
+	require.Equal(t, packet.Data(), result.Drop[0].RawData[:len(packet.Data())])
+	require.Zero(t, h.OutstandingMbufs())
+
+	packetSize := uint64(len(packet.Data()))
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("port0"),
+	)
+	require.Equal(
+		t,
+		[]uint64{32, 32 * packetSize},
+		deviceCounters["output_recirc_drop"],
+	)
 }
 
 // TestMirrorConfigMemoryLeak verifies the block allocator returns memory once a

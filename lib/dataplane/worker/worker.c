@@ -3,6 +3,8 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include <string.h>
+
 struct packet *
 worker_packet_alloc(struct dp_worker *dp_worker) {
 	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(dp_worker->rx_mempool);
@@ -11,6 +13,7 @@ worker_packet_alloc(struct dp_worker *dp_worker) {
 	}
 
 	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(*packet));
 	packet->mbuf = mbuf;
 
 	return packet;

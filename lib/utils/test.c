@@ -1,4 +1,5 @@
 #include <netinet/in.h>
+#include <string.h>
 
 #include "common/test_assert.h"
 #include "lib/dataplane/packet/packet.h"
@@ -10,11 +11,23 @@ test_convert_packet() {
 	struct packet packet;
 	uint8_t src[] = {192, 166, 22, 33};
 	uint8_t dst[] = {10, 101, 12, 3};
+	memset(&packet, 0xA5, sizeof(packet));
 
 	int res = fill_packet(
 		&packet, src, dst, 1010, 3032, IPPROTO_TCP, IPPROTO_IP, 0
 	);
 	TEST_ASSERT_EQUAL(0, res, "failed to fill packet");
+	TEST_ASSERT_NULL(packet.next, "packet next pointer must be reset");
+	TEST_ASSERT_EQUAL(
+		packet.recirc_total_count,
+		0,
+		"packet recirculation total must be reset"
+	);
+	TEST_ASSERT_EQUAL(
+		packet.recirc_stall_count,
+		0,
+		"packet recirculation stall must be reset"
+	);
 
 	// get raw packet data
 

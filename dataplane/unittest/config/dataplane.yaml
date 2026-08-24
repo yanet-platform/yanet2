@@ -1,6 +1,7 @@
 dataplane:
   storage: /dev/hugepages/yanet
   dpdk_memory: 1024
+  packet_recirc_limit: 37
   instances:
     - numa_id: 0
       cp_memory: 2048

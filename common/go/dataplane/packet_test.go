@@ -55,12 +55,13 @@ func TestPacket(t *testing.T) {
 	packet, err := NewPacketFromData(data)
 	require.NoError(t, err, "failed to create new packet from data")
 
-	defer packet.Free()
-
 	packetData := packet.Data()
 	assert.Equal(t, data, packetData)
 
 	packetInfo := packet.Info()
+	clear(packetData.Payload)
+	packet.Free()
+	assert.Equal(t, gopacketData, packetInfo.RawData)
 	assert.Equal(t, packetInfo.DstIP, ip.DstIP)
 	assert.Equal(t, packetInfo.SrcIP, ip.SrcIP)
 	assert.Equal(t, packetInfo.SrcPort, uint16(tcp.SrcPort))
