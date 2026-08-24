@@ -1833,11 +1833,11 @@ config_gen_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
+	uint64_t device_count =
+		cp_device_registry_capacity(&cp_config_gen->device_registry);
+
 	size_t ectx_size = sizeof(struct config_gen_ectx) +
-			   sizeof(struct device_ectx *) *
-				   cp_device_registry_capacity(
-					   &cp_config_gen->device_registry
-				   );
+			   sizeof(struct device_ectx *) * device_count;
 
 	struct config_gen_ectx *config_gen_ectx = (struct config_gen_ectx *)
 		memory_balloc(memory_context, ectx_size);
@@ -1853,6 +1853,10 @@ config_gen_ectx_create(
 	packet_front_init(&config_gen_ectx->packet_front);
 
 	SET_OFFSET_OF(&config_gen_ectx->cp_config_gen, cp_config_gen);
+
+	config_gen_ectx->device_count = device_count;
+	config_gen_ectx->object_count =
+		cp_object_registry_capacity(&cp_config_gen->object_registry);
 
 	struct cp_config_counter_storage_registry *registry =
 		(struct cp_config_counter_storage_registry *)memory_balloc(
@@ -1877,14 +1881,6 @@ config_gen_ectx_create(
 		goto error;
 	}
 	SET_OFFSET_OF(&config_gen_ectx->counter_storage_registry, registry);
-
-	// Set device_count before any fallible work so the error path's
-	// config_gen_ectx_free computes the correct flexible-array size.
-	config_gen_ectx->device_count =
-		cp_device_registry_capacity(&cp_config_gen->device_registry);
-
-	config_gen_ectx->object_count =
-		cp_object_registry_capacity(&cp_config_gen->object_registry);
 
 	if (config_gen_ectx->object_count > 0) {
 		struct object_ectx **objects =
@@ -1935,11 +1931,8 @@ config_gen_ectx_create(
 		}
 	}
 
-	for (uint64_t device_idx = 0;
-	     // FIXME: cp_config_gen_device_count
-	     device_idx <
-	     cp_device_registry_capacity(&cp_config_gen->device_registry);
-	     ++device_idx) {
+	// FIXME: cp_config_gen_device_count
+	for (uint64_t device_idx = 0; device_idx < device_count; ++device_idx) {
 
 		struct cp_device *cp_device =
 			cp_config_gen_get_device(cp_config_gen, device_idx);
