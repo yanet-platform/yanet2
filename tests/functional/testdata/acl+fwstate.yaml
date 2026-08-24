@@ -27,7 +27,7 @@ rules:
     dst_port_ranges:
       - from: 80
         to: 80
-    dsts:
+    destinations4:
       - 192.0.3.0/255.255.255.0
     proto_ranges:
       - from: 1536
@@ -35,7 +35,7 @@ rules:
     src_port_ranges:
       - from: 0
         to: 65535
-    srcs:
+    sources4:
       - 192.0.2.0/255.255.255.0
     vlan_ranges: []
 
@@ -47,7 +47,7 @@ rules:
     dst_port_ranges:
       - from: 0
         to: 65535
-    dsts:
+    destinations4:
       - 192.0.2.0/255.255.255.0
     proto_ranges:
       - from: 1536
@@ -55,7 +55,7 @@ rules:
     src_port_ranges:
       - from: 80
         to: 80
-    srcs:
+    sources4:
       - 192.0.3.0/255.255.255.0
     vlan_ranges: []
 
@@ -67,7 +67,7 @@ rules:
     dst_port_ranges:
       - from: 80
         to: 80
-    dsts:
+    destinations4:
       - 192.0.3.0/255.255.255.0
     proto_ranges:
       - from: 4352
@@ -75,7 +75,7 @@ rules:
     src_port_ranges:
       - from: 0
         to: 65535
-    srcs:
+    sources4:
       - 192.0.2.0/255.255.255.0
     vlan_ranges: []
 
@@ -87,7 +87,7 @@ rules:
     dst_port_ranges:
       - from: 0
         to: 65535
-    dsts:
+    destinations4:
       - 192.0.2.0/255.255.255.0
     proto_ranges:
       - from: 4352
@@ -95,7 +95,7 @@ rules:
     src_port_ranges:
       - from: 80
         to: 80
-    srcs:
+    sources4:
       - 192.0.3.0/255.255.255.0
     vlan_ranges: []
 
@@ -109,7 +109,7 @@ rules:
     dst_port_ranges:
       - from: 80
         to: 80
-    dsts:
+    destinations6:
       - "2001:db8:2::/ffff:ffff:ffff::"
     proto_ranges:
       - from: 1536
@@ -117,7 +117,7 @@ rules:
     src_port_ranges:
       - from: 0
         to: 65535
-    srcs:
+    sources6:
       - "2001:db8:1::/ffff:ffff:ffff::"
     vlan_ranges: []
 
@@ -129,7 +129,7 @@ rules:
     dst_port_ranges:
       - from: 0
         to: 65535
-    dsts:
+    destinations6:
       - "2001:db8:1::/ffff:ffff:ffff::"
     proto_ranges:
       - from: 1536
@@ -137,7 +137,7 @@ rules:
     src_port_ranges:
       - from: 80
         to: 80
-    srcs:
+    sources6:
       - "2001:db8:2::/ffff:ffff:ffff::"
     vlan_ranges: []
 
@@ -152,7 +152,7 @@ rules:
     dst_port_ranges:
       - from: 9999
         to: 9999
-    dsts:
+    destinations6:
       - "ff02::1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
     proto_ranges:
       - from: 4352
@@ -160,7 +160,7 @@ rules:
     src_port_ranges:
       - from: 9999
         to: 9999
-    srcs:
+    sources6:
       - "::/::0"
     vlan_ranges:
       - from: 0

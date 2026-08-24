@@ -52,6 +52,13 @@ export interface Rule {
     proto_ranges?: ProtoRange[];
     src_port_ranges?: PortRange[];
     dst_port_ranges?: PortRange[];
+    // Family-typed network lists (commonpb.ContiguousIPv4Network and
+    // commonpb.BiContiguousIPv6Network), serialized by the gateway as bare
+    // network strings. They merge with the legacy srcs/dsts lists.
+    sources4?: string[];
+    sources6?: string[];
+    destinations4?: string[];
+    destinations6?: string[];
 }
 
 export interface ShowConfigRequest {

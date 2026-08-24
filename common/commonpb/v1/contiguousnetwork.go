@@ -49,33 +49,7 @@ func ParseContiguousIPNetwork(s string) (*ContiguousIPNetwork, error) {
 //
 // Returns an error if any prefix is not valid.
 func NetworksFromPrefixes(prefixes []netip.Prefix) ([]*ContiguousIPNetwork, error) {
-	networks := make([]*ContiguousIPNetwork, 0, len(prefixes))
-	for idx, prefix := range prefixes {
-		network, err := NewContiguousIPNetworkFromPrefix(prefix)
-		if err != nil {
-			return nil, fmt.Errorf("prefixes[%d]: %w", idx, err)
-		}
-		networks = append(networks, network)
-	}
-
-	return networks, nil
-}
-
-// PrefixesFromNetworks converts ContiguousIPNetwork messages to masked
-// netip.Prefix values.
-//
-// Returns an error if any network is malformed.
-func PrefixesFromNetworks(networks []*ContiguousIPNetwork) ([]netip.Prefix, error) {
-	prefixes := make([]netip.Prefix, 0, len(networks))
-	for idx, network := range networks {
-		prefix, err := network.ToPrefix()
-		if err != nil {
-			return nil, fmt.Errorf("prefixes[%d]: %w", idx, err)
-		}
-		prefixes = append(prefixes, prefix)
-	}
-
-	return prefixes, nil
+	return networksFromPrefixes(prefixes, NewContiguousIPNetworkFromPrefix)
 }
 
 // ToContiguous converts the ContiguousIPNetwork to an xnetip CIDR block.

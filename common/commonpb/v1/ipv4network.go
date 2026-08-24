@@ -33,16 +33,6 @@ func NewContiguousIPv4NetworkFromPrefix(prefix netip.Prefix) (*ContiguousIPv4Net
 	return NewContiguousIPv4NetworkFromContiguous(net), nil
 }
 
-// ParseContiguousIPv4Network parses s as an IPv4 CIDR prefix, masking off
-// any host bits.
-func ParseContiguousIPv4Network(s string) (*ContiguousIPv4Network, error) {
-	prefix, err := netip.ParsePrefix(s)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse IP network: %w", err)
-	}
-	return NewContiguousIPv4NetworkFromPrefix(prefix)
-}
-
 // ToContiguous converts the ContiguousIPv4Network to an xnetip IPv4 CIDR
 // block.
 //
@@ -103,7 +93,11 @@ func (m *ContiguousIPv4Network) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("empty IP network is not allowed")
 	}
 
-	parsed, err := ParseContiguousIPv4Network(raw)
+	prefix, err := netip.ParsePrefix(raw)
+	if err != nil {
+		return fmt.Errorf("failed to parse IP network: %w", err)
+	}
+	parsed, err := NewContiguousIPv4NetworkFromPrefix(prefix)
 	if err != nil {
 		return err
 	}

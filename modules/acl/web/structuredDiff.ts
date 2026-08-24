@@ -53,9 +53,17 @@ const fieldValues = (rule: Rule, field: RuleField): string[] => {
         case 'counter':
             return [rule.counter ?? ''];
         case 'srcs':
-            return (rule.srcs ?? []).map(formatIPNetItem).filter(Boolean);
+            return [
+                ...(rule.srcs ?? []).map(formatIPNetItem).filter(Boolean),
+                ...(rule.sources4 ?? []),
+                ...(rule.sources6 ?? []),
+            ];
         case 'dsts':
-            return (rule.dsts ?? []).map(formatIPNetItem).filter(Boolean);
+            return [
+                ...(rule.dsts ?? []).map(formatIPNetItem).filter(Boolean),
+                ...(rule.destinations4 ?? []),
+                ...(rule.destinations6 ?? []),
+            ];
         case 'src_port_ranges':
             return (rule.src_port_ranges ?? []).map(fmtRange);
         case 'dst_port_ranges':

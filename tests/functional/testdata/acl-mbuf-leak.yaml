@@ -13,7 +13,7 @@ rules:
     dst_port_ranges:
       - from: 0
         to: 65535
-    dsts:
+    destinations4:
       - 0.0.0.0/0.0.0.0
     proto_ranges:
       - from: 4352
@@ -21,7 +21,7 @@ rules:
     src_port_ranges:
       - from: 0
         to: 65535
-    srcs:
+    sources4:
       - 192.0.2.30/255.255.255.255
     vlan_ranges: []
 
@@ -33,7 +33,7 @@ rules:
     dst_port_ranges:
       - from: 80
         to: 80
-    dsts:
+    destinations4:
       - 192.0.3.1/255.255.255.255
     proto_ranges:
       - from: 1536
@@ -41,7 +41,7 @@ rules:
     src_port_ranges:
       - from: 0
         to: 65535
-    srcs:
+    sources4:
       - 192.0.2.40/255.255.255.255
     vlan_ranges: []
 
@@ -52,7 +52,7 @@ rules:
     dst_port_ranges:
       - from: 0
         to: 65535
-    dsts:
+    destinations4:
       - 0.0.0.0/0.0.0.0
     proto_ranges:
       - from: 4352
@@ -60,6 +60,6 @@ rules:
     src_port_ranges:
       - from: 0
         to: 65535
-    srcs:
+    sources4:
       - 192.0.2.50/255.255.255.255
     vlan_ranges: []

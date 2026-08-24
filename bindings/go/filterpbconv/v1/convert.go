@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 )
 
@@ -110,6 +111,37 @@ func ToIPNet(pb *filterpb.IPNet) (filter.IPNet, error) {
 	}
 
 	return net, nil
+}
+
+// ToNet4sFromContiguous converts family-typed contiguous IPv4 network
+// messages to filter IPNets.
+func ToNet4sFromContiguous(pb []*commonpb.ContiguousIPv4Network) (filter.IPNets, error) {
+	prefixes, err := commonpb.PrefixesFromNetworks(pb)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 network: %v", err)
+	}
+
+	return filter.Net4sFromPrefixes(prefixes)
+}
+
+// ToNet6sFromBiContiguous converts family-typed bi-contiguous IPv6 network
+// messages to filter IPNets.
+func ToNet6sFromBiContiguous(pb []*commonpb.BiContiguousIPv6Network) (filter.IPNets, error) {
+	out := make(filter.IPNets, 0, len(pb))
+
+	for idx := range pb {
+		net, err := pb[idx].ToBiContiguous()
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 network at index %d: %v", idx, err)
+		}
+
+		out = append(out, filter.IPNet{
+			Addr: net.Network().Addr(),
+			Mask: net.Network().Mask(),
+		})
+	}
+
+	return out, nil
 }
 
 // ToPortRanges converts protobuf PortRange messages to filter PortRanges.

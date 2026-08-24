@@ -2,7 +2,7 @@ import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '@yanet/core
 import { ActionKind } from '@yanet/core/api/acl';
 import { extractBytes, formatIPNetItem, formatRange } from '@yanet/core/utils';
 import type { RuleDraft, RuleItem } from './types';
-import { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
+import { parseRangesRaw, parseProtoRangesRaw, partitionCidrsToTyped } from './parseHelpers';
 export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 
 /**
@@ -69,9 +69,13 @@ export const expandRule = (rule: Rule): {
 } => {
     const srcs = rule.srcs ?? [];
     const dsts = rule.dsts ?? [];
+    const sources4 = rule.sources4 ?? [];
+    const sources6 = rule.sources6 ?? [];
+    const destinations4 = rule.destinations4 ?? [];
+    const destinations6 = rule.destinations6 ?? [];
 
-    const sourceCidrs = srcs.map(formatIPNetItem).filter(Boolean);
-    const dstCidrs = dsts.map(formatIPNetItem).filter(Boolean);
+    const sourceCidrs = [...srcs.map(formatIPNetItem).filter(Boolean), ...sources4, ...sources6];
+    const dstCidrs = [...dsts.map(formatIPNetItem).filter(Boolean), ...destinations4, ...destinations6];
 
     const srcPortRanges = (rule.src_port_ranges ?? []).map(formatRange);
     const dstPortRanges = (rule.dst_port_ranges ?? []).map(formatRange);
@@ -80,16 +84,16 @@ export const expandRule = (rule: Rule): {
     const deviceNames = (rule.devices ?? []).map(d => d.name ?? '').filter(Boolean);
 
     // Per-family counts for classification (addr byte length: 4 = IPv4, 16 = IPv6).
-    let v4SrcCount = 0;
-    let v6SrcCount = 0;
+    let v4SrcCount = sources4.length;
+    let v6SrcCount = sources6.length;
     for (const net of srcs) {
         const len = extractBytes(net.addr)?.length ?? 0;
         if (len === 4) v4SrcCount++;
         else if (len === 16) v6SrcCount++;
     }
 
-    let v4DstCount = 0;
-    let v6DstCount = 0;
+    let v4DstCount = destinations4.length;
+    let v6DstCount = destinations6.length;
     for (const net of dsts) {
         const len = extractBytes(net.addr)?.length ?? 0;
         if (len === 4) v4DstCount++;
@@ -199,16 +203,20 @@ export const itemToDraft = (item: RuleItem): RuleDraft => ruleToDraft(item.rule)
 /** Convert a ProtoRange wire object to the encoded-range string "A-B". */
 export const protoRangeToStr = (r: ProtoRange): string => formatRange(r);
 
-/** Convert a RuleDraft to a wire Rule. */
+/** Convert a RuleDraft to a wire Rule, carrying networks in the typed lists. */
 export const draftToRule = (draft: RuleDraft): Rule => {
     const actions: Action[] = draft.actions.map(kind => ({ kind }));
+    const sources = partitionCidrsToTyped(draft.sourceCidrs);
+    const destinations = partitionCidrsToTyped(draft.dstCidrs);
     return {
         actions,
         counter: draft.counter || undefined,
         devices: draft.deviceNames.map(name => ({ name })),
         vlan_ranges: parseRangesRaw(draft.vlanRaw),
-        srcs: parseCidrsToIPNets(draft.sourceCidrs),
-        dsts: parseCidrsToIPNets(draft.dstCidrs),
+        sources4: sources.v4,
+        sources6: sources.v6,
+        destinations4: destinations.v4,
+        destinations6: destinations.v6,
         proto_ranges: parseProtoRangesRaw(draft.protoRaw),
         src_port_ranges: parseRangesRaw(draft.srcPortRaw),
         dst_port_ranges: parseRangesRaw(draft.dstPortRaw),

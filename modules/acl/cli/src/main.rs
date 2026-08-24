@@ -681,6 +681,47 @@ mod test {
     }
 
     #[test]
+    fn test_rules_yaml_typed_network_lists_parse() {
+        let yaml = r#"
+rules:
+  - actions:
+      - kind: ACTION_KIND_PASS
+    sources4:
+      - 192.0.2.0/24
+      - 192.0.3.1/255.255.255.255
+    sources6:
+      - 2001:db8::/32
+      - "2001:db8::/ffff:ffff:ffff:0:ffff::"
+    destinations4:
+      - 0.0.0.0/0
+    destinations6:
+      - "::/::"
+"#;
+        let config: ACLConfig = serde_yaml::from_str(yaml).expect("typed network lists must parse");
+
+        let rule = &config.rules[0];
+        assert_eq!(2, rule.sources4.len());
+        assert_eq!(2, rule.sources6.len());
+        assert_eq!(1, rule.destinations4.len());
+        assert_eq!(1, rule.destinations6.len());
+    }
+
+    #[test]
+    fn test_rules_yaml_rejects_noncontiguous_v4_source() {
+        let yaml = "rules:\n  - sources4:\n      - 192.0.2.0/255.0.255.0\n";
+
+        serde_yaml::from_str::<ACLConfig>(yaml).expect_err("a non-contiguous IPv4 mask must be rejected at parse time");
+    }
+
+    #[test]
+    fn test_rules_yaml_rejects_v6_hole_within_half() {
+        let yaml = "rules:\n  - sources6:\n      - \"2001:db8::/ffff:0:ffff::\"\n";
+
+        serde_yaml::from_str::<ACLConfig>(yaml)
+            .expect_err("an IPv6 mask with a hole inside a half must be rejected at parse time");
+    }
+
+    #[test]
     fn a_tag_entry_splits_on_the_first_equals() {
         let tag = parse_tag("config=my-acl").expect("a well-formed tag must parse");
 

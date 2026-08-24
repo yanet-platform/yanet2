@@ -15,6 +15,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
@@ -1139,8 +1140,9 @@ func TestACL_Counters(t *testing.T) {
 			},
 			Counter: "svc_counter",
 			Devices: []*filterpb.Device{{Name: "port0"}},
-			Srcs:    []*filterpb.IPNet{{Addr: make([]byte, 4), Mask: make([]byte, 4)}},
-			Dsts:    []*filterpb.IPNet{{Addr: make([]byte, 4), Mask: make([]byte, 4)}},
+			// 0.0.0.0/0: the zero address with a zero prefix length.
+			Sources4:      []*commonpb.ContiguousIPv4Network{{Addr: &commonpb.IPv4Address{}}},
+			Destinations4: []*commonpb.ContiguousIPv4Network{{Addr: &commonpb.IPv4Address{}}},
 			// UDP (17) with any subtype: proto in the high byte.
 			ProtoRanges:   []*filterpb.ProtoRange{{From: 17 << 8, To: 17<<8 | 0xFF}},
 			SrcPortRanges: []*filterpb.PortRange{{From: 0, To: 65535}},

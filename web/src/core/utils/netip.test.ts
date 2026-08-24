@@ -8,6 +8,7 @@ import {
     ipRangeSpan,
     parseCIDRPrefix,
     parseCidrsToIPNets,
+    partitionCidrsToTyped,
     parseIPToBytes,
     parseIPv6ToBytes,
     IPv4Prefix,
@@ -585,5 +586,42 @@ describe('ipRangeSpan', () => {
 
     it('returns undefined for a missing endpoint', () => {
         expect(ipRangeSpan({ start: '10.0.0.0' })).toBeUndefined();
+    });
+});
+
+describe('partitionCidrsToTyped', () => {
+    it('partitions by family and canonicalizes bare hosts to full width', () => {
+        expect(partitionCidrsToTyped(['192.0.2.0/24', '2001:db8::/32', '10.1.2.3', '::1'])).toEqual({
+            v4: ['192.0.2.0/24', '10.1.2.3/32'],
+            v6: ['2001:db8::/32', '::1/128'],
+        });
+    });
+
+    it('drops malformed entries', () => {
+        expect(partitionCidrsToTyped(['192.0.2.0/33', 'garbage', '10.0.0.0/8/9', '2001:db8::/129'])).toEqual({
+            v4: [],
+            v6: [],
+        });
+    });
+
+    it('canonicalizes a contiguous IPv4 mask form to a prefix length', () => {
+        expect(partitionCidrsToTyped(['192.0.2.0/255.255.255.0'])).toEqual({
+            v4: ['192.0.2.0/24'],
+            v6: [],
+        });
+    });
+
+    it('preserves a bi-contiguous IPv6 mask with a hole at the /64 boundary', () => {
+        expect(partitionCidrsToTyped(['2001:db8:1::/ffff:ffff:ffff:0:ffff::'])).toEqual({
+            v4: [],
+            v6: ['2001:db8:1::/ffff:ffff:ffff:0:ffff::'],
+        });
+    });
+
+    it('drops masks outside the typed mask classes', () => {
+        expect(partitionCidrsToTyped(['192.0.2.0/255.0.255.0', '2001:db8::/ffff:0:ffff::'])).toEqual({
+            v4: [],
+            v6: [],
+        });
     });
 });

@@ -14,7 +14,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -368,6 +371,36 @@ func labeler(fullMethod string, req any) metrics.Labels {
 	}
 }
 
+// mergedNet4s decodes the IPv4 networks a rule carries in the legacy
+// mixed-family list and the typed list, legacy entries first.
+func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.ContiguousIPv4Network) (filter.IPNets, error) {
+	nets, err := filterpbconv.ToNet4s(legacy)
+	if err != nil {
+		return nil, err
+	}
+	typedNets, err := filterpbconv.ToNet4sFromContiguous(typed)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(nets, typedNets...), nil
+}
+
+// mergedNet6s decodes the IPv6 networks a rule carries in the legacy
+// mixed-family list and the typed list, legacy entries first.
+func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.BiContiguousIPv6Network) (filter.IPNets, error) {
+	nets, err := filterpbconv.ToNet6s(legacy)
+	if err != nil {
+		return nil, err
+	}
+	typedNets, err := filterpbconv.ToNet6sFromBiContiguous(typed)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(nets, typedNets...), nil
+}
+
 func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 	rules := make([]cacl.AclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
@@ -379,19 +412,19 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := filterpbconv.ToNet4s(reqRule.Srcs)
+		src4s, err := mergedNet4s(reqRule.Srcs, reqRule.Sources4)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := filterpbconv.ToNet4s(reqRule.Dsts)
+		dst4s, err := mergedNet4s(reqRule.Dsts, reqRule.Destinations4)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := filterpbconv.ToNet6s(reqRule.Srcs)
+		src6s, err := mergedNet6s(reqRule.Srcs, reqRule.Sources6)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := filterpbconv.ToNet6s(reqRule.Dsts)
+		dst6s, err := mergedNet6s(reqRule.Dsts, reqRule.Destinations6)
 		if err != nil {
 			return nil, err
 		}

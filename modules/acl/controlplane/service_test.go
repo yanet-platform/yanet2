@@ -3,6 +3,7 @@ package acl_test
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +17,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/yanet-platform/xnetip"
+
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
@@ -964,6 +968,117 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 	_, err := svc.UpdateConfig(t.Context(), req)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// mustV4Network builds a ContiguousIPv4Network from a CIDR test literal.
+func mustV4Network(t *testing.T, cidr string) *commonpb.ContiguousIPv4Network {
+	t.Helper()
+
+	network, err := commonpb.NewContiguousIPv4NetworkFromPrefix(netip.MustParsePrefix(cidr))
+	require.NoError(t, err)
+	return network
+}
+
+// mustV6Network builds a BiContiguousIPv6Network from an xnetip test
+// literal, accepting the CIDR and address/mask forms.
+func mustV6Network(s string) *commonpb.BiContiguousIPv6Network {
+	return commonpb.NewBiContiguousIPv6NetworkFromBiContiguous(xnetip.MustParseBiContiguous(s))
+}
+
+// TestUpdateConfig_TypedNetworkLists verifies that a rule carrying only
+// typed network lists decodes into the per-family filter values.
+//
+// The IPv6 destination uses a mask with a hole exactly at the /64
+// boundary, which the CIDR form cannot express.
+func TestUpdateConfig_TypedNetworkLists(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+
+	source4 := mustV4Network(t, "192.0.2.0/24")
+	destination4 := mustV4Network(t, "198.51.100.0/24")
+	source6 := mustV6Network("2001:db8::/32")
+	destination6 := &commonpb.BiContiguousIPv6Network{
+		Addr:        commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8:1::").As16()),
+		HiPrefixLen: 48,
+		LoPrefixLen: 16,
+	}
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{{
+			Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Sources4:      []*commonpb.ContiguousIPv4Network{source4},
+			Sources6:      []*commonpb.BiContiguousIPv6Network{source6},
+			Destinations4: []*commonpb.ContiguousIPv4Network{destination4},
+			Destinations6: []*commonpb.BiContiguousIPv6Network{destination6},
+		}},
+	})
+	require.NoError(t, err)
+
+	handles := backend.CreatedHandles()
+	require.Len(t, handles, 1)
+	rules := handles[0].Rules()
+	require.Len(t, rules, 1)
+
+	assert.Equal(t, filter.IPNets{filter.MustParseIPNet("192.0.2.0/24")}, rules[0].Src4s)
+	assert.Equal(t, filter.IPNets{filter.MustParseIPNet("2001:db8::/32")}, rules[0].Src6s)
+	assert.Equal(t, filter.IPNets{filter.MustParseIPNet("198.51.100.0/24")}, rules[0].Dst4s)
+	assert.Equal(t, filter.IPNets{{
+		Addr: netip.MustParseAddr("2001:db8:1::"),
+		Mask: netip.MustParseAddr("ffff:ffff:ffff:0:ffff::"),
+	}}, rules[0].Dst6s)
+}
+
+// TestUpdateConfig_MergesLegacyAndTypedNetworks verifies that legacy and
+// typed lists merge into one match set, legacy entries first.
+func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+
+	typed := mustV4Network(t, "198.51.100.0/24")
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{{
+			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Srcs: []*filterpb.IPNet{{
+				Addr: []byte{192, 0, 2, 0},
+				Mask: []byte{255, 255, 255, 0},
+			}},
+			Sources4: []*commonpb.ContiguousIPv4Network{typed},
+		}},
+	})
+	require.NoError(t, err)
+
+	handles := backend.CreatedHandles()
+	require.Len(t, handles, 1)
+	rules := handles[0].Rules()
+	require.Len(t, rules, 1)
+	assert.Equal(t, filter.IPNets{
+		filter.MustParseIPNet("192.0.2.0/24"),
+		filter.MustParseIPNet("198.51.100.0/24"),
+	}, rules[0].Src4s)
+}
+
+// TestUpdateConfig_RejectsTypedV6HalfOverflow verifies that a half prefix
+// length above 64 is rejected before reaching the backend.
+func TestUpdateConfig_RejectsTypedV6HalfOverflow(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{{
+			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Sources6: []*commonpb.BiContiguousIPv6Network{{
+				Addr:        commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8::").As16()),
+				HiPrefixLen: 65,
+			}},
+		}},
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.Equal(t, 0, backend.PublishCalls(), "backend must not be asked to publish")
 }
 
 // TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports

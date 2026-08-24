@@ -11,7 +11,7 @@
 import yaml from 'js-yaml';
 import { ActionKind } from '@yanet/core/api/acl';
 import type { Rule } from '@yanet/core/api/acl';
-import { parseCidrsToIPNets } from './parseHelpers';
+import { partitionCidrsToTyped } from './parseHelpers';
 
 /** Raw shape of an action entry in the YAML schema. */
 interface YamlAction {
@@ -22,6 +22,10 @@ interface YamlAction {
 interface YamlRule {
     srcs?: unknown;
     dsts?: unknown;
+    sources4?: unknown;
+    sources6?: unknown;
+    destinations4?: unknown;
+    destinations6?: unknown;
     src_port_ranges?: unknown;
     dst_port_ranges?: unknown;
     proto_ranges?: unknown;
@@ -64,8 +68,16 @@ const convertRow = (r: unknown): Rule => {
     if (!r || typeof r !== 'object') return {};
     const row = r as YamlRule;
 
-    const srcs = parseCidrsToIPNets(parseStringArray(row.srcs));
-    const dsts = parseCidrsToIPNets(parseStringArray(row.dsts));
+    const sources = partitionCidrsToTyped([
+        ...parseStringArray(row.srcs),
+        ...parseStringArray(row.sources4),
+        ...parseStringArray(row.sources6),
+    ]);
+    const destinations = partitionCidrsToTyped([
+        ...parseStringArray(row.dsts),
+        ...parseStringArray(row.destinations4),
+        ...parseStringArray(row.destinations6),
+    ]);
 
     const src_port_ranges = rangesFromObjects(row.src_port_ranges);
     const dst_port_ranges = rangesFromObjects(row.dst_port_ranges);
@@ -90,7 +102,19 @@ const convertRow = (r: unknown): Rule => {
         })
         .filter((a): a is { kind: ActionKind } => a !== null);
 
-    return { srcs, dsts, src_port_ranges, dst_port_ranges, proto_ranges, vlan_ranges, devices, counter, actions };
+    return {
+        sources4: sources.v4,
+        sources6: sources.v6,
+        destinations4: destinations.v4,
+        destinations6: destinations.v6,
+        src_port_ranges,
+        dst_port_ranges,
+        proto_ranges,
+        vlan_ranges,
+        devices,
+        counter,
+        actions,
+    };
 };
 
 /** Convert raw rule rows in chunks, posting progress after each chunk. */

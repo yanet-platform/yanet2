@@ -32,6 +32,24 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             ".modules.acl.controlplane.aclpb.v1.Action.kind",
             "#[serde(with = \"crate::action_kind\")]",
         )
+        // The typed network lists stay out of the YAML output while empty,
+        // so show rendering of a legacy-schema config is unchanged.
+        .field_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Rule.sources4",
+            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+        )
+        .field_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Rule.sources6",
+            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+        )
+        .field_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Rule.destinations4",
+            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+        )
+        .field_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Rule.destinations6",
+            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+        )
         .compile_protos(&["aclpb/v1/acl.proto"], &["../../..", "../controlplane"])?;
 
     Ok(())
