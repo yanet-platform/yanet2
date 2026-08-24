@@ -175,6 +175,52 @@ impl<'de> Deserialize<'de> for pb::IpAddress {
     }
 }
 
+impl From<Ipv4Addr> for pb::IPv4Address {
+    fn from(addr: Ipv4Addr) -> Self {
+        pb::IPv4Address { addr: addr.to_bits() }
+    }
+}
+
+impl From<&pb::IPv4Address> for Ipv4Addr {
+    fn from(ip: &pb::IPv4Address) -> Self {
+        Ipv4Addr::from_bits(ip.addr)
+    }
+}
+
+impl Display for pb::IPv4Address {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        Ipv4Addr::from(self).fmt(f)
+    }
+}
+
+impl FromStr for pb::IPv4Address {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let addr = Ipv4Addr::from_str(s)?;
+        Ok(Self::from(addr))
+    }
+}
+
+impl Serialize for pb::IPv4Address {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::IPv4Address {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
 impl From<(IpAddr, IpAddr)> for pb::IpRange {
     fn from((start, end): (IpAddr, IpAddr)) -> Self {
         pb::IpRange {
@@ -861,5 +907,52 @@ mod test {
         let json = serde_json::to_string(&malformed).unwrap();
         assert_eq!(r#""invalid""#, json);
         assert!(serde_json::from_str::<pb::ContiguousIpNetwork>(&json).is_err());
+    }
+
+    /// Verifies that the first address octet lands in the most
+    /// significant byte of the encoded value, in both directions.
+    ///
+    /// The fixture values mirror the Go tests so a byte-order defect
+    /// fails identically in both languages.
+    #[test]
+    fn test_ipv4_address_conversion_network_byte_order() {
+        let addr = pb::IPv4Address::from(Ipv4Addr::new(10, 1, 2, 3));
+        assert_eq!(0x0A010203, addr.addr);
+        assert_eq!(Ipv4Addr::new(10, 1, 2, 3), Ipv4Addr::from(&addr));
+    }
+
+    /// Verifies the fixed32 wire encoding against a golden byte fixture
+    /// shared with the Go tests.
+    #[test]
+    fn test_ipv4_address_wire_bytes_golden() {
+        use prost::Message;
+
+        let addr = pb::IPv4Address { addr: 0x0A010203 };
+        assert_eq!(vec![0x0d, 0x03, 0x02, 0x01, 0x0a], addr.encode_to_vec());
+    }
+
+    #[test]
+    fn test_ipv4_address_display_boundary_values() {
+        assert_eq!("0.0.0.0", pb::IPv4Address { addr: 0 }.to_string());
+        assert_eq!("255.255.255.255", pb::IPv4Address { addr: u32::MAX }.to_string());
+    }
+
+    #[test]
+    fn test_ipv4_address_serde_string_round_trip() {
+        let addr = pb::IPv4Address::from(Ipv4Addr::new(10, 1, 2, 3));
+        let json = serde_json::to_string(&addr).unwrap();
+        assert_eq!(r#""10.1.2.3""#, json);
+        let got: pb::IPv4Address = serde_json::from_str(&json).unwrap();
+        assert_eq!(addr, got);
+    }
+
+    #[test]
+    fn test_ipv4_address_from_str_rejects_ipv6() {
+        assert!("2001:db8::1".parse::<pb::IPv4Address>().is_err());
+    }
+
+    #[test]
+    fn test_ipv4_address_from_str_rejects_ipv4_mapped() {
+        assert!("::ffff:10.1.2.3".parse::<pb::IPv4Address>().is_err());
     }
 }

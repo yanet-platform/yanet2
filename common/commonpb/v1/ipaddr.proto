@@ -19,3 +19,12 @@ message IPAddress {
   // Reserved for zone.
   reserved 2;
 }
+
+// IPv4Address represents an IPv4 host address.
+//
+// Unlike IPAddress, the family is fixed by the type and every value is a
+// valid address: there is no malformed state to validate after decoding.
+message IPv4Address {
+  // The address as a big-endian u32 value: 10.1.2.3 is 0x0A010203.
+  fixed32 addr = 1;
+}
