@@ -1004,7 +1004,7 @@ func Test_PdumpService_SetConfig_PreservesPublishedConfigDuringReaderDrain(t *te
 		&pdumppb.ShowConfigRequest{Name: name},
 	)
 	require.NoError(t, err)
-	require.Equal(t, "new", response.Config.Filter)
+	require.Equal(t, "old", response.Config.Filter)
 	require.NoError(t, tasks.Wait())
 }
 

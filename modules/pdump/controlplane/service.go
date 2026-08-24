@@ -186,8 +186,8 @@ func (m *PdumpService) SetConfig(
 	err := m.updateConfig(
 		name,
 		request,
-		func() error {
-			return m.updateModuleConfig(name)
+		func(config *pdumpConfig) error {
+			return m.updateModuleConfig(name, config)
 		},
 	)
 	if err != nil {
@@ -282,14 +282,13 @@ func (m *PdumpService) transferConfigParameters(
 // the previous ring have stopped and the state lock has been reacquired.
 func (m *PdumpService) updateModuleConfig(
 	name string,
+	modConfig *pdumpConfig,
 ) error {
 	if m.agent == nil {
 		return fmt.Errorf("pdump agent is required")
 	}
 
 	m.log.Debug("update config", zap.String("module", name))
-
-	modConfig := m.configs[name]
 
 	ffiConfig, err := NewModuleConfig(m.agent, name, WithModuleConfigLog(m.log))
 	if err != nil {
@@ -416,7 +415,7 @@ func (m *PdumpService) registerRingReaders(
 func (m *PdumpService) updateConfig(
 	name string,
 	request *pdumppb.SetConfigRequest,
-	publish func() error,
+	publish func(config *pdumpConfig) error,
 ) error {
 	newConfig, err := m.prepareConfig(name, request)
 	if err != nil {
@@ -427,8 +426,12 @@ func (m *PdumpService) updateConfig(
 		name,
 		fmt.Errorf("terminated by config update"),
 		func() error {
+			if err := publish(newConfig); err != nil {
+				return err
+			}
 			m.configs[name] = newConfig
-			return publish()
+
+			return nil
 		},
 	)
 }
