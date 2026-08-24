@@ -1204,6 +1204,49 @@ func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
 	}
 }
 
+// Test_NewMetricsFactory_ScopesToOwnServices verifies that the module's
+// metrics factory records only the services the ACL module registers, so a
+// foreign service sharing the module server records no series.
+func Test_NewMetricsFactory_ScopesToOwnServices(t *testing.T) {
+	svc := acl.NewACLService(newFakeBackend(), acl.WithMetrics(acl.NewMetricsFactory()))
+
+	okHandler := func(context.Context, any) (any, error) {
+		return &aclpb.ListConfigsResponse{}, nil
+	}
+	// The requests carry no config label so the service's retention keeps the
+	// recorded series.
+	for _, fullMethod := range []string{
+		"/" + acl.ACLServiceName + "/ListConfigs",
+		"/" + acl.ACLMetricsServiceName + "/GetMetrics",
+		"/modules.fwstate.controlplane.fwstatepb.v1.FWStateService/ShowConfig",
+		"/modules.fwstate.controlplane.fwstatepb.v1.MetricsService/GetMetrics",
+	} {
+		_, err := svc.UnaryServerInterceptor()(
+			t.Context(),
+			&aclpb.ListConfigsRequest{},
+			&grpc.UnaryServerInfo{FullMethod: fullMethod},
+			okHandler,
+		)
+		require.NoError(t, err)
+	}
+
+	collected, err := svc.Metrics()
+	require.NoError(t, err)
+
+	services := map[string]struct{}{}
+	for _, metric := range collected {
+		for _, label := range metric.GetLabels() {
+			if label.GetName() == "grpc_service" {
+				services[label.GetValue()] = struct{}{}
+			}
+		}
+	}
+	assert.Equal(t, map[string]struct{}{
+		acl.ACLServiceName:        {},
+		acl.ACLMetricsServiceName: {},
+	}, services)
+}
+
 func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 	_, agent := newMetricsSnapshotHarness(t)
 	backend := newBlockingDPConfigBackend(agent.DPConfig())

@@ -7,15 +7,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
 const (
-	moduleType  = "acl"
-	agentName   = moduleType
-	serviceName = "modules.acl.controlplane.aclpb.v1.ACLService"
+	moduleType = "acl"
+	agentName  = moduleType
 )
 
 // ModuleOption configures the ACLModule constructor.
@@ -55,7 +53,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", serviceName))
+	log := opts.Log.With(zap.String("module", ACLServiceName))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -78,9 +76,7 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 	aclService := NewACLService(
 		NewBackend(agent),
 		WithLog(log),
-		WithMetrics(grpcmetrics.NewFactory(
-			grpcmetrics.WithLabeler(labeler),
-		)),
+		WithMetrics(NewMetricsFactory()),
 	)
 
 	metricsService := NewMetricsService(aclService)
@@ -104,8 +100,8 @@ func (m *ACLModule) Endpoint() string {
 
 func (m *ACLModule) ServicesNames() []string {
 	return []string{
-		serviceName,
-		aclpb.MetricsService_ServiceDesc.ServiceName,
+		ACLServiceName,
+		ACLMetricsServiceName,
 	}
 }
 

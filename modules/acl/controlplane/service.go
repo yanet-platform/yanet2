@@ -78,11 +78,41 @@ func WithLog(log *zap.Logger) Option {
 
 // WithMetrics sets the gRPC metrics factory.
 //
-// When unset, no metrics are collected.
+// When unset, no metrics are collected. Use [NewMetricsFactory] to build a
+// factory scoped to this module's services.
 func WithMetrics(factory grpcmetrics.Factory) Option {
 	return func(o *options) {
 		o.Metrics = factory
 	}
+}
+
+// ACLServiceName and ACLMetricsServiceName are the fully-qualified gRPC
+// service names exposed by this module, derived from the generated service
+// descriptors so they cannot drift from the proto definitions.
+//
+// They are used to scope the module's [grpcmetrics.ServerMetrics] to its own
+// services when several modules share a single [grpc.Server].
+var (
+	ACLServiceName        = aclpb.ACLService_ServiceDesc.ServiceName
+	ACLMetricsServiceName = aclpb.MetricsService_ServiceDesc.ServiceName
+)
+
+// NewMetricsFactory returns a [grpcmetrics.Factory] pre-bound to this module's
+// own labeler and service filter, applying any extra options (e.g. custom
+// histogram buckets) supplied by the caller.
+func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
+	opts := make([]grpcmetrics.Option, 0, len(extra)+2)
+	opts = append(opts, grpcmetrics.WithLabeler(labeler))
+
+	// Scope the collector to this module's own services.
+	opts = append(opts, grpcmetrics.WithServiceFilter(
+		func(service string) bool {
+			return service == ACLServiceName ||
+				service == ACLMetricsServiceName
+		},
+	))
+	opts = append(opts, extra...)
+	return grpcmetrics.NewFactory(opts...)
 }
 
 type aclConfig struct {
