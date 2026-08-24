@@ -5,7 +5,10 @@ use core::{
     str::FromStr,
 };
 
-use netip::{Contiguous, IpNetwork, Ipv4Network, Ipv6Network, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
+use netip::{
+    BiContiguous, Contiguous, IpNetwork, Ipv4Network, Ipv6Network, MacAddr, ipv4_range_to_networks,
+    ipv6_range_to_networks,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 #[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
@@ -392,6 +395,82 @@ impl Serialize for pb::ContiguousIPv6Network {
 }
 
 impl<'de> Deserialize<'de> for pb::ContiguousIPv6Network {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
+impl From<BiContiguous<Ipv6Network>> for pb::BiContiguousIPv6Network {
+    fn from(net: BiContiguous<Ipv6Network>) -> Self {
+        let mask = net.mask().to_bits();
+        pb::BiContiguousIPv6Network {
+            addr: Some(pb::IPv6Address::from(*net.addr())),
+            hi_prefix_len: ((mask >> 64) as u64).leading_ones(),
+            lo_prefix_len: (mask as u64).leading_ones(),
+        }
+    }
+}
+
+impl TryFrom<&pb::BiContiguousIPv6Network> for BiContiguous<Ipv6Network> {
+    type Error = Box<dyn Error>;
+
+    /// Masks address bits outside the two half-masks rather than
+    /// rejecting them.
+    fn try_from(net: &pb::BiContiguousIPv6Network) -> Result<Self, Self::Error> {
+        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+        if net.hi_prefix_len > 64 || net.lo_prefix_len > 64 {
+            return Err(format!(
+                "invalid prefix lengths {}/{}: each half must not exceed 64",
+                net.hi_prefix_len, net.lo_prefix_len
+            )
+            .into());
+        }
+
+        let mask = (u128::from(u64::MAX.unbounded_shl(64 - net.hi_prefix_len)) << 64)
+            | u128::from(u64::MAX.unbounded_shl(64 - net.lo_prefix_len));
+        let network = Ipv6Network::new(Ipv6Addr::from(addr), Ipv6Addr::from_bits(mask));
+        BiContiguous::try_from(network).map_err(|e| format!("failed to build IP network: {e}").into())
+    }
+}
+
+impl Display for pb::BiContiguousIPv6Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match BiContiguous::<Ipv6Network>::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::BiContiguousIPv6Network {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = BiContiguous::<Ipv6Network>::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::BiContiguousIPv6Network {
+    /// Serializes as the string `Display` renders: the CIDR form when
+    /// the mask is globally contiguous, the address/mask form otherwise.
+    ///
+    /// A message with an absent address renders as the literal
+    /// `"invalid"`, which is not itself a parseable network and so
+    /// deliberately does not deserialize back.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::BiContiguousIPv6Network {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -1426,5 +1505,157 @@ mod test {
             ],
             msg.encode_to_vec()
         );
+    }
+
+    /// Verifies typed construction from a bi-contiguous network and the
+    /// decode back, with fixtures mirrored in the Go tests.
+    #[test]
+    fn test_bicontiguous_ipv6_network_conversion_round_trip() {
+        let net = BiContiguous::<Ipv6Network>::parse("2001:db8:ff00::1:2:0:0/ffff:ffff:ff00:0:ffff:ffff:0:0").unwrap();
+        let msg = pb::BiContiguousIPv6Network::from(net);
+        assert_eq!(
+            Some(pb::IPv6Address {
+                hi: 0x20010db8ff000000,
+                lo: 0x0001000200000000
+            }),
+            msg.addr
+        );
+        assert_eq!(40, msg.hi_prefix_len);
+        assert_eq!(32, msg.lo_prefix_len);
+        assert_eq!(net, BiContiguous::<Ipv6Network>::try_from(&msg).unwrap());
+    }
+
+    /// Verifies the nested wire encoding against a golden byte fixture
+    /// shared with the Go tests.
+    #[test]
+    fn test_bicontiguous_ipv6_network_wire_bytes_golden() {
+        use prost::Message;
+
+        let msg = pb::BiContiguousIPv6Network {
+            addr: Some(pb::IPv6Address {
+                hi: 0x20010db8ff000000,
+                lo: 0x0001000200000000,
+            }),
+            hi_prefix_len: 40,
+            lo_prefix_len: 32,
+        };
+        assert_eq!(
+            vec![
+                0x0a, 0x12, 0x09, 0x00, 0x00, 0x00, 0xff, 0xb8, 0x0d, 0x01, 0x20, 0x11, 0x00, 0x00, 0x00, 0x00, 0x02,
+                0x00, 0x01, 0x00, 0x10, 0x28, 0x18, 0x20,
+            ],
+            msg.encode_to_vec()
+        );
+    }
+
+    /// The wildcard is not an empty message: the present-but-zero
+    /// address encodes as two bytes, and decode relies on that presence
+    /// to tell the wildcard from a malformed message.
+    #[test]
+    fn test_bicontiguous_ipv6_network_wire_bytes_zero_value_golden() {
+        use prost::Message;
+
+        let msg = pb::BiContiguousIPv6Network {
+            addr: Some(pb::IPv6Address { hi: 0, lo: 0 }),
+            hi_prefix_len: 0,
+            lo_prefix_len: 0,
+        };
+        assert_eq!(vec![0x0a, 0x00], msg.encode_to_vec());
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_try_from_masks_host_bits() {
+        let msg = pb::BiContiguousIPv6Network {
+            addr: Some(pb::IPv6Address { hi: 0x20010db8ffffffff, lo: u64::MAX }),
+            hi_prefix_len: 32,
+            lo_prefix_len: 16,
+        };
+        let expected = BiContiguous::<Ipv6Network>::parse("2001:db8:0:0:ffff::/ffff:ffff:0:0:ffff::").unwrap();
+        assert_eq!(expected, BiContiguous::<Ipv6Network>::try_from(&msg).unwrap());
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_try_from_rejects_absent_addr() {
+        let malformed = pb::BiContiguousIPv6Network {
+            addr: None,
+            hi_prefix_len: 32,
+            lo_prefix_len: 0,
+        };
+        assert!(BiContiguous::<Ipv6Network>::try_from(&malformed).is_err());
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_try_from_rejects_half_overflow() {
+        let addr = Some(pb::IPv6Address { hi: 0x20010db800000000, lo: 0 });
+        let high = pb::BiContiguousIPv6Network {
+            addr,
+            hi_prefix_len: 65,
+            lo_prefix_len: 0,
+        };
+        assert!(BiContiguous::<Ipv6Network>::try_from(&high).is_err());
+
+        let low = pb::BiContiguousIPv6Network {
+            addr,
+            hi_prefix_len: 0,
+            lo_prefix_len: 65,
+        };
+        assert!(BiContiguous::<Ipv6Network>::try_from(&low).is_err());
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_serde_string_round_trip() {
+        let msg = pb::BiContiguousIPv6Network::from(
+            BiContiguous::<Ipv6Network>::parse("2001:db8:ff00::1:2:0:0/ffff:ffff:ff00:0:ffff:ffff:0:0").unwrap(),
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(r#""2001:db8:ff00:0:1:2::/ffff:ffff:ff00:0:ffff:ffff::""#, json);
+        let got: pb::BiContiguousIPv6Network = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, got);
+    }
+
+    /// The `"invalid"` literal an absent address serializes to is not
+    /// itself a parseable network, so deserializing it back is a
+    /// deliberate error rather than a silently reconstructed message.
+    #[test]
+    fn test_bicontiguous_ipv6_network_serde_invalid_does_not_deserialize() {
+        let malformed = pb::BiContiguousIPv6Network {
+            addr: None,
+            hi_prefix_len: 32,
+            lo_prefix_len: 0,
+        };
+        let json = serde_json::to_string(&malformed).unwrap();
+        assert_eq!(r#""invalid""#, json);
+        assert!(serde_json::from_str::<pb::BiContiguousIPv6Network>(&json).is_err());
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_from_str_accepts_cidr_form() {
+        let got: pb::BiContiguousIPv6Network = "2001:db8::/32".parse().unwrap();
+        assert_eq!(Some(pb::IPv6Address { hi: 0x20010db800000000, lo: 0 }), got.addr);
+        assert_eq!(32, got.hi_prefix_len);
+        assert_eq!(0, got.lo_prefix_len);
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_from_str_rejects_high_half_hole() {
+        assert!(
+            "2001:db8::/ffff:0:ffff::"
+                .parse::<pb::BiContiguousIPv6Network>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_from_str_rejects_low_half_hole() {
+        assert!(
+            "2001:db8::/ffff:ffff:ffff:ffff:ffff:0:ffff:0"
+                .parse::<pb::BiContiguousIPv6Network>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_bicontiguous_ipv6_network_from_str_rejects_ipv4() {
+        assert!("10.0.0.0/24".parse::<pb::BiContiguousIPv6Network>().is_err());
     }
 }

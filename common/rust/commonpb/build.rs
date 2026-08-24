@@ -3,10 +3,11 @@ use core::error::Error;
 /// Messages that gain the ordinary `Serialize`/`Deserialize` derive.
 ///
 /// The address messages, `MACAddress`, and the network messages
-/// (`ContiguousIPNetwork`, `ContiguousIPv4Network`, `ContiguousIPv6Network`)
-/// are deliberately absent: `src/lib.rs` hand-writes their
-/// `Serialize`/`Deserialize` impls to go straight to and from a plain
-/// string, and prost-build's attribute paths are additive, not
+/// (`ContiguousIPNetwork`, `ContiguousIPv4Network`, `ContiguousIPv6Network`,
+/// `BiContiguousIPv6Network`) are deliberately absent: `src/lib.rs`
+/// hand-writes their `Serialize`/`Deserialize` impls to go straight to
+/// and from a plain string, and prost-build's attribute paths are
+/// additive, not
 /// subtractive -- a blanket `message_attribute(".", ...)` cannot exclude
 /// a single message, so every other message is listed here individually
 /// instead.
