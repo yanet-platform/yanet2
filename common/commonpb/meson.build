@@ -6,8 +6,13 @@ common_proto_files = [
     join_paths(common_proto_dir, 'v1', 'metric.proto'),
     join_paths(common_proto_dir, 'v1', 'macaddr.proto'),
     join_paths(common_proto_dir, 'v1', 'ipaddr.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipv4addr.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipv6addr.proto'),
     join_paths(common_proto_dir, 'v1', 'iprange.proto'),
     join_paths(common_proto_dir, 'v1', 'ipnetwork.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipv4network.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipv6network.proto'),
+    join_paths(common_proto_dir, 'v1', 'bicontiguousnetwork.proto'),
 ]
 
 # Generate protobuf files. The root include dir is required so that protos
@@ -20,8 +25,13 @@ common_protoc_gen = custom_target(
         'metric.pb.go',
         'macaddr.pb.go',
         'ipaddr.pb.go',
+        'ipv4addr.pb.go',
+        'ipv6addr.pb.go',
         'iprange.pb.go',
         'ipnetwork.pb.go',
+        'ipv4network.pb.go',
+        'ipv6network.pb.go',
+        'bicontiguousnetwork.pb.go',
     ],
     input: common_proto_files,
     command: [
