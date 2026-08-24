@@ -59,8 +59,8 @@ func Test_NAT64Service_AddShowRemove(t *testing.T) {
 	require.False(t, backend.handles[1].freed)
 	_, err = service.AddMapping(ctx, &nat64pb.AddMappingRequest{
 		Name:        "nat64-0",
-		Ipv4:        commonpb.NewIPAddressFromAddr(ipv4),
-		Ipv6:        commonpb.NewIPAddressFromAddr(ipv6),
+		Ipv4:        commonpb.NewIPv4Address(ipv4.As4()),
+		Ipv6:        commonpb.NewIPv6Address(ipv6.As16()),
 		PrefixIndex: 1,
 	})
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func Test_NAT64Service_AddShowRemove(t *testing.T) {
 
 	_, err = service.RemoveMapping(ctx, &nat64pb.RemoveMappingRequest{
 		Name: "nat64-0",
-		Ipv4: commonpb.NewIPAddressFromAddr(ipv4),
+		Ipv4: commonpb.NewIPv4Address(ipv4.As4()),
 	})
 	require.NoError(t, err)
 
@@ -187,4 +187,37 @@ func Test_NAT64Service_InvalidMTU(t *testing.T) {
 	})
 	require.Nil(t, resp)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_NAT64Service_MappingAddressInvalid verifies missing and
+// IPv4-mapped mapping addresses are rejected.
+func Test_NAT64Service_MappingAddressInvalid(t *testing.T) {
+	backend := &mockBackend{}
+	service := NewNAT64Service(backend)
+	ctx := t.Context()
+
+	// A valid prefix keeps the prefix-index guard out of the way, so an
+	// InvalidArgument below can come only from the address checks.
+	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: []byte{0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	})
+	require.NoError(t, err)
+
+	ipv4 := commonpb.NewIPv4Address(netip.MustParseAddr("192.0.2.1").As4())
+	ipv6 := commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8::1").As16())
+	mapped := commonpb.NewIPv6Address(netip.MustParseAddr("::ffff:192.0.2.1").As16())
+
+	_, err = service.AddMapping(ctx, &nat64pb.AddMappingRequest{Name: "nat64-0", Ipv6: ipv6})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	_, err = service.AddMapping(ctx, &nat64pb.AddMappingRequest{Name: "nat64-0", Ipv4: ipv4})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	_, err = service.AddMapping(ctx, &nat64pb.AddMappingRequest{Name: "nat64-0", Ipv4: ipv4, Ipv6: mapped})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	_, err = service.RemoveMapping(ctx, &nat64pb.RemoveMappingRequest{Name: "nat64-0"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	// Only the prefix update reached the backend: no mapping landed.
+	require.Len(t, backend.configs, 1)
+	require.Empty(t, backend.configs[0].Mappings)
 }

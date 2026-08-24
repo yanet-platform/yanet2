@@ -54,9 +54,9 @@ message Prefix {
 
 // Mapping represents an IPv4-IPv6 address mapping
 message Mapping {
-  common.commonpb.v1.IPAddress ipv4 = 1; // IPv4 host address
-  common.commonpb.v1.IPAddress ipv6 = 2; // IPv6 host address
-  uint32 prefix_index = 3;               // Index of the used prefix
+  common.commonpb.v1.IPv4Address ipv4 = 1; // IPv4 host address
+  common.commonpb.v1.IPv6Address ipv6 = 2; // IPv6 host address
+  uint32 prefix_index = 3;                 // Index of the used prefix
 }
 
 // Config represents configuration for a single dataplane instance
@@ -90,9 +90,9 @@ message RemovePrefixResponse {}
 // AddMappingRequest specifies an IPv4-IPv6 mapping to add
 message AddMappingRequest {
   string name = 1;
-  common.commonpb.v1.IPAddress ipv4 = 2; // IPv4 host address
-  common.commonpb.v1.IPAddress ipv6 = 3; // IPv6 host address
-  uint32 prefix_index = 4;               // Index of the used prefix
+  common.commonpb.v1.IPv4Address ipv4 = 2; // IPv4 host address
+  common.commonpb.v1.IPv6Address ipv6 = 3; // IPv6 host address
+  uint32 prefix_index = 4;                 // Index of the used prefix
 }
 
 message AddMappingResponse {}
@@ -100,7 +100,7 @@ message AddMappingResponse {}
 // RemoveMappingRequest specifies an IPv4-IPv6 mapping to remove
 message RemoveMappingRequest {
   string name = 1;
-  common.commonpb.v1.IPAddress ipv4 = 2; // IPv4 host address to remove mapping for
+  common.commonpb.v1.IPv4Address ipv4 = 2; // IPv4 host address to remove mapping for
 }
 
 message RemoveMappingResponse {}

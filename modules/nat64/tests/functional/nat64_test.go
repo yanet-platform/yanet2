@@ -111,8 +111,8 @@ func mustAddMapping(t *testing.T, svc *nat64.NAT64Service, name string, ip4, ip6
 	t.Helper()
 	_, err := svc.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
 		Name:        name,
-		Ipv4:        commonpb.NewIPAddressFromAddr(netip.MustParseAddr(ip4)),
-		Ipv6:        commonpb.NewIPAddressFromAddr(netip.MustParseAddr(ip6)),
+		Ipv4:        commonpb.NewIPv4Address(netip.MustParseAddr(ip4).As4()),
+		Ipv6:        commonpb.NewIPv6Address(netip.MustParseAddr(ip6).As16()),
 		PrefixIndex: prefixIdx,
 	})
 	require.NoError(t, err)

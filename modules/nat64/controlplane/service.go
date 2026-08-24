@@ -176,8 +176,8 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 	for _, mapping := range cfg.Mappings {
 		response.Config.Mappings = append(response.Config.Mappings, &nat64pb.Mapping{
-			Ipv4:        commonpb.NewIPAddressFromAddr(mapping.IPv4),
-			Ipv6:        commonpb.NewIPAddressFromAddr(mapping.IPv6),
+			Ipv4:        commonpb.NewIPv4Address(mapping.IPv4.As4()),
+			Ipv6:        commonpb.NewIPv6Address(mapping.IPv6.As16()),
 			PrefixIndex: mapping.PrefixIndex,
 		})
 	}
@@ -248,18 +248,15 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 }
 
 func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRequest) (*nat64pb.AddMappingResponse, error) {
-	ipv4, err := req.GetIpv4().ToAddr()
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid ipv4 (bytes=%x): %v", req.GetIpv4().GetAddr(), err)
+	if req.GetIpv4() == nil {
+		return nil, status.Error(codes.InvalidArgument, "ipv4 address is required")
 	}
-	if !ipv4.Is4() {
-		return nil, status.Errorf(codes.InvalidArgument, "ipv4 %q is not an IPv4 address", ipv4)
+	if req.GetIpv6() == nil {
+		return nil, status.Error(codes.InvalidArgument, "ipv6 address is required")
 	}
-	ipv6, err := req.GetIpv6().ToAddr()
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid ipv6 (bytes=%x): %v", req.GetIpv6().GetAddr(), err)
-	}
-	if !ipv6.Is6() || ipv6.Is4In6() {
+	ipv4 := req.GetIpv4().ToAddr()
+	ipv6 := req.GetIpv6().ToAddr()
+	if ipv6.Is4In6() {
 		return nil, status.Errorf(codes.InvalidArgument, "ipv6 %q is not a pure IPv6 address", ipv6)
 	}
 
@@ -294,13 +291,10 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 }
 
 func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMappingRequest) (*nat64pb.RemoveMappingResponse, error) {
-	ipv4, err := req.GetIpv4().ToAddr()
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid ipv4 (bytes=%x): %v", req.GetIpv4().GetAddr(), err)
+	if req.GetIpv4() == nil {
+		return nil, status.Error(codes.InvalidArgument, "ipv4 address is required")
 	}
-	if !ipv4.Is4() {
-		return nil, status.Errorf(codes.InvalidArgument, "ipv4 %q is not an IPv4 address", ipv4)
-	}
+	ipv4 := req.GetIpv4().ToAddr()
 
 	name := req.GetName()
 	if name == "" {

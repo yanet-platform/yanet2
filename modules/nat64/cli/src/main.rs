@@ -5,7 +5,6 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
     CompleteEnv,
 };
-use commonpb::pb::IpAddress;
 use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
     RemoveMappingRequest, RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest,
@@ -333,8 +332,8 @@ impl NAT64Service {
     pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Error> {
         let request = AddMappingRequest {
             name: cmd.config_name.clone(),
-            ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
-            ipv6: Some(IpAddress { addr: cmd.ipv6.octets().to_vec() }),
+            ipv4: Some(cmd.ipv4.into()),
+            ipv6: Some(cmd.ipv6.into()),
             prefix_index: cmd.prefix_index,
         };
         log::debug!("AddMappingRequest: {request:?}");
@@ -358,7 +357,7 @@ impl NAT64Service {
     pub async fn remove_mapping(&mut self, cmd: RemoveMappingCmd) -> Result<(), Error> {
         let request = RemoveMappingRequest {
             name: cmd.config_name.clone(),
-            ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
+            ipv4: Some(cmd.ipv4.into()),
         };
         log::debug!("RemoveMappingRequest: {request:?}");
         self.service
