@@ -22,9 +22,13 @@ message SetupConfigRequest {
   string name = 1;
   ImportConfig config = 2;
   // IPv4 source address for MPLS routes.
-  common.commonpb.v1.IPAddress source_v4 = 3;
+  //
+  // MUST be present.
+  common.commonpb.v1.IPv4Address source_v4 = 3;
   // IPv6 source address for MPLS routes.
-  common.commonpb.v1.IPAddress source_v6 = 4;
+  //
+  // MUST be present.
+  common.commonpb.v1.IPv6Address source_v6 = 4;
 }
 
 message SetupConfigResponse {}

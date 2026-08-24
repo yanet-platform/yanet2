@@ -135,14 +135,16 @@ func (m *AdapterService) SetupConfig(
 		return nil, fmt.Errorf("no import config provided")
 	}
 
-	mplsV4Src, err := req.GetSourceV4().ToAddr()
-	if err != nil {
-		return nil, fmt.Errorf("invalid v4 source (bytes=%x): %w", req.GetSourceV4().GetAddr(), err)
+	// The typed sources decode totally: an omitted field is otherwise
+	// indistinguishable from the zero address, so check presence here.
+	if req.GetSourceV4() == nil {
+		return nil, fmt.Errorf("no v4 source address provided")
 	}
-	mplsV6Src, err := req.GetSourceV6().ToAddr()
-	if err != nil {
-		return nil, fmt.Errorf("invalid v6 source (bytes=%x): %w", req.GetSourceV6().GetAddr(), err)
+	if req.GetSourceV6() == nil {
+		return nil, fmt.Errorf("no v6 source address provided")
 	}
+	mplsV4Src := req.GetSourceV4().ToAddr()
+	mplsV6Src := req.GetSourceV6().ToAddr()
 
 	cfg := bird.DefaultConfig()
 	req.GetConfig().ToConfig(cfg)

@@ -79,16 +79,23 @@ func runClient() error {
 	if err != nil {
 		return fmt.Errorf("failed to parse --source-v4: %w", err)
 	}
-	if !addrV4.Is4() {
-		return fmt.Errorf("--source-v4 must be an IPv4 address, got %q", clientCmdArgs.SourceV4)
+	sourceV4, err := commonpb.NewIPv4AddressFromAddr(addrV4)
+	if err != nil {
+		return fmt.Errorf("invalid --source-v4: %w", err)
 	}
 
 	addrV6, err := netip.ParseAddr(clientCmdArgs.SourceV6)
 	if err != nil {
 		return fmt.Errorf("failed to parse --source-v6: %w", err)
 	}
-	if !addrV6.Is6() || addrV6.Is4In6() {
-		return fmt.Errorf("--source-v6 must be an IPv6 address, got %q", clientCmdArgs.SourceV6)
+	// The wire type counts the IPv4-mapped form as IPv6, but the server
+	// requires a pure IPv6 source; reject it before the round trip.
+	if addrV6.Is4In6() {
+		return fmt.Errorf("--source-v6 must be a pure IPv6 address, got %q", clientCmdArgs.SourceV6)
+	}
+	sourceV6, err := commonpb.NewIPv6AddressFromAddr(addrV6)
+	if err != nil {
+		return fmt.Errorf("invalid --source-v6: %w", err)
 	}
 
 	// Load server config to get the adapter address
@@ -124,8 +131,8 @@ func runClient() error {
 
 	req := &adapterpb.SetupConfigRequest{
 		Name:     clientCmdArgs.ConfigName,
-		SourceV4: commonpb.NewIPAddressFromAddr(addrV4),
-		SourceV6: commonpb.NewIPAddressFromAddr(addrV6),
+		SourceV4: sourceV4,
+		SourceV6: sourceV6,
 		Config: &adapterpb.ImportConfig{
 			Sockets:  clientCmdArgs.Sockets,
 			LogLevel: logLevel,
