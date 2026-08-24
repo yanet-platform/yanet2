@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package modules.decap.controlplane.decappb.v1;
 
-import "common/commonpb/v1/ipnetwork.proto";
+import "common/commonpb/v1/contiguousnetwork.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1;decappb";
 

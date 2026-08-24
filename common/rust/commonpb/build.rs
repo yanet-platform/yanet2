@@ -36,6 +36,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6addr.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/iprange.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipnetwork.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/contiguousnetwork.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4network.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6network.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/bicontiguousnetwork.proto");
@@ -66,6 +67,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "common/commonpb/v1/ipv6addr.proto",
             "common/commonpb/v1/iprange.proto",
             "common/commonpb/v1/ipnetwork.proto",
+            "common/commonpb/v1/contiguousnetwork.proto",
             "common/commonpb/v1/ipv4network.proto",
             "common/commonpb/v1/ipv6network.proto",
             "common/commonpb/v1/bicontiguousnetwork.proto",

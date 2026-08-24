@@ -38,14 +38,14 @@ func TestContiguousIPNetwork_ToPrefix_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestContiguousIPNetwork_HostBitsNormalized asserts that construction and
-// decoding both mask host bits below prefix_len, so the normalization is
-// documented behavior rather than an accident of one direction.
+// TestContiguousIPNetwork_HostBitsNormalized asserts that construction
+// and decoding both mask host bits below prefix_len.
 //
-// It checks the raw wire bytes (m.GetAddr().GetAddr()) directly rather than
-// only round-tripping through ToPrefix, because ToPrefix masks on the way
-// out too: a constructor that forgot to mask would still pass a
-// ToPrefix-only assertion.
+// The normalization is documented behavior of both directions, not an
+// accident of one. It checks the raw wire bytes (m.GetAddr().GetAddr())
+// directly rather than only round-tripping through ToPrefix, because
+// ToPrefix masks on the way out too: a constructor that forgot to mask
+// would still pass a ToPrefix-only assertion.
 func TestContiguousIPNetwork_HostBitsNormalized(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -113,8 +113,10 @@ func TestContiguousIPNetwork_HostBitsNormalized(t *testing.T) {
 }
 
 // TestContiguousIPNetwork_ToPrefix_PrefixLenOverflow asserts that a
-// prefix_len exceeding the address family's bit length is rejected rather
-// than silently truncated or wrapped.
+// prefix_len exceeding the family's bit length is rejected.
+//
+// The rejection is the contract: an overflowing length must not be
+// silently truncated or wrapped.
 func TestContiguousIPNetwork_ToPrefix_PrefixLenOverflow(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -148,9 +150,11 @@ func TestContiguousIPNetwork_ToPrefix_MalformedAddr(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestNewContiguousIPNetworkFromPrefix_Invalid asserts that constructing
-// from an invalid netip.Prefix is rejected at construction time rather than
-// producing a message that fails later.
+// TestNewContiguousIPNetworkFromPrefix_Invalid asserts that an invalid
+// prefix is rejected at construction time.
+//
+// Failing at construction is the contract: an invalid input must not
+// produce a message that only fails later.
 func TestNewContiguousIPNetworkFromPrefix_Invalid(t *testing.T) {
 	_, err := commonpb.NewContiguousIPNetworkFromPrefix(netip.Prefix{})
 	require.Error(t, err)

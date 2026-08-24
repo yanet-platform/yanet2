@@ -4,20 +4,5 @@ package common.commonpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
-import "common/commonpb/v1/ipaddr.proto";
-
-// ContiguousIPNetwork represents an IPv4 or IPv6 CIDR prefix.
-//
-// "Contiguous" distinguishes this from a general per-bit mask: the network
-// mask must be expressible as a prefix length. Family is determined by the
-// length of addr, consistently with IPAddress.
-message ContiguousIPNetwork {
-  // Masked network base address.
-  //
-  // Host bits below prefix_len MUST be zero.
-  IPAddress addr = 1;
-  // Prefix length, in bits.
-  //
-  // MUST be <= 32 for a 4-byte addr and <= 128 for a 16-byte addr.
-  uint32 prefix_len = 2;
-}
+// This file is deliberately message-less. It is kept as a placeholder
+// for upcoming network messages.

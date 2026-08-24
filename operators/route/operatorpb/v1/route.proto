@@ -5,7 +5,7 @@ package operators.route.operatorpb.v1;
 option go_package = "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1;operatorpb";
 
 import "common/commonpb/v1/ipaddr.proto";
-import "common/commonpb/v1/ipnetwork.proto";
+import "common/commonpb/v1/contiguousnetwork.proto";
 
 // RouteService is the operator-owned routing surface.
 service RouteService {
