@@ -5,7 +5,7 @@ use core::{
     str::FromStr,
 };
 
-use netip::{Contiguous, IpNetwork, Ipv4Network, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
+use netip::{Contiguous, IpNetwork, Ipv4Network, Ipv6Network, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 #[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
@@ -327,6 +327,71 @@ impl Serialize for pb::ContiguousIPv4Network {
 }
 
 impl<'de> Deserialize<'de> for pb::ContiguousIPv4Network {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
+impl From<Contiguous<Ipv6Network>> for pb::ContiguousIPv6Network {
+    fn from(net: Contiguous<Ipv6Network>) -> Self {
+        pb::ContiguousIPv6Network {
+            addr: Some(pb::IPv6Address::from(*net.addr())),
+            prefix_len: u32::from(net.prefix()),
+        }
+    }
+}
+
+impl TryFrom<&pb::ContiguousIPv6Network> for Contiguous<Ipv6Network> {
+    type Error = Box<dyn Error>;
+
+    /// Masks host bits to `prefix_len` rather than rejecting them.
+    fn try_from(net: &pb::ContiguousIPv6Network) -> Result<Self, Self::Error> {
+        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+        let addr = Ipv6Addr::from(addr);
+        let prefix_len =
+            u8::try_from(net.prefix_len).map_err(|_| format!("invalid prefix length {}", net.prefix_len))?;
+        Contiguous::<Ipv6Network>::try_from((addr, prefix_len))
+            .map_err(|e| format!("invalid prefix length {prefix_len}: {e}").into())
+    }
+}
+
+impl Display for pb::ContiguousIPv6Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match Contiguous::<Ipv6Network>::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::ContiguousIPv6Network {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = Contiguous::<Ipv6Network>::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::ContiguousIPv6Network {
+    /// Serializes as the CIDR string `Display` renders.
+    ///
+    /// A message with an absent address renders as the literal
+    /// `"invalid"`, which is not itself a parseable network and so
+    /// deliberately does not deserialize back.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::ContiguousIPv6Network {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -1236,5 +1301,130 @@ mod test {
             prefix_len: 0,
         };
         assert_eq!(vec![0x0a, 0x00], msg.encode_to_vec());
+    }
+
+    /// Verifies typed construction from a CIDR block and the decode back,
+    /// with fixtures mirrored in the Go tests.
+    #[test]
+    fn test_contiguous_ipv6_network_conversion_round_trip() {
+        let net = Contiguous::<Ipv6Network>::parse("2a02:6b8::/32").unwrap();
+        let msg = pb::ContiguousIPv6Network::from(net);
+        assert_eq!(Some(pb::IPv6Address { hi: 0x2a0206b800000000, lo: 0 }), msg.addr);
+        assert_eq!(32, msg.prefix_len);
+        assert_eq!(net, Contiguous::<Ipv6Network>::try_from(&msg).unwrap());
+    }
+
+    /// Verifies the nested wire encoding against a golden byte fixture
+    /// shared with the Go tests.
+    #[test]
+    fn test_contiguous_ipv6_network_wire_bytes_golden() {
+        use prost::Message;
+
+        let msg = pb::ContiguousIPv6Network {
+            addr: Some(pb::IPv6Address {
+                hi: 0x2a0206b800000001,
+                lo: 0x0000000000000100,
+            }),
+            prefix_len: 128,
+        };
+        assert_eq!(
+            vec![
+                0x0a, 0x12, 0x09, 0x01, 0x00, 0x00, 0x00, 0xb8, 0x06, 0x02, 0x2a, 0x11, 0x00, 0x01, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x10, 0x80, 0x01,
+            ],
+            msg.encode_to_vec()
+        );
+    }
+
+    /// The default route is not an empty message: the present-but-zero
+    /// address encodes as two bytes, and decode relies on that presence
+    /// to tell the default route from a malformed message.
+    #[test]
+    fn test_contiguous_ipv6_network_wire_bytes_zero_value_golden() {
+        use prost::Message;
+
+        let msg = pb::ContiguousIPv6Network {
+            addr: Some(pb::IPv6Address { hi: 0, lo: 0 }),
+            prefix_len: 0,
+        };
+        assert_eq!(vec![0x0a, 0x00], msg.encode_to_vec());
+    }
+
+    #[test]
+    fn test_contiguous_ipv6_network_try_from_masks_host_bits() {
+        let msg = pb::ContiguousIPv6Network {
+            addr: Some(pb::IPv6Address {
+                hi: 0x2a0206b800000001,
+                lo: 0x0000000000000100,
+            }),
+            prefix_len: 64,
+        };
+        let expected = Contiguous::<Ipv6Network>::parse("2a02:6b8:0:1::/64").unwrap();
+        assert_eq!(expected, Contiguous::<Ipv6Network>::try_from(&msg).unwrap());
+    }
+
+    #[test]
+    fn test_contiguous_ipv6_network_try_from_rejects_absent_addr() {
+        let malformed = pb::ContiguousIPv6Network { addr: None, prefix_len: 64 };
+        assert!(Contiguous::<Ipv6Network>::try_from(&malformed).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_ipv6_network_try_from_rejects_prefix_overflow() {
+        let malformed = pb::ContiguousIPv6Network {
+            addr: Some(pb::IPv6Address { hi: 0x2a0206b800000000, lo: 0 }),
+            prefix_len: 129,
+        };
+        assert!(Contiguous::<Ipv6Network>::try_from(&malformed).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_ipv6_network_serde_string_round_trip() {
+        let msg = pb::ContiguousIPv6Network::from(Contiguous::<Ipv6Network>::parse("2a02:6b8::/32").unwrap());
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(r#""2a02:6b8::/32""#, json);
+        let got: pb::ContiguousIPv6Network = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, got);
+    }
+
+    /// The `"invalid"` literal an absent address serializes to is not
+    /// itself a parseable network, so deserializing it back is a
+    /// deliberate error rather than a silently reconstructed message.
+    #[test]
+    fn test_contiguous_ipv6_network_serde_invalid_does_not_deserialize() {
+        let malformed = pb::ContiguousIPv6Network { addr: None, prefix_len: 64 };
+        let json = serde_json::to_string(&malformed).unwrap();
+        assert_eq!(r#""invalid""#, json);
+        assert!(serde_json::from_str::<pb::ContiguousIPv6Network>(&json).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_ipv6_network_from_str_masks_host_bits() {
+        let got: pb::ContiguousIPv6Network = "2a02:6b8:0:1::100/64".parse().unwrap();
+        assert_eq!(Some(pb::IPv6Address { hi: 0x2a0206b800000001, lo: 0 }), got.addr);
+        assert_eq!(64, got.prefix_len);
+    }
+
+    #[test]
+    fn test_contiguous_ipv6_network_from_str_rejects_ipv4() {
+        assert!("10.0.0.0/8".parse::<pb::ContiguousIPv6Network>().is_err());
+    }
+
+    /// A half-zero address omits that half inside the nested message;
+    /// the fixture pins the hi-only shape shared with the Go tests.
+    #[test]
+    fn test_contiguous_ipv6_network_wire_bytes_hi_only_golden() {
+        use prost::Message;
+
+        let msg = pb::ContiguousIPv6Network {
+            addr: Some(pb::IPv6Address { hi: 0x2a0206b800000000, lo: 0 }),
+            prefix_len: 32,
+        };
+        assert_eq!(
+            vec![
+                0x0a, 0x09, 0x09, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x06, 0x02, 0x2a, 0x10, 0x20
+            ],
+            msg.encode_to_vec()
+        );
     }
 }

@@ -38,3 +38,20 @@ message ContiguousIPv4Network {
   // MUST be <= 32.
   uint32 prefix_len = 2;
 }
+
+// ContiguousIPv6Network represents an IPv6 CIDR prefix.
+//
+// Unlike ContiguousIPNetwork, the family is fixed by the type: the
+// address cannot carry IPv4, and an absent addr is the only malformed
+// state.
+message ContiguousIPv6Network {
+  // Network base address.
+  //
+  // MUST be present. Host bits below prefix_len are masked off on
+  // decode, so producers need not normalize.
+  IPv6Address addr = 1;
+  // Prefix length, in bits.
+  //
+  // MUST be <= 128.
+  uint32 prefix_len = 2;
+}
