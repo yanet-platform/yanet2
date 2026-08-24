@@ -221,6 +221,56 @@ impl<'de> Deserialize<'de> for pb::IPv4Address {
     }
 }
 
+impl From<Ipv6Addr> for pb::IPv6Address {
+    fn from(addr: Ipv6Addr) -> Self {
+        let bits = addr.to_bits();
+        pb::IPv6Address {
+            hi: (bits >> 64) as u64,
+            lo: bits as u64,
+        }
+    }
+}
+
+impl From<&pb::IPv6Address> for Ipv6Addr {
+    fn from(ip: &pb::IPv6Address) -> Self {
+        Ipv6Addr::from_bits((u128::from(ip.hi) << 64) | u128::from(ip.lo))
+    }
+}
+
+impl Display for pb::IPv6Address {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        Ipv6Addr::from(self).fmt(f)
+    }
+}
+
+impl FromStr for pb::IPv6Address {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let addr = Ipv6Addr::from_str(s)?;
+        Ok(Self::from(addr))
+    }
+}
+
+impl Serialize for pb::IPv6Address {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::IPv6Address {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
 impl From<(IpAddr, IpAddr)> for pb::IpRange {
     fn from((start, end): (IpAddr, IpAddr)) -> Self {
         pb::IpRange {
@@ -954,5 +1004,74 @@ mod test {
     #[test]
     fn test_ipv4_address_from_str_rejects_ipv4_mapped() {
         assert!("::ffff:10.1.2.3".parse::<pb::IPv4Address>().is_err());
+    }
+
+    /// Verifies that address bytes 0-7 land in the high half and bytes
+    /// 8-15 in the low half, both big-endian, in both directions.
+    ///
+    /// The fixture values mirror the Go tests so a half-swap or
+    /// endianness defect fails identically in both languages.
+    #[test]
+    fn test_ipv6_address_conversion_network_byte_order() {
+        let source = Ipv6Addr::new(0x2a02, 0x6b8, 0, 1, 0, 0, 0, 0x100);
+        let addr = pb::IPv6Address::from(source);
+        assert_eq!(0x2a0206b800000001, addr.hi);
+        assert_eq!(0x0000000000000100, addr.lo);
+        assert_eq!(source, Ipv6Addr::from(&addr));
+    }
+
+    /// Verifies the two-fixed64 wire encoding against a golden byte
+    /// fixture shared with the Go tests.
+    #[test]
+    fn test_ipv6_address_wire_bytes_golden() {
+        use prost::Message;
+
+        let addr = pb::IPv6Address {
+            hi: 0x2a0206b800000001,
+            lo: 0x0000000000000100,
+        };
+        assert_eq!(
+            vec![
+                0x09, 0x01, 0x00, 0x00, 0x00, 0xb8, 0x06, 0x02, 0x2a, 0x11, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+            ],
+            addr.encode_to_vec()
+        );
+    }
+
+    #[test]
+    fn test_ipv6_address_display_boundary_values() {
+        assert_eq!("::", pb::IPv6Address { hi: 0, lo: 0 }.to_string());
+        assert_eq!(
+            "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            pb::IPv6Address { hi: u64::MAX, lo: u64::MAX }.to_string()
+        );
+    }
+
+    /// Verifies that the IPv4-mapped form stays in its mapped rendering
+    /// instead of collapsing to the bare IPv4 string.
+    #[test]
+    fn test_ipv6_address_display_keeps_ipv4_mapped_form() {
+        let addr = pb::IPv6Address { hi: 0, lo: 0x0000ffff0a010203 };
+        assert_eq!("::ffff:10.1.2.3", addr.to_string());
+    }
+
+    #[test]
+    fn test_ipv6_address_serde_string_round_trip() {
+        let addr = pb::IPv6Address::from(Ipv6Addr::new(0x2a02, 0x6b8, 0, 1, 0, 0, 0, 0x100));
+        let json = serde_json::to_string(&addr).unwrap();
+        assert_eq!(r#""2a02:6b8:0:1::100""#, json);
+        let got: pb::IPv6Address = serde_json::from_str(&json).unwrap();
+        assert_eq!(addr, got);
+    }
+
+    #[test]
+    fn test_ipv6_address_from_str_rejects_ipv4() {
+        assert!("10.1.2.3".parse::<pb::IPv6Address>().is_err());
+    }
+
+    #[test]
+    fn test_ipv6_address_from_str_rejects_zoned() {
+        assert!("fe80::1%eth0".parse::<pb::IPv6Address>().is_err());
     }
 }
