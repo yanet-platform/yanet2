@@ -339,6 +339,62 @@ impl<'de> Deserialize<'de> for pb::IPv4Prefix {
     }
 }
 
+impl From<Ipv4Network> for pb::IPv4Network {
+    fn from(net: Ipv4Network) -> Self {
+        pb::IPv4Network {
+            addr: Some(pb::IPv4Address::from(*net.addr())),
+            mask: Some(pb::IPv4Address::from(*net.mask())),
+        }
+    }
+}
+
+impl TryFrom<&pb::IPv4Network> for Ipv4Network {
+    type Error = Box<dyn Error>;
+
+    fn try_from(net: &pb::IPv4Network) -> Result<Self, Self::Error> {
+        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+        let mask = net.mask.as_ref().ok_or("invalid IP network: missing mask")?;
+        Ok(Ipv4Network::new(Ipv4Addr::from(addr), Ipv4Addr::from(mask)))
+    }
+}
+
+impl Display for pb::IPv4Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match Ipv4Network::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::IPv4Network {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = Ipv4Network::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::IPv4Network {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::IPv4Network {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
 impl From<Contiguous<Ipv6Network>> for pb::IPv6Prefix {
     fn from(net: Contiguous<Ipv6Network>) -> Self {
         pb::IPv6Prefix {

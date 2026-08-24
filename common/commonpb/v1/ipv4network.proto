@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package common.commonpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
+
+import "common/commonpb/v1/ipv4addr.proto";
+
+// IPv4Network represents an IPv4 network as a base address and an
+// arbitrary bitmask. Accepted mask classes are the consuming API's contract.
+message IPv4Network {
+  // Network base address, normalized by the mask on decode.
+  //
+  // MUST be present.
+  IPv4Address addr = 1;
+  // Network bitmask.
+  //
+  // MUST be present. The explicit zero mask is the match-all wildcard.
+  IPv4Address mask = 2;
+}
