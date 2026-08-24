@@ -100,18 +100,22 @@ var (
 // NewMetricsFactory returns a [grpcmetrics.Factory] pre-bound to this module's
 // own labeler and service filter, applying any extra options (e.g. custom
 // histogram buckets) supplied by the caller.
+//
+// The labeler and the service filter are applied after the extra options,
+// so a caller cannot override the module's scoping. Any retention provider
+// passed here is ignored: the service injects its own at construction time.
 func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
 	opts := make([]grpcmetrics.Option, 0, len(extra)+2)
-	opts = append(opts, grpcmetrics.WithLabeler(labeler))
-
-	// Scope the collector to this module's own services.
-	opts = append(opts, grpcmetrics.WithServiceFilter(
-		func(service string) bool {
-			return service == ACLServiceName ||
-				service == ACLMetricsServiceName
-		},
-	))
 	opts = append(opts, extra...)
+	opts = append(opts,
+		grpcmetrics.WithLabeler(labeler),
+		grpcmetrics.WithServiceFilter(
+			func(service string) bool {
+				return service == ACLServiceName ||
+					service == ACLMetricsServiceName
+			},
+		),
+	)
 	return grpcmetrics.NewFactory(opts...)
 }
 
