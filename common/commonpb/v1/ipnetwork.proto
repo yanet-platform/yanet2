@@ -21,3 +21,20 @@ message ContiguousIPNetwork {
   // MUST be <= 32 for a 4-byte addr and <= 128 for a 16-byte addr.
   uint32 prefix_len = 2;
 }
+
+// ContiguousIPv4Network represents an IPv4 CIDR prefix.
+//
+// Unlike ContiguousIPNetwork, the family is fixed by the type: the
+// address cannot carry IPv6, and an absent addr is the only malformed
+// state.
+message ContiguousIPv4Network {
+  // Network base address.
+  //
+  // MUST be present. Host bits below prefix_len are masked off on
+  // decode, so producers need not normalize.
+  IPv4Address addr = 1;
+  // Prefix length, in bits.
+  //
+  // MUST be <= 32.
+  uint32 prefix_len = 2;
+}

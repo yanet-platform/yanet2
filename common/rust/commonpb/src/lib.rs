@@ -5,7 +5,7 @@ use core::{
     str::FromStr,
 };
 
-use netip::{Contiguous, IpNetwork, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
+use netip::{Contiguous, IpNetwork, Ipv4Network, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 #[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
@@ -262,6 +262,71 @@ impl Serialize for pb::IPv6Address {
 }
 
 impl<'de> Deserialize<'de> for pb::IPv6Address {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
+impl From<Contiguous<Ipv4Network>> for pb::ContiguousIPv4Network {
+    fn from(net: Contiguous<Ipv4Network>) -> Self {
+        pb::ContiguousIPv4Network {
+            addr: Some(pb::IPv4Address::from(*net.addr())),
+            prefix_len: u32::from(net.prefix()),
+        }
+    }
+}
+
+impl TryFrom<&pb::ContiguousIPv4Network> for Contiguous<Ipv4Network> {
+    type Error = Box<dyn Error>;
+
+    /// Masks host bits to `prefix_len` rather than rejecting them.
+    fn try_from(net: &pb::ContiguousIPv4Network) -> Result<Self, Self::Error> {
+        let addr = net.addr.as_ref().ok_or("invalid IP network: missing address")?;
+        let addr = Ipv4Addr::from(addr);
+        let prefix_len =
+            u8::try_from(net.prefix_len).map_err(|_| format!("invalid prefix length {}", net.prefix_len))?;
+        Contiguous::<Ipv4Network>::try_from((addr, prefix_len))
+            .map_err(|e| format!("invalid prefix length {prefix_len}: {e}").into())
+    }
+}
+
+impl Display for pb::ContiguousIPv4Network {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match Contiguous::<Ipv4Network>::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::ContiguousIPv4Network {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = Contiguous::<Ipv4Network>::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::ContiguousIPv4Network {
+    /// Serializes as the CIDR string `Display` renders.
+    ///
+    /// A message with an absent address renders as the literal
+    /// `"invalid"`, which is not itself a parseable network and so
+    /// deliberately does not deserialize back.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::ContiguousIPv4Network {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -1073,5 +1138,103 @@ mod test {
     #[test]
     fn test_ipv6_address_from_str_rejects_zoned() {
         assert!("fe80::1%eth0".parse::<pb::IPv6Address>().is_err());
+    }
+
+    /// Verifies typed construction from a CIDR block and the decode back,
+    /// with fixtures mirrored in the Go tests.
+    #[test]
+    fn test_contiguous_ipv4_network_conversion_round_trip() {
+        let net = Contiguous::<Ipv4Network>::parse("10.1.2.0/24").unwrap();
+        let msg = pb::ContiguousIPv4Network::from(net);
+        assert_eq!(Some(pb::IPv4Address { addr: 0x0a010200 }), msg.addr);
+        assert_eq!(24, msg.prefix_len);
+        assert_eq!(net, Contiguous::<Ipv4Network>::try_from(&msg).unwrap());
+    }
+
+    /// Verifies the nested wire encoding against a golden byte fixture
+    /// shared with the Go tests.
+    #[test]
+    fn test_contiguous_ipv4_network_wire_bytes_golden() {
+        use prost::Message;
+
+        let msg = pb::ContiguousIPv4Network {
+            addr: Some(pb::IPv4Address { addr: 0x0a010203 }),
+            prefix_len: 32,
+        };
+        assert_eq!(
+            vec![0x0a, 0x05, 0x0d, 0x03, 0x02, 0x01, 0x0a, 0x10, 0x20],
+            msg.encode_to_vec()
+        );
+    }
+
+    #[test]
+    fn test_contiguous_ipv4_network_try_from_masks_host_bits() {
+        let msg = pb::ContiguousIPv4Network {
+            addr: Some(pb::IPv4Address { addr: 0x0a010203 }),
+            prefix_len: 24,
+        };
+        let expected = Contiguous::<Ipv4Network>::parse("10.1.2.0/24").unwrap();
+        assert_eq!(expected, Contiguous::<Ipv4Network>::try_from(&msg).unwrap());
+    }
+
+    #[test]
+    fn test_contiguous_ipv4_network_try_from_rejects_absent_addr() {
+        let malformed = pb::ContiguousIPv4Network { addr: None, prefix_len: 24 };
+        assert!(Contiguous::<Ipv4Network>::try_from(&malformed).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_ipv4_network_try_from_rejects_prefix_overflow() {
+        let malformed = pb::ContiguousIPv4Network {
+            addr: Some(pb::IPv4Address { addr: 0x0a000000 }),
+            prefix_len: 33,
+        };
+        assert!(Contiguous::<Ipv4Network>::try_from(&malformed).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_ipv4_network_serde_string_round_trip() {
+        let msg = pb::ContiguousIPv4Network::from(Contiguous::<Ipv4Network>::parse("10.0.0.0/8").unwrap());
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(r#""10.0.0.0/8""#, json);
+        let got: pb::ContiguousIPv4Network = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, got);
+    }
+
+    /// The `"invalid"` literal an absent address serializes to is not
+    /// itself a parseable network, so deserializing it back is a
+    /// deliberate error rather than a silently reconstructed message.
+    #[test]
+    fn test_contiguous_ipv4_network_serde_invalid_does_not_deserialize() {
+        let malformed = pb::ContiguousIPv4Network { addr: None, prefix_len: 24 };
+        let json = serde_json::to_string(&malformed).unwrap();
+        assert_eq!(r#""invalid""#, json);
+        assert!(serde_json::from_str::<pb::ContiguousIPv4Network>(&json).is_err());
+    }
+
+    #[test]
+    fn test_contiguous_ipv4_network_from_str_masks_host_bits() {
+        let got: pb::ContiguousIPv4Network = "10.1.2.3/24".parse().unwrap();
+        assert_eq!(Some(pb::IPv4Address { addr: 0x0a010200 }), got.addr);
+        assert_eq!(24, got.prefix_len);
+    }
+
+    #[test]
+    fn test_contiguous_ipv4_network_from_str_rejects_ipv6() {
+        assert!("2a02:6b8::/32".parse::<pb::ContiguousIPv4Network>().is_err());
+    }
+
+    /// The default route is not an empty message: the present-but-zero
+    /// address encodes as two bytes, and decode relies on that presence
+    /// to tell the default route from a malformed message.
+    #[test]
+    fn test_contiguous_ipv4_network_wire_bytes_zero_value_golden() {
+        use prost::Message;
+
+        let msg = pb::ContiguousIPv4Network {
+            addr: Some(pb::IPv4Address { addr: 0 }),
+            prefix_len: 0,
+        };
+        assert_eq!(vec![0x0a, 0x00], msg.encode_to_vec());
     }
 }
