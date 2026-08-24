@@ -12,12 +12,12 @@ import (
 // TestPrefixesFromNetworks_TypedNetworks asserts that a family-typed
 // network list decodes to masked netip.Prefix values.
 func TestPrefixesFromNetworks_TypedNetworks(t *testing.T) {
-	first, err := commonpb.NewContiguousIPv4NetworkFromPrefix(netip.MustParsePrefix("10.0.0.0/24"))
+	first, err := commonpb.NewIPv4PrefixFromPrefix(netip.MustParsePrefix("10.0.0.0/24"))
 	require.NoError(t, err)
-	second, err := commonpb.NewContiguousIPv4NetworkFromPrefix(netip.MustParsePrefix("10.0.1.1/24"))
+	second, err := commonpb.NewIPv4PrefixFromPrefix(netip.MustParsePrefix("10.0.1.1/24"))
 	require.NoError(t, err)
 
-	prefixes, err := commonpb.PrefixesFromNetworks([]*commonpb.ContiguousIPv4Network{first, second})
+	prefixes, err := commonpb.PrefixesFromNetworks([]*commonpb.IPv4Prefix{first, second})
 	require.NoError(t, err)
 	require.Equal(t, []netip.Prefix{
 		netip.MustParsePrefix("10.0.0.0/24"),
@@ -28,7 +28,7 @@ func TestPrefixesFromNetworks_TypedNetworks(t *testing.T) {
 // TestPrefixesFromNetworks_MalformedTypedNetwork asserts that a malformed
 // family-typed network is rejected with the offending index named.
 func TestPrefixesFromNetworks_MalformedTypedNetwork(t *testing.T) {
-	_, err := commonpb.PrefixesFromNetworks([]*commonpb.ContiguousIPv4Network{
+	_, err := commonpb.PrefixesFromNetworks([]*commonpb.IPv4Prefix{
 		{Addr: &commonpb.IPv4Address{Addr: 0x0a000000}, PrefixLen: 33},
 	})
 	require.ErrorContains(t, err, "prefixes[0]")

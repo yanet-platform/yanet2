@@ -4,21 +4,21 @@ package common.commonpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
-import "common/commonpb/v1/ipv4addr.proto";
+import "common/commonpb/v1/ipv6addr.proto";
 
-// ContiguousIPv4Network represents an IPv4 CIDR prefix.
+// IPv6Prefix represents an IPv6 CIDR prefix.
 //
 // Unlike ContiguousIPNetwork, the family is fixed by the type: the
-// address cannot carry IPv6, and an absent addr is the only malformed
+// address cannot carry IPv4, and an absent addr is the only malformed
 // state.
-message ContiguousIPv4Network {
+message IPv6Prefix {
   // Network base address.
   //
   // MUST be present. Host bits below prefix_len are masked off on
   // decode, so producers need not normalize.
-  IPv4Address addr = 1;
+  IPv6Address addr = 1;
   // Prefix length, in bits.
   //
-  // MUST be <= 32.
+  // MUST be <= 128.
   uint32 prefix_len = 2;
 }

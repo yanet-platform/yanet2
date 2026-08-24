@@ -970,11 +970,11 @@ func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// mustV4Network builds a ContiguousIPv4Network from a CIDR test literal.
-func mustV4Network(t *testing.T, cidr string) *commonpb.ContiguousIPv4Network {
+// mustV4Network builds a IPv4Prefix from a CIDR test literal.
+func mustV4Network(t *testing.T, cidr string) *commonpb.IPv4Prefix {
 	t.Helper()
 
-	network, err := commonpb.NewContiguousIPv4NetworkFromPrefix(netip.MustParsePrefix(cidr))
+	network, err := commonpb.NewIPv4PrefixFromPrefix(netip.MustParsePrefix(cidr))
 	require.NoError(t, err)
 	return network
 }
@@ -1007,9 +1007,9 @@ func TestUpdateConfig_TypedNetworkLists(t *testing.T) {
 		Name: "acl0",
 		Rules: []*aclpb.Rule{{
 			Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
-			Sources4:      []*commonpb.ContiguousIPv4Network{source4},
+			Sources4:      []*commonpb.IPv4Prefix{source4},
 			Sources6:      []*commonpb.BiContiguousIPv6Network{source6},
-			Destinations4: []*commonpb.ContiguousIPv4Network{destination4},
+			Destinations4: []*commonpb.IPv4Prefix{destination4},
 			Destinations6: []*commonpb.BiContiguousIPv6Network{destination6},
 		}},
 	})
@@ -1045,7 +1045,7 @@ func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
 				Addr: []byte{192, 0, 2, 0},
 				Mask: []byte{255, 255, 255, 0},
 			}},
-			Sources4: []*commonpb.ContiguousIPv4Network{typed},
+			Sources4: []*commonpb.IPv4Prefix{typed},
 		}},
 	})
 	require.NoError(t, err)

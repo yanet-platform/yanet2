@@ -373,7 +373,7 @@ func labeler(fullMethod string, req any) metrics.Labels {
 
 // mergedNet4s decodes the IPv4 networks a rule carries in the legacy
 // mixed-family list and the typed list, legacy entries first.
-func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.ContiguousIPv4Network) (filter.IPNets, error) {
+func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Prefix) (filter.IPNets, error) {
 	nets, err := filterpbconv.ToNet4s(legacy)
 	if err != nil {
 		return nil, err

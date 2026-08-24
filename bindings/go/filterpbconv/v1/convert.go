@@ -115,7 +115,7 @@ func ToIPNet(pb *filterpb.IPNet) (filter.IPNet, error) {
 
 // ToNet4sFromContiguous converts family-typed contiguous IPv4 network
 // messages to filter IPNets.
-func ToNet4sFromContiguous(pb []*commonpb.ContiguousIPv4Network) (filter.IPNets, error) {
+func ToNet4sFromContiguous(pb []*commonpb.IPv4Prefix) (filter.IPNets, error) {
 	prefixes, err := commonpb.PrefixesFromNetworks(pb)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 network: %v", err)

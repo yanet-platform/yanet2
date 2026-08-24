@@ -8,39 +8,39 @@ import (
 	"github.com/yanet-platform/xnetip"
 )
 
-// NewContiguousIPv6NetworkFromContiguous creates a ContiguousIPv6Network
+// NewIPv6PrefixFromContiguous creates a IPv6Prefix
 // from an xnetip IPv6 CIDR block.
 //
 // The conversion is total: the block is masked by its own invariant. The
 // inverse of ToContiguous.
-func NewContiguousIPv6NetworkFromContiguous(net xnetip.Contiguous[xnetip.Network6]) *ContiguousIPv6Network {
-	return &ContiguousIPv6Network{
+func NewIPv6PrefixFromContiguous(net xnetip.Contiguous[xnetip.Network6]) *IPv6Prefix {
+	return &IPv6Prefix{
 		Addr:      NewIPv6Address(net.Network().Addr().As16()),
 		PrefixLen: uint32(net.PrefixLen()),
 	}
 }
 
-// NewContiguousIPv6NetworkFromPrefix creates a ContiguousIPv6Network from
+// NewIPv6PrefixFromPrefix creates a IPv6Prefix from
 // a netip.Prefix value, masking off any host bits.
 //
 // Returns an error if prefix is not a valid IPv6 prefix; the IPv4-mapped
 // form counts as IPv6 here, consistently with IPv6Address.
-func NewContiguousIPv6NetworkFromPrefix(prefix netip.Prefix) (*ContiguousIPv6Network, error) {
+func NewIPv6PrefixFromPrefix(prefix netip.Prefix) (*IPv6Prefix, error) {
 	net, ok := xnetip.ContiguousFromPrefix6(prefix)
 	if !ok {
 		return nil, fmt.Errorf("not a valid IPv6 prefix: %s", prefix)
 	}
-	return NewContiguousIPv6NetworkFromContiguous(net), nil
+	return NewIPv6PrefixFromContiguous(net), nil
 }
 
-// ToContiguous converts the ContiguousIPv6Network to an xnetip IPv6 CIDR
+// ToContiguous converts the IPv6Prefix to an xnetip IPv6 CIDR
 // block.
 //
 // Returns an error if addr is absent or prefix_len exceeds 128; the
 // latter wraps xnetip.ErrCIDROverflow. The returned block is masked, so
 // host bits never leak out even if the message was constructed by hand.
-// The inverse of NewContiguousIPv6NetworkFromContiguous.
-func (m *ContiguousIPv6Network) ToContiguous() (xnetip.Contiguous[xnetip.Network6], error) {
+// The inverse of NewIPv6PrefixFromContiguous.
+func (m *IPv6Prefix) ToContiguous() (xnetip.Contiguous[xnetip.Network6], error) {
 	if m.GetAddr() == nil {
 		return xnetip.Contiguous[xnetip.Network6]{}, fmt.Errorf("missing network address")
 	}
@@ -51,11 +51,11 @@ func (m *ContiguousIPv6Network) ToContiguous() (xnetip.Contiguous[xnetip.Network
 	return net, nil
 }
 
-// ToPrefix converts the ContiguousIPv6Network back to a masked
+// ToPrefix converts the IPv6Prefix back to a masked
 // netip.Prefix value.
 //
 // Returns an error exactly when ToContiguous does.
-func (m *ContiguousIPv6Network) ToPrefix() (netip.Prefix, error) {
+func (m *IPv6Prefix) ToPrefix() (netip.Prefix, error) {
 	net, err := m.ToContiguous()
 	if err != nil {
 		return netip.Prefix{}, err
@@ -64,7 +64,7 @@ func (m *ContiguousIPv6Network) ToPrefix() (netip.Prefix, error) {
 }
 
 // AsLogValue implements xgrpc.ProtoLogValue for compact gRPC logging.
-func (m *ContiguousIPv6Network) AsLogValue() any {
+func (m *IPv6Prefix) AsLogValue() any {
 	prefix, err := m.ToPrefix()
 	if err != nil {
 		return "invalid"
@@ -75,7 +75,7 @@ func (m *ContiguousIPv6Network) AsLogValue() any {
 
 // MarshalJSON serializes the network as a bare CIDR string, the same
 // form the Rust side renders.
-func (m *ContiguousIPv6Network) MarshalJSON() ([]byte, error) {
+func (m *IPv6Prefix) MarshalJSON() ([]byte, error) {
 	prefix, err := m.ToPrefix()
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func (m *ContiguousIPv6Network) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON accepts a bare IPv6 CIDR string.
-func (m *ContiguousIPv6Network) UnmarshalJSON(data []byte) error {
+func (m *IPv6Prefix) UnmarshalJSON(data []byte) error {
 	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -97,7 +97,7 @@ func (m *ContiguousIPv6Network) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse IP network: %w", err)
 	}
-	parsed, err := NewContiguousIPv6NetworkFromPrefix(prefix)
+	parsed, err := NewIPv6PrefixFromPrefix(prefix)
 	if err != nil {
 		return err
 	}

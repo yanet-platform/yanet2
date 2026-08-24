@@ -11,8 +11,8 @@ common_proto_files = [
     join_paths(common_proto_dir, 'v1', 'iprange.proto'),
     join_paths(common_proto_dir, 'v1', 'ipnetwork.proto'),
     join_paths(common_proto_dir, 'v1', 'contiguousnetwork.proto'),
-    join_paths(common_proto_dir, 'v1', 'ipv4network.proto'),
-    join_paths(common_proto_dir, 'v1', 'ipv6network.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipv4prefix.proto'),
+    join_paths(common_proto_dir, 'v1', 'ipv6prefix.proto'),
     join_paths(common_proto_dir, 'v1', 'bicontiguousnetwork.proto'),
 ]
 
@@ -31,8 +31,8 @@ common_protoc_gen = custom_target(
         'iprange.pb.go',
         'ipnetwork.pb.go',
         'contiguousnetwork.pb.go',
-        'ipv4network.pb.go',
-        'ipv6network.pb.go',
+        'ipv4prefix.pb.go',
+        'ipv6prefix.pb.go',
         'bicontiguousnetwork.pb.go',
     ],
     input: common_proto_files,

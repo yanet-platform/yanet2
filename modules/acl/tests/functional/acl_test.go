@@ -1141,8 +1141,8 @@ func TestACL_Counters(t *testing.T) {
 			Counter: "svc_counter",
 			Devices: []*filterpb.Device{{Name: "port0"}},
 			// 0.0.0.0/0: the zero address with a zero prefix length.
-			Sources4:      []*commonpb.ContiguousIPv4Network{{Addr: &commonpb.IPv4Address{}}},
-			Destinations4: []*commonpb.ContiguousIPv4Network{{Addr: &commonpb.IPv4Address{}}},
+			Sources4:      []*commonpb.IPv4Prefix{{Addr: &commonpb.IPv4Address{}}},
+			Destinations4: []*commonpb.IPv4Prefix{{Addr: &commonpb.IPv4Address{}}},
 			// UDP (17) with any subtype: proto in the high byte.
 			ProtoRanges:   []*filterpb.ProtoRange{{From: 17 << 8, To: 17<<8 | 0xFF}},
 			SrcPortRanges: []*filterpb.PortRange{{From: 0, To: 65535}},
