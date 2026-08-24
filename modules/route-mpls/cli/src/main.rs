@@ -1,13 +1,6 @@
 //! CLI for YANET "route-mpls" module.
 
-use core::{net::IpAddr, ops::Deref};
-
-#[allow(clippy::std_instead_of_core, non_snake_case)]
-pub mod filterpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("common.filterpb.v1");
-}
+use core::net::IpAddr;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod routemplspb {
@@ -127,25 +120,6 @@ pub struct RouteWithdrawCmd {
     /// The MPLS Label to encapsulate packets into.
     #[arg(long = "label")]
     pub mpls_label: u32,
-}
-
-impl TryFrom<Contiguous<IpNetwork>> for filterpb::IpPrefix {
-    type Error = Box<dyn core::error::Error>;
-
-    fn try_from(net: Contiguous<IpNetwork>) -> Result<Self, Self::Error> {
-        let length = net.prefix() as u32;
-
-        match net.deref() {
-            IpNetwork::V4(net) => {
-                let addr = net.addr().octets().to_vec();
-                Ok(filterpb::IpPrefix { addr, length })
-            }
-            IpNetwork::V6(net) => {
-                let addr = net.addr().octets().to_vec();
-                Ok(filterpb::IpPrefix { addr, length })
-            }
-        }
-    }
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -310,10 +284,7 @@ impl RouteMplsService {
             name: cmd.config_name.clone(),
             updates: vec![UpdateEvent {
                 event: Some(Event::Update(Rule {
-                    prefix: Some(
-                        filterpb::IpPrefix::try_from(cmd.prefix)
-                            .map_err(|e| self.service.invalid("update", e.to_string()))?,
-                    ),
+                    prefix: Some(cmd.prefix.into()),
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,
@@ -342,10 +313,7 @@ impl RouteMplsService {
             name: cmd.config_name.clone(),
             updates: vec![UpdateEvent {
                 event: Some(Event::Withdraw(Rule {
-                    prefix: Some(
-                        filterpb::IpPrefix::try_from(cmd.prefix)
-                            .map_err(|e| self.service.invalid("withdraw", e.to_string()))?,
-                    ),
+                    prefix: Some(cmd.prefix.into()),
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,

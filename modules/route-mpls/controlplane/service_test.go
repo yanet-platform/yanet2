@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -60,14 +59,11 @@ func newTestService(t *testing.T) *RouteMPLSService {
 func makeRule(t *testing.T, cidr string, dst string, label uint32) *routemplspb.Rule {
 	t.Helper()
 
-	p := netip.MustParsePrefix(cidr)
-	addrBytes := p.Addr().AsSlice()
+	prefix, err := commonpb.ParseContiguousIPNetwork(cidr)
+	require.NoError(t, err)
 
 	return &routemplspb.Rule{
-		Prefix: &filterpb.IPPrefix{
-			Addr:   addrBytes,
-			Length: uint32(p.Bits()),
-		},
+		Prefix: prefix,
 		Nexthop: &routemplspb.NextHop{
 			Label:         label,
 			SourceIp:      commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
@@ -101,6 +97,38 @@ func Test_RouteMPLSService_CreateConfig_EmptyName(t *testing.T) {
 		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
 	})
 	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_RouteMPLSService_CreateConfig_InvalidPrefix verifies that a rule whose
+// prefix length exceeds the address family's bit width is rejected.
+func Test_RouteMPLSService_CreateConfig_InvalidPrefix(t *testing.T) {
+	service := newTestService(t)
+
+	rule := makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)
+	rule.Prefix.PrefixLen = 33
+
+	response, err := service.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
+		Name:  "mpls0",
+		Rules: []*routemplspb.Rule{rule},
+	})
+	require.Nil(t, response)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_RouteMPLSService_CreateConfig_MissingPrefix verifies that a rule
+// carrying no prefix message is rejected rather than treated as a default.
+func Test_RouteMPLSService_CreateConfig_MissingPrefix(t *testing.T) {
+	service := newTestService(t)
+
+	rule := makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)
+	rule.Prefix = nil
+
+	response, err := service.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
+		Name:  "mpls0",
+		Rules: []*routemplspb.Rule{rule},
+	})
+	require.Nil(t, response)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 

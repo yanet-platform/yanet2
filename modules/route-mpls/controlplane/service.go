@@ -14,7 +14,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
@@ -235,12 +234,13 @@ func (m *RouteMPLSService) ShowConfig(
 	rules := make([]*routemplspb.Rule, 0)
 	for _, prefixes := range config.Prefixes {
 		for prefix, nexthops := range prefixes {
+			network, err := commonpb.NewContiguousIPNetworkFromPrefix(prefix)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to encode prefix %q: %v", prefix, err)
+			}
 			for _, nexthop := range nexthops.NextHops {
 				rules = append(rules, &routemplspb.Rule{
-					Prefix: &filterpb.IPPrefix{
-						Addr:   prefix.Addr().AsSlice(),
-						Length: uint32(prefix.Bits()),
-					},
+					Prefix: network,
 					Nexthop: &routemplspb.NextHop{
 						Label:         nexthop.MPLSLabel,
 						SourceIp:      commonpb.NewIPAddressFromAddr(nexthop.Source),
@@ -302,7 +302,7 @@ func (m *RouteMPLSService) CreateConfig(
 	prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
 
 	for _, rule := range req.Rules {
-		prefix, err := makePrefix(rule.Prefix)
+		prefix, err := rule.GetPrefix().ToPrefix()
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 		}
@@ -375,7 +375,7 @@ func (m *RouteMPLSService) UpdateConfig(
 
 	for _, update := range req.Updates {
 		if u := update.GetUpdate(); u != nil {
-			prefix, err := makePrefix(u.Prefix)
+			prefix, err := u.GetPrefix().ToPrefix()
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 			}
@@ -400,7 +400,7 @@ func (m *RouteMPLSService) UpdateConfig(
 		}
 
 		if w := update.GetWithdraw(); w != nil {
-			prefix, err := makePrefix(w.Prefix)
+			prefix, err := w.GetPrefix().ToPrefix()
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 			}
@@ -431,14 +431,6 @@ func (m *RouteMPLSService) UpdateConfig(
 	m.configs[name] = config
 
 	return &routemplspb.UpdateConfigResponse{}, nil
-}
-
-func makePrefix(prefix *filterpb.IPPrefix) (netip.Prefix, error) {
-	addr, ok := netip.AddrFromSlice(prefix.Addr)
-	if !ok {
-		return netip.Prefix{}, fmt.Errorf("invalid address length")
-	}
-	return netip.PrefixFrom(addr, int(prefix.Length)), nil
 }
 
 func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {

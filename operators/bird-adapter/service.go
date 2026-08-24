@@ -423,12 +423,20 @@ func (m *AdapterService) processBirdImport(
 					if update.Prefix.Addr().Is6() {
 						source = mplsV6Src
 					}
+					rule, err := rib.ToPBMPLSRoute(&update, source)
+					if err != nil {
+						clientLog.Debug("mpls route cannot be converted to protobuf, skip",
+							zap.String("prefix", update.Prefix.String()),
+							zap.Error(err),
+						)
+						continue
+					}
 					if update.ToRemove {
 						mplsUpdates = append(
 							mplsUpdates,
 							&routemplspb.UpdateEvent{
 								Event: &routemplspb.UpdateEvent_Withdraw{
-									Withdraw: rib.ToPBMPLSRoute(&update, source),
+									Withdraw: rule,
 								},
 							},
 						)
@@ -437,7 +445,7 @@ func (m *AdapterService) processBirdImport(
 							mplsUpdates,
 							&routemplspb.UpdateEvent{
 								Event: &routemplspb.UpdateEvent_Update{
-									Update: rib.ToPBMPLSRoute(&update, source),
+									Update: rule,
 								},
 							},
 						)

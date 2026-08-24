@@ -5,7 +5,6 @@ import (
 	"net/netip"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
@@ -146,7 +145,11 @@ func ToPBRoute(route *Route) (*routepb.Route, error) {
 	}, nil
 }
 
-func ToPBMPLSRoute(route *Route, source netip.Addr) *routemplspb.Rule {
+// ToPBMPLSRoute converts an adapter Route to the wire MPLS rule.
+//
+// Returns an error if the route carries an invalid prefix, which the
+// structured wire message cannot represent.
+func ToPBMPLSRoute(route *Route, source netip.Addr) (*routemplspb.Rule, error) {
 	weight := uint64(1)
 	for _, community := range route.LargeCommunities {
 		if community.ASN == 13238 && community.Function == 1 {
@@ -164,11 +167,14 @@ func ToPBMPLSRoute(route *Route, source netip.Addr) *routemplspb.Rule {
 	if len(route.MplsLabelStack) > 0 {
 		label = route.MplsLabelStack[0]
 	}
+
+	prefix, err := commonpb.NewContiguousIPNetworkFromPrefix(route.Prefix)
+	if err != nil {
+		return nil, fmt.Errorf("invalid prefix %q: %w", route.Prefix, err)
+	}
+
 	return &routemplspb.Rule{
-		Prefix: &filterpb.IPPrefix{
-			Addr:   route.Prefix.Addr().AsSlice(),
-			Length: uint32(route.Prefix.Bits()),
-		},
+		Prefix: prefix,
 		Nexthop: &routemplspb.NextHop{
 			Kind:          routemplspb.ActionKind_ACTION_KIND_TUNNEL,
 			Label:         label,
@@ -179,5 +185,5 @@ func ToPBMPLSRoute(route *Route, source netip.Addr) *routemplspb.Rule {
 
 			Counter: fmt.Sprintf("%s/%s/%d", route.Prefix.String(), destination.String(), label),
 		},
-	}
+	}, nil
 }
