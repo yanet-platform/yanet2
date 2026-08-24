@@ -14,6 +14,10 @@ type metricsSource interface {
 	Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
 }
 
+type moduleCounterReader interface {
+	ModuleCounters(dataplaneConfig *ffi.DPConfig, position ffi.ModuleReference, counterNames []string) []ffi.CounterInfo
+}
+
 // MetricsService exposes ACL module metrics over its own gRPC service.
 type MetricsService struct {
 	aclpb.UnimplementedMetricsServiceServer
@@ -46,7 +50,8 @@ func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetric
 var aclStructuralCounters = []string{
 	"acl_no_match", "acl_action_allow", "acl_action_deny", "acl_action_count",
 	"acl_action_check_state", "acl_action_create_state", "acl_action_unknown",
-	"acl_state_miss", "acl_sync_sent",
+	"acl_state_miss", "acl_sync_sent", "rx", "tx", "drop", "pending_input",
+	"pending_output",
 }
 
 // Metrics returns ACL module metrics matching tags: per-pipeline packet
@@ -107,15 +112,19 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 
 		var counters []ffi.CounterInfo
 		if read {
-			counters = dpConfig.ModuleCounters(
-				pos.Device,
-				pos.Pipeline,
-				pos.Function,
-				pos.Chain,
-				moduleType,
-				configName,
-				names,
-			)
+			if counterReader, ok := m.backend.(moduleCounterReader); ok {
+				counters = counterReader.ModuleCounters(dpConfig, pos, names)
+			} else {
+				counters = dpConfig.ModuleCounters(
+					pos.Device,
+					pos.Pipeline,
+					pos.Function,
+					pos.Chain,
+					moduleType,
+					configName,
+					names,
+				)
+			}
 		}
 
 		for _, counter := range counters {
@@ -178,6 +187,31 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 				result = append(result,
 					commonpb.NewMetricCounter("acl_sync_sent_packets", packets, baseLabels...),
 					commonpb.NewMetricCounter("acl_sync_sent_bytes", bytes, baseLabels...),
+				)
+			case "rx":
+				result = append(result,
+					commonpb.NewMetricCounter("acl_rx_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_rx_bytes", bytes, baseLabels...),
+				)
+			case "tx":
+				result = append(result,
+					commonpb.NewMetricCounter("acl_tx_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_tx_bytes", bytes, baseLabels...),
+				)
+			case "drop":
+				result = append(result,
+					commonpb.NewMetricCounter("acl_drop_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_drop_bytes", bytes, baseLabels...),
+				)
+			case "pending_input":
+				result = append(result,
+					commonpb.NewMetricCounter("acl_pending_input_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_pending_input_bytes", bytes, baseLabels...),
+				)
+			case "pending_output":
+				result = append(result,
+					commonpb.NewMetricCounter("acl_pending_output_packets", packets, baseLabels...),
+					commonpb.NewMetricCounter("acl_pending_output_bytes", bytes, baseLabels...),
 				)
 			}
 		}
