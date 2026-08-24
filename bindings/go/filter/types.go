@@ -1,9 +1,7 @@
 package filter
 
 import (
-	"encoding/binary"
-	"net"
-	"net/netip"
+	"github.com/yanet-platform/xnetip"
 )
 
 type Device struct {
@@ -12,68 +10,11 @@ type Device struct {
 
 type Devices []Device
 
-type IPNet struct {
-	Addr netip.Addr
-	Mask netip.Addr
-}
-
 // UnspecifiedIPv4 is the IPv4 wildcard network (0.0.0.0/0).
-var UnspecifiedIPv4 = IPNet{
-	Addr: netip.IPv4Unspecified(),
-	Mask: netip.IPv4Unspecified(),
-}
+var UnspecifiedIPv4 = xnetip.MustParseContiguous4("0.0.0.0/0")
 
 // UnspecifiedIPv6 is the IPv6 wildcard network (::/0).
-var UnspecifiedIPv6 = IPNet{
-	Addr: netip.IPv6Unspecified(),
-	Mask: netip.IPv6Unspecified(),
-}
-
-// MustParseIPNet parses a CIDR prefix string into an IPNet.
-//
-// The IPv4/IPv6 family is inferred from the parsed address. Panics on
-// malformed input — intended for static test data and other contexts
-// where a parse failure is a programmer error.
-func MustParseIPNet(s string) IPNet {
-	p := netip.MustParsePrefix(s)
-	if p.Addr().Is4() {
-		return IPNet{
-			Addr: p.Addr(),
-			Mask: makePrefix4(p.Bits()),
-		}
-	}
-
-	return IPNet{
-		Addr: p.Addr(),
-		Mask: makePrefix6(p.Bits()),
-	}
-}
-
-// MaskIsValid reports whether the mask is a contiguous prefix mask.
-//
-// For IPv4 the whole 32-bit mask must be a single contiguous prefix. For
-// IPv6 the mask must be bi-contiguous: each 64-bit half is independently a
-// contiguous prefix, so a hole exactly at the /64 boundary is allowed while
-// a hole within a half is not.
-func (m IPNet) MaskIsValid() bool {
-	if m.Mask.Is4() {
-		bytes := m.Mask.As4()
-		return maskIsPrefix(binary.BigEndian.Uint32(bytes[:]))
-	}
-
-	bytes := m.Mask.As16()
-	return maskIsPrefix(binary.BigEndian.Uint64(bytes[:8])) &&
-		maskIsPrefix(binary.BigEndian.Uint64(bytes[8:]))
-}
-
-// maskIsPrefix reports whether mask is a contiguous run of 1-bits from the
-// most significant bit, with no gaps.
-func maskIsPrefix[T ~uint32 | ~uint64](mask T) bool {
-	inv := ^mask
-	return inv&(inv+1) == 0
-}
-
-type IPNets []IPNet
+var UnspecifiedIPv6 = xnetip.MustParseBiContiguous("::/0")
 
 type PortRange struct {
 	From uint16
@@ -95,54 +36,6 @@ type VlanRange struct {
 }
 
 type VlanRanges []VlanRange
-
-// Net4sFromPrefixes converts standard library prefixes to IPNets,
-// keeping only IPv4 entries.
-func Net4sFromPrefixes(prefixes []netip.Prefix) (IPNets, error) {
-	out := make([]IPNet, 0, len(prefixes))
-
-	for _, prefix := range prefixes {
-		if !prefix.Addr().Is4() {
-			continue
-		}
-
-		out = append(out, IPNet{
-			Addr: prefix.Addr(),
-			Mask: makePrefix4(prefix.Bits()),
-		})
-	}
-
-	return out, nil
-}
-
-// Net6sFromPrefixes converts standard library prefixes to IPNets,
-// keeping only IPv6 entries.
-func Net6sFromPrefixes(prefixes []netip.Prefix) (IPNets, error) {
-	out := make([]IPNet, 0, len(prefixes))
-
-	for _, prefix := range prefixes {
-		if !prefix.Addr().Is6() {
-			continue
-		}
-
-		out = append(out, IPNet{
-			Addr: prefix.Addr(),
-			Mask: makePrefix6(prefix.Bits()),
-		})
-	}
-
-	return out, nil
-}
-
-func makePrefix4(bits int) netip.Addr {
-	mask := net.CIDRMask(bits, 32)
-	return netip.AddrFrom4([4]byte(mask))
-}
-
-func makePrefix6(bits int) netip.Addr {
-	mask := net.CIDRMask(bits, 128)
-	return netip.AddrFrom16([16]byte(mask))
-}
 
 // Subtype is a closed range of protocol subtype bytes used by NewProtoRange.
 type Subtype struct {

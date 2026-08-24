@@ -10,6 +10,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
@@ -93,15 +94,15 @@ func catchAllForwardRules(device string) []cforward.ForwardRule {
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 		{
 			Target:  device,
@@ -254,7 +255,7 @@ func TestMirror_NoMatch(t *testing.T) {
 		Target:  "port0",
 		Mode:    cmirror.ModeNone,
 		Counter: "unmatchable",
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 		// Src4s deliberately absent — makes the rule invisible to all filters.
 	}
 
@@ -285,8 +286,8 @@ func TestMirror_ModeNone_IPv4(t *testing.T) {
 		Target:  "port0",
 		Mode:    cmirror.ModeNone,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
@@ -324,8 +325,8 @@ func TestMirror_ModeOut_IPv4(t *testing.T) {
 		Target:  "port1",
 		Mode:    cmirror.ModeOut,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0", "port1"})
@@ -365,8 +366,8 @@ func TestMirror_ModeIn_IPv4(t *testing.T) {
 		Target:  "port1",
 		Mode:    cmirror.ModeIn,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0", "port1"})
@@ -413,8 +414,8 @@ func TestMirror_UnmappedDevice(t *testing.T) {
 		Target:  "phantom",
 		Mode:    cmirror.ModeOut,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
@@ -459,8 +460,8 @@ func TestMirror_IPv6_ModeOut(t *testing.T) {
 		Target:  "port1",
 		Mode:    cmirror.ModeOut,
 		Counter: "rule0",
-		Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-		Dst6s:   filter.IPNets{filter.MustParseIPNet("2001:db8::/32")},
+		Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:   []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/32")},
 	}
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0", "port1"})
@@ -574,8 +575,8 @@ func TestMirror_MinAction(t *testing.T) {
 			Target:  "port0",
 			Mode:    cmirror.ModeNone,
 			Counter: "ip4lose",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 		},
 	}
 
@@ -613,8 +614,8 @@ func TestMirror_EmptyRound(t *testing.T) {
 		Target:  "port0",
 		Mode:    cmirror.ModeNone,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupMirrorHarness(t, []string{"port0"})

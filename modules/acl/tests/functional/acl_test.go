@@ -2,7 +2,6 @@ package acl_test
 
 import (
 	"net"
-	"net/netip"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -13,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -226,14 +226,14 @@ func requireModuleCounterPackets(
 
 // allow4Rule builds an IPv4 ALLOW rule for the given source and destination host
 // addresses and protocol range.
-func allow4Rule(src4, dst4 filter.IPNets, protos filter.ProtoRanges) cacl.AclRule {
+func allow4Rule(src4, dst4 []xnetip.Contiguous[xnetip.Network4], protos filter.ProtoRanges) cacl.AclRule {
 	return cacl.AclRule{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
 		Src4s:         src4,
 		Dst4s:         dst4,
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   protos,
@@ -243,7 +243,7 @@ func allow4Rule(src4, dst4 filter.IPNets, protos filter.ProtoRanges) cacl.AclRul
 
 // deny4Rule builds an IPv4 DENY rule for the given source and destination host
 // addresses and protocol range.
-func deny4Rule(src4, dst4 filter.IPNets, protos filter.ProtoRanges) cacl.AclRule {
+func deny4Rule(src4, dst4 []xnetip.Contiguous[xnetip.Network4], protos filter.ProtoRanges) cacl.AclRule {
 	r := allow4Rule(src4, dst4, protos)
 	r.Actions = []cacl.AclAction{{Kind: cacl.ActionDeny}}
 	return r
@@ -251,12 +251,12 @@ func deny4Rule(src4, dst4 filter.IPNets, protos filter.ProtoRanges) cacl.AclRule
 
 // allow6Rule builds an IPv6 ALLOW rule for the given source and destination
 // prefixes and protocol range.
-func allow6Rule(src6, dst6 filter.IPNets, protos filter.ProtoRanges) cacl.AclRule {
+func allow6Rule(src6, dst6 []xnetip.BiContiguous, protos filter.ProtoRanges) cacl.AclRule {
 	return cacl.AclRule{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{},
-		Dst4s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{},
 		Src6s:         src6,
 		Dst6s:         dst6,
 		SrcPortRanges: allPorts,
@@ -286,8 +286,8 @@ func TestACL_NoMatch_Drop(t *testing.T) {
 	// Rule matches a different source address, so the test packet misses it.
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{{Addr: netip.MustParseAddr("10.10.10.10"), Mask: netip.MustParseAddr("255.255.255.255")}},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.10.10.10/255.255.255.255")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			icmp4Proto,
 		),
 	}
@@ -328,10 +328,10 @@ func TestACL_TCP_SYNFlag(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges: filter.ProtoRanges{
@@ -397,8 +397,8 @@ func TestACL_Allow_UDP_IPv4(t *testing.T) {
 
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -436,8 +436,8 @@ func TestACL_Deny_UDP_IPv4(t *testing.T) {
 
 	rules := []cacl.AclRule{
 		deny4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -474,10 +474,10 @@ func TestACL_PortRange_UDP(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: filter.PortRanges{{From: 150, To: 450}},
 		ProtoRanges:   udpProto,
@@ -534,10 +534,10 @@ func TestACL_PortRange_BatchResultsAdvance(t *testing.T) {
 		rules := []cacl.AclRule{{
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 			Devices:       filter.Devices{{Name: "port0"}},
-			Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Src6s:         filter.IPNets{},
-			Dst6s:         filter.IPNets{},
+			Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Src6s:         []xnetip.BiContiguous{},
+			Dst6s:         []xnetip.BiContiguous{},
 			SrcPortRanges: allPorts,
 			DstPortRanges: filter.PortRanges{{From: 150, To: 450}},
 			ProtoRanges:   udpProto,
@@ -578,10 +578,10 @@ func TestACL_PortRange_BatchResultsAdvance(t *testing.T) {
 		rules := []cacl.AclRule{{
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 			Devices:       filter.Devices{{Name: "port0"}},
-			Src4s:         filter.IPNets{},
-			Dst4s:         filter.IPNets{},
-			Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			Src4s:         []xnetip.Contiguous[xnetip.Network4]{},
+			Dst4s:         []xnetip.Contiguous[xnetip.Network4]{},
+			Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
 			DstPortRanges: filter.PortRanges{{From: 150, To: 450}},
 			ProtoRanges:   tcpProto,
@@ -628,8 +628,8 @@ func TestACL_Subnet_IPv4(t *testing.T) {
 
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.MustParseIPNet("192.0.2.0/24")},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/24")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -666,10 +666,10 @@ func TestACL_TCP_IPv4(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   tcpProto,
@@ -710,8 +710,8 @@ func TestACL_ICMP_IPv4(t *testing.T) {
 	// ICMP has no port concept, so the rule uses the ip4 filter, not ip4_port.
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			icmp4Proto,
 		),
 	}
@@ -750,10 +750,10 @@ func TestACL_IPv6_TCP(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{},
-		Dst4s:         filter.IPNets{},
-		Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
-		Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   tcpProto,
@@ -794,8 +794,8 @@ func TestACL_IPv6_ICMP(t *testing.T) {
 
 	rules := []cacl.AclRule{
 		allow6Rule(
-			filter.IPNets{filter.UnspecifiedIPv6},
-			filter.IPNets{filter.UnspecifiedIPv6},
+			[]xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			[]xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			icmp6Proto,
 		),
 	}
@@ -829,27 +829,21 @@ func TestACL_IPv6_ICMP(t *testing.T) {
 func TestACL_Overlapping_RulePriority(t *testing.T) {
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{{
-				Addr: netip.MustParseAddr("192.0.2.0"),
-				Mask: netip.MustParseAddr("255.255.255.254"),
-			}},
-			filter.IPNets{filter.UnspecifiedIPv4}, udpProto,
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.254")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, udpProto,
 		),
 		deny4Rule(
-			filter.IPNets{{
-				Addr: netip.MustParseAddr("192.0.2.0"),
-				Mask: netip.MustParseAddr("255.255.255.240"),
-			}},
-			filter.IPNets{filter.UnspecifiedIPv4}, udpProto,
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.240")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, udpProto,
 		),
 		allow4Rule(
-			filter.IPNets{filter.MustParseIPNet("192.0.2.0/24")},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/24")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 		deny4Rule(
-			filter.IPNets{filter.MustParseIPNet("192.0.0.0/16")},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.0.0/16")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -965,8 +959,8 @@ func TestACL_NonIP_Drop(t *testing.T) {
 	// the ARP packet, so the vlan filter returns FILTER_RULE_INVALID.
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -1010,10 +1004,10 @@ func TestACL_Counters(t *testing.T) {
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 			Counter:       "acl_http",
 			Devices:       filter.Devices{{Name: "port0"}},
-			Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Src6s:         filter.IPNets{},
-			Dst6s:         filter.IPNets{},
+			Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Src6s:         []xnetip.BiContiguous{},
+			Dst6s:         []xnetip.BiContiguous{},
 			SrcPortRanges: allPorts,
 			DstPortRanges: allPorts,
 			ProtoRanges:   udpProto,
@@ -1058,10 +1052,10 @@ func TestACL_Counters(t *testing.T) {
 				Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 				Counter:       "http",
 				Devices:       filter.Devices{{Name: "port0"}},
-				Src4s:         filter.IPNets{{Addr: netip.MustParseAddr("10.0.0.1"), Mask: netip.MustParseAddr("255.255.255.255")}},
-				Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-				Src6s:         filter.IPNets{},
-				Dst6s:         filter.IPNets{},
+				Src4s:         []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.1/255.255.255.255")},
+				Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Src6s:         []xnetip.BiContiguous{},
+				Dst6s:         []xnetip.BiContiguous{},
 				SrcPortRanges: allPorts,
 				DstPortRanges: allPorts,
 				ProtoRanges:   udpProto,
@@ -1070,10 +1064,10 @@ func TestACL_Counters(t *testing.T) {
 				Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 				Counter:       "dns",
 				Devices:       filter.Devices{{Name: "port0"}},
-				Src4s:         filter.IPNets{{Addr: netip.MustParseAddr("10.0.0.2"), Mask: netip.MustParseAddr("255.255.255.255")}},
-				Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-				Src6s:         filter.IPNets{},
-				Dst6s:         filter.IPNets{},
+				Src4s:         []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.2/255.255.255.255")},
+				Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Src6s:         []xnetip.BiContiguous{},
+				Dst6s:         []xnetip.BiContiguous{},
 				SrcPortRanges: allPorts,
 				DstPortRanges: allPorts,
 				ProtoRanges:   udpProto,
@@ -1231,10 +1225,10 @@ func TestACL_Counters(t *testing.T) {
 			Actions: []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
 			// Counter intentionally left empty — C layer synthesises "rule 0".
 			Devices:       filter.Devices{{Name: "port0"}},
-			Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Src6s:         filter.IPNets{},
-			Dst6s:         filter.IPNets{},
+			Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Src6s:         []xnetip.BiContiguous{},
+			Dst6s:         []xnetip.BiContiguous{},
 			SrcPortRanges: allPorts,
 			DstPortRanges: allPorts,
 			ProtoRanges:   udpProto,
@@ -1280,10 +1274,10 @@ func TestACL_Counters(t *testing.T) {
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 			Counter:       "unused",
 			Devices:       filter.Devices{{Name: "port0"}},
-			Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-			Src6s:         filter.IPNets{},
-			Dst6s:         filter.IPNets{},
+			Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Src6s:         []xnetip.BiContiguous{},
+			Dst6s:         []xnetip.BiContiguous{},
 			SrcPortRanges: allPorts,
 			DstPortRanges: allPorts,
 			ProtoRanges:   udpProto,
@@ -1325,13 +1319,13 @@ func TestACL_Counters(t *testing.T) {
 		// Two rules: first allows packets from 10.0.0.1, second denies from 10.0.0.2.
 		rules := []cacl.AclRule{
 			allow4Rule(
-				filter.IPNets{{Addr: netip.MustParseAddr("10.0.0.1"), Mask: netip.MustParseAddr("255.255.255.255")}},
-				filter.IPNets{filter.UnspecifiedIPv4},
+				[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.1/255.255.255.255")},
+				[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 				udpProto,
 			),
 			deny4Rule(
-				filter.IPNets{{Addr: netip.MustParseAddr("10.0.0.2"), Mask: netip.MustParseAddr("255.255.255.255")}},
-				filter.IPNets{filter.UnspecifiedIPv4},
+				[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.2/255.255.255.255")},
+				[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 				udpProto,
 			),
 		}
@@ -1412,10 +1406,10 @@ func TestACL_Log_AllowPasses(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionLog}, {Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   udpProto,
@@ -1461,10 +1455,10 @@ func TestACL_NoTerminatingAction_Drop(t *testing.T) {
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}},
 		Counter:       "acl_count_only",
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   udpProto,
@@ -1512,10 +1506,10 @@ func TestACL_VLAN_Match(t *testing.T) {
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
 		VlanRanges:    filter.VlanRanges{{From: 100, To: 200}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   udpProto,
@@ -1567,10 +1561,10 @@ func TestACL_IPv4Fragment_FirstFragment(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: filter.PortRanges{{From: 80, To: 80}},
 		ProtoRanges:   udpProto,
@@ -1620,10 +1614,10 @@ func TestACL_IPv4Fragment_LaterFragment_PortRule(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: filter.PortRanges{{From: 80, To: 80}},
 		ProtoRanges:   udpProto,
@@ -1672,8 +1666,8 @@ func TestACL_IPv4Fragment_LaterFragment_NoPortRule(t *testing.T) {
 	// allowed regardless of what the "port" bytes contain.
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -1727,10 +1721,10 @@ func TestACL_IPv6Fragment_FirstFragment(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{},
-		Dst4s:         filter.IPNets{},
-		Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
-		Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		SrcPortRanges: allPorts,
 		DstPortRanges: filter.PortRanges{{From: 443, To: 443}},
 		ProtoRanges:   tcpProto,
@@ -1791,10 +1785,10 @@ func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 	rules := []cacl.AclRule{{
 		Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{},
-		Dst4s:         filter.IPNets{},
-		Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
-		Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{},
+		Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		SrcPortRanges: allPorts,
 		DstPortRanges: filter.PortRanges{{From: 443, To: 443}},
 		ProtoRanges:   tcpProto,
@@ -1809,47 +1803,4 @@ func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 	assert.Empty(t, result.Output, "non-first fragment must NOT match port-based rule")
 	require.Len(t, result.Drop, 1, "non-first fragment must be dropped")
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
-}
-
-// TestACL_RejectsNonContiguousIPv4Mask verifies that an IPv4 rule whose mask
-// is not a contiguous prefix (a hole between set bits) is rejected at config
-// update time instead of being silently mis-classified.
-func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
-	_, _, backend := setupACLHarness(t, []string{"port0"})
-
-	badMask := netip.AddrFrom4([4]byte{0xff, 0x00, 0xff, 0x00})
-	rules := []cacl.AclRule{
-		allow4Rule(
-			filter.IPNets{{Addr: netip.MustParseAddr("192.0.2.0"), Mask: badMask}},
-			filter.IPNets{filter.UnspecifiedIPv4},
-			udpProto,
-		),
-	}
-
-	_, err := backend.NewModule("reject4", rules, "", "", nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "non-contiguous")
-}
-
-// TestACL_RejectsNonBiContiguousIPv6Mask verifies that an IPv6 rule whose
-// mask has a hole within the high 64-bit half is rejected at config update
-// time instead of being silently mis-classified.
-func TestACL_RejectsNonBiContiguousIPv6Mask(t *testing.T) {
-	_, _, backend := setupACLHarness(t, []string{"port0"})
-
-	badMask := netip.AddrFrom16([16]byte{
-		0xff, 0x00, 0xff, 0x00, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0,
-	})
-	rules := []cacl.AclRule{
-		allow6Rule(
-			filter.IPNets{{Addr: netip.MustParseAddr("2001:db8::"), Mask: badMask}},
-			filter.IPNets{filter.UnspecifiedIPv6},
-			udpProto,
-		),
-	}
-
-	_, err := backend.NewModule("reject6", rules, "", "", nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bi-contiguous")
 }

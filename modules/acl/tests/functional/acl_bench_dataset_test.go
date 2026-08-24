@@ -44,8 +44,10 @@ import (
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
@@ -102,31 +104,24 @@ func datasetActionKind(t testing.TB, kind string) uint32 {
 	}
 }
 
-// parseDatasetNet accepts CIDR ("net/bits"), the addr/mask-address form
-// used by non-contiguous production masks, and bare addresses.
-func parseDatasetNet(t testing.TB, s string) filter.IPNet {
-	if before, after, ok := strings.Cut(s, "/"); ok {
-		if mask, err := netip.ParseAddr(after); err == nil {
-			addr, err := netip.ParseAddr(before)
-			require.NoError(t, err)
-			return filter.IPNet{Addr: addr, Mask: mask}
-		}
-		return filter.MustParseIPNet(s)
-	}
-	addr, err := netip.ParseAddr(s)
+// datasetNet4 parses a dataset IPv4 network in CIDR, addr/mask, or bare
+// address form.
+func datasetNet4(t testing.TB, s string) xnetip.Contiguous[xnetip.Network4] {
+	network, err := xnetip.ParseNetwork4(s)
 	require.NoError(t, err)
-	if addr.Is4() {
-		return filter.IPNet{
-			Addr: addr,
-			Mask: netip.MustParseAddr("255.255.255.255"),
-		}
-	}
-	return filter.IPNet{
-		Addr: addr,
-		Mask: netip.MustParseAddr(
-			"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
-		),
-	}
+	typed, ok := xnetip.ContiguousFrom(network)
+	require.True(t, ok, "dataset IPv4 masks must be contiguous: %s", s)
+	return typed
+}
+
+// datasetNet6 parses a dataset IPv6 network in CIDR, addr/mask, or bare
+// address form.
+func datasetNet6(t testing.TB, s string) xnetip.BiContiguous {
+	network, err := xnetip.ParseNetwork6(s)
+	require.NoError(t, err)
+	typed, ok := xnetip.BiContiguousFrom6(network)
+	require.True(t, ok, "dataset IPv6 masks must be bi-contiguous: %s", s)
+	return typed
 }
 
 func convertDatasetRule(t testing.TB, raw datasetRule) cacl.AclRule {
@@ -152,19 +147,17 @@ func convertDatasetRule(t testing.TB, raw datasetRule) cacl.AclRule {
 		)
 	}
 	for _, address := range raw.Srcs {
-		network := parseDatasetNet(t, address)
-		if network.Addr.Is4() {
-			rule.Src4s = append(rule.Src4s, network)
+		if strings.Contains(address, ":") {
+			rule.Src6s = append(rule.Src6s, datasetNet6(t, address))
 		} else {
-			rule.Src6s = append(rule.Src6s, network)
+			rule.Src4s = append(rule.Src4s, datasetNet4(t, address))
 		}
 	}
 	for _, address := range raw.Dsts {
-		network := parseDatasetNet(t, address)
-		if network.Addr.Is4() {
-			rule.Dst4s = append(rule.Dst4s, network)
+		if strings.Contains(address, ":") {
+			rule.Dst6s = append(rule.Dst6s, datasetNet6(t, address))
 		} else {
-			rule.Dst6s = append(rule.Dst6s, network)
+			rule.Dst4s = append(rule.Dst4s, datasetNet4(t, address))
 		}
 	}
 	for _, protoRange := range raw.ProtoRanges {
@@ -213,7 +206,7 @@ var (
 
 // randomNet6 derives a nested IPv6 network: a subnet of a random
 // supernet with a shape-weighted prefix length.
-func randomNet6(r *rand.Rand, supernets []netip.Addr) filter.IPNet {
+func randomNet6(r *rand.Rand, supernets []netip.Addr) xnetip.BiContiguous {
 	base := supernets[r.Intn(len(supernets))].As16()
 	bits := 48
 	switch pick := r.Intn(100); {
@@ -232,39 +225,14 @@ func randomNet6(r *rand.Rand, supernets []netip.Addr) filter.IPNet {
 	for idx := 4; idx < (bits+7)/8; idx++ {
 		addr[idx] = byte(r.Intn(256))
 	}
-	mask := [16]byte{}
-	for idx := 0; idx < bits/8; idx++ {
-		mask[idx] = 0xff
-	}
-	if bits%8 != 0 {
-		mask[bits/8] = byte(0xff << (8 - bits%8))
-	}
-	for idx := range addr {
-		addr[idx] &= mask[idx]
-	}
-	return filter.IPNet{
-		Addr: netip.AddrFrom16(addr),
-		Mask: netip.AddrFrom16(mask),
-	}
+	net := xerror.Unwrap(xnetip.ContiguousFromCIDR6(netip.AddrFrom16(addr), bits))
+	return xnetip.BiContiguousFromContiguous(net)
 }
 
-func randomNet4(r *rand.Rand) filter.IPNet {
+func randomNet4(r *rand.Rand) xnetip.Contiguous[xnetip.Network4] {
 	bits := 16 + r.Intn(17)
 	addr := [4]byte{10, byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256))}
-	mask := [4]byte{}
-	for idx := 0; idx < bits/8; idx++ {
-		mask[idx] = 0xff
-	}
-	if bits%8 != 0 {
-		mask[bits/8] = byte(0xff << (8 - bits%8))
-	}
-	for idx := range addr {
-		addr[idx] &= mask[idx]
-	}
-	return filter.IPNet{
-		Addr: netip.AddrFrom4(addr),
-		Mask: netip.AddrFrom4(mask),
-	}
+	return xerror.Unwrap(xnetip.ContiguousFromCIDR4(netip.AddrFrom4(addr), bits))
 }
 
 // generateDatasetRules synthesizes a deterministic ruleset whose shape
@@ -281,11 +249,11 @@ func generateDatasetRules(count int) []cacl.AclRule {
 		supernets[idx] = netip.AddrFrom16(a)
 	}
 
-	srcPool := make([]filter.IPNet, count*35/100+1)
+	srcPool := make([]xnetip.BiContiguous, count*35/100+1)
 	for idx := range srcPool {
 		srcPool[idx] = randomNet6(r, supernets)
 	}
-	dstPool := make([]filter.IPNet, count*6/100+1)
+	dstPool := make([]xnetip.BiContiguous, count*6/100+1)
 	for idx := range dstPool {
 		dstPool[idx] = randomNet6(r, supernets)
 	}
@@ -338,17 +306,17 @@ func generateDatasetRules(count int) []cacl.AclRule {
 
 		switch pick := r.Intn(1000); {
 		case pick < 2:
-			rule.Src4s = []filter.IPNet{randomNet4(r)}
-			rule.Dst4s = []filter.IPNet{randomNet4(r)}
+			rule.Src4s = []xnetip.Contiguous[xnetip.Network4]{randomNet4(r)}
+			rule.Dst4s = []xnetip.Contiguous[xnetip.Network4]{randomNet4(r)}
 		case pick < 30:
-			rule.Src4s = []filter.IPNet{randomNet4(r)}
-			rule.Dst4s = []filter.IPNet{randomNet4(r)}
+			rule.Src4s = []xnetip.Contiguous[xnetip.Network4]{randomNet4(r)}
+			rule.Dst4s = []xnetip.Contiguous[xnetip.Network4]{randomNet4(r)}
 			rule.DstPortRanges = dstPorts()
 		case pick < 130:
-			rule.Src6s = []filter.IPNet{
+			rule.Src6s = []xnetip.BiContiguous{
 				srcPool[r.Intn(len(srcPool))],
 			}
-			rule.Dst6s = []filter.IPNet{
+			rule.Dst6s = []xnetip.BiContiguous{
 				dstPool[r.Intn(len(dstPool))],
 			}
 		default:
@@ -358,7 +326,7 @@ func generateDatasetRules(count int) []cacl.AclRule {
 					srcPool[r.Intn(len(srcPool))],
 				)
 			}
-			rule.Dst6s = []filter.IPNet{
+			rule.Dst6s = []xnetip.BiContiguous{
 				dstPool[r.Intn(len(dstPool))],
 			}
 			rule.DstPortRanges = dstPorts()
@@ -372,10 +340,10 @@ func generateDatasetRules(count int) []cacl.AclRule {
 			{Kind: uint32(cacl.ActionCount)},
 			{Kind: uint32(cacl.ActionDeny)},
 		},
-		Src4s: []filter.IPNet{filter.UnspecifiedIPv4},
-		Dst4s: []filter.IPNet{filter.UnspecifiedIPv4},
-		Src6s: []filter.IPNet{filter.UnspecifiedIPv6},
-		Dst6s: []filter.IPNet{filter.UnspecifiedIPv6},
+		Src4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 	})
 	return rules
 }
@@ -456,10 +424,27 @@ func setProtocol(network gopacket.NetworkLayer, proto layers.IPProtocol) {
 	}
 }
 
+// flowNet is an address and mask pair a flow seed samples host bits
+// from, family-neutral on purpose: a seed only reads raw bytes.
+type flowNet struct {
+	addr netip.Addr
+	mask netip.Addr
+}
+
+// flowNetFrom4 extracts the address and mask bytes of an IPv4 network.
+func flowNetFrom4(network xnetip.Contiguous[xnetip.Network4]) flowNet {
+	return flowNet{addr: network.Network().Addr(), mask: network.Network().Mask()}
+}
+
+// flowNetFrom6 extracts the address and mask bytes of an IPv6 network.
+func flowNetFrom6(network xnetip.BiContiguous) flowNet {
+	return flowNet{addr: network.Network().Addr(), mask: network.Network().Mask()}
+}
+
 // hostInNet4 is the IPv4 counterpart of hostInNet.
-func hostInNet4(network filter.IPNet, hostBits int) net.IP {
-	addr := network.Addr.As4()
-	mask := network.Mask.As4()
+func hostInNet4(network flowNet, hostBits int) net.IP {
+	addr := network.addr.As4()
+	mask := network.mask.As4()
 	pattern := [4]byte{
 		0, byte(hostBits >> 16), byte(hostBits >> 8), byte(hostBits),
 	}
@@ -472,9 +457,9 @@ func hostInNet4(network filter.IPNet, hostBits int) net.IP {
 
 // hostInNet places index-derived host bits into the free (mask-zero)
 // bits of a rule network, producing an address inside the rule's prefix.
-func hostInNet(network filter.IPNet, hostBits int) net.IP {
-	addr := network.Addr.As16()
-	mask := network.Mask.As16()
+func hostInNet(network flowNet, hostBits int) net.IP {
+	addr := network.addr.As16()
+	mask := network.mask.As16()
 	pattern := [16]byte{}
 	pattern[12] = byte(hostBits >> 24)
 	pattern[13] = byte(hostBits >> 16)
@@ -497,8 +482,8 @@ func synthesizeDatasetPackets(
 	tb testing.TB, rules []cacl.AclRule, limit int,
 ) []gopacket.Packet {
 	type flowSeed struct {
-		src filter.IPNet
-		dst filter.IPNet
+		src flowNet
+		dst flowNet
 		// Destination port and protocol picked from the rule when
 		// constrained, so rule-specific table regions are exercised.
 		dstPort uint16
@@ -510,11 +495,11 @@ func synthesizeDatasetPackets(
 		seed := flowSeed{dstPort: 443}
 		switch {
 		case len(rule.Src6s) > 0 && len(rule.Dst6s) > 0:
-			seed.src = rule.Src6s[0]
-			seed.dst = rule.Dst6s[0]
+			seed.src = flowNetFrom6(rule.Src6s[0])
+			seed.dst = flowNetFrom6(rule.Dst6s[0])
 		case len(rule.Src4s) > 0 && len(rule.Dst4s) > 0:
-			seed.src = rule.Src4s[0]
-			seed.dst = rule.Dst4s[0]
+			seed.src = flowNetFrom4(rule.Src4s[0])
+			seed.dst = flowNetFrom4(rule.Dst4s[0])
 			seed.ipv4 = true
 		default:
 			continue

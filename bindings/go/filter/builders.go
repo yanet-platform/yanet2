@@ -3,6 +3,8 @@ package filter
 import (
 	"runtime"
 	"unsafe"
+
+	"github.com/yanet-platform/xnetip"
 )
 
 // CBuildDevices writes the C representation of Devices into dst.
@@ -11,13 +13,13 @@ func CBuildDevices[T any](dst *T, m Devices, pinner *runtime.Pinner) {
 }
 
 // CBuildNet4s writes the C representation of IPv4 IPNets into dst.
-func CBuildNet4s[T any](dst *T, m IPNets, pinner *runtime.Pinner) {
-	*dst = *(*T)(unsafe.Pointer(m.cBuildNet4s(pinner)))
+func CBuildNet4s[T any](dst *T, m []xnetip.Contiguous[xnetip.Network4], pinner *runtime.Pinner) {
+	*dst = *(*T)(unsafe.Pointer(cBuildNet4s(m, pinner)))
 }
 
 // CBuildNet6s writes the C representation of IPv6 IPNets into dst.
-func CBuildNet6s[T any](dst *T, m IPNets, pinner *runtime.Pinner) {
-	*dst = *(*T)(unsafe.Pointer(m.cBuildNet6s(pinner)))
+func CBuildNet6s[T any](dst *T, m []xnetip.BiContiguous, pinner *runtime.Pinner) {
+	*dst = *(*T)(unsafe.Pointer(cBuildNet6s(m, pinner)))
 }
 
 // CBuildPortRanges writes the C representation of PortRanges into dst.

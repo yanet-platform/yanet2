@@ -4,6 +4,7 @@ package cmirror
 import "C"
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"runtime"
 	"unsafe"
 
@@ -32,15 +33,24 @@ func (m MirrorMode) toC() C.uint8_t {
 
 // MirrorRule describes a single mirroring rule in Go types.
 type MirrorRule struct {
-	Target     string
-	Mode       MirrorMode
-	Counter    string
-	Devices    filter.Devices
+	// Target is the mirroring target device name.
+	Target string
+	// Mode selects how matched packets are handled.
+	Mode MirrorMode
+	// Counter is the counter name for traffic accounting.
+	Counter string
+	// Devices is the device match set.
+	Devices filter.Devices
+	// VlanRanges is the VLAN range match set.
 	VlanRanges filter.VlanRanges
-	Src4s      filter.IPNets
-	Dst4s      filter.IPNets
-	Src6s      filter.IPNets
-	Dst6s      filter.IPNets
+	// Src4s is the contiguous IPv4 source match set.
+	Src4s []xnetip.Contiguous[xnetip.Network4]
+	// Dst4s is the contiguous IPv4 destination match set.
+	Dst4s []xnetip.Contiguous[xnetip.Network4]
+	// Src6s is the bi-contiguous IPv6 source match set.
+	Src6s []xnetip.BiContiguous
+	// Dst6s is the bi-contiguous IPv6 destination match set.
+	Dst6s []xnetip.BiContiguous
 }
 
 // Update compiles the given rules into C structures and pushes them into

@@ -11,6 +11,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
@@ -29,11 +30,8 @@ var benchBatchSizes = []int{1, 2, 4, 8, 16, 32}
 func BenchmarkACLAllow(b *testing.B) {
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{{
-				Addr: netip.MustParseAddr("192.0.2.0"),
-				Mask: netip.MustParseAddr("255.255.255.0"),
-			}},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -78,11 +76,8 @@ func BenchmarkACLAllow(b *testing.B) {
 func BenchmarkACLDeny(b *testing.B) {
 	rules := []cacl.AclRule{
 		deny4Rule(
-			filter.IPNets{{
-				Addr: netip.MustParseAddr("192.0.2.0"),
-				Mask: netip.MustParseAddr("255.255.255.0"),
-			}},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0")},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}
@@ -221,10 +216,11 @@ func BenchmarkACLAllowRuleScale(b *testing.B) {
 				hostIP := benchHostIP(idx)
 				addr, ok := netip.AddrFromSlice(hostIP.To4())
 				require.True(b, ok, "benchHostIP must produce a valid IPv4 address")
-				mask := netip.MustParseAddr("255.255.255.255")
+				net, err := xnetip.ContiguousFromCIDR4(addr, 32)
+				require.NoError(b, err)
 				rules[idx] = allow4Rule(
-					filter.IPNets{{Addr: addr, Mask: mask}},
-					filter.IPNets{filter.UnspecifiedIPv4},
+					[]xnetip.Contiguous[xnetip.Network4]{net},
+					[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 					udpProto,
 				)
 			}
@@ -254,8 +250,8 @@ func BenchmarkACLAllowRuleScale(b *testing.B) {
 func BenchmarkACLAllowDiverseFlow(b *testing.B) {
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}

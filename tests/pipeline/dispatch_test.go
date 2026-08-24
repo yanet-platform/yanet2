@@ -28,6 +28,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
@@ -113,10 +114,10 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 	rule := cacl.AclRule{
 		Actions:       []cacl.AclAction{{Kind: action}},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: filter.PortRanges{{From: 0, To: 65535}},
 		DstPortRanges: filter.PortRanges{{From: 0, To: 65535}},
 		ProtoRanges: filter.ProtoRanges{
@@ -332,8 +333,8 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 		Target:  "port0",
 		Mode:    cforward.ModeOut,
 		Counter: forwardName,
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/8")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/8")},
 	}
 	handle, err := forwardBackend.UpdateModule(
 		forwardName, []cforward.ForwardRule{rule},

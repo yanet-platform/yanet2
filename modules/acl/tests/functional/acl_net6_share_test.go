@@ -20,7 +20,6 @@ package acl_test
 import (
 	"fmt"
 	"net"
-	"net/netip"
 	"os"
 	"testing"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
@@ -66,11 +66,8 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 	// An address inside the nested network lands in a partition. The filter_ip6
 	// classifier never has to distinguish it, exactly the case a broken remap
 	// would smooth over.
-	divergeBroad := filter.MustParseIPNet("2001:db8:1::/48")
-	divergeNested := filter.IPNet{
-		Addr: netip.MustParseAddr("2001:db8:1:1::"),
-		Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff::"),
-	}
+	divergeBroad := xnetip.MustParseBiContiguous("2001:db8:1::/48")
+	divergeNested := xnetip.MustParseBiContiguous("2001:db8:1:1::/ffff:ffff:ffff:ffff::")
 
 	// The deepLoA and deepLoB networks are disjoint port-scoped ranges reaching
 	// 112 bits deep, 48 past the hi/lo split at byte 8. Their dst-lo union has
@@ -78,29 +75,20 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 	// Port scoping compiles them only into filter_ip6_port. filter_ip6 has no
 	// matching fallback, so a dst-lo remap failure for either network cannot be
 	// masked by the other filter's independent result.
-	deepLoA := filter.IPNet{
-		Addr: netip.MustParseAddr("2001:db8:9::1000:0"),
-		Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:0000"),
-	}
-	deepLoB := filter.IPNet{
-		Addr: netip.MustParseAddr("2001:db8:9::2000:0"),
-		Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:0000"),
-	}
+	deepLoA := xnetip.MustParseBiContiguous("2001:db8:9::1000:0/ffff:ffff:ffff:ffff:ffff:ffff:ffff:0000")
+	deepLoB := xnetip.MustParseBiContiguous("2001:db8:9::2000:0/ffff:ffff:ffff:ffff:ffff:ffff:ffff:0000")
 
 	// The nonContiguous rule has a mask that is bi-contiguous (5 hi bytes, then 3
 	// lo bytes) but not contiguous across the full 128 bits: exactly the
 	// shape the net6 compiler accepts and a union partition can obscure.
-	nonContiguous := filter.IPNet{
-		Addr: netip.MustParseAddr("bbbb:bbbb:bb00:0000:aaaa:aa00:0000:0000"),
-		Mask: netip.MustParseAddr("ffff:ffff:ff00:0000:ffff:ff00:0000:0000"),
-	}
+	nonContiguous := xnetip.MustParseBiContiguous("bbbb:bbbb:bb00:0000:aaaa:aa00:0000:0000/ffff:ffff:ff00:0000:ffff:ff00:0000:0000")
 
 	return []cacl.AclRule{
 		{
 			Counter:       "diverge_broad",
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
-			Src6s:         filter.IPNets{divergeBroad},
-			Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:         []xnetip.BiContiguous{divergeBroad},
+			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
 			DstPortRanges: allPorts,
 			ProtoRanges:   tcpProto,
@@ -108,8 +96,8 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		{
 			Counter:       "diverge_nested",
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionDeny}},
-			Src6s:         filter.IPNets{divergeNested},
-			Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:         []xnetip.BiContiguous{divergeNested},
+			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
 			DstPortRanges: filter.PortRanges{{From: 7000, To: 7000}},
 			ProtoRanges:   tcpProto,
@@ -117,8 +105,8 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		{
 			Counter:       "deep_lo_a",
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
-			Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:         filter.IPNets{deepLoA},
+			Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:         []xnetip.BiContiguous{deepLoA},
 			SrcPortRanges: allPorts,
 			DstPortRanges: filter.PortRanges{{From: 8000, To: 8000}},
 			ProtoRanges:   tcpProto,
@@ -126,8 +114,8 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		{
 			Counter:       "deep_lo_b",
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
-			Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:         filter.IPNets{deepLoB},
+			Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:         []xnetip.BiContiguous{deepLoB},
 			SrcPortRanges: allPorts,
 			DstPortRanges: filter.PortRanges{{From: 8001, To: 8001}},
 			ProtoRanges:   tcpProto,
@@ -135,8 +123,8 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		{
 			Counter:       "non_contig_broad",
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
-			Src6s:         filter.IPNets{nonContiguous},
-			Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:         []xnetip.BiContiguous{nonContiguous},
+			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
 			DstPortRanges: allPorts,
 			ProtoRanges:   udpProto,
@@ -144,8 +132,8 @@ func net6ShareEdgeCaseRules() []cacl.AclRule {
 		{
 			Counter:       "non_contig_port",
 			Actions:       []cacl.AclAction{{Kind: cacl.ActionCount}, {Kind: cacl.ActionAllow}},
-			Src6s:         filter.IPNets{nonContiguous},
-			Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:         []xnetip.BiContiguous{nonContiguous},
+			Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 			SrcPortRanges: allPorts,
 			DstPortRanges: filter.PortRanges{{From: 9000, To: 9000}},
 			ProtoRanges:   udpProto,

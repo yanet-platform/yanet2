@@ -1,6 +1,7 @@
 package decap_test
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"net"
 	"net/netip"
 	"slices"
@@ -61,15 +62,15 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 		{
 			Target:  "port0",

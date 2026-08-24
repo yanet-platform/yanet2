@@ -5,6 +5,7 @@ package cacl
 import "C"
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"runtime"
 	"unsafe"
 
@@ -34,18 +35,30 @@ type AclAction struct {
 
 // AclRule describes a single ACL rule composed of match criteria and actions.
 type AclRule struct {
-	Actions       []AclAction
-	Counter       string
-	Devices       filter.Devices
-	VlanRanges    filter.VlanRanges
-	Src4s         filter.IPNets
-	Dst4s         filter.IPNets
-	Src6s         filter.IPNets
-	Dst6s         filter.IPNets
-	ProtoRanges   filter.ProtoRanges
+	// Actions is the ordered action list, the last one terminal.
+	Actions []AclAction
+	// Counter is the counter name for traffic accounting.
+	Counter string
+	// Devices is the device match set.
+	Devices filter.Devices
+	// VlanRanges is the VLAN range match set.
+	VlanRanges filter.VlanRanges
+	// Src4s is the contiguous IPv4 source match set.
+	Src4s []xnetip.Contiguous[xnetip.Network4]
+	// Dst4s is the contiguous IPv4 destination match set.
+	Dst4s []xnetip.Contiguous[xnetip.Network4]
+	// Src6s is the bi-contiguous IPv6 source match set.
+	Src6s []xnetip.BiContiguous
+	// Dst6s is the bi-contiguous IPv6 destination match set.
+	Dst6s []xnetip.BiContiguous
+	// ProtoRanges is the protocol and subtype range match set.
+	ProtoRanges filter.ProtoRanges
+	// SrcPortRanges is the source port range match set.
 	SrcPortRanges filter.PortRanges
+	// DstPortRanges is the destination port range match set.
 	DstPortRanges filter.PortRanges
-	Fragment      filter.Fragment
+	// Fragment is the fragmentation attribute to match.
+	Fragment filter.Fragment
 }
 
 // AclConfigInfo holds metadata about a compiled ACL configuration.

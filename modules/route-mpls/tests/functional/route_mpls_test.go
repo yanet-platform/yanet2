@@ -10,6 +10,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
@@ -101,7 +102,7 @@ var (
 // rule4 builds a rule matching one IPv4 destination prefix.
 func rule4(prefix string, nexthops ...croutempls.Nexthop) croutempls.Rule {
 	return croutempls.Rule{
-		Dst4s:    filter.IPNets{filter.MustParseIPNet(prefix)},
+		Dst4s:    []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4(prefix)},
 		Nexthops: nexthops,
 	}
 }
@@ -109,7 +110,7 @@ func rule4(prefix string, nexthops ...croutempls.Nexthop) croutempls.Rule {
 // rule6 builds a rule matching one IPv6 destination prefix.
 func rule6(prefix string, nexthops ...croutempls.Nexthop) croutempls.Rule {
 	return croutempls.Rule{
-		Dst6s:    filter.IPNets{filter.MustParseIPNet(prefix)},
+		Dst6s:    []xnetip.BiContiguous{xnetip.MustParseBiContiguous(prefix)},
 		Nexthops: nexthops,
 	}
 }
@@ -409,15 +410,15 @@ func catchAllForwardRules(device string) []cforward.ForwardRule {
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 		{
 			Target:  device,

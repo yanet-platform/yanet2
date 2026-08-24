@@ -11,6 +11,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
@@ -94,15 +95,15 @@ func catchAllForwardRules(device string) []cforward.ForwardRule {
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 		{
 			Target:  device,
@@ -254,7 +255,7 @@ func TestForward_NoMatch(t *testing.T) {
 		Target:  "port0",
 		Mode:    cforward.ModeNone,
 		Counter: "unmatchable",
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 		// Src4s deliberately absent — makes the rule invisible to all filters.
 	}
 
@@ -285,8 +286,8 @@ func TestForward_ModeNone_IPv4(t *testing.T) {
 		Target:  "port0",
 		Mode:    cforward.ModeNone,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0"})
@@ -324,8 +325,8 @@ func TestForward_ModeOut_IPv4(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeOut,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
@@ -476,8 +477,8 @@ func TestForward_ModeIn_IPv4(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeIn,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
@@ -522,8 +523,8 @@ func TestForward_UnmappedDevice(t *testing.T) {
 		Target:  "phantom",
 		Mode:    cforward.ModeOut,
 		Counter: "rule0",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0"})
@@ -568,8 +569,8 @@ func TestForward_IPv6_ModeOut(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeOut,
 		Counter: "rule0",
-		Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-		Dst6s:   filter.IPNets{filter.MustParseIPNet("2001:db8::/32")},
+		Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:   []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/32")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
@@ -683,8 +684,8 @@ func TestForward_MinAction(t *testing.T) {
 			Target:  "port0",
 			Mode:    cforward.ModeNone,
 			Counter: "ip4lose",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
 		},
 	}
 

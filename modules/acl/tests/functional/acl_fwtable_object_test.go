@@ -1,6 +1,7 @@
 package acl_test
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"net"
 	"testing"
 	"time"
@@ -70,10 +71,10 @@ func checkStateDeny4Rule() cacl.AclRule {
 			{Kind: cacl.ActionDeny},
 		},
 		Devices:       filter.Devices{{Name: "port0"}},
-		Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
-		Src6s:         filter.IPNets{},
-		Dst6s:         filter.IPNets{},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{},
+		Dst6s:         []xnetip.BiContiguous{},
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   udpProto,

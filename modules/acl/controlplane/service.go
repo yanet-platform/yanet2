@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/yanet-platform/xnetip"
 	"strings"
 	"sync"
 
@@ -14,7 +15,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	filterpbconv "github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
@@ -373,7 +373,7 @@ func labeler(fullMethod string, req any) metrics.Labels {
 
 // mergedNet4s decodes the IPv4 networks a rule carries in the legacy
 // mixed-family list and the typed list, legacy entries first.
-func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Network) (filter.IPNets, error) {
+func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Network) ([]xnetip.Contiguous[xnetip.Network4], error) {
 	nets, err := filterpbconv.ToNet4s(legacy)
 	if err != nil {
 		return nil, err
@@ -388,7 +388,7 @@ func mergedNet4s(legacy []*filterpb.IPNet, typed []*commonpb.IPv4Network) (filte
 
 // mergedNet6s decodes the IPv6 networks a rule carries in the legacy
 // mixed-family list and the typed list, legacy entries first.
-func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.IPv6Network) (filter.IPNets, error) {
+func mergedNet6s(legacy []*filterpb.IPNet, typed []*commonpb.IPv6Network) ([]xnetip.BiContiguous, error) {
 	nets, err := filterpbconv.ToNet6s(legacy)
 	if err != nil {
 		return nil, err

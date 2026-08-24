@@ -1,6 +1,7 @@
 package acl_test
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -72,8 +73,8 @@ func TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule(t *testing.T) {
 	// free path.
 	rules := []cacl.AclRule{
 		allow4Rule(
-			filter.IPNets{filter.UnspecifiedIPv4},
-			filter.IPNets{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			udpProto,
 		),
 	}

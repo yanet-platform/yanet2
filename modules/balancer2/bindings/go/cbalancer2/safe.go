@@ -41,9 +41,13 @@ type RealConfig struct {
 // empty set of networks disallows all networks. An empty set of ports allows
 // all ports.
 type AllowedSources struct {
-	Net4s       filter.IPNets
-	Net6s       filter.IPNets
-	PortRanges  filter.PortRanges
+	// Net4s is the contiguous IPv4 allowed-source set.
+	Net4s []xnetip.Contiguous[xnetip.Network4]
+	// Net6s is the bi-contiguous IPv6 allowed-source set.
+	Net6s []xnetip.BiContiguous
+	// PortRanges is the allowed source port range set.
+	PortRanges filter.PortRanges
+	// CounterName is the counter name for traffic accounting.
 	CounterName string
 }
 

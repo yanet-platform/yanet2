@@ -3,7 +3,7 @@ package aclpb
 import (
 	"fmt"
 
-	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
@@ -72,22 +72,24 @@ func FromRule(rule cacl.AclRule) *Rule {
 		vlanRanges[idx] = &filterpb.VlanRange{From: uint32(v.From), To: uint32(v.To)}
 	}
 
-	srcs := make([]*filterpb.IPNet, 0, len(rule.Src4s)+len(rule.Src6s))
-	for _, n := range rule.Src4s {
-		srcs = append(srcs, ipNetToProto(n))
+	sources4 := make([]*commonpb.IPv4Network, len(rule.Src4s))
+	for idx, n := range rule.Src4s {
+		sources4[idx] = commonpb.NewIPv4NetworkFrom4(n.Network())
 	}
 
-	for _, n := range rule.Src6s {
-		srcs = append(srcs, ipNetToProto(n))
+	sources6 := make([]*commonpb.IPv6Network, len(rule.Src6s))
+	for idx, n := range rule.Src6s {
+		sources6[idx] = commonpb.NewIPv6NetworkFrom6(n.Network())
 	}
 
-	dsts := make([]*filterpb.IPNet, 0, len(rule.Dst4s)+len(rule.Dst6s))
-	for _, n := range rule.Dst4s {
-		dsts = append(dsts, ipNetToProto(n))
+	destinations4 := make([]*commonpb.IPv4Network, len(rule.Dst4s))
+	for idx, n := range rule.Dst4s {
+		destinations4[idx] = commonpb.NewIPv4NetworkFrom4(n.Network())
 	}
 
-	for _, n := range rule.Dst6s {
-		dsts = append(dsts, ipNetToProto(n))
+	destinations6 := make([]*commonpb.IPv6Network, len(rule.Dst6s))
+	for idx, n := range rule.Dst6s {
+		destinations6[idx] = commonpb.NewIPv6NetworkFrom6(n.Network())
 	}
 
 	srcPortRanges := make([]*filterpb.PortRange, len(rule.SrcPortRanges))
@@ -110,8 +112,10 @@ func FromRule(rule cacl.AclRule) *Rule {
 		Counter:       rule.Counter,
 		Devices:       devices,
 		VlanRanges:    vlanRanges,
-		Srcs:          srcs,
-		Dsts:          dsts,
+		Sources4:      sources4,
+		Sources6:      sources6,
+		Destinations4: destinations4,
+		Destinations6: destinations6,
 		SrcPortRanges: srcPortRanges,
 		DstPortRanges: dstPortRanges,
 		ProtoRanges:   protoRanges,
@@ -152,26 +156,6 @@ func (m *Action) SetFromCAclKind(kind uint32) {
 		// TODO: dangerous default.
 		m.Kind = ActionKind_ACTION_KIND_PASS
 	}
-}
-
-// ipNetToProto converts a filter.IPNet to a filterpb.IPNet.
-//
-// Used internally by FromRule. Kept here until a project-wide filterpb.From*
-// family lands, at which point this helper will move there.
-func ipNetToProto(n filter.IPNet) *filterpb.IPNet {
-	var addrBytes, maskBytes []byte
-	if n.Addr.Is4() {
-		a := n.Addr.As4()
-		addrBytes = a[:]
-		mk := n.Mask.As4()
-		maskBytes = mk[:]
-	} else {
-		a := n.Addr.As16()
-		addrBytes = a[:]
-		mk := n.Mask.As16()
-		maskBytes = mk[:]
-	}
-	return &filterpb.IPNet{Addr: addrBytes, Mask: maskBytes}
 }
 
 // ToCAclKind maps the proto kind enum to the cacl action kind.

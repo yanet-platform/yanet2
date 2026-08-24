@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/xnetip"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
@@ -28,95 +29,96 @@ func ToDevices(pb []*filterpb.Device) (filter.Devices, error) {
 	return out, nil
 }
 
-// ToNet4s converts protobuf IPNet messages to filter IPNets, keeping only IPv4
-// entries.
-func ToNet4s(pb []*filterpb.IPNet) (filter.IPNets, error) {
-	out := make(filter.IPNets, 0, len(pb))
+// ToNet4s converts legacy protobuf IPNet messages to contiguous IPv4
+// filter networks, keeping only IPv4 entries.
+func ToNet4s(pb []*filterpb.IPNet) ([]xnetip.Contiguous[xnetip.Network4], error) {
+	out := make([]xnetip.Contiguous[xnetip.Network4], 0, len(pb))
 
 	for idx := range pb {
-		net, err := ToIPNet(pb[idx])
+		addr, mask, err := legacyNetParts(pb[idx])
 		if err != nil {
 			return nil, err
 		}
-		if !net.Addr.Is4() {
+		if !addr.Is4() {
 			continue
 		}
 
-		out = append(out, net)
+		net, err := xnetip.Network4From(addr, mask)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid network address")
+		}
+		typed, ok := xnetip.ContiguousFrom(net)
+		if !ok {
+			return nil, status.Error(codes.InvalidArgument, "network mask must be contiguous")
+		}
+
+		out = append(out, typed)
 	}
 
 	return out, nil
 }
 
-// ToNet6s converts protobuf IPNet messages to filter IPNets, keeping only IPv6
-// entries.
-func ToNet6s(pb []*filterpb.IPNet) (filter.IPNets, error) {
-	out := make(filter.IPNets, 0, len(pb))
+// ToNet6s converts legacy protobuf IPNet messages to bi-contiguous IPv6
+// filter networks, keeping only IPv6 entries.
+func ToNet6s(pb []*filterpb.IPNet) ([]xnetip.BiContiguous, error) {
+	out := make([]xnetip.BiContiguous, 0, len(pb))
 
 	for idx := range pb {
-		net, err := ToIPNet(pb[idx])
+		addr, mask, err := legacyNetParts(pb[idx])
 		if err != nil {
 			return nil, err
 		}
-		if !net.Addr.Is6() {
+		if !addr.Is6() {
 			continue
 		}
 
-		out = append(out, net)
+		net, err := xnetip.Network6From(addr, mask)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid network address")
+		}
+		typed, ok := xnetip.BiContiguousFrom6(net)
+		if !ok {
+			return nil, status.Error(codes.InvalidArgument, "network mask must be bi-contiguous")
+		}
+
+		out = append(out, typed)
 	}
 
 	return out, nil
 }
 
-// ToIPNet validates the address family and mask shape before returning a
-// filter network value.
-func ToIPNet(pb *filterpb.IPNet) (filter.IPNet, error) {
+// legacyNetParts decodes and validates the address and mask bytes a legacy
+// IPNet message carries.
+func legacyNetParts(pb *filterpb.IPNet) (netip.Addr, netip.Addr, error) {
 	addr, ok := netip.AddrFromSlice(pb.Addr)
 	if !ok {
-		return filter.IPNet{}, status.Error(
+		return netip.Addr{}, netip.Addr{}, status.Error(
 			codes.InvalidArgument,
 			"invalid network address",
 		)
 	}
 	mask, ok := netip.AddrFromSlice(pb.Mask)
 	if !ok {
-		return filter.IPNet{}, status.Error(
+		return netip.Addr{}, netip.Addr{}, status.Error(
 			codes.InvalidArgument,
 			"invalid network mask",
 		)
 	}
 
 	if addr.Is4() != mask.Is4() {
-		return filter.IPNet{}, status.Error(
+		return netip.Addr{}, netip.Addr{}, status.Error(
 			codes.InvalidArgument,
 			"network address and mask must be the same IP family",
 		)
 	}
 
-	net := filter.IPNet{
-		Addr: addr,
-		Mask: mask,
-	}
-	if !net.MaskIsValid() {
-		if mask.Is4() {
-			return filter.IPNet{}, status.Error(
-				codes.InvalidArgument,
-				"network mask must be contiguous",
-			)
-		}
-		return filter.IPNet{}, status.Error(
-			codes.InvalidArgument,
-			"network mask must be bi-contiguous",
-		)
-	}
-
-	return net, nil
+	return addr, mask, nil
 }
 
 // ToNet4sFromNetworks converts family-typed IPv4 network messages to
-// filter IPNets, enforcing the compiler's contiguous mask class.
-func ToNet4sFromNetworks(pb []*commonpb.IPv4Network) (filter.IPNets, error) {
-	out := make(filter.IPNets, 0, len(pb))
+// contiguous IPv4 filter networks, enforcing the compiler's mask class.
+func ToNet4sFromNetworks(pb []*commonpb.IPv4Network) ([]xnetip.Contiguous[xnetip.Network4], error) {
+	out := make([]xnetip.Contiguous[xnetip.Network4], 0, len(pb))
 
 	for idx := range pb {
 		net, err := pb[idx].ToNetwork4()
@@ -124,24 +126,21 @@ func ToNet4sFromNetworks(pb []*commonpb.IPv4Network) (filter.IPNets, error) {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 network at index %d: %v", idx, err)
 		}
 
-		ipNet := filter.IPNet{
-			Addr: net.Addr(),
-			Mask: net.Mask(),
-		}
-		if !ipNet.MaskIsValid() {
+		typed, ok := xnetip.ContiguousFrom(net)
+		if !ok {
 			return nil, status.Errorf(codes.InvalidArgument, "network mask must be contiguous at index %d", idx)
 		}
 
-		out = append(out, ipNet)
+		out = append(out, typed)
 	}
 
 	return out, nil
 }
 
 // ToNet6sFromNetworks converts family-typed IPv6 network messages to
-// filter IPNets, enforcing the compiler's bi-contiguous mask class.
-func ToNet6sFromNetworks(pb []*commonpb.IPv6Network) (filter.IPNets, error) {
-	out := make(filter.IPNets, 0, len(pb))
+// bi-contiguous IPv6 filter networks, enforcing the compiler's mask class.
+func ToNet6sFromNetworks(pb []*commonpb.IPv6Network) ([]xnetip.BiContiguous, error) {
+	out := make([]xnetip.BiContiguous, 0, len(pb))
 
 	for idx := range pb {
 		net, err := pb[idx].ToNetwork6()
@@ -149,15 +148,12 @@ func ToNet6sFromNetworks(pb []*commonpb.IPv6Network) (filter.IPNets, error) {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 network at index %d: %v", idx, err)
 		}
 
-		ipNet := filter.IPNet{
-			Addr: net.Addr(),
-			Mask: net.Mask(),
-		}
-		if !ipNet.MaskIsValid() {
+		typed, ok := xnetip.BiContiguousFrom6(net)
+		if !ok {
 			return nil, status.Errorf(codes.InvalidArgument, "network mask must be bi-contiguous at index %d", idx)
 		}
 
-		out = append(out, ipNet)
+		out = append(out, typed)
 	}
 
 	return out, nil

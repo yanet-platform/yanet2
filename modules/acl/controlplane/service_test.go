@@ -3,7 +3,6 @@ package acl_test
 import (
 	"context"
 	"errors"
-	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"github.com/yanet-platform/xnetip"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
@@ -1013,13 +1011,10 @@ func TestUpdateConfig_TypedNetworkLists(t *testing.T) {
 	rules := handles[0].Rules()
 	require.Len(t, rules, 1)
 
-	assert.Equal(t, filter.IPNets{filter.MustParseIPNet("192.0.2.0/24")}, rules[0].Src4s)
-	assert.Equal(t, filter.IPNets{filter.MustParseIPNet("2001:db8::/32")}, rules[0].Src6s)
-	assert.Equal(t, filter.IPNets{filter.MustParseIPNet("198.51.100.0/24")}, rules[0].Dst4s)
-	assert.Equal(t, filter.IPNets{{
-		Addr: netip.MustParseAddr("2001:db8:1::"),
-		Mask: netip.MustParseAddr("ffff:ffff:ffff:0:ffff::"),
-	}}, rules[0].Dst6s)
+	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/24")}, rules[0].Src4s)
+	assert.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/32")}, rules[0].Src6s)
+	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("198.51.100.0/24")}, rules[0].Dst4s)
+	assert.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/ffff:ffff:ffff:0:ffff::")}, rules[0].Dst6s)
 }
 
 // TestUpdateConfig_MergesLegacyAndTypedNetworks verifies that legacy and
@@ -1047,9 +1042,9 @@ func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
 	require.Len(t, handles, 1)
 	rules := handles[0].Rules()
 	require.Len(t, rules, 1)
-	assert.Equal(t, filter.IPNets{
-		filter.MustParseIPNet("192.0.2.0/24"),
-		filter.MustParseIPNet("198.51.100.0/24"),
+	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("192.0.2.0/24"),
+		xnetip.MustParseContiguous4("198.51.100.0/24"),
 	}, rules[0].Src4s)
 }
 

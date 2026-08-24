@@ -1,6 +1,7 @@
 package acl_test
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"net"
 	"net/netip"
 	"testing"
@@ -61,8 +62,8 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 	// CREATE_STATE is non-terminal: the packet passes and the module
 	// synthesizes a state-sync frame when the emit config is usable.
 	rule := allow4Rule(
-		filter.IPNets{filter.UnspecifiedIPv4},
-		filter.IPNets{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		tcpProto,
 	)
 	rule.Actions = []cacl.AclAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}
@@ -87,8 +88,8 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 // them to the destination the previous config installed.
 func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 	rule := allow4Rule(
-		filter.IPNets{filter.UnspecifiedIPv4},
-		filter.IPNets{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		tcpProto,
 	)
 	rule.Actions = []cacl.AclAction{{Kind: cacl.ActionCreateState}, {Kind: cacl.ActionAllow}}

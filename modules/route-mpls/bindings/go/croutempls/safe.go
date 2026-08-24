@@ -1,9 +1,8 @@
 package croutempls
 
 import (
+	"github.com/yanet-platform/xnetip"
 	"net/netip"
-
-	"github.com/yanet-platform/yanet2/bindings/go/filter"
 )
 
 // Kind identifies the forwarding action for an MPLS nexthop.
@@ -35,10 +34,10 @@ type Nexthop struct {
 // Rule describes a single route-mpls forwarding rule with its prefix
 // match criteria and nexthop list.
 type Rule struct {
-	// Dst4s is the set of IPv4 destination prefixes to match.
-	Dst4s filter.IPNets
-	// Dst6s is the set of IPv6 destination prefixes to match.
-	Dst6s filter.IPNets
+	// Dst4s is the contiguous IPv4 destination match set.
+	Dst4s []xnetip.Contiguous[xnetip.Network4]
+	// Dst6s is the bi-contiguous IPv6 destination match set.
+	Dst6s []xnetip.BiContiguous
 	// Nexthops is the ordered list of nexthops for this rule.
 	Nexthops []Nexthop
 }

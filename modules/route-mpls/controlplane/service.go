@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/xnetip"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -136,21 +138,19 @@ func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 				nexthops = append(nexthops, nh.ToFFI())
 			}
 
-			dst4s, _ := filter.Net4sFromPrefixes([]netip.Prefix{prefix})
-			dst6s, _ := filter.Net6sFromPrefixes([]netip.Prefix{prefix})
+			rule := croutempls.Rule{Nexthops: nexthops}
+			if net4, ok := xnetip.ContiguousFromPrefix4(prefix); ok {
+				rule.Dst4s = []xnetip.Contiguous[xnetip.Network4]{net4}
+			} else if net6, ok := xnetip.ContiguousFromPrefix6(prefix); ok {
+				rule.Dst6s = []xnetip.BiContiguous{xnetip.BiContiguousFromContiguous(net6)}
+			}
 
-			rules = append(rules, croutempls.Rule{
-				Dst4s:    dst4s,
-				Dst6s:    dst6s,
-				Nexthops: nexthops,
-			})
+			rules = append(rules, rule)
 		}
 	}
 
-	default4Prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{}), 0)
-	default4Dst, _ := filter.Net4sFromPrefixes([]netip.Prefix{default4Prefix})
 	rules = append(rules, croutempls.Rule{
-		Dst4s: default4Dst,
+		Dst4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Nexthops: []croutempls.Nexthop{
 			{
 				Kind:    croutempls.KindNone,
@@ -160,10 +160,8 @@ func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 		},
 	})
 
-	default16Prefix := netip.PrefixFrom(netip.AddrFrom16([16]byte{}), 0)
-	default16Dst, _ := filter.Net6sFromPrefixes([]netip.Prefix{default16Prefix})
 	rules = append(rules, croutempls.Rule{
-		Dst6s: default16Dst,
+		Dst6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		Nexthops: []croutempls.Nexthop{
 			{
 				Kind:    croutempls.KindNone,

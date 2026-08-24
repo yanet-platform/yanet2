@@ -8,6 +8,8 @@ import "C"
 
 import (
 	"runtime"
+
+	"github.com/yanet-platform/xnetip"
 )
 
 func (m *Device) build() C.struct_filter_device {
@@ -43,13 +45,13 @@ func (m Devices) cBuild(pinner *runtime.Pinner) *C.struct_filter_devices {
 	}
 }
 
-func (m *IPNet) buildNet4() C.struct_net4 {
+func buildNet4(m xnetip.Contiguous[xnetip.Network4]) C.struct_net4 {
 	res := C.struct_net4{
 		addr: [4]C.uint8_t{0},
 		mask: [4]C.uint8_t{0},
 	}
-	addr := m.Addr.As4()
-	mask := m.Mask.As4()
+	addr := m.Network().Addr().As4()
+	mask := m.Network().Mask().As4()
 	for idx := range 4 {
 		res.addr[idx] = C.uint8_t(addr[idx])
 		res.mask[idx] = C.uint8_t(mask[idx])
@@ -58,7 +60,7 @@ func (m *IPNet) buildNet4() C.struct_net4 {
 	return res
 }
 
-func (m IPNets) cBuildNet4s(pinner *runtime.Pinner) *C.struct_filter_net4s {
+func cBuildNet4s(m []xnetip.Contiguous[xnetip.Network4], pinner *runtime.Pinner) *C.struct_filter_net4s {
 	if len(m) == 0 {
 		return &C.struct_filter_net4s{
 			items: nil,
@@ -68,7 +70,7 @@ func (m IPNets) cBuildNet4s(pinner *runtime.Pinner) *C.struct_filter_net4s {
 
 	cNet4s := make([]C.struct_net4, len(m))
 	for idx, item := range m {
-		cNet4s[idx] = item.buildNet4()
+		cNet4s[idx] = buildNet4(item)
 	}
 
 	pinner.Pin(&cNet4s[0])
@@ -78,13 +80,13 @@ func (m IPNets) cBuildNet4s(pinner *runtime.Pinner) *C.struct_filter_net4s {
 	}
 }
 
-func (m *IPNet) buildNet6() C.struct_net6 {
+func buildNet6(m xnetip.BiContiguous) C.struct_net6 {
 	res := C.struct_net6{
 		addr: [16]C.uint8_t{0},
 		mask: [16]C.uint8_t{0},
 	}
-	addr := m.Addr.As16()
-	mask := m.Mask.As16()
+	addr := m.Network().Addr().As16()
+	mask := m.Network().Mask().As16()
 	for idx := range 16 {
 		res.addr[idx] = C.uint8_t(addr[idx])
 		res.mask[idx] = C.uint8_t(mask[idx])
@@ -93,7 +95,7 @@ func (m *IPNet) buildNet6() C.struct_net6 {
 	return res
 }
 
-func (m IPNets) cBuildNet6s(pinner *runtime.Pinner) *C.struct_filter_net6s {
+func cBuildNet6s(m []xnetip.BiContiguous, pinner *runtime.Pinner) *C.struct_filter_net6s {
 	if len(m) == 0 {
 		return &C.struct_filter_net6s{
 			items: nil,
@@ -103,7 +105,7 @@ func (m IPNets) cBuildNet6s(pinner *runtime.Pinner) *C.struct_filter_net6s {
 
 	cNet6s := make([]C.struct_net6, len(m))
 	for idx, item := range m {
-		cNet6s[idx] = item.buildNet6()
+		cNet6s[idx] = buildNet6(item)
 	}
 
 	pinner.Pin(&cNet6s[0])
