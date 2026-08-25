@@ -331,8 +331,9 @@ type FrameworkOption func(*TestFramework) error
 // Config contains essential configuration parameters for initializing the test framework.
 // It specifies the QEMU virtual machine image and working directory for test execution.
 type Config struct {
-	Name      string
-	QEMUImage string // Path to the QEMU virtual machine image file
+	Name        string
+	QEMUImage   string // Path to the QEMU virtual machine image file
+	ProjectRoot string // Canonical project root for build and target paths
 }
 
 // New creates and initializes a new Framework instance with the specified configuration
@@ -386,7 +387,7 @@ func New(config *Config, opts ...FrameworkOption) (*Framework, error) {
 
 	if fw.qemu == nil {
 		// Initialize QEMU manager
-		qemu, err := NewQEMUManager(config.Name, config.QEMUImage, fw.log)
+		qemu, err := newQEMUManager(config.Name, config.QEMUImage, fw.log, config.ProjectRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create QEMU manager: %w", err)
 		}

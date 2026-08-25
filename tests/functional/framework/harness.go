@@ -270,6 +270,7 @@ type HarnessConfig struct {
 	PoolSize         int
 	BaselineTag      string
 	QEMUImage        string
+	ProjectRoot      string
 	Dataplane        string
 	Controlplane     string
 	Forward          string
@@ -307,18 +308,17 @@ func (m *Harness) Shutdown() error {
 
 // resolveQEMUImage returns the configured QEMU image, or the shared
 // functional-test image resolved from the project root when unset.
-func resolveQEMUImage(configured string) (string, error) {
+func resolveQEMUImage(configured, projectRoot string) (string, error) {
 	if configured != "" {
 		return configured, nil
 	}
 	if env := os.Getenv("YANET_QEMU_IMAGE"); env != "" {
 		return env, nil
 	}
-	root, err := findProjectRoot()
-	if err != nil {
-		return "", fmt.Errorf("failed to locate project root for QEMU image: %w", err)
+	if projectRoot == "" {
+		return "", fmt.Errorf("project root is required to resolve the QEMU image")
 	}
-	return filepath.Join(root, "tests", "functional", "yanet-test.qcow2"), nil
+	return filepath.Join(projectRoot, "tests", "functional", "yanet-test.qcow2"), nil
 }
 
 // newHarnessLogger builds the logger a harness runs with, mirroring the
@@ -356,7 +356,14 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		}
 	}()
 
-	qemuImage, err := resolveQEMUImage(config.QEMUImage)
+	projectRoot := config.ProjectRoot
+	if projectRoot == "" {
+		projectRoot, err = findProjectRoot()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to locate project root for harness: %w", err)
+		}
+	}
+	qemuImage, err := resolveQEMUImage(config.QEMUImage, projectRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,10 +401,6 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	}
 
 	bootedTemplate := BootedImagePath(qemuImage)
-	projectRoot, err := findProjectRoot()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to locate project root for baseline: %w", err)
-	}
 	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route, config.FingerprintFiles, config.SkipCommonConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fingerprint baseline: %w", err)
@@ -411,6 +414,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		route:            route,
 		poolName:         config.PoolName,
 		fingerprint:      fingerprint,
+		projectRoot:      projectRoot,
 		log:              logger,
 		prepare:          config.Prepare,
 		afterStart:       config.AfterStart,
@@ -430,9 +434,9 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	logger.Infof("Starting VM pool %q with size %d (baseline template: %s)",
 		config.PoolName, poolSize, baselineTemplate)
 
-	pool, err := NewVMPool(
+	pool, err := newVMPool(
 		poolSize, config.PoolName, qemuImage,
-		bootedTemplate, baselineTemplate, baselineSnapshotName, config.EnableSSHForward, logger,
+		bootedTemplate, baselineTemplate, baselineSnapshotName, config.EnableSSHForward, logger, projectRoot,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create VM pool: %w", err)
@@ -580,6 +584,7 @@ type baselineSetup struct {
 	profileReady     func(*TestFramework) error
 	skipCommonConfig bool
 	forceStop        bool
+	projectRoot      string
 }
 
 // ensureTemplate makes sure baselineTemplate holds a "baseline" snapshot,
@@ -597,7 +602,7 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 
 	m.log.Infof("Baseline template %s not found; bootstrapping from booted template", baselineTemplate)
 
-	prepPool, err := NewVMPool(1, "baseline-prep-"+m.poolName, qemuImage, bootedTemplate, "", "", false, m.log)
+	prepPool, err := newVMPool(1, "baseline-prep-"+m.poolName, qemuImage, bootedTemplate, "", "", false, m.log, m.projectRoot)
 	if err != nil {
 		return fmt.Errorf("failed to create baseline prep pool: %w", err)
 	}

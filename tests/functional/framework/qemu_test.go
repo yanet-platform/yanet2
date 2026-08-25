@@ -3,6 +3,7 @@ package framework
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -217,5 +218,24 @@ func TestSerialBufferContains(t *testing.T) {
 	}
 	if q.serialBufferContains("missing") {
 		t.Fatal("expected contains to miss absent marker")
+	}
+}
+
+func TestNewQEMUManagerUsesProvidedProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	manager, err := newQEMUManager("root-test", "image.qcow2", zap.NewNop().Sugar(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Stop() })
+
+	if manager.ProjectDir != root {
+		t.Fatalf("project directory = %q, want %q", manager.ProjectDir, root)
+	}
+	if manager.BuildDir != filepath.Join(root, "build") {
+		t.Fatalf("build directory = %q, want %q", manager.BuildDir, filepath.Join(root, "build"))
+	}
+	if manager.TargetDir != filepath.Join(root, "target") {
+		t.Fatalf("target directory = %q, want %q", manager.TargetDir, filepath.Join(root, "target"))
 	}
 }

@@ -3,6 +3,8 @@ package framework
 import (
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestConfigureTemplateSetsGuestPathsForSelectedSnapshot(t *testing.T) {
@@ -78,5 +80,18 @@ func Test_ResolveCLIPaths_GuestStorageMode(t *testing.T) {
 	mounted := &TestFramework{Paths: DefaultGuestPaths()}
 	if got := mounted.resolveCLIPaths(command); got != command {
 		t.Errorf("resolveCLIPaths() = %q, want %q", got, command)
+	}
+}
+
+func TestNewVMPoolUsesProvidedProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	pool, err := newVMPool(1, "root-test", "image.qcow2", "", "", "", false, zap.NewNop().Sugar(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Shutdown() })
+
+	if got := pool.vms[0].manager.ProjectDir; got != root {
+		t.Fatalf("project directory = %q, want %q", got, root)
 	}
 }
