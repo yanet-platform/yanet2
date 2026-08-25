@@ -52,6 +52,29 @@ test(
   timeout: 90,
 )
 
+counter_workers_test = executable(
+  'counter_workers_test',
+  ['counter_workers_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args + [
+    '-Wl,-E',
+    '-Wl,--undefined=new_device_plain',
+    '-Wl,--export-dynamic-symbol=new_device_plain',
+  ],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_agent_counters_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_dev_plain_api,
+    libdpdk_dep,
+  ],
+  link_with: [lib_dev_plain_dp],
+  include_directories: yanet_rootdir,
+)
+
+test('counter_workers', counter_workers_test, suite: ['lib'])
+
 loaded_counts_test = executable(
   'loaded_counts_test',
   ['loaded_counts_test.c'],

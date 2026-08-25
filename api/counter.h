@@ -180,6 +180,11 @@ yanet_get_counter_values(
 // name query. Pass tag_count == 0 to impose no per-tag constraint and a
 // NULL query to impose no name constraint.
 //
+// Each worker's counter storage registry is matched independently and
+// the result is the union across workers: every returned counter spans
+// instance_count == worker_count instances, and a worker whose registry
+// does not carry the counter contributes zero values for its instance.
+//
 // Each counter_tag is a predicate against the counter's tags, with
 // the check encoded in value: an empty string requires the tag to be
 // absent, "*" requires the tag to be present with any value, and any
@@ -208,6 +213,56 @@ yanet_get_counters_by_tags(
 	const struct counter_query *query,
 	yanet_error **err
 );
+
+// One worker's independently matched counter set.
+//
+// counters holds only that worker's snapshot: its instance_count is 1
+// and every handle's values are copied from that worker's own storages.
+struct counter_worker_set {
+	uint64_t worker_idx;
+	struct counter_handle_list *counters;
+};
+
+// Per-worker counter sets, one entry per dataplane worker in index
+// order.
+//
+// A worker whose registry holds no match carries an empty set, so entry
+// i always belongs to worker i.
+struct counter_worker_set_list {
+	uint64_t worker_count;
+	struct counter_worker_set sets[];
+};
+
+// Return each worker's counters that satisfy every predicate in tags
+// and the compiled name query, matched against that worker's own
+// counter storage registry.
+//
+// The tag predicates and their value semantics are those of
+// yanet_get_counters_by_tags; unlike it, no cross-worker union is
+// taken, so the sets may differ from worker to worker.
+//
+// The returned list must be released with
+// yanet_counter_worker_set_list_free. On failure NULL is returned and
+// err is filled; a worker without a match yields an empty set, not
+// failure.
+struct counter_worker_set_list *
+yanet_get_counters_by_tags_per_worker(
+	struct dp_config *dp_config,
+	const struct counter_tag *tags,
+	size_t tag_count,
+	const struct counter_query *query,
+	yanet_error **err
+);
+
+// Return the set belonging to worker_idx, or NULL when out of range.
+struct counter_worker_set *
+yanet_get_counter_worker_set(
+	struct counter_worker_set_list *sets, uint64_t worker_idx
+);
+
+// Release a per-worker set list. No-op on NULL.
+void
+yanet_counter_worker_set_list_free(struct counter_worker_set_list *sets);
 
 void
 yanet_counter_handle_list_free(struct counter_handle_list *counters);

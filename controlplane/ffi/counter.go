@@ -13,6 +13,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -355,6 +356,12 @@ type CounterGroup struct {
 // CountersByTags returns counters matching every predicate in tags and at
 // least one pattern in query. A nil or empty tags slice imposes no per-tag
 // constraint. A nil or empty query matches any counter name.
+//
+// Every worker's counter storage registry is matched independently and the
+// sets are merged: a counter is identified by its group's tag set and its
+// name, and a worker that does not carry it contributes zero values for
+// its instance. Every returned counter therefore spans exactly one value
+// set per dataplane worker.
 func (m *DPConfig) CountersByTags(
 	tags []CounterTag,
 	query []string,
@@ -405,22 +412,43 @@ func (m *DPConfig) CountersByTags(
 	}
 
 	var cErr *C.yanet_error
-	counters := C.yanet_get_counters_by_tags(
+	sets := C.yanet_get_counters_by_tags_per_worker(
 		m.ptr,
 		cTagsPtr,
 		C.size_t(len(cTags)),
 		compiled,
 		&cErr,
 	)
-	if counters == nil {
+	if sets == nil {
 		if err := cerrors.FromC(unsafe.Pointer(cErr)); err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("unknown error")
 	}
-	defer C.yanet_counter_handle_list_free(counters)
+	defer C.yanet_counter_worker_set_list_free(sets)
 
+	workerCount := int(sets.worker_count)
+	perWorker := make([][]CounterGroup, workerCount)
+	for idx := range workerCount {
+		set := C.yanet_get_counter_worker_set(sets, C.uint64_t(idx))
+		if set == nil {
+			return nil, fmt.Errorf("counter set for worker %d is missing", idx)
+		}
+		perWorker[idx] = decodeCounterGroups(set.counters)
+	}
+
+	return MergeWorkerCounterGroups(workerCount, perWorker), nil
+}
+
+// decodeCounterGroups splits one handle list into groups of counters
+// sharing the same tag set. Consecutive handles of one storage share the
+// tags pointer, which marks the group boundary. A nil list decodes to no
+// groups.
+func decodeCounterGroups(counters *C.struct_counter_handle_list) []CounterGroup {
 	groups := make([]CounterGroup, 0)
+	if counters == nil {
+		return groups
+	}
 
 	for idx := C.uint64_t(0); idx < counters.count; idx++ {
 		handle := C.yanet_get_counter(counters, idx)
@@ -436,7 +464,109 @@ func (m *DPConfig) CountersByTags(
 			decodeCounterHandle(handle, counters.instance_count))
 	}
 
-	return groups, nil
+	return groups
+}
+
+// counterGroupKey builds a canonical identity of a tag set, independent
+// of the tags' order.
+func counterGroupKey(tags []CounterTag) string {
+	ordered := slices.Clone(tags)
+	slices.SortFunc(ordered, func(a, b CounterTag) int {
+		return strings.Compare(a.Key, b.Key)
+	})
+
+	var key strings.Builder
+	for _, tag := range ordered {
+		key.WriteString(tag.Key)
+		key.WriteByte(0)
+		key.WriteString(tag.Value)
+		key.WriteByte(1)
+	}
+	return key.String()
+}
+
+// MergeWorkerCounterGroups combines per-worker counter groups into one
+// slice spanning every worker.
+//
+// A counter is identified by its group's tag set and its name. The first
+// worker carrying it defines its position and its size, every other
+// carrier's snapshot lands in that worker's instance slot, and workers
+// without the counter contribute zero values in theirs. Sizes come from
+// the module's registry and are expected to agree across workers; on
+// disagreement the first worker's size stays and the disagreeing worker's
+// instance remains zero.
+func MergeWorkerCounterGroups(
+	workerCount int,
+	perWorker [][]CounterGroup,
+) []CounterGroup {
+	type mergedGroup struct {
+		tags     []CounterTag
+		counters []CounterInfo
+		sizes    []int
+		byName   map[string]int
+	}
+
+	groups := make([]*mergedGroup, 0)
+	groupIndex := map[string]int{}
+
+	for workerIdx, workerGroups := range perWorker {
+		for _, group := range workerGroups {
+			key := counterGroupKey(group.Tags)
+			idx, found := groupIndex[key]
+			if !found {
+				idx = len(groups)
+				groupIndex[key] = idx
+				groups = append(groups, &mergedGroup{
+					tags:   group.Tags,
+					byName: map[string]int{},
+				})
+			}
+			merged := groups[idx]
+			for _, counter := range group.Counters {
+				size := 0
+				if len(counter.Values) > 0 {
+					size = len(counter.Values[0])
+				}
+
+				counterIdx, found := merged.byName[counter.Name]
+				if !found {
+					counterIdx = len(merged.counters)
+					merged.byName[counter.Name] = counterIdx
+					merged.counters = append(
+						merged.counters,
+						CounterInfo{
+							Name:   counter.Name,
+							Values: make([][]uint64, workerCount),
+						},
+					)
+					merged.sizes = append(merged.sizes, size)
+				}
+
+				if size != merged.sizes[counterIdx] {
+					continue
+				}
+				if len(counter.Values) > 0 {
+					merged.counters[counterIdx].Values[workerIdx] = counter.Values[0]
+				}
+			}
+		}
+	}
+
+	merged := make([]CounterGroup, 0, len(groups))
+	for _, group := range groups {
+		for idx, counter := range group.counters {
+			for workerIdx := range counter.Values {
+				if counter.Values[workerIdx] == nil {
+					counter.Values[workerIdx] = make([]uint64, group.sizes[idx])
+				}
+			}
+		}
+		merged = append(merged, CounterGroup{
+			Tags:     group.tags,
+			Counters: group.counters,
+		})
+	}
+	return merged
 }
 
 func decodeCounterTags(
