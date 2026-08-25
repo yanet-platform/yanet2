@@ -43,12 +43,12 @@ type fakeFileInfo struct {
 	sys  any
 }
 
-func (f fakeFileInfo) Name() string       { return f.name }
-func (f fakeFileInfo) Size() int64        { return 0 }
-func (f fakeFileInfo) Mode() os.FileMode  { return f.mode }
-func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
-func (f fakeFileInfo) IsDir() bool        { return f.mode&os.ModeDir != 0 }
-func (f fakeFileInfo) Sys() any           { return f.sys }
+func (m fakeFileInfo) Name() string       { return m.name }
+func (m fakeFileInfo) Size() int64        { return 0 }
+func (m fakeFileInfo) Mode() os.FileMode  { return m.mode }
+func (m fakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (m fakeFileInfo) IsDir() bool        { return m.mode&os.ModeDir != 0 }
+func (m fakeFileInfo) Sys() any           { return m.sys }
 
 // seamOverrides bundles the per-test seam overrides. A zero-value field
 // leaves the corresponding production value in place.
@@ -80,22 +80,21 @@ func withSeams(t *testing.T, o seamOverrides) {
 }
 
 func TestRootDigest(t *testing.T) {
-	// First 12 hex chars of sha256 are an AC contract: the runtime
-	// directory namespace is keyed by this prefix.
-	const root = "/Users/moonug/projects/yanet/yanet2"
+	// Pin a stable fixture string so the assertion is independent of
+	// the developer's local checkout path. The fixture is the only
+	// piece of state the AC couples rootDigest to.
+	const root = "/yanet2-fixture-root"
 	got := rootDigest(root)
-	want := "97985db1afa4"
+	sum := sha256.Sum256([]byte(root))
+	want := hex.EncodeToString(sum[:])[:12]
 	if got != want {
-		t.Errorf("rootDigest(%q) = %q, want %q", root, got, want)
+		t.Errorf("rootDigest(%q) = %q, want sha256 prefix %q", root, got, want)
 	}
 	if len(got) != 12 {
 		t.Errorf("rootDigest length = %d, want 12", len(got))
 	}
-	// Cross-check against a hand-computed sha256 prefix.
-	sum := sha256.Sum256([]byte(root))
-	want2 := hex.EncodeToString(sum[:])[:12]
-	if got != want2 {
-		t.Errorf("rootDigest(%q) = %q, want sha256 prefix %q", root, got, want2)
+	if got2 := rootDigest(root); got2 != got {
+		t.Errorf("rootDigest is non-deterministic: %q vs %q", got, got2)
 	}
 }
 
@@ -359,7 +358,7 @@ func TestProvisionSession(t *testing.T) {
 		if lookErr != nil {
 			t.Skip("ssh-keygen not available; cannot plant partial state")
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), sshKeygenTimeout)
+		ctx, cancel := context.WithTimeout(t.Context(), sshKeygenTimeout)
 		defer cancel()
 		command := exec.CommandContext(ctx, keygen, "-t", "ed25519", "-N", "", "-f", rt.PrivateKey)
 		if _, err := command.CombinedOutput(); err != nil {
@@ -382,12 +381,13 @@ func TestProvisionSession(t *testing.T) {
 	})
 }
 
-// TestProvisionSessionEndToEnd drives the full path layout
-// (provisioningBase + projectRoot + rootDigest + name) and asserts the
-// literal AC contract: /tmp/yanet2-lab-<uid>/<root-digest>/<name>/...
+// TestProvisionSessionEndToEnd drives the full path layout assembled
+// at runtime (provisioningBase + projectRoot + rootDigest + name) and
+// asserts the layout matches: <base>/<root-digest>/<name>/supervisor.sock.
+// The base is seam-supplied to keep the test hermetic; the production
+// provisioningBase default of /tmp/yanet2-lab-<uid> is exercised by the
+// manual lab flow.
 func TestProvisionSessionEndToEnd(t *testing.T) {
-	// Use a temp base to keep the test hermetic and assert the layout
-	// independent of the real /tmp tree.
 	base := t.TempDir()
 	withSeams(t, seamOverrides{Base: base})
 	// Plant a synthetic project root: a real directory with a go.mod.
@@ -457,5 +457,40 @@ func TestProjectRootNoGoMod(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	} else if !strings.Contains(err.Error(), "not inside the YANET2 repository") {
 		t.Errorf("error %q does not mention YANET2", err.Error())
+	}
+}
+
+func TestProjectRootCacheHitsOnce(t *testing.T) {
+	var calls int
+	prevStart := walkStart
+	t.Cleanup(func() { walkStart = prevStart })
+	walkStart = func() (string, error) {
+		calls++
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(filepath.Join(root, "go.mod"), nil, 0o644); err != nil {
+			return "", err
+		}
+		return root, nil
+	}
+	resetProjectRootCache()
+	t.Cleanup(resetProjectRootCache)
+
+	for range 5 {
+		if _, err := projectRoot(); err != nil {
+			t.Fatalf("projectRoot: %v", err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("walkStart called %d times across 5 projectRoot calls, want 1", calls)
+	}
+	resetProjectRootCache()
+	if _, err := projectRoot(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("walkStart called %d times after reset + 1 call, want 2", calls)
 	}
 }

@@ -1,10 +1,12 @@
-package lab
+package lab_test
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/yanet-platform/yanet2/lab"
 )
 
 func TestParseManifest(t *testing.T) {
@@ -12,7 +14,7 @@ func TestParseManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "packet.pcap"), []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := ParseManifest([]byte(`
+	manifest, err := lab.ParseManifest([]byte(`
 version: 1
 name: smoke
 steps:
@@ -26,7 +28,7 @@ probes:
     expect: {drop: true}
 `), dir)
 	if err != nil {
-		t.Fatalf("ParseManifest() error = %v", err)
+		t.Fatalf("lab.ParseManifest() error = %v", err)
 	}
 	if manifest.Name != "smoke" || len(manifest.Probes) != 1 {
 		t.Fatalf("unexpected manifest: %#v", manifest)
@@ -34,14 +36,14 @@ probes:
 }
 
 func TestParseManifestRejectsUnknownFields(t *testing.T) {
-	_, err := ParseManifest([]byte("version: 1\nname: smoke\nunknown: true\n"), t.TempDir())
+	_, err := lab.ParseManifest([]byte("version: 1\nname: smoke\nunknown: true\n"), t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "schema") {
 		t.Fatalf("expected schema error, got %v", err)
 	}
 }
 
 func TestParseManifestRejectsTraversal(t *testing.T) {
-	_, err := ParseManifest([]byte("version: 1\nname: smoke\nboot:\n  dataplane: ../secret\n"), t.TempDir())
+	_, err := lab.ParseManifest([]byte("version: 1\nname: smoke\nboot:\n  dataplane: ../secret\n"), t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("expected traversal error, got %v", err)
 	}
@@ -56,14 +58,14 @@ func TestParseManifestRejectsSymlinkTraversal(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "packet.pcap")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ParseManifest([]byte("version: 1\nname: smoke\nprobes:\n  - name: packet\n    ingress: 0\n    egress: 1\n    send: {pcap: packet.pcap}\n    expect: {drop: true}\n"), dir)
+	_, err := lab.ParseManifest([]byte("version: 1\nname: smoke\nprobes:\n  - name: packet\n    ingress: 0\n    egress: 1\n    send: {pcap: packet.pcap}\n    expect: {drop: true}\n"), dir)
 	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("expected symlink traversal error, got %v", err)
 	}
 }
 
 func TestParseManifestRejectsDuplicateNames(t *testing.T) {
-	_, err := ParseManifest([]byte(`
+	_, err := lab.ParseManifest([]byte(`
 version: 1
 name: smoke
 steps:

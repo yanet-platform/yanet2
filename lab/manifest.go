@@ -97,7 +97,7 @@ func ParseManifest(data []byte, baseDir string) (*Manifest, error) {
 	if err := json.Unmarshal(jsonDocument, &manifest); err != nil {
 		return nil, fmt.Errorf("decode validated manifest: %w", err)
 	}
-	if err := manifest.validateSemantics(baseDir); err != nil {
+	if err := validateManifestSemantics(manifest, baseDir); err != nil {
 		return nil, err
 	}
 	return &manifest, nil
@@ -135,7 +135,7 @@ func yamlToJSON(data []byte) ([]byte, error) {
 	return json.Marshal(document)
 }
 
-func (m *Manifest) validateSemantics(baseDir string) error {
+func validateManifestSemantics(m Manifest, baseDir string) error {
 	names := make(map[string]string, len(m.Steps)+len(m.Probes))
 	for _, step := range m.Steps {
 		if previous, ok := names[step.Name]; ok {

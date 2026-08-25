@@ -40,11 +40,17 @@ const sunPathSlack = len("/supervisor.sock") + 1
 // blocking `up`/`serve` indefinitely.
 const sshKeygenTimeout = 30 * time.Second
 
+// maxSessionNameSlack covers the fixed portion of the runtime path that
+// the session name sits inside: "/tmp/yanet2-lab-" (15) + uid (up to 10
+// digits) + "/" + 12-char root digest + "/" = 39, rounded to 40 to leave
+// a one-byte headroom under the sun_path cap.
+const maxSessionNameSlack = 40
+
 // maxSessionNameLen caps the session name length so the supervisor.sock
 // path fits in sun_path regardless of the project root's absolute length.
 // It is re-checked in validSessionName so any caller — including those
 // that bypass provisionSession — gets the rejection up front.
-const maxSessionNameLen = sunPathLimit - sunPathSlack - 40
+const maxSessionNameLen = sunPathLimit - sunPathSlack - maxSessionNameSlack
 
 type request struct {
 	Action   string   `json:"action"`
@@ -65,10 +71,10 @@ type application struct {
 }
 
 func main() {
-	app := &application{session: defaultSession}
-	root := app.command()
+	m := &application{session: defaultSession}
+	root := m.command()
 	if err := root.Execute(); err != nil {
-		if app.json {
+		if m.json {
 			_ = json.NewEncoder(os.Stderr).Encode(response{Error: err.Error()})
 		} else {
 			fmt.Fprintln(os.Stderr, "yanet-lab:", err)
@@ -81,29 +87,29 @@ func main() {
 	}
 }
 
-func (a *application) command() *cobra.Command {
+func (m *application) command() *cobra.Command {
 	root := &cobra.Command{Use: "yanet-lab", Short: "Operate a reusable local YANET2 QEMU lab", SilenceUsage: true}
-	root.PersistentFlags().StringVar(&a.session, "session", defaultSession, "lab session name")
-	root.PersistentFlags().BoolVar(&a.json, "json", false, "emit machine-readable JSON")
+	root.PersistentFlags().StringVar(&m.session, "session", defaultSession, "lab session name")
+	root.PersistentFlags().BoolVar(&m.json, "json", false, "emit machine-readable JSON")
 	root.AddCommand(
-		&cobra.Command{Use: "doctor", Short: "Check host prerequisites", RunE: func(*cobra.Command, []string) error { return a.doctor() }},
-		&cobra.Command{Use: "up", Short: "Start or reuse the lab VM", RunE: func(*cobra.Command, []string) error { return a.up() }},
-		&cobra.Command{Use: "status", Short: "Show lab and YANET readiness", RunE: func(*cobra.Command, []string) error { return a.simple("status", nil) }},
-		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return a.simple("reset", nil) }},
-		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return a.simple("report", nil) }},
-		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return a.simple("down", nil) }},
-		a.execCommand(), a.shellCommand(), a.manifestCommand(), a.scenarioCommand(), a.serveCommand(),
+		&cobra.Command{Use: "doctor", Short: "Check host prerequisites", RunE: func(*cobra.Command, []string) error { return m.doctor() }},
+		&cobra.Command{Use: "up", Short: "Start or reuse the lab VM", RunE: func(*cobra.Command, []string) error { return m.up() }},
+		&cobra.Command{Use: "status", Short: "Show lab and YANET readiness", RunE: func(*cobra.Command, []string) error { return m.simple("status", nil) }},
+		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return m.simple("reset", nil) }},
+		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return m.simple("report", nil) }},
+		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return m.simple("down", nil) }},
+		m.execCommand(), m.shellCommand(), m.manifestCommand(), m.scenarioCommand(), m.serveCommand(),
 	)
 	return root
 }
 
-func (a *application) execCommand() *cobra.Command {
+func (m *application) execCommand() *cobra.Command {
 	return &cobra.Command{Use: "exec -- COMMAND [ARG...]", Short: "Execute a command in the guest", Args: cobra.MinimumNArgs(1), DisableFlagParsing: true, RunE: func(_ *cobra.Command, args []string) error {
-		return a.simple("exec", args)
+		return m.simple("exec", args)
 	}}
 }
 
-func (a *application) shellCommand() *cobra.Command {
+func (m *application) shellCommand() *cobra.Command {
 	return &cobra.Command{Use: "shell", Short: "Open an interactive guest command shell", RunE: func(*cobra.Command, []string) error {
 		scanner := bufio.NewScanner(os.Stdin)
 		for {
@@ -116,7 +122,7 @@ func (a *application) shellCommand() *cobra.Command {
 				return nil
 			}
 			if line != "" {
-				if err := a.simple("shell", []string{line}); err != nil {
+				if err := m.simple("shell", []string{line}); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
 			}
@@ -124,7 +130,7 @@ func (a *application) shellCommand() *cobra.Command {
 	}}
 }
 
-func (a *application) manifestCommand() *cobra.Command {
+func (m *application) manifestCommand() *cobra.Command {
 	command := &cobra.Command{Use: "manifest", Short: "Validate or run a lab manifest"}
 	command.AddCommand(
 		&cobra.Command{Use: "validate PATH", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
@@ -132,7 +138,7 @@ func (a *application) manifestCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printValue(manifest)
+			return m.printValue(manifest)
 		}},
 		&cobra.Command{Use: "run PATH", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 			path, err := filepath.Abs(args[0])
@@ -142,21 +148,21 @@ func (a *application) manifestCommand() *cobra.Command {
 			if _, err := lab.LoadManifest(path); err != nil {
 				return err
 			}
-			if err := a.ensureUp(); err != nil {
+			if err := m.ensureUp(); err != nil {
 				return err
 			}
-			return a.simpleManifest(path)
+			return m.simpleManifest(path)
 		}},
 	)
 	return command
 }
 
-func (a *application) scenarioCommand() *cobra.Command {
+func (m *application) scenarioCommand() *cobra.Command {
 	command := &cobra.Command{Use: "scenario", Short: "List or run built-in guided scenarios"}
 	command.AddCommand(
 		&cobra.Command{Use: "list", RunE: func(*cobra.Command, []string) error {
 			names := []string{"forward-route", "decap", "nat64"}
-			if a.json {
+			if m.json {
 				return json.NewEncoder(os.Stdout).Encode(names)
 			}
 			for _, name := range names {
@@ -173,21 +179,21 @@ func (a *application) scenarioCommand() *cobra.Command {
 			if _, err := lab.LoadManifest(path); err != nil {
 				return err
 			}
-			if err := a.ensureUp(); err != nil {
+			if err := m.ensureUp(); err != nil {
 				return err
 			}
-			return a.simpleManifest(path)
+			return m.simpleManifest(path)
 		}},
 	)
 	return command
 }
 
-func (a *application) serveCommand() *cobra.Command {
-	command := &cobra.Command{Use: "serve", Hidden: true, RunE: func(*cobra.Command, []string) error { return a.serve() }}
+func (m *application) serveCommand() *cobra.Command {
+	command := &cobra.Command{Use: "serve", Hidden: true, RunE: func(*cobra.Command, []string) error { return m.serve() }}
 	return command
 }
 
-func (a *application) doctor() error {
+func (m *application) doctor() error {
 	root, err := projectRoot()
 	if err != nil {
 		return err
@@ -218,7 +224,7 @@ func (a *application) doctor() error {
 			all = false
 		}
 	}
-	if a.json {
+	if m.json {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": all, "checks": checks})
 	} else {
 		for _, item := range checks {
@@ -235,11 +241,11 @@ func (a *application) doctor() error {
 	return nil
 }
 
-func (a *application) up() error {
-	if _, err := a.call(request{Action: "status"}); err == nil {
-		return a.simple("status", nil)
+func (m *application) up() error {
+	if _, err := m.call(request{Action: "status"}); err == nil {
+		return m.simple("status", nil)
 	}
-	runtime, err := provisionSession(a.session)
+	runtime, err := provisionSession(m.session)
 	if err != nil {
 		return err
 	}
@@ -256,7 +262,7 @@ func (a *application) up() error {
 	if err != nil {
 		return err
 	}
-	command := exec.Command(executable, "--session", a.session, "serve")
+	command := exec.Command(executable, "--session", m.session, "serve")
 	command.Stdout, command.Stderr, command.Stdin = logFile, logFile, nil
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := command.Start(); err != nil {
@@ -268,8 +274,8 @@ func (a *application) up() error {
 	go func() { exited <- command.Wait() }()
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
-		if response, callErr := a.call(request{Action: "status"}); callErr == nil {
-			return a.printResponse(response)
+		if response, callErr := m.call(request{Action: "status"}); callErr == nil {
+			return m.printResponse(response)
 		}
 		select {
 		case processErr := <-exited:
@@ -280,37 +286,37 @@ func (a *application) up() error {
 	return fmt.Errorf("lab did not start; see %s", filepath.Join(dir, "supervisor.log"))
 }
 
-func (a *application) ensureUp() error {
-	if _, err := a.call(request{Action: "status"}); err == nil {
+func (m *application) ensureUp() error {
+	if _, err := m.call(request{Action: "status"}); err == nil {
 		return nil
 	}
-	return a.up()
+	return m.up()
 }
 
-func (a *application) simple(action string, argv []string) error {
-	response, err := a.call(request{Action: action, Argv: argv})
+func (m *application) simple(action string, argv []string) error {
+	response, err := m.call(request{Action: action, Argv: argv})
 	if err != nil {
 		return err
 	}
-	return a.printResponse(response)
+	return m.printResponse(response)
 }
 
-func (a *application) simpleManifest(path string) error {
-	response, err := a.call(request{Action: "manifest", Manifest: path})
+func (m *application) simpleManifest(path string) error {
+	response, err := m.call(request{Action: "manifest", Manifest: path})
 	if err != nil {
 		return err
 	}
-	return a.printResponse(response)
+	return m.printResponse(response)
 }
 
-func (a *application) call(value request) (*response, error) {
-	socket, err := sessionSocket(a.session)
+func (m *application) call(value request) (*response, error) {
+	socket, err := sessionSocket(m.session)
 	if err != nil {
 		return nil, err
 	}
 	connection, err := net.DialTimeout("unix", socket, time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("lab session %q is not running; use 'yanet-lab up'", a.session)
+		return nil, fmt.Errorf("lab session %q is not running; use 'yanet-lab up'", m.session)
 	}
 	defer connection.Close()
 	if err := json.NewEncoder(connection).Encode(value); err != nil {
@@ -323,8 +329,8 @@ func (a *application) call(value request) (*response, error) {
 	return &reply, nil
 }
 
-func (a *application) printResponse(value *response) error {
-	if a.json {
+func (m *application) printResponse(value *response) error {
+	if m.json {
 		_ = json.NewEncoder(os.Stdout).Encode(value)
 	} else if value.Report != nil {
 		for _, result := range value.Report.Results {
@@ -349,16 +355,16 @@ func (a *application) printResponse(value *response) error {
 	return nil
 }
 
-func (a *application) printValue(value any) error {
-	if a.json {
+func (m *application) printValue(value any) error {
+	if m.json {
 		return json.NewEncoder(os.Stdout).Encode(value)
 	}
 	fmt.Println("manifest is valid")
 	return nil
 }
 
-func (a *application) serve() error {
-	runtime, err := provisionSession(a.session)
+func (m *application) serve() error {
+	runtime, err := provisionSession(m.session)
 	if err != nil {
 		return err
 	}
@@ -368,7 +374,7 @@ func (a *application) serve() error {
 	// at the same path, so remove the placeholder before net.Listen and let
 	// net.Listen recreate it as a socket inode.
 	_ = os.Remove(socket)
-	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{PoolName: "lab-" + a.session})
+	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{PoolName: "lab-" + m.session})
 	if err != nil {
 		return err
 	}
@@ -826,6 +832,13 @@ func cachedProjectRoot() (string, error) {
 // resetProjectRootCache clears the cached project root. Tests call it
 // after t.Chdir or after overriding walkStart to ensure the next
 // projectRoot call walks the new cwd.
+//
+// Contract: callers MUST NOT invoke resetProjectRootCache concurrently
+// with projectRoot(). The cache fields are unsynchronized; concurrent
+// access can yield a torn read of projectRootValue or panic when the
+// sync.Once reassignment races with an in-flight Do. Production never
+// calls this function; tests call it only during setup or teardown,
+// before goroutines begin or after they have joined.
 func resetProjectRootCache() {
 	projectRootOnce = sync.Once{}
 	projectRootValue = ""
