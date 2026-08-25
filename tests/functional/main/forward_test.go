@@ -3,6 +3,7 @@ package functional
 import (
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,12 +23,13 @@ func deviceCounterValues(
 ) map[string][]uint64 {
 	t.Helper()
 
-	command := testFramework.Paths.CLI("yanet-cli-counters") +
-		" --format json --device " + device + " --kind device"
+	var command strings.Builder
+	command.WriteString(testFramework.Paths.CLI("yanet-cli-counters"))
+	command.WriteString(" --format json --device " + device + " --kind device")
 	for _, name := range names {
-		command += " --name " + name
+		command.WriteString(" --name " + name)
 	}
-	output, err := testFramework.ExecuteCommand(command)
+	output, err := testFramework.ExecuteCommand(command.String())
 	require.NoError(t, err)
 
 	var response struct {
