@@ -2,12 +2,13 @@ package operator
 
 import (
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/xnetip"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
@@ -96,12 +97,12 @@ func convertRule(r yamlForwardRule) (*forwardpb.Rule, error) {
 		vlanRanges[idx] = &filterpb.VlanRange{From: vr.From, To: vr.To}
 	}
 
-	srcs, err := convertCIDRs(r.Srcs)
+	sources4, sources6, err := convertCIDRs(r.Srcs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse src: %w", err)
 	}
 
-	dsts, err := convertCIDRs(r.Dsts)
+	destinations4, destinations6, err := convertCIDRs(r.Dsts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse dst: %w", err)
 	}
@@ -112,10 +113,12 @@ func convertRule(r yamlForwardRule) (*forwardpb.Rule, error) {
 			Mode:    mode,
 			Counter: r.Counter,
 		},
-		Devices:    devices,
-		VlanRanges: vlanRanges,
-		Srcs:       srcs,
-		Dsts:       dsts,
+		Devices:       devices,
+		VlanRanges:    vlanRanges,
+		Sources4:      sources4,
+		Sources6:      sources6,
+		Destinations4: destinations4,
+		Destinations6: destinations6,
 	}, nil
 }
 
@@ -133,20 +136,32 @@ func convertMode(m yamlModeKind) (forwardpb.ForwardMode, error) {
 	}
 }
 
-// convertCIDRs parses a slice of CIDR strings into filterpb.IPNet values.
-func convertCIDRs(cidrs []string) ([]*filterpb.IPNet, error) {
-	out := make([]*filterpb.IPNet, 0, len(cidrs))
+// convertCIDRs parses a slice of CIDR strings into family-typed network
+// messages, preserving the within-family order of the input.
+//
+// An IPv4-mapped IPv6 address counts as IPv6, as it did when the family
+// was derived from the address byte length.
+func convertCIDRs(cidrs []string) ([]*commonpb.IPv4Network, []*commonpb.IPv6Network, error) {
+	var v4 []*commonpb.IPv4Network
+	var v6 []*commonpb.IPv6Network
 	for _, s := range cidrs {
 		prefix, err := netip.ParsePrefix(s)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse CIDR %q: %w", s, err)
+			return nil, nil, fmt.Errorf("failed to parse CIDR %q: %w", s, err)
 		}
-		addr := prefix.Masked().Addr().AsSlice()
-		mask := net.CIDRMask(prefix.Bits(), len(addr)*8)
-		out = append(out, &filterpb.IPNet{
-			Addr: addr,
-			Mask: mask,
-		})
+		if prefix.Addr().Is4() {
+			net, ok := xnetip.Network4FromPrefix(prefix)
+			if !ok {
+				return nil, nil, fmt.Errorf("invalid CIDR %q", s)
+			}
+			v4 = append(v4, commonpb.NewIPv4NetworkFrom4(net))
+			continue
+		}
+		net, ok := xnetip.Network6FromPrefix(prefix)
+		if !ok {
+			return nil, nil, fmt.Errorf("invalid CIDR %q", s)
+		}
+		v6 = append(v6, commonpb.NewIPv6NetworkFrom6(net))
 	}
-	return out, nil
+	return v4, v6, nil
 }

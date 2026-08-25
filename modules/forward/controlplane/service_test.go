@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -294,6 +295,119 @@ func TestUpdateConfigMaterializesEmptyCounterUTF8Boundary(t *testing.T) {
 
 	_, err = proto.Marshal(response)
 	require.NoError(t, err, "ShowConfigResponse carrying the materialised counter must marshal")
+}
+
+// v4net builds an IPv4Network message from xnetip network text, in any
+// form xnetip parsing accepts: CIDR or an explicit address/mask.
+func v4net(s string) *commonpb.IPv4Network {
+	return commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4(s))
+}
+
+// v6net builds an IPv6Network message the same way.
+func v6net(s string) *commonpb.IPv6Network {
+	return commonpb.NewIPv6NetworkFrom6(xnetip.MustParseNetwork6(s))
+}
+
+// TestUpdateConfigRejectsOutOfClassMasks verifies that UpdateConfig
+// enforces the filter compiler's mask classes on the network lists.
+//
+// A non-contiguous IPv4 mask and an IPv6 mask with a hole inside a
+// 64-bit half are both rejected.
+func TestUpdateConfigRejectsOutOfClassMasks(t *testing.T) {
+	tests := []struct {
+		name string
+		rule *forwardpb.Rule
+	}{
+		{
+			name: "non-contiguous IPv4 source mask",
+			rule: &forwardpb.Rule{
+				Action:   &forwardpb.Action{Target: "device0"},
+				Sources4: []*commonpb.IPv4Network{v4net("192.0.2.0/255.0.255.0")},
+			},
+		},
+		{
+			name: "IPv6 destination mask with a hole inside a half",
+			rule: &forwardpb.Rule{
+				Action:        &forwardpb.Action{Target: "device0"},
+				Destinations6: []*commonpb.IPv6Network{v6net("2001:db8::/ffff:0:ffff::")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := forward.NewForwardService(&mockBackend{})
+
+			_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+				Name:  "config",
+				Rules: []*forwardpb.Rule{tt.rule},
+			})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
+// TestUpdateConfigAcceptsV6MaskHoleAtHalfBoundary verifies that an IPv6
+// mask with its hole exactly at the /64 boundary reaches the backend.
+func TestUpdateConfigAcceptsV6MaskHoleAtHalfBoundary(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	const network = "2001:db8::/ffff:ffff:ffff:0:ffff::"
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action:   &forwardpb.Action{Target: "device0"},
+				Sources6: []*commonpb.IPv6Network{v6net(network)},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous(network)}, backend.rules[0].Src6s)
+}
+
+// TestUpdateConfigPreservesWithinFamilyNetworkOrder verifies that the
+// networks of every family-typed list reach the backend in request order.
+func TestUpdateConfigPreservesWithinFamilyNetworkOrder(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := forward.NewForwardService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*forwardpb.Rule{
+			{
+				Action:        &forwardpb.Action{Target: "device0"},
+				Sources4:      []*commonpb.IPv4Network{v4net("192.0.2.0/24"), v4net("10.0.0.0/8")},
+				Sources6:      []*commonpb.IPv6Network{v6net("2001:db8:1::/48"), v6net("2001:db8::/32")},
+				Destinations4: []*commonpb.IPv4Network{v4net("203.0.113.0/24"), v4net("198.51.100.0/24")},
+				Destinations6: []*commonpb.IPv6Network{v6net("2001:db8:2::/48"), v6net("2001:db8:3::/48")},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	rule := backend.rules[0]
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("192.0.2.0/24"),
+		xnetip.MustParseContiguous4("10.0.0.0/8"),
+	}, rule.Src4s)
+	require.Equal(t, []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous("2001:db8:1::/48"),
+		xnetip.MustParseBiContiguous("2001:db8::/32"),
+	}, rule.Src6s)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("203.0.113.0/24"),
+		xnetip.MustParseContiguous4("198.51.100.0/24"),
+	}, rule.Dst4s)
+	require.Equal(t, []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous("2001:db8:2::/48"),
+		xnetip.MustParseBiContiguous("2001:db8:3::/48"),
+	}, rule.Dst6s)
 }
 
 // TestMetricsExactTagNeverReadsForeignCounter verifies that an exact

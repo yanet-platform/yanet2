@@ -1,6 +1,6 @@
 import type { Rule, VlanRange } from '@yanet/core/api/forward';
 import { ForwardMode } from '@yanet/core/api/forward';
-import { formatIPNetItem, formatRange, parseCidrsToIPNets, parseRangesRaw } from '@yanet/core/utils';
+import { formatRange, parseRangesRaw, partitionCidrsToTyped } from '@yanet/core/utils';
 import type { RuleItem, RuleDraft } from './types';
 
 /** Format VlanRange array to a display string. */
@@ -35,8 +35,8 @@ export const rulesToNgItems = (rules: Rule[]): RuleItem[] => {
         const deviceNames = (rule.devices || []).map((d) => d.name || '').filter(Boolean);
         const vlansDisplay = formatVlanRanges(rule.vlan_ranges);
         const isAllVlans = computeIsAllVlans(rule.vlan_ranges);
-        const sourceCidrs = (rule.srcs || []).map(formatIPNetItem).filter(Boolean);
-        const dstCidrs = (rule.dsts || []).map(formatIPNetItem).filter(Boolean);
+        const sourceCidrs = [...(rule.sources4 || []), ...(rule.sources6 || [])];
+        const dstCidrs = [...(rule.destinations4 || []), ...(rule.destinations6 || [])];
         const mode = rule.action?.mode ?? ForwardMode.NONE;
 
         return {
@@ -57,18 +57,24 @@ export const rulesToNgItems = (rules: Rule[]): RuleItem[] => {
     });
 };
 
-/** Convert a RuleDraft to a Rule for the API. */
-export const draftToRule = (draft: RuleDraft): Rule => ({
-    action: {
-        target: draft.target,
-        mode: draft.mode,
-        counter: draft.counter || undefined,
-    },
-    devices: draft.deviceNames.map((name) => ({ name })),
-    vlan_ranges: parseRangesRaw(draft.vlansRaw),
-    srcs: parseCidrsToIPNets(draft.sourceCidrs),
-    dsts: parseCidrsToIPNets(draft.dstCidrs),
-});
+/** Convert a RuleDraft to a Rule for the API, carrying networks in the family-typed lists. */
+export const draftToRule = (draft: RuleDraft): Rule => {
+    const sources = partitionCidrsToTyped(draft.sourceCidrs);
+    const destinations = partitionCidrsToTyped(draft.dstCidrs);
+    return {
+        action: {
+            target: draft.target,
+            mode: draft.mode,
+            counter: draft.counter || undefined,
+        },
+        devices: draft.deviceNames.map((name) => ({ name })),
+        vlan_ranges: parseRangesRaw(draft.vlansRaw),
+        sources4: sources.v4,
+        sources6: sources.v6,
+        destinations4: destinations.v4,
+        destinations6: destinations.v6,
+    };
+};
 
 /** Convert a RuleItem back to a RuleDraft for editing. */
 export const itemToDraft = (item: RuleItem): RuleDraft => ({

@@ -2,8 +2,8 @@ import { createService, type CallOptions } from './client';
 
 // Forward types based on forwardpb/forward.proto
 
-import type { Device, VlanRange, IPNet, ListConfigsResponse } from './shared';
-export type { Device, VlanRange, IPNet, ListConfigsResponse };
+import type { Device, VlanRange, ListConfigsResponse } from './shared';
+export type { Device, VlanRange, ListConfigsResponse };
 
 export enum ForwardMode {
     NONE = 0,
@@ -27,8 +27,13 @@ export interface Rule {
     action?: Action;
     devices?: Device[];
     vlan_ranges?: VlanRange[];
-    srcs?: IPNet[];
-    dsts?: IPNet[];
+    // Family-typed network lists (commonpb.IPv4Network and
+    // commonpb.IPv6Network), serialized by the gateway as bare network
+    // strings.
+    sources4?: string[];
+    sources6?: string[];
+    destinations4?: string[];
+    destinations6?: string[];
 }
 
 // Request/Response types

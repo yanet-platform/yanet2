@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import type { Rule } from '@yanet/core/api/forward';
 import { ForwardMode, FORWARD_MODE_LABELS } from '@yanet/core/api/forward';
-import { formatIPNetItem, dumpYamlDoc } from '@yanet/core/utils';
+import { dumpYamlDoc } from '@yanet/core/utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '@yanet/core/components';
 import { effectiveCounterName } from './hooks';
 
@@ -15,8 +15,8 @@ import { effectiveCounterName } from './hooks';
 export const rulesToDiffYaml = (rules: Rule[], showEffectiveCounter = false): string => {
     const yamlRules = rules.map((r) => {
         const devices = (r.devices ?? []).map(d => d.name ?? '').filter(Boolean);
-        const srcs = (r.srcs ?? []).map(formatIPNetItem).filter(Boolean);
-        const dsts = (r.dsts ?? []).map(formatIPNetItem).filter(Boolean);
+        const srcs = [...(r.sources4 ?? []), ...(r.sources6 ?? [])];
+        const dsts = [...(r.destinations4 ?? []), ...(r.destinations6 ?? [])];
         const vlan_ranges = (r.vlan_ranges ?? []).map(vr => ({
             from: vr.from ?? 0,
             to: vr.to ?? 0,

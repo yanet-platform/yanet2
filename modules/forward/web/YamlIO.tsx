@@ -3,7 +3,7 @@ import yaml from 'js-yaml';
 import type { Rule } from '@yanet/core/api/forward';
 import { ForwardMode } from '@yanet/core/api/forward';
 import { toaster } from '@yanet/core/utils';
-import { parseCidrsToIPNets } from '@yanet/core/utils';
+import { partitionCidrsToTyped } from '@yanet/core/utils';
 import { rulesToDiffYaml } from './SaveDiffModal';
 import YamlIOModal from '@yanet/core/components/YamlIOModal';
 
@@ -82,16 +82,24 @@ export const parseYamlToRules = (text: string): Rule[] => {
         });
 
         const srcsRaw = Array.isArray(row.srcs) ? row.srcs : [];
-        const srcs = parseCidrsToIPNets(
+        const sources = partitionCidrsToTyped(
             (srcsRaw as unknown[]).filter((s): s is string => typeof s === 'string'),
         );
 
         const dstsRaw = Array.isArray(row.dsts) ? row.dsts : [];
-        const dsts = parseCidrsToIPNets(
+        const destinations = partitionCidrsToTyped(
             (dstsRaw as unknown[]).filter((s): s is string => typeof s === 'string'),
         );
 
-        return { action: { target, mode, counter }, devices, vlan_ranges, srcs, dsts };
+        return {
+            action: { target, mode, counter },
+            devices,
+            vlan_ranges,
+            sources4: sources.v4,
+            sources6: sources.v6,
+            destinations4: destinations.v4,
+            destinations6: destinations.v6,
+        };
     });
 
     return rules;

@@ -9,11 +9,12 @@ use clap_complete::{
     CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
+use commonpb::pb::{IPv4Network, IPv6Network};
 use forwardpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     forward_service_client::ForwardServiceClient,
 };
-use netip::{Contiguous, IpNetwork};
+use netip::IpNetwork;
 use serde::{Deserialize, Serialize, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -157,6 +158,9 @@ impl TryFrom<ForwardRule> for forwardpb::Rule {
             ModeKind::Unknown(mode) => return Err(format!("unknown forward mode {mode}").into()),
         };
 
+        let (sources4, sources6) = partition_nets(forward_rule.srcs)?;
+        let (destinations4, destinations6) = partition_nets(forward_rule.dsts)?;
+
         Ok(Self {
             action: Some(forwardpb::Action {
                 target: forward_rule.target,
@@ -165,18 +169,36 @@ impl TryFrom<ForwardRule> for forwardpb::Rule {
             }),
             devices: forward_rule.devices.into_iter().map(|m| m.into()).collect(),
             vlan_ranges: forward_rule.vlan_ranges.into_iter().map(Into::into).collect(),
-            srcs: forward_rule
-                .srcs
-                .into_iter()
-                .map(|n| Contiguous::<IpNetwork>::parse(&n).map(filterpb::pb::IpNet::from))
-                .collect::<Result<Vec<_>, _>>()?,
-            dsts: forward_rule
-                .dsts
-                .into_iter()
-                .map(|n| Contiguous::<IpNetwork>::parse(&n).map(filterpb::pb::IpNet::from))
-                .collect::<Result<Vec<_>, _>>()?,
+            sources4,
+            sources6,
+            destinations4,
+            destinations6,
         })
     }
+}
+
+/// Partitions a mixed-family network list into the family-typed wire
+/// messages, preserving the within-family order.
+fn partition_nets(nets: Vec<String>) -> Result<(Vec<IPv4Network>, Vec<IPv6Network>), Box<dyn core::error::Error>> {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    for net in nets {
+        match IpNetwork::parse(&net)? {
+            IpNetwork::V4(net) => v4.push(net.into()),
+            IpNetwork::V6(net) => v6.push(net.into()),
+        }
+    }
+
+    Ok((v4, v6))
+}
+
+/// Renders the family-typed wire lists back into one mixed list, IPv4
+/// entries first.
+fn render_nets(v4: Vec<IPv4Network>, v6: Vec<IPv6Network>) -> Vec<String> {
+    v4.into_iter()
+        .map(|net| net.to_string())
+        .chain(v6.into_iter().map(|net| net.to_string()))
+        .collect()
 }
 
 impl TryFrom<forwardpb::Rule> for ForwardRule {
@@ -197,8 +219,8 @@ impl TryFrom<forwardpb::Rule> for ForwardRule {
             counter: action.counter,
             devices: rule.devices.into_iter().map(|d| d.name).collect(),
             vlan_ranges: rule.vlan_ranges.into_iter().map(VlanRange::from).collect(),
-            srcs: rule.srcs.into_iter().map(|n| n.to_string()).collect(),
-            dsts: rule.dsts.into_iter().map(|n| n.to_string()).collect(),
+            srcs: render_nets(rule.sources4, rule.sources6),
+            dsts: render_nets(rule.destinations4, rule.destinations6),
         })
     }
 }
@@ -209,11 +231,15 @@ impl TryFrom<forwardpb::Rule> for ForwardRule {
 /// and an empty counter as an empty string, and none of them is optional on
 /// `update` either.
 ///
-/// A network renders from the address and mask actually stored, so
-/// re-applying shown output normalises an address that carries host bits
-/// outside its mask. A stored IPv6 network's mask may have a hole at the
-/// `/64` boundary. Such a network renders in expanded-mask form, and
-/// `update` rejects it because it requires a contiguous mask.
+/// The `srcs` and `dsts` lists are mixed-family in the file but travel
+/// family-split on the wire, so `show` renders IPv4 entries before IPv6
+/// entries and only within-family order survives a round trip. A network
+/// parses in CIDR or address/mask form, normalising an address that
+/// carries host bits outside its mask. Any parseable mask is sent as-is,
+/// and the server enforces the filter compiler's mask classes: contiguous
+/// for IPv4, bi-contiguous for IPv6. A stored IPv6 mask with its hole
+/// exactly at the `/64` boundary renders in expanded-mask form and
+/// round-trips through `update`.
 ///
 /// A `counter` left empty on `update` is not stored empty: the server
 /// materialises it to `to_<target>` before storing, bounded to whatever
@@ -419,10 +445,12 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 mod test {
     use super::*;
 
-    fn ip_net(cidr: &str) -> filterpb::pb::IpNet {
-        Contiguous::<IpNetwork>::parse(cidr)
-            .expect("valid cidr in test fixture")
-            .into()
+    fn v4_net(net: &str) -> IPv4Network {
+        net.parse().expect("valid IPv4 network in test fixture")
+    }
+
+    fn v6_net(net: &str) -> IPv6Network {
+        net.parse().expect("valid IPv6 network in test fixture")
     }
 
     fn sample_rules() -> Vec<forwardpb::Rule> {
@@ -441,8 +469,10 @@ mod test {
                     filterpb::pb::VlanRange { from: 0, to: 100 },
                     filterpb::pb::VlanRange { from: 200, to: 300 },
                 ],
-                srcs: vec![ip_net("192.0.2.0/24"), ip_net("2001:db8::/32")],
-                dsts: vec![ip_net("203.0.113.0/24"), ip_net("2001:db8:1::/48")],
+                sources4: vec![v4_net("192.0.2.0/24")],
+                sources6: vec![v6_net("2001:db8::/32")],
+                destinations4: vec![v4_net("203.0.113.0/24")],
+                destinations6: vec![v6_net("2001:db8:1::/48")],
             },
             forwardpb::Rule {
                 action: Some(forwardpb::Action {
@@ -452,8 +482,10 @@ mod test {
                 }),
                 devices: vec![],
                 vlan_ranges: vec![],
-                srcs: vec![],
-                dsts: vec![],
+                sources4: vec![],
+                sources6: vec![],
+                destinations4: vec![],
+                destinations6: vec![],
             },
             forwardpb::Rule {
                 action: Some(forwardpb::Action {
@@ -463,8 +495,10 @@ mod test {
                 }),
                 devices: vec![filterpb::pb::Device { name: "eth2".to_string() }],
                 vlan_ranges: vec![filterpb::pb::VlanRange { from: 10, to: 20 }],
-                srcs: vec![ip_net("10.0.0.0/8")],
-                dsts: vec![ip_net("10.1.0.0/16")],
+                sources4: vec![v4_net("10.0.0.0/8")],
+                sources6: vec![],
+                destinations4: vec![v4_net("10.1.0.0/16")],
+                destinations6: vec![],
             },
         ]
     }
@@ -541,6 +575,55 @@ rules:
     }
 
     #[test]
+    fn mixed_family_networks_partition_by_family_preserving_order() {
+        let yaml = r#"
+rules:
+  - target: "t"
+    mode: "NONE"
+    counter: ""
+    devices: []
+    vlan_ranges: []
+    srcs:
+      - 2001:db8::/32
+      - 192.0.2.0/24
+      - 10.0.0.0/8
+    dsts: []
+"#;
+
+        let config: ForwardConfig = serde_yaml::from_str(yaml).expect("mixed families must parse");
+        let rules: Vec<forwardpb::Rule> = config.try_into().expect("mixed families must convert");
+
+        assert_eq!(vec![v4_net("192.0.2.0/24"), v4_net("10.0.0.0/8")], rules[0].sources4);
+        assert_eq!(vec![v6_net("2001:db8::/32")], rules[0].sources6);
+    }
+
+    #[test]
+    fn a_bi_contiguous_v6_mask_round_trips_through_the_rule_file() {
+        let rule = forwardpb::Rule {
+            action: Some(forwardpb::Action {
+                target: "t".to_string(),
+                mode: forwardpb::ForwardMode::None as i32,
+                counter: "c".to_string(),
+            }),
+            devices: vec![],
+            vlan_ranges: vec![],
+            sources4: vec![],
+            // The mask hole sits exactly at the /64 boundary, which the
+            // filter compiler accepts.
+            sources6: vec![v6_net("2001:db8::/ffff:ffff:ffff:0:ffff::")],
+            destinations4: vec![],
+            destinations6: vec![],
+        };
+
+        let config = ForwardConfig::try_from(vec![rule.clone()]).expect("a bi-contiguous v6 network must render");
+        let yaml = serde_yaml::to_string(&config).expect("forward config must serialize");
+        let parsed: ForwardConfig = serde_yaml::from_str(&yaml).expect("forward config must deserialize");
+        let rebuilt: Vec<forwardpb::Rule> = parsed.try_into().expect("forward config must convert back");
+
+        assert_eq!(vec![rule], rebuilt);
+    }
+
+    #[test]
     fn an_unrecognised_mode_number_is_shown_but_rejected_by_update() {
         let rule = forwardpb::Rule {
             action: Some(forwardpb::Action {
@@ -550,8 +633,10 @@ rules:
             }),
             devices: vec![],
             vlan_ranges: vec![],
-            srcs: vec![],
-            dsts: vec![],
+            sources4: vec![],
+            sources6: vec![],
+            destinations4: vec![],
+            destinations6: vec![],
         };
 
         let config = ForwardConfig::try_from(vec![rule]).expect("an unrecognised mode must not blank the show");

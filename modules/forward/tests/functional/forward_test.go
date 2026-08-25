@@ -14,7 +14,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -374,11 +374,11 @@ func TestForward_EmptyCounterMaterializesToTarget(t *testing.T) {
 					Target: "port1",
 					Mode:   forwardpb.ForwardMode_OUT,
 				},
-				Srcs: []*filterpb.IPNet{
-					{Addr: []byte{0, 0, 0, 0}, Mask: []byte{0, 0, 0, 0}},
+				Sources4: []*commonpb.IPv4Network{
+					commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("0.0.0.0/0")),
 				},
-				Dsts: []*filterpb.IPNet{
-					{Addr: []byte{10, 0, 0, 0}, Mask: []byte{255, 255, 255, 0}},
+				Destinations4: []*commonpb.IPv4Network{
+					commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("10.0.0.0/24")),
 				},
 			},
 		},

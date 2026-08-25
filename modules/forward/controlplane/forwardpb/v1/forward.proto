@@ -3,6 +3,8 @@ syntax = "proto3";
 package modules.forward.controlplane.forwardpb.v1;
 
 import "common/filterpb/v1/filter.proto";
+import "common/commonpb/v1/ipv4network.proto";
+import "common/commonpb/v1/ipv6network.proto";
 import "common/commonpb/v1/metric.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1;forwardpb";
@@ -59,8 +61,10 @@ message Rule {
 
   repeated common.filterpb.v1.Device devices = 2;
   repeated common.filterpb.v1.VlanRange vlan_ranges = 3;
-  repeated common.filterpb.v1.IPNet srcs = 4;
-  repeated common.filterpb.v1.IPNet dsts = 5;
+  repeated common.commonpb.v1.IPv4Network sources4 = 4;
+  repeated common.commonpb.v1.IPv6Network sources6 = 5;
+  repeated common.commonpb.v1.IPv4Network destinations4 = 6;
+  repeated common.commonpb.v1.IPv6Network destinations6 = 7;
 }
 
 message Action {
