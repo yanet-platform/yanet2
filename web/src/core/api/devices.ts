@@ -45,6 +45,38 @@ export interface UpdateDeviceVlanResponse {
     error?: string;
 }
 
+// VXLAN device update request/response
+export interface UpdateDeviceVxlanRequest {
+    name?: string;
+    device?: Device;
+    vni?: number;
+    dst_port?: number;
+    src_mac?: string;
+    dst_mac?: string;
+    src_ip?: string;
+    dst_ip?: string;
+}
+
+export interface UpdateDeviceVxlanResponse {
+    error?: string;
+}
+
+// VXLAN device get request/response
+export interface GetDeviceVxlanRequest {
+    name?: string;
+}
+
+export interface GetDeviceVxlanResponse {
+    name?: string;
+    device?: Device;
+    vni?: number;
+    dst_port?: number;
+    src_mac?: string;
+    dst_mac?: string;
+    src_ip?: string;
+    dst_ip?: string;
+}
+
 /** Device type discriminator; the concrete set is owned by the device registry. */
 export type DeviceType = string;
 
@@ -67,6 +99,7 @@ export const toDevicePayload = (
 const deviceService = createService('controlplane.ynpb.v1.DeviceService');
 const plainService = createService('devices.plain.controlplane.plainpb.v1.DevicePlainService');
 const vlanService = createService('devices.vlan.controlplane.vlanpb.v1.DeviceVlanService');
+const vxlanService = createService('devices.vxlan.controlplane.vxlanpb.v1.DeviceVxlanService');
 
 export const devices = {
     list: (request: ListDevicesRequest, options?: CallOptions): Promise<ListDevicesResponse> => {
@@ -77,5 +110,11 @@ export const devices = {
     },
     updateVlan: (request: UpdateDeviceVlanRequest, options?: CallOptions): Promise<UpdateDeviceVlanResponse> => {
         return vlanService.callWithBody<UpdateDeviceVlanResponse>('UpdateDevice', request, options);
+    },
+    updateVxlan: (request: UpdateDeviceVxlanRequest, options?: CallOptions): Promise<UpdateDeviceVxlanResponse> => {
+        return vxlanService.callWithBody<UpdateDeviceVxlanResponse>('UpdateDevice', request, options);
+    },
+    getVxlan: (request: GetDeviceVxlanRequest, options?: CallOptions): Promise<GetDeviceVxlanResponse> => {
+        return vxlanService.callWithBody<GetDeviceVxlanResponse>('GetDevice', request, options);
     },
 };

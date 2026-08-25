@@ -5,6 +5,7 @@ import (
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	trafgen "github.com/yanet-platform/yanet2/devices/trafgen/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
+	vxlan "github.com/yanet-platform/yanet2/devices/vxlan/controlplane"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
@@ -52,4 +53,6 @@ type DevicesConfig struct {
 	Vlan xcfg.Optional[vlan.Config] `yaml:"vlan"`
 	// Trafgen is the configuration for the traffic generator device.
 	Trafgen xcfg.Optional[trafgen.Config] `yaml:"trafgen"`
+	// Vxlan is the configuration for the vxlan device.
+	Vxlan xcfg.Optional[vxlan.Config] `yaml:"vxlan"`
 }

@@ -37,6 +37,7 @@ CLI_MODULES := \
 	decap \
 	device-plain \
 	device-vlan \
+	device-vxlan \
 	device-trafgen \
 	dscp \
 	fwstate \

@@ -37,6 +37,7 @@ members = [
     "modules/route/cli/route",
     "devices/plain/cli",
     "devices/vlan/cli",
+    "devices/vxlan/cli",
     "devices/trafgen/cli",
     "objects/fwstate/cli",
     "operators/pipeline/cli",
