@@ -582,8 +582,8 @@ test3(void *memory) {
 // addr, the same way FILTER_ATTR_QUERY_FUNC(net6_src/net6_dst) does.
 static uint32_t
 local_net6_slot(struct net6_classifier *c, const uint8_t addr[NET6_LEN]) {
-	uint32_t hi = lpm8_lookup(&c->hi, addr);
-	uint32_t lo = lpm8_lookup(&c->lo, addr + 8);
+	uint32_t hi = lpm_hash_lookup(&c->hi, addr);
+	uint32_t lo = lpm_hash_lookup(&c->lo, addr + 8);
 	return value_table_get(&c->comb, hi, lo);
 }
 
@@ -598,8 +598,8 @@ shared_net6_slot(
 	struct net6_classifier *local,
 	const uint8_t addr[NET6_LEN]
 ) {
-	uint32_t hi = lpm8_lookup(&dir->hi, addr);
-	uint32_t lo = lpm8_lookup(&dir->lo, addr + 8);
+	uint32_t hi = lpm_hash_lookup(&dir->hi, addr);
+	uint32_t lo = lpm_hash_lookup(&dir->lo, addr + 8);
 	return value_table_get(&local->comb, remap_hi[hi], remap_lo[lo]);
 }
 

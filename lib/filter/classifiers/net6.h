@@ -2,13 +2,13 @@
 
 #include <stdbool.h>
 
-#include "common/lpm.h"
+#include "common/lpm_hash.h"
 #include "common/memory_address.h"
 #include "common/value.h"
 
 struct net6_classifier {
-	struct lpm hi;
-	struct lpm lo;
+	struct lpm_hash hi;
+	struct lpm_hash lo;
 	struct value_table comb;
 };
 
@@ -21,8 +21,8 @@ struct net6_classifier {
 // have hi_count entries and remap_lo_* arrays have lo_count entries. The
 // array pointers are shared-memory relative pointers.
 struct net6_share_dir {
-	struct lpm hi;
-	struct lpm lo;
+	struct lpm_hash hi;
+	struct lpm_hash lo;
 	uint32_t hi_count;
 	uint32_t lo_count;
 	uint32_t *remap_hi_a;

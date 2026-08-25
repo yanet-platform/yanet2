@@ -130,71 +130,130 @@ range_index_free(struct range_index *range_index) {
 }
 
 /*
- * Build an LPM from a range_index.
+ * Build callback invoked once per contiguous range of the partition stored in
+ * a range_index.
  *
- * The range_index stores a contiguous, ascending, non-overlapping partition
- * of the full keyspace: radix maps each range-start key -> an index into the
- * values[] array.  This function walks the radix in ascending order, derives
- * each range's upper bound from the next key, and inserts [from..to] -> value
- * into the LPM.  The LPM must already be initialised by the caller.
+ * from and to bound the range inclusively (big-endian keys), value is the
+ * payload the range_index assigned to it, and ctx is the opaque pointer passed
+ * alongside the callback from the build call site. Return 0 to keep walking,
+ * non-zero to abort the build (range_index_build then returns -1).
  */
-struct range_index_lpm_ctx {
-	struct lpm *lpm;
+typedef int (*range_index_build_fn)(
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value,
+	void *ctx
+);
+
+// Walk state shared between range_index_build and its radix callback.
+//
+// prev_value starts at LPM_VALUE_INVALID and is replaced by each walked range's
+// value; the previous range is emitted when the next range starts, and the
+// final range is emitted by range_index_build once the walk completes.
+struct range_index_build_state {
 	const uint32_t *values;
 	uint8_t prev_from[LPM_KEY_SIZE_MAX];
 	uint32_t prev_value;
+	range_index_build_fn fn;
+	void *fn_ctx;
 };
 
 static inline int
-range_index_lpm_cb(
+range_index_build_cb(
 	uint8_t key_size, const uint8_t *from, uint32_t index, void *data
 ) {
-	struct range_index_lpm_ctx *ctx = (struct range_index_lpm_ctx *)data;
+	struct range_index_build_state *state =
+		(struct range_index_build_state *)data;
 
-	if (ctx->prev_value != LPM_VALUE_INVALID) {
+	if (state->prev_value != LPM_VALUE_INVALID) {
 		uint8_t to[key_size];
 		memcpy(to, from, key_size);
 		filter_key_dec(key_size, to);
-		if (lpm_insert(
-			    ctx->lpm,
+		if (state->fn(
 			    key_size,
-			    ctx->prev_from,
+			    state->prev_from,
 			    to,
-			    ctx->prev_value
+			    state->prev_value,
+			    state->fn_ctx
 		    )) {
 			return -1;
 		}
 	}
 
-	memcpy(ctx->prev_from, from, key_size);
-	ctx->prev_value = ctx->values[index];
+	memcpy(state->prev_from, from, key_size);
+	state->prev_value = state->values[index];
 	return 0;
 }
 
+/*
+ * Drive a build callback across every range of a range_index.
+ *
+ * The range_index stores a contiguous, ascending, non-overlapping partition of
+ * the full keyspace: radix maps each range-start key -> an index into the
+ * values[] array. This walks the radix in ascending order, derives each range's
+ * upper bound from the next key, and invokes fn with [from..to] -> value per
+ * range, plus the final [prev_from..0xff..0xff] -> value after the walk.
+ */
 static inline int
-range_index_build_lpm(
-	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+range_index_build(
+	const struct range_index *range_index,
+	uint8_t key_size,
+	range_index_build_fn fn,
+	void *ctx
 ) {
-	struct range_index_lpm_ctx ctx;
-	ctx.lpm = lpm;
-	ctx.values = ADDR_OF(&range_index->values);
-	ctx.prev_value = LPM_VALUE_INVALID;
+	struct range_index_build_state state;
+	state.values = ADDR_OF(&range_index->values);
+	state.prev_value = LPM_VALUE_INVALID;
+	state.fn = fn;
+	state.fn_ctx = ctx;
 
 	if (radix_walk(
-		    &range_index->radix, key_size, range_index_lpm_cb, &ctx
+		    &range_index->radix, key_size, range_index_build_cb, &state
 	    )) {
 		return -1;
 	}
 
-	if (ctx.prev_value != LPM_VALUE_INVALID) {
+	if (state.prev_value != LPM_VALUE_INVALID) {
 		uint8_t to[key_size];
 		memset(to, 0xff, key_size);
-		if (lpm_insert(
-			    lpm, key_size, ctx.prev_from, to, ctx.prev_value
-		    )) {
+		if (fn(key_size, state.prev_from, to, state.prev_value, ctx)) {
 			return -1;
 		}
 	}
 
 	return 0;
+}
+
+struct range_index_lpm_ctx {
+	struct lpm *lpm;
+};
+
+static inline int
+range_index_lpm_insert_cb(
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value,
+	void *ctx
+) {
+	struct range_index_lpm_ctx *lpm_ctx = (struct range_index_lpm_ctx *)ctx;
+	return lpm_insert(lpm_ctx->lpm, key_size, from, to, value);
+}
+
+/*
+ * Build an LPM from a range_index.
+ *
+ * Thin wrapper over range_index_build whose callback forwards each range to
+ * lpm_insert. The LPM must already be initialised by the caller. Behaviour is
+ * identical to walking the radix and inserting [from..to] -> value per range.
+ */
+static inline int
+range_index_build_lpm(
+	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+) {
+	struct range_index_lpm_ctx ctx = {lpm};
+	return range_index_build(
+		range_index, key_size, range_index_lpm_insert_cb, &ctx
+	);
 }

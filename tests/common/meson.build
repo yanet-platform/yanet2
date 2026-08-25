@@ -117,6 +117,14 @@ executable(
   dependencies: dependencies
 )
 
+executable(
+  'lpm_hash_hybrid_bench',
+  ['lpm_hash_hybrid_bench.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+
 big_array_test = executable(
   'big_array_test',
   ['big_array_test.c'],

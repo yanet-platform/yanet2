@@ -1,6 +1,7 @@
 #include "../rule.h"
 
 #include "common/lpm.h"
+#include "common/lpm_hash.h"
 #include "common/range_collector.h"
 
 #include "common/registry.h"
@@ -10,6 +11,16 @@
 #include "declare.h"
 #include "lib/errors/errors.h"
 #include "net6_share.h"
+
+/*
+ * Hashed-top height for the net6 classifier halves.
+ *
+ * The top hash resolves the leading bytes of a half to the trie page they
+ * lead to, so its value is a walk-skip depth, not a prefix property. Six is
+ * within a few percent of per-trie optimal on the production ruleset capture
+ * for all four half-tries.
+ */
+#define NET6_LPM_HASH_HOPS LPM_HASH_HOPS_DEFAULT
 
 typedef void (*action_get_net6_func)(
 	const struct filter_rule *rule, struct net6 **net, uint32_t *count
@@ -63,8 +74,6 @@ collect_net6_range(
 	uint32_t count,
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
-	struct lpm *lpm,
-	const char *lpm_name,
 	struct range_index *ri
 ) {
 	struct range_collector collector;
@@ -103,39 +112,21 @@ collect_net6_range(
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context, lpm_name)) {
-		goto error_lpm;
-	}
 
 	if (range_index_init(ri, memory_context)) {
-		goto error_ri_init;
+		goto error_collector;
 	}
 
 	if (range_collector_collect(&collector, 8, ri)) {
-		goto error_collect;
-	}
-
-	if (range_index_build_lpm(ri, 8, lpm)) {
-		goto error_collect;
+		goto error_ri;
 	}
 
 	range_collector_free(&collector, 8);
 
 	return 0;
 
-error_collect:
+error_ri:
 	range_index_free(ri);
-	lpm_free(lpm);
-	range_collector_free(&collector, 8);
-	return -1;
-
-error_ri_init:
-	lpm_free(lpm);
-	range_collector_free(&collector, 8);
-	return -1;
-
-error_lpm:
-	lpm_free(lpm);
 
 error_collector:
 	range_collector_free(&collector, 8);
@@ -710,10 +701,18 @@ init_net6(
 		    count,
 		    get_net6,
 		    net6_get_hi_part,
-		    &net6->hi,
-		    "lpm_hi",
 		    &ri_hi
 	    )) {
+		goto error_hi;
+	}
+	if (range_index_build_lpm_hash(
+		    &ri_hi,
+		    memory_context,
+		    NET6_LPM_HASH_HOPS,
+		    "lpm_hi",
+		    &net6->hi
+	    )) {
+		range_index_free(&ri_hi);
 		goto error_hi;
 	}
 
@@ -724,11 +723,23 @@ init_net6(
 		    count,
 		    get_net6,
 		    net6_get_lo_part,
-		    &net6->lo,
-		    "lpm_lo",
 		    &ri_lo
 	    )) {
-		goto error_lo;
+		range_index_free(&ri_hi);
+		lpm_hash_fini(&net6->hi);
+		goto error_hi;
+	}
+	if (range_index_build_lpm_hash(
+		    &ri_lo,
+		    memory_context,
+		    NET6_LPM_HASH_HOPS,
+		    "lpm_lo",
+		    &net6->lo
+	    )) {
+		range_index_free(&ri_lo);
+		range_index_free(&ri_hi);
+		lpm_hash_fini(&net6->hi);
+		goto error_hi;
 	}
 
 	if (merge_net6_range(
@@ -741,21 +752,17 @@ init_net6(
 		    &net6->comb,
 		    registry
 	    )) {
-		goto error_merge;
+		range_index_free(&ri_lo);
+		lpm_hash_fini(&net6->lo);
+		range_index_free(&ri_hi);
+		lpm_hash_fini(&net6->hi);
+		goto error_hi;
 	}
 
 	range_index_free(&ri_hi);
 	range_index_free(&ri_lo);
 
 	return 0;
-
-error_merge:
-	range_index_free(&ri_lo);
-	lpm_free(&net6->lo);
-
-error_lo:
-	range_index_free(&ri_hi);
-	lpm_free(&net6->hi);
 
 error_hi:
 	SET_OFFSET_OF(data, NULL);
@@ -814,8 +821,8 @@ free_net6(void *data, struct memory_context *memory_context) {
 	if (c == NULL) {
 		return;
 	}
-	lpm_free(&c->lo);
-	lpm_free(&c->hi);
+	lpm_hash_fini(&c->lo);
+	lpm_hash_fini(&c->hi);
 	value_table_free(&c->comb);
 	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
 }
@@ -836,8 +843,8 @@ FILTER_ATTR_COMPILER_FREE_FUNC(net6_dst)(
 
 // Shared per-direction half-classification.
 struct net6_share_remap_ctx {
-	const struct lpm *local_a;
-	const struct lpm *local_b;
+	const struct lpm_hash *local_a;
+	const struct lpm_hash *local_b;
 	uint32_t *remap_a;
 	uint32_t *remap_b;
 	uint32_t class_count;
@@ -860,6 +867,7 @@ net6_share_remap_collect(
 	uint32_t value,
 	void *data
 ) {
+	(void)key_size;
 	(void)to;
 	struct net6_share_remap_ctx *ctx = (struct net6_share_remap_ctx *)data;
 
@@ -867,8 +875,8 @@ net6_share_remap_collect(
 		return -1;
 	}
 
-	uint32_t class_a = lpm_lookup(ctx->local_a, key_size, from);
-	uint32_t class_b = lpm_lookup(ctx->local_b, key_size, from);
+	uint32_t class_a = lpm_hash_lookup(ctx->local_a, from);
+	uint32_t class_b = lpm_hash_lookup(ctx->local_b, from);
 
 	if (ctx->remap_a[value] != LPM_VALUE_INVALID &&
 	    ctx->remap_a[value] != class_a) {
@@ -887,19 +895,22 @@ net6_share_remap_collect(
 
 // Builds the two remap arrays for one address half.
 //
-// Walks the union trie across the full 8-byte key space and resolves each
-// union half-class into the local half-classes of both classifiers. On
-// success the caller owns the returned arrays, on failure both are freed
-// and err distinguishes an allocation failure from a broken refinement
-// invariant (a local classifier disagreeing with the union classification
-// across a walked range).
+// Walks the union range_index across the full 8-byte key space and
+// resolves each union half-class into the local half-classes of both
+// classifiers. The range_index partitions the full key space, so the
+// walked ranges are the same ones the trie walk used to cover; the
+// callback already matches range_index_build_fn. On success the caller
+// owns the returned arrays, on failure both are freed and err
+// distinguishes an allocation failure from a broken refinement
+// invariant (a local classifier disagreeing with the union
+// classification across a walked range).
 static int
 net6_share_build_remap(
 	struct memory_context *mctx,
-	const struct lpm *uni,
+	const struct range_index *uni_ri,
 	uint32_t class_count,
-	const struct lpm *local_a,
-	const struct lpm *local_b,
+	const struct lpm_hash *local_a,
+	const struct lpm_hash *local_b,
 	uint32_t **remap_a,
 	uint32_t **remap_b,
 	yanet_error **err
@@ -935,12 +946,7 @@ net6_share_build_remap(
 		.class_count = class_count,
 	};
 
-	uint8_t from[8];
-	uint8_t to[8];
-	memset(from, 0x00, sizeof(from));
-	memset(to, 0xff, sizeof(to));
-
-	if (lpm8_walk(uni, from, to, net6_share_remap_collect, &ctx)) {
+	if (range_index_build(uni_ri, 8, net6_share_remap_collect, &ctx)) {
 		memory_bfree(mctx, b, size);
 		memory_bfree(mctx, a, size);
 		yanet_error_add(
@@ -973,18 +979,13 @@ filter_net6_share_init(
 		is_src ? action_get_net6_src : action_get_net6_dst;
 
 	// Only the tries are kept. Collector classes are dense, so the
-	// range index maximum value plus one is the class count and the
-	// index itself can be released right away.
-	struct range_index ri;
+	// range index maximum value plus one is the class count. The range
+	// index must outlive the remap walk, since lpm_hash has no walk and
+	// net6_share_build_remap walks the union range_index directly, so
+	// each ri is freed only after its remap succeeds.
+	struct range_index ri_hi;
 	if (collect_net6_range(
-		    mctx,
-		    rules,
-		    rule_count,
-		    get_net6,
-		    net6_get_hi_part,
-		    &out->hi,
-		    is_src ? "net6_share_src_hi" : "net6_share_dst_hi",
-		    &ri
+		    mctx, rules, rule_count, get_net6, net6_get_hi_part, &ri_hi
 	    )) {
 		yanet_error_add(
 			err,
@@ -992,18 +993,24 @@ filter_net6_share_init(
 		);
 		goto error;
 	}
-	out->hi_count = ri.max_value + 1;
-	range_index_free(&ri);
-
-	if (collect_net6_range(
+	if (range_index_build_lpm_hash(
+		    &ri_hi,
 		    mctx,
-		    rules,
-		    rule_count,
-		    get_net6,
-		    net6_get_lo_part,
-		    &out->lo,
-		    is_src ? "net6_share_src_lo" : "net6_share_dst_lo",
-		    &ri
+		    NET6_LPM_HASH_HOPS,
+		    is_src ? "net6_share_src_hi" : "net6_share_dst_hi",
+		    &out->hi
+	    )) {
+		yanet_error_add(
+			err, "out of memory: failed to build shared net6 hi lpm"
+		);
+		range_index_free(&ri_hi);
+		goto error;
+	}
+	out->hi_count = ri_hi.max_value + 1;
+
+	struct range_index ri_lo;
+	if (collect_net6_range(
+		    mctx, rules, rule_count, get_net6, net6_get_lo_part, &ri_lo
 	    )) {
 		yanet_error_add(
 			err,
@@ -1011,14 +1018,26 @@ filter_net6_share_init(
 		);
 		goto error_hi;
 	}
-	out->lo_count = ri.max_value + 1;
-	range_index_free(&ri);
+	if (range_index_build_lpm_hash(
+		    &ri_lo,
+		    mctx,
+		    NET6_LPM_HASH_HOPS,
+		    is_src ? "net6_share_src_lo" : "net6_share_dst_lo",
+		    &out->lo
+	    )) {
+		yanet_error_add(
+			err, "out of memory: failed to build shared net6 lo lpm"
+		);
+		range_index_free(&ri_lo);
+		goto error_hi;
+	}
+	out->lo_count = ri_lo.max_value + 1;
 
 	uint32_t *remap_hi_a;
 	uint32_t *remap_hi_b;
 	if (net6_share_build_remap(
 		    mctx,
-		    &out->hi,
+		    &ri_hi,
 		    out->hi_count,
 		    &local_a->hi,
 		    &local_b->hi,
@@ -1033,7 +1052,7 @@ filter_net6_share_init(
 	uint32_t *remap_lo_b;
 	if (net6_share_build_remap(
 		    mctx,
-		    &out->lo,
+		    &ri_lo,
 		    out->lo_count,
 		    &local_a->lo,
 		    &local_b->lo,
@@ -1049,6 +1068,9 @@ filter_net6_share_init(
 	SET_OFFSET_OF(&out->remap_lo_a, remap_lo_a);
 	SET_OFFSET_OF(&out->remap_lo_b, remap_lo_b);
 
+	range_index_free(&ri_lo);
+	range_index_free(&ri_hi);
+
 	return 0;
 
 error_remap_hi:
@@ -1056,10 +1078,12 @@ error_remap_hi:
 	memory_bfree(mctx, remap_hi_a, sizeof(uint32_t) * out->hi_count);
 
 error_lo:
-	lpm_free(&out->lo);
+	lpm_hash_fini(&out->lo);
+	range_index_free(&ri_lo);
 
 error_hi:
-	lpm_free(&out->hi);
+	lpm_hash_fini(&out->hi);
+	range_index_free(&ri_hi);
 
 error:
 	memset(out, 0, sizeof(*out));
@@ -1089,10 +1113,11 @@ filter_net6_share_dir_free(
 		memory_bfree(mctx, remap, sizeof(uint32_t) * dir->lo_count);
 	}
 
-	// lpm_free is safe on a zeroed trie, and zeroing the structure
-	// afterwards keeps the whole free path repeatable.
-	lpm_free(&dir->hi);
-	lpm_free(&dir->lo);
+	// lpm_hash_fini is safe on a zeroed trie (lpm_free handles a zeroed
+	// lpm and value_slot_index_fini is NULL-safe), and zeroing the
+	// structure afterwards keeps the whole free path repeatable.
+	lpm_hash_fini(&dir->hi);
+	lpm_hash_fini(&dir->lo);
 
 	memset(dir, 0, sizeof(*dir));
 }
