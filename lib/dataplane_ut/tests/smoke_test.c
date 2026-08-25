@@ -161,7 +161,12 @@ run_round_restore_test(void) {
 		"device update failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
-	cp_device_plain_free(device, &err);
+	// The live generation still references the device, so the destroy
+	// fails with EAGAIN and the handle stays dangling until agent_detach;
+	// free the allocated error chain instead of leaking it.
+	yanet_error *device_err = NULL;
+	cp_device_plain_free(device, &device_err);
+	yanet_error_free(device_err);
 
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
@@ -376,7 +381,10 @@ run_rounds_geometry_mismatch_test(void) {
 		"device update failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
-	cp_device_plain_free(device, &err);
+	// Dangling until agent_detach; the EAGAIN error chain must be freed.
+	yanet_error *device_err = NULL;
+	cp_device_plain_free(device, &device_err);
+	yanet_error_free(device_err);
 
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
