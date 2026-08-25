@@ -43,9 +43,14 @@ type DscpService struct {
 }
 
 type config struct {
-	Prefixes []netip.Prefix
-	Config   dscpConfig
-	Module   ModuleHandle
+	// Prefixes4 is the sorted IPv4 prefix set.
+	Prefixes4 []netip.Prefix
+	// Prefixes6 is the sorted IPv6 prefix set.
+	Prefixes6 []netip.Prefix
+	// Config is the DSCP marking configuration.
+	Config dscpConfig
+	// Module is the shared-memory handle of the published config.
+	Module ModuleHandle
 }
 
 // Free releases the module handle held by the config.
@@ -60,9 +65,10 @@ func (m *config) Free() error {
 
 func (m *config) Clone() *config {
 	return &config{
-		Prefixes: slices.Clone(m.Prefixes),
-		Config:   m.Config,
-		Module:   m.Module,
+		Prefixes4: slices.Clone(m.Prefixes4),
+		Prefixes6: slices.Clone(m.Prefixes6),
+		Config:    m.Config,
+		Module:    m.Module,
 	}
 }
 
@@ -115,13 +121,18 @@ func (m *DscpService) ShowConfig(
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
 
-	prefixes, err := commonpb.NetworksFromPrefixes(config.Prefixes)
+	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(config.Prefixes4)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
+	}
+	prefixes6, err := commonpb.NewIPv6PrefixesFromPrefixes(config.Prefixes6)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
 	}
 
 	response.Config = &dscppb.Config{
-		Prefixes: prefixes,
+		Prefixes4: prefixes4,
+		Prefixes6: prefixes6,
 		DscpConfig: &dscppb.DscpConfig{
 			Flag: uint32(config.Config.Flag),
 			Mark: uint32(config.Config.Mark),
@@ -140,7 +151,11 @@ func (m *DscpService) AddPrefixes(
 	}
 
 	name := request.GetName()
-	toAdd, err := commonpb.PrefixesFromNetworks(request.GetPrefixes())
+	toAdd4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
+	}
+	toAdd6, err := commonpb.PrefixesFromNetworks(request.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
@@ -153,18 +168,25 @@ func (m *DscpService) AddPrefixes(
 		cfg = currConfig.Clone()
 	}
 
-	cfg.Prefixes = slices.Compact(
-		slices.SortedFunc(
-			slices.Values(slices.Concat(cfg.Prefixes, toAdd)),
-			comparePrefixes,
-		),
-	)
+	cfg.Prefixes4 = mergePrefixes(cfg.Prefixes4, toAdd4)
+	cfg.Prefixes6 = mergePrefixes(cfg.Prefixes6, toAdd6)
 
 	if err := m.updateModuleConfig(name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &dscppb.AddPrefixesResponse{}, nil
+}
+
+// mergePrefixes folds new prefixes into an existing sorted set, keeping it
+// sorted and duplicate-free.
+func mergePrefixes(existing, toAdd []netip.Prefix) []netip.Prefix {
+	return slices.Compact(
+		slices.SortedFunc(
+			slices.Values(slices.Concat(existing, toAdd)),
+			comparePrefixes,
+		),
+	)
 }
 
 func comparePrefixes(first, second netip.Prefix) int {
@@ -183,7 +205,11 @@ func (m *DscpService) RemovePrefixes(
 	}
 
 	name := request.GetName()
-	toRemove, err := commonpb.PrefixesFromNetworks(request.GetPrefixes())
+	toRemove4, err := commonpb.PrefixesFromNetworks(request.GetPrefixes4())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
+	}
+	toRemove6, err := commonpb.PrefixesFromNetworks(request.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
@@ -198,18 +224,24 @@ func (m *DscpService) RemovePrefixes(
 		cfg = currConfig.Clone()
 	}
 
-	cfg.Prefixes = slices.DeleteFunc(
-		cfg.Prefixes,
-		func(prefix netip.Prefix) bool {
-			return slices.Contains(toRemove, prefix)
-		},
-	)
+	cfg.Prefixes4 = removePrefixes(cfg.Prefixes4, toRemove4)
+	cfg.Prefixes6 = removePrefixes(cfg.Prefixes6, toRemove6)
 
 	if err := m.updateModuleConfig(name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &dscppb.RemovePrefixesResponse{}, nil
+}
+
+// removePrefixes drops every listed prefix from an existing set.
+func removePrefixes(existing, toRemove []netip.Prefix) []netip.Prefix {
+	return slices.DeleteFunc(
+		existing,
+		func(prefix netip.Prefix) bool {
+			return slices.Contains(toRemove, prefix)
+		},
+	)
 }
 
 func (m *DscpService) SetDscpMarking(
@@ -246,7 +278,7 @@ func (m *DscpService) SetDscpMarking(
 func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 	module, err := m.backend.UpdateModule(
 		name,
-		cfg.Prefixes,
+		slices.Concat(cfg.Prefixes4, cfg.Prefixes6),
 		cfg.Config.Flag,
 		cfg.Config.Mark,
 	)
@@ -258,9 +290,10 @@ func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
 	m.parkOrFree(cfg.Module)
 
 	m.configs[name] = &config{
-		Prefixes: cfg.Prefixes,
-		Config:   cfg.Config,
-		Module:   module,
+		Prefixes4: cfg.Prefixes4,
+		Prefixes6: cfg.Prefixes6,
+		Config:    cfg.Config,
+		Module:    module,
 	}
 
 	return nil

@@ -33,6 +33,14 @@ func NewIPv6PrefixFromPrefix(prefix netip.Prefix) (*IPv6Prefix, error) {
 	return NewIPv6PrefixFromContiguous(net), nil
 }
 
+// NewIPv6PrefixesFromPrefixes creates IPv6Prefix messages from IPv6
+// netip.Prefix values, masking off any host bits.
+//
+// Returns an error if any prefix is invalid or not IPv6.
+func NewIPv6PrefixesFromPrefixes(prefixes []netip.Prefix) ([]*IPv6Prefix, error) {
+	return networksFromPrefixes(prefixes, NewIPv6PrefixFromPrefix)
+}
+
 // ToContiguous converts the IPv6Prefix to an xnetip IPv6 CIDR
 // block.
 //

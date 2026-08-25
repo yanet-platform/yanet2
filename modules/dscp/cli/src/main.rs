@@ -3,7 +3,7 @@ use clap_complete::{
     CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
-use commonpb::pb::IpPrefix;
+use commonpb::partition_prefixes;
 use dscppb::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
@@ -206,9 +206,11 @@ impl DscpService {
     }
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Error> {
+        let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
         let request = AddPrefixesRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefix.iter().copied().map(IpPrefix::from).collect(),
+            prefixes4,
+            prefixes6,
         };
         log::trace!("AddPrefixesRequest: {request:?}");
         let response = self
@@ -229,9 +231,11 @@ impl DscpService {
     }
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Error> {
+        let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
         let request = RemovePrefixesRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefix.iter().copied().map(IpPrefix::from).collect(),
+            prefixes4,
+            prefixes6,
         };
         log::trace!("RemovePrefixesRequest: {request:?}");
         let response = self
@@ -296,11 +300,16 @@ fn print_tree(response: &ShowConfigResponse) {
         }
 
         tree.begin_child("Prefixes".to_string());
-        if config.prefixes.is_empty() {
+        if config.prefixes4.is_empty() && config.prefixes6.is_empty() {
             tree.add_empty_child("(none)".to_owned());
         }
 
-        for (idx, prefix) in config.prefixes.iter().enumerate() {
+        let prefixes = config
+            .prefixes4
+            .iter()
+            .map(ToString::to_string)
+            .chain(config.prefixes6.iter().map(ToString::to_string));
+        for (idx, prefix) in prefixes.enumerate() {
             tree.add_empty_child(format!("{idx}: {prefix}"));
         }
         tree.end_child();

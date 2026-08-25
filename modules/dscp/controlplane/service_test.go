@@ -18,22 +18,37 @@ import (
 
 var errBackendFailure = fmt.Errorf("backend failure")
 
-// mustNetworks returns structured networks for valid CIDR test inputs.
-func mustNetworks(t *testing.T, prefixes ...string) []*commonpb.IPPrefix {
+// mustPrefixes4 returns family-typed IPv4 prefix messages for valid CIDR
+// test inputs.
+func mustPrefixes4(t *testing.T, prefixes ...string) []*commonpb.IPv4Prefix {
 	t.Helper()
 
-	networks := make([]*commonpb.IPPrefix, 0, len(prefixes))
-	for _, prefix := range prefixes {
-		network, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(prefix))
-		require.NoError(t, err)
-		networks = append(networks, network)
-	}
-
+	networks, err := commonpb.NewIPv4PrefixesFromPrefixes(parsePrefixes(prefixes))
+	require.NoError(t, err)
 	return networks
 }
 
-// networkStrings returns canonical CIDR text for valid structured networks.
-func networkStrings(t *testing.T, networks []*commonpb.IPPrefix) []string {
+// mustPrefixes6 is mustPrefixes4 for IPv6 prefix messages.
+func mustPrefixes6(t *testing.T, prefixes ...string) []*commonpb.IPv6Prefix {
+	t.Helper()
+
+	networks, err := commonpb.NewIPv6PrefixesFromPrefixes(parsePrefixes(prefixes))
+	require.NoError(t, err)
+	return networks
+}
+
+// parsePrefixes parses valid CIDR test inputs.
+func parsePrefixes(prefixes []string) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		out = append(out, netip.MustParsePrefix(prefix))
+	}
+	return out
+}
+
+// prefixStrings returns canonical CIDR text for valid prefix messages of
+// either family.
+func prefixStrings[T interface{ ToPrefix() (netip.Prefix, error) }](t *testing.T, networks []T) []string {
 	t.Helper()
 
 	prefixes := make([]string, 0, len(networks))
@@ -44,14 +59,6 @@ func networkStrings(t *testing.T, networks []*commonpb.IPPrefix) []string {
 	}
 
 	return prefixes
-}
-
-// malformedNetwork returns a network with an invalid address length.
-func malformedNetwork() *commonpb.IPPrefix {
-	return &commonpb.IPPrefix{
-		Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
-		PrefixLen: 24,
-	}
 }
 
 type mockModuleHandle struct {
@@ -117,8 +124,9 @@ func Test_DscpService_ListShowAddRemoveSetMarking(t *testing.T) {
 
 	{
 		response, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-			Name:     "dscp0",
-			Prefixes: mustNetworks(t, "10.0.0.0/24", "2001:db8::/32"),
+			Name:      "dscp0",
+			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+			Prefixes6: mustPrefixes6(t, "2001:db8::/32"),
 		})
 		require.NotNil(t, response)
 		require.NoError(t, err)
@@ -136,11 +144,8 @@ func Test_DscpService_ListShowAddRemoveSetMarking(t *testing.T) {
 		require.NotNil(t, response)
 		require.NoError(t, err)
 		assert.Empty(t, response.Config.DscpConfig)
-		assert.Equal(
-			t,
-			[]string{"10.0.0.0/24", "2001:db8::/32"},
-			networkStrings(t, response.Config.Prefixes),
-		)
+		assert.Equal(t, []string{"10.0.0.0/24"}, prefixStrings(t, response.Config.Prefixes4))
+		assert.Equal(t, []string{"2001:db8::/32"}, prefixStrings(t, response.Config.Prefixes6))
 	}
 
 	{
@@ -165,8 +170,8 @@ func Test_DscpService_ListShowAddRemoveSetMarking(t *testing.T) {
 
 	{
 		response, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
-			Name:     "dscp0",
-			Prefixes: mustNetworks(t, "10.0.0.0/24"),
+			Name:      "dscp0",
+			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
 		})
 		require.NotNil(t, response)
 		require.NoError(t, err)
@@ -176,11 +181,8 @@ func Test_DscpService_ListShowAddRemoveSetMarking(t *testing.T) {
 		response, err := service.ShowConfig(ctx, &dscppb.ShowConfigRequest{Name: "dscp0"})
 		require.NotNil(t, response)
 		require.NoError(t, err)
-		assert.Equal(
-			t,
-			[]string{"2001:db8::/32"},
-			networkStrings(t, response.Config.Prefixes),
-		)
+		assert.Empty(t, response.Config.Prefixes4)
+		assert.Equal(t, []string{"2001:db8::/32"}, prefixStrings(t, response.Config.Prefixes6))
 	}
 }
 
@@ -199,8 +201,8 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 
 	t.Run("AddPrefixesInvalidName", func(t *testing.T) {
 		response, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-			Name:     "",
-			Prefixes: mustNetworks(t, "10.0.0.0/24"),
+			Name:      "",
+			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -208,8 +210,8 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 
 	t.Run("RemovePrefixesInvalidName", func(t *testing.T) {
 		response, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
-			Name:     "",
-			Prefixes: mustNetworks(t, "10.0.0.0/24"),
+			Name:      "",
+			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -225,8 +227,8 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 
 	t.Run("AddPrefixesInvalidPrefix", func(t *testing.T) {
 		response, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-			Name:     "dscp0",
-			Prefixes: []*commonpb.IPPrefix{malformedNetwork()},
+			Name:      "dscp0",
+			Prefixes4: []*commonpb.IPv4Prefix{{PrefixLen: 24}},
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -234,8 +236,8 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 
 	t.Run("RemovePrefixesInvalidPrefix", func(t *testing.T) {
 		response, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
-			Name:     "dscp0",
-			Prefixes: []*commonpb.IPPrefix{malformedNetwork()},
+			Name:      "dscp0",
+			Prefixes6: []*commonpb.IPv6Prefix{{PrefixLen: 64}},
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -277,14 +279,14 @@ func Test_DscpService_NoUpdateOnFailure(t *testing.T) {
 	name := "dscp0"
 
 	_, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-		Name:     name,
-		Prefixes: mustNetworks(t, "10.0.0.0/24"),
+		Name:      name,
+		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
 	})
 	require.NoError(t, err)
 
 	_, err = service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-		Name:     name,
-		Prefixes: mustNetworks(t, "20.0.0.0/24"),
+		Name:      name,
+		Prefixes4: mustPrefixes4(t, "20.0.0.0/24"),
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.Internal, status.Code(err))
@@ -292,7 +294,7 @@ func Test_DscpService_NoUpdateOnFailure(t *testing.T) {
 	response, err := service.ShowConfig(ctx, &dscppb.ShowConfigRequest{Name: name})
 	require.NotNil(t, response)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"10.0.0.0/24"}, networkStrings(t, response.Config.Prefixes))
+	assert.Equal(t, []string{"10.0.0.0/24"}, prefixStrings(t, response.Config.Prefixes4))
 }
 
 // Test_DscpService_ConcurrentAccess verifies that concurrent mutations and
@@ -312,8 +314,8 @@ func Test_DscpService_ConcurrentAccess(t *testing.T) {
 			for j := range iterations {
 				if j%3 == 0 {
 					if _, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
-						Name:     name,
-						Prefixes: mustNetworks(t, fmt.Sprintf("10.%d.%d.0/24", i, j)),
+						Name:      name,
+						Prefixes4: mustPrefixes4(t, fmt.Sprintf("10.%d.%d.0/24", i, j)),
 					}); err != nil {
 						return err
 					}
@@ -321,8 +323,8 @@ func Test_DscpService_ConcurrentAccess(t *testing.T) {
 				}
 				if j%3 == 1 {
 					if _, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
-						Name:     name,
-						Prefixes: mustNetworks(t, fmt.Sprintf("10.%d.%d.0/24", i, j)),
+						Name:      name,
+						Prefixes4: mustPrefixes4(t, fmt.Sprintf("10.%d.%d.0/24", i, j)),
 					}); err != nil {
 						return err
 					}

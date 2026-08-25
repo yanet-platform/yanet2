@@ -690,9 +690,49 @@ impl<'de> Deserialize<'de> for pb::IpPrefix {
     }
 }
 
+/// Partitions mixed-family contiguous prefixes into the family-typed
+/// prefix messages, preserving the within-family order.
+pub fn partition_prefixes(
+    prefixes: impl IntoIterator<Item = Contiguous<IpNetwork>>,
+) -> (Vec<pb::IPv4Prefix>, Vec<pb::IPv6Prefix>) {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    for prefix in prefixes {
+        match prefix.addr() {
+            IpAddr::V4(addr) => v4.push(pb::IPv4Prefix {
+                addr: Some(pb::IPv4Address::from(addr)),
+                prefix_len: u32::from(prefix.prefix()),
+            }),
+            IpAddr::V6(addr) => v6.push(pb::IPv6Prefix {
+                addr: Some(pb::IPv6Address::from(addr)),
+                prefix_len: u32::from(prefix.prefix()),
+            }),
+        }
+    }
+
+    (v4, v6)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn partition_prefixes_splits_by_family_preserving_order() {
+        let prefixes = ["2001:db8::/32", "10.0.0.0/8", "192.0.2.0/24", "2001:db8:1::/48"]
+            .map(|prefix| Contiguous::<IpNetwork>::parse(prefix).unwrap());
+
+        let (v4, v6) = partition_prefixes(prefixes);
+
+        assert_eq!(
+            vec!["10.0.0.0/8", "192.0.2.0/24"],
+            v4.iter().map(ToString::to_string).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec!["2001:db8::/32", "2001:db8:1::/48"],
+            v6.iter().map(ToString::to_string).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn v4_round_trip() {

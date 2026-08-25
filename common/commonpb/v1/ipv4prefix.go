@@ -33,6 +33,14 @@ func NewIPv4PrefixFromPrefix(prefix netip.Prefix) (*IPv4Prefix, error) {
 	return NewIPv4PrefixFromContiguous(net), nil
 }
 
+// NewIPv4PrefixesFromPrefixes creates IPv4Prefix messages from IPv4
+// netip.Prefix values, masking off any host bits.
+//
+// Returns an error if any prefix is invalid or not IPv4.
+func NewIPv4PrefixesFromPrefixes(prefixes []netip.Prefix) ([]*IPv4Prefix, error) {
+	return networksFromPrefixes(prefixes, NewIPv4PrefixFromPrefix)
+}
+
 // ToContiguous converts the IPv4Prefix to an xnetip IPv4 CIDR
 // block.
 //

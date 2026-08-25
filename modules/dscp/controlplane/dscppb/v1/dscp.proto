@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package modules.dscp.controlplane.dscppb.v1;
 
-import "common/commonpb/v1/ipprefix.proto";
+import "common/commonpb/v1/ipv4prefix.proto";
+import "common/commonpb/v1/ipv6prefix.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1;dscppb";
 
@@ -24,7 +25,8 @@ service DscpService {
 }
 
 message Config {
-  repeated common.commonpb.v1.IPPrefix prefixes = 2;
+  repeated common.commonpb.v1.IPv4Prefix prefixes4 = 1;
+  repeated common.commonpb.v1.IPv6Prefix prefixes6 = 2;
   DscpConfig dscp_config = 3;
 }
 
@@ -51,7 +53,8 @@ message ShowConfigResponse { Config config = 1; }
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.
 message AddPrefixesRequest {
   string name = 1;
-  repeated common.commonpb.v1.IPPrefix prefixes = 2;
+  repeated common.commonpb.v1.IPv4Prefix prefixes4 = 2;
+  repeated common.commonpb.v1.IPv6Prefix prefixes6 = 3;
 }
 message AddPrefixesResponse {}
 
@@ -59,7 +62,8 @@ message AddPrefixesResponse {}
 // module.
 message RemovePrefixesRequest {
   string name = 1;
-  repeated common.commonpb.v1.IPPrefix prefixes = 2;
+  repeated common.commonpb.v1.IPv4Prefix prefixes4 = 2;
+  repeated common.commonpb.v1.IPv6Prefix prefixes6 = 3;
 }
 message RemovePrefixesResponse {}
 
