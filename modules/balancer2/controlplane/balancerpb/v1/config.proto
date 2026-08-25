@@ -3,6 +3,7 @@ syntax = "proto3";
 package modules.balancer2.controlplane.balancerpb.v1;
 
 import "common/filterpb/v1/filter.proto";
+import "common/commonpb/v1/ipnetwork.proto";
 
 import "google/protobuf/duration.proto";
 
@@ -51,7 +52,7 @@ message VsIdentifier {
 // - If allowed_srcs contains entries: Only matching sources are permitted
 // - Multiple AllowedSrc entries are evaluated with OR logic (any match allows)
 message AllowedSources {
-  repeated common.filterpb.v1.IPNet nets = 1;
+  repeated common.commonpb.v1.IPNetwork nets = 1;
   repeated common.filterpb.v1.PortRange ports = 2;
   optional string tag = 3;
 }
@@ -83,7 +84,7 @@ message RealIdentifier {
 message RealConfig {
   RelativeRealIdentifier id = 1;
   uint32 weight = 2;
-  common.filterpb.v1.IPNet src = 3;
+  common.commonpb.v1.IPNetwork src = 3;
 }
 
 message VsFlags {

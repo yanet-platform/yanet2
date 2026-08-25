@@ -4,5 +4,14 @@ package common.commonpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
-// This file is deliberately message-less. It is kept as a placeholder
-// for upcoming network messages.
+import "common/commonpb/v1/ipv4network.proto";
+import "common/commonpb/v1/ipv6network.proto";
+
+// IPNetwork represents an IPv4 or IPv6 network with a general per-bit
+// mask. The family is structural through the oneof.
+message IPNetwork {
+  oneof network {
+    IPv4Network v4 = 1;
+    IPv6Network v6 = 2;
+  }
+}

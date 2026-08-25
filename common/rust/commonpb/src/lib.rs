@@ -513,6 +513,65 @@ impl<'de> Deserialize<'de> for pb::IPv6Network {
     }
 }
 
+impl From<IpNetwork> for pb::IpNetwork {
+    fn from(net: IpNetwork) -> Self {
+        let network = match net {
+            IpNetwork::V4(net) => pb::ip_network::Network::V4(net.into()),
+            IpNetwork::V6(net) => pb::ip_network::Network::V6(net.into()),
+        };
+        pb::IpNetwork { network: Some(network) }
+    }
+}
+
+impl TryFrom<&pb::IpNetwork> for IpNetwork {
+    type Error = Box<dyn Error>;
+
+    fn try_from(net: &pb::IpNetwork) -> Result<Self, Self::Error> {
+        match &net.network {
+            Some(pb::ip_network::Network::V4(net)) => Ok(Self::V4(Ipv4Network::try_from(net)?)),
+            Some(pb::ip_network::Network::V6(net)) => Ok(Self::V6(Ipv6Network::try_from(net)?)),
+            None => Err("invalid IP network: missing network".into()),
+        }
+    }
+}
+
+impl Display for pb::IpNetwork {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match IpNetwork::try_from(self) {
+            Ok(net) => net.fmt(f),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl FromStr for pb::IpNetwork {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = IpNetwork::parse(s)?;
+        Ok(Self::from(net))
+    }
+}
+
+impl Serialize for pb::IpNetwork {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for pb::IpNetwork {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<Self>().map_err(de::Error::custom)
+    }
+}
+
 impl From<(IpAddr, IpAddr)> for pb::IpRange {
     fn from((start, end): (IpAddr, IpAddr)) -> Self {
         pb::IpRange {
@@ -732,6 +791,14 @@ mod test {
             vec!["2001:db8::/32", "2001:db8:1::/48"],
             v6.iter().map(ToString::to_string).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn ip_network_container_round_trips_as_string() {
+        for text in ["192.0.2.0/24", "2001:db8::/ffff:ffff:0:ffff::"] {
+            let net: pb::IpNetwork = text.parse().expect("a valid network must parse");
+            assert_eq!(text, net.to_string());
+        }
     }
 
     #[test]

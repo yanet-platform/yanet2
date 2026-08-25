@@ -6,7 +6,7 @@ use core::{
 };
 use std::fs::File;
 
-use filterpb::pb::{IpNet, PortRange};
+use filterpb::pb::PortRange;
 use netip::IpNetwork;
 use serde::{Deserialize, Deserializer};
 use yanet_cli_balancer2::balancerpb;
@@ -229,12 +229,12 @@ impl TryFrom<VirtualService> for balancerpb::VsConfig {
 fn allowed_source(entry: AllowedSrcEntry) -> Result<balancerpb::AllowedSources, Box<dyn Error>> {
     match entry {
         AllowedSrcEntry::Simple(network) => Ok(balancerpb::AllowedSources {
-            nets: vec![IpNet::from(network)],
+            nets: vec![network.into()],
             ports: vec![],
             tag: None,
         }),
         AllowedSrcEntry::Structured { network, ports, tag } => Ok(balancerpb::AllowedSources {
-            nets: vec![IpNet::from(network)],
+            nets: vec![network.into()],
             ports: ports.iter().map(port_range).collect::<Result<_, _>>()?,
             tag,
         }),
@@ -259,7 +259,7 @@ impl From<Real> for balancerpb::RealConfig {
                 port: u32::from(real.port),
             }),
             weight: real.weight,
-            src: Some(IpNet::from(real.src)),
+            src: Some(real.src.into()),
         }
     }
 }
