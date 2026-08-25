@@ -62,10 +62,12 @@ struct packet {
 	struct transport_header transport_header;
 };
 
-// Initialize a packet lineage's redirect credits once.
-
-// Initialization is lazy because packets enter a pipeline before its module
-// execution context supplies the configured limit.
+// Initialize a packet lineage's redirect credits once. Lazy because packets
+// enter a pipeline before its module execution context supplies the configured
+// limit, and the field is treated as "full budget" by every reader until the
+// first explicit consumption. Callers must invoke this before the first
+// redirect consumption on a freshly allocated packet, including after a
+// successful clone.
 static inline void
 packet_recirc_init(struct packet *packet, uint16_t limit) {
 	if (!packet->recirc_initialized) {

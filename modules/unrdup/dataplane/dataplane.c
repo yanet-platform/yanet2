@@ -92,8 +92,10 @@ unrdup_outer_end(struct packet *packet, uint32_t *end) {
 		}
 
 		*end = offset + rte_be_to_cpu_16(outer->total_length);
-	} else if (packet->network_header.type ==
-		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+	} else if (
+		packet->network_header.type ==
+		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
+	) {
 		if (offset + sizeof(struct rte_ipv6_hdr) > data_len) {
 			return -1;
 		}
@@ -631,6 +633,7 @@ unrdup_source_is_set(const uint8_t *addr, uint8_t addr_len) {
 static void
 unrdup_forward_to_peer(
 	const struct unrdup_fanout *fanout,
+	struct module_ectx *module_ectx,
 	struct packet *packet,
 	const struct unrdup_peer *peer,
 	uint32_t entropy
@@ -656,7 +659,9 @@ unrdup_forward_to_peer(
 		return;
 	}
 
-	struct packet *clone = worker_clone_packet(fanout->dp_worker, packet);
+	struct packet *clone = worker_clone_packet(
+		fanout->dp_worker, packet, module_ectx->packet_recirc_limit
+	);
 	if (clone == NULL) {
 		unrdup_count_event(
 			fanout->counter_storage, config->clone_failed_counter_id
@@ -820,7 +825,11 @@ unrdup_handle_packets(
 		struct unrdup_peer *peers = ADDR_OF(&service->peers);
 		for (uint64_t idx = 0; idx < service->peer_count; ++idx) {
 			unrdup_forward_to_peer(
-				&fanout, packet, peers + idx, entropy
+				&fanout,
+				module_ectx,
+				packet,
+				peers + idx,
+				entropy
 			);
 		}
 

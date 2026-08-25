@@ -1251,33 +1251,59 @@ func isKVMEnabled() bool {
 	return false
 }
 
+// existingVMPattern builds the pgrep -f pattern that detects a real QEMU
+// process running the given VM name. The opening [q] class prevents pgrep
+// from matching its own command line on macOS and Linux alike, and the
+// trailing ([[:space:]]|$) anchor stops "yanet-test-vm-foo" from matching
+// "yanet-test-vm-foobar".
+func existingVMPattern(vmName string) string {
+	return "[q]emu-system-x86_64.*[[:space:]]-name[[:space:]]+" +
+		regexp.QuoteMeta(vmName) + "([[:space:]]|$)"
+}
+
+// regexpMatch is a tiny indirection used by the unit tests so they can
+// compare a POSIX ERE pattern against a representative command line. The
+// patterns we ship only rely on literal tokens, [[:space:]] classes, and
+// basic quantifiers that Go's regexp engine handles equivalently.
+func regexpMatch(pattern, s string) (bool, error) {
+	return regexp.MatchString(pattern, s)
+}
+
+// pgrepRunner abstracts exec.Command so unit tests can substitute a fake.
+type pgrepRunner func(pattern string) string
+
+// realPgrepRunner is the production runner: shell out to pgrep -f.
+func realPgrepRunner(pattern string) string {
+	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 // checkForExistingVM checks if there's already a running QEMU process with the given VM name.
 // This prevents conflicts when running tests in parallel or when a previous test didn't clean up properly.
 func (q *QEMUManager) checkForExistingVM(vmName string) error {
-	// Match QEMU itself and exclude pgrep's own command line from the result.
-	pattern := "[q]emu-system-x86_64.*[[:space:]]-name[[:space:]]+" +
-		regexp.QuoteMeta(vmName) + "([[:space:]]|$)"
-	cmd := exec.Command("pgrep", "-f", pattern)
-	output, err := cmd.Output()
+	return checkForExistingVMRun(q, vmName, realPgrepRunner)
+}
 
-	// pgrep returns exit code 1 if no processes found, which is what we want
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			// No matching processes found - this is good
-			return nil
-		}
-		// Some other error occurred
-		q.log.Warnf("Failed to check for existing VM processes: %v", err)
-		return nil // Don't fail the test if pgrep itself fails
+// checkForExistingVMRun is the testable core. When pgrep finds no matches it
+// returns an empty string and we treat that as success. Any non-empty result
+// is an existing QEMU with our name and we return a duplicate-name error.
+func checkForExistingVMRun(
+	q *QEMUManager,
+	vmName string,
+	run pgrepRunner,
+) error {
+	output := run(existingVMPattern(vmName))
+	if len(output) == 0 {
+		return nil
 	}
-
-	// If we got output, there are matching processes
-	if len(output) > 0 {
-		processes := strings.TrimSpace(string(output))
-		q.log.Errorf("Found existing QEMU process(es) with VM name '%s':", vmName)
-		q.log.Errorf("%s", processes)
-		return fmt.Errorf("cannot start VM '%s': a QEMU process with this name is already running. Please stop the existing VM or use a different name. Process details:\n%s", vmName, processes)
-	}
-
-	return nil
+	processes := strings.TrimSpace(output)
+	q.log.Errorf("Found existing QEMU process(es) with VM name '%s':", vmName)
+	q.log.Errorf("%s", processes)
+	return fmt.Errorf(
+		"cannot start VM '%s': a QEMU process with this name is already running. Please stop the existing VM or use a different name. Process details:\n%s",
+		vmName, processes,
+	)
 }

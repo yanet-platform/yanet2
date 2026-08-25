@@ -160,7 +160,7 @@ run_round_restore_test(void) {
 		"device update failed: %s",
 		err ? yanet_error_message(err) : "?"
 	);
-	cp_device_plain_free(device);
+	cp_device_plain_free(device, &err);
 
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);

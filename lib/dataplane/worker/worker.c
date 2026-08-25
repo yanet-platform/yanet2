@@ -32,9 +32,8 @@ worker_clone_packet(
 		return NULL;
 	}
 
-	packet_recirc_init(packet, packet_recirc_limit);
-
 	struct packet *packet_clone = mbuf_to_packet(mbuf);
+	packet_recirc_init(packet, packet_recirc_limit);
 	rte_memcpy(packet_clone, packet, sizeof(struct packet));
 	packet_clone->mbuf = mbuf;
 	packet_clone->next = NULL;
