@@ -457,7 +457,6 @@ acl_handle_packets(
 			}
 
 			dst_hi[idx] = lpm8_lookup(&share_dst->hi, daddr);
-			dst_lo[idx] = lpm8_lookup(&share_dst->lo, daddr + 8);
 
 			const uint32_t *dst_hi_a =
 				ADDR_OF(&share_dst->remap_hi_a);
@@ -468,14 +467,49 @@ acl_handle_packets(
 			const uint32_t *dst_lo_b =
 				ADDR_OF(&share_dst->remap_lo_b);
 
+			// Both leaf filters resolving this hi class through a
+			// uniform combine row makes the lo union walk
+			// unnecessary: every lo class yields the same verdicts.
+			uint32_t local_hi_a = dst_hi_a[dst_hi[idx]];
+			uint32_t local_hi_b = dst_hi_b[dst_hi[idx]];
+			const uint8_t *uniform_a =
+				ADDR_OF(&ip6_dst_cls->hi_uniform);
+			const uint8_t *uniform_b =
+				ADDR_OF(&ip6_port_dst_cls->hi_uniform);
+			if (uniform_a != NULL && uniform_b != NULL &&
+			    (uniform_a[local_hi_a / 8] &
+			     (1u << (local_hi_a % 8))) &&
+			    (uniform_b[local_hi_b / 8] &
+			     (1u << (local_hi_b % 8)))) {
+				ip6_dst_slots[idx] =
+					ADDR_OF(&ip6_dst_cls->hi_uniform_value
+					)[local_hi_a];
+				ip6_dst_slots_b[idx] = ADDR_OF(
+					&ip6_port_dst_cls->hi_uniform_value
+				)[local_hi_b];
+				net6_memo_insert(
+					&share_dst->memo_a,
+					daddr,
+					ip6_dst_slots[idx]
+				);
+				net6_memo_insert(
+					&share_dst->memo_b,
+					daddr,
+					ip6_dst_slots_b[idx]
+				);
+				continue;
+			}
+
+			dst_lo[idx] = lpm8_lookup(&share_dst->lo, daddr + 8);
+
 			ip6_dst_slots[idx] = value_table_get(
 				&ip6_dst_cls->comb,
-				dst_hi_a[dst_hi[idx]],
+				local_hi_a,
 				dst_lo_a[dst_lo[idx]]
 			);
 			ip6_dst_slots_b[idx] = value_table_get(
 				&ip6_port_dst_cls->comb,
-				dst_hi_b[dst_hi[idx]],
+				local_hi_b,
 				dst_lo_b[dst_lo[idx]]
 			);
 			net6_memo_insert(

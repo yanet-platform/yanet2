@@ -33,8 +33,19 @@ FILTER_ATTR_QUERY_FUNC(net6_dst)(
 		}
 
 		uint32_t hi = lpm8_lookup(&c->hi, daddr);
-		uint32_t lo = lpm8_lookup(&c->lo, daddr + 8);
-		verdict = value_table_get(&c->comb, hi, lo);
+
+		// A uniform combine row resolves the address without the lo
+		// walk: every lo class yields the same verdict for this hi
+		// class.
+		const uint8_t *uniform = ADDR_OF(&c->hi_uniform);
+		if (uniform != NULL && (uniform[hi / 8] & (1u << (hi % 8)))) {
+			const uint32_t *uniform_value =
+				ADDR_OF(&c->hi_uniform_value);
+			verdict = uniform_value[hi];
+		} else {
+			uint32_t lo = lpm8_lookup(&c->lo, daddr + 8);
+			verdict = value_table_get(&c->comb, hi, lo);
+		}
 		net6_memo_insert(&c->memo, daddr, verdict);
 		result[idx] = verdict;
 	}
@@ -63,8 +74,19 @@ FILTER_ATTR_QUERY_FUNC(net6_src)(
 		}
 
 		uint32_t hi = lpm8_lookup(&c->hi, saddr);
-		uint32_t lo = lpm8_lookup(&c->lo, saddr + 8);
-		verdict = value_table_get(&c->comb, hi, lo);
+
+		// A uniform combine row resolves the address without the lo
+		// walk: every lo class yields the same verdict for this hi
+		// class.
+		const uint8_t *uniform = ADDR_OF(&c->hi_uniform);
+		if (uniform != NULL && (uniform[hi / 8] & (1u << (hi % 8)))) {
+			const uint32_t *uniform_value =
+				ADDR_OF(&c->hi_uniform_value);
+			verdict = uniform_value[hi];
+		} else {
+			uint32_t lo = lpm8_lookup(&c->lo, saddr + 8);
+			verdict = value_table_get(&c->comb, hi, lo);
+		}
 		net6_memo_insert(&c->memo, saddr, verdict);
 		result[idx] = verdict;
 	}

@@ -532,9 +532,10 @@ merge_net6_range(
 	action_get_net6_func get_net6,
 	const struct range_index *ri_hi,
 	const struct range_index *ri_lo,
-	struct value_table *table,
+	struct net6_classifier *net6,
 	struct value_registry *registry
 ) {
+	struct value_table *table = &net6->comb;
 	struct net6 *nets;
 	uint64_t net_cnt = 0;
 	struct radix net_radix;
@@ -576,6 +577,59 @@ merge_net6_range(
 		    table
 	    )) {
 		goto error_table;
+	}
+
+	// Row-uniformity shortcut: a hi class whose whole combine row holds
+	// one value resolves without the lo walk. Rows never touched by any
+	// network read back the compacted default and are uniform too. The
+	// scan early-exits on the first differing cell, so non-uniform rows
+	// cost a couple of loads.
+	{
+		uint32_t hi_count = table->v_dim;
+		uint8_t *uniform = (uint8_t *)memory_balloc(
+			memory_context, (hi_count + 7) / 8
+		);
+		uint32_t *uniform_value = (uint32_t *)memory_balloc(
+			memory_context, sizeof(uint32_t) * hi_count
+		);
+		if (uniform == NULL || uniform_value == NULL) {
+			if (uniform != NULL) {
+				memory_bfree(
+					memory_context,
+					uniform,
+					(hi_count + 7) / 8
+				);
+			}
+			if (uniform_value != NULL) {
+				memory_bfree(
+					memory_context,
+					uniform_value,
+					sizeof(uint32_t) * hi_count
+				);
+			}
+			goto error_table;
+		}
+
+		memset(uniform, 0, (hi_count + 7) / 8);
+		for (uint32_t idx_hi = 0; idx_hi < hi_count; ++idx_hi) {
+			uint32_t first = value_table_get(table, idx_hi, 0);
+			bool row_uniform = true;
+			for (uint32_t idx_lo = 1; idx_lo < table->h_dim;
+			     ++idx_lo) {
+				if (value_table_get(table, idx_hi, idx_lo) !=
+				    first) {
+					row_uniform = false;
+					break;
+				}
+			}
+			if (row_uniform) {
+				uniform[idx_hi / 8] |= 1u << (idx_hi % 8);
+				uniform_value[idx_hi] = first;
+			}
+		}
+
+		SET_OFFSET_OF(&net6->hi_uniform, uniform);
+		SET_OFFSET_OF(&net6->hi_uniform_value, uniform_value);
 	}
 
 	struct value_registry net_registry;
@@ -658,8 +712,23 @@ error_registry:
 error_net_registry:
 	value_registry_fini(&net_registry);
 
-error_table:
+error_table: {
+	uint8_t *uniform = ADDR_OF(&net6->hi_uniform);
+	if (uniform != NULL) {
+		memory_bfree(memory_context, uniform, (table->v_dim + 7) / 8);
+		SET_OFFSET_OF(&net6->hi_uniform, NULL);
+	}
+	uint32_t *uniform_value = ADDR_OF(&net6->hi_uniform_value);
+	if (uniform_value != NULL) {
+		memory_bfree(
+			memory_context,
+			uniform_value,
+			sizeof(uint32_t) * table->v_dim
+		);
+		SET_OFFSET_OF(&net6->hi_uniform_value, NULL);
+	}
 	value_table_free(table);
+}
 
 error_info:
 	for (uint32_t idx = 0; idx < net_range_count; ++idx) {
@@ -701,6 +770,9 @@ init_net6(
 	if (net6 == NULL) {
 		return -1;
 	}
+	// Zero so every error unwind sees NULL optional pointers (memo,
+	// uniform-row shortcut) instead of arena poison.
+	memset(net6, 0, sizeof(struct net6_classifier));
 	SET_OFFSET_OF(data, net6);
 
 	struct range_index ri_hi;
@@ -738,7 +810,7 @@ init_net6(
 		    get_net6,
 		    &ri_hi,
 		    &ri_lo,
-		    &net6->comb,
+		    net6,
 		    registry
 	    )) {
 		goto error_merge;
@@ -749,6 +821,23 @@ init_net6(
 	if (net6_memo_init(&net6->memo, memory_context)) {
 		range_index_free(&ri_lo);
 		range_index_free(&ri_hi);
+
+		uint8_t *uniform = ADDR_OF(&net6->hi_uniform);
+		if (uniform != NULL) {
+			memory_bfree(
+				memory_context,
+				uniform,
+				(net6->comb.v_dim + 7) / 8
+			);
+		}
+		uint32_t *uniform_value = ADDR_OF(&net6->hi_uniform_value);
+		if (uniform_value != NULL) {
+			memory_bfree(
+				memory_context,
+				uniform_value,
+				sizeof(uint32_t) * net6->comb.v_dim
+			);
+		}
 		value_table_free(&net6->comb);
 		lpm_free(&net6->lo);
 		lpm_free(&net6->hi);
@@ -829,6 +918,22 @@ free_net6(void *data, struct memory_context *memory_context) {
 	lpm_free(&c->hi);
 	value_table_free(&c->comb);
 	net6_memo_fini(&c->memo, memory_context);
+
+	uint8_t *uniform = ADDR_OF(&c->hi_uniform);
+	if (uniform != NULL) {
+		memory_bfree(memory_context, uniform, (c->comb.v_dim + 7) / 8);
+		SET_OFFSET_OF(&c->hi_uniform, NULL);
+	}
+	uint32_t *uniform_value = ADDR_OF(&c->hi_uniform_value);
+	if (uniform_value != NULL) {
+		memory_bfree(
+			memory_context,
+			uniform_value,
+			sizeof(uint32_t) * c->comb.v_dim
+		);
+		SET_OFFSET_OF(&c->hi_uniform_value, NULL);
+	}
+
 	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
 }
 

@@ -505,15 +505,33 @@ time_memo_quad(
 		uint32_t verdict;
 		if (!net6_memo_lookup(&src->memo, src_addrs[idx], &verdict)) {
 			uint32_t hi = lpm8_lookup(&src->hi, src_addrs[idx]);
-			uint32_t lo = lpm8_lookup(&src->lo, src_addrs[idx] + 8);
-			verdict = value_table_get(&src->comb, hi, lo);
+
+			const uint8_t *uniform = ADDR_OF(&src->hi_uniform);
+			if (uniform != NULL &&
+			    (uniform[hi / 8] & (1u << (hi % 8)))) {
+				verdict = ADDR_OF(&src->hi_uniform_value)[hi];
+			} else {
+				uint32_t lo = lpm8_lookup(
+					&src->lo, src_addrs[idx] + 8
+				);
+				verdict = value_table_get(&src->comb, hi, lo);
+			}
 			net6_memo_insert(&src->memo, src_addrs[idx], verdict);
 		}
 		quad_sink ^= verdict;
 		if (!net6_memo_lookup(&dst->memo, dst_addrs[idx], &verdict)) {
 			uint32_t hi = lpm8_lookup(&dst->hi, dst_addrs[idx]);
-			uint32_t lo = lpm8_lookup(&dst->lo, dst_addrs[idx] + 8);
-			verdict = value_table_get(&dst->comb, hi, lo);
+
+			const uint8_t *uniform = ADDR_OF(&dst->hi_uniform);
+			if (uniform != NULL &&
+			    (uniform[hi / 8] & (1u << (hi % 8)))) {
+				verdict = ADDR_OF(&dst->hi_uniform_value)[hi];
+			} else {
+				uint32_t lo = lpm8_lookup(
+					&dst->lo, dst_addrs[idx] + 8
+				);
+				verdict = value_table_get(&dst->comb, hi, lo);
+			}
 			net6_memo_insert(&dst->memo, dst_addrs[idx], verdict);
 		}
 		quad_sink ^= verdict;

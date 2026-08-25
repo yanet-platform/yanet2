@@ -13,6 +13,13 @@ struct net6_classifier {
 	struct lpm lo;
 	struct value_table comb;
 	struct net6_memo memo;
+	// Per-hi-class uniform-row shortcut: bit set in hi_uniform means
+	// every lo class combines with this hi class to hi_uniform_value, so
+	// the lookup can skip the lo walk and the combine fetch entirely.
+	// hi_uniform holds ceil(v_dim / 8) bytes and hi_uniform_value holds
+	// v_dim entries; both are shared-memory relative pointers.
+	uint8_t *hi_uniform;
+	uint32_t *hi_uniform_value;
 };
 
 // Shared per-direction IPv6 half-address classification.
