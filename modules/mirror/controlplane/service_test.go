@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/xnetip"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
@@ -48,6 +50,33 @@ func (m *nilHandleBackend) UpdateModule(
 	rules []cmirror.MirrorRule,
 ) (mirror.ModuleHandle, error) {
 	return nil, nil
+}
+
+// recordingBackend captures the rules handed to UpdateModule so a test can
+// inspect what the service sends to shared memory.
+type recordingBackend struct {
+	mockBackend
+
+	rules []cmirror.MirrorRule
+}
+
+func (m *recordingBackend) UpdateModule(
+	name string,
+	rules []cmirror.MirrorRule,
+) (mirror.ModuleHandle, error) {
+	m.rules = rules
+	return &mockModuleHandle{}, nil
+}
+
+// v4net builds an IPv4Network message from xnetip network text, in any
+// form xnetip parsing accepts: CIDR or an explicit address/mask.
+func v4net(s string) *commonpb.IPv4Network {
+	return commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4(s))
+}
+
+// v6net builds an IPv6Network message the same way.
+func v6net(s string) *commonpb.IPv6Network {
+	return commonpb.NewIPv6NetworkFrom6(xnetip.MustParseNetwork6(s))
 }
 
 // TestShowConfigUnknownConfig verifies that ShowConfig reports NotFound for
@@ -91,6 +120,108 @@ func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {
 
 	_, err = svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{Name: "config"})
 	require.NoError(t, err)
+}
+
+// TestUpdateConfigRejectsOutOfClassMasks verifies that UpdateConfig
+// enforces the filter compiler's mask classes on the network lists.
+//
+// A non-contiguous IPv4 mask and an IPv6 mask with a hole inside a
+// 64-bit half are both rejected.
+func TestUpdateConfigRejectsOutOfClassMasks(t *testing.T) {
+	tests := []struct {
+		name string
+		rule *mirrorpb.Rule
+	}{
+		{
+			name: "non-contiguous IPv4 source mask",
+			rule: &mirrorpb.Rule{
+				Action:   &mirrorpb.Action{Target: "device0"},
+				Sources4: []*commonpb.IPv4Network{v4net("192.0.2.0/255.0.255.0")},
+			},
+		},
+		{
+			name: "IPv6 destination mask with a hole inside a half",
+			rule: &mirrorpb.Rule{
+				Action:        &mirrorpb.Action{Target: "device0"},
+				Destinations6: []*commonpb.IPv6Network{v6net("2001:db8::/ffff:0:ffff::")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := mirror.NewMirrorService(&mockBackend{})
+
+			_, err := svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+				Name:  "config",
+				Rules: []*mirrorpb.Rule{tt.rule},
+			})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
+// TestUpdateConfigAcceptsV6MaskHoleAtHalfBoundary verifies that an IPv6
+// mask with its hole exactly at the /64 boundary reaches the backend.
+func TestUpdateConfigAcceptsV6MaskHoleAtHalfBoundary(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := mirror.NewMirrorService(backend)
+
+	const network = "2001:db8::/ffff:ffff:ffff:0:ffff::"
+
+	_, err := svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{
+				Action:   &mirrorpb.Action{Target: "device0"},
+				Sources6: []*commonpb.IPv6Network{v6net(network)},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	require.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous(network)}, backend.rules[0].Src6s)
+}
+
+// TestUpdateConfigPreservesWithinFamilyNetworkOrder verifies that the
+// networks of every family-typed list reach the backend in request order.
+func TestUpdateConfigPreservesWithinFamilyNetworkOrder(t *testing.T) {
+	backend := &recordingBackend{}
+	svc := mirror.NewMirrorService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
+		Name: "config",
+		Rules: []*mirrorpb.Rule{
+			{
+				Action:        &mirrorpb.Action{Target: "device0"},
+				Sources4:      []*commonpb.IPv4Network{v4net("192.0.2.0/24"), v4net("10.0.0.0/8")},
+				Sources6:      []*commonpb.IPv6Network{v6net("2001:db8:1::/48"), v6net("2001:db8::/32")},
+				Destinations4: []*commonpb.IPv4Network{v4net("203.0.113.0/24"), v4net("198.51.100.0/24")},
+				Destinations6: []*commonpb.IPv6Network{v6net("2001:db8:2::/48"), v6net("2001:db8:3::/48")},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, backend.rules, 1)
+	rule := backend.rules[0]
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("192.0.2.0/24"),
+		xnetip.MustParseContiguous4("10.0.0.0/8"),
+	}, rule.Src4s)
+	require.Equal(t, []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous("2001:db8:1::/48"),
+		xnetip.MustParseBiContiguous("2001:db8::/32"),
+	}, rule.Src6s)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("203.0.113.0/24"),
+		xnetip.MustParseContiguous4("198.51.100.0/24"),
+	}, rule.Dst4s)
+	require.Equal(t, []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous("2001:db8:2::/48"),
+		xnetip.MustParseBiContiguous("2001:db8:3::/48"),
+	}, rule.Dst6s)
 }
 
 // Run with: go test -race

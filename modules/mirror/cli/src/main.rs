@@ -9,11 +9,11 @@ use clap_complete::{
     CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
+use commonpb::pb::{IPv4Network, IPv6Network};
 use mirrorpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     mirror_service_client::MirrorServiceClient,
 };
-use netip::{Contiguous, IpNetwork};
 use serde::{Deserialize, Serialize, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -142,8 +142,10 @@ struct MirrorRule {
     counter: String,
     devices: Vec<String>,
     vlan_ranges: Vec<VlanRange>,
-    srcs: Vec<String>,
-    dsts: Vec<String>,
+    sources4: Vec<IPv4Network>,
+    sources6: Vec<IPv6Network>,
+    destinations4: Vec<IPv4Network>,
+    destinations6: Vec<IPv6Network>,
 }
 
 impl TryFrom<MirrorRule> for mirrorpb::Rule {
@@ -165,16 +167,10 @@ impl TryFrom<MirrorRule> for mirrorpb::Rule {
             }),
             devices: mirror_rule.devices.into_iter().map(|m| m.into()).collect(),
             vlan_ranges: mirror_rule.vlan_ranges.into_iter().map(Into::into).collect(),
-            srcs: mirror_rule
-                .srcs
-                .into_iter()
-                .map(|n| Contiguous::<IpNetwork>::parse(&n).map(filterpb::pb::IpNet::from))
-                .collect::<Result<Vec<_>, _>>()?,
-            dsts: mirror_rule
-                .dsts
-                .into_iter()
-                .map(|n| Contiguous::<IpNetwork>::parse(&n).map(filterpb::pb::IpNet::from))
-                .collect::<Result<Vec<_>, _>>()?,
+            sources4: mirror_rule.sources4,
+            sources6: mirror_rule.sources6,
+            destinations4: mirror_rule.destinations4,
+            destinations6: mirror_rule.destinations6,
         })
     }
 }
@@ -197,21 +193,14 @@ impl TryFrom<mirrorpb::Rule> for MirrorRule {
             counter: action.counter,
             devices: rule.devices.into_iter().map(|d| d.name).collect(),
             vlan_ranges: rule.vlan_ranges.into_iter().map(VlanRange::from).collect(),
-            srcs: rule.srcs.into_iter().map(|n| n.to_string()).collect(),
-            dsts: rule.dsts.into_iter().map(|n| n.to_string()).collect(),
+            sources4: rule.sources4,
+            sources6: rule.sources6,
+            destinations4: rule.destinations4,
+            destinations6: rule.destinations6,
         })
     }
 }
 
-/// A mirror module configuration as read from or written to a rule file.
-///
-/// Every rule field is always emitted, including an empty sequence as `[]`
-/// and an empty counter as an empty string, and none of them is optional on
-/// `update` either. A network renders from the address and mask actually
-/// stored, so re-applying shown output normalises an address that carries
-/// host bits outside its mask. A stored IPv6 network's mask may have a hole
-/// at the `/64` boundary. Such a network renders in expanded-mask form, and
-/// `update` rejects it because it requires a contiguous mask.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MirrorConfig {
     rules: Vec<MirrorRule>,
@@ -410,10 +399,12 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 mod test {
     use super::*;
 
-    fn ip_net(cidr: &str) -> filterpb::pb::IpNet {
-        Contiguous::<IpNetwork>::parse(cidr)
-            .expect("valid cidr in test fixture")
-            .into()
+    fn v4_net(net: &str) -> IPv4Network {
+        net.parse().expect("valid IPv4 network in test fixture")
+    }
+
+    fn v6_net(net: &str) -> IPv6Network {
+        net.parse().expect("valid IPv6 network in test fixture")
     }
 
     fn sample_rules() -> Vec<mirrorpb::Rule> {
@@ -432,8 +423,10 @@ mod test {
                     filterpb::pb::VlanRange { from: 0, to: 100 },
                     filterpb::pb::VlanRange { from: 200, to: 300 },
                 ],
-                srcs: vec![ip_net("192.0.2.0/24"), ip_net("2001:db8::/32")],
-                dsts: vec![ip_net("203.0.113.0/24"), ip_net("2001:db8:1::/48")],
+                sources4: vec![v4_net("192.0.2.0/24")],
+                sources6: vec![v6_net("2001:db8::/32")],
+                destinations4: vec![v4_net("203.0.113.0/24")],
+                destinations6: vec![v6_net("2001:db8:1::/48")],
             },
             mirrorpb::Rule {
                 action: Some(mirrorpb::Action {
@@ -443,8 +436,10 @@ mod test {
                 }),
                 devices: vec![],
                 vlan_ranges: vec![],
-                srcs: vec![],
-                dsts: vec![],
+                sources4: vec![],
+                sources6: vec![],
+                destinations4: vec![],
+                destinations6: vec![],
             },
             mirrorpb::Rule {
                 action: Some(mirrorpb::Action {
@@ -454,8 +449,10 @@ mod test {
                 }),
                 devices: vec![filterpb::pb::Device { name: "eth2".to_string() }],
                 vlan_ranges: vec![filterpb::pb::VlanRange { from: 10, to: 20 }],
-                srcs: vec![ip_net("10.0.0.0/8")],
-                dsts: vec![ip_net("10.1.0.0/16")],
+                sources4: vec![v4_net("10.0.0.0/8")],
+                sources6: vec![],
+                destinations4: vec![v4_net("10.1.0.0/16")],
+                destinations6: vec![],
             },
         ]
     }
@@ -481,22 +478,28 @@ rules:
     counter: ""
     devices: []
     vlan_ranges: []
-    srcs: []
-    dsts: []
+    sources4: []
+    sources6: []
+    destinations4: []
+    destinations6: []
   - target: "t2"
     mode: "IN"
     counter: ""
     devices: []
     vlan_ranges: []
-    srcs: []
-    dsts: []
+    sources4: []
+    sources6: []
+    destinations4: []
+    destinations6: []
   - target: "t3"
     mode: "OUT"
     counter: ""
     devices: []
     vlan_ranges: []
-    srcs: []
-    dsts: []
+    sources4: []
+    sources6: []
+    destinations4: []
+    destinations6: []
 "#;
         let legacy = r#"
 rules:
@@ -505,22 +508,28 @@ rules:
     counter: ""
     devices: []
     vlan_ranges: []
-    srcs: []
-    dsts: []
+    sources4: []
+    sources6: []
+    destinations4: []
+    destinations6: []
   - target: "t2"
     mode: "In"
     counter: ""
     devices: []
     vlan_ranges: []
-    srcs: []
-    dsts: []
+    sources4: []
+    sources6: []
+    destinations4: []
+    destinations6: []
   - target: "t3"
     mode: "Out"
     counter: ""
     devices: []
     vlan_ranges: []
-    srcs: []
-    dsts: []
+    sources4: []
+    sources6: []
+    destinations4: []
+    destinations6: []
 "#;
 
         for yaml in [uppercase, legacy] {
@@ -529,6 +538,32 @@ rules:
             assert!(matches!(config.rules[1].mode, ModeKind::In));
             assert!(matches!(config.rules[2].mode, ModeKind::Out));
         }
+    }
+
+    #[test]
+    fn a_bi_contiguous_v6_mask_round_trips_through_the_rule_file() {
+        let rule = mirrorpb::Rule {
+            action: Some(mirrorpb::Action {
+                target: "t".to_string(),
+                mode: mirrorpb::MirrorMode::None as i32,
+                counter: "c".to_string(),
+            }),
+            devices: vec![],
+            vlan_ranges: vec![],
+            sources4: vec![],
+            // The mask hole sits exactly at the /64 boundary, which the
+            // filter compiler accepts.
+            sources6: vec![v6_net("2001:db8::/ffff:ffff:ffff:0:ffff::")],
+            destinations4: vec![],
+            destinations6: vec![],
+        };
+
+        let config = MirrorConfig::try_from(vec![rule.clone()]).expect("a bi-contiguous v6 network must render");
+        let yaml = serde_yaml::to_string(&config).expect("mirror config must serialize");
+        let parsed: MirrorConfig = serde_yaml::from_str(&yaml).expect("mirror config must deserialize");
+        let rebuilt: Vec<mirrorpb::Rule> = parsed.try_into().expect("mirror config must convert back");
+
+        assert_eq!(vec![rule], rebuilt);
     }
 
     #[test]
@@ -541,8 +576,10 @@ rules:
             }),
             devices: vec![],
             vlan_ranges: vec![],
-            srcs: vec![],
-            dsts: vec![],
+            sources4: vec![],
+            sources6: vec![],
+            destinations4: vec![],
+            destinations6: vec![],
         };
 
         let config = MirrorConfig::try_from(vec![rule]).expect("an unrecognised mode must not blank the show");

@@ -135,19 +135,19 @@ func (m *MirrorService) UpdateConfig(
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := filterpbconv.ToNet4s(reqRule.Srcs)
+		src4s, err := filterpbconv.ToNet4sFromNetworks(reqRule.Sources4)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := filterpbconv.ToNet4s(reqRule.Dsts)
+		dst4s, err := filterpbconv.ToNet4sFromNetworks(reqRule.Destinations4)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := filterpbconv.ToNet6s(reqRule.Srcs)
+		src6s, err := filterpbconv.ToNet6sFromNetworks(reqRule.Sources6)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := filterpbconv.ToNet6s(reqRule.Dsts)
+		dst6s, err := filterpbconv.ToNet6sFromNetworks(reqRule.Destinations6)
 		if err != nil {
 			return nil, err
 		}

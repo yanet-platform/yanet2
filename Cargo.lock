@@ -3422,7 +3422,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "netip",
  "prost",
  "prost-types",
  "ptree",
@@ -3432,6 +3431,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
  "yanet-filterpb",
 ]
 
