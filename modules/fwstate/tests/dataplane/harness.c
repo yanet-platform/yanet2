@@ -342,9 +342,15 @@ fwstate_test_trim_stale_layers(struct cp_module *cp_module, uint64_t now) {
 	// same call — no generation barrier is needed here.
 	int rc4 = fwtable_unlink_stale_cp(fw4table, now);
 	int rc6 = fwtable_unlink_stale_cp(fw6table, now);
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-	fwtable_free_stale(fw4table, &agent->memory_context);
-	fwtable_free_stale(fw6table, &agent->memory_context);
+
+	// Layer memory is charged to the owning map object's context, so the
+	// release must free through the same context.
+	struct fwstate_map_v4_object *object4 =
+		container_of(fw4table, struct fwstate_map_v4_object, table);
+	struct fwstate_map_v6_object *object6 =
+		container_of(fw6table, struct fwstate_map_v6_object, table);
+	fwtable_free_stale(fw4table, &object4->cp_object.memory_context);
+	fwtable_free_stale(fw6table, &object6->cp_object.memory_context);
 	return (rc4 || rc6) ? -1 : 0;
 }
 
@@ -365,4 +371,30 @@ fwstate_test_table_layer(
 		map = (fwmap_t *)ADDR_OF(&map->next);
 	}
 	return map;
+}
+
+// Snapshot one context's accounting counters. The harness is
+// single-threaded between setup calls, so plain reads race with nothing.
+static void
+fwstate_test_mem_counters_read(
+	const struct memory_context *ctx, struct fwstate_test_mem_counters *out
+) {
+	out->balloc_count = ctx->balloc_count;
+	out->bfree_count = ctx->bfree_count;
+	out->balloc_size = ctx->balloc_size;
+	out->bfree_size = ctx->bfree_size;
+}
+
+void
+fwstate_test_agent_mem_counters(
+	struct agent *agent, struct fwstate_test_mem_counters *out
+) {
+	fwstate_test_mem_counters_read(&agent->memory_context, out);
+}
+
+void
+fwstate_test_object_mem_counters(
+	struct cp_object *cp_object, struct fwstate_test_mem_counters *out
+) {
+	fwstate_test_mem_counters_read(&cp_object->memory_context, out);
 }

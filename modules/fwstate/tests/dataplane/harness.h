@@ -113,6 +113,27 @@ fwstate_test_table_layer(
 	struct cp_module *cp_module, bool is_ipv6, uint32_t layer_index
 );
 
+// Accounting snapshot of one memory context, for tests that assert where
+// allocations and frees were charged.
+struct fwstate_test_mem_counters {
+	uint64_t balloc_count;
+	uint64_t bfree_count;
+	uint64_t balloc_size;
+	uint64_t bfree_size;
+};
+
+// Snapshot the stand-in agent's context counters into out.
+void
+fwstate_test_agent_mem_counters(
+	struct agent *agent, struct fwstate_test_mem_counters *out
+);
+
+// Snapshot a map object's own context counters into out.
+void
+fwstate_test_object_mem_counters(
+	struct cp_object *cp_object, struct fwstate_test_mem_counters *out
+);
+
 // Mock implementation of clock_get_time_ns for tests. Returns current
 // monotonic time in nanoseconds. Declared here so cgo can call it directly
 // from Go.

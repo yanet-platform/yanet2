@@ -20,6 +20,10 @@
 // to grow the layer chain (key size and key/copy callbacks). The helpers
 // below carry the family-agnostic machinery; each per-family function is
 // a thin wrapper that selects its key initializer.
+//
+// Layer memory is allocated and freed through the object's own memory
+// context, so the per-object accounting attributes the fwtable stores to
+// the map object rather than to the agent.
 
 typedef void (*map_init_keys_fn)(fwmap_config_t *config);
 
@@ -161,7 +165,9 @@ fwstate_map_v4_object_fini(struct fwstate_map_v4_object *self) {
 
 	struct agent *agent = ADDR_OF(&self->cp_object.agent);
 	if (agent != NULL) {
-		map_free_table(&self->table, &agent->memory_context);
+		// Runs before the common teardown zeroes the object's memory
+		// context, which the table free must still charge.
+		map_free_table(&self->table, &self->cp_object.memory_context);
 	}
 	cp_object_fini(&self->cp_object);
 }
@@ -238,11 +244,9 @@ fwstate_map_v4_object_insert_layer(
 	uint32_t extra_bucket_count,
 	uint16_t worker_count
 ) {
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
-
 	int rc = map_insert_layer(
 		&self->table,
-		&agent->memory_context,
+		&self->cp_object.memory_context,
 		map_v4_init_keys,
 		index_size,
 		extra_bucket_count,
@@ -267,9 +271,7 @@ fwstate_map_v4_object_unlink_stale_layers(
 
 void
 fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
-
-	fwtable_free_stale(&self->table, &agent->memory_context);
+	fwtable_free_stale(&self->table, &self->cp_object.memory_context);
 }
 
 // --- IPv6 object -------------------------------------------------------------
@@ -318,7 +320,9 @@ fwstate_map_v6_object_fini(struct fwstate_map_v6_object *self) {
 
 	struct agent *agent = ADDR_OF(&self->cp_object.agent);
 	if (agent != NULL) {
-		map_free_table(&self->table, &agent->memory_context);
+		// Runs before the common teardown zeroes the object's memory
+		// context, which the table free must still charge.
+		map_free_table(&self->table, &self->cp_object.memory_context);
 	}
 	cp_object_fini(&self->cp_object);
 }
@@ -395,11 +399,9 @@ fwstate_map_v6_object_insert_layer(
 	uint32_t extra_bucket_count,
 	uint16_t worker_count
 ) {
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
-
 	int rc = map_insert_layer(
 		&self->table,
-		&agent->memory_context,
+		&self->cp_object.memory_context,
 		map_v6_init_keys,
 		index_size,
 		extra_bucket_count,
@@ -424,9 +426,7 @@ fwstate_map_v6_object_unlink_stale_layers(
 
 void
 fwstate_map_v6_object_free_stale_layers(struct fwstate_map_v6_object *self) {
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
-
-	fwtable_free_stale(&self->table, &agent->memory_context);
+	fwtable_free_stale(&self->table, &self->cp_object.memory_context);
 }
 
 // --- object factories --------------------------------------------------------
