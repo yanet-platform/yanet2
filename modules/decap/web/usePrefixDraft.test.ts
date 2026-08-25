@@ -29,7 +29,8 @@ describe('usePrefixDraft load', () => {
 
     it('produces one row per wire element and keeps the prefix string as row identity', async () => {
         showConfig.mockResolvedValue({
-            prefixes: [{ network: '10.0.0.0/8' }, { network: '2001:db8::/32' }],
+            prefixes4: ['10.0.0.0/8'],
+            prefixes6: ['2001:db8::/32'],
         });
 
         const { result } = renderHook(() => usePrefixDraft());
@@ -56,11 +57,11 @@ describe('usePrefixDraft commitConfig', () => {
     beforeEach(() => {
         showConfig.mockReset();
         updateConfig.mockReset();
-        showConfig.mockResolvedValue({ prefixes: [] });
+        showConfig.mockResolvedValue({ prefixes4: [], prefixes6: [] });
         updateConfig.mockResolvedValue({});
     });
 
-    it('sends exactly one object-shaped wire element per draft row, in order, dropping none', async () => {
+    it('sends every draft row as a bare string in its family list, dropping none', async () => {
         const { result } = renderHook(() => usePrefixDraft());
         await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -87,10 +88,7 @@ describe('usePrefixDraft commitConfig', () => {
         expect(updateConfig).toHaveBeenCalledTimes(1);
         const sent = updateConfig.mock.calls[0][0];
         expect(sent.name).toBe('decap0');
-        expect(sent.prefixes).toEqual([
-            { network: '10.0.0.0/8' },
-            { network: '' },
-            { network: 'not-a-cidr' },
-        ]);
+        expect(sent.prefixes4).toEqual(['10.0.0.0/8', '', 'not-a-cidr']);
+        expect(sent.prefixes6).toEqual([]);
     });
 });

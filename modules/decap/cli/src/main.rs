@@ -3,6 +3,7 @@ use clap_complete::{
     CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
+use commonpb::partition_prefixes;
 use decappb::{
     ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
     decap_service_client::DecapServiceClient,
@@ -159,7 +160,7 @@ impl DecapService {
         output::data(
             || &response,
             || {
-                if response.prefixes.is_empty() {
+                if response.prefixes4.is_empty() && response.prefixes6.is_empty() {
                     output::empty_with_hint(
                         format_args!("No decap prefixes found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-decap update --name <name> --prefixes <cidr>'"),
@@ -175,9 +176,11 @@ impl DecapService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
+        let (prefixes4, prefixes6) = partition_prefixes(cmd.prefixes);
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefixes.into_iter().map(Into::into).collect(),
+            prefixes4,
+            prefixes6,
         };
         log::trace!("update config request: {request:?}");
         let response = self
@@ -198,7 +201,12 @@ impl DecapService {
 fn print_tree(resp: &ShowConfigResponse) {
     let mut tree = TreeBuilder::new("Decap Prefixes".to_string());
 
-    for (idx, prefix) in resp.prefixes.iter().enumerate() {
+    let prefixes = resp
+        .prefixes4
+        .iter()
+        .map(ToString::to_string)
+        .chain(resp.prefixes6.iter().map(ToString::to_string));
+    for (idx, prefix) in prefixes.enumerate() {
         tree.add_empty_child(format!("{idx}: {prefix}"));
     }
 

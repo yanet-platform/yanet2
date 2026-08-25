@@ -21,10 +21,9 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
         const configNames = await inventoryConfigNames('decap');
         return loadKnownConfigs(configNames, async (name): Promise<{ name: string; rows: PrefixRowItem[] }> => {
             const resp = await API.decap.showConfig({ name });
-            const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((net) => {
-                const p = net.network ?? '';
-                return { id: p, prefix: p };
-            });
+            const rows: PrefixRowItem[] = [...(resp.prefixes4 ?? []), ...(resp.prefixes6 ?? [])].map(
+                (p) => ({ id: p, prefix: p }),
+            );
             return { name, rows };
         }, { onDropped: warnConfigsUnknown('decap-configs-unknown', 'decap') });
     }, []);
@@ -33,8 +32,12 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
         configName: string,
         draftRows: PrefixRowItem[],
     ): Promise<void> => {
-        const prefixes = draftRows.map((r) => ({ network: r.prefix }));
-        await API.decap.updateConfig({ name: configName, prefixes });
+        const prefixes = draftRows.map((r) => r.prefix);
+        await API.decap.updateConfig({
+            name: configName,
+            prefixes4: prefixes.filter((p) => !p.includes(':')),
+            prefixes6: prefixes.filter((p) => p.includes(':')),
+        });
     }, []);
 
     return useDraft<PrefixRowItem>({

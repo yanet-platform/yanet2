@@ -31,13 +31,14 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	modules := make([]ModuleConfig, 0, len(cfg.Functions))
 	for _, fn := range cfg.Functions {
-		prefixes, err := LoadDecapPrefixes(fn.PrefixesFile.Unwrap())
+		prefixes4, prefixes6, err := LoadDecapPrefixes(fn.PrefixesFile.Unwrap())
 		if err != nil {
 			return nil, fmt.Errorf("failed to load prefixes file %q: %w", fn.PrefixesFile.Unwrap(), err)
 		}
 		modules = append(modules, ModuleConfig{
-			Name:     fn.Module.Unwrap(),
-			Prefixes: prefixes,
+			Name:      fn.Module.Unwrap(),
+			Prefixes4: prefixes4,
+			Prefixes6: prefixes6,
 		})
 	}
 

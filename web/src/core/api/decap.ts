@@ -1,17 +1,20 @@
 import { createService, type CallOptions } from './client';
-import type { IPPrefix } from '../utils/netip';
 
 export interface ShowConfigRequest {
     name?: string;
 }
 
+// The prefix lists are family-typed (commonpb.IPv4Prefix and
+// commonpb.IPv6Prefix), serialized by the gateway as bare CIDR strings.
 export interface ShowConfigResponse {
-    prefixes?: IPPrefix[];
+    prefixes4?: string[];
+    prefixes6?: string[];
 }
 
 export interface DecapUpdateConfigRequest {
     name?: string;
-    prefixes?: IPPrefix[];
+    prefixes4?: string[];
+    prefixes6?: string[];
 }
 
 export interface DecapUpdateConfigResponse { }

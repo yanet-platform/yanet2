@@ -85,8 +85,9 @@ func (m *GatewayActuator) Apply(ctx context.Context, state State) error {
 
 	for _, mc := range state.Modules {
 		_, e := m.decap.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-			Name:     mc.Name,
-			Prefixes: mc.Prefixes,
+			Name:      mc.Name,
+			Prefixes4: mc.Prefixes4,
+			Prefixes6: mc.Prefixes6,
 		})
 		if e != nil {
 			err = errors.Join(err, fmt.Errorf(

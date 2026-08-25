@@ -19,7 +19,7 @@ const PrefixYamlIO: React.FC<PrefixYamlIOProps> = ({ configName, rows, onImport,
         itemLabel="prefixes"
         downloadPrefix={`decap-${configName}`}
         toastPrefix="prefix-yaml"
-        importPlaceholder={`config: ${configName}\nprefixes:\n  - 10.0.0.0/8\n  - 2a02:6b8::/32`}
+        importPlaceholder={`config: ${configName}\nprefixes4:\n  - 10.0.0.0/8\nprefixes6:\n  - 2a02:6b8::/32`}
         exportYaml={() => rowsToYaml(configName, rows)}
         parseImport={yamlToRows}
         disabled={disabled}

@@ -11,8 +11,10 @@ import (
 type ModuleConfig struct {
 	// Name is the decap module config name.
 	Name string
-	// Prefixes is the desired tunnel prefix set.
-	Prefixes []*commonpb.IPPrefix
+	// Prefixes4 is the desired IPv4 tunnel prefix set.
+	Prefixes4 []*commonpb.IPv4Prefix
+	// Prefixes6 is the desired IPv6 tunnel prefix set.
+	Prefixes6 []*commonpb.IPv6Prefix
 }
 
 // State is the desired payload pushed by each reconcile pass.

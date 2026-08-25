@@ -35,8 +35,12 @@ type Backend interface {
 }
 
 type config struct {
-	Prefixes []netip.Prefix
-	Module   ModuleHandle
+	// Prefixes4 is the sorted IPv4 prefix set.
+	Prefixes4 []netip.Prefix
+	// Prefixes6 is the sorted IPv6 prefix set.
+	Prefixes6 []netip.Prefix
+	// Module is the shared-memory handle of the published config.
+	Module ModuleHandle
 }
 
 // Free releases the module handle held by the config.
@@ -107,12 +111,16 @@ func (m *DecapService) ShowConfig(
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	prefixes, err := commonpb.NetworksFromPrefixes(entry.Prefixes)
+	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(entry.Prefixes4)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
+	}
+	prefixes6, err := commonpb.NewIPv6PrefixesFromPrefixes(entry.Prefixes6)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
 	}
 
-	return &decappb.ShowConfigResponse{Prefixes: prefixes}, nil
+	return &decappb.ShowConfigResponse{Prefixes4: prefixes4, Prefixes6: prefixes6}, nil
 }
 
 // UpdateConfig atomically replaces the whole prefix set of the named config.
@@ -125,22 +133,22 @@ func (m *DecapService) UpdateConfig(
 		return nil, errConfigNameRequired
 	}
 
-	prefixes, err := commonpb.PrefixesFromNetworks(req.GetPrefixes())
+	prefixes4, err := commonpb.PrefixesFromNetworks(req.GetPrefixes4())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
+	}
+	prefixes6, err := commonpb.PrefixesFromNetworks(req.GetPrefixes6())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
-	prefixes = slices.Compact(
-		slices.SortedFunc(
-			slices.Values(prefixes),
-			comparePrefixes,
-		),
-	)
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	cfg := &config{Prefixes: prefixes}
+	cfg := &config{
+		Prefixes4: normalizePrefixes(prefixes4),
+		Prefixes6: normalizePrefixes(prefixes6),
+	}
 	if err := m.updateConfig(name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
@@ -155,12 +163,22 @@ func comparePrefixes(first, second netip.Prefix) int {
 	)
 }
 
+// normalizePrefixes sorts a prefix set and drops duplicates.
+func normalizePrefixes(prefixes []netip.Prefix) []netip.Prefix {
+	return slices.Compact(
+		slices.SortedFunc(
+			slices.Values(prefixes),
+			comparePrefixes,
+		),
+	)
+}
+
 // updateConfig calls the backend to publish cfg, retries this service's
 // deferred handles (the publish retired the generations that were
 // holding them), frees or defers the old module handle, and stores the
 // new config. The caller must hold m.mu.
 func (m *DecapService) updateConfig(name string, cfg *config) error {
-	mod, err := m.backend.UpdateModule(name, cfg.Prefixes)
+	mod, err := m.backend.UpdateModule(name, slices.Concat(cfg.Prefixes4, cfg.Prefixes6))
 	if err != nil {
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
@@ -172,8 +190,9 @@ func (m *DecapService) updateConfig(name string, cfg *config) error {
 	}
 
 	m.configs[name] = &config{
-		Prefixes: cfg.Prefixes,
-		Module:   mod,
+		Prefixes4: cfg.Prefixes4,
+		Prefixes6: cfg.Prefixes6,
+		Module:    mod,
 	}
 
 	return nil
