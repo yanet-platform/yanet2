@@ -132,4 +132,10 @@ describe('rowsToFIBEntries nexthop MACs', () => {
 
         expect(entries[0].nexthops?.[0].dst_mac).toBe('not-a-mac');
     });
+
+    it('passes a MAC with a non-hex octet through unchanged instead of rewriting the typo', () => {
+        const entries = rowsToFIBEntries([rowFor('10.0.0.0', '10.0.0.255', { dst_mac: '1g:02:03:04:05:06' })]);
+
+        expect(entries[0].nexthops?.[0].dst_mac).toBe('1g:02:03:04:05:06');
+    });
 });

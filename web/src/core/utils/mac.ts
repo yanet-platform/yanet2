@@ -52,15 +52,16 @@ export const parseMACToBytes = (mac: string): number[] | undefined => {
     const trimmed = mac.trim();
     if (!trimmed) return undefined;
 
+    // Tokens are matched as whole hex before parsing: the numeric parser
+    // accepts a hex prefix and would silently rewrite a typo.
     if (trimmed.includes(':') || trimmed.includes('-')) {
         const parts = trimmed.split(/[:-]/);
         if (parts.length !== 6) return undefined;
 
         const bytes: number[] = [];
         for (const part of parts) {
-            const num = parseInt(part, 16);
-            if (isNaN(num) || num < 0 || num > 255) return undefined;
-            bytes.push(num);
+            if (!/^[0-9a-fA-F]{1,2}$/.test(part)) return undefined;
+            bytes.push(parseInt(part, 16));
         }
         return bytes;
     }
@@ -71,21 +72,18 @@ export const parseMACToBytes = (mac: string): number[] | undefined => {
 
         const bytes: number[] = [];
         for (const part of parts) {
-            if (part.length !== 4) return undefined;
+            if (!/^[0-9a-fA-F]{4}$/.test(part)) return undefined;
             const val = parseInt(part, 16);
-            if (isNaN(val)) return undefined;
             bytes.push((val >> 8) & 0xff);
             bytes.push(val & 0xff);
         }
         return bytes;
     }
 
-    if (trimmed.length === 12) {
+    if (/^[0-9a-fA-F]{12}$/.test(trimmed)) {
         const bytes: number[] = [];
         for (let i = 0; i < 6; i++) {
-            const num = parseInt(trimmed.substring(i * 2, i * 2 + 2), 16);
-            if (isNaN(num)) return undefined;
-            bytes.push(num);
+            bytes.push(parseInt(trimmed.substring(i * 2, i * 2 + 2), 16));
         }
         return bytes;
     }
