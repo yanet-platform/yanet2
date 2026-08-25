@@ -2,17 +2,21 @@ package main
 
 import (
 	"bytes"
+	"debug/elf"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/lab"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -27,6 +31,194 @@ func TestValidSessionName(t *testing.T) {
 			t.Errorf("validSessionName(%q) = true", name)
 		}
 	}
+}
+
+func TestCollectDoctorReportChecksRequiredToolsSeparately(t *testing.T) {
+	root := prepareDoctorFiles(t)
+	image := filepath.Join(root, "yanet-test.qcow2")
+	toolPaths := map[string]string{
+		"go":                 "/usr/bin/go",
+		"just":               "/usr/bin/just",
+		"qemu-system-x86_64": "/usr/bin/qemu-system-x86_64",
+		"qemu-img":           "/usr/bin/qemu-img",
+		"ssh":                "/usr/bin/ssh",
+		"ssh-keygen":         "/usr/bin/ssh-keygen",
+	}
+	report := collectDoctorReport(doctorConfig{
+		Root:       root,
+		Image:      image,
+		ImageCheck: readableRegularFile,
+		LookPath: func(name string) (string, error) {
+			if name == "qemu-system-x86_64" {
+				return "", errors.New("tool missing")
+			}
+			return toolPaths[name], nil
+		},
+		Platform:     "darwin",
+		KVMAvailable: func() bool { return false },
+	})
+
+	require.False(t, report.OK)
+	require.Equal(t, doctorStatusFailed, doctorCheckStatus(report, "tool:qemu-system-x86_64"))
+	require.Equal(t, doctorStatusOK, doctorCheckStatus(report, "tool:qemu-img"))
+	require.Equal(t, doctorStatusOK, doctorCheckStatus(report, "qemu-image"))
+	kvm := doctorCheckFor(report, "kvm")
+	require.Equal(t, doctorStatusWarning, kvm.Status)
+	require.Contains(t, kvm.Reason, "TCG fallback")
+}
+
+func TestCollectDoctorReportReportsImageAndArtifactFailures(t *testing.T) {
+	root := prepareDoctorFiles(t)
+	image := filepath.Join(root, "yanet-test.qcow2")
+	require.NoError(t, os.Chmod(image, 0o000))
+	operatorArtifact := filepath.Join(root, "build", "operators", "route", "yanet-route-operator")
+	operatorCLI := filepath.Join(root, "target", "release", "yanet-cli-ready")
+	emptyArtifact := filepath.Join(root, "target", "release", "yanet-cli")
+	require.NoError(t, os.Remove(operatorArtifact))
+	require.NoError(t, os.WriteFile(operatorCLI, []byte("not an executable"), 0o755))
+	require.NoError(t, os.WriteFile(emptyArtifact, nil, 0o755))
+
+	report := collectDoctorReport(doctorConfig{
+		Root:         root,
+		Image:        image,
+		ImageCheck:   readableRegularFile,
+		LookPath:     func(string) (string, error) { return "/usr/bin/tool", nil },
+		Platform:     "linux",
+		KVMAvailable: func() bool { return false },
+	})
+
+	require.False(t, report.OK)
+	imageCheck := doctorCheckFor(report, "qemu-image")
+	require.Equal(t, doctorStatusFailed, imageCheck.Status)
+	require.Contains(t, imageCheck.Reason, image)
+	operatorCheck := doctorCheckFor(report, "artifact:build/operators/route/yanet-route-operator")
+	require.Equal(t, doctorStatusFailed, operatorCheck.Status)
+	require.Contains(t, operatorCheck.Reason, "candidate source: build/operators/")
+	cliCheck := doctorCheckFor(report, "artifact:target/release/yanet-cli-ready")
+	require.Equal(t, doctorStatusFailed, cliCheck.Status)
+	require.Contains(t, cliCheck.Reason, "file is not an ELF executable")
+	emptyCheck := doctorCheckFor(report, "artifact:target/release/yanet-cli")
+	require.Equal(t, doctorStatusFailed, emptyCheck.Status)
+	require.Contains(t, emptyCheck.Reason, "file is empty")
+	require.Equal(t, doctorStatusWarning, doctorCheckStatus(report, "kvm"))
+}
+
+func TestValidateQEMUImageIncludesCommandDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	image := filepath.Join(root, "yanet-test.qcow2")
+	tool := filepath.Join(root, "qemu-img")
+	require.NoError(t, os.WriteFile(image, []byte("image"), 0o600))
+	require.NoError(t, os.WriteFile(tool, []byte("#!/bin/sh\nprintf 'invalid image metadata\\n' >&2\nexit 1\n"), 0o755))
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := validateQEMUImage(image)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid image metadata")
+}
+
+func TestReadableExecutableFileRequiresGuestArchitecture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact")
+	header := validELFHeader()
+	header[4] = byte(elf.ELFCLASS32)
+	require.NoError(t, os.WriteFile(path, header, 0o755))
+	err := readableExecutableFile(path)
+	require.ErrorContains(t, err, "64-bit")
+
+	header = validELFHeader()
+	binary.LittleEndian.PutUint16(header[18:], uint16(elf.EM_AARCH64))
+	require.NoError(t, os.WriteFile(path, header, 0o755))
+	err = readableExecutableFile(path)
+	require.ErrorContains(t, err, "x86_64")
+
+	header = validELFHeader()
+	binary.LittleEndian.PutUint16(header[16:], uint16(elf.ET_REL))
+	require.NoError(t, os.WriteFile(path, header, 0o755))
+	err = readableExecutableFile(path)
+	require.ErrorContains(t, err, "runnable")
+
+	header = validELFHeader()
+	binary.LittleEndian.PutUint16(header[16:], uint16(elf.ET_DYN))
+	require.NoError(t, os.WriteFile(path, header, 0o755))
+	require.NoError(t, readableExecutableFile(path))
+
+	header = validELFHeader()
+	header[5] = byte(elf.ELFDATA2MSB)
+	binary.BigEndian.PutUint16(header[16:], uint16(elf.ET_EXEC))
+	binary.BigEndian.PutUint16(header[18:], uint16(elf.EM_X86_64))
+	binary.BigEndian.PutUint32(header[20:], uint32(elf.EV_CURRENT))
+	require.NoError(t, os.WriteFile(path, header, 0o755))
+	err = readableExecutableFile(path)
+	require.ErrorContains(t, err, "little-endian")
+
+	scriptPath := filepath.Join(t.TempDir(), "dpdk-devbind.py")
+	require.NoError(t, os.WriteFile(scriptPath, []byte("#!\n"), 0o755))
+	err = readableExecutableFile(scriptPath)
+	require.ErrorContains(t, err, "no interpreter")
+}
+
+func TestDoctorReportJSONHasCheckStatusAndReason(t *testing.T) {
+	report := doctorReport{
+		OK:     true,
+		Checks: []doctorCheck{{Name: "kvm", Status: doctorStatusWarning, Reason: "KVM unavailable; using TCG fallback"}},
+	}
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+	var decoded struct {
+		Checks []map[string]string `json:"checks"`
+	}
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded.Checks, 1)
+	require.Equal(t, "kvm", decoded.Checks[0]["name"])
+	require.Equal(t, doctorStatusWarning, decoded.Checks[0]["status"])
+	require.NotEmpty(t, decoded.Checks[0]["reason"])
+}
+
+func TestDoctorAccelerationCheckMissingKVMIsWarning(t *testing.T) {
+	check := doctorAccelerationCheck("linux", func() bool { return false })
+	require.Equal(t, doctorStatusWarning, check.Status)
+	require.Contains(t, check.Reason, "TCG fallback")
+
+	check = doctorAccelerationCheck("darwin", func() bool { return true })
+	require.Equal(t, doctorStatusWarning, check.Status)
+	require.Contains(t, check.Reason, "TCG fallback")
+}
+
+func prepareDoctorFiles(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	image := filepath.Join(root, "yanet-test.qcow2")
+	require.NoError(t, os.WriteFile(image, []byte("image"), 0o600))
+	for _, path := range lab.RequiredArtifacts(root) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		contents := validELFHeader()
+		if strings.HasSuffix(path, ".py") {
+			contents = []byte("#!/u")
+		}
+		require.NoError(t, os.WriteFile(path, contents, 0o755))
+	}
+	return root
+}
+
+func validELFHeader() []byte {
+	header := make([]byte, 64)
+	copy(header, []byte{0x7f, 'E', 'L', 'F', byte(elf.ELFCLASS64), byte(elf.ELFDATA2LSB), byte(elf.EV_CURRENT)})
+	binary.LittleEndian.PutUint16(header[16:], uint16(elf.ET_EXEC))
+	binary.LittleEndian.PutUint16(header[18:], uint16(elf.EM_X86_64))
+	binary.LittleEndian.PutUint32(header[20:], uint32(elf.EV_CURRENT))
+	return header
+}
+
+func doctorCheckFor(report doctorReport, name string) doctorCheck {
+	for _, check := range report.Checks {
+		if check.Name == name {
+			return check
+		}
+	}
+	return doctorCheck{}
+}
+
+func doctorCheckStatus(report doctorReport, name string) string {
+	return doctorCheckFor(report, name).Status
 }
 
 func TestRootCommandHasUpSubcommand(t *testing.T) {

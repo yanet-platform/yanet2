@@ -274,7 +274,7 @@ func (q *QEMUManager) Start() (bool, error) {
 
 	// OS-specific configuration
 	if osType == "linux" {
-		if isKVMEnabled() {
+		if KVMAvailable() {
 			args = append(args, "-enable-kvm")
 		}
 	}
@@ -1377,8 +1377,8 @@ func copyFile(src, dst string) error {
 	return out.Sync()
 }
 
-// isKVMEnabled reports whether QEMU can open the KVM device.
-func isKVMEnabled() bool {
+// KVMAvailable reports whether the current process can use the Linux KVM device.
+func KVMAvailable() bool {
 	return isKVMDeviceAccessible("/dev/kvm")
 }
 

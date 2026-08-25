@@ -72,6 +72,9 @@ func RequiredArtifacts(root string) []string {
 	for _, name := range framework.CLIBinaryNames {
 		paths = append(paths, filepath.Join(root, "target", "release", name))
 	}
+	for _, name := range operatorCLIs {
+		paths = append(paths, filepath.Join(root, "target", "release", name))
+	}
 	return paths
 }
 

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +17,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -366,52 +370,254 @@ func (m *application) doctor() error {
 	if err != nil {
 		return err
 	}
-	type check struct {
-		Name   string `json:"name"`
-		OK     bool   `json:"ok"`
-		Detail string `json:"detail"`
-	}
-	checks := []check{}
-	for _, name := range []string{"go", "just", "qemu-system-x86_64", "qemu-img", "ssh", "ssh-keygen"} {
-		path, lookErr := exec.LookPath(name)
-		checks = append(checks, check{Name: name, OK: lookErr == nil, Detail: path})
-	}
 	image := os.Getenv("YANET_QEMU_IMAGE")
 	if image == "" {
 		image = filepath.Join(root, "tests", "functional", "yanet-test.qcow2")
 	}
-	_, imageErr := os.Stat(image)
-	checks = append(checks, check{Name: "qemu-image", OK: imageErr == nil, Detail: image})
-	for _, path := range lab.RequiredArtifacts(root) {
-		info, artifactErr := os.Stat(path)
-		artifactOK := artifactErr == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
-		checks = append(checks, check{Name: "artifact", OK: artifactOK, Detail: path})
-	}
-	if runtime.GOOS == "linux" {
-		_, kvmErr := os.Stat("/dev/kvm")
-		checks = append(checks, check{Name: "kvm-optional", OK: kvmErr == nil, Detail: "/dev/kvm"})
-	}
-	all := true
-	for _, item := range checks {
-		if !item.OK && item.Name != "kvm-optional" {
-			all = false
-		}
-	}
+	report := collectDoctorReport(doctorConfig{
+		Root:         root,
+		Image:        image,
+		LookPath:     exec.LookPath,
+		ImageCheck:   validateQEMUImage,
+		Platform:     runtime.GOOS,
+		KVMAvailable: framework.KVMAvailable,
+	})
 	if m.json {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": all, "checks": checks})
+		_ = json.NewEncoder(os.Stdout).Encode(report)
 	} else {
-		for _, item := range checks {
-			marker := "ok"
-			if !item.OK {
-				marker = "missing"
-			}
-			fmt.Printf("%-8s %-18s %s\n", marker, item.Name, item.Detail)
+		for _, check := range report.Checks {
+			fmt.Printf("%-8s %-52s %s\n", strings.ToUpper(check.Status), check.Name, check.Reason)
 		}
 	}
-	if !all {
-		return errors.New("required lab prerequisites are missing")
+	if !report.OK {
+		failed := make([]string, 0)
+		for _, check := range report.Checks {
+			if check.Status == doctorStatusFailed {
+				failed = append(failed, check.Name)
+			}
+		}
+		return fmt.Errorf("required lab prerequisites are missing: %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+const (
+	doctorStatusOK      = "ok"
+	doctorStatusFailed  = "failed"
+	doctorStatusWarning = "warning"
+)
+
+type doctorCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
+type doctorReport struct {
+	OK     bool          `json:"ok"`
+	Checks []doctorCheck `json:"checks"`
+}
+
+type doctorConfig struct {
+	Root         string
+	Image        string
+	LookPath     func(string) (string, error)
+	ImageCheck   func(string) error
+	Platform     string
+	KVMAvailable func() bool
+}
+
+func collectDoctorReport(config doctorConfig) doctorReport {
+	checks := make([]doctorCheck, 0)
+	for _, name := range []string{"go", "just", "qemu-system-x86_64", "qemu-img", "ssh", "ssh-keygen"} {
+		path, err := config.LookPath(name)
+		if err != nil {
+			checks = append(checks, doctorCheck{
+				Name:   "tool:" + name,
+				Status: doctorStatusFailed,
+				Reason: "not found in PATH",
+			})
+			continue
+		}
+		checks = append(checks, doctorCheck{
+			Name:   "tool:" + name,
+			Status: doctorStatusOK,
+			Reason: "found at " + path,
+		})
+	}
+
+	imageCheck := config.ImageCheck
+	if imageCheck == nil {
+		imageCheck = readableRegularFile
+	}
+	if err := imageCheck(config.Image); err != nil {
+		checks = append(checks, doctorCheck{
+			Name:   "qemu-image",
+			Status: doctorStatusFailed,
+			Reason: fmt.Sprintf("%s: %v", config.Image, err),
+		})
+	} else {
+		checks = append(checks, doctorCheck{
+			Name:   "qemu-image",
+			Status: doctorStatusOK,
+			Reason: config.Image,
+		})
+	}
+
+	for _, path := range lab.RequiredArtifacts(config.Root) {
+		relative, err := filepath.Rel(config.Root, path)
+		if err != nil {
+			relative = path
+		}
+		name := "artifact:" + filepath.ToSlash(relative)
+		if err := readableExecutableFile(path); err != nil {
+			checks = append(checks, doctorCheck{
+				Name:   name,
+				Status: doctorStatusFailed,
+				Reason: fmt.Sprintf("%v; candidate source: %s", err, artifactSource(relative)),
+			})
+			continue
+		}
+		checks = append(checks, doctorCheck{
+			Name:   name,
+			Status: doctorStatusOK,
+			Reason: "usable; candidate source: " + artifactSource(relative),
+		})
+	}
+
+	checks = append(checks, doctorAccelerationCheck(config.Platform, config.KVMAvailable))
+	report := doctorReport{OK: true, Checks: checks}
+	for _, check := range checks {
+		if check.Status == doctorStatusFailed {
+			report.OK = false
+			break
+		}
+	}
+	return report
+}
+
+func readableRegularFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("missing or unreadable file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("not a regular file")
+	}
+	if info.Size() == 0 {
+		return errors.New("file is empty")
+	}
+	if info.Mode().Perm()&0o444 == 0 {
+		return errors.New("file has no read permission")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("cannot read file: %w", err)
+	}
+	return file.Close()
+}
+
+func validateQEMUImage(path string) error {
+	if err := readableRegularFile(path); err != nil {
+		return err
+	}
+	output, err := exec.Command("qemu-img", "info", "--output=json", path).CombinedOutput()
+	if err != nil {
+		diagnostics := strings.TrimSpace(lab.TruncateOutput(string(output)))
+		if diagnostics == "" {
+			return fmt.Errorf("qemu-img cannot read image: %w", err)
+		}
+		return fmt.Errorf("qemu-img cannot read image: %w: %s", err, diagnostics)
+	}
+	var info struct {
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(output, &info); err != nil {
+		return fmt.Errorf("qemu-img returned invalid metadata: %w", err)
+	}
+	if info.Format != "qcow2" {
+		return fmt.Errorf("image format is %q, want qcow2", info.Format)
+	}
+	return nil
+}
+
+func readableExecutableFile(path string) error {
+	if err := readableRegularFile(path); err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot inspect file: %w", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return errors.New("file is not executable")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("cannot inspect executable: %w", err)
+	}
+	defer file.Close()
+	if filepath.Ext(path) == ".py" {
+		line, err := bufio.NewReaderSize(file, 256).ReadSlice('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("cannot inspect shebang: %w", err)
+		}
+		line = bytes.TrimSuffix(line, []byte{'\n'})
+		if !bytes.HasPrefix(line, []byte("#!")) {
+			return errors.New("file is not a shebang script")
+		}
+		if strings.TrimSpace(string(line[2:])) == "" {
+			return errors.New("shebang has no interpreter")
+		}
+		return nil
+	}
+	binary, err := elf.NewFile(file)
+	if err != nil {
+		return fmt.Errorf("file is not an ELF executable: %w", err)
+	}
+	if binary.Class != elf.ELFCLASS64 {
+		return errors.New("file is not a 64-bit ELF executable")
+	}
+	if binary.Machine != elf.EM_X86_64 {
+		return errors.New("file is not an x86_64 ELF executable")
+	}
+	if binary.Data != elf.ELFDATA2LSB {
+		return errors.New("file is not a little-endian ELF executable")
+	}
+	if binary.Type != elf.ET_EXEC && binary.Type != elf.ET_DYN {
+		return errors.New("file is not a runnable ELF executable")
+	}
+	return nil
+}
+
+func artifactSource(relative string) string {
+	relative = filepath.ToSlash(relative)
+	switch {
+	case strings.HasPrefix(relative, "build/operators/"):
+		return "build/operators/"
+	case strings.HasPrefix(relative, "target/release/"):
+		return "target/release/"
+	default:
+		return relative
+	}
+}
+
+func doctorAccelerationCheck(platform string, kvmAvailable func() bool) doctorCheck {
+	if platform != "linux" {
+		return doctorCheck{
+			Name:   "kvm",
+			Status: doctorStatusWarning,
+			Reason: "KVM unavailable; using TCG fallback",
+		}
+	}
+	if !kvmAvailable() {
+		return doctorCheck{
+			Name:   "kvm",
+			Status: doctorStatusWarning,
+			Reason: "KVM unavailable; using TCG fallback",
+		}
+	}
+	return doctorCheck{Name: "kvm", Status: doctorStatusOK, Reason: "available"}
 }
 
 func (m *application) up() error {
