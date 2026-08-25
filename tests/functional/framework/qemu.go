@@ -108,6 +108,10 @@ const serialTrimMargin = 2 << 20
 //	    log.Fatalf("Failed to create QEMU manager: %v", err)
 //	}
 func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*QEMUManager, error) {
+	return newQEMUManager(name, imagePath, logger, "")
+}
+
+func newQEMUManager(name string, imagePath string, logger *zap.SugaredLogger, projectRoot string) (*QEMUManager, error) {
 	// Use /tmp directly to keep UNIX socket paths under the 104-byte limit.
 	// macOS TMPDIR (/var/folders/.../) is too long for socket paths.
 	workDir, err := os.MkdirTemp("/tmp", fmt.Sprintf("yvm-%s-", name))
@@ -117,9 +121,11 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 	instanceID := filepath.Base(workDir)
 
 	// Determine project root directory
-	projectRoot, err := findProjectRoot()
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine project root directory: %w", err)
+	if projectRoot == "" {
+		projectRoot, err = findProjectRoot()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine project root directory: %w", err)
+		}
 	}
 	buildDir := filepath.Join(projectRoot, "build")
 	targetDir := filepath.Join(projectRoot, "target")

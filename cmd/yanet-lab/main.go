@@ -853,6 +853,10 @@ func (m *application) printValue(value any) error {
 }
 
 func (m *application) serve() (err error) {
+	root, err := projectRoot()
+	if err != nil {
+		return err
+	}
 	dir, socket, err := sessionPaths(m.session)
 	if err != nil {
 		return err
@@ -917,6 +921,7 @@ func (m *application) serve() (err error) {
 		PoolName:         "lab-" + filepath.Base(filepath.Dir(dir)) + "-" + m.session,
 		PoolSize:         1,
 		BaselineTag:      "lab-operators",
+		ProjectRoot:      root,
 		EnableSSHForward: true,
 		ForceStop:        true,
 		Prepare:          lab.PrepareOperators,
@@ -1299,10 +1304,6 @@ func sessionPaths(name string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", "", err
-	}
 	return sessionPathsForRoot(root, name)
 }
 
@@ -1436,19 +1437,147 @@ func validSessionName(name string) bool {
 	return name != "." && name != ".." && sessionNamePattern.MatchString(name)
 }
 
+type projectRootState struct {
+	sync.Once
+	root string
+	err  error
+}
+
+func (m *projectRootState) Resolve() (string, error) {
+	m.Do(func() {
+		cwd, err := os.Getwd()
+		if err != nil {
+			m.err = err
+			return
+		}
+		m.root, m.err = resolveProjectRoot(cwd)
+	})
+	return m.root, m.err
+}
+
+var projectRootCache projectRootState
+
 func projectRoot() (string, error) {
-	dir, err := os.Getwd()
+	return projectRootCache.Resolve()
+}
+
+func resolveProjectRoot(start string) (string, error) {
+	logicalStart, err := filepath.Abs(start)
 	if err != nil {
 		return "", err
 	}
+	canonicalStart, err := filepath.EvalSymlinks(logicalStart)
+	if err != nil {
+		return "", errors.New("project root is not canonical; resolve symlinks before running")
+	}
+	logicalWalk := walkToGoMod(logicalStart)
+	if logicalWalk.Symlink {
+		return "", errors.New("project root is not canonical; resolve symlinks before running")
+	}
+	if !logicalWalk.Found {
+		canonicalWalk := walkToGoMod(canonicalStart)
+		if canonicalWalk.Symlink {
+			return "", errors.New("project root is not canonical; resolve symlinks before running")
+		}
+		if len(logicalWalk.SymlinkPaths) != 0 {
+			return "", errors.New("project root is not canonical; resolve symlinks before running")
+		}
+		if !canonicalWalk.Found {
+			return "", fmt.Errorf("cannot find go.mod walking up from %s", start)
+		}
+		return canonicalWalk.Root, nil
+	}
+
+	canonicalRoot, err := filepath.EvalSymlinks(logicalWalk.Root)
+	if err != nil {
+		return "", errors.New("project root is not canonical; resolve symlinks before running")
+	}
+	if symlinkLeavesRoot(logicalWalk.SymlinkPaths, filepath.Dir(logicalWalk.Root), canonicalRoot) {
+		return "", errors.New("project root is not canonical; resolve symlinks before running")
+	}
+	canonicalWalk := walkToGoMod(canonicalStart)
+	if canonicalWalk.Symlink || !canonicalWalk.Found || canonicalWalk.Root != canonicalRoot {
+		return "", errors.New("project root is not canonical; resolve symlinks before running")
+	}
+
+	resolvedGoMod, err := filepath.EvalSymlinks(filepath.Join(logicalWalk.Root, "go.mod"))
+	if err != nil || resolvedGoMod != filepath.Join(canonicalRoot, "go.mod") {
+		return "", errors.New("project root is not canonical; resolve symlinks before running")
+	}
+	return canonicalRoot, nil
+}
+
+type goModWalk struct {
+	Root         string
+	Found        bool
+	Symlink      bool
+	SymlinkPaths []string
+}
+
+func walkToGoMod(start string) goModWalk {
+	dir := start
+	var symlinkPaths []string
 	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			return dir, nil
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			symlinkPaths = append(symlinkPaths, dir)
+			dir = filepath.Dir(dir)
+			continue
+		}
+		marker := filepath.Join(dir, "go.mod")
+		if info, err := os.Lstat(marker); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return goModWalk{Root: dir, Symlink: true, SymlinkPaths: symlinkPaths}
+			}
+			if info.Mode().IsRegular() {
+				symlinkPaths = append(symlinkPaths, symlinkComponents(dir)...)
+				return goModWalk{Root: dir, Found: true, SymlinkPaths: symlinkPaths}
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", errors.New("not inside the YANET2 repository")
+			return goModWalk{SymlinkPaths: symlinkPaths}
 		}
 		dir = parent
 	}
+}
+
+func symlinkComponents(path string) []string {
+	var paths []string
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		if info, err := os.Lstat(current); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			paths = append(paths, current)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return paths
+		}
+	}
+}
+
+func symlinkLeavesRoot(paths []string, logicalRoot, canonicalRoot string) bool {
+	for _, path := range paths {
+		if !pathWithin(logicalRoot, path) {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil || !pathWithin(canonicalRoot, resolved) {
+			if err == nil && isSystemPrefixAlias(path, resolved) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func isSystemPrefixAlias(path, resolved string) bool {
+	if filepath.Dir(path) != string(filepath.Separator) {
+		return false
+	}
+	return resolved == filepath.Join(string(filepath.Separator)+"private", path)
+}
+
+func pathWithin(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

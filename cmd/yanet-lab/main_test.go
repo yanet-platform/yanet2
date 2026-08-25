@@ -33,6 +33,165 @@ func TestValidSessionName(t *testing.T) {
 	}
 }
 
+func TestResolveProjectRootWalksToCanonicalGoMod(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested", "work")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+
+	got, err := resolveProjectRoot(nested)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestResolveProjectRootAcceptsSystemPrefixAlias(t *testing.T) {
+	resolvedPrefix, err := filepath.EvalSymlinks(string(filepath.Separator) + "var")
+	if err != nil || resolvedPrefix == string(filepath.Separator)+"var" {
+		t.Skip("host has no /var prefix alias")
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	privateVar := string(filepath.Separator) + "private" + string(filepath.Separator) + "var" + string(filepath.Separator)
+	if !strings.HasPrefix(canonicalRoot, privateVar) {
+		t.Skip("temporary directory is not under /private/var")
+	}
+	logicalRoot := string(filepath.Separator) + "var" + string(filepath.Separator) + strings.TrimPrefix(canonicalRoot, privateVar)
+	require.NoError(t, os.WriteFile(filepath.Join(canonicalRoot, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+	logicalStart := filepath.Join(logicalRoot, "nested")
+	require.NoError(t, os.Mkdir(filepath.Join(canonicalRoot, "nested"), 0o755))
+
+	got, err := resolveProjectRoot(logicalStart)
+	require.NoError(t, err)
+	require.Equal(t, canonicalRoot, got)
+}
+
+func TestResolveProjectRootReportsMissingGoMod(t *testing.T) {
+	start, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	_, err = resolveProjectRoot(start)
+	require.EqualError(t, err, "cannot find go.mod walking up from "+start)
+}
+
+func TestResolveProjectRootRejectsIntermediateSymlinkAcrossRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	start := filepath.Join(root, "link", "nested")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "go.mod"), []byte("module example.com/outside\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(outside, "nested"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsSymlinkEscapeAndReentry(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	start := filepath.Join(root, "link", "nested")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "real", "nested"), 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(root, "real", "nested"), filepath.Join(outside, "nested")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsExternalSymlinkWithoutLogicalGoMod(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	start := filepath.Join(root, "link", "nested")
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "go.mod"), []byte("module example.com/outside\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(outside, "nested"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsGoModBelowExternalSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	start := filepath.Join(root, "link", "nested")
+	require.NoError(t, os.Mkdir(filepath.Join(outside, "nested"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "nested", "go.mod"), []byte("module example.com/outside\n"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsSymlinkWithoutGoMod(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	start := filepath.Join(root, "link", "nested")
+	require.NoError(t, os.Mkdir(filepath.Join(outside, "nested"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsSymlinkedGoModThroughExternalSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	marker := t.TempDir()
+	start := filepath.Join(root, "link", "nested")
+	require.NoError(t, os.WriteFile(filepath.Join(marker, "go.mod"), []byte("module example.com/outside\n"), 0o644))
+	require.NoError(t, os.Symlink(filepath.Join(marker, "go.mod"), filepath.Join(outside, "go.mod")))
+	require.NoError(t, os.Mkdir(filepath.Join(outside, "nested"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsDanglingGoModSymlink(t *testing.T) {
+	root := t.TempDir()
+	start := filepath.Join(root, "nested")
+	require.NoError(t, os.Mkdir(start, 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(root, "missing-go.mod"), filepath.Join(root, "go.mod")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootRejectsSymlinkedGoMod(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	start := filepath.Join(root, "nested")
+	require.NoError(t, os.Mkdir(start, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "go.mod"), filepath.Join(root, "go.mod")))
+
+	_, err := resolveProjectRoot(start)
+	require.EqualError(t, err, "project root is not canonical; resolve symlinks before running")
+}
+
+func TestResolveProjectRootCachesResult(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(firstRoot, "go.mod"), []byte("module example.com/first\n"), 0o644))
+
+	projectRootCache = projectRootState{}
+	t.Cleanup(func() { projectRootCache = projectRootState{} })
+
+	t.Chdir(firstRoot)
+	got, err := projectRoot()
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(firstRoot)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+
+	t.Chdir(secondRoot)
+	got, err = projectRoot()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestCollectDoctorReportChecksRequiredToolsSeparately(t *testing.T) {
 	root := prepareDoctorFiles(t)
 	image := filepath.Join(root, "yanet-test.qcow2")

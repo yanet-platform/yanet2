@@ -27,6 +27,7 @@ type VMPool struct {
 	templateSnapshotName string // snapshot loaded from templateOverlay
 	log                  *zap.SugaredLogger
 	forceStop            bool
+	projectRoot          string
 }
 
 type poolEntry struct {
@@ -90,6 +91,10 @@ func PoolSize() int {
 //
 // VMs are not started yet - call StartAll after creating the pool.
 func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, enableSSHForward bool, log *zap.SugaredLogger) (_ *VMPool, err error) {
+	return newVMPool(size, baseName, qemuImage, bootedTemplate, templateOverlay, templateSnapshotName, enableSSHForward, log, "")
+}
+
+func newVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, enableSSHForward bool, log *zap.SugaredLogger, projectRoot string) (_ *VMPool, err error) {
 	if size < 1 {
 		size = 1
 	}
@@ -102,6 +107,7 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		templateOverlay:      templateOverlay,
 		templateSnapshotName: templateSnapshotName,
 		log:                  log.Named("VMPool"),
+		projectRoot:          projectRoot,
 	}
 	defer func() {
 		if err == nil {
@@ -120,7 +126,7 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		if size > 1 {
 			name = fmt.Sprintf("%s-%d", baseName, i)
 		}
-		qemu, qemuErr := NewQEMUManager(name, qemuImage, log)
+		qemu, qemuErr := newQEMUManager(name, qemuImage, log, projectRoot)
 		if qemuErr != nil {
 			err = qemuErr
 			return nil, fmt.Errorf("failed to create QEMU manager for pool slot %d: %w", i, err)
@@ -194,7 +200,7 @@ func (p *VMPool) StartAll() error {
 func (p *VMPool) validateBootedTemplate() error {
 	vm0ImagePath := p.vms[0].manager.ImagePath
 
-	valMgr, err := NewQEMUManager("validate-booted-"+p.vms[0].manager.Name, vm0ImagePath, p.log)
+	valMgr, err := newQEMUManager("validate-booted-"+p.vms[0].manager.Name, vm0ImagePath, p.log, p.projectRoot)
 	if err != nil {
 		return fmt.Errorf("failed to create validation manager: %w", err)
 	}
