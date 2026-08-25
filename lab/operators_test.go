@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/lab"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 func TestMatchesForwardingProbe(t *testing.T) {
@@ -60,17 +61,21 @@ func TestRequiredArtifacts(t *testing.T) {
 		}
 	}
 
-	required := []string{
+	expected := []string{
 		filepath.Join(root, "build", "dataplane", "yanet-dataplane"),
 		filepath.Join(root, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(root, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
 		filepath.Join(root, "build", "operators", "route", "yanet-route-operator"),
 		filepath.Join(root, "build", "operators", "forward", "yanet-forward-operator"),
 		filepath.Join(root, "build", "operators", "decap", "yanet-decap-operator"),
 		filepath.Join(root, "build", "operators", "pipeline", "yanet-pipeline-operator"),
 		filepath.Join(root, "build", "operators", "bird-adapter", "yanet-bird-adapter"),
-		filepath.Join(root, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
 	}
-	for _, path := range required {
-		require.Contains(t, artifacts, path, "RequiredArtifacts must include %s", path)
+	for _, name := range framework.CLIBinaryNames {
+		expected = append(expected, filepath.Join(root, "target", "release", name))
 	}
+	for _, name := range []string{"yanet-cli-ready", "yanet-cli-operator-route", "yanet-cli-operator-neighbour", "yanet-cli-operator-pipeline"} {
+		expected = append(expected, filepath.Join(root, "target", "release", name))
+	}
+	require.Equal(t, expected, artifacts)
 }

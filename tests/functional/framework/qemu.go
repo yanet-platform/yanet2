@@ -262,7 +262,7 @@ func (q *QEMUManager) Start() (bool, error) {
 
 	// OS-specific configuration
 	if osType == "linux" {
-		if isKVMEnabled() {
+		if KVMAvailable() {
 			args = append(args, "-enable-kvm")
 		}
 	}
@@ -1200,12 +1200,13 @@ func copyFile(src, dst string) error {
 	return out.Sync()
 }
 
-// isKVMEnabled checks if KVM is available on the system.
-func isKVMEnabled() bool {
-	if _, err := os.Stat("/dev/kvm"); err == nil {
-		return true
+// KVMAvailable reports whether the current process can use the Linux KVM device.
+func KVMAvailable() bool {
+	file, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+	if err != nil {
+		return false
 	}
-	return false
+	return file.Close() == nil
 }
 
 // getFreePort asks the kernel for a free open port that is ready to use.

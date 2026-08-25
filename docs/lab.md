@@ -7,6 +7,7 @@ snapshot reset makes experiments repeatable.
 ## Quick start
 
 ```bash
+make -C tests/functional prepare-vm
 just lab doctor
 just lab up
 just lab status
@@ -17,11 +18,14 @@ just lab down
 ```
 
 `just lab` without a subcommand prints quick-start help and does not start a
-VM. Build host artifacts first with `make all`; the lab also needs the
-functional-test image and operator binaries produced by the Meson build.
+VM. Build Linux x86_64 guest artifacts first with `make all` in a Linux build
+environment; native macOS Mach-O binaries cannot run in the Linux guest. The
+functional-test image must exist before `doctor` or `up`; create it with
+`make -C tests/functional prepare-vm`. The lab also needs operator binaries
+produced by the Meson build.
 
 The first `up` can take several minutes because the functional harness may need
-to prepare its base image, baseline snapshot, and pinned
+to prepare its booted template, baseline snapshot, and pinned
 `yanet-bird2 2.15.1.1785924912.af804ec4-1` package. Later starts and `reset`
 reuse the snapshot. Set `YANET_QEMU_IMAGE` to use a non-default image. If an
 existing session is unhealthy, `up` returns its status instead of replacing its

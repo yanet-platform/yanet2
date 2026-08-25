@@ -108,15 +108,20 @@ meson test -C build
 For repeatable local experiments, use the reusable QEMU lab:
 
 ```bash
+make -C tests/functional prepare-vm
 just lab doctor
 just lab up
 just lab scenario run forward-route
 just lab down
 ```
 
-Run `make all` before `just lab doctor`; the doctor command checks the QEMU
-image and the dataplane, control-plane, operator, and CLI artifacts required by
-the lab baseline. Running `just lab` without a subcommand only prints help.
+Run `make all` in a Linux build environment before `just lab doctor`; the Linux
+guest requires x86_64 ELF dataplane, control-plane, operator, and CLI artifacts.
+Prepare the functional-test image with `make -C tests/functional prepare-vm`.
+On macOS, native Mach-O outputs are not usable lab artifacts. The doctor
+command also checks the QEMU image and all artifacts required by the lab
+baseline.
+Running `just lab` without a subcommand only prints help.
 
 See the [YANET2 Lab guide](docs/lab.md) for manifests, packet probes,
 troubleshooting, and the built-in forward/route, decap, and NAT64 scenarios.
