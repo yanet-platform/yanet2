@@ -1,6 +1,9 @@
 dataplane:
   storage: /dev/hugepages/yanet
   dpdk_memory: 1024
+  # Maximum self-redirects (recirculations) per packet lineage, shared by the
+  # input and output routes; 4..256, default 64. Packets exceeding the budget
+  # are dropped and counted in input_recirc_drop / output_recirc_drop.
   packet_recirc_limit: 64
   instances:
     - dp_memory: 1073741824
