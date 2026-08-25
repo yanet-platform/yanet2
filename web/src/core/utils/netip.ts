@@ -1,3 +1,5 @@
+import { bytesToBase64, extractBytes } from './bytes';
+
 // Result types for error handling
 export type Ok<T> = { ok: true; value: T };
 export type Err<E> = { ok: false; error: E };
@@ -680,6 +682,67 @@ export const countPrefixLength = (maskBytes: number[]): number => {
     return prefixLen;
 };
 
+/**
+ * Create mask bytes from prefix length
+ * @param prefixLen - Number of leading 1 bits
+ * @param totalBytes - Total number of bytes (4 for IPv4, 16 for IPv6)
+ * @returns Array of mask bytes
+ */
+export const prefixLengthToMaskBytes = (prefixLen: number, totalBytes: number): number[] => {
+    const mask: number[] = [];
+    let remaining = prefixLen;
+    for (let i = 0; i < totalBytes; i++) {
+        if (remaining >= 8) {
+            mask.push(255);
+            remaining -= 8;
+        } else if (remaining > 0) {
+            mask.push((0xff << (8 - remaining)) & 0xff);
+            remaining = 0;
+        } else {
+            mask.push(0);
+        }
+    }
+    return mask;
+};
+
+/**
+ * Format IP network (address + mask) to human-readable string
+ * Supports both contiguous (CIDR) and non-contiguous masks
+ * @param addrBytes - Array of bytes for address
+ * @param maskBytes - Array of bytes for mask (optional)
+ * @returns Formatted network string (e.g., "192.168.1.0/24" or "192.168.1.0/255.255.255.0")
+ */
+export const formatIPNet = (
+    addrBytes: number[],
+    maskBytes?: number[]
+): string => {
+    if (addrBytes.length === 0) return '';
+
+    const ipStr = formatIPFromBytes(addrBytes);
+    if (!maskBytes || maskBytes.length === 0) return ipStr;
+
+    if (isContiguousMask(maskBytes)) {
+        const prefixLen = countPrefixLength(maskBytes);
+        return `${ipStr}/${prefixLen}`;
+    } else {
+        // Non-contiguous mask - show as IP/mask
+        const maskStr = formatIPFromBytes(maskBytes);
+        return `${ipStr}/${maskStr}`;
+    }
+};
+
+/** Format a wire IPNet ({addr, mask} as base64/bytes) to a CIDR string. */
+export const formatIPNetItem = (
+    net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] },
+): string => {
+    const addrBytes = extractBytes(net.addr);
+    const maskBytes = extractBytes(net.mask);
+    if (!addrBytes || addrBytes.length === 0) {
+        return '';
+    }
+    return formatIPNet(addrBytes, maskBytes);
+};
+
 // Wire-format shape of commonpb.IPAddress as it arrives from the
 // gRPC-JSON gateway. The addr field may be base64 (string), a numeric
 // byte array, or a Uint8Array.
@@ -860,6 +923,13 @@ export const ipRangeSpan = (range: IPRangeWire | undefined): bigint | undefined 
 };
 
 /**
+ * Parse CIDR strings to IPNet array with base64-encoded bytes.
+ *
+ * A token with no `/mask` is a bare host address and is encoded at full
+ * width for its family (/32 for IPv4, /128 for IPv6). A token with an
+ * empty or malformed mask is dropped.
+ */
+/**
  * Check if an IPv6 mask is bi-contiguous: each 64-bit half is
  * independently all 1s followed by all 0s. A hole exactly at the /64
  * boundary is allowed while a hole within a half is not.
@@ -877,7 +947,8 @@ export const isBiContiguousMask = (maskBytes: number[]): boolean =>
  * address gains the full-width prefix for its family. An IP-shaped mask is
  * accepted when it fits the typed message's mask class — contiguous for
  * IPv4 (canonicalized to `addr/len`), per-half contiguous for IPv6 (kept
- * in the address/mask form the wire accepts). Anything else is dropped.
+ * in the address/mask form the wire accepts). Anything else is dropped,
+ * like in parseCidrsToIPNets.
  */
 export const partitionCidrsToTyped = (cidrs: string[]): { v4: string[]; v6: string[] } => {
     const v4: string[] = [];
@@ -912,3 +983,23 @@ export const partitionCidrsToTyped = (cidrs: string[]): { v4: string[]; v6: stri
     return { v4, v6 };
 };
 
+export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask: string }> => {
+    const results: Array<{ addr: string; mask: string }> = [];
+    for (const cidr of cidrs) {
+        const parts = cidr.trim().split('/');
+        if (parts.length > 2) continue;
+        const [ipPart, maskStr] = parts;
+        const addrBytes = parseIPToBytes(ipPart);
+        if (!addrBytes) continue;
+        const isIPv4 = addrBytes.length === 4;
+        const maxPrefix = isIPv4 ? 32 : 128;
+        const prefixLength = parts.length === 1 ? maxPrefix : parseStrictPrefixLength(maskStr, maxPrefix);
+        if (prefixLength === undefined) continue;
+        const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
+        results.push({
+            addr: bytesToBase64(addrBytes),
+            mask: bytesToBase64(maskBytes),
+        });
+    }
+    return results;
+};

@@ -11,6 +11,11 @@ message VlanRange {
   uint32 to = 2;
 }
 
+message IPNet {
+  bytes addr = 1;
+  bytes mask = 2;
+}
+
 // Represents a protocol number range [from; to]
 // For transport protocols, upper byte may contain flag bits
 message ProtoRange {

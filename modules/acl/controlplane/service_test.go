@@ -20,6 +20,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -942,6 +943,30 @@ func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
+// TestUpdateConfig_RejectsNonContiguousMask verifies that a rule with a
+// non-contiguous network mask is rejected before reaching the backend.
+func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
+	svc := newTestService(newFakeBackend())
+
+	req := &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{
+			{
+				Srcs: []*filterpb.IPNet{
+					{
+						Addr: []byte{192, 0, 2, 0},
+						Mask: []byte{0xff, 0x00, 0xff, 0x00},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := svc.UpdateConfig(t.Context(), req)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 // mustV4Network builds an IPv4Network from a test literal in the CIDR or
 // address/mask form.
 func mustV4Network(s string) *commonpb.IPv4Network {
@@ -989,6 +1014,37 @@ func TestUpdateConfig_TypedNetworkLists(t *testing.T) {
 	assert.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/32")}, rules[0].Src6s)
 	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("198.51.100.0/24")}, rules[0].Dst4s)
 	assert.Equal(t, []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/ffff:ffff:ffff:0:ffff::")}, rules[0].Dst6s)
+}
+
+// TestUpdateConfig_MergesLegacyAndTypedNetworks verifies that legacy and
+// typed lists merge into one match set, legacy entries first.
+func TestUpdateConfig_MergesLegacyAndTypedNetworks(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+
+	typed := mustV4Network("198.51.100.0/24")
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{{
+			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Srcs: []*filterpb.IPNet{{
+				Addr: []byte{192, 0, 2, 0},
+				Mask: []byte{255, 255, 255, 0},
+			}},
+			Sources4: []*commonpb.IPv4Network{typed},
+		}},
+	})
+	require.NoError(t, err)
+
+	handles := backend.CreatedHandles()
+	require.Len(t, handles, 1)
+	rules := handles[0].Rules()
+	require.Len(t, rules, 1)
+	assert.Equal(t, []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("192.0.2.0/24"),
+		xnetip.MustParseContiguous4("198.51.100.0/24"),
+	}, rules[0].Src4s)
 }
 
 // TestUpdateConfig_RejectsTypedOutOfClassMasks verifies that masks outside

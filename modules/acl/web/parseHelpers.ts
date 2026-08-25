@@ -8,7 +8,7 @@
 import type { ProtoRange } from '@yanet/core/api/acl';
 import { parseRangesRaw } from '@yanet/core/utils';
 
-export { parseRangesRaw, partitionCidrsToTyped } from '@yanet/core/utils';
+export { parseCidrsToIPNets, parseRangesRaw, partitionCidrsToTyped } from '@yanet/core/utils';
 
 /** Parse encoded proto ranges (e.g. "1536-1791") to ProtoRange wire objects. */
 export const parseProtoRangesRaw = (raw: string): ProtoRange[] => parseRangesRaw(raw) as ProtoRange[];

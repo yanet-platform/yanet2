@@ -7,6 +7,7 @@ import {
     normalizeIPRange,
     ipRangeSpan,
     parseCIDRPrefix,
+    parseCidrsToIPNets,
     partitionCidrsToTyped,
     parseIPToBytes,
     parseIPv6ToBytes,
@@ -272,31 +273,31 @@ describe('parseIPv6ToBytes malformed :: and empty-group rejection', () => {
     });
 });
 
-describe('partitionCidrsToTyped rejects malformed :: forms in both spellings', () => {
+describe('parseCidrsToIPNets rejects malformed :: forms in both spellings', () => {
     it('drops ::: bare and with /128', () => {
-        expect(partitionCidrsToTyped([':::'])).toEqual({ v4: [], v6: [] });
-        expect(partitionCidrsToTyped([':::/128'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets([':::'])).toEqual([]);
+        expect(parseCidrsToIPNets([':::/128'])).toEqual([]);
     });
 
     it('drops 1::2::3 bare and with /128', () => {
-        expect(partitionCidrsToTyped(['1::2::3'])).toEqual({ v4: [], v6: [] });
-        expect(partitionCidrsToTyped(['1::2::3/128'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['1::2::3'])).toEqual([]);
+        expect(parseCidrsToIPNets(['1::2::3/128'])).toEqual([]);
     });
 });
 
-describe('partitionCidrsToTyped hex-group strictness', () => {
+describe('parseCidrsToIPNets hex-group strictness', () => {
     it('drops an entry with trailing junk in the first group', () => {
-        expect(partitionCidrsToTyped(['1abcg::/64'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['1abcg::/64'])).toEqual([]);
     });
 
     it('drops an entry with trailing junk in a non-first group', () => {
-        expect(partitionCidrsToTyped(['1:2:3:4:5:6:7:8abcg/128'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['1:2:3:4:5:6:7:8abcg/128'])).toEqual([]);
     });
 
     it('keeps well-formed entries alongside a dropped junk-group one', () => {
-        expect(partitionCidrsToTyped(['1abcg::/64', '2001:db8::/32']))
-            .toEqual(partitionCidrsToTyped(['2001:db8::/32']));
-        expect(partitionCidrsToTyped(['2001:db8::/32']).v6).toHaveLength(1);
+        expect(parseCidrsToIPNets(['1abcg::/64', '2001:db8::/32']))
+            .toEqual(parseCidrsToIPNets(['2001:db8::/32']));
+        expect(parseCidrsToIPNets(['2001:db8::/32'])).toHaveLength(1);
     });
 });
 
@@ -350,83 +351,89 @@ describe('IPv4Prefix.parse mask strictness', () => {
     });
 });
 
-describe('partitionCidrsToTyped mask strictness', () => {
+describe('parseCidrsToIPNets mask strictness', () => {
     it('converts a well-formed CIDR list (positive control)', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/24'])).toEqual({ v4: ['10.0.0.0/24'], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/24'])).toEqual([
+            { addr: 'CgAAAA==', mask: '////AA==' },
+        ]);
     });
 
     it('drops an entry with trailing alphabetic junk in the mask', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/24abc'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/24abc'])).toEqual([]);
     });
 
     it('drops an entry with a trailing decimal fraction in the mask', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/24.5'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/24.5'])).toEqual([]);
     });
 
     it('drops an entry with an explicit leading plus sign in the mask', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/+24'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/+24'])).toEqual([]);
     });
 
     it('drops an entry with an empty mask', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/'])).toEqual([]);
     });
 
     it('keeps well-formed entries alongside dropped malformed ones', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/24abc', '10.0.0.0/24'])).toEqual({ v4: ['10.0.0.0/24'], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/24abc', '10.0.0.0/24'])).toEqual([
+            { addr: 'CgAAAA==', mask: '////AA==' },
+        ]);
     });
 
     it('drops an entry with trailing junk in an embedded-IPv4 tail octet', () => {
-        expect(partitionCidrsToTyped(['1:2:3:4:5:6:10.0.0.1abc/128'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['1:2:3:4:5:6:10.0.0.1abc/128'])).toEqual([]);
     });
 
     it('keeps a valid embedded-IPv4 CIDR alongside a dropped junk-tail one', () => {
-        expect(partitionCidrsToTyped(['1:2:3:4:5:6:10.0.0.1abc/128', '64:ff9b::10.0.0.0/120']))
-            .toEqual(partitionCidrsToTyped(['64:ff9b::10.0.0.0/120']));
-        expect(partitionCidrsToTyped(['64:ff9b::10.0.0.0/120']).v6).toHaveLength(1);
+        expect(parseCidrsToIPNets(['1:2:3:4:5:6:10.0.0.1abc/128', '64:ff9b::10.0.0.0/120']))
+            .toEqual(parseCidrsToIPNets(['64:ff9b::10.0.0.0/120']));
+        expect(parseCidrsToIPNets(['64:ff9b::10.0.0.0/120'])).toHaveLength(1);
     });
 
     it('drops an entry with a zero-padded IPv4 mask', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/024'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/024'])).toEqual([]);
     });
 
     it('drops an entry with a zero-padded IPv6 mask', () => {
-        expect(partitionCidrsToTyped(['2001:db8::/0128'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['2001:db8::/0128'])).toEqual([]);
     });
 
     it('keeps a mask of exactly "/0" (positive control, guard is not over-broad)', () => {
-        expect(partitionCidrsToTyped(['0.0.0.0/0']).v4).toHaveLength(1);
-        expect(partitionCidrsToTyped(['::/0']).v6).toHaveLength(1);
+        expect(parseCidrsToIPNets(['0.0.0.0/0'])).toHaveLength(1);
+        expect(parseCidrsToIPNets(['::/0'])).toHaveLength(1);
     });
 });
 
-describe('partitionCidrsToTyped mask-less host addresses', () => {
+describe('parseCidrsToIPNets mask-less host addresses', () => {
     it('converts a mask-less IPv4 address identically to the same address written /32', () => {
-        expect(partitionCidrsToTyped(['192.168.1.1'])).toEqual(
-            partitionCidrsToTyped(['192.168.1.1/32']),
+        expect(parseCidrsToIPNets(['192.168.1.1'])).toEqual(
+            parseCidrsToIPNets(['192.168.1.1/32']),
         );
-        expect(partitionCidrsToTyped(['192.168.1.1']).v4).toHaveLength(1);
+        expect(parseCidrsToIPNets(['192.168.1.1'])).toHaveLength(1);
     });
 
     it('encodes a mask-less IPv6 address as a full-width /128 host prefix', () => {
-        expect(partitionCidrsToTyped(['2001:db8::1'])).toEqual({ v4: [], v6: ['2001:db8::1/128'] });
+        expect(parseCidrsToIPNets(['2001:db8::1'])).toEqual([
+            { addr: 'IAENuAAAAAAAAAAAAAAAAQ==', mask: '/////////////////////w==' },
+        ]);
     });
 
     it('converts a mask-less embedded-IPv4 address identically to the same address written /128', () => {
-        expect(partitionCidrsToTyped(['::ffff:192.168.1.1'])).toEqual(
-            partitionCidrsToTyped(['::ffff:192.168.1.1/128']),
+        expect(parseCidrsToIPNets(['::ffff:192.168.1.1'])).toEqual(
+            parseCidrsToIPNets(['::ffff:192.168.1.1/128']),
         );
-        expect(partitionCidrsToTyped(['::ffff:192.168.1.1']).v6).toHaveLength(1);
+        expect(parseCidrsToIPNets(['::ffff:192.168.1.1'])).toHaveLength(1);
     });
 
     it('still drops an entry with an empty mask rather than treating it as mask-less', () => {
-        expect(partitionCidrsToTyped(['10.0.0.0/'])).toEqual({ v4: [], v6: [] });
+        expect(parseCidrsToIPNets(['10.0.0.0/'])).toEqual([]);
     });
 
     it('keeps a mask-less entry alongside a well-formed masked one, in order', () => {
-        expect(partitionCidrsToTyped(['192.168.1.1', '10.0.0.0/24'])).toEqual({
-            v4: ['192.168.1.1/32', '10.0.0.0/24'],
-            v6: [],
-        });
+        expect(parseCidrsToIPNets(['192.168.1.1', '10.0.0.0/24'])).toEqual([
+            ...parseCidrsToIPNets(['192.168.1.1/32']),
+            ...parseCidrsToIPNets(['10.0.0.0/24']),
+        ]);
     });
 });
 

@@ -6,6 +6,8 @@
 package filterpbconv
 
 import (
+	"net/netip"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -25,6 +27,92 @@ func ToDevices(pb []*filterpb.Device) (filter.Devices, error) {
 	}
 
 	return out, nil
+}
+
+// ToNet4s converts legacy protobuf IPNet messages to contiguous IPv4
+// filter networks, keeping only IPv4 entries.
+func ToNet4s(pb []*filterpb.IPNet) ([]xnetip.Contiguous[xnetip.Network4], error) {
+	out := make([]xnetip.Contiguous[xnetip.Network4], 0, len(pb))
+
+	for idx := range pb {
+		addr, mask, err := legacyNetParts(pb[idx])
+		if err != nil {
+			return nil, err
+		}
+		if !addr.Is4() {
+			continue
+		}
+
+		net, err := xnetip.Network4From(addr, mask)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid network address")
+		}
+		typed, ok := xnetip.ContiguousFrom(net)
+		if !ok {
+			return nil, status.Error(codes.InvalidArgument, "network mask must be contiguous")
+		}
+
+		out = append(out, typed)
+	}
+
+	return out, nil
+}
+
+// ToNet6s converts legacy protobuf IPNet messages to bi-contiguous IPv6
+// filter networks, keeping only IPv6 entries.
+func ToNet6s(pb []*filterpb.IPNet) ([]xnetip.BiContiguous, error) {
+	out := make([]xnetip.BiContiguous, 0, len(pb))
+
+	for idx := range pb {
+		addr, mask, err := legacyNetParts(pb[idx])
+		if err != nil {
+			return nil, err
+		}
+		if !addr.Is6() {
+			continue
+		}
+
+		net, err := xnetip.Network6From(addr, mask)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid network address")
+		}
+		typed, ok := xnetip.BiContiguousFrom6(net)
+		if !ok {
+			return nil, status.Error(codes.InvalidArgument, "network mask must be bi-contiguous")
+		}
+
+		out = append(out, typed)
+	}
+
+	return out, nil
+}
+
+// legacyNetParts decodes and validates the address and mask bytes a legacy
+// IPNet message carries.
+func legacyNetParts(pb *filterpb.IPNet) (netip.Addr, netip.Addr, error) {
+	addr, ok := netip.AddrFromSlice(pb.Addr)
+	if !ok {
+		return netip.Addr{}, netip.Addr{}, status.Error(
+			codes.InvalidArgument,
+			"invalid network address",
+		)
+	}
+	mask, ok := netip.AddrFromSlice(pb.Mask)
+	if !ok {
+		return netip.Addr{}, netip.Addr{}, status.Error(
+			codes.InvalidArgument,
+			"invalid network mask",
+		)
+	}
+
+	if addr.Is4() != mask.Is4() {
+		return netip.Addr{}, netip.Addr{}, status.Error(
+			codes.InvalidArgument,
+			"network address and mask must be the same IP family",
+		)
+	}
+
+	return addr, mask, nil
 }
 
 // ToNet4sFromNetworks converts family-typed IPv4 network messages to

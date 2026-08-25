@@ -3619,6 +3619,7 @@ dependencies = [
 name = "yanet-filterpb"
 version = "0.1.0"
 dependencies = [
+ "netip",
  "prost",
  "serde",
  "serde_json",

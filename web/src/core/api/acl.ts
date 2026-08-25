@@ -6,8 +6,8 @@ import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
 import type { IPAddressWire } from '../utils/netip';
 
-import type { VlanRange, Device, ListConfigsResponse } from './shared';
-export type { VlanRange, Device, ListConfigsResponse };
+import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
+export type { IPNet, VlanRange, Device, ListConfigsResponse };
 
 export interface PortRange {
     from?: number;
@@ -47,12 +47,14 @@ export interface Rule {
     counter?: string;
     devices?: Device[];
     vlan_ranges?: VlanRange[];
+    srcs?: IPNet[];
+    dsts?: IPNet[];
     proto_ranges?: ProtoRange[];
     src_port_ranges?: PortRange[];
     dst_port_ranges?: PortRange[];
     // Family-typed network lists (commonpb.IPv4Network and
     // commonpb.IPv6Network), serialized by the gateway as bare network
-    // strings.
+    // strings. They merge with the legacy srcs/dsts lists.
     sources4?: string[];
     sources6?: string[];
     destinations4?: string[];

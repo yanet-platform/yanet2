@@ -81,14 +81,20 @@ message Rule {
 
   repeated common.filterpb.v1.Device devices = 3;
   repeated common.filterpb.v1.VlanRange vlan_ranges = 4;
-  repeated common.commonpb.v1.IPv4Network sources4 = 5;
-  repeated common.commonpb.v1.IPv6Network sources6 = 6;
-  repeated common.commonpb.v1.IPv4Network destinations4 = 7;
-  repeated common.commonpb.v1.IPv6Network destinations6 = 8;
-  repeated common.filterpb.v1.ProtoRange proto_ranges = 9;
-  repeated common.filterpb.v1.PortRange src_port_ranges = 10;
-  repeated common.filterpb.v1.PortRange dst_port_ranges = 11;
-  common.filterpb.v1.Fragment fragment = 12;
+  // srcs and dsts carry mixed-family networks with free-form byte
+  // masks; they remain accepted for backward compatibility and merge
+  // with the typed lists below. New clients use the typed lists, which
+  // make invalid mask shapes unrepresentable.
+  repeated common.filterpb.v1.IPNet srcs = 5 [deprecated = true];
+  repeated common.filterpb.v1.IPNet dsts = 6 [deprecated = true];
+  repeated common.filterpb.v1.ProtoRange proto_ranges = 7;
+  repeated common.filterpb.v1.PortRange src_port_ranges = 8;
+  repeated common.filterpb.v1.PortRange dst_port_ranges = 9;
+  common.filterpb.v1.Fragment fragment = 10;
+  repeated common.commonpb.v1.IPv4Network sources4 = 11;
+  repeated common.commonpb.v1.IPv6Network sources6 = 12;
+  repeated common.commonpb.v1.IPv4Network destinations4 = 13;
+  repeated common.commonpb.v1.IPv6Network destinations6 = 14;
 }
 
 message Action { ActionKind kind = 1; }

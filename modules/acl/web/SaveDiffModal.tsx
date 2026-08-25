@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Dialog, Text } from '@gravity-ui/uikit';
 import type { Rule } from '@yanet/core/api/acl';
 import { ActionKind } from '@yanet/core/api/acl';
-import { dumpYamlDoc } from '@yanet/core/utils';
+import { formatIPNetItem, dumpYamlDoc } from '@yanet/core/utils';
 
 // TODO(acl): structured diff disabled until the per-card layout is reworked.
 
@@ -17,7 +17,14 @@ const ACTION_KIND_YAML_NAMES: Record<ActionKind, string> = {
 
 /** Build the serialisable object array for a set of ACL rules. Used by both YAML and JSON export. */
 export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>> => {
+    const isV6 = (cidr: string): boolean => cidr.split('/')[0].includes(':');
     return rules.map(r => {
+        const srcs = [...(r.srcs ?? []).map(formatIPNetItem).filter(Boolean), ...(r.sources4 ?? []), ...(r.sources6 ?? [])];
+        const dsts = [
+            ...(r.dsts ?? []).map(formatIPNetItem).filter(Boolean),
+            ...(r.destinations4 ?? []),
+            ...(r.destinations6 ?? []),
+        ];
         const fmtRange = (rng: { from?: number; to?: number }): { from: number; to: number } => ({
             from: rng.from ?? 0,
             to: rng.to ?? 0,
@@ -32,10 +39,10 @@ export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>
         }));
 
         const entry: Record<string, unknown> = {};
-        const sources4 = r.sources4 ?? [];
-        const sources6 = r.sources6 ?? [];
-        const destinations4 = r.destinations4 ?? [];
-        const destinations6 = r.destinations6 ?? [];
+        const sources4 = srcs.filter(s => !isV6(s));
+        const sources6 = srcs.filter(isV6);
+        const destinations4 = dsts.filter(d => !isV6(d));
+        const destinations6 = dsts.filter(isV6);
         if (sources4.length > 0) entry['sources4'] = sources4;
         if (sources6.length > 0) entry['sources6'] = sources6;
         if (destinations4.length > 0) entry['destinations4'] = destinations4;
