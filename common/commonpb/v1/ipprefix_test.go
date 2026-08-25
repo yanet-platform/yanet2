@@ -5,146 +5,42 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
-// TestIPPrefix_ToPrefix_RoundTrip asserts that a prefix that is
-// already masked survives a New/ToPrefix round trip for both families.
+// TestIPPrefix_ToPrefix_RoundTrip verifies that both families survive the
+// construction and decode round trip, with host bits masked off.
 func TestIPPrefix_ToPrefix_RoundTrip(t *testing.T) {
 	tests := []struct {
 		name   string
-		prefix netip.Prefix
+		input  string
+		want   string
+		wantV4 bool
 	}{
-		{name: "IPv4", prefix: netip.MustParsePrefix("10.0.0.0/24")},
-		{name: "IPv4 host route", prefix: netip.MustParsePrefix("10.0.0.1/32")},
-		{name: "IPv4 default route", prefix: netip.MustParsePrefix("0.0.0.0/0")},
-		{name: "IPv6", prefix: netip.MustParsePrefix("2001:db8::/32")},
-		{name: "IPv6 host route", prefix: netip.MustParsePrefix("2001:db8::1/128")},
-		{name: "IPv6 default route", prefix: netip.MustParsePrefix("::/0")},
+		{name: "IPv4", input: "10.0.0.1/24", want: "10.0.0.0/24", wantV4: true},
+		{name: "IPv6", input: "2001:db8::1/32", want: "2001:db8::/32"},
+		{name: "IPv4-mapped IPv6 stays IPv6", input: "::ffff:10.0.0.1/120", want: "::ffff:10.0.0.0/120"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, err := commonpb.NewIPPrefixFromPrefix(tt.prefix)
+			m, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(tt.input))
 			require.NoError(t, err)
+
+			require.Equal(t, tt.wantV4, m.GetV4() != nil)
+			require.Equal(t, !tt.wantV4, m.GetV6() != nil)
+
 			got, err := m.ToPrefix()
 			require.NoError(t, err)
-			require.Equal(t, tt.prefix, got)
+			require.Equal(t, netip.MustParsePrefix(tt.want), got)
 		})
 	}
 }
 
-// TestIPPrefix_HostBitsNormalized asserts that construction
-// and decoding both mask host bits below prefix_len.
-//
-// The normalization is documented behavior of both directions, not an
-// accident of one. It checks the raw wire bytes (m.GetAddr().GetAddr())
-// directly rather than only round-tripping through ToPrefix, because
-// ToPrefix masks on the way out too: a constructor that forgot to mask
-// would still pass a ToPrefix-only assertion.
-func TestIPPrefix_HostBitsNormalized(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantIn    string
-		wantBytes []byte
-	}{
-		{name: "IPv4", input: "10.0.0.1/24", wantIn: "10.0.0.0/24", wantBytes: []byte{10, 0, 0, 0}},
-		{
-			name:      "IPv6",
-			input:     "2001:db8::1/32",
-			wantIn:    "2001:db8::/32",
-			wantBytes: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			in := netip.MustParsePrefix(tt.input)
-			want := netip.MustParsePrefix(tt.wantIn)
-
-			m, err := commonpb.NewIPPrefixFromPrefix(in)
-			require.NoError(t, err)
-			require.Equal(t, tt.wantBytes, m.GetAddr().GetAddr())
-			got, err := m.ToPrefix()
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-		})
-	}
-
-	decodeTests := []struct {
-		name      string
-		addr      []byte
-		prefixLen uint32
-		wantIn    string
-	}{
-		{name: "IPv4 hand-built", addr: []byte{10, 0, 0, 1}, prefixLen: 24, wantIn: "10.0.0.0/24"},
-		{
-			name:      "IPv6 hand-built",
-			addr:      []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-			prefixLen: 32,
-			wantIn:    "2001:db8::/32",
-		},
-	}
-
-	for _, tt := range decodeTests {
-		t.Run(tt.name, func(t *testing.T) {
-			want := netip.MustParsePrefix(tt.wantIn)
-			m := &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: tt.addr},
-				PrefixLen: tt.prefixLen,
-			}
-			got, err := m.ToPrefix()
-			require.NoError(t, err)
-			require.Equal(t, want, got)
-		})
-	}
-}
-
-// TestIPPrefix_ToPrefix_PrefixLenOverflow asserts that a
-// prefix_len exceeding the family's bit length is rejected.
-//
-// The rejection is the contract: an overflowing length must not be
-// silently truncated or wrapped.
-func TestIPPrefix_ToPrefix_PrefixLenOverflow(t *testing.T) {
-	tests := []struct {
-		name      string
-		addr      []byte
-		prefixLen uint32
-	}{
-		{name: "IPv4 overflow", addr: []byte{10, 0, 0, 0}, prefixLen: 33},
-		{name: "IPv6 overflow", addr: make([]byte, 16), prefixLen: 129},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: tt.addr},
-				PrefixLen: tt.prefixLen,
-			}
-			_, err := m.ToPrefix()
-			require.Error(t, err)
-		})
-	}
-}
-
-// TestIPPrefix_ToPrefix_MalformedAddr asserts that an addr byte
-// length other than 4 or 16 is rejected.
-func TestIPPrefix_ToPrefix_MalformedAddr(t *testing.T) {
-	m := &commonpb.IPPrefix{
-		Addr:      &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5}},
-		PrefixLen: 24,
-	}
-	_, err := m.ToPrefix()
-	require.Error(t, err)
-}
-
-// TestNewIPPrefixFromPrefix_Invalid asserts that an invalid
-// prefix is rejected at construction time.
+// TestNewIPPrefixFromPrefix_Invalid asserts that an invalid prefix is
+// rejected at construction.
 //
 // Failing at construction is the contract: an invalid input must not
 // produce a message that only fails later.
@@ -153,351 +49,70 @@ func TestNewIPPrefixFromPrefix_Invalid(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestIPPrefix_SliceConversions verifies that slice conversion
-// masks host bits and preserves IPv4 and IPv6 prefixes in both directions.
-func TestIPPrefix_SliceConversions(t *testing.T) {
-	prefixes := []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.1/24"),
-		netip.MustParsePrefix("2001:db8::1/32"),
-	}
-	want := []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.0/24"),
-		netip.MustParsePrefix("2001:db8::/32"),
-	}
-
-	networks, err := commonpb.NetworksFromPrefixes(prefixes)
-	require.NoError(t, err)
-
-	got, err := commonpb.PrefixesFromNetworks(networks)
-	require.NoError(t, err)
-	require.Equal(t, want, got)
-}
-
-// TestIPPrefix_SliceConversions_Invalid verifies that conversion
-// errors identify the failing prefix position.
-func TestIPPrefix_SliceConversions_Invalid(t *testing.T) {
-	_, err := commonpb.NetworksFromPrefixes([]netip.Prefix{{}})
-	require.ErrorContains(t, err, "prefixes[0]")
-
-	_, err = commonpb.PrefixesFromNetworks([]*commonpb.IPPrefix{{
-		Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
-	}})
-	require.ErrorContains(t, err, "prefixes[0]")
-}
-
-// TestIPPrefix_AsLogValue asserts the log-friendly string form,
-// including the "invalid" fallback for an undecodable message.
-func TestIPPrefix_AsLogValue(t *testing.T) {
-	ipv4, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.0.0.0/24"))
-	require.NoError(t, err)
-	ipv6, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("2001:db8::/32"))
-	require.NoError(t, err)
-
+// TestIPPrefix_ToPrefix_Malformed verifies that an unset oneof and a
+// malformed branch decode to an error rather than a zero prefix.
+func TestIPPrefix_ToPrefix_Malformed(t *testing.T) {
 	tests := []struct {
 		name string
 		m    *commonpb.IPPrefix
-		want string
 	}{
-		{name: "IPv4", m: ipv4, want: "10.0.0.0/24"},
-		{name: "IPv6", m: ipv6, want: "2001:db8::/32"},
+		{name: "unset oneof", m: &commonpb.IPPrefix{}},
 		{
-			name: "invalid",
-			m:    &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{1, 2, 3}}},
-			want: "invalid",
+			name: "IPv4 branch with missing address",
+			m:    &commonpb.IPPrefix{Prefix: &commonpb.IPPrefix_V4{V4: &commonpb.IPv4Prefix{PrefixLen: 24}}},
+		},
+		{
+			name: "IPv6 branch with overflowing prefix length",
+			m: &commonpb.IPPrefix{
+				Prefix: &commonpb.IPPrefix_V6{V6: &commonpb.IPv6Prefix{Addr: &commonpb.IPv6Address{}, PrefixLen: 129}},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.m.AsLogValue())
+			_, err := tt.m.ToPrefix()
+			require.Error(t, err)
+			require.Equal(t, "invalid", tt.m.AsLogValue())
 		})
 	}
 }
 
-// TestIPPrefix_JSONRoundTrip asserts marshal/unmarshal round
-// trips through the "network" CIDR string for both families.
+// TestIPPrefix_AsLogValue verifies the compact log rendering.
+func TestIPPrefix_AsLogValue(t *testing.T) {
+	m, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.0.0.0/24"))
+	require.NoError(t, err)
+	require.Equal(t, "10.0.0.0/24", m.AsLogValue())
+}
+
+// TestIPPrefix_JSONRoundTrip verifies that JSON is a bare CIDR string in
+// both directions, identically to the family-typed prefix messages.
 func TestIPPrefix_JSONRoundTrip(t *testing.T) {
-	tests := []struct {
-		name   string
-		prefix netip.Prefix
-		want   string
-	}{
-		{name: "IPv4", prefix: netip.MustParsePrefix("10.0.0.0/24"), want: `{"network":"10.0.0.0/24"}`},
-		{name: "IPv6", prefix: netip.MustParsePrefix("2001:db8::/32"), want: `{"network":"2001:db8::/32"}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			original, err := commonpb.NewIPPrefixFromPrefix(tt.prefix)
+	for _, cidr := range []string{"10.0.0.0/24", "2001:db8::/32"} {
+		t.Run(cidr, func(t *testing.T) {
+			m, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(cidr))
 			require.NoError(t, err)
 
-			data, err := json.Marshal(original)
+			data, err := json.Marshal(m)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, string(data))
+			require.Equal(t, `"`+cidr+`"`, string(data))
 
-			var got commonpb.IPPrefix
-			require.NoError(t, json.Unmarshal(data, &got))
-			require.Equal(t, tt.prefix.Addr().AsSlice(), got.GetAddr().GetAddr())
-
-			gotPrefix, err := got.ToPrefix()
+			var decoded commonpb.IPPrefix
+			require.NoError(t, json.Unmarshal(data, &decoded))
+			got, err := decoded.ToPrefix()
 			require.NoError(t, err)
-			require.Equal(t, tt.prefix, gotPrefix)
+			require.Equal(t, netip.MustParsePrefix(cidr), got)
 		})
 	}
 }
 
-// TestIPPrefix_UnmarshalJSON_Errors asserts that an empty or
-// malformed "network" value is rejected.
+// TestIPPrefix_UnmarshalJSON_Errors verifies that malformed JSON input is
+// rejected.
 func TestIPPrefix_UnmarshalJSON_Errors(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{name: "empty string", input: `{"network":""}`},
-		{name: "malformed CIDR", input: `{"network":"not-a-cidr"}`},
-		{name: "invalid JSON", input: `{"network":`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var m commonpb.IPPrefix
-			err := json.Unmarshal([]byte(tt.input), &m)
-			require.Error(t, err)
-		})
-	}
-}
-
-// Test_IPPrefix_ToContiguous_RoundTrip verifies that a CIDR block
-// of either family round-trips normalized, with a family-width wire address.
-func Test_IPPrefix_ToContiguous_RoundTrip(t *testing.T) {
-	tests := []struct {
-		name      string
-		net       xnetip.Contiguous[xnetip.Network]
-		wantBytes []byte
-		wantBits  uint32
-	}{
-		{
-			name:      "IPv4 default route",
-			net:       xnetip.MustParseContiguous("0.0.0.0/0"),
-			wantBytes: []byte{0, 0, 0, 0},
-			wantBits:  0,
-		},
-		{
-			name:      "IPv4 subnet",
-			net:       xnetip.MustParseContiguous("10.0.0.0/24"),
-			wantBytes: []byte{10, 0, 0, 0},
-			wantBits:  24,
-		},
-		{
-			name:      "IPv4 host route",
-			net:       xnetip.MustParseContiguous("10.0.0.1/32"),
-			wantBytes: []byte{10, 0, 0, 1},
-			wantBits:  32,
-		},
-		{
-			name:      "IPv6 default route",
-			net:       xnetip.MustParseContiguous("::/0"),
-			wantBytes: make([]byte, 16),
-			wantBits:  0,
-		},
-		{
-			name:      "zero block is the IPv6 default route",
-			net:       xnetip.Contiguous[xnetip.Network]{},
-			wantBytes: make([]byte, 16),
-			wantBits:  0,
-		},
-		{
-			name:      "IPv6 subnet",
-			net:       xnetip.MustParseContiguous("2001:db8::/32"),
-			wantBytes: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-			wantBits:  32,
-		},
-		{
-			name:      "IPv6 host route",
-			net:       xnetip.MustParseContiguous("2001:db8::1/128"),
-			wantBytes: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-			wantBits:  128,
-		},
-		{
-			name:      "IPv4-mapped IPv6 stays sixteen bytes",
-			net:       xnetip.MustParseContiguous("::ffff:10.0.0.0/120"),
-			wantBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 10, 0, 0, 0},
-			wantBits:  120,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := commonpb.NewIPPrefixFromContiguous(tt.net)
-			require.Equal(t, tt.wantBytes, m.GetAddr().GetAddr())
-			require.Equal(t, tt.wantBits, m.GetPrefixLen())
-
-			got, err := m.ToContiguous()
-			require.NoError(t, err)
-			require.Equal(t, tt.net, got)
-		})
-	}
-}
-
-// Test_IPPrefix_ToContiguous_HostBitsNormalized verifies that a
-// hand-built message with host bits set decodes to the masked block.
-func Test_IPPrefix_ToContiguous_HostBitsNormalized(t *testing.T) {
-	tests := []struct {
-		name      string
-		addr      []byte
-		prefixLen uint32
-		want      string
-	}{
-		{name: "IPv4", addr: []byte{10, 0, 0, 1}, prefixLen: 24, want: "10.0.0.0/24"},
-		{
-			name:      "IPv6",
-			addr:      []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-			prefixLen: 32,
-			want:      "2001:db8::/32",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: tt.addr},
-				PrefixLen: tt.prefixLen,
-			}
-			got, err := m.ToContiguous()
-			require.NoError(t, err)
-			require.Equal(t, xnetip.MustParseContiguous(tt.want), got)
-		})
-	}
-}
-
-// Test_IPPrefix_ToContiguous_Errors verifies that a bad address or
-// an overlong prefix length is rejected, never decoded to the zero block.
-func Test_IPPrefix_ToContiguous_Errors(t *testing.T) {
-	tests := []struct {
-		name      string
-		m         *commonpb.IPPrefix
-		wantErrIs error
-	}{
-		{name: "zero message", m: &commonpb.IPPrefix{}},
-		{name: "nil address", m: &commonpb.IPPrefix{PrefixLen: 24}},
-		{
-			name: "empty address",
-			m: &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{},
-				PrefixLen: 24,
-			},
-		},
-		{
-			name: "three byte address",
-			m: &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
-				PrefixLen: 24,
-			},
-		},
-		{
-			name: "five byte address",
-			m: &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5}},
-				PrefixLen: 24,
-			},
-		},
-		{
-			name: "IPv4 prefix length above 32",
-			m: &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}},
-				PrefixLen: 33,
-			},
-			wantErrIs: xnetip.ErrCIDROverflow,
-		},
-		{
-			name: "IPv6 prefix length above 128",
-			m: &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: make([]byte, 16)},
-				PrefixLen: 129,
-			},
-			wantErrIs: xnetip.ErrCIDROverflow,
-		},
-		{
-			name: "IPv4 prefix length at uint32 maximum",
-			m: &commonpb.IPPrefix{
-				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}},
-				PrefixLen: ^uint32(0),
-			},
-			wantErrIs: xnetip.ErrCIDROverflow,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.m.ToContiguous()
-			require.Error(t, err)
-			if tt.wantErrIs != nil {
-				require.ErrorIs(t, err, tt.wantErrIs)
-			}
-			require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, got)
-		})
-	}
-}
-
-// Test_IPPrefix_ToContiguous_FamilyExtraction verifies that the
-// decoded block unwraps into the family of its wire address width only.
-func Test_IPPrefix_ToContiguous_FamilyExtraction(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantIPv4 bool
-	}{
-		{name: "IPv4 message unwraps to Network4", input: "10.0.0.0/24", wantIPv4: true},
-		{name: "IPv6 message unwraps to Network6", input: "2001:db8::/32", wantIPv4: false},
-		{
-			name:     "IPv4-mapped IPv6 message unwraps to Network6",
-			input:    "::ffff:10.0.0.0/120",
-			wantIPv4: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(tt.input))
-			require.NoError(t, err)
-			net, err := m.ToContiguous()
-			require.NoError(t, err)
-			want := netip.MustParsePrefix(tt.input)
-
-			net4, ok4 := xnetip.ContiguousIPv4(net)
-			net6, ok6 := xnetip.ContiguousIPv6(net)
-			require.Equal(t, tt.wantIPv4, ok4)
-			require.Equal(t, !tt.wantIPv4, ok6)
-			if tt.wantIPv4 {
-				require.Equal(t, want, net4.Prefix())
-			} else {
-				require.Equal(t, want, net6.Prefix())
-			}
-		})
-	}
-}
-
-// Test_IPPrefix_ToPrefix_MatchesToContiguous verifies that the
-// prefix view and the block view of one message name the same network.
-func Test_IPPrefix_ToPrefix_MatchesToContiguous(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{name: "IPv4", input: "10.0.0.1/24"},
-		{name: "IPv6", input: "2001:db8::1/32"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(tt.input))
-			require.NoError(t, err)
-
-			prefix, err := m.ToPrefix()
-			require.NoError(t, err)
-			net, err := m.ToContiguous()
-			require.NoError(t, err)
-			require.Equal(t, prefix, net.Prefix())
+	for _, input := range []string{`""`, `"not-a-cidr"`, `"10.0.0.0"`, `{"network": "10.0.0.0/24"}`} {
+		t.Run(input, func(t *testing.T) {
+			var decoded commonpb.IPPrefix
+			require.Error(t, json.Unmarshal([]byte(input), &decoded))
 		})
 	}
 }

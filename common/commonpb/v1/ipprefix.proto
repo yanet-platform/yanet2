@@ -4,19 +4,14 @@ package common.commonpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
-import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/ipv4prefix.proto";
+import "common/commonpb/v1/ipv6prefix.proto";
 
-// IPPrefix represents an IPv4 or IPv6 CIDR prefix.
-//
-// The mask is a prefix length rather than a general per-bit mask. Family
-// is determined by the length of addr, consistently with IPAddress.
+// IPPrefix represents an IPv4 or IPv6 CIDR prefix. The family is
+// structural through the oneof.
 message IPPrefix {
-  // Masked network base address.
-  //
-  // Host bits below prefix_len MUST be zero.
-  IPAddress addr = 1;
-  // Prefix length, in bits.
-  //
-  // MUST be <= 32 for a 4-byte addr and <= 128 for a 16-byte addr.
-  uint32 prefix_len = 2;
+  oneof prefix {
+    IPv4Prefix v4 = 1;
+    IPv6Prefix v6 = 2;
+  }
 }

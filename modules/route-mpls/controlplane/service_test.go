@@ -108,7 +108,7 @@ func Test_RouteMPLSService_CreateConfig_InvalidPrefix(t *testing.T) {
 	service := newTestService(t)
 
 	rule := makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)
-	rule.Prefix.PrefixLen = 33
+	rule.Prefix.GetV4().PrefixLen = 33
 
 	response, err := service.CreateConfig(t.Context(), &routemplspb.CreateConfigRequest{
 		Name:  "mpls0",

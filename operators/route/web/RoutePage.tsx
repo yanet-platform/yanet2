@@ -14,7 +14,7 @@ import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
 import RouteDrawer from './RouteDrawer';
 import LookupDrawer from './LookupDrawer';
-import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily, routePrefix, toWirePrefix } from './utils';
+import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily, routePrefix } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
 import { FamilyFilter } from '@yanet/core/components/VirtualTable';
 import '@yanet/core/styles/chrome.scss';
@@ -165,7 +165,7 @@ const RoutePage: React.FC = () => {
                 if (op.type === 'delete') {
                     await API.route.deleteRoute({
                         name: currentConfig,
-                        prefix: toWirePrefix(op.prefix),
+                        prefix: op.prefix,
                         nexthop_addrs: [op.nexthop],
                         do_flush: false,
                         source_id: RouteSourceID.STATIC,
@@ -173,7 +173,7 @@ const RoutePage: React.FC = () => {
                 } else {
                     await API.route.insertRoute({
                         name: currentConfig,
-                        prefix: toWirePrefix(op.prefix),
+                        prefix: op.prefix,
                         nexthop_addrs: op.nexthops,
                         do_flush: op.doFlush,
                         source_id: RouteSourceID.STATIC,
@@ -198,7 +198,7 @@ const RoutePage: React.FC = () => {
         try {
             await API.route.deleteRoute({
                 name: currentConfig,
-                prefix: toWirePrefix(prefix),
+                prefix,
                 nexthop_addrs: [route.next_hop],
                 do_flush: true,
                 source_id: RouteSourceID.STATIC,
@@ -247,7 +247,7 @@ const RoutePage: React.FC = () => {
             try {
                 await API.route.deleteRoute({
                     name: currentConfig,
-                    prefix: toWirePrefix(prefix),
+                    prefix,
                     nexthop_addrs: [route.next_hop],
                     do_flush: true,
                     source_id: RouteSourceID.STATIC,

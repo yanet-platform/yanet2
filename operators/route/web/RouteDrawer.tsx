@@ -58,7 +58,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             setDoFlush(false);
             setSubmitting(false);
         }
-    }, [open, mode, route?.prefix?.network, route?.next_hop]);
+    }, [open, mode, route?.prefix, route?.next_hop]);
 
     const nexthopErrors = nexthopRows.map((row) => validateNexthop(row.value));
     const prefixError = validatePrefix(prefix);

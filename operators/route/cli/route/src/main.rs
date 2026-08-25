@@ -754,21 +754,25 @@ mod test {
     }
 
     /// A prefix the server sends as a message that cannot be decoded --
-    /// missing, wrong `addr` length, or a prefix length past the family
-    /// bound -- converts into a `RouteEntry` carrying the malformed marker,
-    /// instead of aborting the process.
+    /// missing, an unset or address-less branch, or a prefix length past
+    /// the family bound -- converts into a `RouteEntry` carrying the
+    /// malformed marker, instead of aborting the process.
     #[test]
     fn route_entry_from_malformed_prefix_does_not_panic() {
         let malformed = [
             None,
-            Some(IpPrefix { addr: None, prefix_len: 8 }),
+            Some(IpPrefix { prefix: None }),
             Some(IpPrefix {
-                addr: Some(commonpb::pb::IpAddress { addr: vec![10, 0, 0] }),
-                prefix_len: 8,
+                prefix: Some(commonpb::pb::ip_prefix::Prefix::V4(commonpb::pb::IPv4Prefix {
+                    addr: None,
+                    prefix_len: 8,
+                })),
             }),
             Some(IpPrefix {
-                addr: Some(commonpb::pb::IpAddress { addr: vec![10, 0, 0, 0] }),
-                prefix_len: 33,
+                prefix: Some(commonpb::pb::ip_prefix::Prefix::V4(commonpb::pb::IPv4Prefix {
+                    addr: Some(commonpb::pb::IPv4Address { addr: 0x0a000000 }),
+                    prefix_len: 33,
+                })),
             }),
         ];
 
@@ -795,17 +799,19 @@ mod test {
     /// one ECMP group.
     #[test]
     fn route_entry_malformed_prefixes_stay_distinct() {
-        let entry_of = |addr: Vec<u8>| {
+        let entry_of = |addr: u32| {
             RouteEntry::from(operatorpb::Route {
                 prefix: Some(IpPrefix {
-                    addr: Some(commonpb::pb::IpAddress { addr }),
-                    prefix_len: 8,
+                    prefix: Some(commonpb::pb::ip_prefix::Prefix::V4(commonpb::pb::IPv4Prefix {
+                        addr: Some(commonpb::pb::IPv4Address { addr }),
+                        prefix_len: 33,
+                    })),
                 }),
                 ..Default::default()
             })
         };
 
-        assert_ne!(entry_of(vec![10, 0, 0]).prefix.0, entry_of(vec![10, 0]).prefix.0);
+        assert_ne!(entry_of(1).prefix.0, entry_of(2).prefix.0);
     }
 
     /// Two best routes sharing a prefix are marked with ECMP size 2; a prefix

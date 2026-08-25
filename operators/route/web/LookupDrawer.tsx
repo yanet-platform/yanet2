@@ -67,7 +67,7 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                 ip_addr: ipAddr,
             });
             setResult({
-                prefix: res.prefix?.network ?? '',
+                prefix: res.prefix ?? '',
                 routes: res.routes ?? [],
             });
         } catch (err) {

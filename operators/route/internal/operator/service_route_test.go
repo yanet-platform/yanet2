@@ -190,16 +190,20 @@ func TestInsertRoute_MalformedPrefix_InvalidArgument(t *testing.T) {
 			prefix: nil,
 		},
 		{
-			name:   "missing addr",
-			prefix: &commonpb.IPPrefix{PrefixLen: 24},
+			name:   "unset oneof",
+			prefix: &commonpb.IPPrefix{},
 		},
 		{
-			name:   "addr of invalid length",
-			prefix: &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0}}, PrefixLen: 24},
+			name: "missing addr",
+			prefix: &commonpb.IPPrefix{
+				Prefix: &commonpb.IPPrefix_V4{V4: &commonpb.IPv4Prefix{PrefixLen: 24}},
+			},
 		},
 		{
-			name:   "prefix length beyond address family",
-			prefix: &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}}, PrefixLen: 33},
+			name: "prefix length beyond address family",
+			prefix: &commonpb.IPPrefix{
+				Prefix: &commonpb.IPPrefix_V4{V4: &commonpb.IPv4Prefix{Addr: &commonpb.IPv4Address{Addr: 0x0a000000}, PrefixLen: 33}},
+			},
 		},
 	}
 
@@ -232,7 +236,9 @@ func TestInsertRoute_HostBitsAreMasked(t *testing.T) {
 	_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
 		Name: "route0",
 		// 10.0.0.7/24 with host bits deliberately left set.
-		Prefix:       &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 7}}, PrefixLen: 24},
+		Prefix: &commonpb.IPPrefix{
+			Prefix: &commonpb.IPPrefix_V4{V4: &commonpb.IPv4Prefix{Addr: &commonpb.IPv4Address{Addr: 0x0a000007}, PrefixLen: 24}},
+		},
 		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1"))},
 		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
 	})

@@ -1,6 +1,6 @@
 import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
-import type { IPPrefix, IPAddressWire, IPRangeWire } from '../utils/netip';
+import type { IPAddressWire, IPRangeWire } from '../utils/netip';
 
 // Route types
 
@@ -17,7 +17,8 @@ export interface LargeCommunity {
 }
 
 export interface Route {
-    prefix?: IPPrefix;
+    // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
+    prefix?: string;
     next_hop?: IPAddressWire;
     peer?: IPAddressWire;
     route_distinguisher?: string | number; // uint64
@@ -46,7 +47,8 @@ export interface ShowRoutesResponse {
 
 export interface InsertRouteRequest {
     name?: string;
-    prefix?: IPPrefix;
+    // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
+    prefix?: string;
     nexthop_addrs?: IPAddressWire[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
@@ -57,7 +59,8 @@ export interface InsertRouteResponse {
 
 export interface DeleteRouteRequest {
     name?: string;
-    prefix?: IPPrefix;
+    // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
+    prefix?: string;
     nexthop_addrs?: IPAddressWire[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
@@ -107,7 +110,8 @@ export interface LookupRouteRequest {
 }
 
 export interface LookupRouteResponse {
-    prefix?: IPPrefix;
+    // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
+    prefix?: string;
     routes?: Route[];
 }
 

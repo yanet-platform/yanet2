@@ -1,23 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, prefixIPFamily, groupByPrefix, filterByFamily, bestPathReason, getRouteId, routePrefix, toWirePrefix } from './utils';
-import { stringToIPAddress, type IPPrefix } from '@yanet/core/utils/netip';
+import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, prefixIPFamily, groupByPrefix, filterByFamily, bestPathReason, getRouteId, routePrefix } from './utils';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
 import type { Route } from '@yanet/core/api/routes';
 
 /** Builds the wire prefix message a server response carries. */
-const net = (cidr: string): IPPrefix => ({ network: cidr });
+const net = (cidr: string): string => cidr;
 
 describe('routePrefix', () => {
-    it('reads the CIDR string out of the wire message', () => {
+    it('reads the bare CIDR string off the wire', () => {
         expect(routePrefix({ prefix: net('10.0.0.0/8') })).toBe('10.0.0.0/8');
+        expect(routePrefix({ prefix: '2001:db8::/32' })).toBe('2001:db8::/32');
     });
 
     it('yields an empty string when the server sent no prefix', () => {
         expect(routePrefix({})).toBe('');
-        expect(routePrefix({ prefix: {} })).toBe('');
-    });
-
-    it('round-trips through toWirePrefix', () => {
-        expect(routePrefix({ prefix: toWirePrefix('2001:db8::/32') })).toBe('2001:db8::/32');
     });
 });
 

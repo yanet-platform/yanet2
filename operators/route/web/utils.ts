@@ -1,16 +1,13 @@
 import type { Route } from '@yanet/core/api/routes';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '@yanet/core/utils';
-import { ipAddressToString, type IPPrefix, type IPAddressWire } from '@yanet/core/utils/netip';
+import { ipAddressToString, type IPAddressWire } from '@yanet/core/utils/netip';
 import type { RouteSortableColumn, IPFamily } from './types';
 
 /** Reads a route's destination prefix as a CIDR string.
  *
- * Empty when the server sent no prefix — the page keeps prefixes as strings
- * everywhere below this boundary. */
-export const routePrefix = (route: Route): string => route.prefix?.network ?? '';
-
-/** Wraps a CIDR string into the wire prefix message. */
-export const toWirePrefix = (prefix: string): IPPrefix => ({ network: prefix });
+ * Empty when the server sent no prefix — the wire carries the prefix as a
+ * bare CIDR string. */
+export const routePrefix = (route: Route): string => route.prefix ?? '';
 
 export interface RouteSubmitParams {
     prefix: string;
