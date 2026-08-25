@@ -4,7 +4,6 @@ import { Tooltip } from '@gravity-ui/uikit';
 import { DotBadge } from '@yanet/core/components/VirtualTable';
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { formatUnixSeconds } from '@yanet/core/utils';
-import { ipAddressToString } from '@yanet/core/utils/netip';
 import { getNeighbourId } from './utils';
 import { nudStateToName, getStateMeta } from './stateMeta';
 import { getMergeDebug } from './mergeDebug';
@@ -156,7 +155,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
             gridTrack: '230px',
             sortKey: 'next_hop',
             renderCell: (neighbour) => {
-                const addr = ipAddressToString(neighbour.next_hop) || '-';
+                const addr = neighbour.next_hop || '-';
                 return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden', width: '100%' }}>
                         {addr !== '-' && <FamilyBadge address={addr} />}

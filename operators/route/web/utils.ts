@@ -1,6 +1,5 @@
 import type { Route } from '@yanet/core/api/routes';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '@yanet/core/utils';
-import { ipAddressToString, type IPAddressWire } from '@yanet/core/utils/netip';
 import type { RouteSortableColumn, IPFamily } from './types';
 
 /** Reads a route's destination prefix as a CIDR string.
@@ -11,13 +10,13 @@ export const routePrefix = (route: Route): string => route.prefix ?? '';
 
 export interface RouteSubmitParams {
     prefix: string;
-    nexthopIps: IPAddressWire[];
+    nexthopIps: string[];
     doFlush: boolean;
 }
 
 export type RouteSubmitOp =
-    | { type: 'delete'; prefix: string; nexthop: IPAddressWire }
-    | { type: 'insert'; prefix: string; nexthops: IPAddressWire[]; doFlush: boolean };
+    | { type: 'delete'; prefix: string; nexthop: string }
+    | { type: 'insert'; prefix: string; nexthops: string[]; doFlush: boolean };
 
 /** Plan API operations for submitting a route. In add mode, just insert.
  *
@@ -46,7 +45,7 @@ export const ROUTE_SOURCES = ['Unknown', 'Static', 'BIRD'] as const;
 
 /** Returns a stable string key for a route row. */
 export const getRouteId = (route: Route): string =>
-    `${routePrefix(route)}_${String(route.next_hop?.addr ?? '')}_${String(route.peer?.addr ?? '')}_${route.route_distinguisher ?? ''}_${route.source ?? 0}_${route.pref ?? 0}_${route.peer_as ?? 0}_${route.origin_as ?? 0}_${route.med ?? 0}_${route.as_path_len ?? 0}`;
+    `${routePrefix(route)}_${route.next_hop ?? ''}_${route.peer ?? ''}_${route.route_distinguisher ?? ''}_${route.source ?? 0}_${route.pref ?? 0}_${route.peer_as ?? 0}_${route.origin_as ?? 0}_${route.med ?? 0}_${route.as_path_len ?? 0}`;
 
 /** Validates a CIDR prefix string. Returns an error message or undefined when valid. */
 export const validatePrefix = (prefix: string): string | undefined => {
@@ -159,8 +158,8 @@ export const bestPathReason = (cands: Route[]): string => {
 /** Sort comparators for each sortable column. */
 export const sortComparators: Record<RouteSortableColumn, (a: Route, b: Route) => number> = {
     prefix: (a, b) => routePrefix(a).localeCompare(routePrefix(b)),
-    next_hop: (a, b) => ipAddressToString(a.next_hop).localeCompare(ipAddressToString(b.next_hop)),
-    peer: (a, b) => ipAddressToString(a.peer).localeCompare(ipAddressToString(b.peer)),
+    next_hop: (a, b) => (a.next_hop ?? '').localeCompare(b.next_hop ?? ''),
+    peer: (a, b) => (a.peer ?? '').localeCompare(b.peer ?? ''),
     is_best: (a, b) => (a.is_best ? 1 : 0) - (b.is_best ? 1 : 0),
     pref: (a, b) => (a.pref ?? 0) - (b.pref ?? 0),
     as_path_len: (a, b) => (a.as_path_len ?? 0) - (b.as_path_len ?? 0),

@@ -296,8 +296,8 @@ describe('bestPathReason', () => {
 describe('getRouteId', () => {
     const base: Route = {
         prefix: net('::/0'),
-        next_hop: { addr: 'fe80::a1a' },
-        peer: { addr: '::' },
+        next_hop: 'fe80::a1a',
+        peer: '::',
         route_distinguisher: '',
         pref: 100,
         peer_as: 65000,
@@ -335,7 +335,7 @@ describe('getRouteId', () => {
         const minimal: Route = { prefix: net('10.0.0.0/8') };
         const id = getRouteId(minimal);
         expect(id).not.toContain('undefined');
-        // next_hop.addr='' peer.addr='' rd='' source=0 pref=0 peerAs=0 originAs=0 med=0 asPathLen=0
+        // next_hop='' peer='' rd='' source=0 pref=0 peerAs=0 originAs=0 med=0 asPathLen=0
         expect(id).toBe('10.0.0.0/8____0_0_0_0_0_0');
     });
 });

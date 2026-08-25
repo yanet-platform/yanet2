@@ -743,13 +743,6 @@ export const formatIPNetItem = (
     return formatIPNet(addrBytes, maskBytes);
 };
 
-// Wire-format shape of commonpb.IPAddress as it arrives from the
-// gRPC-JSON gateway. The addr field may be base64 (string), a numeric
-// byte array, or a Uint8Array.
-export type IPAddressWire = {
-    addr?: string | number[] | Uint8Array;
-};
-
 // Wire-format shape of an IP range as returned by the gRPC-JSON gateway.
 // Both endpoints are plain IP strings — Go's IPRange.MarshalJSON flattens
 // the nested IPAddress shape into top-level strings rather than nesting
@@ -759,26 +752,14 @@ export interface IPRangeWire {
     end?: string;
 }
 
-// Decode a wire IPAddress into a human-readable IP string. Returns an
-// empty string when the message is missing or has an empty addr.
-// The canonical wire form from Go's MarshalJSON is a plain IP string.
-export const ipAddressToString = (ip: IPAddressWire | undefined): string => {
-    if (!ip || ip.addr === undefined || ip.addr === null) return '';
-    if (typeof ip.addr === 'string') {
-        return ip.addr;
-    }
-    const bytes = ip.addr instanceof Uint8Array ? Array.from(ip.addr) : ip.addr;
-    if (bytes.length === 0) return '';
-    return formatIPFromBytes(bytes);
-};
-
-// Encode an IPv4 or IPv6 string into a wire IPAddress message. Returns
-// undefined for empty input or unparseable addresses.
-export const stringToIPAddress = (s: string): IPAddressWire | undefined => {
+// Validate an IP string before sending it as commonpb.IPAddress, which the
+// gateway marshals as a bare IP string. Returns undefined for empty input
+// or unparseable addresses.
+export const stringToIPAddress = (s: string): string | undefined => {
     if (!s) return undefined;
     const parsed = parseIPAddress(s);
     if (!parsed.ok) return undefined;
-    return { addr: s };
+    return s;
 };
 
 // Convert an IP bytes array to a BigInt.

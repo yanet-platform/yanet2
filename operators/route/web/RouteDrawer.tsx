@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Icon, Switch } from '@gravity-ui/uikit';
 import { Plus, TrashBin } from '@gravity-ui/icons';
 import { DraftItemDrawer } from '@yanet/core/components/draft';
-import { ipAddressToString } from '@yanet/core/utils/netip';
 import { validatePrefix, validateNexthop, routePrefix } from './utils';
 import type { Route } from '@yanet/core/api/routes';
 import { CidrPrefixField } from '@yanet/core/components';
@@ -52,7 +51,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             setPrefix(mode === 'edit' && route ? routePrefix(route) : '');
             setNexthopRows(
                 mode === 'edit' && route
-                    ? [makeRow(ipAddressToString(route.next_hop))]
+                    ? [makeRow(route.next_hop ?? '')]
                     : [makeRow('')],
             );
             setDoFlush(false);
@@ -204,7 +203,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
                     <div className="yn-section__body">
                         <dl className="ro-attr-grid">
                             <dt>Peer</dt>
-                            <dd className="yn-cell-mono">{ipAddressToString(route.peer) || '—'}</dd>
+                            <dd className="yn-cell-mono">{route.peer || '—'}</dd>
                             <dt>Best</dt>
                             <dd><BestPill isBest={route.is_best ?? false} /></dd>
                             <dt>Pref</dt>

@@ -130,12 +130,12 @@ func TestIPAddress_MarshalJSON(t *testing.T) {
 		{
 			name: "IPv4",
 			ip:   NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1")),
-			want: `{"addr":"10.0.0.1"}`,
+			want: `"10.0.0.1"`,
 		},
 		{
 			name: "IPv6",
 			ip:   NewIPAddressFromAddr(netip.MustParseAddr("2001:db8::1")),
-			want: `{"addr":"2001:db8::1"}`,
+			want: `"2001:db8::1"`,
 		},
 		{
 			name:    "invalid length",
@@ -166,27 +166,32 @@ func TestIPAddress_UnmarshalJSON(t *testing.T) {
 	}{
 		{
 			name:  "IPv4",
-			input: `{"addr":"10.0.0.1"}`,
+			input: `"10.0.0.1"`,
 			want:  netip.MustParseAddr("10.0.0.1"),
 		},
 		{
 			name:  "IPv6",
-			input: `{"addr":"2001:db8::1"}`,
+			input: `"2001:db8::1"`,
 			want:  netip.MustParseAddr("2001:db8::1"),
 		},
 		{
 			name:    "empty string",
-			input:   `{"addr":""}`,
+			input:   `""`,
 			wantErr: true,
 		},
 		{
 			name:    "malformed address",
-			input:   `{"addr":"not-an-ip"}`,
+			input:   `"not-an-ip"`,
+			wantErr: true,
+		},
+		{
+			name:    "object form",
+			input:   `{"addr":"10.0.0.1"}`,
 			wantErr: true,
 		},
 		{
 			name:    "invalid JSON",
-			input:   `{"addr":`,
+			input:   `"10.0`,
 			wantErr: true,
 		},
 	}
@@ -233,6 +238,27 @@ func TestIPAddress_JSONRoundTrip(t *testing.T) {
 			require.Equal(t, tt.addr, gotAddr)
 		})
 	}
+}
+
+func TestIPAddress_JSONRoundTrip_IPv4Mapped(t *testing.T) {
+	mapped := netip.MustParseAddr("::ffff:10.0.0.1")
+	original := NewIPAddressFromAddr(mapped)
+	require.Len(t, original.Addr, 16, "mapped input must stay in the 16-byte wire form")
+
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.Equal(t, `"::ffff:10.0.0.1"`, string(data))
+
+	var got IPAddress
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.Equal(t, original.Addr, got.Addr)
+
+	gotAddr, err := got.ToAddr()
+	require.NoError(t, err)
+	require.Equal(t, mapped, gotAddr)
+
+	native := NewIPAddressFromAddr(netip.MustParseAddr("10.0.0.1"))
+	require.NotEqual(t, native.Addr, got.Addr, "mapped and native forms must stay distinct on the wire")
 }
 
 func TestIPAddress_AsLogValue(t *testing.T) {

@@ -56,32 +56,26 @@ func (m *IPAddress) AsLogValue() any {
 	return addr.String()
 }
 
-// ipAddressJSON is the JSON wire shape shared by MarshalJSON and
-// UnmarshalJSON.
-type ipAddressJSON struct {
-	Addr string `json:"addr"`
-}
-
-// MarshalJSON serializes addr as a human-readable IP address string.
+// MarshalJSON serializes the message as a bare IP address string.
 func (m *IPAddress) MarshalJSON() ([]byte, error) {
 	addr, err := m.ToAddr()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(ipAddressJSON{Addr: addr.String()})
+	return json.Marshal(addr.String())
 }
 
-// UnmarshalJSON accepts addr as an IPv4 or IPv6 address string.
+// UnmarshalJSON accepts a bare IPv4 or IPv6 address string.
 func (m *IPAddress) UnmarshalJSON(data []byte) error {
-	var raw ipAddressJSON
+	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw.Addr == "" {
+	if raw == "" {
 		return fmt.Errorf("empty IP address is not allowed")
 	}
 
-	parsed, err := netip.ParseAddr(raw.Addr)
+	parsed, err := netip.ParseAddr(raw)
 	if err != nil {
 		return fmt.Errorf("failed to parse IP address: %w", err)
 	}

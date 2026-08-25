@@ -1,5 +1,4 @@
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
-import { ipAddressToString } from '@yanet/core/utils/netip';
 
 const ZERO_MAC = '00:00:00:00:00:00';
 
@@ -36,7 +35,7 @@ export const getMergeDebug = (
     cache: Map<string, Neighbour[]>,
     tables: NeighbourTableInfo[],
 ): MergeDebugResult => {
-    const winnerIp = ipAddressToString(winner.next_hop);
+    const winnerIp = winner.next_hop ?? '';
     const winnerMac = winner.link_addr?.addr || '';
 
     const candidates: ShadowedCandidate[] = [];
@@ -48,7 +47,7 @@ export const getMergeDebug = (
 
         const entries = cache.get(tableName) || [];
         for (const entry of entries) {
-            const entryIp = ipAddressToString(entry.next_hop);
+            const entryIp = entry.next_hop ?? '';
             if (entryIp !== winnerIp) continue;
 
             const entryMac = entry.link_addr?.addr || '';

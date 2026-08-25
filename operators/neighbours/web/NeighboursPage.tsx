@@ -6,7 +6,7 @@ import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '@yanet/core/components';
 import { BulkDeleteModal, DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '@yanet/core/components/command-palette';
-import { stringToIPAddress, ipAddressToString } from '@yanet/core/utils/netip';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
 import { parseIPAddress } from '@yanet/core/utils';
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { NeighbourTable } from './NeighbourTable';
@@ -151,7 +151,7 @@ const NeighboursPage: React.FC = () => {
         let res = allRows;
         if (family !== 'all') {
             res = res.filter((n) => {
-                const addr = ipAddressToString(n.next_hop);
+                const addr = n.next_hop ?? '';
                 return family === 'v6' ? addr.includes(':') : !addr.includes(':');
             });
         }
@@ -474,7 +474,7 @@ const NeighboursPage: React.FC = () => {
     const neighbourDynamicCommands = useCallback((q: string): Command[] => {
         if (!parseIPAddress(q.trim()).ok) return [];
         const ip = q.trim();
-        const existing = allRows.find((n) => ipAddressToString(n.next_hop) === ip);
+        const existing = allRows.find((n) => n.next_hop === ip);
         if (existing) {
             const id = getNeighbourId(existing);
             return [
@@ -507,9 +507,9 @@ const NeighboursPage: React.FC = () => {
     const neighbourRowAdapter = useMemo((): RowAdapter<Neighbour> => ({
         rows: allRows,
         getId: getNeighbourId,
-        getLabel: (n) => ipAddressToString(n.next_hop) || '—',
+        getLabel: (n) => n.next_hop || '—',
         getSub: (n) => [n.device, n.source, nudStateToName(n.state)].filter(Boolean).join(' · '),
-        searchText: (n) => ipAddressToString(n.next_hop) + ' ' + (n.device || '') + ' ' + (n.source || ''),
+        searchText: (n) => (n.next_hop ?? '') + ' ' + (n.device || '') + ' ' + (n.source || ''),
         onSelect: (id) => handleJumpToRow(id),
         icon: '→',
         max: 7,

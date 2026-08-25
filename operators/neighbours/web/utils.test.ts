@@ -102,8 +102,8 @@ describe('sortComparators', () => {
     const makeNeighbour = (overrides: Partial<Neighbour>): Neighbour => ({ ...overrides });
 
     it('next_hop: sorts by IP string representation', () => {
-        const a = makeNeighbour({ next_hop: { addr: '10.0.0.1' } });
-        const b = makeNeighbour({ next_hop: { addr: '192.168.1.1' } });
+        const a = makeNeighbour({ next_hop: '10.0.0.1' });
+        const b = makeNeighbour({ next_hop: '192.168.1.1' });
         expect(sortComparators.next_hop(a, b)).toBeLessThan(0);
         expect(sortComparators.next_hop(b, a)).toBeGreaterThan(0);
     });

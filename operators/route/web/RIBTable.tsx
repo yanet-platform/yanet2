@@ -1,6 +1,5 @@
 import React from 'react';
 import type { Route } from '@yanet/core/api/routes';
-import { ipAddressToString } from '@yanet/core/utils/netip';
 import { getRouteId, routePrefix } from './utils';
 import { BestPill, SourceChip, FamilyBadge, ConflictBadge } from './cells';
 import type { RouteSortableColumn, RouteSortState } from './types';
@@ -73,7 +72,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
             sortKey: 'next_hop',
             renderCell: (route) => (
                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span className="yn-cell-mono" style={{ fontSize: 12.5, color: 'var(--yn-text-2)' }}>{ipAddressToString(route.next_hop) || '-'}</span>
+                    <span className="yn-cell-mono" style={{ fontSize: 12.5, color: 'var(--yn-text-2)' }}>{route.next_hop || '-'}</span>
                 </div>
             ),
         },
@@ -84,7 +83,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
             sortKey: 'peer',
             renderCell: (route) => (
                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span className="yn-cell-mono" style={{ fontSize: 12.5, color: 'var(--yn-text-3)' }}>{ipAddressToString(route.peer) || '-'}</span>
+                    <span className="yn-cell-mono" style={{ fontSize: 12.5, color: 'var(--yn-text-3)' }}>{route.peer || '-'}</span>
                 </div>
             ),
         },

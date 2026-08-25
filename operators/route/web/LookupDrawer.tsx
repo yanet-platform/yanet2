@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { API } from '@yanet/core/api';
 import { toaster } from '@yanet/core/utils';
-import { stringToIPAddress, ipAddressToString } from '@yanet/core/utils/netip';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
 import { parseIPAddress } from '@yanet/core/utils';
 import type { Route } from '@yanet/core/api/routes';
 import { bestPathReason, routePrefix } from './utils';
@@ -215,10 +215,10 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                                                         {routePrefix(r) || '—'}
                                                     </td>
                                                     <td className="yn-cell-mono yn-cell-muted">
-                                                        {ipAddressToString(r.next_hop) || '—'}
+                                                        {r.next_hop || '—'}
                                                     </td>
                                                     <td className="yn-cell-mono yn-cell-muted">
-                                                        {ipAddressToString(r.peer) || '—'}
+                                                        {r.peer || '—'}
                                                     </td>
                                                     <td>
                                                         <SourceChip source={r.source} />

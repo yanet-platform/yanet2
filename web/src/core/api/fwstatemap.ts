@@ -1,5 +1,4 @@
 import { createService, type CallOptions } from './client';
-import type { IPAddressWire } from '../utils/netip';
 
 export interface MapStats {
     index_size?: number;
@@ -47,8 +46,9 @@ export interface FwStateKey {
     proto?: number;
     src_port?: number;
     dst_port?: number;
-    src_addr?: IPAddressWire;
-    dst_addr?: IPAddressWire;
+    // commonpb.IPAddress, serialized by the gateway as a bare IP string.
+    src_addr?: string;
+    dst_addr?: string;
 }
 
 export interface FwStateValue {

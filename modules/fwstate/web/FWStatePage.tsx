@@ -17,7 +17,7 @@ import { useConfigListCache, useSearchParamHelpers, usePageContribution, useCont
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { Direction, MapKind, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstatemap';
 import { ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
-import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '@yanet/core/utils/netip';
+import { isValidIPAddress, parseIPToBytes, stringToIPAddress } from '@yanet/core/utils/netip';
 import { formatBytes, toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import { AddConfigModal, CommandPaletteHeader, ConfirmModal, DeleteConfigModal } from '@yanet/core/components';
 import { SaveIcon, TrashIcon } from '@yanet/core/components/draft';
@@ -102,8 +102,8 @@ const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>
     return {
         mapNameV4: config?.map_name_v4 ?? '',
         mapNameV6: config?.map_name_v6 ?? '',
-        srcAddr: ipAddressToString(sync?.src_addr as IPAddressWire | undefined),
-        dstAddrMulticast: ipAddressToString(sync?.dst_addr_multicast as IPAddressWire | undefined),
+        srcAddr: sync?.src_addr ?? '',
+        dstAddrMulticast: sync?.dst_addr_multicast ?? '',
         portMulticast: sync?.port_multicast ?? 0,
         tcpSynAck: formatDurationNsAsSeconds(sync?.tcp_syn_ack ?? DEFAULT_NS.tcpSynAck),
         tcpSyn: formatDurationNsAsSeconds(sync?.tcp_syn ?? DEFAULT_NS.tcpSyn),
@@ -488,8 +488,8 @@ const FlatStateRow: React.FC<FlatStateRowProps> = ({ row, start, isExpired }) =>
         >
             <div style={colCellStyle(0)}><StatusDot health={row._health} /></div>
             <div style={{ ...colCellStyle(1), color: 'var(--fws-text-3)', fontFamily: 'var(--fws-mono)', fontSize: 11.5 }}>{formatStateIdx(row.idx)}</div>
-            <div style={colCellStyle(2)}><span className="fws-pill fws-pill--src">{ipAddressToString(row.key?.src_addr as IPAddressWire | undefined) || '—'}</span></div>
-            <div style={colCellStyle(3)}><span className="fws-pill fws-pill--dst">{ipAddressToString(row.key?.dst_addr as IPAddressWire | undefined) || '—'}</span></div>
+            <div style={colCellStyle(2)}><span className="fws-pill fws-pill--src">{row.key?.src_addr || '—'}</span></div>
+            <div style={colCellStyle(3)}><span className="fws-pill fws-pill--dst">{row.key?.dst_addr || '—'}</span></div>
             <div style={colCellStyle(4)}><span className={protoClass(row._proto)}>{protoLabel(row._proto)}</span></div>
             <div style={colCellStyle(5)}>{renderFlagChips(row._srcFlags)}</div>
             <div style={colCellStyle(6)}>{renderFlagChips(row._dstFlags)}</div>

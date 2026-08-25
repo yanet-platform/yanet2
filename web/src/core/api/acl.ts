@@ -4,7 +4,6 @@ import { createService, type CallOptions } from './client';
 // No Action.counter, no keep_state, no MapConfig, no DUMP kind.
 
 import type { MACAddress } from './neighbours';
-import type { IPAddressWire } from '../utils/netip';
 
 import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
 export type { IPNet, VlanRange, Device, ListConfigsResponse };
@@ -67,9 +66,10 @@ export interface ShowConfigRequest {
 
 export interface SyncConfig {
     dst_ether?: MACAddress;
-    dst_addr_multicast?: IPAddressWire;
+    // commonpb.IPAddress, serialized by the gateway as a bare IP string.
+    dst_addr_multicast?: string;
     port_multicast?: number;
-    dst_addr_unicast?: IPAddressWire;
+    dst_addr_unicast?: string;
     port_unicast?: number;
 }
 

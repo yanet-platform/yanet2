@@ -8,7 +8,7 @@ import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } fr
 import { useListNavigation, usePageContribution, useTabCycle } from '@yanet/core/hooks';
 import { API } from '@yanet/core/api';
 import { toaster, parseIPAddress } from '@yanet/core/utils';
-import { stringToIPAddress, ipAddressToString, type IPAddressWire } from '@yanet/core/utils/netip';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
 import { RouteSourceID, type Route } from '@yanet/core/api/routes';
 import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
@@ -80,8 +80,8 @@ const RoutePage: React.FC = () => {
         if (q) {
             res = res.filter((r) =>
                 routePrefix(r).toLowerCase().includes(q) ||
-                ipAddressToString(r.next_hop).toLowerCase().includes(q) ||
-                ipAddressToString(r.peer).toLowerCase().includes(q)
+                (r.next_hop ?? '').toLowerCase().includes(q) ||
+                (r.peer ?? '').toLowerCase().includes(q)
             );
         }
         if (sortState.column) {
@@ -146,12 +146,12 @@ const RoutePage: React.FC = () => {
             toaster.error('route-nexthop-error', 'One or more next-hop addresses are invalid');
             return;
         }
-        const nexthopIps = parsed as IPAddressWire[];
+        const nexthopIps = parsed as string[];
 
         const isEdit = drawer.mode === 'edit';
         const original = drawer.route;
-        const newNexthopStr = ipAddressToString(nexthopIps[0]);
-        const originalNexthopStr = ipAddressToString(original?.next_hop);
+        const newNexthopStr = nexthopIps[0] ?? '';
+        const originalNexthopStr = original?.next_hop ?? '';
         const ops = planRouteSubmit(
             drawer.mode,
             { prefix: params.prefix, nexthopIps, doFlush: params.doFlush },
@@ -376,8 +376,8 @@ const RoutePage: React.FC = () => {
         rows: allRows,
         getId: getRouteId,
         getLabel: (r) => routePrefix(r) || '(no prefix)',
-        getSub: (r) => ipAddressToString(r.next_hop) || '—',
-        searchText: (r) => routePrefix(r) + ' ' + ipAddressToString(r.next_hop),
+        getSub: (r) => r.next_hop || '—',
+        searchText: (r) => routePrefix(r) + ' ' + (r.next_hop ?? ''),
         onSelect: (id) => handleJumpToRow(id),
         icon: '→',
         max: 7,

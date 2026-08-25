@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API } from '@yanet/core/api';
 import { toaster } from '@yanet/core/utils';
-import type { IPAddressWire } from '@yanet/core/utils/netip';
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { MERGED_TAB } from './types';
 
@@ -14,7 +13,7 @@ export interface UseNeighboursResult {
     activeTabRef: React.MutableRefObject<string>;
     addNeighbour: (table: string, entry: Neighbour) => Promise<void>;
     updateNeighbour: (table: string, entry: Neighbour) => Promise<void>;
-    removeNeighbours: (table: string, nextHopWires: (IPAddressWire | undefined)[]) => Promise<void>;
+    removeNeighbours: (table: string, nextHopWires: (string | undefined)[]) => Promise<void>;
     createTable: (name: string, priority: number) => Promise<void>;
     updateTable: (name: string, priority: number) => Promise<void>;
     removeTable: (name: string) => Promise<void>;
@@ -140,8 +139,8 @@ export const useNeighbours = (activeTab: string, paused = false): UseNeighboursR
     }, [reloadAll]);
 
     const removeNeighbours = useCallback(
-        async (table: string, nextHopWires: (IPAddressWire | undefined)[]): Promise<void> => {
-            const wires = nextHopWires.filter((w): w is IPAddressWire => w !== undefined);
+        async (table: string, nextHopWires: (string | undefined)[]): Promise<void> => {
+            const wires = nextHopWires.filter((w): w is string => w !== undefined);
             try {
                 await API.neighbours.removeNeighbours(table, wires);
                 toaster.success('nb-removed', `${wires.length} neighbour(s) removed.`);

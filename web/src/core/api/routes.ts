@@ -1,6 +1,6 @@
 import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
-import type { IPAddressWire, IPRangeWire } from '../utils/netip';
+import type { IPRangeWire } from '../utils/netip';
 
 // Route types
 
@@ -19,8 +19,9 @@ export interface LargeCommunity {
 export interface Route {
     // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
     prefix?: string;
-    next_hop?: IPAddressWire;
-    peer?: IPAddressWire;
+    // commonpb.IPAddress, serialized by the gateway as a bare IP string.
+    next_hop?: string;
+    peer?: string;
     route_distinguisher?: string | number; // uint64
     peer_as?: number;
     origin_as?: number;
@@ -49,7 +50,7 @@ export interface InsertRouteRequest {
     name?: string;
     // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
     prefix?: string;
-    nexthop_addrs?: IPAddressWire[];
+    nexthop_addrs?: string[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }
@@ -61,7 +62,7 @@ export interface DeleteRouteRequest {
     name?: string;
     // commonpb.IPPrefix, serialized by the gateway as a bare CIDR string.
     prefix?: string;
-    nexthop_addrs?: IPAddressWire[];
+    nexthop_addrs?: string[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }
@@ -106,7 +107,7 @@ const operatorRouteService = createService('operators.route.operatorpb.v1.RouteS
 
 export interface LookupRouteRequest {
     name?: string;
-    ip_addr?: IPAddressWire;
+    ip_addr?: string;
 }
 
 export interface LookupRouteResponse {

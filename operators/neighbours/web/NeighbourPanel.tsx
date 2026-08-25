@@ -3,7 +3,7 @@ import { Bulb, CircleInfo, Layers } from '@gravity-ui/icons';
 import { Select } from '@gravity-ui/uikit';
 import { useDrawerKeyboard } from '@yanet/core/hooks';
 import { DotBadge } from '@yanet/core/components/VirtualTable';
-import { ipAddressToString, stringToIPAddress } from '@yanet/core/utils/netip';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
 import { formatUnixSeconds } from '@yanet/core/utils';
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { validateMAC, validateNextHop, resolveSubmitTable } from './utils';
@@ -137,7 +137,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
         setSelectedTable([defaultTable]);
 
         if (neighbour) {
-            setNextHop(ipAddressToString(neighbour.next_hop));
+            setNextHop(neighbour.next_hop ?? '');
             setLinkAddr(neighbour.link_addr?.addr || '');
             setHardwareAddr(neighbour.hardware_addr?.addr || '');
             setDevice(neighbour.device || '');
@@ -209,7 +209,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
         canApply: canSubmit,
     });
 
-    const ip = neighbour ? (ipAddressToString(neighbour.next_hop) || '—') : '—';
+    const ip = neighbour ? (neighbour.next_hop || '—') : '—';
     const family = ip !== '—' ? getFamily(ip) : '';
     const deviceDisplay = neighbour?.device || '—';
 

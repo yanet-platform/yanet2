@@ -7,7 +7,7 @@ import {
     getUnixSecondsValue,
     isValidMAC,
 } from '@yanet/core/utils';
-import { ipAddressToString, stringToIPAddress } from '@yanet/core/utils/netip';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
 import type { SortableColumn } from './types';
 import { MERGED_TAB } from './types';
 
@@ -31,7 +31,7 @@ export const resolveSubmitTable = (
 export { isValidMAC };
 
 /** Returns a stable string key for a neighbour row. */
-export const getNeighbourId = (n: Neighbour): string => ipAddressToString(n.next_hop);
+export const getNeighbourId = (n: Neighbour): string => n.next_hop ?? '';
 
 /** Type guard for sortable column names. */
 export const isSortableColumn = (value: string): value is SortableColumn =>
@@ -61,10 +61,7 @@ export const validateNextHop = (value: string): string | undefined => {
 /** Sort comparators for each sortable neighbour column. */
 export const sortComparators: Record<SortableColumn, (a: Neighbour, b: Neighbour) => number> = {
     next_hop: (a, b) =>
-        compareNullableStrings(
-            ipAddressToString(a.next_hop) || undefined,
-            ipAddressToString(b.next_hop) || undefined,
-        ),
+        compareNullableStrings(a.next_hop || undefined, b.next_hop || undefined),
     link_addr: (a, b) =>
         compareMACAddressValues(
             getMACAddressValue(a.link_addr?.addr),
@@ -80,10 +77,7 @@ export const sortComparators: Record<SortableColumn, (a: Neighbour, b: Neighbour
         const stateA = a.state ?? 0;
         const stateB = b.state ?? 0;
         if (stateA !== stateB) return stateA - stateB;
-        return compareNullableStrings(
-            ipAddressToString(a.next_hop) || undefined,
-            ipAddressToString(b.next_hop) || undefined,
-        );
+        return compareNullableStrings(a.next_hop || undefined, b.next_hop || undefined);
     },
     source: (a, b) => compareNullableStrings(a.source, b.source),
     priority: (a, b) => (a.priority ?? 0) - (b.priority ?? 0),

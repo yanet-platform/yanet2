@@ -144,17 +144,20 @@ impl FromStr for pb::IpAddress {
 }
 
 impl Serialize for pb::IpAddress {
-    /// Serializes as the plain address string `Display` renders.
+    /// Serializes the decoded address in its faithful form, not the
+    /// unmapped form `Display` renders for humans.
     ///
-    /// A malformed byte length renders as the literal `"invalid"`, since
-    /// that is what `Display` already falls back to. An IPv4-mapped IPv6
-    /// address renders as its unmapped 4-byte form too, so the round trip
-    /// through this string is lossy for that one input shape as well.
+    /// An IPv4-mapped IPv6 address keeps its mapped rendering here, so the
+    /// round trip through this string is lossless. A malformed byte length
+    /// still renders as the literal `"invalid"`.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.collect_str(self)
+        match IpAddr::try_from(self) {
+            Ok(addr) => serializer.collect_str(&addr),
+            Err(..) => serializer.serialize_str("invalid"),
+        }
     }
 }
 
@@ -997,23 +1000,21 @@ mod test {
         assert_eq!(ip, got);
     }
 
-    /// An IPv4-mapped IPv6 address's `Display` unmaps it, so its string
-    /// form serializes and deserializes as a plain 4-byte IPv4 address --
-    /// not the original 16-byte mapped wire form. The round trip is
-    /// therefore family-normalizing, not byte-preserving, for this one
-    /// input shape.
+    /// An IPv4-mapped IPv6 address renders as `::ffff:a.b.c.d`, distinct
+    /// from the bare 4-byte form, so the 16-byte wire shape round trips
+    /// losslessly through the string encoding.
     #[test]
-    fn serde_ip_address_v4_mapped_does_not_round_trip_bytes() {
+    fn serde_ip_address_v4_mapped_round_trips_bytes() {
         let mapped = pb::IpAddress::from(IpAddr::V6(Ipv4Addr::new(141, 8, 128, 254).to_ipv6_mapped()));
         assert_eq!(16, mapped.addr.len());
 
         let json = serde_json::to_string(&mapped).unwrap();
-        assert_eq!(r#""141.8.128.254""#, json);
+        assert_eq!(r#""::ffff:141.8.128.254""#, json);
 
         let got: pb::IpAddress = serde_json::from_str(&json).unwrap();
-        assert_eq!(4, got.addr.len());
-        assert_ne!(mapped, got);
-        assert_eq!(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(141, 8, 128, 254))), got);
+        assert_eq!(16, got.addr.len());
+        assert_eq!(mapped, got);
+        assert_ne!(pb::IpAddress::from(IpAddr::V4(Ipv4Addr::new(141, 8, 128, 254))), got);
     }
 
     /// A malformed byte length serializes to the same `"invalid"` literal

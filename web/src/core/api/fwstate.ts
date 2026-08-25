@@ -1,9 +1,9 @@
 import { createService, type CallOptions } from './client';
-import type { IPAddressWire } from '../utils/netip';
 
 export interface SyncConfig {
-    src_addr?: IPAddressWire;
-    dst_addr_multicast?: IPAddressWire;
+    // commonpb.IPAddress, serialized by the gateway as a bare IP string.
+    src_addr?: string;
+    dst_addr_multicast?: string;
     port_multicast?: number;
     tcp_syn_ack?: number;
     tcp_syn?: number;
