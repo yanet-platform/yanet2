@@ -8,23 +8,24 @@
 #include "lib/dataplane_ut/mempool.h"
 
 #ifdef YANET_DATAPLANE_UT_CONTROLPLANE
+#include <errno.h>
+#include <string.h>
+
 #include "common/strutils.h"
 #include "devices/plain/api/controlplane.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/packet/dscp.h"
+#include "modules/decap/api/controlplane.h"
 #include "modules/dscp/api/controlplane.h"
 #include "modules/forward/api/controlplane.h"
 #endif
 
 #ifdef YANET_DATAPLANE_UT_CONTROLPLANE
 #include <rte_ether.h>
+#include <rte_gre.h>
 #include <rte_ip.h>
 #endif
 #include <rte_mbuf.h>
-
-#ifdef YANET_DATAPLANE_UT_CONTROLPLANE
-#include <string.h>
-#endif
 
 #ifdef YANET_DATAPLANE_UT_CONTROLPLANE
 // Verifies that run_rounds restores routing metadata and packet payload after
@@ -248,6 +249,188 @@ run_round_restore_test(void) {
 		(long)test_mempool_outstanding(dp_worker->rx_mempool),
 		(long)(outstanding + 1),
 		"run_rounds must not change outstanding packet allocations"
+	);
+
+	packet = packet_list_pop(&input);
+	rte_pktmbuf_free(packet_to_mbuf(packet));
+	agent_detach(agent);
+	dataplane_ut_free(ut);
+	return TEST_SUCCESS;
+}
+
+// Verifies that run_rounds reports -EINVAL when a module mutates mbuf
+// geometry: decap strips tunnel headers with rte_pktmbuf_adj, so the second
+// round's restore sees a packet whose length no longer matches the snapshot.
+static int
+run_rounds_geometry_mismatch_test(void) {
+	const char *port_names[] = {"dev0"};
+	const char *module_names[] = {"decap"};
+	const char *devs_to_load[] = {"plain"};
+	struct dataplane_ut_config cfg = {
+		.cp_memory = 1u << 25,
+		.dp_memory = 1u << 20,
+		.worker_count = 1,
+		.devices = port_names,
+		.device_count = 1,
+		.modules = module_names,
+		.module_count = 1,
+		.devices_to_load = devs_to_load,
+		.devices_to_load_count = 1,
+	};
+	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
+	TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
+
+	struct yanet_shm *shm = dataplane_ut_shm(ut);
+	TEST_ASSERT_NOT_NULL(shm, "dataplane_ut_shm returned NULL");
+	yanet_error *err = NULL;
+	struct agent *agent =
+		agent_attach(shm, 0, "smoke-geometry-mismatch", 8u << 20, &err);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_module *decap =
+		decap_module_config_new(agent, "unwrap", &err);
+	TEST_ASSERT_NOT_NULL(decap, "decap_module_config_new failed");
+	uint8_t first_addr[4] = {0, 0, 0, 0};
+	uint8_t last_addr[4] = {255, 255, 255, 255};
+	TEST_ASSERT_SUCCESS(
+		decap_module_config_add_prefix_v4(decap, first_addr, last_addr),
+		"decap prefix setup failed"
+	);
+
+	struct cp_module *modules[] = {decap};
+	TEST_ASSERT_SUCCESS(
+		agent_update_modules(agent, 1, modules, &err),
+		"module update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	const char *chain_types[] = {"decap"};
+	const char *chain_names[] = {"unwrap"};
+	struct cp_chain_config *chain =
+		cp_chain_config_create("chain", 1, chain_types, chain_names);
+	TEST_ASSERT_NOT_NULL(chain, "cp_chain_config_create failed");
+	struct cp_function_config *function =
+		cp_function_config_create("function", 1);
+	TEST_ASSERT_NOT_NULL(function, "cp_function_config_create failed");
+	TEST_ASSERT_SUCCESS(
+		cp_function_config_set_chain(function, 0, chain, 1),
+		"cp_function_config_set_chain failed"
+	);
+	struct cp_function_config *functions[] = {function};
+	TEST_ASSERT_SUCCESS(
+		agent_update_functions(agent, 1, functions, &err),
+		"function update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_function_config_free(function);
+
+	struct cp_pipeline_config *input_pipeline =
+		cp_pipeline_config_create("input", 1);
+	TEST_ASSERT_NOT_NULL(
+		input_pipeline, "input pipeline allocation failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_pipeline_config_set_function(input_pipeline, 0, "function"),
+		"input pipeline setup failed"
+	);
+	struct cp_pipeline_config *output_pipeline =
+		cp_pipeline_config_create("output", 0);
+	TEST_ASSERT_NOT_NULL(
+		output_pipeline, "output pipeline allocation failed"
+	);
+	struct cp_pipeline_config *pipelines[] = {
+		input_pipeline, output_pipeline
+	};
+	TEST_ASSERT_SUCCESS(
+		agent_update_pipelines(agent, 2, pipelines, &err),
+		"pipeline update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_pipeline_config_free(input_pipeline);
+	cp_pipeline_config_free(output_pipeline);
+
+	struct cp_device_plain_config *device_config =
+		cp_device_plain_config_new("dev0", 1, 1, &err);
+	TEST_ASSERT_NOT_NULL(
+		device_config, "cp_device_plain_config_new failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_plain_config_set_input_pipeline(
+			device_config, 0, "input", 1
+		),
+		"input device pipeline setup failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_plain_config_set_output_pipeline(
+			device_config, 0, "output", 1
+		),
+		"output device pipeline setup failed"
+	);
+	struct cp_device *device =
+		cp_device_plain_new(agent, device_config, &err);
+	cp_device_plain_config_free(device_config);
+	TEST_ASSERT_NOT_NULL(device, "cp_device_plain_new failed");
+	struct cp_device *devices[] = {device};
+	TEST_ASSERT_SUCCESS(
+		agent_update_devices(agent, 1, devices, &err),
+		"device update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_device_plain_free(device, &err);
+
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	struct dp_worker *dp_worker = ADDR_OF(workers);
+	size_t outstanding = test_mempool_outstanding(dp_worker->rx_mempool);
+	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(ut);
+	TEST_ASSERT_NOT_NULL(mbuf, "dataplane_ut_alloc_mbuf returned NULL");
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(*packet));
+	packet->mbuf = mbuf;
+
+	// ether + outer IPv4 (GRE) + 4-byte GRE header + inner IPv4
+	const size_t payload_len = sizeof(struct rte_ether_hdr) +
+				   2 * sizeof(struct rte_ipv4_hdr) + 4;
+	uint8_t *data = (uint8_t *)rte_pktmbuf_append(mbuf, payload_len);
+	TEST_ASSERT_NOT_NULL(data, "packet payload allocation failed");
+	memset(data, 0, payload_len);
+	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)data;
+	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	struct rte_ipv4_hdr *outer = (struct rte_ipv4_hdr *)(ether + 1);
+	outer->version_ihl = RTE_IPV4_VHL_DEF;
+	outer->total_length = rte_cpu_to_be_16(
+		sizeof(struct rte_ipv4_hdr) + 4 + sizeof(struct rte_ipv4_hdr)
+	);
+	outer->next_proto_id = IPPROTO_GRE;
+	outer->dst_addr = rte_cpu_to_be_32(UINT32_C(0xc0000201));
+	struct rte_gre_hdr *gre = (struct rte_gre_hdr *)(outer + 1);
+	gre->proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	struct rte_ipv4_hdr *inner = (struct rte_ipv4_hdr *)(gre + 1);
+	inner->version_ihl = RTE_IPV4_VHL_DEF;
+	inner->total_length =
+		rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
+	inner->next_proto_id = IPPROTO_TCP;
+	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
+
+	struct packet_list input;
+	packet_list_init(&input);
+	packet_list_add(&input, packet);
+
+	int rc = dataplane_ut_run_rounds(ut, 0, &input, 3, 1);
+	TEST_ASSERT_EQUAL(
+		(long)rc,
+		(long)-EINVAL,
+		"run_rounds must reject mutated packet geometry"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)packet_list_count(&input),
+		1L,
+		"run_rounds must return the saved packet on failure"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)test_mempool_outstanding(dp_worker->rx_mempool),
+		(long)(outstanding + 1),
+		"run_rounds must not leak the mutated packet"
 	);
 
 	packet = packet_list_pop(&input);
@@ -543,6 +726,10 @@ main(void) {
 	TEST_ASSERT_SUCCESS(
 		run_round_restore_test(),
 		"run_rounds mutation and restore test failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		run_rounds_geometry_mismatch_test(),
+		"run_rounds geometry rejection test failed"
 	);
 #endif
 

@@ -15,11 +15,14 @@ if not dataplane_only
   smoke_test_c_args += ['-DYANET_DATAPLANE_UT_CONTROLPLANE']
   smoke_test_dependencies += [
     lib_dev_plain_api,
+    lib_decap_cp_dep,
     lib_dscp_cp_dep,
     lib_forward_cp_dep,
   ]
-  smoke_test_link_with += [lib_dscp_dp, lib_forward_dp]
+  smoke_test_link_with += [lib_decap_dp, lib_dscp_dp, lib_forward_dp]
   smoke_test_link_args += [
+    '-Wl,--undefined=new_module_decap',
+    '-Wl,--export-dynamic-symbol=new_module_decap',
     '-Wl,--undefined=new_module_dscp',
     '-Wl,--export-dynamic-symbol=new_module_dscp',
     '-Wl,--undefined=new_module_forward',
