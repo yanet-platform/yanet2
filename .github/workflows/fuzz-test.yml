@@ -24,7 +24,7 @@ jobs:
           sudo apt-get clean
           docker rmi $(docker images -q) 2>/dev/null || true
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -33,7 +33,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24.x"
           cache: false
@@ -44,7 +44,7 @@ jobs:
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
-      - uses: hendrikmuhs/ccache-action@v1.2.18
+      - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-fuzz-build-cache
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload fuzz binaries
         id: upload-fuzz-binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: fuzz-binaries
           path: fuzz-out/
@@ -109,7 +109,7 @@ jobs:
           fi
 
       - name: Upload Go fuzz failure testdata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always() && steps.go-fuzz.outcome == 'failure'
         with:
           name: go-fuzz-testdata
@@ -134,7 +134,7 @@ jobs:
 
     steps:
       - name: Download fuzz binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: fuzz-binaries
           path: fuzz-binaries/

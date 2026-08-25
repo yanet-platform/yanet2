@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -70,7 +70,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
-      - uses: hendrikmuhs/ccache-action@v1.2.18
+      - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-build-asan-test-cache
@@ -78,7 +78,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24.x"
           cache: false
@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -116,7 +116,7 @@ jobs:
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
-      - uses: hendrikmuhs/ccache-action@v1.2.18
+      - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-build-tsan-test-cache
@@ -124,7 +124,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24.x"
           cache: false
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -167,7 +167,7 @@ jobs:
           shared-key: build-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: hendrikmuhs/ccache-action@v1.2.18
+      - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-cache
@@ -175,7 +175,7 @@ jobs:
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24.x"
           cache: false
@@ -212,7 +212,7 @@ jobs:
       # earlier step fails the job.
       - name: Save Go module cache
         if: steps.go-modcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ steps.go-modcache.outputs.path }}
           key: ${{ steps.go-modcache.outputs.key }}
@@ -256,7 +256,7 @@ jobs:
           fi
 
       - name: Upload YANET binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: yanet2-binaries
           path: |
@@ -271,7 +271,7 @@ jobs:
     needs: build-release-artifacts
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -282,7 +282,7 @@ jobs:
           echo "Cleaned build/ and target/ directories"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.24.x"
           cache: true
@@ -312,7 +312,7 @@ jobs:
 
       - name: Cache Ubuntu cloud image
         id: cache-ubuntu-image
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
           key: ${{ runner.os }}-ubuntu-image-${{ hashFiles('tests/functional/Makefile') }}
@@ -321,7 +321,7 @@ jobs:
 
       - name: Cache QEMU image
         id: cache-qemu-image
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             tests/functional/yanet-test.qcow2
@@ -351,7 +351,7 @@ jobs:
           fi
 
       - name: Download YANET binaries from build job
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: yanet2-binaries
           path: ./
@@ -442,7 +442,7 @@ jobs:
         timeout-minutes: 45
 
       - name: Upload functional test logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: functional-test-logs

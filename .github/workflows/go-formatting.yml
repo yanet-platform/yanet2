@@ -24,12 +24,12 @@ jobs:
     name: Check Go Formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # gofmt only reformats source text. It resolves no imports and never
       # touches GOMODCACHE, so this job needs no module cache.
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
