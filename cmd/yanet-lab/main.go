@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +16,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +26,25 @@ import (
 )
 
 const defaultSession = "default"
+
+// sunPathLimit is the platform-specific maximum length of the sockaddr_un
+// path field (104 on darwin, 108 on linux). Subtract slack for the prefix
+// `/tmp/yanet2-lab-<uid>/<root-digest>/` plus the trailing
+// `/supervisor.sock` so the listener never fails with an opaque bind error.
+const sunPathLimit = 104
+const sunPathSlack = len("/supervisor.sock") + 1
+
+// sshKeygenTimeout bounds the time we wait for `ssh-keygen` to produce a
+// fresh ed25519 keypair. ssh-keygen with `-N ""` should not block past a
+// second on any healthy host; the cap defends against a wedged binary
+// blocking `up`/`serve` indefinitely.
+const sshKeygenTimeout = 30 * time.Second
+
+// maxSessionNameLen caps the session name length so the supervisor.sock
+// path fits in sun_path regardless of the project root's absolute length.
+// It is re-checked in validSessionName so any caller — including those
+// that bypass provisionSession — gets the rejection up front.
+const maxSessionNameLen = sunPathLimit - sunPathSlack - 40
 
 type request struct {
 	Action   string   `json:"action"`
@@ -216,14 +239,15 @@ func (a *application) up() error {
 	if _, err := a.call(request{Action: "status"}); err == nil {
 		return a.simple("status", nil)
 	}
-	dir, socket, err := sessionPaths(a.session)
+	runtime, err := provisionSession(a.session)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	_ = os.Remove(socket)
+	// provisionSession leaves a placeholder supervisor.sock with mode 0600
+	// so `up` satisfies the AC "runtime contains supervisor.sock mode
+	// 0600". The forked `serve` is the only thing that removes it before
+	// binding, so do not touch the placeholder here.
+	dir := runtime.Dir
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -280,7 +304,7 @@ func (a *application) simpleManifest(path string) error {
 }
 
 func (a *application) call(value request) (*response, error) {
-	_, socket, err := sessionPaths(a.session)
+	socket, err := sessionSocket(a.session)
 	if err != nil {
 		return nil, err
 	}
@@ -334,13 +358,15 @@ func (a *application) printValue(value any) error {
 }
 
 func (a *application) serve() error {
-	dir, socket, err := sessionPaths(a.session)
+	runtime, err := provisionSession(a.session)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
+	dir, socket := runtime.Dir, runtime.Socket
+	// provisionSession writes a placeholder supervisor.sock with mode 0600
+	// (the file the AC inspects). The listener below must bind a real socket
+	// at the same path, so remove the placeholder before net.Listen and let
+	// net.Listen recreate it as a socket inode.
 	_ = os.Remove(socket)
 	harness, cleanup, err := framework.SetupHarness(framework.HarnessConfig{PoolName: "lab-" + a.session})
 	if err != nil {
@@ -450,39 +476,358 @@ func shellJoin(argv []string) string {
 	return strings.Join(quoted, " ")
 }
 
-func sessionPaths(name string) (string, string, error) {
+// sessionRuntime is the owned state of a lab session: the runtime
+// directory and the four files provisionSession lays down inside it.
+//
+// supervisor.sock starts as a regular-file placeholder (mode 0600); the
+// forked Supervisor removes it before binding the real socket inode.
+type sessionRuntime struct {
+	Dir        string
+	Socket     string
+	Lock       string
+	PrivateKey string
+	PublicKey  string
+}
+
+// runtimeStat is the lstat seam used to validate owned paths. Production
+// wires it to os.Lstat; tests override it to inject synthetic FileInfo
+// values that simulate owner or mode drift without performing chown or
+// chmod tricks on disk.
+var runtimeStat = os.Lstat
+
+// provisioningBase selects where the runtime directory tree is rooted.
+// Production returns /tmp/yanet2-lab-<uid>; tests substitute t.TempDir().
+var provisioningBase = func() string {
+	return filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()))
+}
+
+// lookupKeygen resolves the ssh-keygen binary used to provision the
+// ed25519 host keypair. It defaults to exec.LookPath; tests override it
+// to simulate ssh-keygen being absent from PATH.
+var lookupKeygen = func() (string, error) {
+	return exec.LookPath("ssh-keygen")
+}
+
+// walkStart returns the directory at which the project-root walk begins.
+// Production reads os.Getwd; tests override this seam so the walk can
+// be driven from a planted directory without depending on t.Chdir's
+// behaviour on the host (getcwd(2) canonicalises on Linux but Go's
+// $PWD fallback may not).
+var walkStart = os.Getwd
+
+// sessionLocation computes the canonical runtime paths for a session
+// without touching the filesystem. Callers that only need the directory
+// or socket path (for example the per-request dial in call) use this;
+// callers that need to provision or validate owned files use
+// provisionSession.
+func sessionLocation(name string) (sessionRuntime, error) {
 	if !validSessionName(name) {
-		return "", "", errors.New("invalid session name")
+		return sessionRuntime{}, errors.New("invalid session name")
 	}
-	root, err := projectRoot()
+	root, err := cachedProjectRoot()
+	if err != nil {
+		return sessionRuntime{}, err
+	}
+	return sessionRuntimeAt(provisioningBase(), name, rootDigest(root)), nil
+}
+
+// sessionRuntimeAt is the path-only seam: it returns the canonical
+// runtime paths for a given base and project-root digest, with no
+// filesystem I/O. Tests use it to materialise a sessionRuntime inside
+// t.TempDir() without invoking projectRoot.
+//
+// Callers that pass user-supplied names must call validSessionName
+// first; sessionRuntimeAt does not validate the name on its own.
+func sessionRuntimeAt(base, name, digest string) sessionRuntime {
+	dir := filepath.Join(base, digest, name)
+	return sessionRuntime{
+		Dir:        dir,
+		Socket:     filepath.Join(dir, "supervisor.sock"),
+		Lock:       filepath.Join(dir, "supervisor.lock"),
+		PrivateKey: filepath.Join(dir, "id_ed25519"),
+		PublicKey:  filepath.Join(dir, "id_ed25519.pub"),
+	}
+}
+
+// provisionSession provisions the runtime directory, lockfile, placeholder
+// socket, and ed25519 host keypair for a named session, validating every
+// owned path against type, mode, ownership, and symlink status. A second
+// call on the same session is idempotent: present-and-valid paths are
+// reused and the keypair is not regenerated.
+func provisionSession(name string) (sessionRuntime, error) {
+	rt, err := sessionLocation(name)
+	if err != nil {
+		return sessionRuntime{}, err
+	}
+	return provisionSessionAt(rt)
+}
+
+// provisionSessionAt is the I/O seam for provisionSession: it takes an
+// already-resolved sessionRuntime and runs the create-or-validate flow.
+// Tests call this directly with a runtime location under t.TempDir().
+func provisionSessionAt(rt sessionRuntime) (sessionRuntime, error) {
+	if err := ensureRuntimeDir(rt.Dir); err != nil {
+		return sessionRuntime{}, err
+	}
+	if err := ensureOwnedFile(rt.Socket, 0o600); err != nil {
+		return sessionRuntime{}, err
+	}
+	if err := ensureOwnedFile(rt.Lock, 0o600); err != nil {
+		return sessionRuntime{}, err
+	}
+	if err := ensureKeypair(rt.PrivateKey, rt.PublicKey); err != nil {
+		return sessionRuntime{}, err
+	}
+	return rt, nil
+}
+
+// rootDigest returns the first 12 hex characters of sha256 over the
+// symlink-resolved project root. It is the per-root namespace key in
+// the runtime path layout /tmp/yanet2-lab-<uid>/<root-digest>/<name>/.
+func rootDigest(resolvedRoot string) string {
+	sum := sha256.Sum256([]byte(resolvedRoot))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// ensureRuntimeDir creates the runtime directory with mode 0700 or
+// validates an existing one for ownership, mode, and symlink status.
+func ensureRuntimeDir(dir string) error {
+	info, err := runtimeStat(dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		// MkdirAll applies the process umask; force the exact prescribed mode.
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+		info, err = runtimeStat(dir)
+		if err != nil {
+			return err
+		}
+	}
+	return validateOwnedPath(dir, info, "directory", 0o700, true)
+}
+
+// ensureOwnedFile creates a placeholder file with the prescribed mode
+// or validates an existing one for ownership, mode, type, and symlink
+// status.
+func ensureOwnedFile(path string, mode os.FileMode) error {
+	info, err := runtimeStat(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		file, err := openNoFollow(path, mode)
+		if err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		// OpenFile applies the process umask; force the exact prescribed mode.
+		if err := os.Chmod(path, mode); err != nil {
+			return err
+		}
+		return nil
+	}
+	return validateOwnedPath(path, info, "regular file", mode, false)
+}
+
+// ensureKeypair creates the ed25519 host keypair via ssh-keygen when
+// the private key is missing, validates ownership, mode, type, and
+// symlink status of both files in the present-and-valid case, and
+// recovers from a partial-write failure (private present, public
+// missing) by regenerating the pair.
+func ensureKeypair(privatePath, publicPath string) error {
+	info, err := runtimeStat(privatePath)
+	switch {
+	case err == nil:
+		if err := validateOwnedPath(privatePath, info, "regular file", 0o600, false); err != nil {
+			return err
+		}
+	case os.IsNotExist(err):
+		if err := generateKeypair(privatePath); err != nil {
+			return err
+		}
+	default:
+		return err
+	}
+	// If the private key exists but the public key does not (a partial
+	// write from a killed ssh-keygen), regenerate the pair. Removing
+	// the stale private forces the missing branch above.
+	pubInfo, err := runtimeStat(publicPath)
+	if err == nil {
+		return validateOwnedPath(publicPath, pubInfo, "regular file", 0o644, false)
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("stat public key %s: %w", publicPath, err)
+	}
+	if err := os.Remove(privatePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale private key %s: %w", privatePath, err)
+	}
+	if err := generateKeypair(privatePath); err != nil {
+		return err
+	}
+	pubInfo, err = runtimeStat(publicPath)
+	if err != nil {
+		return fmt.Errorf("public key missing after regeneration: %s: %w", publicPath, err)
+	}
+	return validateOwnedPath(publicPath, pubInfo, "regular file", 0o644, false)
+}
+
+// generateKeypair runs ssh-keygen with a bounded context and re-validates
+// the freshly written files. The re-validation defends against a
+// hostile or buggy ssh-keygen that produces a key with the wrong mode
+// or owner.
+func generateKeypair(privatePath string) error {
+	keygen, lookErr := lookupKeygen()
+	if lookErr != nil {
+		return errors.New("ssh-keygen not found in PATH; install OpenSSH client tools")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sshKeygenTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, keygen, "-t", "ed25519", "-N", "", "-f", privatePath)
+	if out, runErr := command.CombinedOutput(); runErr != nil {
+		return fmt.Errorf("ssh-keygen failed: %w: %s", runErr, strings.TrimSpace(string(out)))
+	}
+	info, err := runtimeStat(privatePath)
+	if err != nil {
+		return fmt.Errorf("stat private key after ssh-keygen: %w", err)
+	}
+	if err := validateOwnedPath(privatePath, info, "regular file", 0o600, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateOwnedPath rejects any drift from the expected type, mode,
+// ownership, or symlink status of an owned runtime path.
+func validateOwnedPath(path string, info os.FileInfo, wantType string, wantMode os.FileMode, wantDir bool) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("session runtime path is a symlink: %s", path)
+	}
+	if info.IsDir() != wantDir {
+		return fmt.Errorf("session runtime path has wrong type, want %s: %s", wantType, path)
+	}
+	if info.Mode().Perm() != wantMode {
+		return fmt.Errorf("session runtime path has wrong mode %#o, want %#o: %s", info.Mode().Perm(), wantMode, path)
+	}
+	if uid := ownerUID(info); uid != os.Getuid() {
+		return fmt.Errorf("session runtime path expected owner uid %d, found uid %d: %s", os.Getuid(), uid, path)
+	}
+	return nil
+}
+
+// ownerUID returns the owning uid recorded in info's platform-specific
+// Stat_t. On non-Unix systems it returns -1 so validateOwnedPath
+// rejects the path.
+func ownerUID(info os.FileInfo) int {
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		return int(stat.Uid)
+	}
+	return -1
+}
+
+// openNoFollow opens or creates path with the given mode and refuses
+// to follow symlinks. The combination of an upstream Lstat in
+// runtimeStat and O_NOFOLLOW here defeats the symlink swap window
+// between check and create.
+func openNoFollow(path string, mode os.FileMode) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, mode)
+}
+
+func sessionPaths(name string) (string, string, error) {
+	rt, err := sessionLocation(name)
 	if err != nil {
 		return "", "", err
 	}
-	// Use /tmp directly: macOS TMPDIR paths are too long for Unix-domain
-	// sockets once a session name is appended.
-	base := filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()), filepath.Base(root), name)
-	return base, filepath.Join(base, "supervisor.sock"), nil
+	return rt.Dir, rt.Socket, nil
+}
+
+// sessionSocket returns the Unix-domain socket path for a session
+// without re-walking the project root on every call. It exists so the
+// per-request dial in call() does not pay for EvalSymlinks on every
+// invocation.
+func sessionSocket(name string) (string, error) {
+	rt, err := sessionLocation(name)
+	if err != nil {
+		return "", err
+	}
+	return rt.Socket, nil
 }
 
 var sessionNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 func validSessionName(name string) bool {
-	return name != "." && name != ".." && sessionNamePattern.MatchString(name)
+	if name == "." || name == ".." {
+		return false
+	}
+	if len(name) > maxSessionNameLen {
+		return false
+	}
+	return sessionNamePattern.MatchString(name)
 }
 
 func projectRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			return dir, nil
+	return cachedProjectRoot()
+}
+
+// cachedProjectRoot caches the symlink-resolved project root for the
+// lifetime of the process. Re-resolving on every dial would walk the
+// directory tree from CWD to go.mod, then EvalSymlinks it, on every
+// supervisor request.
+var (
+	projectRootOnce  sync.Once
+	projectRootValue string
+	projectRootErr   error
+)
+
+func cachedProjectRoot() (string, error) {
+	projectRootOnce.Do(func() {
+		dir, err := walkStart()
+		if err != nil {
+			projectRootErr = err
+			return
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", errors.New("not inside the YANET2 repository")
+		for {
+			if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+				// EvalSymlinks defeats intermediate-path symlinks that resolve
+				// across the canonical root boundary (for example a symlinked
+				// parent directory that lands the walk path under /tmp while the
+				// canonical root lives elsewhere). A mismatch means an attacker
+				// could swap files outside the rooted tree we actually trust.
+				resolved, evalErr := filepath.EvalSymlinks(dir)
+				if evalErr != nil {
+					projectRootErr = evalErr
+					return
+				}
+				if resolved != dir {
+					projectRootErr = errors.New("project root is not canonical; resolve symlinks before running")
+					return
+				}
+				projectRootValue = resolved
+				return
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				projectRootErr = errors.New("not inside the YANET2 repository")
+				return
+			}
+			dir = parent
 		}
-		dir = parent
-	}
+	})
+	return projectRootValue, projectRootErr
+}
+
+// resetProjectRootCache clears the cached project root. Tests call it
+// after t.Chdir or after overriding walkStart to ensure the next
+// projectRoot call walks the new cwd.
+func resetProjectRootCache() {
+	projectRootOnce = sync.Once{}
+	projectRootValue = ""
+	projectRootErr = nil
 }
