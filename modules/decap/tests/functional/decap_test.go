@@ -738,10 +738,8 @@ func TestDecap_NonIPPacket_UnchangedOutput(t *testing.T) {
 	require.Equal(t, pkt.Data(), res.Output[0].RawData[:len(pkt.Data())])
 }
 
-// TestDecap_NestedIPIPRecirculatesPastStallLimit verifies that each successful
-// tunnel removal renews the no-progress allowance while the total lineage
-// budget still bounds the packet.
-func TestDecap_NestedIPIPRecirculatesPastStallLimit(t *testing.T) {
+// verifies that five nested tunnel removals can redirect to the final packet.
+func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 	h, agent, decapBackend := setupDecapHarness(t)
 	decapHandle, err := decapBackend.UpdateModule(
 		"nested",
@@ -857,7 +855,7 @@ func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 		configured uint16
 		limit      uint16
 	}{
-		{name: "default", limit: 16},
+		{name: "default", limit: 64},
 		{name: "minimum", configured: 4, limit: 4},
 		{name: "non_default", configured: 37, limit: 37},
 		{name: "maximum", configured: 256, limit: 256},
@@ -936,10 +934,9 @@ func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 	}
 }
 
-// TestDecap_MissDoesNotResetStallLimit verifies a no-op decap cannot renew
-// the no-progress allowance of a self-targeting forward loop.
-func TestDecap_MissDoesNotResetStallLimit(t *testing.T) {
-	h, agent, decapBackend := setupDecapHarness(t)
+// verifies that a no-op decap does not add packet-lineage redirect credits.
+func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
+	h, agent, decapBackend := setupDecapHarnessWithLimit(t, 4)
 	decapHandle, err := decapBackend.UpdateModule(
 		"miss",
 		[]netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")},

@@ -71,17 +71,27 @@ func setupRouteHarness(
 	tb testing.TB,
 	deviceName string,
 ) (*dataplaneut.Harness, *ffi.Agent, route.Backend) {
+	return setupRouteHarnessWithLimit(tb, deviceName, 0)
+}
+
+// Builds a route harness with an explicit packet-lineage redirect limit.
+func setupRouteHarnessWithLimit(
+	tb testing.TB,
+	deviceName string,
+	packetRecircLimit uint16,
+) (*dataplaneut.Harness, *ffi.Agent, route.Backend) {
 	tb.Helper()
 
-	cfg := dataplaneut.Config{
-		CPMemory:      uint64(routeCPSize),
-		DPMemory:      uint64(routeDPSize),
-		WorkerCount:   1,
-		Devices:       []string{deviceName},
-		Modules:       []string{"route"},
-		DevicesToLoad: []string{"plain"},
+	config := dataplaneut.Config{
+		CPMemory:          uint64(routeCPSize),
+		DPMemory:          uint64(routeDPSize),
+		WorkerCount:       1,
+		PacketRecircLimit: packetRecircLimit,
+		Devices:           []string{deviceName},
+		Modules:           []string{"route"},
+		DevicesToLoad:     []string{"plain"},
 	}
-	h, err := dataplaneut.NewHarness(cfg)
+	h, err := dataplaneut.NewHarness(config)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Free)
 
@@ -776,10 +786,10 @@ func TestRoute_DeviceTranslation_Drop(t *testing.T) {
 	require.Len(t, result.Drop, 1, "expected exactly one dropped packet")
 }
 
-// TestRoute_OutputSelfLoopStopsAtStallLimit verifies a route nexthop targeting
-// its own output entry terminates and attributes the drop to that entry.
-func TestRoute_OutputSelfLoopStopsAtStallLimit(t *testing.T) {
-	h, agent, backend := setupRouteHarness(t, "port0")
+// TestRoute_OutputSelfLoopStopsAtTotalLimit verifies equal-length TTL updates
+// can use the full redirect budget before the target entry accounts the drop.
+func TestRoute_OutputSelfLoopStopsAtTotalLimit(t *testing.T) {
+	h, agent, backend := setupRouteHarnessWithLimit(t, "port0", 5)
 	applyFIB(t, backend, "loop", []FIBEntry{{
 		Prefix:   netip.MustParsePrefix("10.0.0.0/24"),
 		Nexthops: []FIBNexthop{routeNextHop},
@@ -826,7 +836,7 @@ func TestRoute_OutputSelfLoopStopsAtStallLimit(t *testing.T) {
 		[]uint64{1, packetSize},
 		deviceCounters["output_recirc_drop"],
 	)
-	require.Equal(t, []uint64{4, 4 * packetSize}, deviceCounters["output_rx"])
+	require.Equal(t, []uint64{5, 5 * packetSize}, deviceCounters["output_rx"])
 }
 
 // routeCounterNames lists every per-outcome counter registered by the route

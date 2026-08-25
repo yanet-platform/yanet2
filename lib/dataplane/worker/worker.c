@@ -20,7 +20,11 @@ worker_packet_alloc(struct dp_worker *dp_worker) {
 }
 
 struct packet *
-worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
+worker_clone_packet(
+	struct dp_worker *dp_worker,
+	struct packet *packet,
+	uint16_t packet_recirc_limit
+) {
 	struct rte_mbuf *mbuf = rte_pktmbuf_copy(
 		packet->mbuf, dp_worker->rx_mempool, 0, UINT32_MAX
 	);
@@ -28,10 +32,14 @@ worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 		return NULL;
 	}
 
+	packet_recirc_init(packet, packet_recirc_limit);
+
 	struct packet *packet_clone = mbuf_to_packet(mbuf);
 	rte_memcpy(packet_clone, packet, sizeof(struct packet));
 	packet_clone->mbuf = mbuf;
 	packet_clone->next = NULL;
+	packet_clone->recirc_remaining = packet->recirc_remaining / 2;
+	packet->recirc_remaining -= packet_clone->recirc_remaining;
 
 	packet_refresh_data_len(packet_clone);
 	return packet_clone;

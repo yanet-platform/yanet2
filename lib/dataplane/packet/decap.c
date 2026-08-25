@@ -102,7 +102,6 @@ packet_decap(struct packet *packet) {
 	// And transport_header meta
 	packet->transport_header.type = next_transport;
 	packet->transport_header.offset = next_offset - tun_hdrs_size;
-	packet_recirc_mark_progress(packet);
 
 	return 0;
 }

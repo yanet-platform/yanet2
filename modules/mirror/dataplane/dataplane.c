@@ -30,7 +30,9 @@ mirror_clone(
 	void (*route)(struct module_ectx *, struct packet_front *, struct packet *),
 	uint16_t device_id
 ) {
-	struct packet *clone = worker_clone_packet(worker, packet);
+	struct packet *clone = worker_clone_packet(
+		worker, packet, module_ectx->packet_recirc_limit
+	);
 	if (clone == NULL) {
 		return;
 	}

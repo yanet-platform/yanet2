@@ -132,31 +132,25 @@ dataplane_ut_build_optimized(void);
 //
 // Before the loop, every packet and its metadata are snapshotted. Each round
 // rebuilds input from those snapshot pointers and calls dataplane_ut_run. The
-// per-round result is discarded — the run moves packet nodes without freeing
-// them, so the snapshot pointers remain valid for every subsequent round.
+// per-round result is discarded after newly emitted packets are reclaimed.
 //
 // After the loop, input is rebuilt from the snapshot so the caller's list
 // holds all packets in a consistent state for freeing. The snapshot array is
 // freed before returning.
 //
-// When reset_payload is nonzero, each packet's payload bytes are also
-// snapshotted at capture and restored before every round, so modules that
-// rewrite headers in place (for example route decrementing TTL) see fresh
-// input each round. Modules that grow, shrink, or re-slice packets stay out of
-// scope and cause the run to fail rather than restoring bytes into changed
-// mbuf geometry.
+// Mbuf geometry is snapshotted and validated before every round. When
+// reset_payload is nonzero, each packet's payload bytes are also snapshotted
+// and restored, so modules that rewrite headers in place (for example route
+// decrementing TTL) see fresh input each round. Modules that grow, shrink, or
+// re-slice packets stay out of scope and cause the run to fail.
 //
 // Returns 0 on success, -ENOMEM when a snapshot cannot be allocated, and
 // -EINVAL when a handler changes mbuf geometry. Allocation failures leave input
 // intact; every other return leaves it rebuilt from the fixed packet set.
 //
-// Caveat: this primitive assumes each round's handlers only forward or drop the
-// fixed packet set. A handler that allocates, frees, or replicates packets per
-// round breaks the recycling contract: any new mbuf emitted (for example the
-// fwstate state-sync path, which calls worker_packet_alloc +
-// packet_front_output) is held only by the discarded per-round result, not by
-// the snapshot, so it leaks one mbuf per round. Do not benchmark configurations
-// that emit or drop-free packets through this primitive.
+// Handlers must not free or replicate the fixed packet set. Any newly emitted
+// packet is reclaimed from the discarded per-round result before the next
+// round, but a freed snapshot packet cannot be restored.
 int
 dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,

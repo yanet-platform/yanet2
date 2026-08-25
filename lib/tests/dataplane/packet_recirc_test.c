@@ -3,71 +3,42 @@
 #include "lib/dataplane/packet/packet.h"
 
 static int
-test_stalled_redirects_stop_at_stall_limit(void) {
+test_redirect_initializes_remaining_budget(void) {
 	struct packet packet = {0};
-	for (uint8_t idx = 0; idx < PACKET_RECIRC_STALL_LIMIT; ++idx) {
-		TEST_ASSERT(
-			packet_recirc_try_redirect(&packet, 16),
-			"redirect within the stall limit must succeed"
-		);
-	}
-	TEST_ASSERT(
-		!packet_recirc_try_redirect(&packet, 16),
-		"redirect after the stall limit must fail"
-	);
-	TEST_ASSERT_EQUAL(
-		packet.recirc_total_count,
-		PACKET_RECIRC_STALL_LIMIT,
-		"stalled redirects must consume total budget"
-	);
-	TEST_ASSERT_EQUAL(
-		packet.recirc_stall_count,
-		PACKET_RECIRC_STALL_LIMIT,
-		"stalled redirects must consume stall budget"
-	);
-	return TEST_SUCCESS;
-}
-
-static int
-test_progress_resets_only_stall_budget(void) {
-	struct packet packet = {
-		.recirc_total_count = 3,
-		.recirc_stall_count = PACKET_RECIRC_STALL_LIMIT,
-	};
-	packet_recirc_mark_progress(&packet);
-	TEST_ASSERT_EQUAL(
-		packet.recirc_total_count,
-		3,
-		"progress must preserve total budget"
-	);
-	TEST_ASSERT_EQUAL(
-		packet.recirc_stall_count, 0, "progress must reset stall budget"
-	);
 	TEST_ASSERT(
 		packet_recirc_try_redirect(&packet, 16),
-		"redirect after progress must succeed"
+		"first redirect must succeed"
+	);
+	TEST_ASSERT_EQUAL(
+		packet.recirc_remaining,
+		15,
+		"first redirect must consume one total credit"
+	);
+	TEST_ASSERT_EQUAL(
+		packet.recirc_initialized,
+		1,
+		"first redirect must initialize recirculation state"
 	);
 	return TEST_SUCCESS;
 }
 
 static int
-test_progress_cannot_bypass_total_budget(void) {
+test_total_budget_stops_at_limit(void) {
 	struct packet packet = {0};
-	for (uint16_t idx = 0; idx < 4; ++idx) {
+	for (uint16_t idx = 0; idx < 5; ++idx) {
 		TEST_ASSERT(
-			packet_recirc_try_redirect(&packet, 4),
-			"redirect within total limit must succeed"
+			packet_recirc_try_redirect(&packet, 5),
+			"redirect within the total limit must succeed"
 		);
-		packet_recirc_mark_progress(&packet);
 	}
 	TEST_ASSERT(
-		!packet_recirc_try_redirect(&packet, 4),
-		"progress must not bypass total limit"
+		!packet_recirc_try_redirect(&packet, 5),
+		"redirect after the total limit must fail"
 	);
 	TEST_ASSERT_EQUAL(
-		packet.recirc_total_count,
-		4,
-		"total budget must remain exhausted"
+		packet.recirc_remaining,
+		0,
+		"total failure must preserve the exhausted budget"
 	);
 	return TEST_SUCCESS;
 }
@@ -82,16 +53,38 @@ test_maximum_total_budget(void) {
 			),
 			"redirect within maximum total limit must succeed"
 		);
-		packet_recirc_mark_progress(&packet);
 	}
 	TEST_ASSERT(
 		!packet_recirc_try_redirect(&packet, PACKET_RECIRC_LIMIT_MAX),
 		"redirect after maximum total limit must fail"
 	);
 	TEST_ASSERT_EQUAL(
-		packet.recirc_total_count,
-		PACKET_RECIRC_LIMIT_MAX,
-		"failed redirect must preserve the maximum total count"
+		packet.recirc_remaining,
+		0,
+		"failed redirect must preserve exhausted total budget"
+	);
+	return TEST_SUCCESS;
+}
+
+static int
+test_total_exhaustion_preserves_state(void) {
+	struct packet packet = {
+		.recirc_remaining = 0,
+		.recirc_initialized = 1,
+	};
+	TEST_ASSERT(
+		!packet_recirc_try_redirect(&packet, 64),
+		"redirect after total exhaustion must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		packet.recirc_remaining,
+		0,
+		"total exhaustion must preserve remaining budget"
+	);
+	TEST_ASSERT_EQUAL(
+		packet.recirc_initialized,
+		1,
+		"total exhaustion must preserve initialization state"
 	);
 	return TEST_SUCCESS;
 }
@@ -99,16 +92,16 @@ test_maximum_total_budget(void) {
 int
 main(void) {
 	size_t failed = 0;
-	if (test_stalled_redirects_stop_at_stall_limit() != TEST_SUCCESS) {
+	if (test_redirect_initializes_remaining_budget() != TEST_SUCCESS) {
 		++failed;
 	}
-	if (test_progress_resets_only_stall_budget() != TEST_SUCCESS) {
-		++failed;
-	}
-	if (test_progress_cannot_bypass_total_budget() != TEST_SUCCESS) {
+	if (test_total_budget_stops_at_limit() != TEST_SUCCESS) {
 		++failed;
 	}
 	if (test_maximum_total_budget() != TEST_SUCCESS) {
+		++failed;
+	}
+	if (test_total_exhaustion_preserves_state() != TEST_SUCCESS) {
 		++failed;
 	}
 	return failed == 0 ? TEST_SUCCESS : TEST_FAILED;

@@ -68,14 +68,9 @@ assert_clone_correct(
 	TEST_ASSERT_EQUAL(clone->flags, src->flags, "flags preserved");
 	TEST_ASSERT_EQUAL(clone->vlan, src->vlan, "vlan preserved");
 	TEST_ASSERT_EQUAL(
-		clone->recirc_total_count,
-		src->recirc_total_count,
-		"recirculation total preserved"
-	);
-	TEST_ASSERT_EQUAL(
-		clone->recirc_stall_count,
-		src->recirc_stall_count,
-		"recirculation stall count preserved"
+		clone->recirc_initialized,
+		src->recirc_initialized,
+		"recirculation initialization state preserved"
 	);
 	TEST_ASSERT_EQUAL(
 		clone->fragment_offset,
@@ -101,8 +96,8 @@ set_metadata(struct packet *p, uint32_t hash, uint16_t flags, uint16_t vlan) {
 	p->hash = hash;
 	p->flags = flags;
 	p->vlan = vlan;
-	p->recirc_total_count = 3;
-	p->recirc_stall_count = 2;
+	p->recirc_remaining = 5;
+	p->recirc_initialized = 1;
 	p->fragment_offset = 42;
 	p->rx_device_id = 7;
 	p->tx_device_id = 3;
@@ -137,25 +132,40 @@ test_multi_segment(struct rte_mempool *pool) {
 	src.mbuf = segs[0];
 	set_metadata(&src, 0xDEADBEEF, 0x0001, 200);
 
-	struct packet *clone = worker_clone_packet(&dp_worker, &src);
+	struct packet *clone = worker_clone_packet(&dp_worker, &src, 64);
 
 	int rc = assert_clone_correct(&src, clone, src.mbuf->pkt_len);
 	if (rc == TEST_SUCCESS) {
+		TEST_ASSERT_EQUAL(
+			src.recirc_remaining,
+			3,
+			"source must keep the odd recirculation credit"
+		);
+		TEST_ASSERT_EQUAL(
+			clone->recirc_remaining,
+			2,
+			"clone must receive half the recirculation credits"
+		);
+		TEST_ASSERT_EQUAL(
+			src.recirc_remaining + clone->recirc_remaining,
+			5,
+			"cloning must preserve aggregate recirculation credits"
+		);
 		TEST_ASSERT(
 			packet_recirc_try_redirect(
 				clone, PACKET_RECIRC_LIMIT_DEFAULT
 			),
-			"clone must spend its inherited budget independently"
+			"clone must spend its assigned budget"
 		);
 		TEST_ASSERT_EQUAL(
-			src.recirc_total_count,
+			src.recirc_remaining,
 			3,
-			"clone redirect must not change source total count"
+			"clone redirect must not change the source's share"
 		);
 		TEST_ASSERT_EQUAL(
-			src.recirc_stall_count,
-			2,
-			"clone redirect must not change source stall count"
+			clone->recirc_remaining,
+			1,
+			"clone redirect must consume one assigned credit"
 		);
 	}
 
@@ -199,14 +209,14 @@ test_packet_alloc_resets_metadata(struct rte_mempool *pool) {
 	TEST_ASSERT_EQUAL(packet->flags, 0, "new packet flags must be zero");
 	TEST_ASSERT_EQUAL(packet->vlan, 0, "new packet vlan must be zero");
 	TEST_ASSERT_EQUAL(
-		packet->recirc_total_count,
+		packet->recirc_remaining,
 		0,
-		"new packet recirculation total must be zero"
+		"new packet recirculation remaining budget must be zero"
 	);
 	TEST_ASSERT_EQUAL(
-		packet->recirc_stall_count,
+		packet->recirc_initialized,
 		0,
-		"new packet recirculation stall count must be zero"
+		"new packet recirculation state must be uninitialized"
 	);
 	TEST_ASSERT_EQUAL(
 		packet->fragment_offset,
@@ -305,9 +315,24 @@ test_jumbo(struct rte_mempool *pool) {
 	memset(&src, 0, sizeof(src));
 	src.mbuf = segs[0];
 	set_metadata(&src, 0xABCDEF01, 0x0002, 300);
+	src.recirc_remaining = 0;
+	src.recirc_initialized = 0;
 
-	struct packet *clone = worker_clone_packet(&dp_worker, &src);
+	struct packet *clone = worker_clone_packet(&dp_worker, &src, 5);
 	int rc = assert_clone_correct(&src, clone, src.mbuf->pkt_len);
+	if (rc == TEST_SUCCESS) {
+		TEST_ASSERT_EQUAL(
+			src.recirc_remaining,
+			3,
+			"uninitialized source must keep the odd credit"
+		);
+		TEST_ASSERT_EQUAL(
+			clone->recirc_remaining,
+			2,
+			"uninitialized clone must receive half the configured "
+			"credits"
+		);
+	}
 
 	rte_pktmbuf_free(src.mbuf);
 	if (clone != NULL) {

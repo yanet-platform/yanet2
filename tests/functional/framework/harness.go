@@ -31,8 +31,9 @@ func baselineTemplatePath(qemuImage, baselineTag string) string {
 // that relies solely on the modules statically linked into the dataplane
 // binary.
 type DataplaneOptions struct {
-	PluginDir string
-	Modules   []string
+	PluginDir         string
+	Modules           []string
+	PacketRecircLimit uint16
 }
 
 // DataplaneConfig returns the baseline dataplane YAML used by functional
@@ -40,6 +41,12 @@ type DataplaneOptions struct {
 func DataplaneConfig(opts DataplaneOptions) string {
 	plugins := ""
 	cpMemory := "134217728"
+	packetRecircLimit := ""
+	if opts.PacketRecircLimit != 0 {
+		packetRecircLimit = fmt.Sprintf(
+			"  packet_recirc_limit: %d\n", opts.PacketRecircLimit,
+		)
+	}
 	if opts.PluginDir != "" {
 		plugins = "  plugin_dir: " + opts.PluginDir + "\n"
 		if len(opts.Modules) > 0 {
@@ -62,7 +69,7 @@ dataplane:
   storage: /dev/hugepages/yanet
   dpdk_memory: 128
   loglevel: trace
-` + plugins + `  instances:
+` + packetRecircLimit + plugins + `  instances:
     - dp_memory: 100663296
       cp_memory: ` + cpMemory + `
       numa_id: 0

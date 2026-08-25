@@ -41,17 +41,27 @@ func setupForwardHarness(
 	t *testing.T,
 	devices []string,
 ) (*dataplaneut.Harness, *ffi.Agent, forward.Backend) {
+	return setupForwardHarnessWithLimit(t, devices, 0)
+}
+
+// Builds a forward harness with an explicit packet-lineage redirect limit.
+func setupForwardHarnessWithLimit(
+	t *testing.T,
+	devices []string,
+	packetRecircLimit uint16,
+) (*dataplaneut.Harness, *ffi.Agent, forward.Backend) {
 	t.Helper()
 
-	cfg := dataplaneut.Config{
-		CPMemory:      uint64(fwdCPSize),
-		DPMemory:      uint64(fwdDPSize),
-		WorkerCount:   1,
-		Devices:       devices,
-		Modules:       []string{"forward"},
-		DevicesToLoad: []string{"plain"},
+	config := dataplaneut.Config{
+		CPMemory:          uint64(fwdCPSize),
+		DPMemory:          uint64(fwdDPSize),
+		WorkerCount:       1,
+		PacketRecircLimit: packetRecircLimit,
+		Devices:           devices,
+		Modules:           []string{"forward"},
+		DevicesToLoad:     []string{"plain"},
 	}
-	h, err := dataplaneut.NewHarness(cfg)
+	h, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)
 	t.Cleanup(h.Free)
 
@@ -511,8 +521,8 @@ func TestForward_ModeIn_IPv4(t *testing.T) {
 	require.Equal(t, []uint64{0, 0}, deviceCounters["output_recirc_drop"])
 }
 
-// verifies that a recurring ingress redirect terminates with an accounted drop.
-func Test_Forward_ModeInSelfTargetStopsAtStallLimit(t *testing.T) {
+// verifies that a recurring ingress redirect spends its total limit.
+func Test_Forward_ModeInSelfTargetStopsAtTotalLimit(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
@@ -525,7 +535,7 @@ func Test_Forward_ModeInSelfTargetStopsAtStallLimit(t *testing.T) {
 		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
 	}
 
-	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	h, agent, backend := setupForwardHarnessWithLimit(t, []string{"port0"}, 4)
 	applyRules(t, backend, "test", []cforward.ForwardRule{rule})
 	wireForwardPipeline(t, agent, "port0", "test", nil)
 
@@ -566,7 +576,9 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 		{name: "loop1", device: "port1", target: "port0"},
 	}
 
-	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	h, agent, backend := setupForwardHarnessWithLimit(
+		t, []string{"port0", "port1"}, 4,
+	)
 	for _, route := range routes {
 		applyRules(t, backend, route.name, []cforward.ForwardRule{{
 			Target:  route.target,
@@ -628,13 +640,15 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 	require.Equal(t, []uint64{0, 0}, port1Counters["output_recirc_drop"])
 }
 
-// verifies that input and output redirects share one packet stall budget.
-func Test_Forward_MixedModeLoopSharesStallLimit(t *testing.T) {
+// verifies that input and output redirects share one packet-lineage limit.
+func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
 
-	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	h, agent, backend := setupForwardHarnessWithLimit(
+		t, []string{"port0", "port1"}, 4,
+	)
 	applyRules(t, backend, "to_input", []cforward.ForwardRule{{
 		Target:  "port1",
 		Mode:    cforward.ModeIn,
@@ -723,13 +737,13 @@ func Test_Forward_MixedModeLoopSharesStallLimit(t *testing.T) {
 	require.Equal(t, []uint64{0, 0}, port1Counters["output_recirc_drop"])
 }
 
-// verifies that a recurring egress redirect terminates with an accounted drop.
-func Test_Forward_ModeOutSelfTargetStopsAtStallLimit(t *testing.T) {
+// verifies that a recurring egress redirect spends its total limit.
+func Test_Forward_ModeOutSelfTargetStopsAtTotalLimit(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
 
-	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	h, agent, backend := setupForwardHarnessWithLimit(t, []string{"port0"}, 4)
 	applyRules(t, backend, "feeder", catchAllForwardRules("port0"))
 	applyRules(t, backend, "loop", catchAllForwardRules("port0"))
 
@@ -787,7 +801,9 @@ func TestForward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 	packet := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	packetSize := uint64(len(packet.Data()))
 
-	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	h, agent, backend := setupForwardHarnessWithLimit(
+		t, []string{"port0", "port1"}, 4,
+	)
 	routes := []struct {
 		name   string
 		target string

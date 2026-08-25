@@ -19,14 +19,14 @@ test_convert_packet() {
 	TEST_ASSERT_EQUAL(0, res, "failed to fill packet");
 	TEST_ASSERT_NULL(packet.next, "packet next pointer must be reset");
 	TEST_ASSERT_EQUAL(
-		packet.recirc_total_count,
+		packet.recirc_remaining,
 		0,
-		"packet recirculation total must be reset"
+		"packet recirculation remaining budget must be reset"
 	);
 	TEST_ASSERT_EQUAL(
-		packet.recirc_stall_count,
+		packet.recirc_initialized,
 		0,
-		"packet recirculation stall must be reset"
+		"packet recirculation state must be uninitialized"
 	);
 
 	// get raw packet data

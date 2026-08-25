@@ -169,6 +169,7 @@ run_round_restore_test(void) {
 	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(ut);
 	TEST_ASSERT_NOT_NULL(mbuf, "dataplane_ut_alloc_mbuf returned NULL");
 	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(*packet));
 	packet->mbuf = mbuf;
 	uint8_t *data = (uint8_t *)rte_pktmbuf_append(
 		mbuf, sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr)
@@ -207,8 +208,8 @@ run_round_restore_test(void) {
 	ipv4->hdr_checksum = original_checksum;
 	packet->rx_device_id = 0;
 	packet->tx_device_id = 0;
-	packet->recirc_total_count = 0;
-	packet->recirc_stall_count = 0;
+	packet->recirc_remaining = 0;
+	packet->recirc_initialized = 0;
 	TEST_ASSERT_SUCCESS(
 		dataplane_ut_run_rounds(ut, 0, &input, 3, 1),
 		"run_rounds failed"
@@ -219,14 +220,14 @@ run_round_restore_test(void) {
 		"run_rounds must restore the fixed packet set"
 	);
 	TEST_ASSERT_EQUAL(
-		(long)input.first->recirc_total_count,
+		(long)input.first->recirc_remaining,
 		0L,
-		"run_rounds must restore recirculation total"
+		"run_rounds must restore recirculation remaining budget"
 	);
 	TEST_ASSERT_EQUAL(
-		(long)input.first->recirc_stall_count,
+		(long)input.first->recirc_initialized,
 		0L,
-		"run_rounds must restore recirculation stall count"
+		"run_rounds must restore recirculation initialization state"
 	);
 	TEST_ASSERT_EQUAL(
 		(long)input.first->rx_device_id,
@@ -506,8 +507,8 @@ main(void) {
 		struct packet *round_packet = mbuf_to_packet(round_mbuf);
 		memset(round_packet, 0, sizeof(*round_packet));
 		round_packet->mbuf = round_mbuf;
-		round_packet->recirc_total_count = 3;
-		round_packet->recirc_stall_count = 2;
+		round_packet->recirc_remaining = 61;
+		round_packet->recirc_initialized = 1;
 
 		struct packet_list rounds_input;
 		packet_list_init(&rounds_input);
@@ -522,14 +523,15 @@ main(void) {
 			"run_rounds must restore the fixed packet set"
 		);
 		TEST_ASSERT_EQUAL(
-			(long)rounds_input.first->recirc_total_count,
-			3L,
-			"run_rounds must restore recirculation total"
+			(long)rounds_input.first->recirc_remaining,
+			61L,
+			"run_rounds must restore recirculation remaining budget"
 		);
 		TEST_ASSERT_EQUAL(
-			(long)rounds_input.first->recirc_stall_count,
-			2L,
-			"run_rounds must restore recirculation stall count"
+			(long)rounds_input.first->recirc_initialized,
+			1L,
+			"run_rounds must restore recirculation initialization "
+			"state"
 		);
 		round_packet = packet_list_pop(&rounds_input);
 		rte_pktmbuf_free(packet_to_mbuf(round_packet));

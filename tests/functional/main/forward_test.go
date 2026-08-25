@@ -1,6 +1,7 @@
 package functional
 
 import (
+	"encoding/json"
 	"net"
 	"testing"
 	"time"
@@ -11,6 +12,70 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
+
+// Returns selected device counters summed across worker instances.
+func deviceCounterValues(
+	t *testing.T,
+	testFramework *framework.TestFramework,
+	device string,
+	names ...string,
+) map[string][]uint64 {
+	t.Helper()
+
+	command := testFramework.Paths.CLI("yanet-cli-counters") +
+		" --format json --device " + device + " --kind device"
+	for _, name := range names {
+		command += " --name " + name
+	}
+	output, err := testFramework.ExecuteCommand(command)
+	require.NoError(t, err)
+
+	var response struct {
+		Groups []struct {
+			Counters []struct {
+				Name      string `json:"name"`
+				Instances []struct {
+					Values []uint64 `json:"values"`
+				} `json:"instances"`
+			} `json:"counters"`
+		} `json:"groups"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &response))
+
+	valuesByName := map[string][]uint64{}
+	for _, group := range response.Groups {
+		for _, counter := range group.Counters {
+			values := valuesByName[counter.Name]
+			for _, instance := range counter.Instances {
+				if len(values) < len(instance.Values) {
+					missing := len(instance.Values) - len(values)
+					values = append(values, make([]uint64, missing)...)
+				}
+				for idx, value := range instance.Values {
+					values[idx] += value
+				}
+			}
+			valuesByName[counter.Name] = values
+		}
+	}
+	for _, name := range names {
+		require.Contains(t, valuesByName, name)
+	}
+	return valuesByName
+}
+
+// Asserts an exact packet-and-byte delta for one counter.
+func requireCounterDelta(
+	t *testing.T,
+	before, after, expected []uint64,
+) {
+	t.Helper()
+	require.Len(t, before, len(expected))
+	require.Len(t, after, len(expected))
+	for idx := range expected {
+		require.Equal(t, expected[idx], after[idx]-before[idx])
+	}
+}
 
 // createICMPPacket creates a simple ICMP echo request packet for testing
 func createICMPPacket(srcIP, dstIP net.IP, payload []byte) []byte {
@@ -232,4 +297,74 @@ func testForward(t *testing.T, fw *framework.TestFramework) {
 		assert.Equal(t, 4, cntICMP, "four ICMP replies are expected")
 	})
 
+}
+
+// verifies that the YAML limit reaches live module execution.
+func Test_PacketRecircLimit_FromDataplaneConfig(t *testing.T) {
+	withBootedVM(t, func(testFramework *framework.TestFramework) {
+		const device = "01:00.0"
+		require.NoError(t, testFramework.CreateConfigFile("recirc-forward.yaml", `
+rules:
+  - target: "01:00.0"
+    mode: OUT
+    counter: recirc
+    devices:
+      - "01:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+      - "0.0.0.0/0"
+    dsts:
+      - "0.0.0.0/0"
+`))
+
+		paths := testFramework.Paths
+		_, err := testFramework.ExecuteCommands(
+			paths.CLI("yanet-cli-forward")+
+				" update --name=recirc --rules "+
+				"/mnt/config/recirc-forward.yaml",
+			paths.CLI("yanet-cli-function")+
+				" update --name=recirc --chains recirc:1=forward:recirc",
+			paths.CLI("yanet-cli-pipeline")+
+				" update --name=recirc --functions recirc",
+			paths.CLI("yanet-cli-device-plain")+
+				" update --name="+device+
+				" --input test:1 --output recirc:1",
+		)
+		require.NoError(t, err)
+
+		before := deviceCounterValues(
+			t, testFramework, device, "output_rx", "output_recirc_drop",
+		)
+		packet := framework.CreateTCPIPv4Packet(
+			net.ParseIP("192.0.2.1"),
+			net.ParseIP("198.51.100.1"),
+			[]byte("recirculation limit"),
+			nil,
+		)
+		input, output, err := testFramework.SendPacketAndParse(
+			0, 0, packet, 200*time.Millisecond,
+		)
+		require.Error(t, err)
+		require.NotNil(t, input)
+		require.Nil(t, output)
+
+		after := deviceCounterValues(
+			t, testFramework, device, "output_rx", "output_recirc_drop",
+		)
+		packetSize := uint64(len(packet))
+		expectedOutputPasses := uint64(testPacketRecircLimit)
+		require.Equal(
+			t,
+			expectedOutputPasses,
+			after["output_rx"][0]-before["output_rx"][0],
+		)
+		requireCounterDelta(
+			t,
+			before["output_recirc_drop"],
+			after["output_recirc_drop"],
+			[]uint64{1, packetSize},
+		)
+	})
 }

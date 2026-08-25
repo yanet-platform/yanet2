@@ -268,19 +268,19 @@ run_gre_accepted_case(bool inner_v6, uint16_t expect_ether_type) {
 		"outer network type is IPv4"
 	);
 	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
-	p.recirc_total_count = 7;
-	p.recirc_stall_count = 3;
+	p.recirc_remaining = 57;
+	p.recirc_initialized = 1;
 
 	TEST_ASSERT_EQUAL(packet_decap(&p), 0, "rc");
 	TEST_ASSERT_EQUAL(
-		p.recirc_total_count,
-		7,
-		"successful decap preserves total recirculation count"
+		p.recirc_remaining,
+		57,
+		"successful decap preserves remaining recirculation budget"
 	);
 	TEST_ASSERT_EQUAL(
-		p.recirc_stall_count,
-		0,
-		"successful decap resets stalled recirculation count"
+		p.recirc_initialized,
+		1,
+		"successful decap preserves recirculation initialization state"
 	);
 	TEST_ASSERT_EQUAL(
 		p.network_header.type,
@@ -304,18 +304,18 @@ run_gre_accepted_case(bool inner_v6, uint16_t expect_ether_type) {
 
 static int
 assert_decap_failure_preserves_recirc(struct packet *packet) {
-	packet->recirc_total_count = 7;
-	packet->recirc_stall_count = 3;
+	packet->recirc_remaining = 57;
+	packet->recirc_initialized = 1;
 	TEST_ASSERT_EQUAL(packet_decap(packet), -1, "rc");
 	TEST_ASSERT_EQUAL(
-		packet->recirc_total_count,
-		7,
-		"failed decap preserves total recirculation count"
+		packet->recirc_remaining,
+		57,
+		"failed decap preserves remaining recirculation budget"
 	);
 	TEST_ASSERT_EQUAL(
-		packet->recirc_stall_count,
-		3,
-		"failed decap preserves stalled recirculation count"
+		packet->recirc_initialized,
+		1,
+		"failed decap preserves recirculation initialization state"
 	);
 	return TEST_SUCCESS;
 }

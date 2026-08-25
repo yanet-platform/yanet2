@@ -551,13 +551,43 @@ struct saved_packet {
 	uint16_t first_data_len;
 };
 
+static bool
+saved_packet_contains(
+	const struct saved_packet *saved,
+	size_t count,
+	const struct packet *packet
+) {
+	for (size_t idx = 0; idx < count; ++idx) {
+		if (saved[idx].pkt == packet) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void
+saved_packet_list_free_extra(
+	struct packet_list *list, const struct saved_packet *saved, size_t count
+) {
+	struct packet *packet;
+	while ((packet = packet_list_pop(list)) != NULL) {
+		if (saved_packet_contains(saved, count, packet)) {
+			continue;
+		}
+
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (mbuf->pool != NULL) {
+			rte_pktmbuf_free(mbuf);
+		} else {
+			free_packet(packet);
+		}
+	}
+}
+
 static int
 saved_packet_restore(struct saved_packet *saved) {
 	*saved->pkt = saved->state;
 	saved->pkt->next = NULL;
-	if (saved->data == NULL) {
-		return 0;
-	}
 
 	struct rte_mbuf *mbuf = packet_to_mbuf(saved->pkt);
 	if (rte_pktmbuf_pkt_len(mbuf) != saved->data_len ||
@@ -565,6 +595,9 @@ saved_packet_restore(struct saved_packet *saved) {
 	    mbuf->data_off != saved->first_data_off ||
 	    mbuf->data_len != saved->first_data_len) {
 		return -EINVAL;
+	}
+	if (saved->data == NULL) {
+		return 0;
 	}
 
 	uint32_t offset = 0;
@@ -625,12 +658,12 @@ dataplane_ut_run_rounds(
 		saved[idx].pkt = pkt;
 		saved[idx].state = *pkt;
 		snapshot_count = idx + 1;
+		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
+		saved[idx].data_len = rte_pktmbuf_pkt_len(mbuf);
+		saved[idx].segment_count = mbuf->nb_segs;
+		saved[idx].first_data_off = mbuf->data_off;
+		saved[idx].first_data_len = mbuf->data_len;
 		if (reset_payload) {
-			struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
-			saved[idx].data_len = rte_pktmbuf_pkt_len(mbuf);
-			saved[idx].segment_count = mbuf->nb_segs;
-			saved[idx].first_data_off = mbuf->data_off;
-			saved[idx].first_data_len = mbuf->data_len;
 			saved[idx].data = malloc(saved[idx].data_len);
 			if (saved[idx].data == NULL) {
 				result = -ENOMEM;
@@ -659,9 +692,9 @@ dataplane_ut_run_rounds(
 	}
 	captured = 1;
 
-	// Assumes a fixed packet set: handlers forward or drop without
-	// allocating, freeing, or replicating packets. dataplane_ut_run does
-	// not free dropped packets, so saved[idx].pkt stays valid every round.
+	// The saved packet set must remain allocated and each round must return
+	// every saved packet through output or drop. Newly emitted packets are
+	// reclaimed below.
 	for (uint64_t round = 0; round < rounds; ++round) {
 		result = saved_packets_rebuild(saved, count, input);
 		if (result != 0) {
@@ -670,6 +703,10 @@ dataplane_ut_run_rounds(
 
 		struct dataplane_ut_round_result round_result;
 		dataplane_ut_run(ut, worker, input, &round_result);
+		saved_packet_list_free_extra(
+			&round_result.output, saved, count
+		);
+		saved_packet_list_free_extra(&round_result.drop, saved, count);
 	}
 
 	// Leave input holding all packets so the caller can free them.

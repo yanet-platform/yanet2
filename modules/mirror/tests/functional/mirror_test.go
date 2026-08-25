@@ -40,17 +40,27 @@ func setupMirrorHarness(
 	t *testing.T,
 	devices []string,
 ) (*dataplaneut.Harness, *ffi.Agent, mirror.Backend) {
+	return setupMirrorHarnessWithLimit(t, devices, 0)
+}
+
+// Builds a mirror harness with an explicit packet-lineage redirect limit.
+func setupMirrorHarnessWithLimit(
+	t *testing.T,
+	devices []string,
+	packetRecircLimit uint16,
+) (*dataplaneut.Harness, *ffi.Agent, mirror.Backend) {
 	t.Helper()
 
-	cfg := dataplaneut.Config{
-		CPMemory:      uint64(mirCPSize),
-		DPMemory:      uint64(mirDPSize),
-		WorkerCount:   1,
-		Devices:       devices,
-		Modules:       []string{"mirror", "forward"},
-		DevicesToLoad: []string{"plain"},
+	config := dataplaneut.Config{
+		CPMemory:          uint64(mirCPSize),
+		DPMemory:          uint64(mirDPSize),
+		WorkerCount:       1,
+		PacketRecircLimit: packetRecircLimit,
+		Devices:           devices,
+		Modules:           []string{"mirror", "forward"},
+		DevicesToLoad:     []string{"plain"},
 	}
-	h, err := dataplaneut.NewHarness(cfg)
+	h, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)
 	t.Cleanup(h.Free)
 
@@ -639,13 +649,13 @@ func TestMirror_EmptyRound(t *testing.T) {
 	dataplaneut.RequireModuleCounter(t, h, path, "rule0", 0, 0)
 }
 
-// TestMirror_OutputSelfLoopHasBoundedPopulation verifies every clone inherits
-// its source budget, spends it independently, and is reclaimed after conversion.
+// TestMirror_OutputSelfLoopHasBoundedPopulation verifies clones partition one
+// lineage budget and are reclaimed after conversion.
 func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	packet := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 
-	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
+	h, agent, backend := setupMirrorHarnessWithLimit(t, []string{"port0"}, 4)
 	applyRules(t, backend, "loop", []cmirror.MirrorRule{{
 		Target:  "port0",
 		Mode:    cmirror.ModeOut,
@@ -691,7 +701,7 @@ func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 	result, err := h.HandlePackets(packet)
 	require.NoError(t, err)
 	require.Empty(t, result.Output)
-	require.Len(t, result.Drop, 32)
+	require.Len(t, result.Drop, 6)
 	require.Equal(t, packet.Data(), result.Drop[0].RawData[:len(packet.Data())])
 	require.Zero(t, h.OutstandingMbufs())
 
@@ -701,7 +711,12 @@ func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 	)
 	require.Equal(
 		t,
-		[]uint64{32, 32 * packetSize},
+		[]uint64{4, 4 * packetSize},
+		deviceCounters["output_rx"],
+	)
+	require.Equal(
+		t,
+		[]uint64{6, 6 * packetSize},
 		deviceCounters["output_recirc_drop"],
 	)
 }

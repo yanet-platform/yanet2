@@ -13,6 +13,8 @@ import (
 // harness owns the baseline VM pool shared by every test in this package.
 var harness *framework.Harness
 
+const testPacketRecircLimit = uint16(5)
+
 // globalPool is the baseline VM pool. It is a convenience alias for
 // harness.Pool() used by the per-test isolation helpers below.
 var globalPool *framework.VMPool
@@ -102,7 +104,11 @@ func testMainWrapper(m *testing.M) (code int) {
 	}()
 
 	h, cleanup, err := framework.SetupHarness(framework.HarnessConfig{
-		PoolName: "main",
+		PoolName:    "main",
+		BaselineTag: "packet-recirc-limit-5",
+		Dataplane: framework.DataplaneConfig(framework.DataplaneOptions{
+			PacketRecircLimit: testPacketRecircLimit,
+		}),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to set up functional-test harness: %v\n", err)

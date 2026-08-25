@@ -1254,8 +1254,10 @@ func isKVMEnabled() bool {
 // checkForExistingVM checks if there's already a running QEMU process with the given VM name.
 // This prevents conflicts when running tests in parallel or when a previous test didn't clean up properly.
 func (q *QEMUManager) checkForExistingVM(vmName string) error {
-	// Use pgrep to find processes matching the VM name
-	cmd := exec.Command("pgrep", "-af", vmName)
+	// Match QEMU itself and exclude pgrep's own command line from the result.
+	pattern := "[q]emu-system-x86_64.*[[:space:]]-name[[:space:]]+" +
+		regexp.QuoteMeta(vmName) + "([[:space:]]|$)"
+	cmd := exec.Command("pgrep", "-f", pattern)
 	output, err := cmd.Output()
 
 	// pgrep returns exit code 1 if no processes found, which is what we want

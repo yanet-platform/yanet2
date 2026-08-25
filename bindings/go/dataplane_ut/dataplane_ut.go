@@ -188,8 +188,8 @@ type Config struct {
 	CPMemory    uint64
 	DPMemory    uint64
 	WorkerCount uint64
-	// PacketRecircLimit bounds total redirects per packet. Zero selects the
-	// production default; nonzero values use the production range.
+	// PacketRecircLimit bounds total redirects across a packet lineage. Zero
+	// selects the production default; nonzero values use the production range.
 	PacketRecircLimit uint16
 	Devices           []string
 	Modules           []string
@@ -687,6 +687,7 @@ func (m *Harness) Bench(
 	if err != nil {
 		b.Fatalf("failed to build packet list: %v", err)
 	}
+	defer packetList.Free()
 
 	pinner.Pin(m)
 
