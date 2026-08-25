@@ -660,15 +660,15 @@ func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 		Target:  "port0",
 		Mode:    cmirror.ModeOut,
 		Counter: "mirror",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 	}})
 	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
 		"sink",
 		catchAllForwardRules("port0"),
 	)
 	require.NoError(t, err)
-	t.Cleanup(forwardHandle.Free)
+	t.Cleanup(func() { _ = forwardHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: "loop",
@@ -691,11 +691,12 @@ func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 		Name:      "feeder",
 		Functions: []string{"loop"},
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	require.Zero(t, h.OutstandingMbufs())
 	result, err := h.HandlePackets(packet)
