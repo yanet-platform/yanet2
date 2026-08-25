@@ -1,9 +1,9 @@
 import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '@yanet/core/api/acl';
 import { ActionKind } from '@yanet/core/api/acl';
-import { extractBytes, formatIPNetItem, formatRange } from '@yanet/core/utils';
+import { formatRange } from '@yanet/core/utils';
 import type { RuleDraft, RuleItem } from './types';
 import { parseRangesRaw, parseProtoRangesRaw, partitionCidrsToTyped } from './parseHelpers';
-export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
+export { parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 
 /**
  * Normalize a wire-shape Action.kind into a concrete ActionKind.
@@ -67,15 +67,13 @@ export const expandRule = (rule: Rule): {
     isDeadProto: boolean;
     isDead: boolean;
 } => {
-    const srcs = rule.srcs ?? [];
-    const dsts = rule.dsts ?? [];
     const sources4 = rule.sources4 ?? [];
     const sources6 = rule.sources6 ?? [];
     const destinations4 = rule.destinations4 ?? [];
     const destinations6 = rule.destinations6 ?? [];
 
-    const sourceCidrs = [...srcs.map(formatIPNetItem).filter(Boolean), ...sources4, ...sources6];
-    const dstCidrs = [...dsts.map(formatIPNetItem).filter(Boolean), ...destinations4, ...destinations6];
+    const sourceCidrs = [...sources4, ...sources6];
+    const dstCidrs = [...destinations4, ...destinations6];
 
     const srcPortRanges = (rule.src_port_ranges ?? []).map(formatRange);
     const dstPortRanges = (rule.dst_port_ranges ?? []).map(formatRange);
@@ -83,22 +81,11 @@ export const expandRule = (rule: Rule): {
     const vlanRanges = (rule.vlan_ranges ?? []).map(formatRange);
     const deviceNames = (rule.devices ?? []).map(d => d.name ?? '').filter(Boolean);
 
-    // Per-family counts for classification (addr byte length: 4 = IPv4, 16 = IPv6).
-    let v4SrcCount = sources4.length;
-    let v6SrcCount = sources6.length;
-    for (const net of srcs) {
-        const len = extractBytes(net.addr)?.length ?? 0;
-        if (len === 4) v4SrcCount++;
-        else if (len === 16) v6SrcCount++;
-    }
-
-    let v4DstCount = destinations4.length;
-    let v6DstCount = destinations6.length;
-    for (const net of dsts) {
-        const len = extractBytes(net.addr)?.length ?? 0;
-        if (len === 4) v4DstCount++;
-        else if (len === 16) v6DstCount++;
-    }
+    // Per-family counts for classification.
+    const v4SrcCount = sources4.length;
+    const v6SrcCount = sources6.length;
+    const v4DstCount = destinations4.length;
+    const v6DstCount = destinations6.length;
 
     const hasIP4 = v4SrcCount > 0 && v4DstCount > 0;
     const hasIP6 = v6SrcCount > 0 && v6DstCount > 0;

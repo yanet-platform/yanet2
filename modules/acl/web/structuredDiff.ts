@@ -1,5 +1,4 @@
 import type { Rule, Action } from '@yanet/core/api/acl';
-import { formatIPNetItem } from '@yanet/core/utils';
 
 /** Serialize a range {from, to} to a canonical string for equality comparison. */
 const fmtRange = (r: { from?: number; to?: number }): string =>
@@ -53,17 +52,9 @@ const fieldValues = (rule: Rule, field: RuleField): string[] => {
         case 'counter':
             return [rule.counter ?? ''];
         case 'srcs':
-            return [
-                ...(rule.srcs ?? []).map(formatIPNetItem).filter(Boolean),
-                ...(rule.sources4 ?? []),
-                ...(rule.sources6 ?? []),
-            ];
+            return [...(rule.sources4 ?? []), ...(rule.sources6 ?? [])];
         case 'dsts':
-            return [
-                ...(rule.dsts ?? []).map(formatIPNetItem).filter(Boolean),
-                ...(rule.destinations4 ?? []),
-                ...(rule.destinations6 ?? []),
-            ];
+            return [...(rule.destinations4 ?? []), ...(rule.destinations6 ?? [])];
         case 'src_port_ranges':
             return (rule.src_port_ranges ?? []).map(fmtRange);
         case 'dst_port_ranges':
