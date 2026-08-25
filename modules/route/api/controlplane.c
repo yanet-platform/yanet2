@@ -567,10 +567,11 @@ fib_iter_nexthop_counter_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 	    config->cp_module.runtime_counter_registry_count) {
 		return "";
 	}
-	struct cp_module_counter_registry *registries =
+	struct cp_module_counter_registry **registries =
 		ADDR_OF(&config->cp_module.runtime_counter_registries);
-	struct counter_registry *registry =
-		&registries[config->routes_registry_idx].registry;
+	struct cp_module_counter_registry *entry =
+		ADDR_OF(registries + config->routes_registry_idx);
+	struct counter_registry *registry = &entry->registry;
 	if (r->counter_id < registry->count) {
 		return ADDR_OF(&registry->names)[r->counter_id].name;
 	}

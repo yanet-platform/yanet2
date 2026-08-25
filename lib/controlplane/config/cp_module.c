@@ -173,13 +173,20 @@ void
 cp_module_fini(struct cp_module *cp_module) {
 	counter_registry_fini(&cp_module->counter_registry);
 
-	struct cp_module_counter_registry *runtime_registries =
+	struct cp_module_counter_registry **runtime_registries =
 		ADDR_OF(&cp_module->runtime_counter_registries);
 	if (runtime_registries != NULL) {
 		for (uint64_t i = 0;
 		     i < cp_module->runtime_counter_registry_count;
 		     ++i) {
-			counter_registry_fini(&runtime_registries[i].registry);
+			struct cp_module_counter_registry *entry =
+				ADDR_OF(runtime_registries + i);
+			counter_registry_fini(&entry->registry);
+			memory_bfree(
+				&cp_module->memory_context,
+				entry,
+				sizeof(*entry)
+			);
 		}
 		memory_bfree(
 			&cp_module->memory_context,
@@ -227,30 +234,31 @@ cp_module_counter_registry(
 	uint64_t *index_out,
 	yanet_error **err
 ) {
-	struct cp_module_counter_registry *runtime_registries =
+	struct cp_module_counter_registry **runtime_registries =
 		ADDR_OF(&cp_module->runtime_counter_registries);
 	for (uint64_t idx = 0; idx < cp_module->runtime_counter_registry_count;
 	     ++idx) {
-		if (!strncmp(
-			    runtime_registries[idx].tag, tag, COUNTER_NAME_LEN
-		    )) {
+		struct cp_module_counter_registry *entry =
+			ADDR_OF(runtime_registries + idx);
+		if (!strncmp(entry->tag, tag, COUNTER_NAME_LEN)) {
 			if (index_out != NULL) {
 				*index_out = idx;
 			}
-			return &runtime_registries[idx].registry;
+			return &entry->registry;
 		}
 	}
 
 	uint64_t old_count = cp_module->runtime_counter_registry_count;
 	uint64_t new_count = old_count + 1;
-	struct cp_module_counter_registry *new_registries =
-		(struct cp_module_counter_registry *)memory_brealloc(
-			&cp_module->memory_context,
-			runtime_registries,
-			sizeof(*runtime_registries) * old_count,
-			sizeof(*runtime_registries) * new_count
+
+	// Both fallible allocations happen before anything published is
+	// touched, so every failure path below leaves the previous array
+	// intact and usable.
+	struct cp_module_counter_registry *slot =
+		(struct cp_module_counter_registry *)memory_balloc(
+			&cp_module->memory_context, sizeof(*slot)
 		);
-	if (new_registries == NULL) {
+	if (slot == NULL) {
 		yanet_error_add(
 			err,
 			"failed to allocate counter registry '%s' for module "
@@ -261,18 +269,11 @@ cp_module_counter_registry(
 		);
 		return NULL;
 	}
-
-	// realloc freed the old array, so publish the new one before any
-	// fallible step below. A failure past this point leaves the count
-	// unchanged, so the partially initialized slot sits beyond the live
-	// range and is reaped with the array at cp_module_fini.
-	SET_OFFSET_OF(&cp_module->runtime_counter_registries, new_registries);
-
-	struct cp_module_counter_registry *slot = &new_registries[old_count];
 	strtcpy(slot->tag, tag, sizeof(slot->tag));
 	if (counter_registry_init(
 		    &slot->registry, &cp_module->memory_context, 0
 	    )) {
+		memory_bfree(&cp_module->memory_context, slot, sizeof(*slot));
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry '%s' for module "
@@ -284,6 +285,43 @@ cp_module_counter_registry(
 		return NULL;
 	}
 
+	struct cp_module_counter_registry **new_registries =
+		(struct cp_module_counter_registry **)memory_balloc(
+			&cp_module->memory_context,
+			sizeof(*new_registries) * new_count
+		);
+	if (new_registries == NULL) {
+		counter_registry_fini(&slot->registry);
+		memory_bfree(&cp_module->memory_context, slot, sizeof(*slot));
+		yanet_error_add(
+			err,
+			"failed to allocate counter registry '%s' for module "
+			"'%s:%s'",
+			tag,
+			cp_module->type,
+			cp_module->name
+		);
+		return NULL;
+	}
+
+	// A registry embeds self-relative offsets, so it is allocated
+	// out-of-line and never moved; growing therefore only reallocates
+	// the pointer array. Each pointer slot is re-derived against its new
+	// slot address instead of byte-copied — a copied offset would
+	// resolve to a shifted, bogus target.
+	for (uint64_t idx = 0; idx < old_count; ++idx) {
+		SET_OFFSET_OF(
+			new_registries + idx, ADDR_OF(runtime_registries + idx)
+		);
+	}
+	SET_OFFSET_OF(new_registries + old_count, slot);
+
+	memory_bfree(
+		&cp_module->memory_context,
+		runtime_registries,
+		sizeof(*runtime_registries) * old_count
+	);
+	SET_OFFSET_OF(&cp_module->runtime_counter_registries, new_registries);
 	cp_module->runtime_counter_registry_count = new_count;
 
 	if (index_out != NULL) {
@@ -622,38 +660,41 @@ cp_module_registry_upsert(
 	// Link each new runtime registry against the matching-tag registry on
 	// the displaced module so per-rule counters survive a config rebuild
 	// that leaves the layout unchanged.
-	struct cp_module_counter_registry *new_runtime =
+	struct cp_module_counter_registry **new_runtime =
 		ADDR_OF(&new_module->runtime_counter_registries);
 	for (uint64_t idx = 0; idx < new_module->runtime_counter_registry_count;
 	     ++idx) {
+		struct cp_module_counter_registry *new_entry =
+			ADDR_OF(new_runtime + idx);
 		struct counter_registry *old_registry = NULL;
 		if (old_module != NULL) {
-			struct cp_module_counter_registry *old_runtime =
+			struct cp_module_counter_registry **old_runtime =
 				ADDR_OF(&old_module->runtime_counter_registries
 				);
 			for (uint64_t old_idx = 0;
 			     old_idx <
 			     old_module->runtime_counter_registry_count;
 			     ++old_idx) {
+				struct cp_module_counter_registry *old_entry =
+					ADDR_OF(old_runtime + old_idx);
 				if (!strncmp(
-					    old_runtime[old_idx].tag,
-					    new_runtime[idx].tag,
+					    old_entry->tag,
+					    new_entry->tag,
 					    COUNTER_NAME_LEN
 				    )) {
-					old_registry =
-						&old_runtime[old_idx].registry;
+					old_registry = &old_entry->registry;
 					break;
 				}
 			}
 		}
 
 		if (counter_registry_link(
-			    &new_runtime[idx].registry, old_registry, err
+			    &new_entry->registry, old_registry, err
 		    )) {
 			yanet_error_add(
 				err,
 				"failed to link counter registry '%s'",
-				new_runtime[idx].tag
+				new_entry->tag
 			);
 			return -1;
 		}

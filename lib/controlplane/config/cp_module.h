@@ -67,8 +67,13 @@ struct cp_module {
 	// per-route, etc.). Each registry carries a module-unique tag. All
 	// registries are expanded into per-worker storages on config-gen
 	// installation.
+	//
+	// The array holds shared-memory offset pointers to out-of-line
+	// registries: a registry embeds self-relative offsets, so it must
+	// never move after creation, while the pointer array itself may be
+	// reallocated on growth.
 	uint64_t runtime_counter_registry_count;
-	struct cp_module_counter_registry *runtime_counter_registries;
+	struct cp_module_counter_registry **runtime_counter_registries;
 
 	// Rx packet/byte counter (size 2: [packets, bytes])
 	uint64_t rx_counter_id;

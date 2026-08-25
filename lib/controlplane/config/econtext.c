@@ -244,11 +244,13 @@ module_ectx_create(
 			&module_ectx->runtime_counter_storages, runtime_storages
 		);
 
-		struct cp_module_counter_registry *runtime_registries =
+		struct cp_module_counter_registry **runtime_registries =
 			ADDR_OF(&cp_module->runtime_counter_registries);
 		for (uint64_t idx = 0;
 		     idx < cp_module->runtime_counter_registry_count;
 		     ++idx) {
+			struct cp_module_counter_registry *entry =
+				ADDR_OF(runtime_registries + idx);
 			struct counter_storage *old_storage = NULL;
 			if (old_ectx != NULL) {
 				old_storage =
@@ -261,21 +263,21 @@ module_ectx_create(
 						cp_chain->name,
 						cp_module->type,
 						cp_module->name,
-						runtime_registries[idx].tag
+						entry->tag
 					);
 			}
 
 			struct counter_storage *storage = counter_storage_spawn(
 				&cp_config->counter_storage_memory_context,
 				old_storage,
-				&runtime_registries[idx].registry
+				&entry->registry
 			);
 			if (storage == NULL) {
 				yanet_error_add(
 					err,
 					"failed to spawn counter storage for "
 					"registry '%s' on module '%s:%s'",
-					runtime_registries[idx].tag,
+					entry->tag,
 					cp_module->type,
 					cp_module->name
 				);
@@ -292,7 +294,7 @@ module_ectx_create(
 				    cp_chain->name,
 				    cp_module->type,
 				    cp_module->name,
-				    runtime_registries[idx].tag,
+				    entry->tag,
 				    storage,
 				    err
 			    )) {
@@ -301,7 +303,7 @@ module_ectx_create(
 					err,
 					"failed to insert counter storage for "
 					"registry '%s' on module '%s:%s'",
-					runtime_registries[idx].tag,
+					entry->tag,
 					cp_module->type,
 					cp_module->name
 				);

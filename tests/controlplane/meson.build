@@ -28,3 +28,18 @@ agent_memory_tree_test = executable(
   include_directories: yanet_rootdir,
 )
 test('agent_memory_tree', agent_memory_tree_test, suite: ['controlplane'])
+
+cp_module_counter_registry_test = executable(
+  'cp_module_counter_registry_test',
+  ['cp_module_counter_registry_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_common_dep,
+    lib_logging_dep,
+    lib_config_cp_dep,
+    lib_config_dp_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('cp_module_counter_registry', cp_module_counter_registry_test, suite: ['controlplane'])
