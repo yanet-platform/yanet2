@@ -22,6 +22,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "common.readinesspb.v1.Scope.last_transition_time",
             "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
         )
+        .field_attribute(
+            "common.readinesspb.v1.Scope.expected_observation_interval",
+            "#[serde(serialize_with = \"crate::serialize_duration\")]",
+        )
         .enum_attribute(".", "#[derive(serde::Serialize)]")
         .compile_protos(&["common/readinesspb/v1/readiness.proto"], &["../../.."])
         .map_err(Into::into)

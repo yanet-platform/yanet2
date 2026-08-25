@@ -135,6 +135,13 @@ func WithKernelTable(kernelTable KernelTable) Option {
 	}
 }
 
+// DefaultUpdateInterval is the default period of the monitor's periodic
+// force-update pass. Netlink events refresh the table more often; this
+// interval is the worst-case gap between two successful refreshes, and
+// therefore the natural expected-freshness contract for the neighbours
+// readiness scope.
+const DefaultUpdateInterval = 5 * time.Minute
+
 type options struct {
 	UpdateInterval time.Duration
 	LinkMap        map[string]string
@@ -148,7 +155,7 @@ type options struct {
 
 func newOptions() *options {
 	return &options{
-		UpdateInterval: 5 * time.Minute,
+		UpdateInterval: DefaultUpdateInterval,
 		LinkMap:        make(map[string]string),
 		OnSynced:       func() {},
 		OnError:        func(error) {},

@@ -11,10 +11,12 @@ service ReadinessService {
   // Ready returns the current readiness state of the gateway.
   rpc Ready(common.readinesspb.v1.ReadyRequest) returns (common.readinesspb.v1.ReadyResponse);
 
-  // Watch streams readiness state changes.
+  // Watch streams readiness updates.
   //
   // The first message carries the current state of every selected scope;
-  // each subsequent message carries only the scopes whose state or reason
-  // changed.
+  // each subsequent message carries the scopes whose state or reason
+  // changed, in order. With include_observation_updates in the request,
+  // pure observation refreshes are delivered too, coalesced per scope;
+  // see the shared request message for the full semantics.
   rpc Watch(common.readinesspb.v1.ReadyRequest) returns (stream common.readinesspb.v1.ReadyResponse);
 }

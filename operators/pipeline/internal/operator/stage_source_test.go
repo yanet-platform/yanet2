@@ -2,8 +2,13 @@ package operator
 
 import (
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
 // drainWake consumes a single buffered wake signal if present.
@@ -146,4 +151,38 @@ func Test_StageQueueSource_SetStagesEmptyIdles(t *testing.T) {
 	target, ok := src.Snapshot()
 	require.False(t, ok)
 	require.Nil(t, target)
+}
+
+// TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval verifies that
+// each gateway scope's observation contract is the reconcile interval — the
+// nominal cadence — not a backoff-inflated bound.
+func TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
+	cfg.Stages = []StageConfig{{Name: "stage0"}}
+	cfg.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
+	cfg.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
+
+	specs := readinessScopeSpecs(cfg)
+
+	require.Len(t, specs, 2)
+	assert.Equal(t, "pipeline:gw0", specs[0].Name)
+	assert.Equal(t, "pipeline:gw1", specs[1].Name)
+	for _, spec := range specs {
+		assert.Equal(t, 10*time.Second, spec.ExpectedObservationInterval)
+	}
+}
+
+// TestReadiness_ScopeSpecs_NoStages_NoContract verifies that with no stages
+// configured the reconcile loop stays idle, so the scopes declare no
+// freshness contract rather than a periodic one.
+func TestReadiness_ScopeSpecs_NoStages_NoContract(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}}
+	cfg.Stages = nil
+
+	specs := readinessScopeSpecs(cfg)
+
+	require.Len(t, specs, 1)
+	assert.Zero(t, specs[0].ExpectedObservationInterval)
 }

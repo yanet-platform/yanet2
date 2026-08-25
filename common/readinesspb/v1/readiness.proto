@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package common.readinesspb.v1;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/common/readinesspb/v1;readinesspb";
@@ -14,6 +15,13 @@ message ReadyRequest {
   // If empty, return state for all known scopes.
   // Otherwise, return only the requested scopes.
   repeated string scopes = 1;
+  // Opt the Watch stream into observation refreshes: without it, Watch
+  // delivers only state or reason changes; with it, pure observed_at
+  // refreshes are delivered too, coalesced per scope — a burst between two
+  // reads yields the newest snapshot of each affected scope. State and
+  // reason transitions are always delivered in order and never coalesced
+  // away. Ready ignores this field.
+  bool include_observation_updates = 2;
 }
 
 message ReadyResponse { repeated Scope scopes = 1; }
@@ -29,6 +37,15 @@ message Scope {
   google.protobuf.Timestamp observed_at = 4;
   // Timestamp of the last state transition for this scope.
   google.protobuf.Timestamp last_transition_time = 5;
+  // Nominal cadence at which the scope's source re-observes it: the
+  // source's own ticker or heartbeat interval. A staleness consumer judges
+  // the scope stale once observed_at lags by more than a small multiple of
+  // this interval; retries and slow applies can legitimately exceed it,
+  // which is exactly what the consumer should surface. Absent for scopes
+  // with no natural heartbeat — such scopes are never judged stale. A
+  // scope with a contract but no observation yet stays UNKNOWN and is
+  // never judged stale: the UNKNOWN state is itself the signal.
+  google.protobuf.Duration expected_observation_interval = 6;
 }
 
 enum State {

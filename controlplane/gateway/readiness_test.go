@@ -25,7 +25,7 @@ const testGatewayReadinessScope = "gateway"
 
 func newTestTracker() *readiness.Tracker {
 	return readiness.NewTracker(
-		[]string{testGatewayReadinessScope},
+		[]readiness.ScopeSpec{{Name: testGatewayReadinessScope}},
 		readiness.WithDrainLatch(),
 		readiness.WithLog(zap.NewNop()),
 	)

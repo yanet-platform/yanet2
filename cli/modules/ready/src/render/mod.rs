@@ -21,9 +21,19 @@ pub use self::{
     layout::name_width,
     watch::{
         Membership, ServiceColumn, Transition, print_lifecycle_line, print_lost_line, print_membership_line,
-        print_transition_line, record_transition,
+        print_staleness_line, print_transition_line, record_transition, staleness_flips,
     },
 };
+
+/// How often a `--watch` loop re-evaluates every tracked scope's
+/// staleness.
+///
+/// A stopped heartbeat produces no stream message to react to, so
+/// staleness crossings are found by polling. One second is fine enough to
+/// flag a scope within one missed observation of the finest in-tree
+/// contract (the RIB sampler's 1s) yet coarse enough to add no perceptible
+/// load: the evaluation is a map walk over the merged snapshot.
+pub const STALENESS_TICK: Duration = Duration::from_secs(1);
 
 /// Fixed width of the state label cell (`len("NOT_READY")`).
 const STATE_WIDTH: usize = 9;
@@ -82,14 +92,24 @@ impl Symbols {
 
 /// Renders the full one-shot status block for `scopes` to stdout.
 ///
+/// Renders the full one-shot status block for `scopes` to stdout.
+///
 /// `name_width` must be computed once via [`name_width`] and held constant
 /// across the render — recomputing it per row would make the column jitter.
-/// The header line is `{name}{dash}{summary}`; `watching` appends a
+/// `now` is supplied by the caller so the staleness tags shown here and the
+/// verdicts a watch loop seeds from the same render agree on one point in
+/// time. The header line is `{name}{dash}{summary}`; `watching` appends a
 /// `watching` suffix to that summary and, once the block is printed, adds
 /// one trailing blank line to separate it from the `--watch` transition log
 /// that follows.
-pub fn print_status_block(name: &str, scopes: &[Scope], name_width: usize, stale_after: Duration, watching: bool) {
-    let now = SystemTime::now();
+pub fn print_status_block(
+    name: &str,
+    scopes: &[Scope],
+    name_width: usize,
+    stale_multiple: u32,
+    now: SystemTime,
+    watching: bool,
+) {
     let colored = output::is_colored();
     let symbols = Symbols::new(colored);
     let wrap_width = display::terminal_width();
@@ -109,7 +129,7 @@ pub fn print_status_block(name: &str, scopes: &[Scope], name_width: usize, stale
     println!("{name}{}{summary}", symbols.dash);
 
     for scope in scopes {
-        print_scope_row(scope, name_width, stale_after, now, colored, wrap_width);
+        print_scope_row(scope, name_width, stale_multiple, now, colored, wrap_width);
     }
 
     if watching {
@@ -168,7 +188,7 @@ pub fn print_all_ready_line() {
 fn print_scope_row(
     scope: &Scope,
     name_width: usize,
-    stale_after: Duration,
+    stale_multiple: u32,
     now: SystemTime,
     colored: bool,
     wrap_width: Option<usize>,
@@ -183,9 +203,9 @@ fn print_scope_row(
 
     if is_stale(
         scope.observed_at.as_ref(),
-        scope.last_transition_time.as_ref(),
+        scope.expected_observation_interval.as_ref(),
         now,
-        stale_after,
+        stale_multiple,
     ) {
         let stale_age = humanfmt::format_age(scope.observed_at.as_ref(), now).unwrap_or_default();
         let tag = format!("stale {stale_age}");

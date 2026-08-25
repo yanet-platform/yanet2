@@ -325,8 +325,10 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 
 	ynpb.RegisterAuthServiceServer(server, authService)
 
+	// The gateway scope is set once at startup and has no heartbeat source,
+	// so it declares no expected freshness.
 	rdTracker := readiness.NewTracker(
-		[]string{gatewayReadinessScope},
+		[]readiness.ScopeSpec{{Name: gatewayReadinessScope}},
 		readiness.WithDrainLatch(),
 		readiness.WithLog(log),
 	)

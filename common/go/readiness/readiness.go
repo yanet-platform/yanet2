@@ -3,28 +3,34 @@ package readiness
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
-// readinessWatchBuffer is the per-subscriber channel capacity.
-const readinessWatchBuffer = 16
+// readinessTransitionBuffer caps a subscriber's queue of undelivered state
+// and reason transitions. Overflowing it drops the subscriber: silently
+// discarding a promised transition would be worse than disconnecting.
+const readinessTransitionBuffer = 1024
 
-// errSlowConsumer is returned by Watch when a subscriber's buffer overflows.
-var errSlowConsumer = errors.New("readiness watch subscriber too slow")
+// ErrSlowConsumer is returned by Watch when the subscriber's transition
+// queue overflows.
+var ErrSlowConsumer = errors.New("readiness watch subscriber too slow")
 
 // scopeState holds the mutable readiness state for one scope.
 type scopeState struct {
-	name               string
-	state              readinesspb.State
-	reason             *readinesspb.Reason
-	observedAt         time.Time
-	lastTransitionTime time.Time
+	name                        string
+	state                       readinesspb.State
+	reason                      *readinesspb.Reason
+	observedAt                  time.Time
+	lastTransitionTime          time.Time
+	expectedObservationInterval time.Duration
 }
 
 // Name returns the scope's name.
@@ -51,6 +57,9 @@ func (m *scopeState) ToProto() *readinesspb.Scope {
 	if !m.observedAt.IsZero() {
 		scope.ObservedAt = timestamppb.New(m.observedAt)
 		scope.LastTransitionTime = timestamppb.New(m.lastTransitionTime)
+	}
+	if m.expectedObservationInterval > 0 {
+		scope.ExpectedObservationInterval = durationpb.New(m.expectedObservationInterval)
 	}
 	return scope
 }
@@ -85,11 +94,37 @@ func (m *scopeState) Apply(
 }
 
 // subscriber holds state for one active Watch call.
+//
+// Delivery has two paths with different durability rules. State and reason
+// transitions go into a bounded FIFO queue: their order and completeness are
+// the stream's contract, so a reader that falls more than
+// readinessTransitionBuffer transitions behind is dropped with
+// ErrSlowConsumer rather than silently losing a transition it was promised.
+// Pure observation refreshes coalesce per scope name: only the newest
+// snapshot per scope matters to a freshness consumer, so a burst costs
+// memory proportional to the scope count, never to the event rate. signal
+// (capacity one) wakes Watch; a token already queued guarantees the reader
+// will drain both paths, including later updates.
 type subscriber struct {
 	// filter is the set of scope names this subscriber wants. Empty means all.
-	filter  map[string]struct{}
-	ch      chan *readinesspb.ReadyResponse
-	dropped chan struct{}
+	filter map[string]struct{}
+	// includeObservations reports whether the subscriber opted into pure
+	// observation refreshes; without it only state or reason changes are
+	// offered at all.
+	includeObservations bool
+
+	pendingMu      sync.Mutex
+	transitions    []*readinesspb.Scope
+	observations   map[string]*readinesspb.Scope
+	signal         chan struct{}
+	dropped        chan struct{}
+	overflowedOnce bool
+}
+
+// WantsObservations reports whether the subscriber opted into pure
+// observation refreshes.
+func (m *subscriber) WantsObservations() bool {
+	return m.includeObservations
 }
 
 // Matches reports whether the subscriber wants updates for the named scope.
@@ -103,35 +138,73 @@ func (m *subscriber) Matches(name string) bool {
 	return ok
 }
 
-// Send delivers resp to the subscriber without blocking.
+// Offer files one updated scope and wakes Watch.
 //
-// It reports false when the subscriber's buffer is full. The caller is
-// responsible for dropping the subscriber in that case.
-func (m *subscriber) Send(resp *readinesspb.ReadyResponse) bool {
-	select {
-	case m.ch <- resp:
-		return true
-	default:
-		return false
+// A state or reason change is appended to the transition queue and retires
+// any coalesced observation of the same scope: the observation is
+// guaranteed older, because the tracker serializes updates under its mutex,
+// and delivering it after the transition would leave the reader on a stale
+// snapshot. A pure observation refresh replaces the newest coalesced
+// snapshot of its scope. Waking is non-blocking: a token already queued
+// guarantees the reader will drain the mailbox, including this update. It
+// reports false when the transition queue is full — the caller must drop
+// the subscriber then.
+func (m *subscriber) Offer(scope *readinesspb.Scope, changed bool) bool {
+	m.pendingMu.Lock()
+	if changed {
+		if len(m.transitions) >= readinessTransitionBuffer {
+			if !m.overflowedOnce {
+				m.overflowedOnce = true
+				close(m.dropped)
+			}
+			m.pendingMu.Unlock()
+			return false
+		}
+		m.transitions = append(m.transitions, scope)
+		delete(m.observations, scope.Name)
+	} else {
+		m.observations[scope.Name] = scope
 	}
+	m.pendingMu.Unlock()
+
+	select {
+	case m.signal <- struct{}{}:
+	default:
+	}
+	return true
 }
 
-// Drop closes the subscriber's dropped channel, signalling Watch to return
-// errSlowConsumer.
-func (m *subscriber) Drop() {
-	close(m.dropped)
+// Drain returns the queued transitions in order, followed by the coalesced
+// observation snapshots in name order, and empties both paths.
+func (m *subscriber) Drain() []*readinesspb.Scope {
+	m.pendingMu.Lock()
+	scopes := make([]*readinesspb.Scope, 0, len(m.transitions)+len(m.observations))
+	scopes = append(scopes, m.transitions...)
+	transitionCount := len(m.transitions)
+	m.transitions = m.transitions[:0]
+	for _, scope := range m.observations {
+		scopes = append(scopes, scope)
+	}
+	clear(m.observations)
+	m.pendingMu.Unlock()
+
+	observed := scopes[transitionCount:]
+	sort.Slice(observed, func(idx, jdx int) bool {
+		return observed[idx].Name < observed[jdx].Name
+	})
+	return scopes
 }
 
-// Dropped returns the channel that is closed when the subscriber is dropped
-// for being too slow.
+// Dropped returns the channel that is closed when the transition queue
+// overflowed and the subscriber must be dropped.
 func (m *subscriber) Dropped() <-chan struct{} {
 	return m.dropped
 }
 
-// Events returns the channel of readiness updates delivered to the
-// subscriber.
-func (m *subscriber) Events() <-chan *readinesspb.ReadyResponse {
-	return m.ch
+// Signal returns the channel that receives a token whenever the mailbox
+// gains content.
+func (m *subscriber) Signal() <-chan struct{} {
+	return m.signal
 }
 
 // Tracker tracks readiness state across named scopes.
@@ -184,19 +257,35 @@ func WithDrainLatch() Option {
 	}
 }
 
-// NewTracker creates a Tracker pre-seeded with the supplied scope names, each
+// ScopeSpec declares one scope at tracker construction.
+type ScopeSpec struct {
+	Name string
+	// ExpectedObservationInterval is the scope's freshness contract: the
+	// nominal cadence at which the scope's source re-observes it, i.e. the
+	// source's own ticker or heartbeat interval. Consumers judge staleness
+	// per scope against this cadence instead of a single global threshold;
+	// retries and slow applies can legitimately exceed it. Leave it zero
+	// for scopes with no natural heartbeat — such scopes are never judged
+	// stale. A zero or negative value is treated as none, and the contract
+	// is fixed for the tracker's lifetime.
+	ExpectedObservationInterval time.Duration
+}
+
+// NewTracker creates a Tracker pre-seeded with the supplied scopes, each
 // starting at STATE_UNKNOWN.
-func NewTracker(scopeNames []string, options ...Option) *Tracker {
+func NewTracker(specs []ScopeSpec, options ...Option) *Tracker {
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
 	scopes := map[string]*scopeState{}
-	for _, id := range scopeNames {
-		scopes[id] = &scopeState{
-			name:  id,
-			state: readinesspb.State_STATE_UNKNOWN,
+	for _, spec := range specs {
+		interval := max(spec.ExpectedObservationInterval, 0)
+		scopes[spec.Name] = &scopeState{
+			name:                        spec.Name,
+			state:                       readinesspb.State_STATE_UNKNOWN,
+			expectedObservationInterval: interval,
 		}
 	}
 
@@ -255,31 +344,30 @@ func (m *Tracker) snapshotLocked(filter map[string]struct{}) *readinesspb.ReadyR
 	return &readinesspb.ReadyResponse{Scopes: out}
 }
 
-// notifySubscribersLocked fans out changed scopes to all registered subscribers.
+// notifySubscribersLocked fans out updated scopes to all registered
+// subscribers.
 //
-// Each subscriber receives only the subset of changed scopes that match its
-// filter. The send is non-blocking: a subscriber whose channel is full is
-// dropped (its dropped channel is closed and it is removed from the registry).
-// Caller must hold m.mu.
-func (m *Tracker) notifySubscribersLocked(changed []*readinesspb.Scope) {
-	if len(m.subscribers) == 0 || len(changed) == 0 {
+// Each subscriber's mailbox receives only the subset of updated scopes that
+// matches its filter; a subscriber that did not opt into observation
+// refreshes receives only the updates that changed state or reason. A
+// transition-queue overflow drops the subscriber — its Watch returns
+// ErrSlowConsumer. Caller must hold m.mu.
+func (m *Tracker) notifySubscribersLocked(updated []*readinesspb.Scope, changed bool) {
+	if len(m.subscribers) == 0 || len(updated) == 0 {
 		return
 	}
 
 	for sub := range m.subscribers {
-		var matching []*readinesspb.Scope
-		for _, sc := range changed {
-			if sub.Matches(sc.Name) {
-				matching = append(matching, sc)
-			}
-		}
-		if len(matching) == 0 {
+		if !changed && !sub.WantsObservations() {
 			continue
 		}
-		resp := &readinesspb.ReadyResponse{Scopes: matching}
-		if !sub.Send(resp) {
-			sub.Drop()
-			delete(m.subscribers, sub)
+		for _, sc := range updated {
+			if sub.Matches(sc.Name) {
+				if !sub.Offer(sc, changed) {
+					delete(m.subscribers, sub)
+					break
+				}
+			}
 		}
 	}
 }
@@ -287,14 +375,20 @@ func (m *Tracker) notifySubscribersLocked(changed []*readinesspb.Scope) {
 // subscribe registers a new subscriber and atomically captures the initial
 // snapshot. It returns the subscriber and the snapshot to send as the first
 // streamed message.
-func (m *Tracker) subscribe(filter map[string]struct{}) (*subscriber, *readinesspb.ReadyResponse) {
+func (m *Tracker) subscribe(
+	filter map[string]struct{},
+	includeObservations bool,
+) (*subscriber, *readinesspb.ReadyResponse) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	sub := &subscriber{
-		filter:  filter,
-		ch:      make(chan *readinesspb.ReadyResponse, readinessWatchBuffer),
-		dropped: make(chan struct{}),
+		filter:              filter,
+		includeObservations: includeObservations,
+		observations:        map[string]*readinesspb.Scope{},
+		transitions:         make([]*readinesspb.Scope, 0, 16),
+		signal:              make(chan struct{}, 1),
+		dropped:             make(chan struct{}),
 	}
 	m.subscribers[sub] = struct{}{}
 	snapshot := m.snapshotLocked(filter)
@@ -309,17 +403,18 @@ func (m *Tracker) unsubscribe(sub *subscriber) {
 	delete(m.subscribers, sub)
 }
 
-// applyLocked applies next and reason to s, logs the transition, and
+// applyLocked applies next and reason to s, logs any state transition, and
 // notifies Watch subscribers.
 //
-// Subscribers are notified only when the apply actually changed state or
-// reason. Must be called with m.mu held.
+// A subscriber that opted into observation updates receives the scope's
+// current snapshot on every apply — a repeated identical outcome still
+// streams the advanced observation timestamp that freshness consumers
+// depend on. A legacy subscriber receives it only when state or reason
+// actually changed. Must be called with m.mu held.
 func (m *Tracker) applyLocked(s *scopeState, next readinesspb.State, reason *readinesspb.Reason) {
 	prevState, changed := s.Apply(next, reason, time.Now())
 	m.logTransition(s.Name(), prevState, next, reason)
-	if changed {
-		m.notifySubscribersLocked([]*readinesspb.Scope{s.ToProto()})
-	}
+	m.notifySubscribersLocked([]*readinesspb.Scope{s.ToProto()}, changed)
 }
 
 // observeOutcome derives the next state and reason for an apply attempt
@@ -401,8 +496,10 @@ func (m *Tracker) set(scope string, state readinesspb.State, reason *readinesspb
 //
 // It records that the underlying source was successfully re-evaluated, so
 // freshness consumers can distinguish a live scope from one whose last event
-// was long ago. Touch is a no-op for unknown scopes — it never creates a
-// scope. state, reason, and lastTransitionTime are left unchanged.
+// was long ago. Only Watch subscribers that opted into observation updates
+// receive the refreshed snapshot, since the advanced timestamp is what they
+// consume for staleness. Touch is a no-op for unknown scopes — it never
+// creates a scope. state, reason, and lastTransitionTime are left unchanged.
 func (m *Tracker) Touch(scope string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -413,13 +510,17 @@ func (m *Tracker) Touch(scope string) {
 	}
 
 	s.Touch(time.Now())
+	m.notifySubscribersLocked([]*readinesspb.Scope{s.ToProto()}, false)
 }
 
 // Drain marks every scope as STATE_NOT_READY with a SHUTTING_DOWN reason.
 //
-// last_transition_time is updated only for scopes that change state. When
-// the Tracker was constructed with WithDrainLatch, subsequent Set and Observe
-// calls become no-ops after Drain returns.
+// last_transition_time is updated only for scopes that change state, but
+// every scope is re-observed. A subscriber that opted into observation
+// updates receives every scope; a legacy subscriber receives only the ones
+// whose state or reason actually changed. When the Tracker was constructed
+// with WithDrainLatch, subsequent Set and Observe calls become no-ops after
+// Drain returns.
 func (m *Tracker) Drain() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -427,16 +528,25 @@ func (m *Tracker) Drain() {
 	now := time.Now()
 	reason := &readinesspb.Reason{Code: "SHUTTING_DOWN"}
 
-	var changedScopes []*readinesspb.Scope
+	// One fan-out pass over all scopes per change class: a legacy
+	// subscriber must not see an unchanged scope, an opted-in one must see
+	// even the unchanged ones re-observed. A changed scope travels through
+	// the transition queue only, so its delivery is never duplicated.
+	changedScopes := make([]*readinesspb.Scope, 0, len(m.scopes))
+	unchangedScopes := make([]*readinesspb.Scope, 0, len(m.scopes))
 	for _, s := range m.scopes {
 		prevState, changed := s.Apply(readinesspb.State_STATE_NOT_READY, reason, now)
 		m.logTransition(s.Name(), prevState, readinesspb.State_STATE_NOT_READY, reason)
+		proto := s.ToProto()
 		if changed {
-			changedScopes = append(changedScopes, s.ToProto())
+			changedScopes = append(changedScopes, proto)
+		} else {
+			unchangedScopes = append(unchangedScopes, proto)
 		}
 	}
 
-	m.notifySubscribersLocked(changedScopes)
+	m.notifySubscribersLocked(changedScopes, true)
+	m.notifySubscribersLocked(unchangedScopes, false)
 
 	if m.latchOnDrain {
 		m.drained = true
@@ -457,16 +567,20 @@ func (m *Tracker) Ready(req *readinesspb.ReadyRequest) *readinesspb.ReadyRespons
 	return m.snapshotLocked(filter)
 }
 
-// Watch streams readiness state changes to the caller via send.
+// Watch streams readiness updates to the caller via send.
 //
 // The first message carries the current state of every scope matching the
-// request filter (same semantics as Ready). Each subsequent message carries
-// only the scopes whose state or reason changed since the previous message.
-// A pure observed_at refresh (Touch) never emits. A no-op mutation (same
-// state and same reason) never emits.
+// request filter (same semantics as Ready). Without
+// include_observation_updates in the request, each subsequent message
+// carries only the scopes whose state or reason changed since the previous
+// message, in order. With it, pure observed_at refreshes are delivered too,
+// coalesced per scope: a burst of refreshes between two reads yields the
+// newest snapshot of each affected scope. Transitions are never coalesced
+// away — a subscriber that falls more than a bounded number of transitions
+// behind is dropped with an error instead of losing one.
 //
-// Watch returns nil on ctx cancellation, returns the send error on stream
-// write failure, and returns errSlowConsumer if the subscriber's buffer
+// Watch returns nil on ctx cancellation, the send error on stream write
+// failure, and ErrSlowConsumer if the subscriber's transition queue
 // overflows.
 func (m *Tracker) Watch(
 	ctx context.Context,
@@ -478,7 +592,7 @@ func (m *Tracker) Watch(
 		filter[name] = struct{}{}
 	}
 
-	sub, snapshot := m.subscribe(filter)
+	sub, snapshot := m.subscribe(filter, req.GetIncludeObservationUpdates())
 	defer m.unsubscribe(sub)
 
 	if err := send(snapshot); err != nil {
@@ -490,12 +604,13 @@ func (m *Tracker) Watch(
 		case <-ctx.Done():
 			return nil
 		case <-sub.Dropped():
-			return errSlowConsumer
-		case resp, ok := <-sub.Events():
-			if !ok {
-				return errSlowConsumer
+			return ErrSlowConsumer
+		case <-sub.Signal():
+			scopes := sub.Drain()
+			if len(scopes) == 0 {
+				continue
 			}
-			if err := send(resp); err != nil {
+			if err := send(&readinesspb.ReadyResponse{Scopes: scopes}); err != nil {
 				return err
 			}
 		}

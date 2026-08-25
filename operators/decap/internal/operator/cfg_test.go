@@ -3,7 +3,9 @@ package operator
 import (
 	"os"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
@@ -203,5 +205,26 @@ func TestConfigValidate(t *testing.T) {
 				require.NoError(t, err)
 			}
 		})
+	}
+}
+
+// TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval verifies that
+// each gateway scope's observation contract is the reconcile interval — the
+// nominal cadence — not a backoff-inflated bound: a slow or hung apply must
+// surface as staleness after a multiple of the nominal interval, not be
+// hidden behind the retry ceiling.
+func TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
+	cfg.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
+	cfg.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
+
+	specs := readinessScopeSpecs(cfg)
+
+	require.Len(t, specs, 2)
+	assert.Equal(t, "config:gw0", specs[0].Name)
+	assert.Equal(t, "config:gw1", specs[1].Name)
+	for _, spec := range specs {
+		assert.Equal(t, 10*time.Second, spec.ExpectedObservationInterval)
 	}
 }

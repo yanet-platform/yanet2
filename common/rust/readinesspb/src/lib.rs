@@ -45,3 +45,29 @@ where
         None => serializer.serialize_none(),
     }
 }
+
+/// Serializes an `Option<prost_types::Duration>` as
+/// `{"seconds": i64, "nanos": i32}` or `null` when absent, keeping the
+/// nanosecond part that a floating-point seconds value would lose.
+pub fn serialize_duration<S>(value: &Option<prost_types::Duration>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::Serialize;
+
+    match value {
+        Some(duration) => {
+            #[derive(serde::Serialize)]
+            struct Dur {
+                seconds: i64,
+                nanos: i32,
+            }
+            Dur {
+                seconds: duration.seconds,
+                nanos: duration.nanos,
+            }
+            .serialize(serializer)
+        }
+        None => serializer.serialize_none(),
+    }
+}

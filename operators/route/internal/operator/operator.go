@@ -61,17 +61,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	routeRIBStore := newRIBStore(withRIBStoreLog(log))
 
-	// Build the readiness tracker scope list: one fib:<gateway>:<module> scope per
-	// gateway, plus a neighbours scope, a rib scope, and optionally a bird-session scope.
-	scopeNames := make([]string, 0, len(cfg.Gateways)+3)
-	for _, gw := range cfg.Gateways {
-		scopeNames = append(scopeNames, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName))
-	}
-	scopeNames = append(scopeNames, "neighbours", "rib")
-	if cfg.Readiness.ExpectBird {
-		scopeNames = append(scopeNames, "bird-session")
-	}
-	tracker := readiness.NewTracker(scopeNames,
+	tracker := readiness.NewTracker(readinessScopeSpecs(cfg, moduleName),
 		readiness.WithLog(log.With(zap.String("operator", "route"))),
 	)
 
@@ -391,4 +381,45 @@ func parseMAC(s string) ([6]byte, error) {
 		return [6]byte{}, fmt.Errorf("expected 6-byte MAC, got %d bytes", len(hw))
 	}
 	return [6]byte(hw), nil
+}
+
+// readinessScopeSpecs declares the operator's readiness scopes: one
+// fib:<gateway>:<module> scope per gateway, plus a neighbours scope, a rib
+// scope, and optionally a bird-session scope.
+//
+// Each scope's observation contract mirrors the ticker that nominally drives
+// it: the fib scopes are re-observed on every reconcile apply attempt, the
+// rib and bird-session scopes by the readiness sampler, and the neighbours
+// scope by the monitor's periodic force-update pass (netlink events only
+// make it fresher). A slow or hung apply, or a retry backoff, legitimately
+// exceeds the nominal interval — exactly the lag a staleness consumer
+// should surface. With the netlink monitor disabled the neighbours scope is
+// set once, so it declares no contract.
+func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
+	fibInterval := cfg.Reconcile.Interval.Unwrap()
+	specs := make([]readiness.ScopeSpec, 0, len(cfg.Gateways)+3)
+	for _, gw := range cfg.Gateways {
+		specs = append(specs, readiness.ScopeSpec{
+			Name:                        fmt.Sprintf("fib:%s:%s", gw.Name, moduleName),
+			ExpectedObservationInterval: fibInterval,
+		})
+	}
+	neighbours := readiness.ScopeSpec{Name: "neighbours"}
+	if !cfg.NetlinkMonitor.Disabled {
+		neighbours.ExpectedObservationInterval = neigh.DefaultUpdateInterval
+	}
+	specs = append(specs,
+		neighbours,
+		readiness.ScopeSpec{
+			Name:                        "rib",
+			ExpectedObservationInterval: cfg.Readiness.SampleInterval,
+		},
+	)
+	if cfg.Readiness.ExpectBird {
+		specs = append(specs, readiness.ScopeSpec{
+			Name:                        "bird-session",
+			ExpectedObservationInterval: cfg.Readiness.SampleInterval,
+		})
+	}
+	return specs
 }

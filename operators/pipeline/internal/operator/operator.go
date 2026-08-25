@@ -41,12 +41,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		WithServiceLog(log),
 	)
 
-	// One pipeline:<gateway> scope per gateway, covering all stages pushed there.
-	scopeNames := make([]string, len(cfg.Gateways))
-	for idx, gw := range cfg.Gateways {
-		scopeNames[idx] = fmt.Sprintf("pipeline:%s", gw.Name)
-	}
-	tracker := readiness.NewTracker(scopeNames,
+	tracker := readiness.NewTracker(readinessScopeSpecs(cfg),
 		readiness.WithLog(log.With(zap.String("operator", "pipeline"))),
 	)
 
@@ -136,4 +131,28 @@ func (m *Operator) Close() error {
 // Run drives the operator until the supplied context is cancelled.
 func (m *Operator) Run(ctx context.Context) error {
 	return m.app.Run(ctx)
+}
+
+// readinessScopeSpecs declares one scope per gateway, covering all stages
+// pushed there.
+//
+// Each scope is re-observed on every apply attempt — the queue's tail stage
+// stays the steady-state target — so the nominal contract is the reconcile
+// interval. A slow or hung apply, or a retry backoff, legitimately exceeds
+// it: exactly the lag a staleness consumer should surface. With no stages
+// configured the reconcile loop stays idle and the scopes are never
+// re-observed, so they declare no contract.
+func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
+	freshness := cfg.Reconcile.Interval.Unwrap()
+	if len(cfg.Stages) == 0 {
+		freshness = 0
+	}
+	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
+	for idx, gw := range cfg.Gateways {
+		specs[idx] = readiness.ScopeSpec{
+			Name:                        fmt.Sprintf("pipeline:%s", gw.Name),
+			ExpectedObservationInterval: freshness,
+		}
+	}
+	return specs
 }

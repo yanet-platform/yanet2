@@ -435,6 +435,17 @@ pub fn paint_dim(text: &str) -> String {
     text.truecolor(127, 127, 127).to_string()
 }
 
+/// Returns `true` if the installed backend serializes rather than renders.
+///
+/// Answers the inverse of [`data`]'s split: code that renders outside a
+/// `data` closure — a periodic timer in a long-running watch loop, say —
+/// can check whether free-form output is wanted at all instead of relying
+/// on a side effect such as [`is_colored`], which folds in `NO_COLOR` and
+/// stderr's TTY-ness and would misclassify a piped human run.
+pub fn serializes() -> bool {
+    current().serializes()
+}
+
 /// Returns `true` if the current locale advertises UTF-8 encoding.
 fn is_utf8_locale() -> bool {
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {

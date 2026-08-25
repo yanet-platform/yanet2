@@ -42,12 +42,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		})
 	}
 
-	// One config:<gateway> scope per gateway, covering all module configs pushed there.
-	scopeNames := make([]string, len(cfg.Gateways))
-	for idx, gw := range cfg.Gateways {
-		scopeNames[idx] = fmt.Sprintf("config:%s", gw.Name)
-	}
-	tracker := readiness.NewTracker(scopeNames,
+	tracker := readiness.NewTracker(readinessScopeSpecs(cfg),
 		readiness.WithLog(log.With(zap.String("operator", "decap"))),
 	)
 
@@ -102,4 +97,23 @@ func (m *Operator) Run(ctx context.Context) error {
 // Close releases resources owned by the operator.
 func (m *Operator) Close() error {
 	return m.app.Close()
+}
+
+// readinessScopeSpecs declares one scope per gateway, covering all configs
+// pushed there.
+//
+// Each scope is re-observed on every apply attempt, so the nominal contract
+// is the reconcile interval. A slow or hung apply, or a retry backoff,
+// legitimately exceeds it — exactly the lag a staleness consumer should
+// surface.
+func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
+	freshness := cfg.Reconcile.Interval.Unwrap()
+	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
+	for idx, gw := range cfg.Gateways {
+		specs[idx] = readiness.ScopeSpec{
+			Name:                        fmt.Sprintf("config:%s", gw.Name),
+			ExpectedObservationInterval: freshness,
+		}
+	}
+	return specs
 }
