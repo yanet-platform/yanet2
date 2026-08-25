@@ -227,11 +227,11 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 		Counter: "port1_rule",
 		Devices: filter.Devices{{Name: "port1"}},
 	}
-	moduleHandle, err := backend.UpdateModule("demux", []cforward.ForwardRule{rule})
+	moduleHandle, err := backend.UpdateModule(t.Context(), "demux", []cforward.ForwardRule{rule})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = moduleHandle.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: "demux",
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -241,15 +241,15 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      "demux",
 		Functions: []string{"demux"},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy_out"}))
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy_out"}))
 
 	// Port 0 has no output pipeline: the rule never targets it, so an
 	// unmatched packet has nowhere to go but drop.
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{
 		{
 			Name:  "port0",
 			Input: []ffi.DevicePipelineConfig{{Name: "demux", Weight: 1}},

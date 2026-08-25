@@ -171,7 +171,7 @@ func (m *Pipeline) Update(
 	}
 	defer agent.Close()
 
-	if err := agent.UpdatePipeline(pipeline); err != nil {
+	if err := agent.UpdatePipeline(ctx, pipeline); err != nil {
 		return nil, fmt.Errorf("failed to update function: %w", err)
 	}
 
@@ -195,7 +195,7 @@ func (m *Pipeline) Delete(
 	}
 	defer agent.Close()
 
-	if err := agent.DeletePipeline(pipelineName); err != nil {
+	if err := agent.DeletePipeline(ctx, pipelineName); err != nil {
 		return nil, fmt.Errorf("failed to delete pipeline: %w", err)
 	}
 

@@ -43,6 +43,7 @@ type Backend interface {
 	// the ruleset compiled into it and the named fwstate-map objects
 	// linked. The returned handle is not yet published to the dataplane.
 	NewModule(
+		ctx context.Context,
 		name string,
 		rules []cacl.AclRule,
 		fw4MapName, fw6MapName string,
@@ -50,9 +51,9 @@ type Backend interface {
 	) (ModuleHandle, error)
 	// UpdateModule publishes handle to dp_config_gen so the dataplane
 	// picks it up on the next round.
-	UpdateModule(handle ModuleHandle) error
+	UpdateModule(ctx context.Context, handle ModuleHandle) error
 	// DeleteModule removes a module config from the dataplane.
-	DeleteModule(name string) error
+	DeleteModule(ctx context.Context, name string) error
 	// DPConfig returns the dataplane configuration handle for counter
 	// and position queries.
 	DPConfig() *ffi.DPConfig
@@ -631,13 +632,13 @@ func (m *ACLService) UpdateConfig(
 		}
 
 		handle, err := m.backend.NewModule(
-			name, rules, fw4MapName, fw6MapName, emitCfg,
+			ctx, name, rules, fw4MapName, fw6MapName, emitCfg,
 		)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
 		}
 
-		if err := m.backend.UpdateModule(handle); err != nil {
+		if err := m.backend.UpdateModule(ctx, handle); err != nil {
 			if err := handle.Free(); err != nil {
 				m.log.Error("failed to free unpublished acl module",
 					zap.Error(err))
@@ -777,7 +778,7 @@ func (m *ACLService) DeleteConfig(
 		}
 
 		if config.Handle() != nil {
-			if err := m.backend.DeleteModule(name); err != nil {
+			if err := m.backend.DeleteModule(ctx, name); err != nil {
 				return status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
 			}
 			m.log.Info("successfully deleted ACL module config", zap.String("name", name))

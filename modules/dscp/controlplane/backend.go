@@ -1,6 +1,7 @@
 package dscp
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 
@@ -21,11 +22,16 @@ func newBackend(agent *ffi.Agent) *backend {
 }
 
 func (m *backend) UpdateModule(
+	ctx context.Context,
 	name string,
 	prefixes []netip.Prefix,
 	flag uint8,
 	mark uint8,
 ) (ModuleHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	module, err := cdscp.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -47,7 +53,7 @@ func (m *backend) UpdateModule(
 		return nil, fmt.Errorf("failed to set DSCP marking: %w", err)
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		if err := module.Free(); err != nil {
 			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
 		}

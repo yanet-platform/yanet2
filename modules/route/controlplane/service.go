@@ -273,7 +273,7 @@ func (m *RouteService) DeleteConfig(
 		return &routepb.DeleteConfigResponse{}, nil
 	}
 
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err := m.backend.DeleteModule(ctx, name); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
 	m.reclaimDeferred()
@@ -412,7 +412,7 @@ func (m *RouteService) UpdateFIB(
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
-	module, err := m.backend.UpdateModule(name, entries)
+	module, err := m.backend.UpdateModule(ctx, name, entries)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to apply FIB for %q: %v", name, err)
 	}

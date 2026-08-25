@@ -169,7 +169,7 @@ func (m *blockingUpdateBackend) blockNextUpdate() (<-chan struct{}, func()) {
 	})
 }
 
-func (m *blockingUpdateBackend) UpdateModule(handle acl.ModuleHandle) error {
+func (m *blockingUpdateBackend) UpdateModule(ctx context.Context, handle acl.ModuleHandle) error {
 	m.blockMu.Lock()
 	block := m.nextBlock
 	m.nextBlock = nil
@@ -180,7 +180,7 @@ func (m *blockingUpdateBackend) UpdateModule(handle acl.ModuleHandle) error {
 		<-block.release
 	}
 
-	return m.fakeBackend.UpdateModule(handle)
+	return m.fakeBackend.UpdateModule(ctx, handle)
 }
 
 func newBlockingDPConfigBackend(dpConfig *ffi.DPConfig) *blockingDPConfigBackend {
@@ -249,14 +249,14 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	moduleNames := []string{"acl0", "a", "b", "c", "d"}
 	moduleConfigs := make([]ffi.ModuleConfig, 0, len(moduleNames))
 	for _, name := range moduleNames {
-		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, "", "", nil)
+		moduleConfig, moduleErr := cacl.NewModuleConfig(testingTB.Context(), agent, name, nil, "", "", nil)
 		require.NoError(testingTB, moduleErr)
 		testingTB.Cleanup(func() { _ = moduleConfig.Free() })
 		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
 	}
-	require.NoError(testingTB, agent.UpdateModules(moduleConfigs))
+	require.NoError(testingTB, agent.UpdateModules(testingTB.Context(), moduleConfigs))
 
-	require.NoError(testingTB, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(testingTB, agent.UpdateFunction(testingTB.Context(), ffi.FunctionConfig{
 		Name: "function0",
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -275,11 +275,11 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 			},
 		}},
 	}))
-	require.NoError(testingTB, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(testingTB, agent.UpdatePipeline(testingTB.Context(), ffi.PipelineConfig{
 		Name:      "pipeline0",
 		Functions: []string{"function0"},
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(testingTB.Context(), agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
 	}})
@@ -289,6 +289,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 }
 
 func (m *fakeBackend) NewModule(
+	ctx context.Context,
 	name string,
 	rules []cacl.AclRule,
 	fw4MapName, fw6MapName string,
@@ -321,7 +322,7 @@ func (m *fakeBackend) CreatedHandles() []*fakeHandle {
 	return append([]*fakeHandle(nil), m.created...)
 }
 
-func (m *fakeBackend) UpdateModule(handle acl.ModuleHandle) error {
+func (m *fakeBackend) UpdateModule(ctx context.Context, handle acl.ModuleHandle) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -336,7 +337,7 @@ func (m *fakeBackend) UpdateModule(handle acl.ModuleHandle) error {
 	return nil
 }
 
-func (m *fakeBackend) DeleteModule(name string) error {
+func (m *fakeBackend) DeleteModule(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -482,6 +483,7 @@ func (m *compileBlockingBackend) entryOrder() []string {
 }
 
 func (m *compileBlockingBackend) NewModule(
+	ctx context.Context,
 	name string,
 	rules []cacl.AclRule,
 	fw4MapName, fw6MapName string,
@@ -492,7 +494,7 @@ func (m *compileBlockingBackend) NewModule(
 		close(block.entered)
 		<-block.release
 	}
-	return m.fakeBackend.NewModule(name, rules, fw4MapName, fw6MapName, emitConfig)
+	return m.fakeBackend.NewModule(ctx, name, rules, fw4MapName, fw6MapName, emitConfig)
 }
 
 func newTestService(b acl.Backend) *acl.ACLService {

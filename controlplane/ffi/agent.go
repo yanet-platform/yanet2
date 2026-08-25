@@ -19,6 +19,7 @@ package ffi
 //#include "lib/controlplane/agent/agent.h"
 import "C"
 import (
+	"context"
 	"fmt"
 	"unsafe"
 
@@ -104,7 +105,7 @@ func (m *Agent) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
-func (m *Agent) UpdateModules(modules []ModuleConfig) error {
+func (m *Agent) UpdateModules(ctx context.Context, modules []ModuleConfig) error {
 	if len(modules) == 0 {
 		return fmt.Errorf("no modules provided")
 	}
@@ -121,18 +122,20 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 		return fmt.Errorf("no module configs to update")
 	}
 
-	var cErr *C.yanet_error
-	rc := C.agent_update_modules(
-		(*C.struct_agent)(m.AsRawPtr()),
-		C.size_t(len(modules)),
-		&configs[0],
-		&cErr,
-	)
-	if rc != 0 {
-		return fmt.Errorf("failed to update modules: %w", cerrors.FromC(unsafe.Pointer(cErr)))
-	}
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_update_modules(
+			(*C.struct_agent)(m.AsRawPtr()),
+			C.size_t(len(modules)),
+			&configs[0],
+			&cErr,
+		)
+		if rc != 0 {
+			return fmt.Errorf("failed to update modules: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		}
 
-	return nil
+		return nil
+	})
 }
 
 func (m *Agent) DPConfig() *DPConfig {
@@ -141,7 +144,11 @@ func (m *Agent) DPConfig() *DPConfig {
 	}
 }
 
-func (m *Agent) UpdateFunction(functionConfig FunctionConfig) error {
+func (m *Agent) UpdateFunction(ctx context.Context, functionConfig FunctionConfig) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	function, err := newFunctionConfig(functionConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create pipeline config: %w", err)
@@ -151,21 +158,27 @@ func (m *Agent) UpdateFunction(functionConfig FunctionConfig) error {
 	functions := make([]*C.struct_cp_function_config, 1)
 	functions[0] = function.AsRawPtr()
 
-	var cErr *C.yanet_error
-	rc := C.agent_update_functions(
-		m.ptr,
-		1,
-		&functions[0],
-		&cErr,
-	)
-	if rc != 0 {
-		return fmt.Errorf("failed to update functions: %w", cerrors.FromC(unsafe.Pointer(cErr)))
-	}
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_update_functions(
+			m.ptr,
+			1,
+			&functions[0],
+			&cErr,
+		)
+		if rc != 0 {
+			return fmt.Errorf("failed to update functions: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		}
 
-	return nil
+		return nil
+	})
 }
 
-func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
+func (m *Agent) UpdatePipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	pipelines := make([]*C.struct_cp_pipeline_config, 0, 1)
 
 	pipeline, err := newPipelineConfig(pipelineConfig)
@@ -176,24 +189,26 @@ func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
 
 	pipelines = append(pipelines, pipeline.AsRawPtr())
 
-	var cErr *C.yanet_error
-	rc := C.agent_update_pipelines(
-		m.ptr,
-		1,
-		&pipelines[0],
-		&cErr,
-	)
-	if rc != 0 {
-		return fmt.Errorf("failed to update pipelines: %w", cerrors.FromC(unsafe.Pointer(cErr)))
-	}
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_update_pipelines(
+			m.ptr,
+			1,
+			&pipelines[0],
+			&cErr,
+		)
+		if rc != 0 {
+			return fmt.Errorf("failed to update pipelines: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // TODO: (*Agent).UpdateVlanDevices
 
 // UpdateDevices attaches the given pipelines to the given device IDs.
-func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {
+func (m *Agent) UpdateDevices(ctx context.Context, devices []ShmDeviceConfig) error {
 	if len(devices) == 0 {
 		return nil
 	}
@@ -206,18 +221,20 @@ func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {
 		configs[i] = (*C.struct_cp_device)(device.AsRawPtr())
 	}
 
-	var cErr *C.yanet_error
-	rc := C.agent_update_devices(
-		(*C.struct_agent)(m.AsRawPtr()),
-		C.size_t(len(devices)),
-		&configs[0],
-		&cErr,
-	)
-	if rc != 0 {
-		return cerrors.FromC(unsafe.Pointer(cErr))
-	}
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_update_devices(
+			(*C.struct_agent)(m.AsRawPtr()),
+			C.size_t(len(devices)),
+			&configs[0],
+			&cErr,
+		)
+		if rc != 0 {
+			return cerrors.FromC(unsafe.Pointer(cErr))
+		}
 
-	return nil
+		return nil
+	})
 }
 
 type DevicePipeline struct {
@@ -225,54 +242,60 @@ type DevicePipeline struct {
 	Weight uint64
 }
 
-func (m *Agent) DeleteFunction(name string) error {
+func (m *Agent) DeleteFunction(ctx context.Context, name string) error {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	var cErr *C.yanet_error
-	rc := C.agent_delete_function(m.ptr, cName, &cErr)
-	if rc != 0 {
-		return fmt.Errorf("failed to delete function %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
-	}
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_delete_function(m.ptr, cName, &cErr)
+		if rc != 0 {
+			return fmt.Errorf("failed to delete function %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+		}
 
-	return nil
+		return nil
+	})
 }
 
-func (m *Agent) DeletePipeline(name string) error {
+func (m *Agent) DeletePipeline(ctx context.Context, name string) error {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	var cErr *C.yanet_error
-	rc := C.agent_delete_pipeline(m.ptr, cName, &cErr)
-	if rc != 0 {
-		return fmt.Errorf("failed to delete pipeline %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
-	}
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_delete_pipeline(m.ptr, cName, &cErr)
+		if rc != 0 {
+			return fmt.Errorf("failed to delete pipeline %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+		}
 
-	return nil
+		return nil
+	})
 }
 
-func (m *Agent) DeleteModuleConfig(moduleType, configName string) error {
+func (m *Agent) DeleteModuleConfig(ctx context.Context, moduleType, configName string) error {
 	cTypeName := C.CString(moduleType)
 	defer C.free(unsafe.Pointer(cTypeName))
 
 	cConfigName := C.CString(configName)
 	defer C.free(unsafe.Pointer(cConfigName))
 
-	var cErr *C.yanet_error
-	result := C.agent_delete_module(
-		(*C.struct_agent)(m.AsRawPtr()),
-		cTypeName,
-		cConfigName,
-		&cErr,
-	)
-	if result != 0 {
-		return fmt.Errorf(
-			"failed to delete module config type %q name %q: %w",
-			moduleType,
-			configName,
-			cerrors.FromC(unsafe.Pointer(cErr)),
+	return WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		result := C.agent_delete_module(
+			(*C.struct_agent)(m.AsRawPtr()),
+			cTypeName,
+			cConfigName,
+			&cErr,
 		)
-	}
+		if result != 0 {
+			return fmt.Errorf(
+				"failed to delete module config type %q name %q: %w",
+				moduleType,
+				configName,
+				cerrors.FromC(unsafe.Pointer(cErr)),
+			)
+		}
 
-	return nil
+		return nil
+	})
 }

@@ -10,6 +10,7 @@ package plain
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
@@ -127,7 +128,7 @@ func (m *DeviceConfig) Free() error {
 // with ffi.ErrStillReferenced and the owner must retry once the
 // generations drain. On failure every handle is destroyed here — the
 // devices were never registered — and nil is returned.
-func UpdateDevices(agent *ffi.Agent, devices []ffi.DeviceConfig) ([]*DeviceConfig, error) {
+func UpdateDevices(ctx context.Context, agent *ffi.Agent, devices []ffi.DeviceConfig) ([]*DeviceConfig, error) {
 	handles := make([]*DeviceConfig, 0, len(devices))
 	defer func() {
 		if len(handles) == 0 {
@@ -165,7 +166,7 @@ func UpdateDevices(agent *ffi.Agent, devices []ffi.DeviceConfig) ([]*DeviceConfi
 		configs = append(configs, device.AsFFIDevice())
 	}
 
-	if err := agent.UpdateDevices(configs); err != nil {
+	if err := agent.UpdateDevices(ctx, configs); err != nil {
 		return nil, fmt.Errorf("failed to update devices: %w", err)
 	}
 

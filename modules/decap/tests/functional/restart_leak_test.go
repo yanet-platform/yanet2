@@ -46,6 +46,7 @@ func TestRestart_WithoutRelease_ReclaimsSupersededAgents(t *testing.T) {
 		// modeling a creator that crashed before it could drop its own
 		// reference.
 		_, err = decap.NewBackend(agent).UpdateModule(
+			t.Context(),
 			moduleName,
 			[]netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
 		)

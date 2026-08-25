@@ -39,7 +39,7 @@ func TestDeviceRegistryRejectsSameNameAcrossTypes(t *testing.T) {
 	vlanConfig, err := vlan.NewDeviceConfig(agent, "d0", &commonpb.Device{}, 100)
 	require.NoError(t, err)
 
-	updateErr := agent.UpdateDevices([]ffi.ShmDeviceConfig{
+	updateErr := agent.UpdateDevices(t.Context(), []ffi.ShmDeviceConfig{
 		plainConfig.AsFFIDevice(),
 		vlanConfig.AsFFIDevice(),
 	})

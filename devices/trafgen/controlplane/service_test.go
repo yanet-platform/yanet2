@@ -2,6 +2,7 @@ package trafgen
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ type recordingBackend struct {
 }
 
 func (m *recordingBackend) UpdateDevice(
+	ctx context.Context,
 	name string,
 	input, output []Pipeline,
 	frames []byte,

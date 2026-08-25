@@ -1,6 +1,7 @@
 package unrdup
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yanet-platform/xnetip"
@@ -19,10 +20,15 @@ func newBackend(agent *ffi.Agent) *backend {
 }
 
 func (m *backend) UpdateModule(
+	ctx context.Context,
 	name string,
 	sources []xnetip.Network,
 	services []cunrdup.Service,
 ) (ModuleHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	module, err := cunrdup.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -40,7 +46,7 @@ func (m *backend) UpdateModule(
 		return nil, fmt.Errorf("failed to update services: %w", err)
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		_ = module.Free()
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}

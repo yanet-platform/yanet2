@@ -25,9 +25,9 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config, writes rules, and publishes
 	// it to the dataplane.
-	UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, rules []cforward.ForwardRule) (ModuleHandle, error)
 	// DeleteModule removes a module config.
-	DeleteModule(name string) error
+	DeleteModule(ctx context.Context, name string) error
 	// ModuleCounters returns selected dataplane counters collected for a module config.
 	// If counterNames is nil or empty, it returns all counters for the module config.
 	ModuleCounters(name string, counterNames []string) []CounterView
@@ -208,7 +208,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	module, err := m.backend.UpdateModule(name, rules)
+	module, err := m.backend.UpdateModule(ctx, name, rules)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
@@ -241,7 +241,7 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err := m.backend.DeleteModule(ctx, name); err != nil {
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 

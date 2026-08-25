@@ -1,6 +1,7 @@
 package route
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
@@ -53,9 +54,9 @@ type CounterView struct {
 type Backend interface {
 	// UpdateModule builds a fresh ModuleConfig from the supplied FIB
 	// ranges and publishes it to the dataplane atomically.
-	UpdateModule(name string, entries []*routepb.FIBEntry) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, entries []*routepb.FIBEntry) (ModuleHandle, error)
 	// DeleteModule removes a module config from the dataplane.
-	DeleteModule(name string) error
+	DeleteModule(ctx context.Context, name string) error
 	// ModuleCounters reads the named counters back from every position
 	// at which the named config is installed.
 	ModuleCounters(name string, counterNames []string) []CounterView
@@ -77,7 +78,11 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (ModuleHandle, error) {
+func (m *backend) UpdateModule(ctx context.Context, name string, entries []*routepb.FIBEntry) (ModuleHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	module, err := croute.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -159,7 +164,7 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 		}
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		if err := module.Free(); err != nil {
 			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
 		}
@@ -169,8 +174,8 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 	return module, nil
 }
 
-func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(moduleType, name)
+func (m *backend) DeleteModule(ctx context.Context, name string) error {
+	return m.agent.DeleteModuleConfig(ctx, moduleType, name)
 }
 
 func (m *backend) ModuleCounters(name string, counterNames []string) []CounterView {

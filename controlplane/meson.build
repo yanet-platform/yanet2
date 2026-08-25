@@ -70,6 +70,7 @@ custom_target(
         lib_dev_trafgen_dp,
         lib_filter_compiler,
         lib_agent_counters,
+        lib_cancellation_cp,
         lib_counter_pattern,
     ] + librure_targets,
     install: true,

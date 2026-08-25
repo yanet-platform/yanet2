@@ -51,6 +51,7 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule publishes a module config to the dataplane.
 	UpdateModule(
+		ctx context.Context,
 		name string,
 		sources []xnetip.Network,
 		services []cunrdup.Service,
@@ -180,7 +181,7 @@ func (m *UnrdupService) UpdateConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	module, err := m.backend.UpdateModule(name, updated.Sources(), updated.Services)
+	module, err := m.backend.UpdateModule(ctx, name, updated.Sources(), updated.Services)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal, "failed to update config %q: %s", name, err,

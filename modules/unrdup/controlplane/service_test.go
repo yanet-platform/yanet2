@@ -1,6 +1,7 @@
 package unrdup_test
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/netip"
@@ -39,6 +40,7 @@ type fakeBackend struct {
 }
 
 func (m *fakeBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	sources []xnetip.Network,
 	services []cunrdup.Service,

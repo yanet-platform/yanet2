@@ -232,7 +232,7 @@ func (m *FWStateService) UpdateConfig(
 
 		m.log.Debug("update fwstate module config", zap.String("config", name))
 
-		if err := m.publishUpdate(name, newConfig); err != nil {
+		if err := m.publishUpdate(ctx, name, newConfig); err != nil {
 			if err := newConfig.Free(); err != nil {
 				m.log.Error("failed to free unpublished fwstate config",
 					zap.String("config", name), zap.Error(err))
@@ -299,13 +299,14 @@ func (m *FWStateService) prepareUpdate(
 }
 
 func (m *FWStateService) publishUpdate(
+	ctx context.Context,
 	name string,
 	newConfig *FwStateConfig,
 ) error {
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{newConfig.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{newConfig.AsFFIModule()}); err != nil {
 		return err
 	}
 	m.configs[name] = newConfig
@@ -416,7 +417,7 @@ func (m *FWStateService) DeleteConfig(
 		// DeleteModuleConfig removes the shared-memory publication but does not
 		// free the module. Keeping stateMu unlocked lets readers finish against
 		// the old handle before unpublishConfig establishes the Free barrier.
-		if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
+		if err := m.agent.DeleteModuleConfig(ctx, moduleType, name); err != nil {
 			return status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
 		}
 

@@ -70,11 +70,11 @@ func TestACL_UpdateRules_EmitConfigDrivesSyncFrames(t *testing.T) {
 
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
 
-	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
+	handle, err := backend.NewModule(t.Context(), "sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(t, backend.UpdateModule(t.Context(), handle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
 
 	result, err := h.HandlePackets(syncStatePacket(t))
@@ -99,17 +99,17 @@ func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 	// arena (the sizes the net6-share tests proved under ASan).
 	h, agent, backend := setupACLHarnessSized(t, []string{"port0"}, 192*datasize.MB, 48*datasize.MB)
 
-	handle, err := backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
+	handle, err := backend.NewModule(t.Context(), "sync-emit", []cacl.AclRule{rule}, "", "", syncEmitConfig())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(t, backend.UpdateModule(t.Context(), handle))
 	wireACLPipeline(t, agent, "port0", "sync-emit")
 
 	result, err := h.HandlePackets(syncStatePacket(t))
 	require.NoError(t, err)
 	require.Len(t, result.Output, 2, "the emit config must drive a state-sync frame first")
 
-	handle, err = backend.NewModule("sync-emit", []cacl.AclRule{rule}, "", "", nil)
+	handle, err = backend.NewModule(t.Context(), "sync-emit", []cacl.AclRule{rule}, "", "", nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 
@@ -118,7 +118,7 @@ func TestACL_UpdateRules_NilEmitConfigClearsPreviousSyncConfig(t *testing.T) {
 	// Drive bare rounds until the replacement publish completes.
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- backend.UpdateModule(handle)
+		publishDone <- backend.UpdateModule(t.Context(), handle)
 	}()
 	publishing := true
 	for publishing {

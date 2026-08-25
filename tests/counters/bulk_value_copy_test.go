@@ -56,10 +56,10 @@ func bulkCopyProbe(t *testing.T, workerCount uint64) (allocs uint64, matched int
 	input := make([]ffi.DevicePipelineConfig, bulkCopyPipelineCount)
 	for idx := range bulkCopyPipelineCount {
 		name := fmt.Sprintf("bulk-copy-pipeline-%d", idx)
-		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: name}))
+		require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: name}))
 		input[idx] = ffi.DevicePipelineConfig{Name: name, Weight: 1}
 	}
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: input,
 	}})

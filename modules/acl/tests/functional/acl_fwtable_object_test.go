@@ -92,21 +92,22 @@ func TestACL_FWTableObjectStateLookup(t *testing.T) {
 	map4, err := objfwstate.NewMapObjectConfig(agent, "obj4", objfwstate.KindV4)
 	require.NoError(t, err)
 	require.NoError(t, map4.CreateMap(1024, 0, 1))
-	require.NoError(t, map4.Publish(agent))
+	require.NoError(t, map4.Publish(t.Context(), agent))
 	t.Cleanup(func() { _ = map4.Free() })
 
 	map6, err := objfwstate.NewMapObjectConfig(agent, "obj6", objfwstate.KindV6)
 	require.NoError(t, err)
 	require.NoError(t, map6.CreateMap(1024, 0, 1))
-	require.NoError(t, map6.Publish(agent))
+	require.NoError(t, map6.Publish(t.Context(), agent))
 	t.Cleanup(func() { _ = map6.Free() })
 
 	handle, err := backend.NewModule(
+		t.Context(),
 		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "obj4", "obj6", nil,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(t, backend.UpdateModule(t.Context(), handle))
 
 	wireACLPipeline(t, agent, "port0", "acl0")
 
@@ -163,11 +164,12 @@ func TestACL_FWTableObjectFallbackWithoutNames(t *testing.T) {
 	h, agent, backend := setupACLFWTableHarness(t)
 
 	handle, err := backend.NewModule(
+		t.Context(),
 		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "", "", nil,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(t, backend.UpdateModule(t.Context(), handle))
 
 	wireACLPipeline(t, agent, "port0", "acl0")
 
@@ -202,12 +204,13 @@ func TestACL_FWTableObjectUnknownNameRejected(t *testing.T) {
 	_, _, backend := setupACLFWTableHarness(t)
 
 	handle, err := backend.NewModule(
+		t.Context(),
 		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "no-such-map", "", nil,
 	)
 	require.NoError(t, err, "construction only declares the link and must succeed")
 	t.Cleanup(func() { _ = handle.Free() })
 
-	err = backend.UpdateModule(handle)
+	err = backend.UpdateModule(t.Context(), handle)
 	require.Error(t, err, "publishing a config that links an unknown object must fail")
 	require.Contains(t, err.Error(), "linked object")
 	require.Contains(t, err.Error(), "no-such-map")
@@ -226,35 +229,37 @@ func TestACL_FWTableObjectDeleteRefusedWhileLinked(t *testing.T) {
 	map4, err := objfwstate.NewMapObjectConfig(agent, "obj4", objfwstate.KindV4)
 	require.NoError(t, err)
 	require.NoError(t, map4.CreateMap(1024, 0, 1))
-	require.NoError(t, map4.Publish(agent))
+	require.NoError(t, map4.Publish(t.Context(), agent))
 	t.Cleanup(func() { _ = map4.Free() })
 
 	map6, err := objfwstate.NewMapObjectConfig(agent, "obj6", objfwstate.KindV6)
 	require.NoError(t, err)
 	require.NoError(t, map6.CreateMap(1024, 0, 1))
-	require.NoError(t, map6.Publish(agent))
+	require.NoError(t, map6.Publish(t.Context(), agent))
 	t.Cleanup(func() { _ = map6.Free() })
 
 	handle, err := backend.NewModule(
+		t.Context(),
 		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "obj4", "obj6", nil,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(t, backend.UpdateModule(t.Context(), handle))
 
 	wireACLPipeline(t, agent, "port0", "acl0")
 
-	err = objfwstate.DeleteMapObject(agent, objfwstate.KindV4.ObjectType(), "obj4")
+	err = objfwstate.DeleteMapObject(t.Context(), agent, objfwstate.KindV4.ObjectType(), "obj4")
 	require.Error(t, err, "deleting a map a published module links must be refused")
 	require.Contains(t, err.Error(), "is linked by module")
 
 	unlinked, err := backend.NewModule(
+		t.Context(),
 		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "", "", nil,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = unlinked.Free() })
-	require.NoError(t, backend.UpdateModule(unlinked))
+	require.NoError(t, backend.UpdateModule(t.Context(), unlinked))
 	handle.Free()
 
-	require.NoError(t, objfwstate.DeleteMapObject(agent, objfwstate.KindV4.ObjectType(), "obj4"))
+	require.NoError(t, objfwstate.DeleteMapObject(t.Context(), agent, objfwstate.KindV4.ObjectType(), "obj4"))
 }

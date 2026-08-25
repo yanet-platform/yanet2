@@ -677,12 +677,12 @@ func datasetBenchSetup(b *testing.B) *datasetBenchState {
 		}
 		backend := acl.NewBackend(agent)
 
-		handle, err := backend.NewModule("dataset", rules, "", "", nil)
+		handle, err := backend.NewModule(b.Context(), "dataset", rules, "", "", nil)
 		if err != nil {
 			datasetBenchErr = err
 			return
 		}
-		if datasetBenchErr = backend.UpdateModule(handle); datasetBenchErr != nil {
+		if datasetBenchErr = backend.UpdateModule(b.Context(), handle); datasetBenchErr != nil {
 			return
 		}
 		datasetBench = &datasetBenchState{
@@ -828,12 +828,12 @@ func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
 		}
 		backend := acl.NewBackend(agent)
 
-		handle, err := backend.NewModule("dataset", rules, "", "", nil)
+		handle, err := backend.NewModule(b.Context(), "dataset", rules, "", "", nil)
 		if err != nil {
 			topoBenchErr = err
 			return
 		}
-		if topoBenchErr = backend.UpdateModule(handle); topoBenchErr != nil {
+		if topoBenchErr = backend.UpdateModule(b.Context(), handle); topoBenchErr != nil {
 			return
 		}
 		topoBench = &datasetBenchState{
@@ -869,11 +869,11 @@ func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 			Devices: filter.Devices{{Name: dev}},
 		})
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(tb.Context(), sinkName, sinkRules)
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = sinkHandle.Free() })
 
-	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(tb, agent.UpdateFunction(tb.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -886,14 +886,14 @@ func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 			},
 		}},
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name: "dummy-in",
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name: "dummy-out",
 	}))
 
@@ -913,7 +913,7 @@ func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy-out", Weight: 1}},
 		})
 	}
-	_, err = plain.UpdateDevices(agent, devices)
+	_, err = plain.UpdateDevices(tb.Context(), agent, devices)
 	require.NoError(tb, err)
 }
 

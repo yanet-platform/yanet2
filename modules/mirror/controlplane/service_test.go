@@ -26,13 +26,14 @@ func (m *mockModuleHandle) Free() error {
 type mockBackend struct{}
 
 func (m *mockBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	rules []cmirror.MirrorRule,
 ) (mirror.ModuleHandle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) DeleteModule(ctx context.Context, name string) error {
 	return nil
 }
 
@@ -46,6 +47,7 @@ type nilHandleBackend struct {
 }
 
 func (m *nilHandleBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	rules []cmirror.MirrorRule,
 ) (mirror.ModuleHandle, error) {
@@ -61,6 +63,7 @@ type recordingBackend struct {
 }
 
 func (m *recordingBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	rules []cmirror.MirrorRule,
 ) (mirror.ModuleHandle, error) {

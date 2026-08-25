@@ -204,7 +204,11 @@ func NewFWStateMapService(
 // publishGeneration upserts the map object into a new config generation
 // and blocks until every dataplane worker has advanced to it.
 func (m *FWStateMapService) publishGeneration(mapCP cfwstate.MapObjectConfig) error {
-	return mapCP.Publish(m.agent)
+	// Reclamation gives up entirely when this fails, leaving the unlinked
+	// layers parked until some later insert on the same map retries them,
+	// which may never come. The wait therefore outlives whichever request
+	// triggered it, and must not be made cancellable.
+	return mapCP.Publish(context.Background(), m.agent)
 }
 
 // UnaryServerInterceptor returns the service's gRPC metrics interceptor,
@@ -357,7 +361,7 @@ func (m *FWStateMapService) CreateMap(
 		return nil, status.Errorf(codes.Internal, "failed to create fwstate-map table: %v", err)
 	}
 
-	if err := mapConfig.Publish(m.agent); err != nil {
+	if err := mapConfig.Publish(ctx, m.agent); err != nil {
 		if err := mapConfig.Free(); err != nil {
 			m.log.Error("failed to free unpublished fwstate-map",
 				zap.String("map", name), zap.Error(err))
@@ -402,7 +406,7 @@ func (m *FWStateMapService) DeleteMap(
 	}
 
 	if err := cfwstate.DeleteMapObject(
-		m.agent, fwMap.Config().Kind().ObjectType(), name,
+		ctx, m.agent, fwMap.Config().Kind().ObjectType(), name,
 	); err != nil {
 		// The C object deletion refuses while a published module links
 		// the object, failing with the exact error "object

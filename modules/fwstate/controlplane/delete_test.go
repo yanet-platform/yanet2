@@ -89,7 +89,7 @@ func newFWStateTestMaps(
 		mapObject, err := objfwstate.NewMapObjectConfig(agent, name+"-"+kind.String(), kind)
 		require.NoError(testingTB, err)
 		require.NoError(testingTB, mapObject.CreateMap(indexSize, 64, 1))
-		require.NoError(testingTB, mapObject.Publish(agent))
+		require.NoError(testingTB, mapObject.Publish(testingTB.Context(), agent))
 		testingTB.Cleanup(func() { _ = mapObject.Free() })
 		return mapObject
 	}
@@ -108,7 +108,7 @@ func newACLDeleteTestConfig(
 ) *cacl.ModuleConfig {
 	testingTB.Helper()
 
-	config, err := cacl.NewModuleConfig(agent, name, nil, "", "", nil)
+	config, err := cacl.NewModuleConfig(testingTB.Context(), agent, name, nil, "", "", nil)
 	require.NoError(testingTB, err)
 	testingTB.Cleanup(func() { _ = config.Free() })
 
@@ -120,7 +120,7 @@ func TestFWStateDeleteKeepsSameNamedACLConfig(t *testing.T) {
 
 	_, agent := newDeleteTestHarness(t, []string{"acl", "fwstate"}, "acl")
 	aclConfig := newACLDeleteTestConfig(t, agent, configName)
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{aclConfig.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{aclConfig.AsFFIModule()}))
 	maps := newFWStateTestMaps(t, agent, configName, 1024)
 
 	service := fwstate.NewFWStateService(agent)
@@ -177,9 +177,9 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = config.Free() })
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{config.AsFFIModule()}))
 
-	require.NoError(t, agent.DeleteModuleConfig(fwstateModuleType, configName))
+	require.NoError(t, agent.DeleteModuleConfig(t.Context(), fwstateModuleType, configName))
 	require.False(t, hasCPConfig(agent.DPConfig().CPConfigs(), fwstateModuleType, configName))
 }
 

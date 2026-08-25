@@ -57,7 +57,7 @@ func TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule(t *testing.T) {
 
 	fwCfg, err := cfwstate.NewModuleConfig(agent, "fw0", nil, "", "")
 	require.NoError(t, err)
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{fwCfg.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{fwCfg.AsFFIModule()}))
 
 	// The owner's free attempt is refused while the published generation
 	// still references fw0, and is queued for a retry.
@@ -66,7 +66,7 @@ func TestACL_FWStateAgentSharing_TypedDestroyIsolatedPerModule(t *testing.T) {
 	// Retiring the generation that still references fw0 is what lets the
 	// queued free succeed: the delete retries it on its way out and
 	// fwstate's own destructor destroys the module.
-	require.NoError(t, agent.DeleteModuleConfig("fwstate", "fw0"))
+	require.NoError(t, agent.DeleteModuleConfig(t.Context(), "fwstate", "fw0"))
 
 	// An ACL update on the shared agent must not touch anything but its
 	// own acl modules: destruction runs only through each owner's own

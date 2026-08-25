@@ -40,7 +40,14 @@ type Backend interface {
 	//
 	// It returns the freshly published handle. The caller owns the handle
 	// and must Free it once a newer generation has superseded it.
-	UpdateDevice(name string, input, output []Pipeline, frames []byte, lengths []uint32, ratePps uint64) (*ctrafgen.DeviceConfig, error)
+	UpdateDevice(
+		ctx context.Context,
+		name string,
+		input, output []Pipeline,
+		frames []byte,
+		lengths []uint32,
+		ratePps uint64,
+	) (*ctrafgen.DeviceConfig, error)
 }
 
 type config struct {
@@ -101,7 +108,7 @@ func (m *TrafgenService) UpdateDevice(
 		ratePps = old.RatePps
 	}
 
-	if err := m.apply(name, packets, ratePps, input, output); err != nil {
+	if err := m.apply(ctx, name, packets, ratePps, input, output); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update device config %q: %v", name, err,
@@ -206,7 +213,7 @@ func (m *TrafgenService) UploadPcap(
 		output = old.Output
 	}
 
-	if err := m.apply(name, packets, ratePps, input, output); err != nil {
+	if err := m.apply(ctx, name, packets, ratePps, input, output); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update device config %q: %v", name, err,
@@ -238,7 +245,7 @@ func (m *TrafgenService) SetRate(
 		output = old.Output
 	}
 
-	if err := m.apply(name, packets, req.GetRatePps(), input, output); err != nil {
+	if err := m.apply(ctx, name, packets, req.GetRatePps(), input, output); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update device config %q: %v", name, err,
@@ -256,6 +263,7 @@ func (m *TrafgenService) SetRate(
 // after: freed outright when dangling, parked while a pinned generation
 // still references it.
 func (m *TrafgenService) apply(
+	ctx context.Context,
 	name string,
 	packets [][]byte,
 	ratePps uint64,
@@ -263,7 +271,7 @@ func (m *TrafgenService) apply(
 ) error {
 	frames, lengths := flattenFrames(packets)
 
-	handle, err := m.backend.UpdateDevice(name, input, output, frames, lengths, ratePps)
+	handle, err := m.backend.UpdateDevice(ctx, name, input, output, frames, lengths, ratePps)
 	if err != nil {
 		return fmt.Errorf("failed to update device config %q: %w", name, err)
 	}

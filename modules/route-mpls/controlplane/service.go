@@ -285,7 +285,7 @@ func (m *RouteMPLSService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "not found")
 	}
 
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err := m.backend.DeleteModule(ctx, name); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
 
@@ -341,7 +341,7 @@ func (m *RouteMPLSService) CreateConfig(
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
-	handle, err := m.backend.UpdateModule(name, config.BuildRules())
+	handle, err := m.backend.UpdateModule(ctx, name, config.BuildRules())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
@@ -430,7 +430,7 @@ func (m *RouteMPLSService) UpdateConfig(
 		}
 	}
 
-	handle, err := m.backend.UpdateModule(name, config.BuildRules())
+	handle, err := m.backend.UpdateModule(ctx, name, config.BuildRules())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}

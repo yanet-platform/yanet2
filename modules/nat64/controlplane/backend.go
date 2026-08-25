@@ -1,6 +1,7 @@
 package nat64
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -14,7 +15,7 @@ type ModuleHandle interface {
 var _ ModuleHandle = (*cnat64.ModuleConfig)(nil)
 
 type Backend interface {
-	UpdateModule(name string, config *NAT64Config) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, config *NAT64Config) (ModuleHandle, error)
 }
 
 type backend struct {
@@ -27,7 +28,11 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string, config *NAT64Config) (ModuleHandle, error) {
+func (m *backend) UpdateModule(ctx context.Context, name string, config *NAT64Config) (ModuleHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	module, err := cnat64.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -65,7 +70,7 @@ func (m *backend) UpdateModule(name string, config *NAT64Config) (ModuleHandle, 
 		return nil, fmt.Errorf("failed to set MTU: %w", err)
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		if err := module.Free(); err != nil {
 			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
 		}

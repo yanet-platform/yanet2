@@ -1,6 +1,7 @@
 package decap
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 
@@ -20,7 +21,11 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error) {
+func (m *backend) UpdateModule(ctx context.Context, name string, prefixes []netip.Prefix) (ModuleHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	mod, err := cdecap.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -36,6 +41,7 @@ func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHand
 	}
 
 	if err := m.agent.UpdateModules(
+		ctx,
 		[]ffi.ModuleConfig{mod.AsFFIModule()},
 	); err != nil {
 		if err := mod.Free(); err != nil {

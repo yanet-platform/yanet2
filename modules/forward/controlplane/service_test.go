@@ -30,11 +30,11 @@ func (m *mockModuleHandle) Free() error {
 
 type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+func (m *mockBackend) UpdateModule(ctx context.Context, name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) DeleteModule(ctx context.Context, name string) error {
 	return nil
 }
 
@@ -63,7 +63,7 @@ type nilHandleBackend struct {
 	mockBackend
 }
 
-func (m *nilHandleBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+func (m *nilHandleBackend) UpdateModule(ctx context.Context, name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
 	return nil, nil
 }
 
@@ -78,7 +78,7 @@ type recordingBackend struct {
 	rules []cforward.ForwardRule
 }
 
-func (m *recordingBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
+func (m *recordingBackend) UpdateModule(ctx context.Context, name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
 	m.rules = rules
 	return &mockModuleHandle{}, nil
 }

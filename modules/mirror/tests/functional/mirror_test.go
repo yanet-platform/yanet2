@@ -76,7 +76,7 @@ func applyRules(
 ) mirror.ModuleHandle {
 	t.Helper()
 
-	handle, err := backend.UpdateModule(name, rules)
+	handle, err := backend.UpdateModule(t.Context(), name, rules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	return handle
@@ -133,7 +133,7 @@ func wireMirrorPipeline(
 	// packets that pass through (originals and ModeNone mirrors) reach the
 	// output stage.
 	primarySink := configName + "-sink"
-	primarySinkHandle, err := fwdBackend.UpdateModule(primarySink, catchAllForwardRules(primaryDevice))
+	primarySinkHandle, err := fwdBackend.UpdateModule(t.Context(), primarySink, catchAllForwardRules(primaryDevice))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = primarySinkHandle.Free() })
 
@@ -141,11 +141,11 @@ func wireMirrorPipeline(
 	// sink so mirrored packets re-routed via ModeIn reach the output stage.
 	for _, dev := range extraDevices {
 		sinkName := configName + "-sink-" + dev
-		sinkHandle, err := fwdBackend.UpdateModule(sinkName, catchAllForwardRules(dev))
+		sinkHandle, err := fwdBackend.UpdateModule(t.Context(), sinkName, catchAllForwardRules(dev))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sinkHandle.Free() })
 
-		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 			Name: sinkName,
 			Chains: []ffi.FunctionChainConfig{{
 				Weight: 1,
@@ -157,13 +157,13 @@ func wireMirrorPipeline(
 				},
 			}},
 		}))
-		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 			Name:      "sink_in_" + dev,
 			Functions: []string{sinkName},
 		}))
 	}
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -176,20 +176,20 @@ func wireMirrorPipeline(
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
 
 	// A dummy pipeline with no functions passes packets straight through.
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
 
 	// Additional dummy output pipelines for extra devices — each output must
 	// use a distinct pipeline name to avoid counter-key collisions.
 	for _, dev := range extraDevices {
-		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 			Name: "dummy_extra_out_" + dev,
 		}))
 	}
@@ -210,7 +210,7 @@ func wireMirrorPipeline(
 		})
 	}
 
-	_, err = plain.UpdateDevices(agent, allDevices)
+	_, err = plain.UpdateDevices(t.Context(), agent, allDevices)
 	require.NoError(t, err)
 }
 
@@ -672,7 +672,7 @@ func TestMirrorConfigMemoryLeak(t *testing.T) {
 		require.NoErrorf(t, module.Update(rules), "round %d: update failed", round)
 		require.NoErrorf(
 			t,
-			agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}),
+			agent.UpdateModules(t.Context(), []ffi.ModuleConfig{module.AsFFIModule()}),
 			"round %d: publish failed", round,
 		)
 		// The publish retired the previous round's generation, so the

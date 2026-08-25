@@ -1,6 +1,7 @@
 package route_mpls
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -22,9 +23,9 @@ var _ ModuleHandle = (*croutempls.ModuleConfig)(nil)
 type Backend interface {
 	// UpdateModule builds a fresh ModuleConfig from the supplied rules and
 	// publishes it to the dataplane atomically.
-	UpdateModule(name string, rules []croutempls.Rule) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, rules []croutempls.Rule) (ModuleHandle, error)
 	// DeleteModule removes a module config from the dataplane.
-	DeleteModule(name string) error
+	DeleteModule(ctx context.Context, name string) error
 }
 
 // backend is the real Backend implementation backed by shared memory.
@@ -39,7 +40,11 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHandle, error) {
+func (m *backend) UpdateModule(ctx context.Context, name string, rules []croutempls.Rule) (ModuleHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	module, err := croutempls.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -52,7 +57,7 @@ func (m *backend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHand
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		if err := module.Free(); err != nil {
 			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
 		}
@@ -62,6 +67,6 @@ func (m *backend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHand
 	return module, nil
 }
 
-func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(moduleType, name)
+func (m *backend) DeleteModule(ctx context.Context, name string) error {
+	return m.agent.DeleteModuleConfig(ctx, moduleType, name)
 }

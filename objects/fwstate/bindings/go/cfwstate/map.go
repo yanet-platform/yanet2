@@ -55,6 +55,7 @@ package cfwstate
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
@@ -353,55 +354,65 @@ func (m *MapObjectConfig) Free() error {
 // new generation followed by dp_config_wait_for_gen. Re-upserting the same
 // object pointer is safe — the registry uses reference counting, so the
 // ref/unref pair nets to zero and the object survives intact while only the
-// generation advances.
-func (m *MapObjectConfig) Publish(agent *ffi.Agent) error {
+// generation advances. A caller relying on this as a barrier must pass a
+// context that cannot be cancelled, because an ended one returns without
+// publishing anything.
+func (m *MapObjectConfig) Publish(ctx context.Context, agent *ffi.Agent) error {
 	if m.ptr == nil {
 		return fmt.Errorf("fwstate-map object config is nil")
 	}
 
 	objects := []*C.struct_cp_object{m.ptr}
-	var cErr *C.yanet_error
-	rc := C.agent_update_objects(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		C.size_t(1),
-		&objects[0],
-		&cErr,
-	)
-	if rc != 0 {
-		return fmt.Errorf(
-			"failed to update objects: %w",
-			cerrors.FromC(unsafe.Pointer(cErr)),
-		)
-	}
 
-	return nil
+	return ffi.WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_update_objects(
+			(*C.struct_agent)(agent.AsRawPtr()),
+			C.size_t(1),
+			&objects[0],
+			&cErr,
+		)
+		if rc != 0 {
+			return fmt.Errorf(
+				"failed to update objects: %w",
+				cerrors.FromC(unsafe.Pointer(cErr)),
+			)
+		}
+
+		return nil
+	})
 }
 
 // DeleteMapObject removes a named object from the dataplane by type and
 // name (e.g. ("fwstate_map_v4", "default")) via agent_delete_object.
-func DeleteMapObject(agent *ffi.Agent, objectType, objectName string) error {
+func DeleteMapObject(
+	ctx context.Context, agent *ffi.Agent, objectType, objectName string,
+) error {
 	cObjectType := C.CString(objectType)
 	defer C.free(unsafe.Pointer(cObjectType))
 	cObjectName := C.CString(objectName)
 	defer C.free(unsafe.Pointer(cObjectName))
 
-	var cErr *C.yanet_error
-	rc := C.agent_delete_object(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		cObjectType,
-		cObjectName,
-		&cErr,
-	)
-
-	if rc != 0 {
-		return fmt.Errorf(
-			"failed to delete object type %q name %q: %w",
-			objectType,
-			objectName,
-			cerrors.FromC(unsafe.Pointer(cErr)),
+	return ffi.WithCancellation(ctx, func() error {
+		var cErr *C.yanet_error
+		rc := C.agent_delete_object(
+			(*C.struct_agent)(agent.AsRawPtr()),
+			cObjectType,
+			cObjectName,
+			&cErr,
 		)
-	}
-	return nil
+
+		if rc != 0 {
+			return fmt.Errorf(
+				"failed to delete object type %q name %q: %w",
+				objectType,
+				objectName,
+				cerrors.FromC(unsafe.Pointer(cErr)),
+			)
+		}
+
+		return nil
+	})
 }
 
 // ReadForward reads up to count entries in the forward direction.

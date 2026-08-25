@@ -74,11 +74,15 @@ func AccessLogInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 			)
 		}
 
-		if err != nil {
+		switch {
+		case err == nil:
+			log.Info("completed gRPC execution", fields...)
+		case callerGone(status.Code()):
+			fields = append(fields, zap.Error(err))
+			log.Info("abandoned gRPC execution", fields...)
+		default:
 			fields = append(fields, zap.Error(err))
 			log.Error("failed to execute gRPC", fields...)
-		} else {
-			log.Info("completed gRPC execution", fields...)
 		}
 
 		return resp, err

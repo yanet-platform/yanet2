@@ -1,6 +1,7 @@
 package route_mpls
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -28,11 +29,11 @@ func (m *mockModuleHandle) Free() error {
 
 type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHandle, error) {
+func (m *mockBackend) UpdateModule(ctx context.Context, name string, rules []croutempls.Rule) (ModuleHandle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func (m *mockBackend) DeleteModule(ctx context.Context, name string) error {
 	return nil
 }
 
@@ -41,14 +42,14 @@ type flakyBackend struct {
 	numCalls atomic.Int64
 }
 
-func (m *flakyBackend) UpdateModule(name string, rules []croutempls.Rule) (ModuleHandle, error) {
+func (m *flakyBackend) UpdateModule(ctx context.Context, name string, rules []croutempls.Rule) (ModuleHandle, error) {
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
 	return &mockModuleHandle{}, nil
 }
 
-func (m *flakyBackend) DeleteModule(name string) error {
+func (m *flakyBackend) DeleteModule(ctx context.Context, name string) error {
 	return nil
 }
 

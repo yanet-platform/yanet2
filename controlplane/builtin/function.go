@@ -204,7 +204,7 @@ func (m *Function) Update(
 	}
 	defer agent.Close()
 
-	if err := agent.UpdateFunction(function); err != nil {
+	if err := agent.UpdateFunction(ctx, function); err != nil {
 		return nil, fmt.Errorf("failed to update function: %w", err)
 	}
 
@@ -228,7 +228,7 @@ func (m *Function) Delete(
 	}
 	defer agent.Close()
 
-	if err := agent.DeleteFunction(functionName); err != nil {
+	if err := agent.DeleteFunction(ctx, functionName); err != nil {
 		return nil, fmt.Errorf("failed to delete function: %w", err)
 	}
 

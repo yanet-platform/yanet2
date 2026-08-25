@@ -209,7 +209,7 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	inst := m.instanceFor(name).Clone()
 	inst.Config.Prefixes = append(inst.Config.Prefixes, slices.Clone(req.Prefix))
 
-	if err := m.updateModuleConfig(name, inst); err != nil {
+	if err := m.updateModuleConfig(ctx, name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 	next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
 	next.Config.Mappings = adjustMappingsAfterPrefixRemove(next.Config.Mappings, uint32(removeIdx))
 
-	if err := m.updateModuleConfig(name, next); err != nil {
+	if err := m.updateModuleConfig(ctx, name, next); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -292,7 +292,7 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 		PrefixIndex: req.PrefixIndex,
 	})
 
-	if err := m.updateModuleConfig(name, inst); err != nil {
+	if err := m.updateModuleConfig(ctx, name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -326,7 +326,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 		return &nat64pb.RemoveMappingResponse{}, nil
 	}
 
-	if err := m.updateModuleConfig(name, next); err != nil {
+	if err := m.updateModuleConfig(ctx, name, next); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -358,7 +358,7 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 		IPv6MTU: req.Mtu.Ipv6Mtu,
 	}
 
-	if err := m.updateModuleConfig(name, inst); err != nil {
+	if err := m.updateModuleConfig(ctx, name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -378,7 +378,7 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 	inst.Config.DropUnknownPrefix = req.DropUnknownPrefix
 	inst.Config.DropUnknownMapping = req.DropUnknownMapping
 
-	if err := m.updateModuleConfig(name, inst); err != nil {
+	if err := m.updateModuleConfig(ctx, name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -395,8 +395,8 @@ func (m *NAT64Service) instanceFor(name string) config {
 	return inst
 }
 
-func (m *NAT64Service) updateModuleConfig(name string, inst config) error {
-	module, err := m.backend.UpdateModule(name, &inst.Config)
+func (m *NAT64Service) updateModuleConfig(ctx context.Context, name string, inst config) error {
+	module, err := m.backend.UpdateModule(ctx, name, &inst.Config)
 	if err != nil {
 		return err
 	}

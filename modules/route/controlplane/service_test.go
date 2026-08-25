@@ -1,6 +1,7 @@
 package route_test
 
 import (
+	"context"
 	"errors"
 	"net/netip"
 	"sort"
@@ -85,7 +86,7 @@ func newFakeBackend() *fakeBackend {
 // straight off entries, without resolving overlaps: the fake has no LPM, so
 // a test exercising shadowed-nexthop exclusion must go through the real
 // backend instead.
-func (m *fakeBackend) UpdateModule(name string, entries []*routepb.FIBEntry) (route.ModuleHandle, error) {
+func (m *fakeBackend) UpdateModule(ctx context.Context, name string, entries []*routepb.FIBEntry) (route.ModuleHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -109,7 +110,7 @@ func (m *fakeBackend) UpdateModule(name string, entries []*routepb.FIBEntry) (ro
 	return m.handle, nil
 }
 
-func (m *fakeBackend) DeleteModule(name string) error {
+func (m *fakeBackend) DeleteModule(ctx context.Context, name string) error {
 	return nil
 }
 

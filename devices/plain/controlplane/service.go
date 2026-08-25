@@ -51,9 +51,9 @@ func (m *DevicePlainService) UpdateDevice(
 		return nil, fmt.Errorf("failed to create device config: %w", err)
 	}
 
-	if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
-		if err := deviceConfig.Free(); err != nil {
-			return nil, fmt.Errorf("failed to update device and free the unpublished replacement: %w (update error: %v)", err, err)
+	if err := m.agent.UpdateDevices(ctx, []ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
+		if freeErr := deviceConfig.Free(); freeErr != nil {
+			return nil, fmt.Errorf("failed to update device and free the unpublished replacement: %w (free error: %v)", err, freeErr)
 		}
 		return nil, fmt.Errorf("failed to update device: %w", err)
 	}
