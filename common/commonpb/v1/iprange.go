@@ -33,18 +33,6 @@ func NewIPRange(start, end netip.Addr) (*IPRange, error) {
 	}, nil
 }
 
-// MustIPRange is like NewIPRange but panics if validation fails.
-//
-// Intended for tests and package-level variable initialisation where the
-// inputs are static and any failure indicates a programming bug.
-func MustIPRange(start, end netip.Addr) *IPRange {
-	r, err := NewIPRange(start, end)
-	if err != nil {
-		panic(err)
-	}
-	return r
-}
-
 // ToRange converts the IPRange back to a pair of netip.Addr values.
 //
 // Returns an error if either endpoint fails to parse or if the endpoints

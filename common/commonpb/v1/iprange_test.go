@@ -114,7 +114,7 @@ func TestIPRange_ToRange_RoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := MustIPRange(tt.start, tt.end)
+			r := mustIPRange(t, tt.start, tt.end)
 			gotStart, gotEnd, err := r.ToRange()
 			require.NoError(t, err)
 			require.Equal(t, tt.start, gotStart)
@@ -159,12 +159,12 @@ func TestIPRange_MarshalJSON(t *testing.T) {
 	}{
 		{
 			name: "IPv4",
-			r:    MustIPRange(netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
+			r:    mustIPRange(t, netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
 			want: `{"start":"10.0.0.0","end":"10.0.0.255"}`,
 		},
 		{
 			name: "IPv6",
-			r:    MustIPRange(netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
+			r:    mustIPRange(t, netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
 			want: `{"start":"2001:db8::","end":"2001:db8::ffff"}`,
 		},
 		{
@@ -289,7 +289,7 @@ func TestIPRange_JSONRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			original := MustIPRange(tt.start, tt.end)
+			original := mustIPRange(t, tt.start, tt.end)
 
 			data, err := json.Marshal(original)
 			require.NoError(t, err)
@@ -313,12 +313,12 @@ func TestIPRange_AsLogValue(t *testing.T) {
 	}{
 		{
 			name: "IPv4",
-			r:    MustIPRange(netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
+			r:    mustIPRange(t, netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
 			want: "[10.0.0.0, 10.0.0.255]",
 		},
 		{
 			name: "IPv6",
-			r:    MustIPRange(netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
+			r:    mustIPRange(t, netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
 			want: "[2001:db8::, 2001:db8::ffff]",
 		},
 		{
@@ -344,4 +344,13 @@ func TestIPRange_AsLogValue(t *testing.T) {
 			assert.Equal(t, tt.want, tt.r.AsLogValue())
 		})
 	}
+}
+
+// mustIPRange builds a valid range from two addresses of one family,
+// failing the test on any constructor error.
+func mustIPRange(t *testing.T, start, end netip.Addr) *IPRange {
+	t.Helper()
+	r, err := NewIPRange(start, end)
+	require.NoError(t, err)
+	return r
 }
