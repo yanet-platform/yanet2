@@ -2,8 +2,14 @@ package commonpb
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
+)
+
+var (
+	errEmptyAddress = errors.New("empty IP address is not allowed")
+	errZonedAddress = errors.New("zoned IPv6 address is not allowed")
 )
 
 // NewIPAddressFromAddr creates an IPAddress from a netip.Addr value.
@@ -66,20 +72,37 @@ func (m *IPAddress) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON accepts a bare IPv4 or IPv6 address string.
+//
+// A zoned address is rejected.
 func (m *IPAddress) UnmarshalJSON(data []byte) error {
 	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw == "" {
-		return fmt.Errorf("empty IP address is not allowed")
-	}
 
-	parsed, err := netip.ParseAddr(raw)
+	parsed, err := parseAddr(raw)
 	if err != nil {
 		return fmt.Errorf("failed to parse IP address: %w", err)
 	}
 
 	*m = *NewIPAddressFromAddr(parsed)
 	return nil
+}
+
+// parseAddr parses a bare address string for the JSON decoders, rejecting
+// an empty string and a zoned address.
+func parseAddr(raw string) (netip.Addr, error) {
+	if raw == "" {
+		return netip.Addr{}, errEmptyAddress
+	}
+
+	addr, err := netip.ParseAddr(raw)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if addr.Zone() != "" {
+		return netip.Addr{}, fmt.Errorf("%w: %s", errZonedAddress, raw)
+	}
+
+	return addr, nil
 }

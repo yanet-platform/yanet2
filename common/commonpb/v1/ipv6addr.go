@@ -60,11 +60,8 @@ func (m *IPv6Address) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw == "" {
-		return fmt.Errorf("empty IP address is not allowed")
-	}
 
-	parsed, err := netip.ParseAddr(raw)
+	parsed, err := parseAddr(raw)
 	if err != nil {
 		return fmt.Errorf("failed to parse IP address: %w", err)
 	}

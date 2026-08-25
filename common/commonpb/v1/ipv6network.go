@@ -61,7 +61,7 @@ func (m *IPv6Network) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if raw == "" {
-		return fmt.Errorf("empty IP network is not allowed")
+		return fmt.Errorf("failed to parse IP network: %w", errEmptyNetwork)
 	}
 
 	net, err := xnetip.ParseNetwork6(raw)

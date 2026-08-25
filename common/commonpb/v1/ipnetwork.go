@@ -1,9 +1,12 @@
 package commonpb
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 )
+
+var errEmptyNetwork = errors.New("empty IP network is not allowed")
 
 // networksFromPrefixes converts netip.Prefix values to network messages
 // through the supplied per-family constructor.

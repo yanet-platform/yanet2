@@ -97,7 +97,7 @@ func (m *IPv6Prefix) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if raw == "" {
-		return fmt.Errorf("empty IP network is not allowed")
+		return fmt.Errorf("failed to parse IP network: %w", errEmptyNetwork)
 	}
 
 	prefix, err := netip.ParsePrefix(raw)

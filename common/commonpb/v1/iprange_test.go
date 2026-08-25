@@ -231,6 +231,16 @@ func TestIPRange_UnmarshalJSON(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "zoned start",
+			input:   `{"start":"fe80::1%eth0","end":"fe80::ff"}`,
+			wantErr: true,
+		},
+		{
+			name:    "zoned end",
+			input:   `{"start":"fe80::1","end":"fe80::ff%eth0"}`,
+			wantErr: true,
+		},
+		{
 			name:    "family mismatch v4 start v6 end",
 			input:   `{"start":"10.0.0.0","end":"2001:db8::ffff"}`,
 			wantErr: true,

@@ -103,24 +103,20 @@ func (m *IPRange) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON accepts start and end as IPv4 or IPv6 address strings.
+//
+// A zoned address is rejected.
 func (m *IPRange) UnmarshalJSON(data []byte) error {
 	var raw ipRangeJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw.Start == "" {
-		return fmt.Errorf("empty start address is not allowed")
-	}
-	if raw.End == "" {
-		return fmt.Errorf("empty end address is not allowed")
-	}
 
-	start, err := netip.ParseAddr(raw.Start)
+	start, err := parseAddr(raw.Start)
 	if err != nil {
 		return fmt.Errorf("failed to parse start address: %w", err)
 	}
 
-	end, err := netip.ParseAddr(raw.End)
+	end, err := parseAddr(raw.End)
 	if err != nil {
 		return fmt.Errorf("failed to parse end address: %w", err)
 	}

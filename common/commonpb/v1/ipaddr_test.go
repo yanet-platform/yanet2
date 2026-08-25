@@ -175,6 +175,11 @@ func TestIPAddress_UnmarshalJSON(t *testing.T) {
 			want:  netip.MustParseAddr("2001:db8::1"),
 		},
 		{
+			name:    "zoned IPv6",
+			input:   `"fe80::1%eth0"`,
+			wantErr: true,
+		},
+		{
 			name:    "empty string",
 			input:   `""`,
 			wantErr: true,
