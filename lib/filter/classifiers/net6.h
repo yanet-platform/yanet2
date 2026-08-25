@@ -6,10 +6,13 @@
 #include "common/memory_address.h"
 #include "common/value.h"
 
+#include "net6_memo.h"
+
 struct net6_classifier {
 	struct lpm hi;
 	struct lpm lo;
 	struct value_table comb;
+	struct net6_memo memo;
 };
 
 // Shared per-direction IPv6 half-address classification.
@@ -29,6 +32,11 @@ struct net6_share_dir {
 	uint32_t *remap_lo_a;
 	uint32_t *remap_hi_b;
 	uint32_t *remap_lo_b;
+	// Per-filter verdict memos keyed by the full 16-byte address of this
+	// direction: a hit replaces the union walks, the remap fetches, and
+	// the leaf comb fetch for that filter.
+	struct net6_memo memo_a;
+	struct net6_memo memo_b;
 };
 
 // Whether dir holds a built shared classification.

@@ -338,42 +338,7 @@ acl_handle_packets(
 		struct net6_share_dir *share_src = &acl_config->net6_share_src;
 		struct net6_share_dir *share_dst = &acl_config->net6_share_dst;
 
-		// Classify each v6 address half once on the union tries.
-		uint32_t src_hi[count];
-		uint32_t src_lo[count];
-		uint32_t dst_hi[count];
-		uint32_t dst_lo[count];
-
-		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
-			struct rte_mbuf *mbuf =
-				packet_to_mbuf(ip6_packets[idx]);
-			struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-				mbuf,
-				struct rte_ipv6_hdr *,
-				ip6_packets[idx]->network_header.offset
-			);
-			const uint8_t *saddr =
-				(const uint8_t *)ipv6_hdr->src_addr;
-			const uint8_t *daddr =
-				(const uint8_t *)ipv6_hdr->dst_addr;
-
-			src_hi[idx] = lpm8_lookup(&share_src->hi, saddr);
-			src_lo[idx] = lpm8_lookup(&share_src->lo, saddr + 8);
-			dst_hi[idx] = lpm8_lookup(&share_dst->hi, daddr);
-			dst_lo[idx] = lpm8_lookup(&share_dst->lo, daddr + 8);
-		}
-
-		const uint32_t *src_hi_a = ADDR_OF(&share_src->remap_hi_a);
-		const uint32_t *src_lo_a = ADDR_OF(&share_src->remap_lo_a);
-		const uint32_t *dst_hi_a = ADDR_OF(&share_dst->remap_hi_a);
-		const uint32_t *dst_lo_a = ADDR_OF(&share_dst->remap_lo_a);
-		const uint32_t *src_hi_b = ADDR_OF(&share_src->remap_hi_b);
-		const uint32_t *src_lo_b = ADDR_OF(&share_src->remap_lo_b);
-		const uint32_t *dst_hi_b = ADDR_OF(&share_dst->remap_hi_b);
-		const uint32_t *dst_lo_b = ADDR_OF(&share_dst->remap_lo_b);
-
-		// Translate the union classes into the leaf classes of each
-		// filter and combine them in the filter's own comb table.
+		// Leaf comb tables of both filters fed by the union tries.
 		const size_t ip6_src_leaf =
 			filter_ip6->lookup_count + ACL_FILTER_NET6_SRC_POS;
 		const size_t ip6_dst_leaf =
@@ -382,23 +347,6 @@ acl_handle_packets(
 			ADDR_OF(&acl_config->filter_ip6.v[ip6_src_leaf].data);
 		struct net6_classifier *ip6_dst_cls = (struct net6_classifier *)
 			ADDR_OF(&acl_config->filter_ip6.v[ip6_dst_leaf].data);
-
-		uint32_t ip6_src_slots[count];
-		uint32_t ip6_dst_slots[count];
-
-		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
-			ip6_src_slots[idx] = value_table_get(
-				&ip6_src_cls->comb,
-				src_hi_a[src_hi[idx]],
-				src_lo_a[src_lo[idx]]
-			);
-			ip6_dst_slots[idx] = value_table_get(
-				&ip6_dst_cls->comb,
-				dst_hi_a[dst_hi[idx]],
-				dst_lo_a[dst_lo[idx]]
-			);
-		}
-
 		const size_t ip6_port_src_leaf =
 			filter_ip6_port->lookup_count + ACL_FILTER_NET6_SRC_POS;
 		const size_t ip6_port_dst_leaf =
@@ -416,21 +364,138 @@ acl_handle_packets(
 					 .data
 			);
 
+		uint32_t ip6_src_slots[count];
+		uint32_t ip6_dst_slots[count];
+		// Per-address verdict slots of the port filter, shared with
+		// the port loop below through ip6_port_pos.
+		uint32_t ip6_src_slots_b[ip6_idx];
+		uint32_t ip6_dst_slots_b[ip6_idx];
+
+		// Union half-classes per address, computed only for addresses
+		// whose verdict memos missed.
+		uint32_t src_hi[ip6_idx];
+		uint32_t src_lo[ip6_idx];
+		uint32_t dst_hi[ip6_idx];
+		uint32_t dst_lo[ip6_idx];
+
+		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
+			struct rte_mbuf *mbuf =
+				packet_to_mbuf(ip6_packets[idx]);
+			struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_ipv6_hdr *,
+				ip6_packets[idx]->network_header.offset
+			);
+			const uint8_t *saddr =
+				(const uint8_t *)ipv6_hdr->src_addr;
+
+			uint32_t src_a;
+			uint32_t src_b;
+			if (net6_memo_lookup(
+				    &share_src->memo_a, saddr, &src_a
+			    ) &&
+			    net6_memo_lookup(
+				    &share_src->memo_b, saddr, &src_b
+			    )) {
+				ip6_src_slots[idx] = src_a;
+				ip6_src_slots_b[idx] = src_b;
+				continue;
+			}
+
+			src_hi[idx] = lpm8_lookup(&share_src->hi, saddr);
+			src_lo[idx] = lpm8_lookup(&share_src->lo, saddr + 8);
+
+			const uint32_t *src_hi_a =
+				ADDR_OF(&share_src->remap_hi_a);
+			const uint32_t *src_lo_a =
+				ADDR_OF(&share_src->remap_lo_a);
+			const uint32_t *src_hi_b =
+				ADDR_OF(&share_src->remap_hi_b);
+			const uint32_t *src_lo_b =
+				ADDR_OF(&share_src->remap_lo_b);
+
+			ip6_src_slots[idx] = value_table_get(
+				&ip6_src_cls->comb,
+				src_hi_a[src_hi[idx]],
+				src_lo_a[src_lo[idx]]
+			);
+			ip6_src_slots_b[idx] = value_table_get(
+				&ip6_port_src_cls->comb,
+				src_hi_b[src_hi[idx]],
+				src_lo_b[src_lo[idx]]
+			);
+			net6_memo_insert(
+				&share_src->memo_a, saddr, ip6_src_slots[idx]
+			);
+			net6_memo_insert(
+				&share_src->memo_b, saddr, ip6_src_slots_b[idx]
+			);
+		}
+
+		for (uint64_t idx = 0; idx < ip6_idx; ++idx) {
+			struct rte_mbuf *mbuf =
+				packet_to_mbuf(ip6_packets[idx]);
+			struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_ipv6_hdr *,
+				ip6_packets[idx]->network_header.offset
+			);
+			const uint8_t *daddr =
+				(const uint8_t *)ipv6_hdr->dst_addr;
+
+			uint32_t dst_a;
+			uint32_t dst_b;
+			if (net6_memo_lookup(
+				    &share_dst->memo_a, daddr, &dst_a
+			    ) &&
+			    net6_memo_lookup(
+				    &share_dst->memo_b, daddr, &dst_b
+			    )) {
+				ip6_dst_slots[idx] = dst_a;
+				ip6_dst_slots_b[idx] = dst_b;
+				continue;
+			}
+
+			dst_hi[idx] = lpm8_lookup(&share_dst->hi, daddr);
+			dst_lo[idx] = lpm8_lookup(&share_dst->lo, daddr + 8);
+
+			const uint32_t *dst_hi_a =
+				ADDR_OF(&share_dst->remap_hi_a);
+			const uint32_t *dst_lo_a =
+				ADDR_OF(&share_dst->remap_lo_a);
+			const uint32_t *dst_hi_b =
+				ADDR_OF(&share_dst->remap_hi_b);
+			const uint32_t *dst_lo_b =
+				ADDR_OF(&share_dst->remap_lo_b);
+
+			ip6_dst_slots[idx] = value_table_get(
+				&ip6_dst_cls->comb,
+				dst_hi_a[dst_hi[idx]],
+				dst_lo_a[dst_lo[idx]]
+			);
+			ip6_dst_slots_b[idx] = value_table_get(
+				&ip6_port_dst_cls->comb,
+				dst_hi_b[dst_hi[idx]],
+				dst_lo_b[dst_lo[idx]]
+			);
+			net6_memo_insert(
+				&share_dst->memo_a, daddr, ip6_dst_slots[idx]
+			);
+			net6_memo_insert(
+				&share_dst->memo_b, daddr, ip6_dst_slots_b[idx]
+			);
+		}
+
 		uint32_t ip6_port_src_slots[count];
 		uint32_t ip6_port_dst_slots[count];
 
+		// The b-side verdict slots were computed (or memo-replayed)
+		// per address above; port packets reuse them through
+		// ip6_port_pos.
 		for (uint64_t idx = 0; idx < ip6_port_idx; ++idx) {
 			uint32_t pos = ip6_port_pos[idx];
-			ip6_port_src_slots[idx] = value_table_get(
-				&ip6_port_src_cls->comb,
-				src_hi_b[src_hi[pos]],
-				src_lo_b[src_lo[pos]]
-			);
-			ip6_port_dst_slots[idx] = value_table_get(
-				&ip6_port_dst_cls->comb,
-				dst_hi_b[dst_hi[pos]],
-				dst_lo_b[dst_lo[pos]]
-			);
+			ip6_port_src_slots[idx] = ip6_src_slots_b[pos];
+			ip6_port_dst_slots[idx] = ip6_dst_slots_b[pos];
 		}
 
 		acl_filter_query_ext(

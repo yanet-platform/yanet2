@@ -26,10 +26,17 @@ FILTER_ATTR_QUERY_FUNC(net6_dst)(
 
 		const uint8_t *daddr = (const uint8_t *)ipv6_hdr->dst_addr;
 
+		uint32_t verdict;
+		if (net6_memo_lookup(&c->memo, daddr, &verdict)) {
+			result[idx] = verdict;
+			continue;
+		}
+
 		uint32_t hi = lpm8_lookup(&c->hi, daddr);
 		uint32_t lo = lpm8_lookup(&c->lo, daddr + 8);
-
-		result[idx] = value_table_get(&c->comb, hi, lo);
+		verdict = value_table_get(&c->comb, hi, lo);
+		net6_memo_insert(&c->memo, daddr, verdict);
+		result[idx] = verdict;
 	}
 }
 
@@ -49,9 +56,16 @@ FILTER_ATTR_QUERY_FUNC(net6_src)(
 
 		const uint8_t *saddr = (const uint8_t *)ipv6_hdr->src_addr;
 
+		uint32_t verdict;
+		if (net6_memo_lookup(&c->memo, saddr, &verdict)) {
+			result[idx] = verdict;
+			continue;
+		}
+
 		uint32_t hi = lpm8_lookup(&c->hi, saddr);
 		uint32_t lo = lpm8_lookup(&c->lo, saddr + 8);
-
-		result[idx] = value_table_get(&c->comb, hi, lo);
+		verdict = value_table_get(&c->comb, hi, lo);
+		net6_memo_insert(&c->memo, saddr, verdict);
+		result[idx] = verdict;
 	}
 }

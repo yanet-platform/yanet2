@@ -744,6 +744,17 @@ init_net6(
 		goto error_merge;
 	}
 
+	// The memo sizes itself against the arena's free space, so a
+	// failure here is an ordinary out-of-memory.
+	if (net6_memo_init(&net6->memo, memory_context)) {
+		range_index_free(&ri_lo);
+		range_index_free(&ri_hi);
+		value_table_free(&net6->comb);
+		lpm_free(&net6->lo);
+		lpm_free(&net6->hi);
+		goto error_hi;
+	}
+
 	range_index_free(&ri_hi);
 	range_index_free(&ri_lo);
 
@@ -817,6 +828,7 @@ free_net6(void *data, struct memory_context *memory_context) {
 	lpm_free(&c->lo);
 	lpm_free(&c->hi);
 	value_table_free(&c->comb);
+	net6_memo_fini(&c->memo, memory_context);
 	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
 }
 
@@ -1049,7 +1061,18 @@ filter_net6_share_init(
 	SET_OFFSET_OF(&out->remap_lo_a, remap_lo_a);
 	SET_OFFSET_OF(&out->remap_lo_b, remap_lo_b);
 
+	if (net6_memo_init(&out->memo_a, mctx) ||
+	    net6_memo_init(&out->memo_b, mctx)) {
+		net6_memo_fini(&out->memo_a, mctx);
+		net6_memo_fini(&out->memo_b, mctx);
+		goto error_remap_lo;
+	}
+
 	return 0;
+
+error_remap_lo:
+	memory_bfree(mctx, remap_lo_b, sizeof(uint32_t) * out->lo_count);
+	memory_bfree(mctx, remap_lo_a, sizeof(uint32_t) * out->lo_count);
 
 error_remap_hi:
 	memory_bfree(mctx, remap_hi_b, sizeof(uint32_t) * out->hi_count);
@@ -1093,6 +1116,8 @@ filter_net6_share_dir_free(
 	// afterwards keeps the whole free path repeatable.
 	lpm_free(&dir->hi);
 	lpm_free(&dir->lo);
+	net6_memo_fini(&dir->memo_a, mctx);
+	net6_memo_fini(&dir->memo_b, mctx);
 
 	memset(dir, 0, sizeof(*dir));
 }

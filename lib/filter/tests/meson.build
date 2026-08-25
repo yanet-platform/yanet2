@@ -140,6 +140,18 @@ executable('bench_net6',
   link_language: 'c'
 )
 
+# Four-trie benchmark: fills the src/dst hi/lo lpm tries through the real
+# compiler from prefix files, then times whole-address lookups (plain walks
+# vs memoized verdict, scalar), with probes drawn randomly or replayed from
+# a classic pcap.
+executable('bench_net6_quad',
+  ['bench_net6_quad.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+
 # Allocation-failure injection sweep. The compiler sources are recompiled
 # with oom_shim.h force-included so every memory_balloc call on the compile
 # path can be forced to fail one at a time.
