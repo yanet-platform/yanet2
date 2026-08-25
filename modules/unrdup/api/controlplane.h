@@ -16,7 +16,10 @@ unrdup_module_config_new(
 );
 
 void
-unrdup_module_config_free(struct cp_module *cp_module);
+unrdup_module_config_destroy(struct cp_module *cp_module);
+
+int
+unrdup_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 void
 unrdup_module_config_data_fini(struct unrdup_module_config *config);

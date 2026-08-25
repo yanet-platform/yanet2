@@ -16,6 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	cforward "github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
@@ -71,7 +72,7 @@ func setupHarness(
 
 	module, err := cunrdup.NewModuleConfig(agent, configName)
 	require.NoError(t, err)
-	t.Cleanup(module.Free)
+	t.Cleanup(func() { _ = module.Free() })
 
 	for _, source := range sources {
 		require.NoError(t, module.SetSource(source))
@@ -110,7 +111,7 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 	sinkName := configName + "-sink"
 	sink, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllRules())
 	require.NoError(t, err)
-	t.Cleanup(sink.Free)
+	t.Cleanup(func() { _ = sink.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -130,11 +131,12 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 		Functions: []string{configName},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 func catchAllRules() []cforward.ForwardRule {
@@ -143,15 +145,15 @@ func catchAllRules() []cforward.ForwardRule {
 			Target:  deviceName,
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  deviceName,
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 		{
 			Target:  deviceName,

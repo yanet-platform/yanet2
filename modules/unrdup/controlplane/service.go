@@ -2,6 +2,7 @@ package unrdup
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/xnetip"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
@@ -42,7 +44,7 @@ func validateConfigName(name string) error {
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
-	Free()
+	Free() error
 }
 
 // Backend abstracts shared memory operations.
@@ -58,9 +60,39 @@ type Backend interface {
 type UnrdupService struct {
 	unrduppb.UnimplementedUnrdupServiceServer
 
-	mu      sync.RWMutex
-	backend Backend
-	configs map[string]*config
+	mu       sync.RWMutex
+	backend  Backend
+	configs  map[string]*config
+	deferred []ModuleHandle
+}
+
+// parkOrFree frees a superseded handle, keeping it for a later retry while a
+// live generation still references it. The caller must hold m.mu.
+func (m *UnrdupService) parkOrFree(handle ModuleHandle) {
+	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
+// ReclaimDeferred retries every parked handle, dropping the ones whose
+// generations have drained and keeping the rest parked.
+func (m *UnrdupService) ReclaimDeferred() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimDeferred()
+}
+
+// reclaimDeferred is ReclaimDeferred without the lock. The caller must hold
+// m.mu.
+func (m *UnrdupService) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }
 
 type config struct {
@@ -155,8 +187,10 @@ func (m *UnrdupService) UpdateConfig(
 		)
 	}
 
+	m.reclaimDeferred()
+
 	if previous, ok := m.configs[name]; ok && previous.Module != nil {
-		previous.Module.Free()
+		m.parkOrFree(previous.Module)
 	}
 
 	updated.Module = module

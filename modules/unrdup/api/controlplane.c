@@ -251,14 +251,7 @@ unrdup_module_config_new(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "unrdup",
-		    name,
-		    unrdup_module_config_free,
-		    err
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "unrdup", name, err)) {
 		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
@@ -271,7 +264,7 @@ unrdup_module_config_new(
 	unrdup_module_config_data_init(config);
 
 	if (unrdup_module_config_register_counters(&config->cp_module, err)) {
-		unrdup_module_config_free(&config->cp_module);
+		unrdup_module_config_destroy(&config->cp_module);
 		return NULL;
 	}
 
@@ -328,7 +321,7 @@ unrdup_module_config_register_counters(
 }
 
 void
-unrdup_module_config_free(struct cp_module *cp_module) {
+unrdup_module_config_destroy(struct cp_module *cp_module) {
 	struct unrdup_module_config *config =
 		container_of(cp_module, struct unrdup_module_config, cp_module);
 
@@ -343,6 +336,16 @@ unrdup_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct unrdup_module_config)
 	);
+}
+
+int
+unrdup_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	unrdup_module_config_destroy(cp_module);
+	return 0;
 }
 
 int

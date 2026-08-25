@@ -30,18 +30,18 @@ func (m *backend) UpdateModule(
 
 	for _, source := range sources {
 		if err := module.SetSource(source); err != nil {
-			module.Free()
+			_ = module.Free()
 			return nil, fmt.Errorf("failed to set source: %w", err)
 		}
 	}
 
 	if err := module.UpdateServices(services); err != nil {
-		module.Free()
+		_ = module.Free()
 		return nil, fmt.Errorf("failed to update services: %w", err)
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		module.Free()
+		_ = module.Free()
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 

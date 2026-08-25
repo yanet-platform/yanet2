@@ -25,8 +25,9 @@ type fakeHandle struct {
 	freed bool
 }
 
-func (m *fakeHandle) Free() {
+func (m *fakeHandle) Free() error {
 	m.freed = true
+	return nil
 }
 
 type fakeBackend struct {
