@@ -92,10 +92,8 @@ unrdup_outer_end(struct packet *packet, uint32_t *end) {
 		}
 
 		*end = offset + rte_be_to_cpu_16(outer->total_length);
-	} else if (
-		packet->network_header.type ==
-		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
-	) {
+	} else if (packet->network_header.type ==
+		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		if (offset + sizeof(struct rte_ipv6_hdr) > data_len) {
 			return -1;
 		}

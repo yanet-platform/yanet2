@@ -815,11 +815,12 @@ func TestRoute_OutputSelfLoopStopsAtTotalLimit(t *testing.T) {
 		Name:      "feeder",
 		Functions: []string{"loop"},
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	packet := buildRouteIPv4Packet(t, "10.0.0.5", 64)
 	packetSize := uint64(len(packet.Data()))

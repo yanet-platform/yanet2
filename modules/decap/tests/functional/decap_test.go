@@ -746,26 +746,26 @@ func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 		[]netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")},
 	)
 	require.NoError(t, err)
-	t.Cleanup(decapHandle.Free)
+	t.Cleanup(func() { _ = decapHandle.Free() })
 
 	forwardBackend := forward.NewBackend(agent)
 	loopHandle, err := forwardBackend.UpdateModule("nested-loop", []cforward.ForwardRule{{
 		Target:  "port0",
 		Mode:    cforward.ModeIn,
 		Counter: "loop",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.MustParseIPNet("4.5.6.0/24")},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("4.5.6.0/24")},
 	}})
 	require.NoError(t, err)
-	t.Cleanup(loopHandle.Free)
+	t.Cleanup(func() { _ = loopHandle.Free() })
 
 	sinkHandle, err := forwardBackend.UpdateModule("nested-sink", []cforward.ForwardRule{
 		{
 			Target:  "port0",
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  "port0",
@@ -775,7 +775,7 @@ func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: "nested",
@@ -796,11 +796,12 @@ func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 		Functions: []string{"nested"},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "nested-dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "nested", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "nested-dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	pkt := nestedIPv4Packet(t, 5)
 	expected := nestedIPv4Packet(t, 0)
@@ -868,7 +869,7 @@ func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 				[]netip.Prefix{netip.MustParsePrefix("4.5.6.0/24")},
 			)
 			require.NoError(t, err)
-			t.Cleanup(decapHandle.Free)
+			t.Cleanup(func() { _ = decapHandle.Free() })
 
 			forwardHandle, err := forward.NewBackend(agent).UpdateModule(
 				"loop",
@@ -876,12 +877,12 @@ func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 					Target:  "port0",
 					Mode:    cforward.ModeIn,
 					Counter: "loop",
-					Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-					Dst4s:   filter.IPNets{filter.MustParseIPNet("4.5.6.0/24")},
+					Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+					Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("4.5.6.0/24")},
 				}},
 			)
 			require.NoError(t, err)
-			t.Cleanup(forwardHandle.Free)
+			t.Cleanup(func() { _ = forwardHandle.Free() })
 
 			require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 				Name: "nested",
@@ -901,11 +902,12 @@ func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 				Functions: []string{"nested"},
 			}))
 			require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-			require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+			_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 				Name:   "port0",
 				Input:  []ffi.DevicePipelineConfig{{Name: "nested", Weight: 1}},
 				Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-			}}))
+			}})
+			require.NoError(t, err)
 
 			packet := nestedIPv4Packet(t, int(limit)+2)
 			result, err := h.HandlePackets(packet)
@@ -942,7 +944,7 @@ func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 		[]netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")},
 	)
 	require.NoError(t, err)
-	t.Cleanup(decapHandle.Free)
+	t.Cleanup(func() { _ = decapHandle.Free() })
 
 	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
 		"loop",
@@ -950,12 +952,12 @@ func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 			Target:  "port0",
 			Mode:    cforward.ModeIn,
 			Counter: "loop",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		}},
 	)
 	require.NoError(t, err)
-	t.Cleanup(forwardHandle.Free)
+	t.Cleanup(func() { _ = forwardHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: "miss",
@@ -975,11 +977,12 @@ func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 		Functions: []string{"miss"},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "miss", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	packet := nestedIPv4Packet(t, 1)
 	result, err := h.HandlePackets(packet)

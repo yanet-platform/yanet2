@@ -531,8 +531,8 @@ func Test_Forward_ModeInSelfTargetStopsAtTotalLimit(t *testing.T) {
 		Target:  "port0",
 		Mode:    cforward.ModeIn,
 		Counter: "self",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 	}
 
 	h, agent, backend := setupForwardHarnessWithLimit(t, []string{"port0"}, 4)
@@ -584,8 +584,8 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Target:  route.target,
 			Mode:    cforward.ModeIn,
 			Counter: route.name,
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		}})
 		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 			Name: route.name,
@@ -606,7 +606,7 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 		}))
 	}
 
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "loop0", Weight: 1}},
@@ -617,7 +617,8 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Input:  []ffi.DevicePipelineConfig{{Name: "loop1", Weight: 1}},
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_port1", Weight: 1}},
 		},
-	}))
+	})
+	require.NoError(t, err)
 
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
@@ -653,15 +654,15 @@ func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeIn,
 		Counter: "to_input",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 	}})
 	applyRules(t, backend, "to_output", []cforward.ForwardRule{{
 		Target:  "port0",
 		Mode:    cforward.ModeOut,
 		Counter: "to_output",
-		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-		Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 	}})
 
 	for _, name := range []string{"to_input", "to_output"} {
@@ -696,7 +697,7 @@ func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 		Name: "dummy_out_port1",
 	}))
 
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "to_input_in", Weight: 1}},
@@ -707,7 +708,8 @@ func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 			Input:  []ffi.DevicePipelineConfig{{Name: "to_output_in", Weight: 1}},
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_port1", Weight: 1}},
 		},
-	}))
+	})
+	require.NoError(t, err)
 
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
@@ -767,11 +769,12 @@ func Test_Forward_ModeOutSelfTargetStopsAtTotalLimit(t *testing.T) {
 		}))
 	}
 
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
@@ -817,8 +820,8 @@ func TestForward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Target:  route.target,
 			Mode:    cforward.ModeOut,
 			Counter: route.name,
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		}})
 		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 			Name: route.name,
@@ -838,7 +841,7 @@ func TestForward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Functions: []string{route.name},
 		}))
 	}
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
@@ -849,7 +852,8 @@ func TestForward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 			Output: []ffi.DevicePipelineConfig{{Name: "loop1", Weight: 1}},
 		},
-	}))
+	})
+	require.NoError(t, err)
 
 	result, err := h.HandlePackets(packet)
 	require.NoError(t, err)
