@@ -74,7 +74,8 @@ impl Display for pb::MacAddress {
 }
 
 impl Serialize for pb::MacAddress {
-    /// Serializes as the string `Display` renders.
+    /// Serializes as the bare EUI-48 string `Display` renders, such as
+    /// `"3a:ac:26:9b:5b:f9"`.
     ///
     /// A message with the upper 16 bits set renders as the literal
     /// `"invalid"`, since that is what `Display` already falls back to.
@@ -87,7 +88,7 @@ impl Serialize for pb::MacAddress {
 }
 
 impl<'de> Deserialize<'de> for pb::MacAddress {
-    /// Parses the string `Serialize` produces, via `FromStr`.
+    /// Parses the bare EUI-48 string `Serialize` produces, via `FromStr`.
     ///
     /// The literal `"invalid"` a set upper 16 bits serializes to is not
     /// itself a parseable MAC address, so it fails here with a

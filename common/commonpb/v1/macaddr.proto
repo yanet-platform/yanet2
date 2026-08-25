@@ -5,6 +5,8 @@ package common.commonpb.v1;
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
 // MACAddress represents a hardware address in EUI-48 format.
+//
+// Its JSON and string form is the EUI-48 text, such as "3a:ac:26:9b:5b:f9".
 message MACAddress {
   reserved 1;
   // Addr keeps MAC address bytes as a 64-bit unsigned integer in network

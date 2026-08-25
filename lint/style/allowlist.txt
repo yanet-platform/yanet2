@@ -192,7 +192,6 @@ testpkg:bindings/go/dataplane_ut/bench_test.go:dataplaneut:1  # legacy: migrate 
 testpkg:bindings/go/dataplane_ut/dataplane_ut_test.go:dataplaneut:1  # legacy: migrate to the external test package
 testpkg:common/commonpb/v1/ipaddr_test.go:commonpb:1  # legacy: migrate to the external test package
 testpkg:common/commonpb/v1/iprange_test.go:commonpb:1  # legacy: migrate to the external test package
-testpkg:common/commonpb/v1/macaddr_test.go:commonpb:1  # legacy: migrate to the external test package
 testpkg:common/commonpb/v1/metrics_test.go:commonpb:1  # legacy: migrate to the external test package
 testpkg:common/go/bitset/bitset_test.go:bitset:1  # legacy: migrate to the external test package
 testpkg:common/go/dataplane/packet_test.go:dataplane:1  # legacy: migrate to the external test package

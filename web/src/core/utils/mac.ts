@@ -103,3 +103,12 @@ export const parseMACToBytes = (mac: string): number[] | undefined => {
 export const isValidMAC = (mac: string): boolean => {
     return parseMACToBytes(mac) !== undefined;
 };
+
+/**
+ * Canonicalizes user MAC input into the colon-separated EUI-48 text the
+ * gateway accepts, or undefined when the input is malformed.
+ */
+export const normalizeMAC = (mac: string): string | undefined => {
+    const bytes = parseMACToBytes(mac);
+    return bytes ? formatMACFromBytes(bytes) : undefined;
+};

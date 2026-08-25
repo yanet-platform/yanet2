@@ -1,9 +1,8 @@
 import { createService, type CallOptions } from './client';
 
-// Neighbour types
-export interface MACAddress {
-    addr: string; // MAC address string in format "xx:xx:xx:xx:xx:xx"
-}
+// commonpb.MACAddress, serialized by the gateway as a bare EUI-48 string
+// such as "3a:ac:26:9b:5b:f9".
+export type MACAddress = string;
 
 export interface Neighbour {
     // commonpb.IPAddress, serialized by the gateway as a bare IP string.

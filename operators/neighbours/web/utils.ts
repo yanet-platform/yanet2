@@ -64,13 +64,13 @@ export const sortComparators: Record<SortableColumn, (a: Neighbour, b: Neighbour
         compareNullableStrings(a.next_hop || undefined, b.next_hop || undefined),
     link_addr: (a, b) =>
         compareMACAddressValues(
-            getMACAddressValue(a.link_addr?.addr),
-            getMACAddressValue(b.link_addr?.addr),
+            getMACAddressValue(a.link_addr),
+            getMACAddressValue(b.link_addr),
         ),
     hardware_addr: (a, b) =>
         compareMACAddressValues(
-            getMACAddressValue(a.hardware_addr?.addr),
-            getMACAddressValue(b.hardware_addr?.addr),
+            getMACAddressValue(a.hardware_addr),
+            getMACAddressValue(b.hardware_addr),
         ),
     device: (a, b) => compareNullableStrings(a.device, b.device),
     state: (a, b) => {

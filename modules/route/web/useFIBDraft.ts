@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
-import { warnConfigsUnknown } from '@yanet/core/utils';
+import { normalizeMAC, warnConfigsUnknown } from '@yanet/core/utils';
 import type { FIBEntry, FIBNexthop } from '@yanet/core/api/routes';
 import { ipRangeSpan, normalizeIPRange } from '@yanet/core/utils/netip';
 import type { IPRangeWire } from '@yanet/core/utils/netip';
@@ -27,8 +27,8 @@ export const flattenFIBEntries = (entries: FIBEntry[]): FIBRowItem[] => {
                     id: newRowId(),
                     from,
                     to,
-                    dst_mac: nh.dst_mac?.addr || '',
-                    src_mac: nh.src_mac?.addr || '',
+                    dst_mac: nh.dst_mac || '',
+                    src_mac: nh.src_mac || '',
                     device: nh.device || '',
                     counter: nh.counter || '',
                 });
@@ -83,8 +83,8 @@ export const rowsToFIBEntries = (rows: FIBRowItem[]): FIBEntry[] => {
         }
 
         const nh: FIBNexthop = {
-            dst_mac: { addr: row.dst_mac },
-            src_mac: { addr: row.src_mac },
+            dst_mac: normalizeMAC(row.dst_mac) ?? row.dst_mac,
+            src_mac: normalizeMAC(row.src_mac) ?? row.src_mac,
             device: row.device,
             counter: row.counter,
         };

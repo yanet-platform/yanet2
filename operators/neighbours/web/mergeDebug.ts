@@ -36,7 +36,7 @@ export const getMergeDebug = (
     tables: NeighbourTableInfo[],
 ): MergeDebugResult => {
     const winnerIp = winner.next_hop ?? '';
-    const winnerMac = winner.link_addr?.addr || '';
+    const winnerMac = winner.link_addr || '';
 
     const candidates: ShadowedCandidate[] = [];
 
@@ -50,7 +50,7 @@ export const getMergeDebug = (
             const entryIp = entry.next_hop ?? '';
             if (entryIp !== winnerIp) continue;
 
-            const entryMac = entry.link_addr?.addr || '';
+            const entryMac = entry.link_addr || '';
             const macDiffers =
                 entryMac !== winnerMac &&
                 entryMac !== ZERO_MAC &&

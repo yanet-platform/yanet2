@@ -4,8 +4,8 @@ import { flattenFIBEntries, rowsToFIBEntries } from './useFIBDraft';
 import type { FIBRowItem } from './types';
 
 const nexthop = (device: string, counter = ''): FIBNexthop[] => [{
-    dst_mac: { addr: 'aa:bb:cc:dd:ee:ff' },
-    src_mac: { addr: '11:22:33:44:55:66' },
+    dst_mac: 'aa:bb:cc:dd:ee:ff',
+    src_mac: '11:22:33:44:55:66',
     device,
     counter,
 }];
@@ -117,5 +117,19 @@ describe('rowsToFIBEntries commit ordering', () => {
         const merged = entries.find((e) => e.range?.start === '10.0.0.0' && e.range?.end === '10.0.0.255');
         expect(entries).toHaveLength(2);
         expect(merged?.nexthops?.map((nh) => nh.device)).toEqual(['eth0', 'eth2']);
+    });
+});
+
+describe('rowsToFIBEntries nexthop MACs', () => {
+    it('canonicalizes a dotted MAC from an unvalidated import into colon-separated octets', () => {
+        const entries = rowsToFIBEntries([rowFor('10.0.0.0', '10.0.0.255', { dst_mac: '3AAC.269B.5BF9' })]);
+
+        expect(entries[0].nexthops?.[0].dst_mac).toBe('3a:ac:26:9b:5b:f9');
+    });
+
+    it('passes a malformed MAC through unchanged so the gateway reports it', () => {
+        const entries = rowsToFIBEntries([rowFor('10.0.0.0', '10.0.0.255', { dst_mac: 'not-a-mac' })]);
+
+        expect(entries[0].nexthops?.[0].dst_mac).toBe('not-a-mac');
     });
 });

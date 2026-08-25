@@ -171,7 +171,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
             sortKey: 'link_addr',
             renderCell: (neighbour) => (
                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
-                    <span className="yn-cell-mono yn-cell-muted">{neighbour.link_addr?.addr || '-'}</span>
+                    <span className="yn-cell-mono yn-cell-muted">{neighbour.link_addr || '-'}</span>
                 </div>
             ),
         },
@@ -182,7 +182,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
             sortKey: 'hardware_addr',
             renderCell: (neighbour) => (
                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
-                    <span className="yn-cell-mono yn-cell-muted">{neighbour.hardware_addr?.addr || '-'}</span>
+                    <span className="yn-cell-mono yn-cell-muted">{neighbour.hardware_addr || '-'}</span>
                 </div>
             ),
         },

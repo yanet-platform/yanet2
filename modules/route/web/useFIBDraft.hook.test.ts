@@ -24,7 +24,7 @@ import { useFIBDraft } from './useFIBDraft';
 const fibResp = (device: string) => ({
     entries: [{
         range: { start: '10.0.0.0', end: '10.0.0.255' },
-        nexthops: [{ dst_mac: { addr: 'aa:bb:cc:dd:ee:ff' }, src_mac: { addr: '11:22:33:44:55:66' }, device, counter: '' }],
+        nexthops: [{ dst_mac: 'aa:bb:cc:dd:ee:ff', src_mac: '11:22:33:44:55:66', device, counter: '' }],
     }],
 });
 

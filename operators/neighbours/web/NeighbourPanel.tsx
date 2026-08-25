@@ -4,7 +4,7 @@ import { Select } from '@gravity-ui/uikit';
 import { useDrawerKeyboard } from '@yanet/core/hooks';
 import { DotBadge } from '@yanet/core/components/VirtualTable';
 import { stringToIPAddress } from '@yanet/core/utils/netip';
-import { formatUnixSeconds } from '@yanet/core/utils';
+import { formatUnixSeconds, normalizeMAC } from '@yanet/core/utils';
 import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { validateMAC, validateNextHop, resolveSubmitTable } from './utils';
 import { nudStateToName, getStateMeta } from './stateMeta';
@@ -138,8 +138,8 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
 
         if (neighbour) {
             setNextHop(neighbour.next_hop ?? '');
-            setLinkAddr(neighbour.link_addr?.addr || '');
-            setHardwareAddr(neighbour.hardware_addr?.addr || '');
+            setLinkAddr(neighbour.link_addr || '');
+            setHardwareAddr(neighbour.hardware_addr || '');
             setDevice(neighbour.device || '');
             setPriority(neighbour.priority?.toString() || '');
         } else {
@@ -187,8 +187,10 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                 device: device.trim() || undefined,
                 priority: priority.trim() ? Number(priority.trim()) : undefined,
             };
-            if (linkAddr.trim()) entry.link_addr = { addr: linkAddr.trim() };
-            if (hardwareAddr.trim()) entry.hardware_addr = { addr: hardwareAddr.trim() };
+            const linkAddrWire = normalizeMAC(linkAddr);
+            if (linkAddrWire) entry.link_addr = linkAddrWire;
+            const hardwareAddrWire = normalizeMAC(hardwareAddr);
+            if (hardwareAddrWire) entry.hardware_addr = hardwareAddrWire;
 
             await onSubmit(resolvedTable, entry);
             onClose();
@@ -215,8 +217,8 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
 
     const stateName = nudStateToName(neighbour?.state);
     const meta = getStateMeta(neighbour?.state);
-    const neighbourMac = neighbour?.link_addr?.addr || '—';
-    const interfaceMac = neighbour?.hardware_addr?.addr || '—';
+    const neighbourMac = neighbour?.link_addr || '—';
+    const interfaceMac = neighbour?.hardware_addr || '—';
     const source = neighbour?.source || '—';
     const isStatic = source === 'static';
     const priorityDisplay = neighbour?.priority != null ? String(neighbour.priority) : '—';
@@ -381,8 +383,8 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 </div>
 
                                                 {shadowed.map((cand) => {
-                                                    const candMac = cand.entry.link_addr?.addr || '—';
-                                                    const candImac = cand.entry.hardware_addr?.addr || '—';
+                                                    const candMac = cand.entry.link_addr || '—';
+                                                    const candImac = cand.entry.hardware_addr || '—';
                                                     const candUpdated = formatUnixSeconds(cand.entry.updated_at);
                                                     return (
                                                         <div key={cand.table} className="nb-cand">

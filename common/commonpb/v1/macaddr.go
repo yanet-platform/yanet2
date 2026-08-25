@@ -7,6 +7,10 @@ import (
 	"net"
 )
 
+// eui48TextLen is the length of the separated EUI-48 text form,
+// "xx:xx:xx:xx:xx:xx".
+const eui48TextLen = 17
+
 // NewMACAddressEUI48 creates a MACAddress from a 6-byte EUI-48
 // address.
 func NewMACAddressEUI48(addr [6]byte) *MACAddress {
@@ -26,41 +30,54 @@ func (m *MACAddress) EUI48() [6]byte {
 	return [6]byte(buf[2:])
 }
 
+// eui48Text renders the address as six colon-separated lowercase hex
+// octets, rejecting set upper 16 bits instead of truncating them.
+func (m *MACAddress) eui48Text() (string, error) {
+	if m.GetAddr()>>48 != 0 {
+		return "", fmt.Errorf("upper 16 bits are set for MAC address")
+	}
+
+	eui48 := m.EUI48()
+	return net.HardwareAddr(eui48[:]).String(), nil
+}
+
 // AsLogValue implements xgrpc.ProtoLogValue for compact gRPC logging.
 func (m *MACAddress) AsLogValue() any {
-	eui48 := m.EUI48()
-	return net.HardwareAddr(eui48[:]).String()
+	text, err := m.eui48Text()
+	if err != nil {
+		return "invalid"
+	}
+
+	return text
 }
 
-// macAddressJSON is the JSON wire shape shared by MarshalJSON and
-// UnmarshalJSON.
-type macAddressJSON struct {
-	Addr string `json:"addr"`
-}
-
-// MarshalJSON serializes addr as a human-readable MAC address string.
+// MarshalJSON serializes the address as a bare EUI-48 string such as
+// "3a:ac:26:9b:5b:f9".
 func (m *MACAddress) MarshalJSON() ([]byte, error) {
-	eui48 := m.EUI48()
-	return json.Marshal(macAddressJSON{Addr: net.HardwareAddr(eui48[:]).String()})
+	text, err := m.eui48Text()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(text)
 }
 
-// UnmarshalJSON accepts addr as a MAC address string in various EUI-48
-// formats.
+// UnmarshalJSON accepts a bare EUI-48 string: colon- or hyphen-separated
+// hex octets in either letter case. Other layouts are rejected.
 func (m *MACAddress) UnmarshalJSON(data []byte) error {
-	var raw macAddressJSON
+	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw.Addr == "" {
+	if raw == "" {
 		return fmt.Errorf("empty MAC address is not allowed")
 	}
+	if len(raw) != eui48TextLen {
+		return fmt.Errorf("invalid MAC address format: expected EUI-48 xx:xx:xx:xx:xx:xx, got %q", raw)
+	}
 
-	parsed, err := net.ParseMAC(raw.Addr)
+	parsed, err := net.ParseMAC(raw)
 	if err != nil {
 		return err
-	}
-	if len(parsed) != 6 {
-		return fmt.Errorf("invalid MAC address format: expected 6 octets, got %d", len(parsed))
 	}
 
 	*m = *NewMACAddressEUI48([6]byte(parsed))

@@ -49,8 +49,7 @@ func (m *IPv6Address) AsLogValue() any {
 	return m.ToAddr().String()
 }
 
-// MarshalJSON serializes the message as a bare IPv6 address string, the
-// same form the Rust side renders.
+// MarshalJSON serializes the message as a bare IPv6 address string.
 func (m *IPv6Address) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m.ToAddr().String())
 }

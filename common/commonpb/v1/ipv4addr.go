@@ -43,10 +43,6 @@ func (m *IPv4Address) AsLogValue() any {
 
 // MarshalJSON serializes the message as a bare dotted-quad address
 // string.
-//
-// Unlike the mixed message's object form, there is no wrapping: the
-// value is the same bare string the Rust side renders, so both
-// languages share one JSON encoding.
 func (m *IPv4Address) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m.ToAddr().String())
 }

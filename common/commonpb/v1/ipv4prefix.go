@@ -81,8 +81,7 @@ func (m *IPv4Prefix) AsLogValue() any {
 	return prefix.String()
 }
 
-// MarshalJSON serializes the network as a bare CIDR string, the same
-// form the Rust side renders.
+// MarshalJSON serializes the network as a bare CIDR string.
 func (m *IPv4Prefix) MarshalJSON() ([]byte, error) {
 	prefix, err := m.ToPrefix()
 	if err != nil {
