@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -89,9 +90,11 @@ func TestCheckForExistingVMRun_EmptyOutputIsOK(t *testing.T) {
 		Name: "main",
 		log:  zap.NewNop().Sugar(),
 	}
-	err := checkForExistingVMRun(q, "yanet-test-vm-suite", func(string) string {
-		return ""
-	})
+	err := checkForExistingVMRun(
+		q, "yanet-test-vm-suite", func(string) (string, error) {
+			return "", nil
+		},
+	)
 	require.NoError(t, err, "an empty pgrep result must mean no conflict")
 }
 
@@ -103,8 +106,8 @@ func TestCheckForExistingVMRun_PopulatedOutputIsError(t *testing.T) {
 	err := checkForExistingVMRun(
 		q,
 		"yanet-test-vm-suite",
-		func(string) string {
-			return "12345 qemu-system-x86_64 -name yanet-test-vm-suite"
+		func(string) (string, error) {
+			return "12345 qemu-system-x86_64 -name yanet-test-vm-suite", nil
 		},
 	)
 	require.Error(t, err, "non-empty pgrep result must surface as an error")
@@ -112,5 +115,35 @@ func TestCheckForExistingVMRun_PopulatedOutputIsError(t *testing.T) {
 		t,
 		strings.Contains(err.Error(), "yanet-test-vm-suite"),
 		"error must mention the conflicting VM name",
+	)
+}
+
+// TestCheckForExistingVMRun_RunnerErrorIsPropagated verifies that a failing
+// pgrep (missing binary on the host, unexpected exit status) surfaces as an
+// error instead of silently passing the duplicate-VM check.
+func TestCheckForExistingVMRun_RunnerErrorIsPropagated(t *testing.T) {
+	q := &QEMUManager{
+		Name: "main",
+		log:  zap.NewNop().Sugar(),
+	}
+	err := checkForExistingVMRun(
+		q,
+		"yanet-test-vm-suite",
+		func(string) (string, error) {
+			return "", errors.New("exec: pgrep: executable file not found")
+		},
+	)
+	require.Error(
+		t, err, "a pgrep failure must not be treated as no conflict",
+	)
+	require.True(
+		t,
+		strings.Contains(err.Error(), "cannot check for existing VM"),
+		"error must state which check failed",
+	)
+	require.True(
+		t,
+		strings.Contains(err.Error(), "executable file not found"),
+		"underlying pgrep error must be wrapped, not swallowed",
 	)
 }

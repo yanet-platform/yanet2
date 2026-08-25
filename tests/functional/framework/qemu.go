@@ -3,6 +3,7 @@ package framework
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1270,15 +1271,24 @@ func regexpMatch(pattern, s string) (bool, error) {
 }
 
 // pgrepRunner abstracts exec.Command so unit tests can substitute a fake.
-type pgrepRunner func(pattern string) string
+// It mirrors pgrep's contract: ("", nil) when nothing matches, a populated
+// stdout on matches, and a non-nil error when pgrep itself cannot run.
+type pgrepRunner func(pattern string) (string, error)
 
-// realPgrepRunner is the production runner: shell out to pgrep -f.
-func realPgrepRunner(pattern string) string {
+// realPgrepRunner is the production runner: shell out to pgrep -f. Exit
+// status 1 is pgrep's "no process matched" and is not an error; anything
+// else (missing binary, exit 2, signal) must surface to the caller instead
+// of silently passing the duplicate-VM check.
+func realPgrepRunner(pattern string) (string, error) {
 	out, err := exec.Command("pgrep", "-f", pattern).Output()
-	if err != nil {
-		return ""
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", nil
 	}
-	return string(out)
+	if err != nil {
+		return "", fmt.Errorf("pgrep -f %q: %w", pattern, err)
+	}
+	return string(out), nil
 }
 
 // checkForExistingVM checks if there's already a running QEMU process with the given VM name.
@@ -1289,13 +1299,20 @@ func (q *QEMUManager) checkForExistingVM(vmName string) error {
 
 // checkForExistingVMRun is the testable core. When pgrep finds no matches it
 // returns an empty string and we treat that as success. Any non-empty result
-// is an existing QEMU with our name and we return a duplicate-name error.
+// is an existing QEMU with our name and we return a duplicate-name error. A
+// runner error means the check itself failed and is propagated so a host
+// without pgrep fails loudly instead of racing a second VM into existence.
 func checkForExistingVMRun(
 	q *QEMUManager,
 	vmName string,
 	run pgrepRunner,
 ) error {
-	output := run(existingVMPattern(vmName))
+	output, err := run(existingVMPattern(vmName))
+	if err != nil {
+		return fmt.Errorf(
+			"cannot check for existing VM '%s': %w", vmName, err,
+		)
+	}
 	if len(output) == 0 {
 		return nil
 	}

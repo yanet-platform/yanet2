@@ -739,7 +739,7 @@ func TestDecap_NonIPPacket_UnchangedOutput(t *testing.T) {
 }
 
 // verifies that five nested tunnel removals can redirect to the final packet.
-func Test_Decap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
+func TestDecap_NestedIPIPFiveLayersReachOutput(t *testing.T) {
 	h, agent, decapBackend := setupDecapHarness(t)
 	decapHandle, err := decapBackend.UpdateModule(
 		"nested",
@@ -937,7 +937,7 @@ func TestDecap_NestedIPIPStopsAtTotalLimit(t *testing.T) {
 }
 
 // verifies that a no-op decap does not add packet-lineage redirect credits.
-func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
+func TestDecap_MissDoesNotRenewTotalLimit(t *testing.T) {
 	h, agent, decapBackend := setupDecapHarnessWithLimit(t, 4)
 	decapHandle, err := decapBackend.UpdateModule(
 		"miss",

@@ -522,7 +522,7 @@ func TestForward_ModeIn_IPv4(t *testing.T) {
 }
 
 // verifies that a recurring ingress redirect spends its total limit.
-func Test_Forward_ModeInSelfTargetStopsAtTotalLimit(t *testing.T) {
+func TestForward_ModeInSelfTargetStopsAtTotalLimit(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
@@ -561,7 +561,7 @@ func Test_Forward_ModeInSelfTargetStopsAtTotalLimit(t *testing.T) {
 }
 
 // verifies that an input recirculation drop is counted on the target device.
-func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
+func TestForward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
@@ -642,7 +642,7 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 }
 
 // verifies that input and output redirects share one packet-lineage limit.
-func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
+func TestForward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
@@ -740,7 +740,7 @@ func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 }
 
 // verifies that a recurring egress redirect spends its total limit.
-func Test_Forward_ModeOutSelfTargetStopsAtTotalLimit(t *testing.T) {
+func TestForward_ModeOutSelfTargetStopsAtTotalLimit(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	pktSize := uint64(len(pkt.Data()))
