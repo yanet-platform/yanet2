@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/json"
@@ -40,6 +41,31 @@ const (
 	supervisorShutdownTimeout = 2 * time.Minute
 	maxRequestSize            = 1 << 20 // 1 MiB
 )
+
+// sunPathLimit is the platform-specific maximum length of the sockaddr_un
+// path field (104 on darwin, 108 on linux). Subtract slack for the prefix
+// `/tmp/yanet2-lab-<uid>/<root-digest>/` plus the trailing
+// `/supervisor.sock` so the listener never fails with an opaque bind error.
+const sunPathLimit = 104
+const sunPathSlack = len("/supervisor.sock") + 1
+
+// sshKeygenTimeout bounds the time we wait for ssh-keygen to produce a
+// fresh ed25519 keypair. ssh-keygen with -N "" should not block past a
+// second on any healthy host; the cap defends against a wedged binary
+// blocking up/serve indefinitely.
+const sshKeygenTimeout = 30 * time.Second
+
+// maxSessionNameSlack covers the fixed portion of the runtime path that
+// the session name sits inside: "/tmp/yanet2-lab-" (15) + uid (up to 10
+// digits) + "/" + 12-char root digest + "/" = 39, rounded to 40 to leave
+// a one-byte headroom under the sun_path cap.
+const maxSessionNameSlack = 40
+
+// maxSessionNameLen caps the session name length so the supervisor.sock
+// path fits in sun_path regardless of the project root's absolute length.
+// It is re-checked in validSessionName so any caller — including those
+// that bypass ensureSessionDirectory — gets the rejection up front.
+const maxSessionNameLen = sunPathLimit - sunPathSlack - maxSessionNameSlack
 
 const supervisorProtocolVersion = 2
 
@@ -1148,9 +1174,15 @@ func ensureSSHKey(dir string) (string, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	command := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", path)
-	if output, err := command.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("generate lab SSH key: %w: %s", err, output)
+	command, err := sshKeygenCommand(path)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sshKeygenTimeout)
+	defer cancel()
+	command = exec.CommandContext(ctx, command.Path, command.Args[1:]...)
+	if output, runErr := command.CombinedOutput(); runErr != nil {
+		return "", fmt.Errorf("generate lab SSH key: %w: %s", runErr, output)
 	}
 	if err := validatePrivateFile(path, 0o600); err != nil {
 		return "", err
@@ -1313,9 +1345,16 @@ func sessionPathsForRoot(root, name string) (string, string, error) {
 	}
 	// Use /tmp directly: macOS TMPDIR paths are too long for Unix-domain
 	// sockets once a session name is appended.
-	digest := sha256.Sum256([]byte(root))
-	base := filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()), fmt.Sprintf("%x", digest[:6]), name)
+	base := filepath.Join("/tmp", fmt.Sprintf("yanet2-lab-%d", os.Getuid()), rootDigest(root), name)
 	return base, filepath.Join(base, "supervisor.sock"), nil
+}
+
+// rootDigest returns the first 12 hex characters of sha256 over the
+// symlink-resolved project root. It is the per-root namespace key in
+// the runtime path layout /tmp/yanet2-lab-<uid>/<root-digest>/<name>/.
+func rootDigest(resolvedRoot string) string {
+	sum := sha256.Sum256([]byte(resolvedRoot))
+	return fmt.Sprintf("%x", sum[:6])
 }
 
 func ensureSessionDirectory(dir string) error {
@@ -1434,7 +1473,31 @@ func openPrivateFile(path string, flags int) (*os.File, error) {
 var sessionNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 func validSessionName(name string) bool {
-	return name != "." && name != ".." && sessionNamePattern.MatchString(name)
+	if name == "." || name == ".." {
+		return false
+	}
+	if len(name) > maxSessionNameLen {
+		return false
+	}
+	return sessionNamePattern.MatchString(name)
+}
+
+// lookupKeygen resolves the ssh-keygen binary. Tests override it to
+// exercise the not-in-PATH branch deterministically without depending
+// on the host's actual PATH.
+var lookupKeygen = func() (string, error) {
+	return exec.LookPath("ssh-keygen")
+}
+
+// sshKeygenCommand constructs the ssh-keygen command for the runtime's
+// private key. It surfaces a clean error when ssh-keygen is missing
+// rather than the raw exec.LookPath / exit-status strings.
+func sshKeygenCommand(privatePath string) (*exec.Cmd, error) {
+	binary, err := lookupKeygen()
+	if err != nil {
+		return nil, errors.New("ssh-keygen not found in PATH; install OpenSSH client tools")
+	}
+	return exec.Command(binary, "-q", "-t", "ed25519", "-N", "", "-f", privatePath), nil
 }
 
 type projectRootState struct {

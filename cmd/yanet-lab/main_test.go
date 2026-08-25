@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"debug/elf"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -30,6 +32,41 @@ func TestValidSessionName(t *testing.T) {
 		if validSessionName(name) {
 			t.Errorf("validSessionName(%q) = true", name)
 		}
+	}
+	// Names that would push supervisor.sock past sun_path on darwin.
+	longName := strings.Repeat("a", maxSessionNameLen+1)
+	if validSessionName(longName) {
+		t.Errorf("validSessionName(%d-char) = true, want false for sun_path", len(longName))
+	}
+}
+
+func TestRootDigest(t *testing.T) {
+	// First 12 hex chars of sha256 are an AC contract: the runtime
+	// directory namespace is keyed by this prefix.
+	const root = "/yanet2-fixture-root"
+	got := rootDigest(root)
+	sum := sha256.Sum256([]byte(root))
+	want := fmt.Sprintf("%x", sum[:6])
+	if got != want {
+		t.Errorf("rootDigest(%q) = %q, want sha256 prefix %q", root, got, want)
+	}
+	if len(got) != 12 {
+		t.Errorf("rootDigest length = %d, want 12", len(got))
+	}
+}
+
+func TestSSHKeygenCleanErrorWhenMissing(t *testing.T) {
+	prev := lookupKeygen
+	t.Cleanup(func() { lookupKeygen = prev })
+	lookupKeygen = func() (string, error) {
+		return "", errors.New("ssh-keygen: not in PATH")
+	}
+	_, err := ensureSSHKey(t.TempDir())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ssh-keygen not found") {
+		t.Errorf("error %q does not mention missing ssh-keygen", err.Error())
 	}
 }
 
