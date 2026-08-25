@@ -24,7 +24,7 @@ func FromRIBRoute(route *rib.Route, isBest bool) (*Route, error) {
 		peer = commonpb.NewIPAddressFromAddr(route.Peer)
 	}
 
-	prefix, err := commonpb.NewContiguousIPNetworkFromPrefix(route.Prefix)
+	prefix, err := commonpb.NewIPPrefixFromPrefix(route.Prefix)
 	if err != nil {
 		return nil, fmt.Errorf("invalid prefix %q: %w", route.Prefix, err)
 	}

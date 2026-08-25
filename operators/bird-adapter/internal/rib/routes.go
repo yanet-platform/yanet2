@@ -124,7 +124,7 @@ func ToPBRoute(route *Route) (*routepb.Route, error) {
 		originAS = route.ASPath[len(route.ASPath)-1]
 	}
 
-	prefix, err := commonpb.NewContiguousIPNetworkFromPrefix(route.Prefix)
+	prefix, err := commonpb.NewIPPrefixFromPrefix(route.Prefix)
 	if err != nil {
 		return nil, fmt.Errorf("invalid prefix %q: %w", route.Prefix, err)
 	}
@@ -168,7 +168,7 @@ func ToPBMPLSRoute(route *Route, source netip.Addr) (*routemplspb.Rule, error) {
 		label = route.MplsLabelStack[0]
 	}
 
-	prefix, err := commonpb.NewContiguousIPNetworkFromPrefix(route.Prefix)
+	prefix, err := commonpb.NewIPPrefixFromPrefix(route.Prefix)
 	if err != nil {
 		return nil, fmt.Errorf("invalid prefix %q: %w", route.Prefix, err)
 	}

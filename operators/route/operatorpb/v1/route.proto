@@ -5,7 +5,7 @@ package operators.route.operatorpb.v1;
 option go_package = "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1;operatorpb";
 
 import "common/commonpb/v1/ipaddr.proto";
-import "common/commonpb/v1/contiguousnetwork.proto";
+import "common/commonpb/v1/ipprefix.proto";
 
 // RouteService is the operator-owned routing surface.
 service RouteService {
@@ -60,7 +60,7 @@ message LookupRouteRequest {
 // LookupRouteResponse contains the matching routes for the IP address.
 message LookupRouteResponse {
   // Prefix is the prefix that matched with the IP address.
-  common.commonpb.v1.ContiguousIPNetwork prefix = 1;
+  common.commonpb.v1.IPPrefix prefix = 1;
   // Matching routes for the IP address, sorted with best path first.
   repeated Route routes = 2;
 }
@@ -70,7 +70,7 @@ message InsertRouteRequest {
   string name = 1;
   // The destination prefix of the route. Host bits below the prefix
   // length are masked off by the server.
-  common.commonpb.v1.ContiguousIPNetwork prefix = 2;
+  common.commonpb.v1.IPPrefix prefix = 2;
   // NexthopAddrs is the list of nexthop IP addresses.
   repeated common.commonpb.v1.IPAddress nexthop_addrs = 3;
 
@@ -90,7 +90,7 @@ message DeleteRouteRequest {
   string name = 1;
   // The destination prefix of the route. Host bits below the prefix
   // length are masked off by the server.
-  common.commonpb.v1.ContiguousIPNetwork prefix = 2;
+  common.commonpb.v1.IPPrefix prefix = 2;
   // NexthopAddrs is the list of nexthop IP addresses.
   repeated common.commonpb.v1.IPAddress nexthop_addrs = 3;
 
@@ -127,7 +127,7 @@ message ListConfigsResponse { repeated string configs = 1; }
 
 // Route represents a routing table entry.
 message Route {
-  common.commonpb.v1.ContiguousIPNetwork prefix = 1;
+  common.commonpb.v1.IPPrefix prefix = 1;
   common.commonpb.v1.IPAddress next_hop = 2;
   common.commonpb.v1.IPAddress peer = 3;
   uint64 route_distinguisher = 4;

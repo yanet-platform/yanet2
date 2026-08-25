@@ -16,7 +16,7 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
 };
 use colored::Colorize;
-use commonpb::pb::ContiguousIpNetwork;
+use commonpb::pb::IpPrefix;
 use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -324,7 +324,7 @@ impl RouteService {
 
         let request = InsertRouteRequest {
             name: cmd.name.clone(),
-            prefix: Some(ContiguousIpNetwork::from(cmd.prefix)),
+            prefix: Some(IpPrefix::from(cmd.prefix)),
             nexthop_addrs,
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
@@ -362,7 +362,7 @@ impl RouteService {
 
         let request = DeleteRouteRequest {
             name: cmd.name.clone(),
-            prefix: Some(ContiguousIpNetwork::from(cmd.prefix)),
+            prefix: Some(IpPrefix::from(cmd.prefix)),
             nexthop_addrs,
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
@@ -629,7 +629,7 @@ mod test {
     use super::*;
 
     /// `prefix`/`next_hop`/`peer` need no `serialize_with` override: plain
-    /// `Option<commonpb::pb::ContiguousIpNetwork>` and
+    /// `Option<commonpb::pb::IpPrefix>` and
     /// `Option<commonpb::pb::IpAddress>` fields already serialize as the
     /// CIDR or plain address string, or `null` when absent, through those
     /// types' own `Serialize` impls. This pins that output byte-for-byte,
@@ -761,12 +761,12 @@ mod test {
     fn route_entry_from_malformed_prefix_does_not_panic() {
         let malformed = [
             None,
-            Some(ContiguousIpNetwork { addr: None, prefix_len: 8 }),
-            Some(ContiguousIpNetwork {
+            Some(IpPrefix { addr: None, prefix_len: 8 }),
+            Some(IpPrefix {
                 addr: Some(commonpb::pb::IpAddress { addr: vec![10, 0, 0] }),
                 prefix_len: 8,
             }),
-            Some(ContiguousIpNetwork {
+            Some(IpPrefix {
                 addr: Some(commonpb::pb::IpAddress { addr: vec![10, 0, 0, 0] }),
                 prefix_len: 33,
             }),
@@ -797,7 +797,7 @@ mod test {
     fn route_entry_malformed_prefixes_stay_distinct() {
         let entry_of = |addr: Vec<u8>| {
             RouteEntry::from(operatorpb::Route {
-                prefix: Some(ContiguousIpNetwork {
+                prefix: Some(IpPrefix {
                     addr: Some(commonpb::pb::IpAddress { addr }),
                     prefix_len: 8,
                 }),

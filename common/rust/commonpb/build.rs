@@ -3,7 +3,7 @@ use core::error::Error;
 /// Messages that gain the ordinary `Serialize`/`Deserialize` derive.
 ///
 /// The address messages, `MACAddress`, and the network messages
-/// (`ContiguousIPNetwork`, `IPv4Prefix`, `IPv6Prefix`, `IPv4Network`,
+/// (`IPPrefix`, `IPv4Prefix`, `IPv6Prefix`, `IPv4Network`,
 /// `IPv6Network`) are deliberately absent:
 /// `src/lib.rs` hand-writes their `Serialize`/`Deserialize` impls to go
 /// straight to and from a plain string, and prost-build's attribute paths are
@@ -36,7 +36,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6addr.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/iprange.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipnetwork.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/contiguousnetwork.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/ipprefix.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4prefix.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4network.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6network.proto");
@@ -68,7 +68,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "common/commonpb/v1/ipv6addr.proto",
             "common/commonpb/v1/iprange.proto",
             "common/commonpb/v1/ipnetwork.proto",
-            "common/commonpb/v1/contiguousnetwork.proto",
+            "common/commonpb/v1/ipprefix.proto",
             "common/commonpb/v1/ipv4prefix.proto",
             "common/commonpb/v1/ipv4network.proto",
             "common/commonpb/v1/ipv6network.proto",

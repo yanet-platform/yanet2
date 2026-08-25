@@ -750,8 +750,8 @@ export type IPAddressWire = {
     addr?: string | number[] | Uint8Array;
 };
 
-// Wire-format shape of commonpb.ContiguousIPNetwork from the gRPC-JSON gateway: {network: "10.0.0.0/8"}.
-export type ContiguousIPNetwork = {
+// Wire-format shape of commonpb.IPPrefix from the gRPC-JSON gateway: {network: "10.0.0.0/8"}.
+export type IPPrefix = {
     network?: string;
 };
 

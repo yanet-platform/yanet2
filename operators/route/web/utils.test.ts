@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, prefixIPFamily, groupByPrefix, filterByFamily, bestPathReason, getRouteId, routePrefix, toWirePrefix } from './utils';
-import { stringToIPAddress, type ContiguousIPNetwork } from '@yanet/core/utils/netip';
+import { stringToIPAddress, type IPPrefix } from '@yanet/core/utils/netip';
 import type { Route } from '@yanet/core/api/routes';
 
 /** Builds the wire prefix message a server response carries. */
-const net = (cidr: string): ContiguousIPNetwork => ({ network: cidr });
+const net = (cidr: string): IPPrefix => ({ network: cidr });
 
 describe('routePrefix', () => {
     it('reads the CIDR string out of the wire message', () => {

@@ -8,51 +8,41 @@ import (
 	"github.com/yanet-platform/xnetip"
 )
 
-// NewContiguousIPNetworkFromContiguous creates a ContiguousIPNetwork from
+// NewIPPrefixFromContiguous creates a IPPrefix from
 // an xnetip CIDR block.
 //
 // The conversion is total: the block is masked by its own invariant, so
 // the message carries the base address in the block's family width (four
 // bytes for IPv4, sixteen for IPv6) and the prefix length verbatim. The
 // inverse of ToContiguous.
-func NewContiguousIPNetworkFromContiguous(net xnetip.Contiguous[xnetip.Network]) *ContiguousIPNetwork {
-	return &ContiguousIPNetwork{
+func NewIPPrefixFromContiguous(net xnetip.Contiguous[xnetip.Network]) *IPPrefix {
+	return &IPPrefix{
 		Addr:      NewIPAddressFromAddr(net.Network().Addr()),
 		PrefixLen: uint32(net.PrefixLen()),
 	}
 }
 
-// NewContiguousIPNetworkFromPrefix creates a ContiguousIPNetwork from a
+// NewIPPrefixFromPrefix creates a IPPrefix from a
 // netip.Prefix value, masking off any host bits.
 //
 // Returns an error if prefix is not valid.
-func NewContiguousIPNetworkFromPrefix(prefix netip.Prefix) (*ContiguousIPNetwork, error) {
+func NewIPPrefixFromPrefix(prefix netip.Prefix) (*IPPrefix, error) {
 	net, ok := xnetip.ContiguousFromPrefix(prefix)
 	if !ok {
 		return nil, fmt.Errorf("invalid prefix")
 	}
-	return NewContiguousIPNetworkFromContiguous(net), nil
+	return NewIPPrefixFromContiguous(net), nil
 }
 
-// ParseContiguousIPNetwork parses s as a CIDR prefix, masking off any host
-// bits.
-func ParseContiguousIPNetwork(s string) (*ContiguousIPNetwork, error) {
-	prefix, err := netip.ParsePrefix(s)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse IP network: %w", err)
-	}
-	return NewContiguousIPNetworkFromPrefix(prefix)
-}
-
-// NetworksFromPrefixes creates ContiguousIPNetwork messages from netip.Prefix
+// NetworksFromPrefixes creates IPPrefix messages from netip.Prefix
 // values, masking off any host bits.
 //
 // Returns an error if any prefix is not valid.
-func NetworksFromPrefixes(prefixes []netip.Prefix) ([]*ContiguousIPNetwork, error) {
-	return networksFromPrefixes(prefixes, NewContiguousIPNetworkFromPrefix)
+func NetworksFromPrefixes(prefixes []netip.Prefix) ([]*IPPrefix, error) {
+	return networksFromPrefixes(prefixes, NewIPPrefixFromPrefix)
 }
 
-// ToContiguous converts the ContiguousIPNetwork to an xnetip CIDR block.
+// ToContiguous converts the IPPrefix to an xnetip CIDR block.
 //
 // Returns an error if addr is missing or malformed, or if prefix_len
 // exceeds the address family's bit length; the latter wraps
@@ -60,8 +50,8 @@ func NetworksFromPrefixes(prefixes []netip.Prefix) ([]*ContiguousIPNetwork, erro
 // leak out even if the message was constructed by hand, and the family
 // follows the address width: a sixteen-byte IPv4-mapped address stays
 // IPv6, consistently with IPAddress. The inverse of
-// NewContiguousIPNetworkFromContiguous.
-func (m *ContiguousIPNetwork) ToContiguous() (xnetip.Contiguous[xnetip.Network], error) {
+// NewIPPrefixFromContiguous.
+func (m *IPPrefix) ToContiguous() (xnetip.Contiguous[xnetip.Network], error) {
 	addr, err := m.GetAddr().ToAddr()
 	if err != nil {
 		return xnetip.Contiguous[xnetip.Network]{}, fmt.Errorf("failed to parse network address: %w", err)
@@ -73,13 +63,13 @@ func (m *ContiguousIPNetwork) ToContiguous() (xnetip.Contiguous[xnetip.Network],
 	return net, nil
 }
 
-// ToPrefix converts the ContiguousIPNetwork back to a netip.Prefix value.
+// ToPrefix converts the IPPrefix back to a netip.Prefix value.
 //
 // Returns an error if addr is malformed or if prefix_len exceeds the
 // address family's bit length, exactly when ToContiguous does. The returned
 // prefix is masked, so host bits never leak out even if the message was
 // constructed by hand.
-func (m *ContiguousIPNetwork) ToPrefix() (netip.Prefix, error) {
+func (m *IPPrefix) ToPrefix() (netip.Prefix, error) {
 	net, err := m.ToContiguous()
 	if err != nil {
 		return netip.Prefix{}, err
@@ -88,7 +78,7 @@ func (m *ContiguousIPNetwork) ToPrefix() (netip.Prefix, error) {
 }
 
 // AsLogValue implements xgrpc.ProtoLogValue for compact gRPC logging.
-func (m *ContiguousIPNetwork) AsLogValue() any {
+func (m *IPPrefix) AsLogValue() any {
 	prefix, err := m.ToPrefix()
 	if err != nil {
 		return "invalid"
@@ -97,26 +87,26 @@ func (m *ContiguousIPNetwork) AsLogValue() any {
 	return prefix.String()
 }
 
-// contiguousIPNetworkJSON is the JSON wire shape shared by MarshalJSON and
+// ipPrefixJSON is the JSON wire shape shared by MarshalJSON and
 // UnmarshalJSON.
-type contiguousIPNetworkJSON struct {
+type ipPrefixJSON struct {
 	// Network is the CIDR string.
 	Network string `json:"network"`
 }
 
 // MarshalJSON serializes the network as a human-readable CIDR string.
-func (m *ContiguousIPNetwork) MarshalJSON() ([]byte, error) {
+func (m *IPPrefix) MarshalJSON() ([]byte, error) {
 	prefix, err := m.ToPrefix()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(contiguousIPNetworkJSON{Network: prefix.String()})
+	return json.Marshal(ipPrefixJSON{Network: prefix.String()})
 }
 
 // UnmarshalJSON accepts the network as a CIDR string under the "network"
 // key.
-func (m *ContiguousIPNetwork) UnmarshalJSON(data []byte) error {
-	var raw contiguousIPNetworkJSON
+func (m *IPPrefix) UnmarshalJSON(data []byte) error {
+	var raw ipPrefixJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -124,7 +114,11 @@ func (m *ContiguousIPNetwork) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("empty IP network is not allowed")
 	}
 
-	parsed, err := ParseContiguousIPNetwork(raw.Network)
+	prefix, err := netip.ParsePrefix(raw.Network)
+	if err != nil {
+		return fmt.Errorf("failed to parse IP network: %w", err)
+	}
+	parsed, err := NewIPPrefixFromPrefix(prefix)
 	if err != nil {
 		return err
 	}

@@ -241,7 +241,7 @@ func (m *RouteMPLSService) ShowConfig(
 	rules := make([]*routemplspb.Rule, 0)
 	for _, prefixes := range config.Prefixes {
 		for prefix, nexthops := range prefixes {
-			network, err := commonpb.NewContiguousIPNetworkFromPrefix(prefix)
+			network, err := commonpb.NewIPPrefixFromPrefix(prefix)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to encode prefix %q: %v", prefix, err)
 			}

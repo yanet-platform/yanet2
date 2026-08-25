@@ -8,7 +8,7 @@ import "common/commonpb/v1/ipv4addr.proto";
 
 // IPv4Prefix represents an IPv4 CIDR prefix.
 //
-// Unlike ContiguousIPNetwork, the family is fixed by the type: the
+// Unlike IPPrefix, the family is fixed by the type: the
 // address cannot carry IPv6, and an absent addr is the only malformed
 // state.
 message IPv4Prefix {

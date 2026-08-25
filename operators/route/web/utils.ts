@@ -1,6 +1,6 @@
 import type { Route } from '@yanet/core/api/routes';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '@yanet/core/utils';
-import { ipAddressToString, type ContiguousIPNetwork, type IPAddressWire } from '@yanet/core/utils/netip';
+import { ipAddressToString, type IPPrefix, type IPAddressWire } from '@yanet/core/utils/netip';
 import type { RouteSortableColumn, IPFamily } from './types';
 
 /** Reads a route's destination prefix as a CIDR string.
@@ -10,7 +10,7 @@ import type { RouteSortableColumn, IPFamily } from './types';
 export const routePrefix = (route: Route): string => route.prefix?.network ?? '';
 
 /** Wraps a CIDR string into the wire prefix message. */
-export const toWirePrefix = (prefix: string): ContiguousIPNetwork => ({ network: prefix });
+export const toWirePrefix = (prefix: string): IPPrefix => ({ network: prefix });
 
 export interface RouteSubmitParams {
     prefix: string;

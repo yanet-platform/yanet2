@@ -18,18 +18,18 @@ import (
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
-func mustNetworks(t *testing.T, cidrs ...string) []*commonpb.ContiguousIPNetwork {
+func mustNetworks(t *testing.T, cidrs ...string) []*commonpb.IPPrefix {
 	t.Helper()
-	networks := make([]*commonpb.ContiguousIPNetwork, 0, len(cidrs))
+	networks := make([]*commonpb.IPPrefix, 0, len(cidrs))
 	for _, cidr := range cidrs {
-		network, err := commonpb.ParseContiguousIPNetwork(cidr)
+		network, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(cidr))
 		require.NoError(t, err)
 		networks = append(networks, network)
 	}
 	return networks
 }
 
-func networkStrings(t *testing.T, networks []*commonpb.ContiguousIPNetwork) []string {
+func networkStrings(t *testing.T, networks []*commonpb.IPPrefix) []string {
 	t.Helper()
 	strs := make([]string, 0, len(networks))
 	for _, network := range networks {
@@ -161,18 +161,18 @@ func Test_DecapService_EmptyConfigName(t *testing.T) {
 func Test_DecapService_InvalidPrefix(t *testing.T) {
 	tests := []struct {
 		name    string
-		network *commonpb.ContiguousIPNetwork
+		network *commonpb.IPPrefix
 	}{
 		{
 			name: "address length is neither 4 nor 16 bytes",
-			network: &commonpb.ContiguousIPNetwork{
+			network: &commonpb.IPPrefix{
 				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
 				PrefixLen: 24,
 			},
 		},
 		{
 			name: "prefix length exceeds address bit length",
-			network: &commonpb.ContiguousIPNetwork{
+			network: &commonpb.IPPrefix{
 				Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}},
 				PrefixLen: 33,
 			},
@@ -185,7 +185,7 @@ func Test_DecapService_InvalidPrefix(t *testing.T) {
 
 			resp, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
 				Name:     "decap0",
-				Prefixes: []*commonpb.ContiguousIPNetwork{tt.network},
+				Prefixes: []*commonpb.IPPrefix{tt.network},
 			})
 			require.Nil(t, resp)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))

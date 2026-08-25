@@ -61,7 +61,7 @@ func newTestService(t *testing.T) *RouteMPLSService {
 func makeRule(t *testing.T, cidr string, dst string, label uint32) *routemplspb.Rule {
 	t.Helper()
 
-	prefix, err := commonpb.ParseContiguousIPNetwork(cidr)
+	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(cidr))
 	require.NoError(t, err)
 
 	return &routemplspb.Rule{

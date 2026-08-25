@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package modules.dscp.controlplane.dscppb.v1;
 
-import "common/commonpb/v1/contiguousnetwork.proto";
+import "common/commonpb/v1/ipprefix.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1;dscppb";
 
@@ -24,7 +24,7 @@ service DscpService {
 }
 
 message Config {
-  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
+  repeated common.commonpb.v1.IPPrefix prefixes = 2;
   DscpConfig dscp_config = 3;
 }
 
@@ -51,7 +51,7 @@ message ShowConfigResponse { Config config = 1; }
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.
 message AddPrefixesRequest {
   string name = 1;
-  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
+  repeated common.commonpb.v1.IPPrefix prefixes = 2;
 }
 message AddPrefixesResponse {}
 
@@ -59,7 +59,7 @@ message AddPrefixesResponse {}
 // module.
 message RemovePrefixesRequest {
   string name = 1;
-  repeated common.commonpb.v1.ContiguousIPNetwork prefixes = 2;
+  repeated common.commonpb.v1.IPPrefix prefixes = 2;
 }
 message RemovePrefixesResponse {}
 

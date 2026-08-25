@@ -19,12 +19,12 @@ import (
 var errBackendFailure = fmt.Errorf("backend failure")
 
 // mustNetworks returns structured networks for valid CIDR test inputs.
-func mustNetworks(t *testing.T, prefixes ...string) []*commonpb.ContiguousIPNetwork {
+func mustNetworks(t *testing.T, prefixes ...string) []*commonpb.IPPrefix {
 	t.Helper()
 
-	networks := make([]*commonpb.ContiguousIPNetwork, 0, len(prefixes))
+	networks := make([]*commonpb.IPPrefix, 0, len(prefixes))
 	for _, prefix := range prefixes {
-		network, err := commonpb.ParseContiguousIPNetwork(prefix)
+		network, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(prefix))
 		require.NoError(t, err)
 		networks = append(networks, network)
 	}
@@ -33,7 +33,7 @@ func mustNetworks(t *testing.T, prefixes ...string) []*commonpb.ContiguousIPNetw
 }
 
 // networkStrings returns canonical CIDR text for valid structured networks.
-func networkStrings(t *testing.T, networks []*commonpb.ContiguousIPNetwork) []string {
+func networkStrings(t *testing.T, networks []*commonpb.IPPrefix) []string {
 	t.Helper()
 
 	prefixes := make([]string, 0, len(networks))
@@ -47,8 +47,8 @@ func networkStrings(t *testing.T, networks []*commonpb.ContiguousIPNetwork) []st
 }
 
 // malformedNetwork returns a network with an invalid address length.
-func malformedNetwork() *commonpb.ContiguousIPNetwork {
-	return &commonpb.ContiguousIPNetwork{
+func malformedNetwork() *commonpb.IPPrefix {
+	return &commonpb.IPPrefix{
 		Addr:      &commonpb.IPAddress{Addr: []byte{10, 0, 0}},
 		PrefixLen: 24,
 	}
@@ -226,7 +226,7 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 	t.Run("AddPrefixesInvalidPrefix", func(t *testing.T) {
 		response, err := service.AddPrefixes(ctx, &dscppb.AddPrefixesRequest{
 			Name:     "dscp0",
-			Prefixes: []*commonpb.ContiguousIPNetwork{malformedNetwork()},
+			Prefixes: []*commonpb.IPPrefix{malformedNetwork()},
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -235,7 +235,7 @@ func Test_DscpService_RequestValidation(t *testing.T) {
 	t.Run("RemovePrefixesInvalidPrefix", func(t *testing.T) {
 		response, err := service.RemovePrefixes(ctx, &dscppb.RemovePrefixesRequest{
 			Name:     "dscp0",
-			Prefixes: []*commonpb.ContiguousIPNetwork{malformedNetwork()},
+			Prefixes: []*commonpb.IPPrefix{malformedNetwork()},
 		})
 		require.Nil(t, response)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))

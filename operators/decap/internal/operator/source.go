@@ -9,8 +9,10 @@ import (
 
 // ModuleConfig holds the desired prefix set for one decap module config.
 type ModuleConfig struct {
-	Name     string
-	Prefixes []*commonpb.ContiguousIPNetwork
+	// Name is the decap module config name.
+	Name string
+	// Prefixes is the desired tunnel prefix set.
+	Prefixes []*commonpb.IPPrefix
 }
 
 // State is the desired payload pushed by each reconcile pass.

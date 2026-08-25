@@ -196,7 +196,7 @@ func (m *RouteService) LookupRoute(
 		return &operatorpb.LookupRouteResponse{}, nil
 	}
 
-	matched, err := commonpb.NewContiguousIPNetworkFromPrefix(prefix)
+	matched, err := commonpb.NewIPPrefixFromPrefix(prefix)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert matched prefix %q: %v", prefix, err)
 	}

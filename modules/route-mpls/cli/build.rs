@@ -1,7 +1,7 @@
 use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/contiguousnetwork.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipprefix.proto");
     println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipaddr.proto");
     println!("cargo:rerun-if-changed=../controlplane/routemplspb/v1/routempls.proto");
 

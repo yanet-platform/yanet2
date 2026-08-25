@@ -16,10 +16,10 @@ import (
 )
 
 // mustNetwork builds the wire prefix message from a CIDR string.
-func mustNetwork(t *testing.T, s string) *commonpb.ContiguousIPNetwork {
+func mustNetwork(t *testing.T, s string) *commonpb.IPPrefix {
 	t.Helper()
 
-	network, err := commonpb.ParseContiguousIPNetwork(s)
+	network, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix(s))
 	require.NoError(t, err)
 
 	return network
@@ -183,7 +183,7 @@ func TestInsertRoute_MalformedPrefix_InvalidArgument(t *testing.T) {
 
 	testCases := []struct {
 		name   string
-		prefix *commonpb.ContiguousIPNetwork
+		prefix *commonpb.IPPrefix
 	}{
 		{
 			name:   "missing prefix",
@@ -191,15 +191,15 @@ func TestInsertRoute_MalformedPrefix_InvalidArgument(t *testing.T) {
 		},
 		{
 			name:   "missing addr",
-			prefix: &commonpb.ContiguousIPNetwork{PrefixLen: 24},
+			prefix: &commonpb.IPPrefix{PrefixLen: 24},
 		},
 		{
 			name:   "addr of invalid length",
-			prefix: &commonpb.ContiguousIPNetwork{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0}}, PrefixLen: 24},
+			prefix: &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0}}, PrefixLen: 24},
 		},
 		{
 			name:   "prefix length beyond address family",
-			prefix: &commonpb.ContiguousIPNetwork{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}}, PrefixLen: 33},
+			prefix: &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 0}}, PrefixLen: 33},
 		},
 	}
 
@@ -232,7 +232,7 @@ func TestInsertRoute_HostBitsAreMasked(t *testing.T) {
 	_, err := svc.InsertRoute(t.Context(), &operatorpb.InsertRouteRequest{
 		Name: "route0",
 		// 10.0.0.7/24 with host bits deliberately left set.
-		Prefix:       &commonpb.ContiguousIPNetwork{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 7}}, PrefixLen: 24},
+		Prefix:       &commonpb.IPPrefix{Addr: &commonpb.IPAddress{Addr: []byte{10, 0, 0, 7}}, PrefixLen: 24},
 		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.168.1.1"))},
 		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
 	})
