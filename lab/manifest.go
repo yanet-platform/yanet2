@@ -27,7 +27,7 @@ type Manifest struct {
 	Version     int     `yaml:"version" json:"version"`
 	Name        string  `yaml:"name" json:"name"`
 	Description string  `yaml:"description,omitempty" json:"description,omitempty"`
-	Boot        Boot    `yaml:"boot,omitempty" json:"boot,omitempty"`
+	Boot        Boot    `yaml:"boot,omitempty" json:"boot,omitzero"`
 	Files       []File  `yaml:"files,omitempty" json:"files,omitempty"`
 	Steps       []Step  `yaml:"steps,omitempty" json:"steps,omitempty"`
 	Probes      []Probe `yaml:"probes,omitempty" json:"probes,omitempty"`
