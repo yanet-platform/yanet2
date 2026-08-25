@@ -407,8 +407,7 @@ run_rounds_geometry_mismatch_test(void) {
 	gre->proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 	struct rte_ipv4_hdr *inner = (struct rte_ipv4_hdr *)(gre + 1);
 	inner->version_ihl = RTE_IPV4_VHL_DEF;
-	inner->total_length =
-		rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
+	inner->total_length = rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
 	inner->next_proto_id = IPPROTO_TCP;
 	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
 

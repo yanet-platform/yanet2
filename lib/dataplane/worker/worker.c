@@ -35,9 +35,9 @@ worker_clone_packet(
 	struct packet *packet_clone = mbuf_to_packet(mbuf);
 	// Order is load-bearing: init the source budget first (no-op when the
 	// lineage is already initialized, so an already-spent source splits its
-	// remainder), snapshot into the clone, then partition floor/ceil. A swap
-	// of init and memcpy would copy uninitialized fields and re-init the
-	// clone to the full limit on its first redirect.
+	// remainder), snapshot into the clone, then partition floor/ceil. A
+	// swap of init and memcpy would copy uninitialized fields and re-init
+	// the clone to the full limit on its first redirect.
 	packet_recirc_init(packet, packet_recirc_limit);
 	rte_memcpy(packet_clone, packet, sizeof(struct packet));
 	packet_clone->mbuf = mbuf;
