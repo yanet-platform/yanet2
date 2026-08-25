@@ -9,22 +9,12 @@
 #include <rte_mbuf.h>
 
 #include <stdint.h>
-#include <string.h>
 
 static inline void
 FILTER_ATTR_QUERY_FUNC(net6_dst)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	if (!count) {
-		return;
-	}
-
 	struct net6_classifier *c = (struct net6_classifier *)data;
-
-	uint8_t hi_keys[count][8];
-	uint8_t lo_keys[count][8];
-	uint32_t hi_values[count];
-	uint32_t lo_values[count];
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
@@ -34,17 +24,12 @@ FILTER_ATTR_QUERY_FUNC(net6_dst)(
 			packets[idx]->network_header.offset
 		);
 
-		memcpy(hi_keys[idx], ipv6_hdr->dst_addr, 8);
-		memcpy(lo_keys[idx], ipv6_hdr->dst_addr + 8, 8);
-	}
+		const uint8_t *daddr = (const uint8_t *)ipv6_hdr->dst_addr;
 
-	lpm8_lookup_batch(&c->hi, hi_keys[0], hi_values, count);
-	lpm8_lookup_batch(&c->lo, lo_keys[0], lo_values, count);
+		uint32_t hi = lpm8_lookup(&c->hi, daddr);
+		uint32_t lo = lpm8_lookup(&c->lo, daddr + 8);
 
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		result[idx] = value_table_get(
-			&c->comb, hi_values[idx], lo_values[idx]
-		);
+		result[idx] = value_table_get(&c->comb, hi, lo);
 	}
 }
 
@@ -52,16 +37,7 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net6_src)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	if (!count) {
-		return;
-	}
-
 	struct net6_classifier *c = (struct net6_classifier *)data;
-
-	uint8_t hi_keys[count][8];
-	uint8_t lo_keys[count][8];
-	uint32_t hi_values[count];
-	uint32_t lo_values[count];
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
@@ -71,16 +47,11 @@ FILTER_ATTR_QUERY_FUNC(net6_src)(
 			packets[idx]->network_header.offset
 		);
 
-		memcpy(hi_keys[idx], ipv6_hdr->src_addr, 8);
-		memcpy(lo_keys[idx], ipv6_hdr->src_addr + 8, 8);
-	}
+		const uint8_t *saddr = (const uint8_t *)ipv6_hdr->src_addr;
 
-	lpm8_lookup_batch(&c->hi, hi_keys[0], hi_values, count);
-	lpm8_lookup_batch(&c->lo, lo_keys[0], lo_values, count);
+		uint32_t hi = lpm8_lookup(&c->hi, saddr);
+		uint32_t lo = lpm8_lookup(&c->lo, saddr + 8);
 
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		result[idx] = value_table_get(
-			&c->comb, hi_values[idx], lo_values[idx]
-		);
+		result[idx] = value_table_get(&c->comb, hi, lo);
 	}
 }
