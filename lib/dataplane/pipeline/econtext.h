@@ -129,8 +129,11 @@ struct function_ectx {
 	struct counter_storage *counter_storage;
 	uint64_t chain_count;
 	struct chain_ectx **chains;
+	// Size of the routing table below; always a power of two so packet
+	// selection masks the flow hash instead of dividing it.
 	uint64_t chain_map_size;
-	struct chain_ectx *chain_map[];
+	// Destination indices into the chains array, replicated by weight.
+	uint64_t chain_map[];
 };
 
 struct pipeline_ectx {

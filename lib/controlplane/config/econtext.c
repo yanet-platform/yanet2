@@ -2,9 +2,79 @@
 
 #include <string.h>
 
+#include "common/numutils.h"
+
 // cp_config and cp_config_gen
 #include "lib/controlplane/config/zone.h"
 #include "lib/errors/errors.h"
+
+// Minimum power-of-two routing table size once any destination is enabled.
+//
+// A table barely larger than the weight sum rounds small ratios coarsely
+// (three equal chains need four slots), while the floor keeps configured
+// ratios accurate and still fits a single small allocation.
+#define ROUTING_TABLE_MIN_SLOTS 64
+
+// Distribute a power-of-two routing table's padding slots over its enabled
+// destinations in proportion to their weights.
+//
+// Largest remainder: every enabled destination first receives its floored
+// share of the padding, then the few still-unassigned slots go one each to
+// the destinations with the largest fractional remainders. Zero-weight
+// destinations never receive a slot, so a disabled destination stays
+// unroutable, and configured ratios survive the power-of-two rounding as
+// closely as slot counts allow.
+//
+// The weight array is scratch: awarded leftover slots zero their entry, so
+// the repeat scans skip them. The leftover count is always below the number
+// of enabled destinations (the fractional parts sum to the leftover and
+// each is below one), so the scans never run out of candidates while slots
+// remain. Products are computed at 128 bits because a weight can approach
+// the table size, which may approach 2^63.
+static void
+routing_table_pad(
+	uint64_t *map,
+	uint64_t map_size,
+	uint64_t weight_sum,
+	uint64_t *weights,
+	uint64_t count
+) {
+	const uint64_t pad = map_size - weight_sum;
+
+	uint64_t pos = weight_sum;
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		const uint64_t share =
+			(uint64_t)(((unsigned __int128)weights[idx] * pad) /
+				   weight_sum);
+		for (uint64_t n = 0; n < share; ++n) {
+			map[pos] = idx;
+			++pos;
+		}
+	}
+
+	while (pos < map_size) {
+		uint64_t best = count;
+		uint64_t best_rem = 0;
+		for (uint64_t idx = 0; idx < count; ++idx) {
+			if (weights[idx] == 0) {
+				continue;
+			}
+
+			const uint64_t rem =
+				(uint64_t)(((unsigned __int128)weights[idx] *
+					    pad) %
+					   weight_sum);
+			if (rem > best_rem) {
+				best = idx;
+				best_rem = rem;
+			}
+		}
+
+		weights[best] = 0;
+		map[pos] = best;
+		++pos;
+	}
+}
 
 static void
 module_ectx_free(
@@ -689,10 +759,33 @@ function_ectx_free(
 		counter_storage_free(counter_storage);
 	}
 
-	size_t ectx_size =
-		sizeof(struct function_ectx) +
-		sizeof(struct chain_ectx *) * function_ectx->chain_map_size;
+	size_t ectx_size = sizeof(struct function_ectx) +
+			   sizeof(uint64_t) * function_ectx->chain_map_size;
 	memory_bfree(memory_context, function_ectx, ectx_size);
+}
+
+// Size a function's chain routing table, padded up to a power of two.
+//
+// A power-of-two table size lets packet selection mask the flow hash
+// instead of dividing it. A fully disabled function keeps the table size
+// at zero; the padding itself is spread by the shared largest-remainder
+// distributor, which never routes traffic to a zero-weight chain.
+static uint64_t
+function_ectx_chain_map_size(const struct cp_function *cp_function) {
+	uint64_t weight_sum = 0;
+	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
+		weight_sum += cp_function->chains[idx].weight;
+	}
+
+	if (weight_sum == 0) {
+		return 0;
+	}
+
+	if (weight_sum < ROUTING_TABLE_MIN_SLOTS) {
+		return ROUTING_TABLE_MIN_SLOTS;
+	}
+
+	return next_power_of_two(weight_sum);
 }
 
 static struct function_ectx *
@@ -709,13 +802,11 @@ function_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	uint64_t weight_sum = 0;
-	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
-		weight_sum += cp_function->chains[idx].weight;
-	}
+	const uint64_t chain_map_size =
+		function_ectx_chain_map_size(cp_function);
 
 	size_t ectx_size = sizeof(struct function_ectx) +
-			   sizeof(struct chain_ectx *) * weight_sum;
+			   sizeof(uint64_t) * chain_map_size;
 
 	struct function_ectx *function_ectx = (struct function_ectx *)
 		memory_balloc(memory_context, ectx_size);
@@ -730,7 +821,7 @@ function_ectx_create(
 
 	memset(function_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&function_ectx->cp_function, cp_function);
-	function_ectx->chain_map_size = weight_sum;
+	function_ectx->chain_map_size = chain_map_size;
 
 	struct chain_ectx **chains = (struct chain_ectx **)memory_balloc(
 		memory_context,
@@ -854,11 +945,47 @@ function_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_function->chains[idx].weight;
 		     ++weight_idx) {
-			SET_OFFSET_OF(
-				function_ectx->chain_map + pos, chain_ectx
-			);
+			function_ectx->chain_map[pos] = idx;
 			++pos;
 		}
+	}
+
+	// Scratch weights for the largest-remainder padding distributor; a
+	// fully disabled function has no padding to distribute.
+	if (function_ectx->chain_map_size > 0) {
+		uint64_t weight_sum = 0;
+		for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
+			weight_sum += cp_function->chains[idx].weight;
+		}
+
+		uint64_t *weights = (uint64_t *)memory_balloc(
+			memory_context,
+			sizeof(uint64_t) * cp_function->chain_count
+		);
+		if (weights == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate memory for chain weights "
+				"in function '%s'",
+				cp_function->name
+			);
+			goto error;
+		}
+		for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
+			weights[idx] = cp_function->chains[idx].weight;
+		}
+		routing_table_pad(
+			function_ectx->chain_map,
+			function_ectx->chain_map_size,
+			weight_sum,
+			weights,
+			cp_function->chain_count
+		);
+		memory_bfree(
+			memory_context,
+			weights,
+			sizeof(uint64_t) * cp_function->chain_count
+		);
 	}
 
 	return function_ectx;
@@ -1074,9 +1201,9 @@ device_entry_ectx_free(
 		);
 	}
 
-	size_t ectx_size = sizeof(struct device_entry_ectx) +
-			   sizeof(struct pipeline_ectx *) *
-				   device_entry_ectx->pipeline_map_size;
+	size_t ectx_size =
+		sizeof(struct device_entry_ectx) +
+		sizeof(uint64_t) * device_entry_ectx->pipeline_map_size;
 
 	memory_bfree(memory_context, device_entry_ectx, ectx_size);
 }
@@ -1100,8 +1227,21 @@ device_entry_ectx_create(
 		weight_sum += cp_device_entry->pipelines[idx].weight;
 	}
 
+	// Same power-of-two padding as the function chain table: masking the
+	// flow hash replaces a division, the largest-remainder distributor
+	// keeps disabled pipelines at zero slots, and a fully disabled entry
+	// keeps the table size at zero.
+	uint64_t pipeline_map_size = 0;
+	if (weight_sum > 0) {
+		if (weight_sum < ROUTING_TABLE_MIN_SLOTS) {
+			pipeline_map_size = ROUTING_TABLE_MIN_SLOTS;
+		} else {
+			pipeline_map_size = next_power_of_two(weight_sum);
+		}
+	}
+
 	size_t ectx_size = sizeof(struct device_entry_ectx) +
-			   sizeof(struct pipeline_ectx *) * weight_sum;
+			   sizeof(uint64_t) * pipeline_map_size;
 
 	struct device_entry_ectx *device_entry_ectx =
 		(struct device_entry_ectx *)memory_balloc(
@@ -1186,7 +1326,7 @@ device_entry_ectx_create(
 		       device_entry_ectx->pipeline_count);
 	SET_OFFSET_OF(&device_entry_ectx->pipelines, pipelines);
 
-	device_entry_ectx->pipeline_map_size = weight_sum;
+	device_entry_ectx->pipeline_map_size = pipeline_map_size;
 	uint64_t pos = 0;
 	for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count; ++idx) {
 		struct cp_pipeline *cp_pipeline = cp_config_gen_lookup_pipeline(
@@ -1221,6 +1361,34 @@ device_entry_ectx_create(
 			device_entry_ectx->pipeline_map[pos] = idx;
 			++pos;
 		}
+	}
+
+	// Scratch weights for the largest-remainder padding distributor; a
+	// fully disabled entry has no padding to distribute.
+	if (device_entry_ectx->pipeline_map_size > 0) {
+		uint64_t *weights = (uint64_t *)memory_balloc(
+			memory_context,
+			sizeof(uint64_t) * cp_device_entry->pipeline_count
+		);
+		if (weights == NULL) {
+			goto error;
+		}
+		for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count;
+		     ++idx) {
+			weights[idx] = cp_device_entry->pipelines[idx].weight;
+		}
+		routing_table_pad(
+			device_entry_ectx->pipeline_map,
+			device_entry_ectx->pipeline_map_size,
+			weight_sum,
+			weights,
+			cp_device_entry->pipeline_count
+		);
+		memory_bfree(
+			memory_context,
+			weights,
+			sizeof(uint64_t) * cp_device_entry->pipeline_count
+		);
 	}
 
 	return device_entry_ectx;
