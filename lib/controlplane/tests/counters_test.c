@@ -7,6 +7,9 @@
  * fix: a value-page surface (the agent counters API snapshots
  * handle->values under cp_config_lock) and a tag-string surface (tags are
  * strdup'd instead of borrowed from the freed generation arena).
+ *
+ * GH#1926 joins them: a read against a generation whose execution context
+ * is absent on a worker must answer rather than reach into that worker.
  */
 
 #include "api/agent.h"
@@ -15,8 +18,11 @@
 #include "common/test_assert.h"
 #include "devices/plain/api/controlplane.h"
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_counter.h"
 #include "lib/controlplane/config/cp_pipeline.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/counters/counters.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
@@ -27,6 +33,12 @@
 #include <string.h>
 
 #define CNT_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
+#define CNT_TEST_WORKER_COUNT 4
+
+// Written straight into one worker's counter storage, so a value copied
+// from a worker is told apart from the zeros of a worker without a
+// context.
+#define CNT_TEST_MARKER 4242
 
 static int
 install_empty_pipeline(
@@ -226,6 +238,94 @@ test_tag_strings_survive_generation_swap(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that a tagged counter read still describes its counters when
+// the published generation carries an execution context for some workers
+// and not for others, reporting zeros for a worker that carries none and
+// its own values for a worker that does.
+//
+// A worker registering after an install is what leaves a live generation
+// short of contexts. The harness fixes its worker set at startup, so the
+// state is staged by detaching one context, put back right after the read
+// so teardown still reclaims it.
+static int
+test_read_survives_absent_worker_context(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent =
+		agent_attach(shm, 0, "cnt-1926", CNT_TEST_MEMORY_LIMIT, &err);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct dp_config *dp_config = agent_dp_config(agent);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	TEST_ASSERT_SUCCESS(
+		install_empty_pipeline(dp_config, cp_config, "pipe0"),
+		"failed to install pipe0"
+	);
+	TEST_ASSERT_SUCCESS(
+		install_device(agent, dp_config, cp_config, "dev0", "pipe0"),
+		"failed to install dev0 with input pipeline pipe0"
+	);
+
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct config_gen_ectx *marked =
+		cp_config_gen_worker_ectx(config_gen, 1);
+	TEST_ASSERT_NOT_NULL(marked, "the second worker has no context");
+
+	const struct counter_tag tags[] = {
+		{.key = "device", .value = "dev0"},
+		{.key = "pipeline", .value = "pipe0"},
+		{.key = "kind", .value = "pipeline"},
+	};
+	struct cp_counter_storage **found =
+		cp_config_counter_storage_registry_find(
+			ADDR_OF(&marked->counter_storage_registry),
+			tags,
+			3,
+			NULL
+		);
+	TEST_ASSERT_NOT_NULL(found, "the registry lookup failed");
+	TEST_ASSERT_NOT_NULL(found[0], "no counter storage matched pipe0");
+	counter_get_address(0, ADDR_OF(&found[0]->storage))[0] =
+		CNT_TEST_MARKER;
+	free(found);
+
+	// Before the fix the read described the whole list from the first
+	// worker alone and then indexed every worker's matches
+	// unconditionally.
+	struct config_gen_ectx **ectxs = ADDR_OF(&config_gen->config_gen_ectxs);
+	struct config_gen_ectx *detached = ADDR_OF(ectxs);
+	ectxs[0] = NULL;
+
+	struct counter_handle_list *list =
+		yanet_get_pipeline_counters(dp_config, "dev0", "pipe0");
+	SET_OFFSET_OF(ectxs, detached);
+
+	TEST_ASSERT_NOT_NULL(list, "the read failed with a context detached");
+	TEST_ASSERT(list->count > 0, "the read described no counters");
+	TEST_ASSERT_EQUAL(
+		list->instance_count,
+		CNT_TEST_WORKER_COUNT,
+		"the read lost workers"
+	);
+
+	struct counter_handle *handle = yanet_get_counter(list, 0);
+	TEST_ASSERT_EQUAL(
+		yanet_get_counter_value(handle->values, 0, 0),
+		0,
+		"the worker without a context did not report zero"
+	);
+	TEST_ASSERT_EQUAL(
+		yanet_get_counter_value(handle->values, 0, 1),
+		CNT_TEST_MARKER,
+		"the marked worker lost its value"
+	);
+
+	yanet_counter_handle_list_free(list);
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -236,7 +336,7 @@ main(void) {
 	struct dataplane_ut_config cfg = {
 		.cp_memory = 1u << 25,
 		.dp_memory = 1u << 20,
-		.worker_count = 1,
+		.worker_count = CNT_TEST_WORKER_COUNT,
 		.devices = port_names,
 		.device_count = 1,
 		.modules = NULL,
@@ -261,6 +361,9 @@ main(void) {
 	int res = test_value_snapshot_survives_removal(shm);
 	if (res == TEST_SUCCESS) {
 		res = test_tag_strings_survive_generation_swap(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_read_survives_absent_worker_context(shm);
 	}
 
 	dataplane_ut_free(ut);

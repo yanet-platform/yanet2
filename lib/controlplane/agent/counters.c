@@ -135,7 +135,9 @@ cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
 // newly allocated memory, stashed behind the handle's opaque value array.
 //
 // The pointer array and every worker's value block live in one allocation:
-// the pointer array first, then each worker's values back to back.
+// the pointer array first, then each worker's values back to back. A
+// worker handed no storage reads back as zeros, which is what it has
+// contributed.
 //
 // The caller guarantees the per-worker storages stay alive for the
 // duration of this call.
@@ -163,6 +165,10 @@ counter_handle_copy_values(
 			continue;
 		}
 		values[w_idx] = value_blocks + w_idx * dst->size;
+		if (worker_storages[w_idx] == NULL) {
+			memset(values[w_idx], 0, dst->size * sizeof(uint64_t));
+			continue;
+		}
 		struct counter_value_handle *handle =
 			counter_get_value_handle(idx, worker_storages[w_idx]);
 		memcpy(values[w_idx],
@@ -212,7 +218,9 @@ fill_counter_handle(
 // a worker without an execution context. Every worker registry is built
 // by the same execution-context traversal, so the match order is
 // identical across workers: for match index i, every worker's array
-// names the same tag set at that index.
+// names the same tag set at that index. That alignment holds because one
+// generation builds every worker's context in a single pass; installing
+// contexts per worker would have to establish it another way.
 struct worker_counter_matches {
 	struct cp_counter_storage ***by_worker;
 	uint64_t worker_count;
@@ -313,18 +321,26 @@ counter_handle_list_build_metadata(
 	struct matched_counter **out_sources,
 	yanet_error **err
 ) {
-	// A worker set with no execution context yet (the initial generation
-	// before any install) yields an empty list.
-	if (matches->worker_count == 0 || matches->by_worker[0] == NULL) {
+	// Any worker carrying a context of this generation matches the same
+	// storages in the same order, so the first one that carries a context
+	// describes the whole list. A generation no worker carries a context
+	// of describes nothing and yields an empty list.
+	uint64_t source_worker = 0;
+	while (source_worker < matches->worker_count &&
+	       matches->by_worker[source_worker] == NULL) {
+		++source_worker;
+	}
+	if (source_worker == matches->worker_count) {
 		*out_sources = NULL;
 		return counter_handle_list_alloc(matches->worker_count, 0, err);
 	}
-	struct cp_counter_storage **matches0 = matches->by_worker[0];
+	struct cp_counter_storage **described =
+		matches->by_worker[source_worker];
 
 	size_t match_count = 0;
-	for (size_t i = 0; matches0[i] != NULL; ++i) {
+	for (size_t i = 0; described[i] != NULL; ++i) {
 		struct counter_storage *storage =
-			ADDR_OF(&matches0[i]->storage);
+			ADDR_OF(&described[i]->storage);
 		match_count += counter_registry_match_count(
 			ADDR_OF(&storage->registry), names
 		);
@@ -348,8 +364,8 @@ counter_handle_list_build_metadata(
 	}
 
 	size_t next = 0;
-	for (size_t i = 0; matches0[i] != NULL; ++i) {
-		struct cp_counter_storage *cp_storage = matches0[i];
+	for (size_t i = 0; described[i] != NULL; ++i) {
+		struct cp_counter_storage *cp_storage = described[i];
 		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
 		struct counter_registry *registry = ADDR_OF(&storage->registry);
 		struct counter *counters = ADDR_OF(&registry->names);
@@ -392,6 +408,8 @@ counter_handle_list_build_metadata(
 
 // Copy every matched counter's per-worker value snapshot into the list
 // built by the metadata pass.
+//
+// A worker the generation carries no context for contributes zeros.
 static int
 counter_handle_list_fill_values(
 	struct counter_handle_list *list,
@@ -413,6 +431,10 @@ counter_handle_list_fill_values(
 		size_t m_idx = sources[k].m_idx;
 		uint64_t r_idx = sources[k].r_idx;
 		for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
+			if (matches->by_worker[w_idx] == NULL) {
+				worker_storages[w_idx] = NULL;
+				continue;
+			}
 			struct cp_counter_storage *cps =
 				matches->by_worker[w_idx][m_idx];
 			worker_storages[w_idx] = ADDR_OF(&cps->storage);
