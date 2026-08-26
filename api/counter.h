@@ -41,6 +41,10 @@ struct counter_handle {
 	uint64_t **values;
 };
 
+// A list of counter handles whose single allocation also owns every
+// handle's tag array and value blocks: they are carved out of a value
+// region placed right after the handle array, so freeing the list
+// reclaims all of it.
 struct counter_handle_list {
 	uint64_t instance_count;
 	uint64_t count;

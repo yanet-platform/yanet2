@@ -93,106 +93,116 @@ yanet_get_module_counters(
 	return yanet_get_counters_by_tags(dp_config, tags, 7, query, NULL);
 }
 
-static size_t
-counter_registry_match_count(
-	struct counter_registry *registry,
-	const struct counter_pattern_set *names
-) {
-	struct counter *counters = ADDR_OF(&registry->names);
-	size_t matches = 0;
-	for (uint64_t i = 0; i < registry->count; ++i) {
-		if (counter_pattern_set_match(names, counters[i].name)) {
-			++matches;
-		}
+// Checked accumulation for a list's value-region size.
+//
+// Every region term is added through this guard so a corrupted
+// registry size cannot wrap the sum into a small allocation.
+static bool
+counter_region_add(size_t *sum, size_t add) {
+	if (add > SIZE_MAX - *sum) {
+		return false;
 	}
-	return matches;
+	*sum += add;
+	return true;
 }
 
-// Copy a tag array into freshly allocated memory, so a handle outlives
-// the generation arena the tags may live in.
-static struct counter_tag *
-counter_tags_dup(const struct counter_tag *tags, size_t tag_count) {
-	struct counter_tag *dup = malloc(tag_count * sizeof(*dup));
-	if (dup == NULL) {
-		return NULL;
+// Size of one tag-array copy: the fixed-size struct array alone.
+static bool
+counter_tag_region_size(size_t tag_count, size_t *out) {
+	if (tag_count > SIZE_MAX / sizeof(struct counter_tag)) {
+		return false;
 	}
+	*out = tag_count * sizeof(struct counter_tag);
+	return true;
+}
+
+// Carve a tag-array copy from the cursor and fill it in, advancing the
+// cursor past it.
+static struct counter_tag *
+counter_tags_carve(
+	uint8_t **cursor, const struct counter_tag *tags, size_t tag_count
+) {
+	struct counter_tag *dup = (struct counter_tag *)*cursor;
+	*cursor += tag_count * sizeof(*dup);
 	memcpy(dup, tags, tag_count * sizeof(*dup));
 	return dup;
 }
 
-// Copy one already-described counter's per-worker value snapshot into
-// newly allocated memory, stashed behind the handle's opaque value array.
+// Size of one counter's share of a list's value region: the
+// worker-pointer array plus every worker's value block.
+static bool
+counter_value_region_size(
+	uint64_t worker_count, uint64_t counter_size, size_t *out
+) {
+	if (worker_count == 0) {
+		*out = 0;
+		return true;
+	}
+	if (worker_count > SIZE_MAX / sizeof(uint64_t *)) {
+		return false;
+	}
+	size_t ptr_array = (size_t)worker_count * sizeof(uint64_t *);
+	size_t per_worker = (size_t)worker_count * sizeof(uint64_t);
+	if (counter_size > (SIZE_MAX - ptr_array) / per_worker) {
+		return false;
+	}
+	*out = ptr_array + per_worker * (size_t)counter_size;
+	return true;
+}
+
+// Carve a counter's worker-pointer array and value blocks from the
+// cursor, advance the cursor past them, and point the handle at them.
 //
-// The pointer array and every worker's value block live in one allocation:
-// the pointer array first, then each worker's values back to back.
-//
-// The caller guarantees the per-worker storages stay alive for the
-// duration of this call.
-static int
-counter_handle_copy_values(
-	struct counter_handle *dst,
-	struct counter_storage **worker_storages,
-	uint64_t worker_count,
-	uint64_t idx
+// The blocks come from the list's own zeroed allocation, so a worker
+// without a snapshot keeps a zeroed instance and a zero-size counter
+// keeps a NULL-filled pointer array.
+static uint64_t **
+counter_values_carve(
+	struct counter_handle *dst, uint8_t **cursor, uint64_t worker_count
 ) {
 	size_t ptr_array_size = worker_count * sizeof(uint64_t *);
-
-	uint8_t *base =
-		malloc(ptr_array_size +
-		       worker_count * dst->size * sizeof(uint64_t));
-	if (base == NULL) {
-		return -1;
-	}
+	uint8_t *base = *cursor;
+	*cursor = base + ptr_array_size +
+		  worker_count * dst->size * sizeof(uint64_t);
 
 	uint64_t **values = (uint64_t **)base;
 	uint64_t *value_blocks = (uint64_t *)(base + ptr_array_size);
 	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
+		values[w_idx] = dst->size == 0
+					? NULL
+					: value_blocks + w_idx * dst->size;
+	}
+	dst->values = values;
+	return values;
+}
+
+// Snapshot one already-described counter's per-worker values into
+// blocks carved from the cursor.
+//
+// Each worker has its own single-instance storage. The caller gathers
+// one storage per worker into worker_storages (a plain C-pointer
+// array). These storages are dataplane-owned and outlive every
+// configuration generation, so no lock or generation pin is required
+// around this call.
+static void
+counter_handle_fill_values(
+	struct counter_handle *dst,
+	uint8_t **cursor,
+	struct counter_storage **worker_storages,
+	uint64_t worker_count,
+	uint64_t idx
+) {
+	uint64_t **values = counter_values_carve(dst, cursor, worker_count);
+	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
 		if (dst->size == 0) {
-			values[w_idx] = NULL;
 			continue;
 		}
-		values[w_idx] = value_blocks + w_idx * dst->size;
 		struct counter_value_handle *handle =
 			counter_get_value_handle(idx, worker_storages[w_idx]);
 		memcpy(values[w_idx],
 		       counter_handle_get_value(handle),
 		       dst->size * sizeof(uint64_t));
 	}
-	dst->values = values;
-	return 0;
-}
-
-// Snapshot a counter's per-worker values into heap memory and stash the
-// result behind the opaque counter_handle.values.
-//
-// Each worker has its own single-instance storage. The caller gathers one
-// storage per worker into worker_storages (a plain C-pointer array). These
-// storages are dataplane-owned and outlive every configuration generation,
-// so no lock or generation pin is required around this call.
-static int
-fill_counter_handle(
-	struct counter_handle *dst,
-	struct counter_storage **worker_storages,
-	uint64_t worker_count,
-	uint64_t idx,
-	struct counter_tag *tags,
-	size_t tag_count
-) {
-	struct counter_storage *storage0 = worker_storages[0];
-	struct counter_registry *reg = ADDR_OF(&storage0->registry);
-	struct counter *counters = ADDR_OF(&reg->names);
-	strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
-	dst->size = counters[idx].size;
-	dst->gen = counters[idx].gen;
-
-	// Attach the tags before the fallible allocation so the list free path
-	// reclaims them even when this handle's value array is left NULL.
-	dst->tags = tags;
-	dst->tag_count = tag_count;
-
-	return counter_handle_copy_values(
-		dst, worker_storages, worker_count, idx
-	);
 }
 
 // Per-worker counter storages matching one tag predicate.
@@ -258,15 +268,26 @@ worker_counter_matches_collect(
 	return 0;
 }
 
-// Allocate a handle list sized for match_count handles and zero it.
-// Sets instance_count and count on success. The caller still owns filling
-// in each handle.
+// Allocate a handle list sized for match_count handles plus a
+// values_size-byte value region, and zero all of it.
+//
+// Sets instance_count and count on success. The value region sits right
+// after the handle array and is carved sequentially by the fill pass;
+// the zeroing leaves every not-yet-carved handle with NULL tags and
+// values, and a later pass only overwrites what it fills in.
 static struct counter_handle_list *
 counter_handle_list_alloc(
-	uint64_t instance_count, size_t match_count, yanet_error **err
+	uint64_t instance_count,
+	size_t match_count,
+	size_t values_size,
+	yanet_error **err
 ) {
 	size_t list_size = sizeof(struct counter_handle_list) +
 			   sizeof(struct counter_handle) * match_count;
+	if (!counter_region_add(&list_size, values_size)) {
+		yanet_error_add(err, "counter list size overflow");
+		return NULL;
+	}
 	struct counter_handle_list *list =
 		(struct counter_handle_list *)malloc(list_size);
 	if (list == NULL) {
@@ -279,6 +300,13 @@ counter_handle_list_alloc(
 	return list;
 }
 
+// The first byte of a list's value region: right past the handle
+// array. The carve cursor starts here.
+static uint8_t *
+counter_handle_list_region(const struct counter_handle_list *list) {
+	return (uint8_t *)(list->counters + list->count);
+}
+
 // Build one worker's handle list from its matching storages.
 //
 // matches is that worker's NULL-terminated storage match array, or NULL
@@ -286,6 +314,12 @@ counter_handle_list_alloc(
 // instance_count == 1 and values snapshotted from that worker's own
 // storages only. Handles of one storage share a tags copy and sit next
 // to each other, matching the list free path's sharing convention.
+//
+// A sizing pass walks the matches first so the list's single allocation
+// covers everything the fill pass carves: every matched counter's value
+// block and one tag copy per storage with a match. The generation pin
+// held by the caller keeps the registries from changing between the two
+// walks.
 static struct counter_handle_list *
 worker_counter_list_build(
 	struct cp_counter_storage **matches,
@@ -293,23 +327,60 @@ worker_counter_list_build(
 	yanet_error **err
 ) {
 	if (matches == NULL) {
-		return counter_handle_list_alloc(1, 0, err);
+		return counter_handle_list_alloc(1, 0, 0, err);
 	}
 
 	size_t match_count = 0;
+	size_t values_size = 0;
 	for (size_t i = 0; matches[i] != NULL; ++i) {
-		struct counter_storage *storage = ADDR_OF(&matches[i]->storage);
-		match_count += counter_registry_match_count(
-			ADDR_OF(&storage->registry), names
-		);
+		struct cp_counter_storage *cp_storage = matches[i];
+		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
+		struct counter_registry *registry = ADDR_OF(&storage->registry);
+		struct counter *counters = ADDR_OF(&registry->names);
+
+		size_t storage_matches = 0;
+		size_t region = 0;
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			if (!counter_pattern_set_match(
+				    names, counters[idx].name
+			    )) {
+				continue;
+			}
+			size_t counter_region;
+			if (!counter_value_region_size(
+				    1, counters[idx].size, &counter_region
+			    ) ||
+			    !counter_region_add(&region, counter_region)) {
+				yanet_error_add(
+					err, "counter list size overflow"
+				);
+				return NULL;
+			}
+			++storage_matches;
+		}
+		if (storage_matches == 0) {
+			continue;
+		}
+		match_count += storage_matches;
+
+		size_t tags_region;
+		if (!counter_tag_region_size(
+			    cp_storage->tag_count, &tags_region
+		    ) ||
+		    !counter_region_add(&values_size, region) ||
+		    !counter_region_add(&values_size, tags_region)) {
+			yanet_error_add(err, "counter list size overflow");
+			return NULL;
+		}
 	}
 
 	struct counter_handle_list *list =
-		counter_handle_list_alloc(1, match_count, err);
+		counter_handle_list_alloc(1, match_count, values_size, err);
 	if (list == NULL) {
 		return NULL;
 	}
 
+	uint8_t *cursor = counter_handle_list_region(list);
 	size_t next = 0;
 	for (size_t i = 0; matches[i] != NULL; ++i) {
 		struct cp_counter_storage *cp_storage = matches[i];
@@ -324,35 +395,25 @@ worker_counter_list_build(
 				continue;
 			}
 			if (storage_tags == NULL) {
-				storage_tags = counter_tags_dup(
-					cp_storage->tags, cp_storage->tag_count
+				storage_tags = counter_tags_carve(
+					&cursor,
+					cp_storage->tags,
+					cp_storage->tag_count
 				);
-				if (storage_tags == NULL) {
-					yanet_error_add(err, "malloc failed");
-					yanet_counter_handle_list_free(list);
-					return NULL;
-				}
 			}
 			struct counter_handle *dst = &list->counters[next];
 			const struct counter *src = &counters[idx];
 			strtcpy(dst->name, src->name, sizeof(dst->name));
 			dst->size = src->size;
 			dst->gen = src->gen;
-			// Attach the tags before the fallible value copy so
-			// the list free path reclaims them even when this
-			// handle's value array is left NULL.
 			dst->tags = storage_tags;
 			dst->tag_count = cp_storage->tag_count;
 			struct counter_storage *worker_storages[1] = {
 				storage,
 			};
-			if (counter_handle_copy_values(
-				    dst, worker_storages, 1, idx
-			    )) {
-				yanet_error_add(err, "malloc failed");
-				yanet_counter_handle_list_free(list);
-				return NULL;
-			}
+			counter_handle_fill_values(
+				dst, &cursor, worker_storages, 1, idx
+			);
 			++next;
 		}
 	}
@@ -434,12 +495,22 @@ struct counter_merge_counter_slot {
 	uint64_t handle;
 };
 
+// Identity of one merged handle: the first worker's handle it came
+// from, valid only while that worker's set is alive.
+struct counter_merge_entry {
+	const struct counter_handle *src;
+	uint64_t group;
+};
+
 // State of one merge of per-worker sets into a union list.
 struct counter_merge {
+	// The merged list, allocated between the registration and fill
+	// passes, once the value-region size is known.
 	struct counter_handle_list *list;
-	// Group of every merged handle, parallel to list->counters.
-	uint64_t *handle_group;
 	size_t used;
+
+	// Identity of every merged handle, parallel to list->counters.
+	struct counter_merge_entry *entries;
 
 	struct counter_merge_group *groups;
 	size_t group_count;
@@ -464,45 +535,34 @@ pow2_at_least(size_t count) {
 // Release the merge indexes. The merged list stays owned by the caller.
 static void
 counter_merge_fini(struct counter_merge *merge) {
-	free(merge->handle_group);
+	free(merge->entries);
 	free(merge->groups);
 	free(merge->group_slots);
 	free(merge->counter_slots);
 }
 
-// Allocate a merged list sized for total handles plus its indexes.
+// Allocate the merge indexes sized for total distinct handles.
 //
 // On failure every allocation of this merge is already released.
 static int
 counter_merge_init(
-	struct counter_merge *merge,
-	uint64_t worker_count,
-	size_t total,
-	yanet_error **err
+	struct counter_merge *merge, size_t total, yanet_error **err
 ) {
 	memset(merge, 0, sizeof(*merge));
-
-	merge->list = counter_handle_list_alloc(worker_count, total, err);
-	if (merge->list == NULL) {
-		return -1;
-	}
-	merge->list->count = 0;
 
 	if (total == 0) {
 		return 0;
 	}
 
-	merge->handle_group = malloc(total * sizeof(*merge->handle_group));
+	merge->entries = malloc(total * sizeof(*merge->entries));
 	merge->groups = malloc(total * sizeof(*merge->groups));
 	size_t slot_count = pow2_at_least(2 * total);
 	merge->group_slots = calloc(slot_count, sizeof(*merge->group_slots));
 	merge->counter_slots =
 		calloc(slot_count, sizeof(*merge->counter_slots));
-	if (merge->handle_group == NULL || merge->groups == NULL ||
+	if (merge->entries == NULL || merge->groups == NULL ||
 	    merge->group_slots == NULL || merge->counter_slots == NULL) {
 		yanet_error_add(err, "malloc failed");
-		yanet_counter_handle_list_free(merge->list);
-		merge->list = NULL;
 		counter_merge_fini(merge);
 		return -1;
 	}
@@ -562,6 +622,9 @@ counter_merge_counter_hash(uint64_t group, const char *name) {
 
 // Return the merged handle index for (group, name), reserving the next
 // free handle and setting *created when the counter is new to the merge.
+//
+// A reserved index carries no identity yet; the caller records it, and
+// until it does a same-identity lookup cannot resolve to it.
 static uint64_t
 counter_merge_handle(
 	struct counter_merge *merge,
@@ -577,14 +640,13 @@ counter_merge_handle(
 		if (cur->handle == 0) {
 			cur->hash = hash;
 			cur->handle = merge->used + 1;
-			merge->handle_group[merge->used] = group;
 			*created = true;
 			return merge->used++;
 		}
 		if (cur->hash == hash) {
 			uint64_t handle = cur->handle - 1;
-			if (merge->handle_group[handle] == group &&
-			    strcmp(merge->list->counters[handle].name, name) ==
+			if (merge->entries[handle].group == group &&
+			    strcmp(merge->entries[handle].src->name, name) ==
 				    0) {
 				*created = false;
 				return handle;
@@ -594,46 +656,114 @@ counter_merge_handle(
 	}
 }
 
-// Fill a freshly reserved merged handle from the first worker carrying
-// the counter: metadata, its own tags copy, and a zeroed value block
-// spanning every worker.
+// Registration pass over the per-worker sets.
+//
+// Records the identity of every distinct counter — the first worker
+// carrying it fixes its position, metadata and size — and sizes the
+// merged list's value region: each distinct counter's worker-pointer
+// array, value blocks spanning every worker, and its own tags array.
+// The per-worker sets stay alive for the whole merge, so the registered
+// handles and group tags are borrowed, not copied.
 static int
-counter_merge_handle_init(
+counter_merge_register(
 	struct counter_merge *merge,
-	uint64_t handle_idx,
-	const struct counter_handle *src,
+	const struct counter_worker_set_list *sets,
+	size_t *values_size,
 	yanet_error **err
 ) {
-	struct counter_handle *dst = &merge->list->counters[handle_idx];
-	strtcpy(dst->name, src->name, sizeof(dst->name));
-	dst->size = src->size;
-	dst->gen = src->gen;
-	dst->tags = counter_tags_dup(src->tags, src->tag_count);
-	if (dst->tags == NULL && src->tag_count > 0) {
-		yanet_error_add(err, "malloc failed");
-		return -1;
-	}
-	dst->tag_count = src->tag_count;
-
-	uint64_t worker_count = merge->list->instance_count;
-	size_t ptr_array_size = worker_count * sizeof(uint64_t *);
-	uint8_t *base = calloc(
-		1, ptr_array_size + worker_count * dst->size * sizeof(uint64_t)
-	);
-	if (base == NULL) {
-		yanet_error_add(err, "malloc failed");
-		return -1;
-	}
-	dst->values = (uint64_t **)base;
-	uint64_t *blocks = (uint64_t *)(base + ptr_array_size);
+	uint64_t worker_count = sets->worker_count;
 	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
-		if (dst->size == 0) {
-			dst->values[w_idx] = NULL;
-			continue;
+		struct counter_handle_list *src = sets->sets[w_idx].counters;
+		for (size_t i = 0; i < src->count; ++i) {
+			struct counter_handle *handle = &src->counters[i];
+			uint64_t group = counter_merge_group(merge, handle);
+			bool created = false;
+			uint64_t handle_idx = counter_merge_handle(
+				merge, group, handle->name, &created
+			);
+			if (!created) {
+				continue;
+			}
+			merge->entries[handle_idx] =
+				(struct counter_merge_entry){
+					.src = handle,
+					.group = group,
+				};
+			size_t region;
+			size_t tags_region;
+			if (!counter_value_region_size(
+				    worker_count, handle->size, &region
+			    ) ||
+			    !counter_tag_region_size(
+				    handle->tag_count, &tags_region
+			    ) ||
+			    !counter_region_add(values_size, region) ||
+			    !counter_region_add(values_size, tags_region)) {
+				yanet_error_add(
+					err, "counter list size overflow"
+				);
+				return -1;
+			}
 		}
-		dst->values[w_idx] = blocks + w_idx * dst->size;
 	}
 	return 0;
+}
+
+// Fill pass over the registered identities.
+//
+// Materializes the merged list's handles, carving each one's tag copy
+// and value blocks from the region in the list's own allocation.
+static void
+counter_merge_fill(struct counter_merge *merge) {
+	uint64_t worker_count = merge->list->instance_count;
+	uint8_t *cursor = counter_handle_list_region(merge->list);
+	for (size_t idx = 0; idx < merge->used; ++idx) {
+		const struct counter_handle *src = merge->entries[idx].src;
+		struct counter_handle *dst = &merge->list->counters[idx];
+		strtcpy(dst->name, src->name, sizeof(dst->name));
+		dst->size = src->size;
+		dst->gen = src->gen;
+		dst->tag_count = src->tag_count;
+		dst->tags =
+			counter_tags_carve(&cursor, src->tags, src->tag_count);
+		counter_values_carve(dst, &cursor, worker_count);
+	}
+}
+
+// Copy pass over the per-worker sets.
+//
+// Sizes come from the module's registry and are expected to agree
+// across workers; on disagreement the first worker's size stays and
+// this worker's instance remains zero. The instance slots of workers
+// without the counter keep their zeroed state.
+static void
+counter_merge_copy_values(
+	struct counter_merge *merge, const struct counter_worker_set_list *sets
+) {
+	for (uint64_t w_idx = 0; w_idx < sets->worker_count; ++w_idx) {
+		struct counter_handle_list *src = sets->sets[w_idx].counters;
+		for (size_t i = 0; i < src->count; ++i) {
+			struct counter_handle *handle = &src->counters[i];
+			uint64_t group = counter_merge_group(merge, handle);
+			bool created = false;
+			uint64_t handle_idx = counter_merge_handle(
+				merge, group, handle->name, &created
+			);
+			if (created) {
+				// Registration walked every pair first, so
+				// a creation here is unreachable.
+				continue;
+			}
+			struct counter_handle *dst =
+				&merge->list->counters[handle_idx];
+			if (handle->size != dst->size || dst->size == 0) {
+				continue;
+			}
+			memcpy(dst->values[w_idx],
+			       handle->values[0],
+			       dst->size * sizeof(uint64_t));
+		}
+	}
 }
 
 // Union of the per-worker matched counter sets.
@@ -654,51 +784,29 @@ counter_worker_sets_merge(
 	}
 
 	struct counter_merge merge;
-	if (counter_merge_init(&merge, worker_count, total, err)) {
+	if (counter_merge_init(&merge, total, err)) {
 		return NULL;
 	}
 
-	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
-		struct counter_handle_list *src = sets->sets[w_idx].counters;
-		for (size_t i = 0; i < src->count; ++i) {
-			struct counter_handle *handle = &src->counters[i];
-			uint64_t group = counter_merge_group(&merge, handle);
-			bool created = false;
-			uint64_t handle_idx = counter_merge_handle(
-				&merge, group, handle->name, &created
-			);
-			if (created && counter_merge_handle_init(
-					       &merge, handle_idx, handle, err
-				       )) {
-				goto error;
-			}
-			struct counter_handle *dst =
-				&merge.list->counters[handle_idx];
-			// Sizes come from the module's registry and are
-			// expected to agree across workers; on disagreement
-			// the first worker's size stays and this worker's
-			// instance remains zero.
-			if (handle->size != dst->size || dst->size == 0) {
-				continue;
-			}
-			memcpy(dst->values[w_idx],
-			       handle->values[0],
-			       dst->size * sizeof(uint64_t));
-		}
+	size_t values_size = 0;
+	if (counter_merge_register(&merge, sets, &values_size, err)) {
+		counter_merge_fini(&merge);
+		return NULL;
 	}
 
-	merge.list->count = merge.used;
+	merge.list = counter_handle_list_alloc(
+		worker_count, merge.used, values_size, err
+	);
+	if (merge.list == NULL) {
+		counter_merge_fini(&merge);
+		return NULL;
+	}
+
+	counter_merge_fill(&merge);
+	counter_merge_copy_values(&merge, sets);
+
 	counter_merge_fini(&merge);
 	return merge.list;
-
-error:
-	// Every handle below merge.used is initialized, including the one
-	// whose init failed halfway, so publishing the count lets the free
-	// path reclaim their tags and value blocks.
-	merge.list->count = merge.used;
-	yanet_counter_handle_list_free(merge.list);
-	counter_merge_fini(&merge);
-	return NULL;
 }
 
 // Build the per-worker set list from the collected matches.
@@ -945,27 +1053,31 @@ counter_handle_list_build(
 ) {
 	uint64_t count = counter_registry->count;
 
-	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
-		sizeof(struct counter_handle_list) +
-		sizeof(struct counter_handle) * count
-	);
+	size_t values_size = 0;
+	{
+		struct counter *counters = ADDR_OF(&counter_registry->names);
+		for (uint64_t idx = 0; idx < count; ++idx) {
+			size_t region;
+			if (!counter_value_region_size(
+				    worker_count, counters[idx].size, &region
+			    ) ||
+			    !counter_region_add(&values_size, region)) {
+				return NULL;
+			}
+		}
+	}
 
+	struct counter_handle_list *list = counter_handle_list_alloc(
+		worker_count, count, values_size, NULL
+	);
 	if (list == NULL) {
 		return NULL;
 	}
-	list->instance_count = worker_count;
-	list->count = count;
 	struct counter_handle *handlers = list->counters;
 
-	for (uint64_t idx = 0; idx < count; ++idx) {
-		handlers[idx].tag_count = 0;
-		handlers[idx].tags = NULL;
-		handlers[idx].values = NULL;
-	}
-
 	// storages holds one offset-pointer cell per worker; materialize a
-	// plain storage pointer per worker before handing them to
-	// fill_counter_handle, which indexes the array directly.
+	// plain storage pointer per worker before handing them to the
+	// value fill, which indexes the array directly.
 	struct counter_storage **worker_storages =
 		malloc(worker_count * sizeof(*worker_storages));
 	if (worker_storages == NULL) {
@@ -976,19 +1088,16 @@ counter_handle_list_build(
 		worker_storages[worker_idx] = ADDR_OF(storages + worker_idx);
 	}
 
+	uint8_t *cursor = counter_handle_list_region(list);
 	for (uint64_t idx = 0; idx < count; ++idx) {
-		if (fill_counter_handle(
-			    &handlers[idx],
-			    worker_storages,
-			    worker_count,
-			    idx,
-			    NULL,
-			    0
-		    )) {
-			free(worker_storages);
-			yanet_counter_handle_list_free(list);
-			return NULL;
-		}
+		struct counter *counters = ADDR_OF(&counter_registry->names);
+		struct counter_handle *dst = &handlers[idx];
+		strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
+		dst->size = counters[idx].size;
+		dst->gen = counters[idx].gen;
+		counter_handle_fill_values(
+			dst, &cursor, worker_storages, worker_count, idx
+		);
 	}
 
 	free(worker_storages);
@@ -1105,18 +1214,9 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	if (counters == NULL) {
 		return;
 	}
-	struct counter_handle *handles = counters->counters;
-	for (size_t i = 0; i < counters->count; ++i) {
-		// Handles from one storage share that storage's tag array;
-		// free it once, on its first handle.
-		if (i == 0 || handles[i].tags != handles[i - 1].tags) {
-			free(handles[i].tags);
-		}
-		// This pointer is the base of the single allocation that also
-		// holds every worker's value block, so freeing it here
-		// reclaims all of it.
-		free(handles[i].values);
-	}
+	// The list's single allocation owns every handle's tag array and
+	// value block: they are carved out of its value region, so one
+	// free reclaims all of it.
 	free(counters);
 }
 

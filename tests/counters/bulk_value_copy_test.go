@@ -20,15 +20,14 @@ const (
 	bulkCopyDPSize    = 4 * datasize.MB
 	bulkCopyAgentSize = 2 * datasize.MB
 
-	// bulkCopyPipelineCount is chosen so the per-counter allocation term
-	// dominates the fixed per-worker overhead: 20 empty pipelines
-	// register 6 counters each and the single device storage registers
-	// another 12, so the nil tag filter matches 132 counters across 21
-	// storages. One worker's set costs one value block per matched
-	// counter plus a small tag term per matched storage (one tags array
-	// and two strdup'd strings per tag), so a per-worker budget of the
-	// matched counters plus eight allocations per storage leaves room
-	// for both terms.
+	// bulkCopyPipelineCount is chosen so the matched counter set dwarfs
+	// the fixed per-read terms: 20 empty pipelines register 6 counters
+	// each and the single device storage registers another 12, so the
+	// nil tag filter matches 132 counters across 21 storages. Every
+	// value block and tag copy is carved from a list's own allocation,
+	// so the read costs a fixed set of allocations plus a small
+	// per-worker term — the 132 matched counters must cost nothing per
+	// counter.
 	bulkCopyPipelineCount = 20
 
 	// bulkCopyCycles is the number of repeated read cycles the leak
@@ -96,11 +95,10 @@ func bulkCopyProbe(t *testing.T, workerCount uint64) (allocs uint64, matched int
 }
 
 // TestCountersByTagsPerWorkerAllocationsAreBounded pins the allocation
-// shape of the per-worker counter read: every worker's matched set is
-// materialized separately, so the total scales once per worker — one
-// worker's share stays on the order of one allocation per matched
-// counter — and a higher worker count must not grow any single worker's
-// share.
+// shape of the per-worker counter read: every counter's value block and
+// tag copy is carved from its list's own allocation, so the read scales
+// with the worker and storage counts only — no per-counter allocation
+// in the per-worker copy or anywhere else in the read.
 func TestCountersByTagsPerWorkerAllocationsAreBounded(t *testing.T) {
 	const (
 		lowWorkers  = 2
@@ -117,20 +115,27 @@ func TestCountersByTagsPerWorkerAllocationsAreBounded(t *testing.T) {
 
 	matched := uint64(highMatched)
 	storageCount := uint64(bulkCopyPipelineCount + 1)
-	perWorkerBudget := matched + 8*storageCount
 	perWorkerLow := lowAllocs / lowWorkers
 	perWorkerHigh := highAllocs / highWorkers
 
-	require.Less(t, perWorkerHigh, perWorkerBudget,
-		"one worker's share must cost one allocation per matched "+
-			"counter plus a small tag term per storage",
+	require.LessOrEqual(
+		t,
+		highAllocs,
+		2*uint64(highWorkers)+storageCount+8,
+		"the read may scale with workers and storages, not counters",
 	)
 	require.Less(t, perWorkerHigh, perWorkerLow+matched,
 		"a higher worker count must not grow a single worker's share",
 	)
-	require.GreaterOrEqual(t, perWorkerHigh, matched,
-		"a worker's share must average at least one allocation per "+
-			"matched counter, or the probe stopped observing the copy",
+	require.Less(t, perWorkerHigh, matched,
+		"no per-matched-counter allocation may remain in a worker's share",
+	)
+	require.GreaterOrEqual(
+		t,
+		highAllocs,
+		2*uint64(highWorkers),
+		"the read must still materialize every worker's set, or the "+
+			"probe stopped observing it",
 	)
 }
 
