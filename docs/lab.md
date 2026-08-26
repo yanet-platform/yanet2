@@ -134,9 +134,11 @@ Both `just lab shell` and `just lab serial` start Bash with
 `/tmp/yanet/cli` on `PATH`. They enable each YANET CLI's dynamic Bash
 completion and show the guest paths for CLI binaries, configuration, logs, and
 build artifacts. `shell` is the normal choice because it has a native SSH TTY;
-use `serial` to inspect the QEMU console directly. Other VM commands report
-`lab is busy` while serial is attached; `down` closes the attachment. `reset`
-restores the guest snapshot and reapplies this shell setup.
+use `serial` to inspect the QEMU console directly. While any supervisor
+operation is active, other VM commands report `lab is busy` and exit non-zero
+without queueing. `down` closes the serial attachment and waits for the active
+operation to finish before it shuts the VM down; `reset` restores the guest
+snapshot and reapplies this shell setup.
 
 ## Troubleshooting
 

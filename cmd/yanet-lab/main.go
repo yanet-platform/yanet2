@@ -73,7 +73,10 @@ const maxSessionNameLen = sunPathLimit - sunPathSlack - maxSessionNameSlack
 
 // supervisorProtocolVersion is stamped on every Supervisor reply so a stale
 // Supervisor process forked by an older CLI is detected and replaced.
-const supervisorProtocolVersion = 2
+// Version 3 folded the pre-ready busy reply into the single-flight contract:
+// version 2 supervisors reply `lab is starting` pre-ready, which newer CLIs
+// treat as stale. Main-line code is pre-release, so the wire may break freely.
+const supervisorProtocolVersion = 3
 
 // cliProtocolVersion is the version of the CLI JSON envelope itself. It is
 // independent from the Supervisor protocol and travels in its own field so
@@ -853,16 +856,12 @@ var serveRunner = func(m *application, logPath string) (*response, error) {
 			if response.OK {
 				return response, nil
 			}
-			lastStatusError = response.Error
+			lastStatusError = startupStatusError(lastStatusError, response.Error)
 		}
 		select {
 		case processErr := <-exited:
-			if directory, _, pathErr := sessionPaths(m.session); pathErr == nil {
-				if lockErr := probeSessionLock(directory); errors.Is(lockErr, errLabBusy) {
-					return nil, errLabBusy
-				}
-			}
-			return nil, fmt.Errorf("lab supervisor exited during startup: %w; see %s", processErr, logPath)
+			directory, _, pathErr := sessionPaths(m.session)
+			return nil, exitedDuringStartupError(directory, pathErr, processErr, logPath)
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
@@ -885,6 +884,29 @@ func startupFailure(lastStatusError, logPath string) error {
 		return fmt.Errorf("lab did not start; see %s", logPath)
 	}
 	return fmt.Errorf("lab did not start: %s; see %s", lastStatusError, logPath)
+}
+
+// startupStatusError folds a non-busy status reply into the startup poll's
+// last-seen error. The pre-ready Supervisor answers every non-down action
+// with `lab is busy` while it is still booting, so that reply is expected
+// during startup and must not become the failure message a timeout reports.
+func startupStatusError(lastStatusError, statusError string) string {
+	if statusError == labBusyError {
+		return lastStatusError
+	}
+	return statusError
+}
+
+// exitedDuringStartupError reports a forked serve child that exited before
+// answering OK. When the session lock is still held by a competing Supervisor
+// the child lost the flock race and the exact busy contract applies; otherwise
+// the wrapped error names the child's own failure. directoryErr guards the
+// probe so an unresolvable session path still yields the generic error.
+func exitedDuringStartupError(directory string, directoryErr error, processErr error, logPath string) error {
+	if directoryErr == nil && errors.Is(probeSessionLock(directory), errLabBusy) {
+		return errLabBusy
+	}
+	return fmt.Errorf("lab supervisor exited during startup: %w; see %s", processErr, logPath)
 }
 
 func (m *application) ensureUp() error {

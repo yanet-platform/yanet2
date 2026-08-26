@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -481,6 +482,39 @@ func TestStartupFailureIncludesLastStatusError(t *testing.T) {
 	require.EqualError(t, err, "lab did not start: operator profile is not ready; see /tmp/supervisor.log")
 }
 
+func TestStartupStatusErrorDropsBusy(t *testing.T) {
+	require.Equal(t, "", startupStatusError("", labBusyError))
+	require.Equal(t, "operator profile is not ready", startupStatusError("", "operator profile is not ready"))
+	require.Equal(t, "operator profile is not ready", startupStatusError("operator profile is not ready", labBusyError))
+	require.Equal(t, "baseline snapshot missing; run up again", startupStatusError("operator profile is not ready", "baseline snapshot missing; run up again"))
+}
+
+func TestExitedDuringStartupError(t *testing.T) {
+	processErr := errors.New("exit status 1")
+	logPath := "/tmp/supervisor.log"
+
+	t.Run("free lock produces generic error", func(t *testing.T) {
+		dir := t.TempDir()
+		err := exitedDuringStartupError(dir, nil, processErr, logPath)
+		require.EqualError(t, err, "lab supervisor exited during startup: exit status 1; see /tmp/supervisor.log")
+	})
+
+	t.Run("held lock produces exact busy error", func(t *testing.T) {
+		dir := t.TempDir()
+		holder, err := os.OpenFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+		require.NoError(t, err)
+		defer holder.Close()
+		require.NoError(t, syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+		err = exitedDuringStartupError(dir, nil, processErr, logPath)
+		require.EqualError(t, err, labBusyError)
+	})
+
+	t.Run("session path error bypasses probe", func(t *testing.T) {
+		err := exitedDuringStartupError("", errors.New("invalid session path"), processErr, logPath)
+		require.EqualError(t, err, "lab supervisor exited during startup: exit status 1; see /tmp/supervisor.log")
+	})
+}
+
 func TestHandleRuntimeConnectionReturnsBusyWhileStarting(t *testing.T) {
 	for _, action := range []string{"status", "reset", "exec", "shell", "serial", "report", "manifest"} {
 		t.Run(action, func(t *testing.T) {
@@ -658,10 +692,11 @@ func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
 	require.True(t, state.TryOperation())
 	busyServer, busyClient := net.Pipe()
 	directory := t.TempDir()
+	restoreRanWhileBusy := make(chan struct{}, 1)
 	var busyHandlers errgroup.Group
 	busyHandlers.Go(func() error {
 		handleConnection(busyServer, nil, directory, state, func() error {
-			t.Fatal("restore ran while reset was busy")
+			restoreRanWhileBusy <- struct{}{}
 			return nil
 		}, nil, func() {})
 		return nil
@@ -674,6 +709,11 @@ func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
 	require.NoError(t, busyHandlers.Wait())
 	require.NoError(t, busyClient.Close())
 	require.NoError(t, busyServer.Close())
+	select {
+	case <-restoreRanWhileBusy:
+		t.Fatal("restore ran while reset was busy")
+	default:
+	}
 
 	state.ReleaseOperation()
 
@@ -735,6 +775,39 @@ func TestSupervisorClosesSerial(t *testing.T) {
 	_, err := client.Write([]byte("closed"))
 	require.Error(t, err)
 	state.ReleaseSerial(server)
+}
+
+func TestSupervisorShutdownClosesAttachedSerial(t *testing.T) {
+	state := &supervisor{}
+	server, client := net.Pipe()
+	defer client.Close()
+	require.True(t, state.TrySerial(server))
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		_ = state.Shutdown(func() error { return nil })
+		close(shutdownDone)
+	}()
+
+	// Stop must close the attached serial connection so the serial io.Copy
+	// returns and handleConnection's deferred ReleaseSerial can release the
+	// operation mutex the shutdown is waiting on. Once stopping is visible
+	// the close already happened (both live under the same serialMutex
+	// critical section), so a blocking read on the peer must fail with EOF.
+	require.Eventually(t, func() bool {
+		state.serialMutex.Lock()
+		defer state.serialMutex.Unlock()
+		return state.stopping
+	}, time.Second, time.Millisecond)
+	_, err := client.Read(make([]byte, 1))
+	require.ErrorIs(t, err, io.EOF)
+
+	state.ReleaseSerial(server)
+	select {
+	case <-shutdownDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not complete after the attached serial was closed")
+	}
 }
 
 func TestSupervisorRejectsOperationsAfterShutdown(t *testing.T) {
@@ -802,19 +875,34 @@ func TestSupervisorSignalWaitsForActiveOperation(t *testing.T) {
 
 func TestSupervisorShutdownHooksAreSerialized(t *testing.T) {
 	state := &supervisor{}
+
+	var order []string
+	var orderMutex sync.Mutex
+	record := func(name string) {
+		orderMutex.Lock()
+		defer orderMutex.Unlock()
+		order = append(order, name)
+	}
+	orderSnapshot := func() []string {
+		orderMutex.Lock()
+		defer orderMutex.Unlock()
+		return append([]string(nil), order...)
+	}
+
 	downHookStarted := make(chan struct{})
 	releaseDownHook := make(chan struct{})
-	downCleanupStarted := make(chan struct{})
 	resultHookStarted := make(chan struct{})
 	releaseResultHook := make(chan struct{})
 	go func() {
 		_ = state.ShutdownWithBeforeWaitAndResult(func() {
+			record("down-before-wait")
 			close(downHookStarted)
 			<-releaseDownHook
 		}, func() error {
-			close(downCleanupStarted)
+			record("down-cleanup")
 			return nil
 		}, func(error) {
+			record("down-result")
 			close(resultHookStarted)
 			<-releaseResultHook
 		})
@@ -822,51 +910,26 @@ func TestSupervisorShutdownHooksAreSerialized(t *testing.T) {
 	<-downHookStarted
 
 	signalAttempted := make(chan struct{})
-	signalHookStarted := make(chan struct{})
 	go func() {
 		close(signalAttempted)
 		_ = state.ShutdownWithBeforeWait(func() {
-			close(signalHookStarted)
+			record("signal-before-wait")
 		}, func() error { return nil })
 	}()
 	<-signalAttempted
-	select {
-	case <-signalHookStarted:
-		t.Fatal("concurrent shutdown hook ran before the active shutdown completed")
-	case <-time.After(50 * time.Millisecond):
-	}
 
 	close(releaseDownHook)
 	require.Eventually(t, func() bool {
-		select {
-		case <-downCleanupStarted:
-			return true
-		default:
-			return false
-		}
+		return len(orderSnapshot()) == 3
 	}, time.Second, time.Millisecond)
-	require.Eventually(t, func() bool {
-		select {
-		case <-resultHookStarted:
-			return true
-		default:
-			return false
-		}
-	}, time.Second, time.Millisecond)
-	select {
-	case <-signalHookStarted:
-		t.Fatal("concurrent shutdown hook ran before the result hook returned")
-	default:
-	}
+	// The second shutdown must be blocked on shutdownMutex until the first
+	// completes: its hook cannot have run while the result hook is held.
+	require.Equal(t, []string{"down-before-wait", "down-cleanup", "down-result"}, orderSnapshot())
 	close(releaseResultHook)
 	require.Eventually(t, func() bool {
-		select {
-		case <-signalHookStarted:
-			return true
-		default:
-			return false
-		}
+		return len(orderSnapshot()) == 4
 	}, time.Second, time.Millisecond)
+	require.Equal(t, []string{"down-before-wait", "down-cleanup", "down-result", "signal-before-wait"}, orderSnapshot())
 }
 
 func TestEnsurePrivateDirectoryRejectsUnsafePaths(t *testing.T) {
@@ -1140,6 +1203,30 @@ func TestUpRejectsBusySupervisorWithoutSpawningReplacement(t *testing.T) {
 	application.session = "unhealthy-running"
 	err := application.up()
 	require.EqualError(t, err, labBusyError)
+	require.False(t, serveRunnerCalled)
+}
+
+func TestUpRejectsNonBusyUnhealthySupervisor(t *testing.T) {
+	dir, cleanup := tempUp(t, "unhealthy-operators")
+	defer cleanup()
+	serveRunnerCalled := false
+	stubCallAndServe(t,
+		func(*application, request) (*response, error) {
+			return &response{
+				OK:                        false,
+				Error:                     "operator profile is not ready",
+				SupervisorProtocolVersion: supervisorProtocolVersion,
+			}, nil
+		},
+		func(*application, string) (*response, error) {
+			serveRunnerCalled = true
+			return nil, errors.New("serveRunner must not run for an unhealthy Supervisor")
+		},
+	)
+	application := newApplication()
+	application.session = "unhealthy-operators"
+	err := application.up()
+	require.EqualError(t, err, "session unhealthy: operator profile is not ready; see "+filepath.Join(dir, "supervisor.log"))
 	require.False(t, serveRunnerCalled)
 }
 
