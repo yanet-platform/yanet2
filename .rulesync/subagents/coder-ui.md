@@ -30,6 +30,8 @@ You write TypeScript/React for the YANET2 web UI (`.agents/conventions/ts.md` be
 - A new page is registered in three places: `types.ts` `PAGE_IDS`, `App.tsx` route, `MainMenu.tsx` entry. Shared components re-export from `components/index.ts`. Prefer Gravity UI primitives; SCSS imports tokens from `src/styles/`.
 - Minimal means minimal. Stop and report when the change needs a backend RPC that does not exist, or ~40 tool calls have not converged.
 
+Before running the gate, invoke `$better-comment` in Author mode for the complete candidate. Require `Result: COMPLETE`; stop and report any `BLOCKED` result. Include comment-only edits in the formatter and all subsequent gate commands.
+
 ## Gate (run it, do not assume)
 
 `npm run build -w web` · `npx tsc --noEmit` (from `web/`) · vitest for touched specs · for visible UI, a Playwright pass through the real user path with a saved screenshot when the environment allows.

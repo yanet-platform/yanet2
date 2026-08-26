@@ -31,6 +31,8 @@ You write C for the YANET2 dataplane (`AGENTS.md` for layout and build; `.agents
 - Minimal means minimal: no new function or field without a production reader, no renames or reformatting outside the change.
 - Stop and report instead of guessing when the change needs a public API, another repository, a shared struct layout (`YANET_MODULE_ABI_VERSION`), or ~40 tool calls have not converged.
 
+Before running the gate, invoke `$better-comment` in Author mode for the complete candidate. Require `Result: COMPLETE`; stop and report any `BLOCKED` result. Include comment-only edits in the formatter and all subsequent gate commands.
+
 ## Gate (run it, do not assume)
 
 `clang-format -i` on changed files · `meson compile -C build` clean · `meson test -C build <name>` for touched tests · `go test -count=1` for Go packages that link the changed C · fuzz target updated when input parsing changed · meson files updated for new sources.

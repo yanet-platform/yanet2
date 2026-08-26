@@ -159,11 +159,13 @@ deploy/packages/
 # no change here.
 .agents/skills/*
 !.agents/skills/autopilot
+!.agents/skills/better-comment
 !.agents/skills/issue-create
 !.agents/skills/review-change
 !.agents/skills/ship-pr
 .claude/skills/*
 !.claude/skills/autopilot
+!.claude/skills/better-comment
 !.claude/skills/issue-create
 !.claude/skills/review-change
 !.claude/skills/ship-pr

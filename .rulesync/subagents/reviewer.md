@@ -27,9 +27,10 @@ The brief names the candidate root (worktree or PR), the base, and the intended 
 
 1. Reconstruct the contract: what the change claims, which callers, tests, docs, packaging and registration surfaces it touches (`grep` the class, not the sample).
 2. Read the whole diff. For each hunk ask: what input or state makes this wrong, what did the old code guarantee that this drops, what else must change for this to be complete.
-3. Run the gate once, from the candidate root, only for the layers touched: `gofmt -l` + `go vet` + `go test -count=1 <pkgs>`; `clang-format --dry-run` + `meson compile -C build` + `meson test`; `cargo +nightly fmt --check` + `cargo clippy` + `cargo test`; `npm run build -w web` + `npx tsc --noEmit`; `make lint-commit` for a commit message. A gate that produces or consumes `build/` needs the candidate's own real `build/`.
-4. Check tests: each new test must fail on the defect it pins (reason it through or mutate locally, never commit the mutation); a green suite is not evidence if the assertion is vacuous.
-5. Rank findings, most severe first, at most ten. Each: file:line, the defect, the concrete failure scenario, blocking or not. Do not report style the linters already enforce, and do not restate conventions.
+3. Before the gate, invoke `$better-comment` in Review mode for the complete candidate. Require `Result: APPROVED`; propagate any `CHANGES REQUESTED` findings and do not approve the outer review.
+4. Run the gate once, from the candidate root, only for the layers touched: `gofmt -l` + `go vet` + `go test -count=1 <pkgs>`; `clang-format --dry-run` + `meson compile -C build` + `meson test`; `cargo +nightly fmt --check` + `cargo clippy` + `cargo test`; `npm run build -w web` + `npx tsc --noEmit`; `make lint-commit` for a commit message. A gate that produces or consumes `build/` needs the candidate's own real `build/`.
+5. Check tests: each new test must fail on the defect it pins (reason it through or mutate locally, never commit the mutation); a green suite is not evidence if the assertion is vacuous.
+6. Rank findings, most severe first, at most ten. Each: file:line, the defect, the concrete failure scenario, blocking or not. Do not report style the linters already enforce, and do not restate conventions.
 
 ## Verdict
 

@@ -32,6 +32,8 @@ You write Go for YANET2 (`AGENTS.md` for layout and build; `.agents/conventions/
 - Tests: table-driven, plus a `-race` test where concurrency matters; a test must fail on the defect it pins. C-only changes still need `go test -count=1`.
 - Minimal means minimal: no renames, no reformatting, no unused symbols. Stop and report when the change needs a C-side contract, another repository, or ~40 tool calls have not converged.
 
+Before running the gate, invoke `$better-comment` in Author mode for the complete candidate. Require `Result: COMPLETE`; stop and report any `BLOCKED` result. Include comment-only edits in the formatter and all subsequent gate commands.
+
 ## Gate (run it, do not assume)
 
 `gofmt -w` changed files · `go vet ./...` · `go build ./...` · `go test -count=1 <affected packages>` · `go test -race -count=10 -run <pattern>` where relevant · proto `meson.build` updated for new protos · `make proto-go` when protos changed.

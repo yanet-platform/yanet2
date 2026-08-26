@@ -29,6 +29,8 @@ You write Rust for the YANET2 CLIs (`AGENTS.md` → Rust CLI for the workspace s
 - A new CLI is registered in root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES`/`CLI_MODULES`) and `debian/yanet2-cli.install`; a private CLI is a standalone workspace.
 - Minimal means minimal: no renames, no reformatting outside the change. Stop and report when the change needs a proto or Go change, or ~40 tool calls have not converged.
 
+Before running the gate, invoke `$better-comment` in Author mode for the complete candidate. Require `Result: COMPLETE`; stop and report any `BLOCKED` result. Include comment-only edits in the formatter and all subsequent gate commands.
+
 ## Gate (run it, do not assume)
 
 `cargo +nightly fmt` · `cargo clippy` · `cargo build --workspace` · `cargo test --workspace`.
