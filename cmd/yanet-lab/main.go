@@ -38,7 +38,13 @@ const labBusyError = "lab is busy"
 var errLabBusy = errors.New(labBusyError)
 
 const (
+	statusReady    = "READY"
+	statusNotReady = "NOT_READY"
+)
+
+const (
 	supervisorRequestTimeout  = 5 * time.Second
+	supervisorStatusTimeout   = 45 * time.Second
 	supervisorExecTimeout     = 5 * time.Minute
 	supervisorManifestTimeout = 10 * time.Minute
 	supervisorResetTimeout    = 2 * time.Minute
@@ -115,6 +121,11 @@ type response struct {
 	// SupervisorProtocolVersion is the Supervisor protocol version the
 	// Supervisor stamps on every reply.
 	SupervisorProtocolVersion int `json:"supervisorProtocolVersion,omitempty"`
+	// Status is the overall Operator Profile verdict for status replies:
+	// READY when every scope is ready, NOT_READY otherwise.
+	Status string `json:"status,omitempty"`
+	// Scopes lists every AD-11 scope's state and reason for status replies.
+	Scopes []lab.ScopeResult `json:"scopes,omitempty"`
 }
 
 type application struct {
@@ -268,7 +279,7 @@ func (m *application) command() *cobra.Command {
 	root.AddCommand(
 		&cobra.Command{Use: "doctor", Short: "Check host prerequisites", RunE: func(*cobra.Command, []string) error { return m.doctor() }},
 		m.upCommand(),
-		&cobra.Command{Use: "status", Short: "Show lab and YANET readiness", RunE: func(*cobra.Command, []string) error { return m.simple("status", nil) }},
+		&cobra.Command{Use: "status", Short: "Show lab and YANET readiness", RunE: func(*cobra.Command, []string) error { return m.status() }},
 		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return m.simple("reset", nil) }},
 		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return m.simple("report", nil) }},
 		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return m.simple("down", nil) }},
@@ -979,6 +990,72 @@ func (m *application) simple(action string, argv []string) error {
 	return m.printResponse(response)
 }
 
+// status runs the read-only Operator Profile status check and renders it.
+//
+// A Supervisor reply whose protocol version differs from the current one is a
+// stale Supervisor: status reports the observed version and returns a protocol
+// mismatch error without calling down or changing any Lab state. A reply whose
+// overall status is missing is derived from the reported scopes, and a failed
+// reply never renders a ready verdict, so the CLI can contradict neither the
+// Supervisor nor its own fail-closed default.
+func (m *application) status() error {
+	reply, err := m.call(request{Action: "status"})
+	if err != nil {
+		return err
+	}
+	if reply.SupervisorProtocolVersion != supervisorProtocolVersion {
+		reply.Status = statusNotReady
+		reply.OK = false
+		reply.Error = fmt.Sprintf("protocol mismatch: supervisor protocol %d, want %d", reply.SupervisorProtocolVersion, supervisorProtocolVersion)
+		return m.printResponse(reply)
+	}
+	if reply.Scopes == nil {
+		reply.Scopes = []lab.ScopeResult{}
+	}
+	if reply.Status == "" {
+		reply.Status = statusVerdict(reply.Scopes)
+	}
+	if !reply.OK && reply.Status == statusReady {
+		reply.Status = statusNotReady
+	}
+	if reply.Status == statusNotReady && reply.Error == "" {
+		reply.OK = false
+		reply.Error = "operator profile is not ready"
+	}
+	return m.printResponse(reply)
+}
+
+// statusVerdict reduces per-scope state to the overall READY/NOT_READY
+// verdict. An empty scope list is NOT_READY so a missing check can never be
+// mistaken for a healthy profile.
+func statusVerdict(scopes []lab.ScopeResult) string {
+	if len(scopes) == 0 {
+		return statusNotReady
+	}
+	for _, scope := range scopes {
+		if scope.State != lab.StateReady {
+			return statusNotReady
+		}
+	}
+	return statusReady
+}
+
+// failedScopeNames returns the non-ready scope names of a status result.
+func failedScopeNames(scopes []lab.ScopeResult) []string {
+	failed := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.State != lab.StateReady {
+			failed = append(failed, scope.Name)
+		}
+	}
+	return failed
+}
+
+// checkOperatorStatus gathers the per-scope Operator Profile status from the
+// live guest. The package var lets tests substitute a fake runner so the
+// status request handler can be exercised without a QEMU guest.
+var checkOperatorStatus = lab.CheckStatus
+
 func (m *application) simpleManifest(path string) error {
 	response, err := m.call(request{Action: "manifest", Manifest: path})
 	if err != nil {
@@ -1026,6 +1103,11 @@ func requestTimeout(action string) time.Duration {
 		return supervisorResetTimeout
 	case "down":
 		return supervisorShutdownTimeout
+	// status runs every Operator Profile probe in one guest command bounded
+	// by the command runner, so the CLI deadline must exceed that bound
+	// instead of the protocol handshake budget.
+	case "status":
+		return supervisorStatusTimeout
 	default:
 		return supervisorRequestTimeout
 	}
@@ -1072,6 +1154,18 @@ func (m *application) printResponse(value *response) error {
 			}
 			if result.Error != "" {
 				fmt.Println(result.Error)
+			}
+		}
+	} else if value.Scopes != nil {
+		if value.Status != "" {
+			fmt.Println(value.Status)
+		}
+		if value.Output != "" {
+			fmt.Println(value.Output)
+		}
+		for _, scope := range value.Scopes {
+			if scope.State != lab.StateReady {
+				fmt.Printf("%s: %s\n", scope.Name, scope.Reason)
 			}
 		}
 	} else if value.Output != "" {
@@ -1278,15 +1372,14 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	}
 	switch value.Action {
 	case "status":
-		output, err := fw.ExecuteCommand("pgrep -f '[y]anet-dataplane' >/dev/null && pgrep -f '[y]anet-controlplane' >/dev/null")
-		if err == nil {
-			err = lab.CheckOperators(fw)
+		results, checkErr := checkOperatorStatus(fw)
+		reply.Scopes = results
+		reply.Status = statusVerdict(results)
+		if checkErr != nil {
+			setError(&reply, checkErr)
+		} else if reply.Status == statusNotReady {
+			setError(&reply, fmt.Errorf("operator profile is not ready: %s", strings.Join(failedScopeNames(results), ", ")))
 		}
-		if err == nil {
-			output = "VM: running; YANET: ready; operators: ready"
-		}
-		reply.Output = output
-		setError(&reply, err)
 	case "exec":
 		output, err := fw.ExecuteCommand(lab.ShellJoin(value.Argv))
 		reply.Output = lab.TruncateOutput(output)

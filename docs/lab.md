@@ -37,8 +37,11 @@ supervisor; inspect it with `status`, `report`, or `down`.
   tooling (`ssh`, `ssh-keygen`), the disk image, required host artifacts, and
   optional Linux KVM.
 - `up` starts or reuses a named session; `--session NAME` selects another one.
-- `status` verifies the dataplane, control plane, operators, BIRD session, and
-  imported lab routes.
+- `status` runs the pinned Operator Profile check read-only and prints the
+  overall `READY` or `NOT_READY` verdict plus any failing scope. `--json` lists
+  every scope with its `state` and `reason`. A Supervisor whose protocol
+  version differs from the CLI's is reported as a `protocol mismatch` with a
+  non-zero exit while leaving the VM untouched.
 - `exec -- COMMAND ARG...` executes one command without shell interpolation.
 - `shell` opens an SSH-backed interactive Bash session in the guest.
 - `serial` attaches directly to the guest's ttyS0 Bash console. Press `Ctrl-]`
@@ -114,8 +117,10 @@ system temporary directory.
 The saved lab baseline runs the route, forward, decap, and pipeline operators,
 BIRD, and the BIRD adapter. It includes permanent IPv4 and IPv6 neighbours,
 default routes, and BIRD routes for `198.51.100.0/24` and
-`2001:db8:100::/48`. `status` requires every operator readiness service, the
-active `route0` adapter session, and both BIRD routes.
+`2001:db8:100::/48`. `status` requires the dataplane and control plane, every
+operator process, every readiness service, the active `route0` adapter
+session, and both imported routes, and reports each scope's `state` and
+`reason` in `--json` output.
 
 BIRD comes from the pinned
 [`v2.15.1-yanet.1`](https://github.com/yanet-platform/bird/releases/tag/v2.15.1-yanet.1)

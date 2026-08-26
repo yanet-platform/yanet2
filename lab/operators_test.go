@@ -1,8 +1,10 @@
 package lab_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -78,4 +80,140 @@ func TestRequiredArtifacts(t *testing.T) {
 		expected = append(expected, filepath.Join(root, "target", "release", name))
 	}
 	require.Equal(t, expected, artifacts)
+}
+
+func TestScopeNamesAD11Membership(t *testing.T) {
+	require.Equal(t, []string{
+		"dataplane",
+		"controlplane",
+		"route-operator",
+		"forward-operator",
+		"decap-operator",
+		"pipeline-operator",
+		"bird",
+		"bird-adapter",
+		"ready-route",
+		"ready-forward",
+		"ready-decap",
+		"ready-pipeline",
+		"route0-session",
+		"imported-route-v4",
+		"imported-route-v6",
+	}, lab.ScopeNames())
+}
+
+func TestParseScopeStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		assert func(*testing.T, []lab.ScopeResult)
+	}{
+		{
+			name:   "ready matrix",
+			output: statusStatusLines(nil),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Len(t, scopes, len(lab.ScopeNames()))
+				for _, scope := range scopes {
+					require.Equal(t, lab.StateReady, scope.State)
+					require.Empty(t, scope.Reason)
+				}
+			},
+		},
+		{
+			name:   "single scope failure",
+			output: statusStatusLines(map[string]string{"bird": "not_ready"}),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "bird").State)
+				require.Equal(t, "bird process is not running", scopeResultByName(scopes, "bird").Reason)
+				require.Equal(t, lab.StateReady, scopeResultByName(scopes, "dataplane").State)
+			},
+		},
+		{
+			name:   "multi scope failure",
+			output: statusStatusLines(map[string]string{"route-operator": "not_ready", "imported-route-v6": "not_ready"}),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "route-operator").State)
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "imported-route-v6").State)
+			},
+		},
+		{
+			name:   "degraded maps to not ready",
+			output: statusStatusLines(map[string]string{"ready-decap": "degraded"}),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "ready-decap").State)
+				require.Equal(t, "readiness degraded", scopeResultByName(scopes, "ready-decap").Reason)
+			},
+		},
+		{
+			name:   "unknown state is malformed",
+			output: statusStatusLines(map[string]string{"ready-route": "unknown"}),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "ready-route").State)
+				require.Equal(t, "malformed status output", scopeResultByName(scopes, "ready-route").Reason)
+			},
+		},
+		{
+			name:   "missing scope line",
+			output: strings.Replace(statusStatusLines(nil), "YANET2_SCOPE bird ready\n", "", 1),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "bird").State)
+				require.Equal(t, "status output missing", scopeResultByName(scopes, "bird").Reason)
+			},
+		},
+		{
+			name:   "truncated scope line",
+			output: strings.Replace(statusStatusLines(nil), "YANET2_SCOPE bird ready", "YANET2_SCOPE bird", 1),
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "bird").State)
+				require.Equal(t, "malformed status output", scopeResultByName(scopes, "bird").Reason)
+			},
+		},
+		{
+			name:   "duplicate scope line",
+			output: statusStatusLines(nil) + "\nYANET2_SCOPE bird ready",
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Equal(t, lab.StateNotReady, scopeResultByName(scopes, "bird").State)
+				require.Equal(t, "duplicate status output", scopeResultByName(scopes, "bird").Reason)
+			},
+		},
+		{
+			name:   "empty output fails closed",
+			output: "",
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Len(t, scopes, len(lab.ScopeNames()))
+				for _, scope := range scopes {
+					require.Equal(t, lab.StateNotReady, scope.State)
+					require.Equal(t, "status output missing", scope.Reason)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.assert(t, lab.ParseScopeStatus(tc.output))
+		})
+	}
+}
+
+// statusStatusLines renders one marked status line per scope, overriding the
+// state of named scopes.
+func statusStatusLines(overrides map[string]string) string {
+	lines := make([]string, 0, len(lab.ScopeNames()))
+	for _, name := range lab.ScopeNames() {
+		state := "ready"
+		if override, present := overrides[name]; present {
+			state = override
+		}
+		lines = append(lines, fmt.Sprintf("YANET2_SCOPE %s %s", name, state))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func scopeResultByName(scopes []lab.ScopeResult, name string) lab.ScopeResult {
+	for _, scope := range scopes {
+		if scope.Name == name {
+			return scope
+		}
+	}
+	return lab.ScopeResult{}
 }

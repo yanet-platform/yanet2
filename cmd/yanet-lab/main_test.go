@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/lab"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -544,10 +545,11 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 }
 
 func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
-	fast := []string{"status", "shell", "report", "serial"}
+	fast := []string{"shell", "report", "serial"}
 	for _, action := range fast {
 		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "fast action %q", action)
 	}
+	assert.Equal(t, supervisorStatusTimeout, requestTimeout("status"))
 	assert.Equal(t, supervisorManifestTimeout+30*time.Second, requestTimeout("manifest"))
 	assert.Equal(t, supervisorExecTimeout, requestTimeout("exec"))
 	assert.Equal(t, supervisorResetTimeout, requestTimeout("reset"))
@@ -1024,6 +1026,213 @@ func TestResponseEnvelopeCarriesBothProtocolVersions(t *testing.T) {
 	require.Equal(t, true, decoded["ok"])
 }
 
+func TestStatusVerdict(t *testing.T) {
+	require.Equal(t, statusNotReady, statusVerdict(nil))
+	require.Equal(t, statusReady, statusVerdict(readyScopes()))
+	require.Equal(t, statusNotReady, statusVerdict(failingScopes("bird", "bird process is not running")))
+}
+
+func TestStatusReadyJSONListsEveryScope(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion, Scopes: readyScopes()}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.NoError(t, err)
+	var decoded struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+		Scopes []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"scopes"`
+	}
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, true, decoded.OK)
+	require.Equal(t, statusReady, decoded.Status)
+	require.Len(t, decoded.Scopes, len(lab.ScopeNames()))
+	for _, scope := range decoded.Scopes {
+		require.Equal(t, string(lab.StateReady), scope.State)
+	}
+}
+
+func TestStatusNotReadyJSONListsReasonsAndFails(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{
+			OK:                        false,
+			Error:                     "operator profile is not ready: bird",
+			Status:                    statusNotReady,
+			SupervisorProtocolVersion: supervisorProtocolVersion,
+			Scopes:                    failingScopes("bird", "bird process is not running"),
+		}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "operator profile is not ready")
+	var decoded struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+		Error  string `json:"error"`
+		Scopes []struct {
+			Name   string `json:"name"`
+			State  string `json:"state"`
+			Reason string `json:"reason"`
+		} `json:"scopes"`
+	}
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, false, decoded.OK)
+	require.Equal(t, statusNotReady, decoded.Status)
+	require.Contains(t, decoded.Error, "bird")
+	for _, scope := range decoded.Scopes {
+		if scope.Name == "bird" {
+			require.Equal(t, string(lab.StateNotReady), scope.State)
+			require.Equal(t, "bird process is not running", scope.Reason)
+		} else {
+			require.Equal(t, string(lab.StateReady), scope.State)
+		}
+	}
+}
+
+func TestStatusHumanSummaryHealthyExitsZero(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion, Scopes: readyScopes()}, nil
+	}, nil)
+	application := newApplication()
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(stdout), statusReady)
+}
+
+func TestStatusHumanSummaryNotReadyFailsAndShowsFailingScope(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{
+			OK:                        false,
+			Error:                     "operator profile is not ready: route0-session",
+			Status:                    statusNotReady,
+			SupervisorProtocolVersion: supervisorProtocolVersion,
+			Scopes:                    failingScopes("route0-session", "route0 adapter session is not connected"),
+		}, nil
+	}, nil)
+	application := newApplication()
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.Error(t, err)
+	require.Contains(t, string(stdout), statusNotReady)
+	require.Contains(t, string(stdout), "route0-session")
+	require.Contains(t, string(stdout), "route0 adapter session is not connected")
+	require.NotContains(t, string(stdout), "\n"+statusReady)
+}
+
+func TestStatusProtocolMismatchWithoutStateChange(t *testing.T) {
+	calls := make([]request, 0)
+	stubCallAndServe(t, func(_ *application, value request) (*response, error) {
+		calls = append(calls, value)
+		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion - 1}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "protocol mismatch")
+	require.Len(t, calls, 1)
+	require.Equal(t, "status", calls[0].Action)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.EqualValues(t, supervisorProtocolVersion-1, decoded["supervisorProtocolVersion"])
+	require.Equal(t, statusNotReady, decoded["status"])
+	require.Equal(t, false, decoded["ok"])
+	require.Contains(t, decoded["error"], "protocol mismatch")
+}
+
+func TestStatusCurrentProtocolHealthy(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion, Scopes: readyScopes()}, nil
+	}, nil)
+	application := newApplication()
+	require.NoError(t, application.status())
+}
+
+func TestStatusHandlerPopulatesScopes(t *testing.T) {
+	cases := []struct {
+		name       string
+		results    []lab.ScopeResult
+		checkErr   error
+		wantOK     bool
+		wantStatus string
+	}{
+		{
+			name:       "ready",
+			results:    readyScopes(),
+			wantOK:     true,
+			wantStatus: statusReady,
+		},
+		{
+			name:       "not ready",
+			results:    failingScopes("bird", "bird process is not running"),
+			wantOK:     false,
+			wantStatus: statusNotReady,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			saved := checkOperatorStatus
+			checkOperatorStatus = func(*framework.TestFramework) ([]lab.ScopeResult, error) {
+				return tc.results, tc.checkErr
+			}
+			t.Cleanup(func() { checkOperatorStatus = saved })
+			state := &supervisor{}
+			server, client := net.Pipe()
+			defer client.Close()
+			var handlers errgroup.Group
+			handlers.Go(func() error {
+				handleConnection(server, nil, t.TempDir(), state, nil, nil, func() {})
+				return nil
+			})
+			require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
+			var reply response
+			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.Equal(t, tc.wantOK, reply.OK)
+			require.Equal(t, tc.wantStatus, reply.Status)
+			require.Len(t, reply.Scopes, len(lab.ScopeNames()))
+			require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
+			require.NoError(t, handlers.Wait())
+		})
+	}
+}
+
+// readyScopes returns the full AD-11 scope list in ready state.
+func readyScopes() []lab.ScopeResult {
+	scopes := make([]lab.ScopeResult, 0, len(lab.ScopeNames()))
+	for _, name := range lab.ScopeNames() {
+		scopes = append(scopes, lab.ScopeResult{Name: name, State: lab.StateReady})
+	}
+	return scopes
+}
+
+// failingScopes returns the full AD-11 scope list with one named scope failed.
+func failingScopes(notReadyName, reason string) []lab.ScopeResult {
+	scopes := readyScopes()
+	for idx := range scopes {
+		if scopes[idx].Name == notReadyName {
+			scopes[idx].State = lab.StateNotReady
+			scopes[idx].Reason = reason
+		}
+	}
+	return scopes
+}
+
 func TestUpCommandPassesPositionalToRunE(t *testing.T) {
 	command := newApplication().upCommand()
 	require.Equal(t, "up [SESSION]", command.Use)
@@ -1257,7 +1466,8 @@ func TestUpReusesHealthyRunningSupervisor(t *testing.T) {
 		func(*application, request) (*response, error) {
 			return &response{
 				OK:                        true,
-				Output:                    "VM: running; YANET: ready",
+				Status:                    statusReady,
+				Scopes:                    readyScopes(),
 				SupervisorProtocolVersion: supervisorProtocolVersion,
 			}, nil
 		},
@@ -1274,12 +1484,25 @@ func TestUpReusesHealthyRunningSupervisor(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, serveRunnerCalled, "serveRunner must not run when a current-protocol Supervisor already answers OK")
-	var decoded map[string]any
+	var decoded struct {
+		OK                        bool   `json:"ok"`
+		Status                    string `json:"status"`
+		Protocol                  int    `json:"protocol"`
+		SupervisorProtocolVersion int    `json:"supervisorProtocolVersion"`
+		Scopes                    []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"scopes"`
+	}
 	require.NoError(t, json.Unmarshal(stdout, &decoded))
-	require.Equal(t, "VM: running; YANET: ready", decoded["output"])
-	require.EqualValues(t, cliProtocolVersion, decoded["protocol"])
-	require.EqualValues(t, supervisorProtocolVersion, decoded["supervisorProtocolVersion"])
-	require.Equal(t, true, decoded["ok"])
+	require.True(t, decoded.OK)
+	require.Equal(t, statusReady, decoded.Status)
+	require.Len(t, decoded.Scopes, len(lab.ScopeNames()))
+	for _, scope := range decoded.Scopes {
+		require.Equal(t, string(lab.StateReady), scope.State)
+	}
+	require.EqualValues(t, cliProtocolVersion, decoded.Protocol)
+	require.EqualValues(t, supervisorProtocolVersion, decoded.SupervisorProtocolVersion)
 }
 
 func TestUpRechecksShutdownMarkerBeforeSpawn(t *testing.T) {

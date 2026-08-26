@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
@@ -30,7 +31,152 @@ var operatorArtifacts = []string{
 	"build/operators/bird-adapter/yanet-bird-adapter",
 }
 
-const operatorHealthCommand = `pgrep -f '^/tmp/yanet/operators/yanet-route-operator ' >/dev/null && pgrep -f '^/tmp/yanet/operators/yanet-forward-operator ' >/dev/null && pgrep -f '^/tmp/yanet/operators/yanet-decap-operator ' >/dev/null && pgrep -f '^/tmp/yanet/operators/yanet-pipeline-operator ' >/dev/null && pgrep -x bird >/dev/null && pgrep -f '^/tmp/yanet/operators/yanet-bird-adapter server ' >/dev/null && /tmp/yanet/cli/yanet-cli-ready route >/dev/null 2>&1 && /tmp/yanet/cli/yanet-cli-ready forward >/dev/null 2>&1 && /tmp/yanet/cli/yanet-cli-ready decap >/dev/null 2>&1 && /tmp/yanet/cli/yanet-cli-ready pipeline >/dev/null 2>&1 && sessions=$(/tmp/yanet/operators/yanet-bird-adapter list-sessions --server-config /tmp/yanet/config/operators/bird-adapter.yaml) && printf '%s\n' "$sessions" | awk '/^Name:/{route = $2 == "route0"} route && /^Connection:/{ready = $2 == "READY"} END{exit !ready}' && /tmp/yanet/cli/yanet-cli-operator-route show --name route0 --format json | grep -F "198.51.100.0/24" >/dev/null && /tmp/yanet/cli/yanet-cli-operator-route show --name route0 --format json | grep -F "2001:db8:100::/48" >/dev/null`
+// ScopeState is the readiness state of one Operator Profile scope.
+type ScopeState string
+
+// Operator Profile scope states reported by the status parser.
+const (
+	StateReady    ScopeState = "ready"
+	StateNotReady ScopeState = "not_ready"
+)
+
+// ScopeResult is the outcome of one Operator Profile scope probe.
+type ScopeResult struct {
+	// Name identifies the scope.
+	Name string `json:"name"`
+	// State is ready when the scope's probe succeeded.
+	State ScopeState `json:"state"`
+	// Reason names the failure, empty while the scope is ready.
+	Reason string `json:"reason,omitempty"`
+}
+
+// operatorScope is one named probe of the pinned Operator Profile (AD-11). The
+// Command exits zero while the scope is ready in the guest and Reason names
+// the failure the probe detects.
+type operatorScope struct {
+	Name    string
+	Command string
+	Reason  string
+}
+
+// operatorScopes is the shared Operator Profile check table (AD-11). Startup
+// health, waiting, and status derive commands from it so the surfaces cannot
+// diverge.
+var operatorScopes = []operatorScope{
+	{Name: "dataplane", Command: "pgrep -f '[y]anet-dataplane' >/dev/null", Reason: "yanet-dataplane process is not running"},
+	{Name: "controlplane", Command: "pgrep -f '[y]anet-controlplane' >/dev/null", Reason: "yanet-controlplane process is not running"},
+	{Name: "route-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-route-operator ' >/dev/null", Reason: "yanet-route-operator process is not running"},
+	{Name: "forward-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-forward-operator ' >/dev/null", Reason: "yanet-forward-operator process is not running"},
+	{Name: "decap-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-decap-operator ' >/dev/null", Reason: "yanet-decap-operator process is not running"},
+	{Name: "pipeline-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-pipeline-operator ' >/dev/null", Reason: "yanet-pipeline-operator process is not running"},
+	{Name: "bird", Command: "pgrep -x bird >/dev/null", Reason: "bird process is not running"},
+	{Name: "bird-adapter", Command: "pgrep -f '^/tmp/yanet/operators/yanet-bird-adapter server ' >/dev/null", Reason: "yanet-bird-adapter server process is not running"},
+	{Name: "ready-route", Command: "/tmp/yanet/cli/yanet-cli-ready route >/dev/null 2>&1", Reason: "route readiness service is not ready"},
+	{Name: "ready-forward", Command: "/tmp/yanet/cli/yanet-cli-ready forward >/dev/null 2>&1", Reason: "forward readiness service is not ready"},
+	{Name: "ready-decap", Command: "/tmp/yanet/cli/yanet-cli-ready decap >/dev/null 2>&1", Reason: "decap readiness service is not ready"},
+	{Name: "ready-pipeline", Command: "/tmp/yanet/cli/yanet-cli-ready pipeline >/dev/null 2>&1", Reason: "pipeline readiness service is not ready"},
+	{Name: "route0-session", Command: `sessions=$(/tmp/yanet/operators/yanet-bird-adapter list-sessions --server-config /tmp/yanet/config/operators/bird-adapter.yaml) && printf '%s\n' "$sessions" | awk '/^Name:/{route = $2 == "route0"} route && /^Connection:/{ready = $2 == "READY"} END{exit !ready}'`, Reason: "route0 adapter session is not connected"},
+	{Name: "imported-route-v4", Command: `/tmp/yanet/cli/yanet-cli-operator-route show --name route0 --format json | grep -F "198.51.100.0/24" >/dev/null`, Reason: "imported route 198.51.100.0/24 is missing"},
+	{Name: "imported-route-v6", Command: `/tmp/yanet/cli/yanet-cli-operator-route show --name route0 --format json | grep -F "2001:db8:100::/48" >/dev/null`, Reason: "imported route 2001:db8:100::/48 is missing"},
+}
+
+// ScopeNames returns the pinned Operator Profile scope names in execution
+// order (AD-11).
+func ScopeNames() []string {
+	names := make([]string, len(operatorScopes))
+	for idx, scope := range operatorScopes {
+		names[idx] = scope.Name
+	}
+	return names
+}
+
+// operatorHealthCommand runs every scope probe and exits at the first failure,
+// keeping the startup and wait loops fast. It is built from the shared table
+// so startup and status cannot diverge (AD-11).
+var operatorHealthCommand = buildOperatorHealthCommand()
+
+func buildOperatorHealthCommand() string {
+	commands := make([]string, len(operatorScopes))
+	for idx, scope := range operatorScopes {
+		commands[idx] = scope.Command
+	}
+	return strings.Join(commands, " && ")
+}
+
+// scopeStatusMarker is the fixed token prefixing every per-scope status line
+// so the parser cannot confuse probe noise with the report.
+const scopeStatusMarker = "YANET2_SCOPE"
+
+// operatorStatusCommand runs every scope probe without short-circuiting and
+// prints one marked line per scope, so a single guest command bounds the
+// complete reporting pass.
+var operatorStatusCommand = buildOperatorStatusCommand()
+
+func buildOperatorStatusCommand() string {
+	var builder strings.Builder
+	for _, scope := range operatorScopes {
+		fmt.Fprintf(&builder, "if %s; then printf '%s %s ready\\n'; else printf '%s %s not_ready\\n'; fi\n",
+			scope.Command, scopeStatusMarker, scope.Name, scopeStatusMarker, scope.Name)
+	}
+	return builder.String()
+}
+
+// ParseScopeStatus parses the marked per-scope lines of the Operator Profile
+// status command into one result per scope. It fails closed: a scope whose
+// line is absent, truncated, duplicated, or otherwise malformed is reported
+// NOT_READY with an explicit parse reason and is never assumed healthy.
+func ParseScopeStatus(output string) []ScopeResult {
+	matches := map[string][]string{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != scopeStatusMarker {
+			continue
+		}
+		matches[fields[1]] = append(matches[fields[1]], line)
+	}
+	results := make([]ScopeResult, 0, len(operatorScopes))
+	for _, scope := range operatorScopes {
+		lines := matches[scope.Name]
+		switch {
+		case len(lines) == 0:
+			results = append(results, ScopeResult{Name: scope.Name, State: StateNotReady, Reason: "status output missing"})
+		case len(lines) > 1:
+			results = append(results, ScopeResult{Name: scope.Name, State: StateNotReady, Reason: "duplicate status output"})
+		default:
+			results = append(results, parseScopeStatusLine(scope, lines[0]))
+		}
+	}
+	return results
+}
+
+func parseScopeStatusLine(scope operatorScope, line string) ScopeResult {
+	fields := strings.Fields(line)
+	if len(fields) != 3 {
+		return ScopeResult{Name: scope.Name, State: StateNotReady, Reason: "malformed status output"}
+	}
+	switch fields[2] {
+	case "ready":
+		return ScopeResult{Name: scope.Name, State: StateReady}
+	case "not_ready":
+		return ScopeResult{Name: scope.Name, State: StateNotReady, Reason: scope.Reason}
+	case "degraded":
+		return ScopeResult{Name: scope.Name, State: StateNotReady, Reason: "readiness degraded"}
+	default:
+		return ScopeResult{Name: scope.Name, State: StateNotReady, Reason: "malformed status output"}
+	}
+}
+
+// CheckStatus runs every Operator Profile scope probe as one guest command and
+// returns the parsed per-scope outcomes. It changes no Lab state and does not
+// run the forwarding packet probe, which stays in startup health only.
+func CheckStatus(fw *framework.TestFramework) ([]ScopeResult, error) {
+	output, err := fw.ExecuteCommand(operatorStatusCommand)
+	results := ParseScopeStatus(output)
+	if err != nil {
+		return results, fmt.Errorf("operator profile status: %w\n%s", err, TruncateOutput(output))
+	}
+	return results, nil
+}
 
 var forwardingProbe = []byte{
 	0x52, 0x54, 0x00, 0x6b, 0xff, 0xa5, 0x52, 0x54, 0x00, 0x6b, 0xff, 0xa1, 0x08, 0x00,
