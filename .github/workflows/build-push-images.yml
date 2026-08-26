@@ -36,7 +36,7 @@ jobs:
       - name: Cache rust
         uses: Swatinem/rust-cache@v2.9.2
         with:
-          shared-key: deb-24.04
+          shared-key: deb-24.04-amd64
           cache-targets: false
 
       - name: Install packaging tools
@@ -64,7 +64,7 @@ jobs:
 
       - uses: actions/upload-artifact@v5
         with:
-          name: debs-24.04
+          name: debs-24.04-amd64
           path: |
             outdeb/*.deb
             outdeb/*.ddeb
@@ -99,7 +99,7 @@ jobs:
       - name: Download deb packages
         uses: actions/download-artifact@v5
         with:
-          name: debs-24.04
+          name: debs-24.04-amd64
           path: deploy/packages/
 
       - name: Set up Docker Buildx
