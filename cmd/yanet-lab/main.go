@@ -67,7 +67,14 @@ const maxSessionNameSlack = 40
 // that bypass ensureSessionDirectory — gets the rejection up front.
 const maxSessionNameLen = sunPathLimit - sunPathSlack - maxSessionNameSlack
 
+// supervisorProtocolVersion is stamped on every Supervisor reply so a stale
+// Supervisor process forked by an older CLI is detected and replaced.
 const supervisorProtocolVersion = 2
+
+// cliProtocolVersion is the version of the CLI JSON envelope itself. It is
+// independent from the Supervisor protocol and travels in its own field so
+// the two contracts can evolve separately (AD-8, FR-18).
+const cliProtocolVersion = 1
 
 type request struct {
 	Action   string   `json:"action"`
@@ -77,13 +84,30 @@ type request struct {
 	Columns  int      `json:"columns,omitempty"`
 }
 
+// response is the wire shape shared by the CLI envelope and every Supervisor
+// reply.
+//
+// Two protocol version fields travel together so the CLI envelope contract
+// (Protocol) and the Supervisor protocol contract (SupervisorProtocolVersion)
+// can evolve independently per AD-8 / FR-21.
+//
+// The CLI side sets Protocol=cliProtocolVersion in JSON output (printResponse);
+// the non-JSON CLI branch leaves it zero. In either case the Supervisor's
+// SupervisorProtocolVersion is forwarded untouched. The Supervisor side never
+// sets Protocol; it stamps SupervisorProtocolVersion=supervisorProtocolVersion
+// on every reply, including the pre-ready and decode-error paths.
 type response struct {
-	OK       bool           `json:"ok"`
-	Output   string         `json:"output,omitempty"`
-	Error    string         `json:"error,omitempty"`
-	Report   *lab.RunReport `json:"report,omitempty"`
-	SSHPort  int            `json:"ssh_port,omitempty"`
-	Protocol int            `json:"protocol,omitempty"`
+	OK      bool           `json:"ok"`
+	Output  string         `json:"output,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Report  *lab.RunReport `json:"report,omitempty"`
+	SSHPort int            `json:"ssh_port,omitempty"`
+	// Protocol is the CLI JSON envelope version. Set to cliProtocolVersion
+	// by the CLI before printing a response in --json mode.
+	Protocol int `json:"protocol,omitempty"`
+	// SupervisorProtocolVersion is the Supervisor protocol version the
+	// Supervisor stamps on every reply.
+	SupervisorProtocolVersion int `json:"supervisorProtocolVersion,omitempty"`
 }
 
 type application struct {
@@ -177,7 +201,7 @@ func (m *application) Run() int {
 	root := m.command()
 	if err := root.Execute(); err != nil {
 		if m.json {
-			_ = json.NewEncoder(os.Stderr).Encode(response{Error: err.Error()})
+			_ = json.NewEncoder(os.Stderr).Encode(response{Error: err.Error(), Protocol: cliProtocolVersion})
 		} else {
 			fmt.Fprintln(os.Stderr, "yanet-lab:", err)
 		}
@@ -202,7 +226,7 @@ func (m *application) command() *cobra.Command {
 	root.PersistentFlags().BoolVar(&m.json, "json", false, "emit machine-readable JSON")
 	root.AddCommand(
 		&cobra.Command{Use: "doctor", Short: "Check host prerequisites", RunE: func(*cobra.Command, []string) error { return m.doctor() }},
-		&cobra.Command{Use: "up", Short: "Start or reuse the lab VM", RunE: func(*cobra.Command, []string) error { return m.up() }},
+		m.upCommand(),
 		&cobra.Command{Use: "status", Short: "Show lab and YANET readiness", RunE: func(*cobra.Command, []string) error { return m.simple("status", nil) }},
 		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return m.simple("reset", nil) }},
 		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return m.simple("report", nil) }},
@@ -216,6 +240,24 @@ func (m *application) execCommand() *cobra.Command {
 	return &cobra.Command{Use: "exec -- COMMAND [ARG...]", Short: "Execute a command in the guest", Args: cobra.MinimumNArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 		return m.simple("exec", args)
 	}}
+}
+
+// upCommand wires the optional positional session name used in the recipe
+// invocations (`just lab up my-session`) on top of the --session flag.
+func (m *application) upCommand() *cobra.Command {
+	return &cobra.Command{Use: "up [SESSION]", Short: "Start or reuse the lab VM", Args: cobra.MaximumNArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+		m.selectSession(args)
+		return m.up()
+	}}
+}
+
+// selectSession applies an optional positional session name to the running
+// application, leaving the --session flag value intact when no positional is
+// given. Extracted so the assignment is testable without spawning serve.
+func (m *application) selectSession(args []string) {
+	if len(args) == 1 {
+		m.session = args[0]
+	}
 }
 
 func (m *application) shellCommand() *cobra.Command {
@@ -647,13 +689,6 @@ func doctorAccelerationCheck(platform string, kvmAvailable func() bool) doctorCh
 }
 
 func (m *application) up() error {
-	status, err := m.shutdownStaleSupervisor()
-	if err != nil {
-		return err
-	}
-	if status != nil {
-		return m.printResponse(status)
-	}
 	dir, _, err := sessionPaths(m.session)
 	if err != nil {
 		return err
@@ -661,20 +696,105 @@ func (m *application) up() error {
 	if err := ensureSessionDirectory(dir); err != nil {
 		return err
 	}
-	executable, err := os.Executable()
+	logPath := filepath.Join(dir, "supervisor.log")
+	if err := shutdownMarkerCheck(dir); err != nil {
+		return err
+	}
+	reuse, replacedFrom, err := m.shutdownStaleSupervisor()
 	if err != nil {
 		return err
 	}
-	logFile, err := openPrivateFile(filepath.Join(dir, "supervisor.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	if reuse != nil {
+		if !reuse.OK {
+			return sessionUnhealthy(reuse.Error, logPath)
+		}
+		return m.printResponse(reuse)
+	}
+	if err := probeSessionLock(dir); err != nil {
+		return sessionUnhealthy(err.Error(), logPath)
+	}
+	// Re-check the shutdown marker immediately before spawning serve so a
+	// concurrent `down` that wrote the marker between the initial check and
+	// the spawn still blocks `up` instead of clobbering the failed session.
+	if err := shutdownMarkerCheck(dir); err != nil {
+		return err
+	}
+	response, err := serveRunner(m, logPath)
 	if err != nil {
 		return err
+	}
+	annotateReplacement(response, replacedFrom)
+	return m.printResponse(response)
+}
+
+// sessionUnhealthy wraps the exact AC2 error form: a non-zero prefix naming
+// the reason and the supervisor log path the developer should inspect.
+func sessionUnhealthy(reason, logPath string) error {
+	return fmt.Errorf("session unhealthy: %s; see %s", reason, logPath)
+}
+
+// probeSessionLock reports whether another supervisor process still holds the
+// session lock. up uses it to refuse clobbering a locked-but-silent session
+// (AC2 "locked by a stale Supervisor") without spawning a serve process that
+// would just die on flock.
+func probeSessionLock(directory string) error {
+	path := filepath.Join(directory, "supervisor.lock")
+	lock, err := openPrivateFile(path, os.O_RDONLY)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return fmt.Errorf("supervisor lock is held by another process: %w", err)
+	}
+	return nil
+}
+
+// noteProtocolReplacement records in the up response that a Supervisor with a
+// stale protocol version was torn down and replaced. A negative staleVersion
+// (the noStaleTeardown sentinel) is a no-op so a direct caller cannot emit a
+// bogus "replaced stale supervisor (protocol -1)" prefix.
+func noteProtocolReplacement(output string, staleVersion int) string {
+	if staleVersion < 0 {
+		return output
+	}
+	prefix := fmt.Sprintf("replaced stale supervisor (protocol %d)", staleVersion)
+	if output == "" {
+		return prefix
+	}
+	return prefix + "; " + output
+}
+
+// annotateReplacement prepends the stale-protocol replacement note to the
+// fresh Supervisor's status reply when up tore down a stale Supervisor first.
+// Extracted so the no-op sentinel path is testable without a live Supervisor.
+func annotateReplacement(response *response, replacedFrom int) {
+	if replacedFrom >= 0 {
+		response.Output = noteProtocolReplacement(response.Output, replacedFrom)
+	}
+}
+
+// serveRunner forks the serve subprocess for up and returns its first OK
+// status response. The package var lets tests substitute a fake runner so the
+// stale-protocol replacement wire-up can be exercised without spawning QEMU.
+var serveRunner = func(m *application, logPath string) (*response, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	logFile, err := openPrivateFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	if err != nil {
+		return nil, err
 	}
 	command := exec.Command(executable, "--session", m.session, "serve")
 	command.Stdout, command.Stderr, command.Stdin = logFile, logFile, nil
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
-		return err
+		return nil, err
 	}
 	_ = logFile.Close()
 	exited := make(chan error, 1)
@@ -684,13 +804,13 @@ func (m *application) up() error {
 	for time.Now().Before(deadline) {
 		if response, callErr := m.call(request{Action: "status"}); callErr == nil {
 			if response.OK {
-				return m.printResponse(response)
+				return response, nil
 			}
 			lastStatusError = response.Error
 		}
 		select {
 		case processErr := <-exited:
-			return fmt.Errorf("lab supervisor exited during startup: %w; see %s", processErr, filepath.Join(dir, "supervisor.log"))
+			return nil, fmt.Errorf("lab supervisor exited during startup: %w; see %s", processErr, logPath)
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
@@ -701,7 +821,7 @@ func (m *application) up() error {
 		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 		<-exited
 	}
-	return startupFailure(lastStatusError, filepath.Join(dir, "supervisor.log"))
+	return nil, startupFailure(lastStatusError, logPath)
 }
 
 func startupTimeout() time.Duration {
@@ -731,30 +851,38 @@ func classifyStaleSupervisor(resp *response, callErr error) staleSupervisorDecis
 	if callErr != nil {
 		return staleSupervisorAbsent
 	}
-	if resp.Protocol == supervisorProtocolVersion {
+	if resp.SupervisorProtocolVersion == supervisorProtocolVersion {
 		return staleSupervisorCurrent
 	}
 	return staleSupervisorStale
 }
 
+// noStaleTeardown is the replacedFrom sentinel returned by shutdownStaleSupervisor
+// when no stale Supervisor was torn down. 0 is a legitimate observed stale
+// version (an old Supervisor that did not stamp supervisorProtocolVersion), so
+// the sentinel is distinct.
+const noStaleTeardown = -1
+
 // shutdownStaleSupervisor checks for a running lab supervisor. If one exists
 // with the current protocol version it returns the status response. If a stale
 // (wrong-version) supervisor is running, it sends "down" and polls until the
-// socket goes away. Returns nil when no stale supervisor remains.
-func (m *application) shutdownStaleSupervisor() (*response, error) {
+// socket goes away, then reports the observed stale version so up can annotate
+// the replacement in its JSON output (AC4).
+func (m *application) shutdownStaleSupervisor() (*response, int, error) {
 	resp, err := m.call(request{Action: "status"})
 	switch classifyStaleSupervisor(resp, err) {
 	case staleSupervisorAbsent:
-		return nil, nil
+		return nil, noStaleTeardown, nil
 	case staleSupervisorCurrent:
-		return resp, nil
+		return resp, noStaleTeardown, nil
 	}
+	staleVersion := resp.SupervisorProtocolVersion
 	staleResponse, staleErr := m.call(request{Action: "down"})
 	if staleErr != nil {
-		return nil, fmt.Errorf("stale lab supervisor is running; stop it before starting a new one: %w", staleErr)
+		return nil, noStaleTeardown, fmt.Errorf("stale lab supervisor is running; stop it before starting a new one: %w", staleErr)
 	}
 	if !staleResponse.OK {
-		return nil, fmt.Errorf("stale lab supervisor refused shutdown: %s", staleResponse.Error)
+		return nil, noStaleTeardown, fmt.Errorf("stale lab supervisor refused shutdown: %s", staleResponse.Error)
 	}
 	deadline := time.Now().Add(supervisorRequestTimeout)
 	for time.Now().Before(deadline) {
@@ -764,9 +892,9 @@ func (m *application) shutdownStaleSupervisor() (*response, error) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if _, callErr := m.call(request{Action: "status"}); callErr == nil {
-		return nil, fmt.Errorf("stale lab supervisor did not shut down within %s; stop it manually", supervisorRequestTimeout)
+		return nil, noStaleTeardown, fmt.Errorf("stale lab supervisor did not shut down within %s; stop it manually", supervisorRequestTimeout)
 	}
-	return nil, nil
+	return nil, staleVersion, nil
 }
 
 func (m *application) simple(action string, argv []string) error {
@@ -786,6 +914,15 @@ func (m *application) simpleManifest(path string) error {
 }
 
 func (m *application) call(value request) (*response, error) {
+	return callSupervisor(m, value)
+}
+
+// callSupervisor issues a request to the named session's Supervisor over its
+// Unix-domain socket. The function lives at package scope so tests can
+// substitute a fake without standing up a real socket. Tests must not call
+// t.Parallel() while this var is stubbed because the package-level binding
+// is shared.
+var callSupervisor = func(m *application, value request) (*response, error) {
 	connection, err := m.sessionConnection()
 	if err != nil {
 		return nil, err
@@ -846,7 +983,9 @@ func (m *application) sessionConnection() (net.Conn, error) {
 
 func (m *application) printResponse(value *response) error {
 	if m.json {
-		_ = json.NewEncoder(os.Stdout).Encode(value)
+		encoded := *value
+		encoded.Protocol = cliProtocolVersion
+		_ = json.NewEncoder(os.Stdout).Encode(&encoded)
 	} else if value.Report != nil {
 		for _, result := range value.Report.Results {
 			marker := "PASS"
@@ -1017,18 +1156,18 @@ func handleRuntimeConnection(connection net.Conn, dir string, runtime *sessionRu
 	default:
 		var value request
 		if err := decodeRequest(connection, &value); err != nil {
-			_ = json.NewEncoder(connection).Encode(response{Error: err.Error(), Protocol: supervisorProtocolVersion})
+			_ = json.NewEncoder(connection).Encode(response{Error: err.Error(), SupervisorProtocolVersion: supervisorProtocolVersion})
 			return
 		}
 		if value.Action == "down" {
 			if runtime.Interrupted != nil {
 				runtime.Interrupted.Store(true)
 			}
-			_ = json.NewEncoder(connection).Encode(response{OK: true, Output: "lab stopped", Protocol: supervisorProtocolVersion})
+			_ = json.NewEncoder(connection).Encode(response{OK: true, Output: "lab stopped", SupervisorProtocolVersion: supervisorProtocolVersion})
 			stop()
 			return
 		}
-		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting", Protocol: supervisorProtocolVersion})
+		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting", SupervisorProtocolVersion: supervisorProtocolVersion})
 	}
 }
 
@@ -1036,10 +1175,10 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	defer connection.Close()
 	var value request
 	if err := decodeRequest(connection, &value); err != nil {
-		_ = json.NewEncoder(connection).Encode(response{Error: err.Error()})
+		_ = json.NewEncoder(connection).Encode(response{Error: err.Error(), SupervisorProtocolVersion: supervisorProtocolVersion})
 		return
 	}
-	reply := response{OK: true, Protocol: supervisorProtocolVersion}
+	reply := response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion}
 	if value.Action == "serial" {
 		if !state.TrySerial(connection) {
 			reply.OK = false
@@ -1468,6 +1607,81 @@ func openPrivateFile(path string, flags int) (*os.File, error) {
 		return nil, err
 	}
 	return file, nil
+}
+
+// shutdownMarkerName is the file a failed down writes atomically into the
+// session runtime directory. Its presence blocks the next up until an
+// explicit successful down retry removes it (AC5/AC6).
+const shutdownMarkerName = "shutdown-failed.json"
+
+// maxShutdownMarkerBytes bounds how much of the marker file checkShutdownMarker
+// reads; any well-formed marker is tiny.
+const maxShutdownMarkerBytes = 4096
+
+// shutdownMarkerCheck rejects up when a previous down left its marker in the
+// session runtime directory. It is a package var so tests can stub the second
+// invocation inside up() and exercise the TOCTOU re-check race without
+// standing up a real marker-writing sibling process.
+var shutdownMarkerCheck = checkShutdownMarker
+
+// checkShutdownMarker rejects up when a previous down left its marker in the
+// session runtime directory. A valid marker names the failing step and reason
+// and is reported back to the caller; any deviation from the exact
+// mode-0600 regular file containing exactly the string fields
+// status="FAILED", non-empty step and reason is treated as an unknown shutdown
+// state so cleanup stays with an explicit down retry.
+func checkShutdownMarker(directory string) error {
+	path := filepath.Join(directory, shutdownMarkerName)
+	if _, err := os.Lstat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return unknownShutdownState(fmt.Errorf("inspect marker: %w", err))
+	}
+	file, err := openPrivateFile(path, os.O_RDONLY)
+	if err != nil {
+		return unknownShutdownState(err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxShutdownMarkerBytes+1))
+	if err != nil {
+		return unknownShutdownState(fmt.Errorf("read marker: %w", err))
+	}
+	if len(data) > maxShutdownMarkerBytes {
+		return unknownShutdownState(fmt.Errorf("marker exceeds %d bytes", maxShutdownMarkerBytes))
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return unknownShutdownState(fmt.Errorf("marker is not a JSON object: %w", err))
+	}
+	if len(fields) != 3 {
+		return unknownShutdownState(fmt.Errorf("marker has %d fields, want exactly status, step, reason", len(fields)))
+	}
+	for _, key := range []string{"status", "step", "reason"} {
+		value, present := fields[key]
+		if !present {
+			return unknownShutdownState(fmt.Errorf("marker missing field %q", key))
+		}
+		stringValue, ok := value.(string)
+		if !ok {
+			return unknownShutdownState(fmt.Errorf("marker field %q is not a string", key))
+		}
+		if stringValue == "" {
+			return unknownShutdownState(fmt.Errorf("marker field %q is empty", key))
+		}
+	}
+	if status := fields["status"].(string); status != "FAILED" {
+		return unknownShutdownState(fmt.Errorf("marker status is %q, want FAILED", status))
+	}
+	step := fields["step"].(string)
+	reason := fields["reason"].(string)
+	return fmt.Errorf("previous down failed at step %q: %s; run 'yanet-lab down' to retry cleanup", step, reason)
+}
+
+// unknownShutdownState formats the uniform error checkShutdownMarker returns
+// for every deviation from the contract (AC6).
+func unknownShutdownState(err error) error {
+	return fmt.Errorf("shutdown state unknown: %w; run 'yanet-lab down' to retry cleanup", err)
 }
 
 var sessionNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
