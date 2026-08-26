@@ -753,23 +753,22 @@ func TestSupervisorSignalWaitsForActiveOperation(t *testing.T) {
 
 	interrupted := &atomic.Bool{}
 	runtime := &sessionRuntime{Ready: make(chan struct{}), State: state, Interrupted: interrupted}
-	cleanupStarted := make(chan struct{})
 	listenerClosed := make(chan struct{})
-	runtime.Shutdown = func() error {
-		close(cleanupStarted)
-		return nil
-	}
 	close(runtime.Ready)
 
-	go handleTerminationSignal(runtime, func() { close(listenerClosed) })
+	signalReturned := make(chan struct{})
+	go func() {
+		handleTerminationSignal(runtime, func() { close(listenerClosed) })
+		close(signalReturned)
+	}()
 	require.Eventually(t, func() bool {
 		state.serialMutex.Lock()
 		defer state.serialMutex.Unlock()
 		return state.stopping
 	}, time.Second, time.Millisecond)
 	select {
-	case <-cleanupStarted:
-		t.Fatal("signal cleanup started before active operation released")
+	case <-signalReturned:
+		t.Fatal("signal shutdown returned before active operation released")
 	default:
 	}
 	require.Eventually(t, func() bool {
@@ -784,7 +783,7 @@ func TestSupervisorSignalWaitsForActiveOperation(t *testing.T) {
 	state.ReleaseOperation()
 	require.Eventually(t, func() bool {
 		select {
-		case <-cleanupStarted:
+		case <-signalReturned:
 			return true
 		default:
 			return false

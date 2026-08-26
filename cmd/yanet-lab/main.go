@@ -1226,16 +1226,7 @@ func handleTerminationSignal(runtime *sessionRuntime, closeListener func()) {
 			}
 		default:
 		}
-	}, func() error {
-		select {
-		case <-runtime.Ready:
-			if runtime.Shutdown != nil {
-				return runtime.Shutdown()
-			}
-		default:
-		}
-		return nil
-	})
+	}, func() error { return nil })
 }
 
 func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, state *supervisor, restore func() error, shutdown func() error, stop func()) {
