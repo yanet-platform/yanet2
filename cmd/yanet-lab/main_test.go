@@ -772,11 +772,14 @@ func TestSupervisorSignalWaitsForActiveOperation(t *testing.T) {
 		t.Fatal("signal cleanup started before active operation released")
 	default:
 	}
-	select {
-	case <-listenerClosed:
-	default:
-		t.Fatal("signal did not close listener before waiting for active operation")
-	}
+	require.Eventually(t, func() bool {
+		select {
+		case <-listenerClosed:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
 
 	state.ReleaseOperation()
 	require.Eventually(t, func() bool {
