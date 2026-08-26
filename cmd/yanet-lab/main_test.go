@@ -801,6 +801,75 @@ func TestSupervisorSignalWaitsForActiveOperation(t *testing.T) {
 	require.True(t, interrupted.Load())
 }
 
+func TestSupervisorShutdownHooksAreSerialized(t *testing.T) {
+	state := &supervisor{}
+	downHookStarted := make(chan struct{})
+	releaseDownHook := make(chan struct{})
+	downCleanupStarted := make(chan struct{})
+	resultHookStarted := make(chan struct{})
+	releaseResultHook := make(chan struct{})
+	go func() {
+		_ = state.ShutdownWithBeforeWaitAndResult(func() {
+			close(downHookStarted)
+			<-releaseDownHook
+		}, func() error {
+			close(downCleanupStarted)
+			return nil
+		}, func(error) {
+			close(resultHookStarted)
+			<-releaseResultHook
+		})
+	}()
+	<-downHookStarted
+
+	signalAttempted := make(chan struct{})
+	signalHookStarted := make(chan struct{})
+	go func() {
+		close(signalAttempted)
+		_ = state.ShutdownWithBeforeWait(func() {
+			close(signalHookStarted)
+		}, func() error { return nil })
+	}()
+	<-signalAttempted
+	select {
+	case <-signalHookStarted:
+		t.Fatal("concurrent shutdown hook ran before the active shutdown completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseDownHook)
+	require.Eventually(t, func() bool {
+		select {
+		case <-downCleanupStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-resultHookStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	select {
+	case <-signalHookStarted:
+		t.Fatal("concurrent shutdown hook ran before the result hook returned")
+	default:
+	}
+	close(releaseResultHook)
+	require.Eventually(t, func() bool {
+		select {
+		case <-signalHookStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
 func TestEnsurePrivateDirectoryRejectsUnsafePaths(t *testing.T) {
 	testCases := []struct {
 		name    string

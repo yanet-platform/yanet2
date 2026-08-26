@@ -122,6 +122,7 @@ type application struct {
 type supervisor struct {
 	operationMutex sync.Mutex
 	serialMutex    sync.Mutex
+	shutdownMutex  sync.Mutex
 	serial         net.Conn
 	stopping       bool
 }
@@ -191,16 +192,22 @@ func (m *supervisor) waitForOperation(fn func() error) error {
 	return fn()
 }
 
-func (m *supervisor) shutdown(beforeWait func(), fn func() error) error {
+func (m *supervisor) shutdown(beforeWait func(), fn func() error, result func(error)) error {
+	m.shutdownMutex.Lock()
+	defer m.shutdownMutex.Unlock()
 	m.Stop()
 	if beforeWait != nil {
 		beforeWait()
 	}
-	return m.waitForOperation(fn)
+	err := m.waitForOperation(fn)
+	if result != nil {
+		result(err)
+	}
+	return err
 }
 
 func (m *supervisor) Shutdown(fn func() error) error {
-	return m.shutdown(nil, fn)
+	return m.shutdown(nil, fn, nil)
 }
 
 // ShutdownWithBeforeWait stops the supervisor after running a pre-wait hook.
@@ -208,7 +215,15 @@ func (m *supervisor) Shutdown(fn func() error) error {
 // The hook runs after new work is rejected and before the active operation is
 // awaited.
 func (m *supervisor) ShutdownWithBeforeWait(beforeWait func(), fn func() error) error {
-	return m.shutdown(beforeWait, fn)
+	return m.shutdown(beforeWait, fn, nil)
+}
+
+// ShutdownWithBeforeWaitAndResult stops the supervisor and runs a result hook.
+//
+// The result hook runs while shutdowns are serialized and after the active
+// operation and resource cleanup have completed.
+func (m *supervisor) ShutdownWithBeforeWaitAndResult(beforeWait func(), fn func() error, result func(error)) error {
+	return m.shutdown(beforeWait, fn, result)
 }
 
 func main() {
@@ -842,6 +857,11 @@ var serveRunner = func(m *application, logPath string) (*response, error) {
 		}
 		select {
 		case processErr := <-exited:
+			if directory, _, pathErr := sessionPaths(m.session); pathErr == nil {
+				if lockErr := probeSessionLock(directory); errors.Is(lockErr, errLabBusy) {
+					return nil, errLabBusy
+				}
+			}
 			return nil, fmt.Errorf("lab supervisor exited during startup: %w; see %s", processErr, logPath)
 		case <-time.After(250 * time.Millisecond):
 		}
@@ -1331,18 +1351,19 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	case "down":
 		reply.Output = "lab stopped"
 		_ = json.NewEncoder(connection).Encode(reply)
-		shutdownErr := state.ShutdownWithBeforeWait(func() {
+		_ = state.ShutdownWithBeforeWaitAndResult(func() {
 			if fw != nil {
 				fw.AbortGuestSerial()
 			}
-		}, shutdown)
-		if shutdownErr == nil {
-			if removeErr := os.Remove(filepath.Join(dir, shutdownMarkerName)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				fmt.Fprintf(os.Stderr, "remove shutdown marker: %v\n", removeErr)
+		}, shutdown, func(shutdownErr error) {
+			if shutdownErr == nil {
+				if removeErr := os.Remove(filepath.Join(dir, shutdownMarkerName)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					fmt.Fprintf(os.Stderr, "remove shutdown marker: %v\n", removeErr)
+				}
+			} else if markerErr := writeShutdownMarker(dir, "down", shutdownErr.Error()); markerErr != nil {
+				fmt.Fprintf(os.Stderr, "write shutdown marker: %v\n", markerErr)
 			}
-		} else if markerErr := writeShutdownMarker(dir, "down", shutdownErr.Error()); markerErr != nil {
-			fmt.Fprintf(os.Stderr, "write shutdown marker: %v\n", markerErr)
-		}
+		})
 		stop()
 		return
 	default:
