@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -480,16 +481,20 @@ func TestStartupFailureIncludesLastStatusError(t *testing.T) {
 	require.EqualError(t, err, "lab did not start: operator profile is not ready; see /tmp/supervisor.log")
 }
 
-func TestHandleRuntimeConnectionReportsStarting(t *testing.T) {
-	runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}}
-	server, client := net.Pipe()
-	defer client.Close()
-	go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
-	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
-	var reply response
-	require.NoError(t, json.NewDecoder(client).Decode(&reply))
-	require.False(t, reply.OK)
-	require.Equal(t, "lab is starting", reply.Error)
+func TestHandleRuntimeConnectionReturnsBusyWhileStarting(t *testing.T) {
+	for _, action := range []string{"status", "reset", "exec", "shell", "serial", "report", "manifest"} {
+		t.Run(action, func(t *testing.T) {
+			runtime := &sessionRuntime{Ready: make(chan struct{}), State: &supervisor{}}
+			server, client := net.Pipe()
+			defer client.Close()
+			go handleRuntimeConnection(server, t.TempDir(), runtime, func() {})
+			require.NoError(t, json.NewEncoder(client).Encode(request{Action: action}))
+			var reply response
+			require.NoError(t, json.NewDecoder(client).Decode(&reply))
+			require.False(t, reply.OK)
+			require.Equal(t, labBusyError, reply.Error)
+		})
+	}
 }
 
 func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
@@ -556,7 +561,7 @@ func TestSerialDimensionsUseTerminalHeightAndWidth(t *testing.T) {
 }
 
 func TestHandleConnectionReturnsBusy(t *testing.T) {
-	for _, action := range []string{"status", "shell"} {
+	for _, action := range []string{"status", "reset", "exec", "shell", "serial", "report", "manifest"} {
 		t.Run(action, func(t *testing.T) {
 			state := &supervisor{}
 			require.True(t, state.TryOperation())
@@ -573,11 +578,123 @@ func TestHandleConnectionReturnsBusy(t *testing.T) {
 			var reply response
 			require.NoError(t, json.NewDecoder(client).Decode(&reply))
 			require.False(t, reply.OK)
-			require.Equal(t, "lab is busy", reply.Error)
+			require.Equal(t, labBusyError, reply.Error)
 			require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
 			require.NoError(t, handlers.Wait())
 		})
 	}
+}
+
+func TestDownWaitsForActiveOperation(t *testing.T) {
+	state := &supervisor{}
+	require.True(t, state.TryOperation())
+	operationReleased := false
+	t.Cleanup(func() {
+		if !operationReleased {
+			state.ReleaseOperation()
+		}
+	})
+
+	shutdownStarted := make(chan struct{})
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, nil, func() error {
+			close(shutdownStarted)
+			return nil
+		}, func() {})
+		return nil
+	})
+
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.True(t, reply.OK)
+	require.Equal(t, "lab stopped", reply.Output)
+	require.Eventually(t, func() bool {
+		state.serialMutex.Lock()
+		defer state.serialMutex.Unlock()
+		return state.stopping
+	}, time.Second, time.Millisecond)
+
+	busyServer, busyClient := net.Pipe()
+	var busyHandlers errgroup.Group
+	busyHandlers.Go(func() error {
+		handleConnection(busyServer, nil, directory, state, nil, nil, func() {})
+		return nil
+	})
+	require.NoError(t, json.NewEncoder(busyClient).Encode(request{Action: "status"}))
+	var busyReply response
+	require.NoError(t, json.NewDecoder(busyClient).Decode(&busyReply))
+	require.False(t, busyReply.OK)
+	require.Equal(t, labBusyError, busyReply.Error)
+	require.NoError(t, busyHandlers.Wait())
+	require.NoError(t, busyClient.Close())
+	require.NoError(t, busyServer.Close())
+	select {
+	case <-shutdownStarted:
+		t.Fatal("shutdown started before active operation released")
+	default:
+	}
+
+	state.ReleaseOperation()
+	operationReleased = true
+	select {
+	case <-shutdownStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not start after active operation released")
+	}
+	require.NoError(t, handlers.Wait())
+}
+
+func TestSupervisorOperationCanRetryAfterRelease(t *testing.T) {
+	savedProbe := baselineReadyProbe
+	t.Cleanup(func() { baselineReadyProbe = savedProbe })
+	baselineReadyProbe = func() bool { return true }
+
+	state := &supervisor{}
+	require.True(t, state.TryOperation())
+	busyServer, busyClient := net.Pipe()
+	directory := t.TempDir()
+	var busyHandlers errgroup.Group
+	busyHandlers.Go(func() error {
+		handleConnection(busyServer, nil, directory, state, func() error {
+			t.Fatal("restore ran while reset was busy")
+			return nil
+		}, nil, func() {})
+		return nil
+	})
+	require.NoError(t, json.NewEncoder(busyClient).Encode(request{Action: "reset"}))
+	var busyReply response
+	require.NoError(t, json.NewDecoder(busyClient).Decode(&busyReply))
+	require.False(t, busyReply.OK)
+	require.Equal(t, labBusyError, busyReply.Error)
+	require.NoError(t, busyHandlers.Wait())
+	require.NoError(t, busyClient.Close())
+	require.NoError(t, busyServer.Close())
+
+	state.ReleaseOperation()
+
+	restoreRan := 0
+	server, client := net.Pipe()
+	defer client.Close()
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, func() error {
+			restoreRan++
+			return nil
+		}, nil, func() {})
+		return nil
+	})
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.True(t, reply.OK)
+	require.Equal(t, "baseline restored", reply.Output)
+	require.NoError(t, handlers.Wait())
+	require.Equal(t, 1, restoreRan)
 }
 
 func TestHandleConnectionDownAcksBeforeShutdown(t *testing.T) {
@@ -628,6 +745,57 @@ func TestSupervisorRejectsOperationsAfterShutdown(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 	require.False(t, state.TrySerial(server))
+}
+
+func TestSupervisorSignalWaitsForActiveOperation(t *testing.T) {
+	state := &supervisor{}
+	require.True(t, state.TryOperation())
+
+	interrupted := &atomic.Bool{}
+	runtime := &sessionRuntime{Ready: make(chan struct{}), State: state, Interrupted: interrupted}
+	cleanupStarted := make(chan struct{})
+	listenerClosed := make(chan struct{})
+	runtime.Shutdown = func() error {
+		close(cleanupStarted)
+		return nil
+	}
+	close(runtime.Ready)
+
+	go handleTerminationSignal(runtime, func() { close(listenerClosed) })
+	require.Eventually(t, func() bool {
+		state.serialMutex.Lock()
+		defer state.serialMutex.Unlock()
+		return state.stopping
+	}, time.Second, time.Millisecond)
+	select {
+	case <-cleanupStarted:
+		t.Fatal("signal cleanup started before active operation released")
+	default:
+	}
+	select {
+	case <-listenerClosed:
+	default:
+		t.Fatal("signal did not close listener before waiting for active operation")
+	}
+
+	state.ReleaseOperation()
+	require.Eventually(t, func() bool {
+		select {
+		case <-cleanupStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-listenerClosed:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.True(t, interrupted.Load())
 }
 
 func TestEnsurePrivateDirectoryRejectsUnsafePaths(t *testing.T) {
@@ -880,9 +1048,10 @@ func tempUp(t *testing.T, session string) (string, func()) {
 	}
 }
 
-func TestUpRejectsUnhealthyRunningSupervisor(t *testing.T) {
-	dir, cleanup := tempUp(t, "unhealthy-running")
+func TestUpRejectsBusySupervisorWithoutSpawningReplacement(t *testing.T) {
+	_, cleanup := tempUp(t, "unhealthy-running")
 	defer cleanup()
+	serveRunnerCalled := false
 	stubCallAndServe(t,
 		func(*application, request) (*response, error) {
 			return &response{
@@ -891,12 +1060,16 @@ func TestUpRejectsUnhealthyRunningSupervisor(t *testing.T) {
 				SupervisorProtocolVersion: supervisorProtocolVersion,
 			}, nil
 		},
-		nil,
+		func(*application, string) (*response, error) {
+			serveRunnerCalled = true
+			return nil, errors.New("serveRunner must not run for a busy Supervisor")
+		},
 	)
 	application := newApplication()
 	application.session = "unhealthy-running"
 	err := application.up()
-	require.EqualError(t, err, fmt.Sprintf("session unhealthy: lab is busy; see %s", filepath.Join(dir, "supervisor.log")))
+	require.EqualError(t, err, labBusyError)
+	require.False(t, serveRunnerCalled)
 }
 
 func TestUpRejectsLockedButSilentSession(t *testing.T) {
@@ -915,9 +1088,7 @@ func TestUpRejectsLockedButSilentSession(t *testing.T) {
 	application := newApplication()
 	application.session = "locked-silent"
 	err = application.up()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "session unhealthy: supervisor lock is held")
-	require.Contains(t, err.Error(), "supervisor.log")
+	require.EqualError(t, err, labBusyError)
 }
 
 func TestUpReusesHealthyRunningSupervisor(t *testing.T) {
@@ -1069,8 +1240,8 @@ func TestProbeSessionLock(t *testing.T) {
 		defer holder.Close()
 		require.NoError(t, syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 		err = probeSessionLock(dir)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "supervisor lock is held")
+		require.ErrorIs(t, err, errLabBusy)
+		require.EqualError(t, err, labBusyError)
 	})
 }
 

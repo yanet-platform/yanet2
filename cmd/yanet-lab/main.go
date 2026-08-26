@@ -33,6 +33,10 @@ import (
 
 const defaultSession = "default"
 
+const labBusyError = "lab is busy"
+
+var errLabBusy = errors.New(labBusyError)
+
 const (
 	supervisorRequestTimeout  = 5 * time.Second
 	supervisorExecTimeout     = 5 * time.Minute
@@ -168,24 +172,43 @@ func (m *supervisor) CloseSerial() {
 	}
 }
 
-// MarkStopping flags the supervisor as stopping so TryOperation and TrySerial
-// reject new work. It returns immediately without waiting for in-flight work.
-func (m *supervisor) MarkStopping() {
+// Stop flags the supervisor as stopping and closes an active serial session.
+//
+// TryOperation and TrySerial reject new work after Stop returns. Stop does not
+// wait for an operation already holding operationMutex.
+func (m *supervisor) Stop() {
 	m.serialMutex.Lock()
-	m.stopping = true
-	m.serialMutex.Unlock()
-}
-
-func (m *supervisor) Shutdown(fn func() error) error {
-	m.serialMutex.Lock()
+	defer m.serialMutex.Unlock()
 	m.stopping = true
 	if m.serial != nil {
 		_ = m.serial.Close()
 	}
-	m.serialMutex.Unlock()
+}
+
+func (m *supervisor) waitForOperation(fn func() error) error {
 	m.operationMutex.Lock()
 	defer m.operationMutex.Unlock()
 	return fn()
+}
+
+func (m *supervisor) shutdown(beforeWait func(), fn func() error) error {
+	m.Stop()
+	if beforeWait != nil {
+		beforeWait()
+	}
+	return m.waitForOperation(fn)
+}
+
+func (m *supervisor) Shutdown(fn func() error) error {
+	return m.shutdown(nil, fn)
+}
+
+// ShutdownWithBeforeWait stops the supervisor after running a pre-wait hook.
+//
+// The hook runs after new work is rejected and before the active operation is
+// awaited.
+func (m *supervisor) ShutdownWithBeforeWait(beforeWait func(), fn func() error) error {
+	return m.shutdown(beforeWait, fn)
 }
 
 func main() {
@@ -706,11 +729,17 @@ func (m *application) up() error {
 	}
 	if reuse != nil {
 		if !reuse.OK {
+			if reuse.Error == labBusyError {
+				return errLabBusy
+			}
 			return sessionUnhealthy(reuse.Error, logPath)
 		}
 		return m.printResponse(reuse)
 	}
 	if err := probeSessionLock(dir); err != nil {
+		if errors.Is(err, errLabBusy) {
+			return errLabBusy
+		}
 		return sessionUnhealthy(err.Error(), logPath)
 	}
 	// Re-check the shutdown marker immediately before spawning serve so a
@@ -748,6 +777,9 @@ func probeSessionLock(directory string) error {
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errLabBusy
+		}
 		return fmt.Errorf("supervisor lock is held by another process: %w", err)
 	}
 	return nil
@@ -1055,17 +1087,7 @@ func (m *application) serve() (err error) {
 	defer signal.Stop(stopping)
 	go func() {
 		<-stopping
-		runtime.State.MarkStopping()
-		startupInterrupted.Store(true)
-		runtime.State.CloseSerial()
-		_ = listener.Close()
-		select {
-		case <-runtime.Ready:
-			if runtime.Framework != nil {
-				runtime.Framework.AbortGuestSerial()
-			}
-		default:
-		}
+		handleTerminationSignal(runtime, func() { _ = listener.Close() })
 	}()
 	acceptErrors := make(chan error, 1)
 	var handlers errgroup.Group
@@ -1167,8 +1189,33 @@ func handleRuntimeConnection(connection net.Conn, dir string, runtime *sessionRu
 			stop()
 			return
 		}
-		_ = json.NewEncoder(connection).Encode(response{Error: "lab is starting", SupervisorProtocolVersion: supervisorProtocolVersion})
+		_ = json.NewEncoder(connection).Encode(response{Error: labBusyError, SupervisorProtocolVersion: supervisorProtocolVersion})
 	}
+}
+
+func handleTerminationSignal(runtime *sessionRuntime, closeListener func()) {
+	if runtime.Interrupted != nil {
+		runtime.Interrupted.Store(true)
+	}
+	runtime.State.ShutdownWithBeforeWait(func() {
+		closeListener()
+		select {
+		case <-runtime.Ready:
+			if runtime.Framework != nil {
+				runtime.Framework.AbortGuestSerial()
+			}
+		default:
+		}
+	}, func() error {
+		select {
+		case <-runtime.Ready:
+			if runtime.Shutdown != nil {
+				return runtime.Shutdown()
+			}
+		default:
+		}
+		return nil
+	})
 }
 
 func handleConnection(connection net.Conn, fw *framework.TestFramework, dir string, state *supervisor, restore func() error, shutdown func() error, stop func()) {
@@ -1182,7 +1229,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	if value.Action == "serial" {
 		if !state.TrySerial(connection) {
 			reply.OK = false
-			reply.Error = "lab is busy"
+			reply.Error = errLabBusy.Error()
 			_ = json.NewEncoder(connection).Encode(reply)
 			return
 		}
@@ -1190,7 +1237,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	} else if value.Action != "down" {
 		if !state.TryOperation() {
 			reply.OK = false
-			reply.Error = "lab is busy"
+			reply.Error = errLabBusy.Error()
 			_ = json.NewEncoder(connection).Encode(reply)
 			return
 		}
@@ -1284,10 +1331,11 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	case "down":
 		reply.Output = "lab stopped"
 		_ = json.NewEncoder(connection).Encode(reply)
-		if fw != nil {
-			fw.AbortGuestSerial()
-		}
-		shutdownErr := state.Shutdown(shutdown)
+		shutdownErr := state.ShutdownWithBeforeWait(func() {
+			if fw != nil {
+				fw.AbortGuestSerial()
+			}
+		}, shutdown)
 		if shutdownErr == nil {
 			if removeErr := os.Remove(filepath.Join(dir, shutdownMarkerName)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 				fmt.Fprintf(os.Stderr, "remove shutdown marker: %v\n", removeErr)
