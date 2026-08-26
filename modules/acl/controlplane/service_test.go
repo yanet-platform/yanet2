@@ -228,7 +228,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	testingTB.Helper()
 
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
-		CPMemory:      uint64(128 * datasize.MB),
+		CPMemory:      uint64(192 * datasize.MB),
 		DPMemory:      uint64(64 * datasize.MB),
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
@@ -241,7 +241,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	agent, err := harness.SharedMemory().AgentAttach(
 		"acl-metrics-snapshot",
 		0,
-		64*datasize.MB,
+		96*datasize.MB,
 	)
 	require.NoError(testingTB, err)
 	testingTB.Cleanup(func() { _ = agent.CleanUp() })

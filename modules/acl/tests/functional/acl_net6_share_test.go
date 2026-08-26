@@ -375,7 +375,7 @@ func runNet6ShareVerdictParity(
 func TestACL_Net6Share_VerdictParity(t *testing.T) {
 	const (
 		net6ShareCPMemory  = 192 * datasize.MB
-		net6ShareAgentSize = 48 * datasize.MB
+		net6ShareAgentSize = 64 * datasize.MB
 	)
 	runNet6ShareVerdictParity(t, 384, 512, net6ShareCPMemory, net6ShareAgentSize)
 }
@@ -454,7 +454,7 @@ func TestACL_Net6Share_VerdictParity_ScaleHeavy(t *testing.T) {
 func TestACL_Net6Share_EmptyRoundForcePoll(t *testing.T) {
 	const (
 		emptyRoundCPMemory    = 192 * datasize.MB
-		emptyRoundAgentMemory = 48 * datasize.MB
+		emptyRoundAgentMemory = 64 * datasize.MB
 	)
 
 	_, present := os.LookupEnv(net6ShareDisableEnv)
