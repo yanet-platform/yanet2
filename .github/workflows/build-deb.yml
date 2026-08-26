@@ -92,18 +92,19 @@ jobs:
       - id: set
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.include_2204 }}" == "true" ]]; then
-            echo 'matrix={"unbtver":["24.04","22.04"]}' >> $GITHUB_OUTPUT
+            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"},{"unbtver":"22.04","arch":"amd64","runner":"ubuntu-22.04","artifact":"debs-22.04"}]}' >> "$GITHUB_OUTPUT"
           else
-            echo 'matrix={"unbtver":["24.04"]}' >> $GITHUB_OUTPUT
+            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}' >> "$GITHUB_OUTPUT"
           fi
 
   build-deb:
+    name: Build DEB (${{ matrix.unbtver }}, ${{ matrix.arch }})
     needs: set-matrix
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
 
-    runs-on: ubuntu-${{ matrix.unbtver }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -120,7 +121,7 @@ jobs:
       - uses: hendrikmuhs/ccache-action@v1.2.23
         name: ccache
         with:
-          key: ${{ runner.os }}-deb-ccache-${{ matrix.unbtver }}
+          key: ${{ runner.os }}-deb-ccache-${{ matrix.unbtver }}-${{ matrix.arch }}
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
@@ -139,7 +140,7 @@ jobs:
       - name: Cache rust
         uses: Swatinem/rust-cache@v2.9.2
         with:
-          shared-key: deb-${{ matrix.unbtver }}
+          shared-key: deb-${{ matrix.unbtver }}-${{ matrix.arch }}
           cache-targets: false
 
       - name: Install packaging tools
@@ -162,10 +163,27 @@ jobs:
           sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
           sudo chown -R $(id -u) ~/.cargo  # fix caching for Rust
 
+      - name: Verify package architecture
+        run: |
+          set -euo pipefail
+          actual_host_arch=$(dpkg --print-architecture)
+          if [[ "$actual_host_arch" != '${{ matrix.arch }}' ]]; then
+            echo "Runner architecture mismatch: $actual_host_arch (expected ${{ matrix.arch }})" >&2
+            exit 1
+          fi
+          expected_arch='${{ matrix.arch }}'
+          for package in outdeb/*.deb outdeb/*.ddeb; do
+            actual_arch=$(dpkg-deb --field "$package" Architecture)
+            if [[ "$actual_arch" != "$expected_arch" ]]; then
+              echo "Unexpected architecture for $(basename "$package"): $actual_arch (expected $expected_arch)" >&2
+              exit 1
+            fi
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: debs-${{ matrix.unbtver }}
+          name: ${{ matrix.artifact }}
           path: |
             outdeb/*.changes
             outdeb/*.deb
@@ -185,13 +203,65 @@ jobs:
           path: artifacts
 
       - name: Verify downloaded packages
-        run: ./scripts/verify-deb-artifacts.sh artifacts
+        run: |
+          set -euo pipefail
+
+          mapfile -t artifact_sets < <(find artifacts -mindepth 1 -maxdepth 1 -type d -name 'debs-*' -printf '%f\n' | sort)
+          ((${#artifact_sets[@]} > 0)) || { echo 'No Debian artifact sets found' >&2; exit 1; }
+
+          # Normal tag pushes build the two 24.04 release architectures. A
+          # manually dispatched tag build may additionally verify the
+          # optional Ubuntu 22.04 amd64 artifact, but it is not published.
+          expected_sets=(debs-24.04 debs-24.04-arm64)
+          if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ github.event.inputs.include_2204 }}" == 'true' ]]; then
+            expected_sets+=(debs-22.04)
+          fi
+          mapfile -t expected_sets < <(printf '%s\n' "${expected_sets[@]}" | sort)
+          if [[ "${artifact_sets[*]}" != "${expected_sets[*]}" ]]; then
+            echo "Unexpected Debian artifact sets: ${artifact_sets[*]}" >&2
+            echo "Expected Debian artifact sets: ${expected_sets[*]}" >&2
+            exit 1
+          fi
+
+          release_sets=(debs-24.04 debs-24.04-arm64)
+
+          release_version=''
+          for artifact_set in "${artifact_sets[@]}"; do
+            mapfile -t changes_files < <(find "artifacts/$artifact_set" -maxdepth 1 -type f -name '*.changes' -print)
+            ((${#changes_files[@]} == 1)) || {
+              echo "Expected exactly one .changes file in $artifact_set" >&2
+              exit 1
+            }
+            changes_version=$(awk -F': ' '$1 == "Version" { print $2; exit }' "${changes_files[0]}")
+            [[ -n "$changes_version" ]] || {
+              echo "Missing Version in ${changes_files[0]}" >&2
+              exit 1
+            }
+            if [[ -z "$release_version" ]]; then
+              release_version="$changes_version"
+            elif [[ "$changes_version" != "$release_version" ]]; then
+              echo "Mixed release versions: $release_version and $changes_version" >&2
+              exit 1
+            fi
+            echo "Verifying $artifact_set"
+            ./scripts/verify-deb-artifacts.sh "artifacts/$artifact_set"
+          done
 
       - name: Flatten artifacts
         run: |
+          set -euo pipefail
           mkdir -p outdeb
-          find artifacts -type f \( -name "*.changes" -o -name "*.deb" -o -name "*.ddeb" \) -exec cp {} outdeb/ \;
-          ./scripts/verify-deb-artifacts.sh outdeb
+          release_sets=(debs-24.04 debs-24.04-arm64)
+          for release_set in "${release_sets[@]}"; do
+            while IFS= read -r -d '' artifact; do
+              destination="outdeb/$(basename "$artifact")"
+              if [[ -e "$destination" ]]; then
+                echo "Artifact filename collision: $(basename "$artifact")" >&2
+                exit 1
+              fi
+              cp -- "$artifact" "$destination"
+            done < <(find "artifacts/$release_set" -type f \( -name "*.changes" -o -name "*.deb" -o -name "*.ddeb" \) -print0 | sort -z)
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
