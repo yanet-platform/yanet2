@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -428,7 +430,7 @@ func TestRootCommandHasUpSubcommand(t *testing.T) {
 	require.NoError(t, command.Execute())
 	found := false
 	for _, sub := range command.Commands() {
-		if sub.Use == "up" {
+		if sub.Name() == "up" {
 			found = true
 			break
 		}
@@ -498,7 +500,8 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
 	var reply response
 	require.NoError(t, json.NewDecoder(client).Decode(&reply))
-	require.Equal(t, supervisorProtocolVersion, reply.Protocol)
+	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
+	require.Equal(t, 0, reply.Protocol)
 }
 
 func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
@@ -571,6 +574,7 @@ func TestHandleConnectionReturnsBusy(t *testing.T) {
 			require.NoError(t, json.NewDecoder(client).Decode(&reply))
 			require.False(t, reply.OK)
 			require.Equal(t, "lab is busy", reply.Error)
+			require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
 			require.NoError(t, handlers.Wait())
 		})
 	}
@@ -598,6 +602,7 @@ func TestHandleConnectionDownAcksBeforeShutdown(t *testing.T) {
 	require.NoError(t, json.NewDecoder(client).Decode(&reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
+	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
 	// The response was decoded while shutdown was still blocked — proving
 	// the early ack-before-shutdown ordering.
 	close(shutdownReturned)
@@ -691,13 +696,486 @@ func TestClassifyStaleSupervisor(t *testing.T) {
 		expected staleSupervisorDecision
 	}{
 		{name: "no supervisor", resp: nil, callErr: errors.New("connect: connection refused"), expected: staleSupervisorAbsent},
-		{name: "current version", resp: &response{Protocol: supervisorProtocolVersion}, callErr: nil, expected: staleSupervisorCurrent},
-		{name: "stale version", resp: &response{Protocol: supervisorProtocolVersion + 1}, callErr: nil, expected: staleSupervisorStale},
-		{name: "old supervisor (protocol 0)", resp: &response{Protocol: 0}, callErr: nil, expected: staleSupervisorStale},
+		{name: "current version", resp: &response{SupervisorProtocolVersion: supervisorProtocolVersion}, callErr: nil, expected: staleSupervisorCurrent},
+		{name: "stale version", resp: &response{SupervisorProtocolVersion: supervisorProtocolVersion + 1}, callErr: nil, expected: staleSupervisorStale},
+		{name: "old supervisor (protocol 0)", resp: &response{SupervisorProtocolVersion: 0}, callErr: nil, expected: staleSupervisorStale},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.expected, classifyStaleSupervisor(tc.resp, tc.callErr))
+		})
+	}
+}
+
+func TestResponseEnvelopeCarriesBothProtocolVersions(t *testing.T) {
+	data, err := json.Marshal(response{
+		OK:                        true,
+		Output:                    "VM: running; YANET: ready; operators: ready",
+		Protocol:                  cliProtocolVersion,
+		SupervisorProtocolVersion: supervisorProtocolVersion,
+	})
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.EqualValues(t, cliProtocolVersion, decoded["protocol"])
+	require.EqualValues(t, supervisorProtocolVersion, decoded["supervisorProtocolVersion"])
+	require.Equal(t, true, decoded["ok"])
+}
+
+func TestUpCommandPassesPositionalToRunE(t *testing.T) {
+	command := newApplication().upCommand()
+	require.Equal(t, "up [SESSION]", command.Use)
+	var seen []string
+	command.RunE = func(_ *cobra.Command, args []string) error {
+		seen = args
+		return nil
+	}
+	command.SetArgs([]string{"my-session"})
+	require.NoError(t, command.Execute())
+	require.Equal(t, []string{"my-session"}, seen)
+	command.SetArgs([]string{"my-session", "extra"})
+	err := command.Execute()
+	require.Error(t, err)
+}
+
+func TestSelectSessionAssignsPositional(t *testing.T) {
+	application := newApplication()
+	require.Equal(t, defaultSession, application.session)
+	application.selectSession([]string{"my-session"})
+	require.Equal(t, "my-session", application.session)
+	application.selectSession(nil)
+	require.Equal(t, "my-session", application.session)
+}
+
+func TestUpRejectsShutdownMarkerBeforeSpawn(t *testing.T) {
+	// Reset the cached project root so this test can pin it to the temp dir.
+	projectRootCache = projectRootState{}
+	t.Cleanup(func() { projectRootCache = projectRootState{} })
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+	t.Chdir(root)
+
+	session := "marker-reject"
+	dir, _, err := sessionPaths(session)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, shutdownMarkerName),
+		[]byte(`{"status":"FAILED","step":"stop-vm","reason":"qemu timed out"}`), 0o600))
+
+	stubCallAndServe(t, nil, func(*application, string) (*response, error) {
+		t.Fatal("serveRunner must not run when shutdown-failed.json rejects up")
+		return nil, nil
+	})
+
+	application := newApplication()
+	application.session = session
+	err = application.up()
+	require.EqualError(t, err, `previous down failed at step "stop-vm": qemu timed out; run 'yanet-lab down' to retry cleanup`)
+}
+
+func TestPrintResponseStampsCLIProtocol(t *testing.T) {
+	t.Run("ok path", func(t *testing.T) {
+		application := newApplication()
+		application.json = true
+		value := &response{OK: true, Output: "VM: running", SupervisorProtocolVersion: supervisorProtocolVersion}
+		stdout, err := captureStdout(t, func() error {
+			return application.printResponse(value)
+		})
+		require.NoError(t, err)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(stdout, &decoded))
+		require.EqualValues(t, cliProtocolVersion, decoded["protocol"])
+		require.EqualValues(t, supervisorProtocolVersion, decoded["supervisorProtocolVersion"])
+		require.Equal(t, true, decoded["ok"])
+		require.Equal(t, "VM: running", decoded["output"])
+		// The caller's struct must not have been mutated.
+		require.Equal(t, 0, value.Protocol)
+	})
+	t.Run("error path", func(t *testing.T) {
+		application := newApplication()
+		application.json = true
+		value := &response{OK: false, Error: "lab stopped", SupervisorProtocolVersion: supervisorProtocolVersion}
+		stdout, callErr := captureStdout(t, func() error {
+			return application.printResponse(value)
+		})
+		require.EqualError(t, callErr, "lab stopped")
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(stdout, &decoded))
+		require.EqualValues(t, cliProtocolVersion, decoded["protocol"])
+		require.EqualValues(t, supervisorProtocolVersion, decoded["supervisorProtocolVersion"])
+		require.Equal(t, false, decoded["ok"])
+		require.Equal(t, "lab stopped", decoded["error"])
+		require.Equal(t, 0, value.Protocol)
+	})
+}
+
+func TestAnnotateReplacementOnlyFiresOnStaleTeardown(t *testing.T) {
+	resp := &response{Output: "VM: running"}
+	annotateReplacement(resp, noStaleTeardown)
+	require.Equal(t, "VM: running", resp.Output)
+	annotateReplacement(resp, 1)
+	require.Equal(t, "replaced stale supervisor (protocol 1); VM: running", resp.Output)
+	resp = &response{Output: "VM: running"}
+	annotateReplacement(resp, 0)
+	require.Equal(t, "replaced stale supervisor (protocol 0); VM: running", resp.Output)
+	resp = &response{}
+	annotateReplacement(resp, 2)
+	require.Equal(t, "replaced stale supervisor (protocol 2)", resp.Output)
+}
+
+// captureStdout redirects os.Stdout during fn and returns whatever was written.
+func captureStdout(t *testing.T, fn func() error) ([]byte, error) {
+	t.Helper()
+	original := os.Stdout
+	readEnd, writeEnd, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = writeEnd
+	defer func() {
+		os.Stdout = original
+		_ = readEnd.Close()
+		_ = writeEnd.Close()
+	}()
+	runErr := fn()
+	require.NoError(t, writeEnd.Close())
+	data, readErr := io.ReadAll(readEnd)
+	return data, errors.Join(runErr, readErr)
+}
+
+// stubCallAndServe swaps the package-level callSupervisor and serveRunner
+// functions for the duration of a test, restoring the originals on cleanup.
+// Tests that exercise up()'s wire-ups use this to drive the production flow
+// without standing up a real Unix-domain socket or forking a QEMU subprocess.
+func stubCallAndServe(t *testing.T, call func(*application, request) (*response, error), run func(*application, string) (*response, error)) {
+	t.Helper()
+	savedCall, savedRun := callSupervisor, serveRunner
+	t.Cleanup(func() {
+		callSupervisor = savedCall
+		serveRunner = savedRun
+	})
+	if call != nil {
+		callSupervisor = call
+	}
+	if run != nil {
+		serveRunner = run
+	}
+}
+
+// tempUp sets projectRootCache to a temp repo and chdir's into it, returning
+// the resolved session runtime directory and a cleanup func.
+func tempUp(t *testing.T, session string) (string, func()) {
+	t.Helper()
+	projectRootCache = projectRootState{}
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/lab\n"), 0o644))
+	t.Chdir(root)
+	dir, _, err := sessionPaths(session)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	return dir, func() {
+		_ = os.RemoveAll(dir)
+		projectRootCache = projectRootState{}
+	}
+}
+
+func TestUpRejectsUnhealthyRunningSupervisor(t *testing.T) {
+	dir, cleanup := tempUp(t, "unhealthy-running")
+	defer cleanup()
+	stubCallAndServe(t,
+		func(*application, request) (*response, error) {
+			return &response{
+				OK:                        false,
+				Error:                     "lab is busy",
+				SupervisorProtocolVersion: supervisorProtocolVersion,
+			}, nil
+		},
+		nil,
+	)
+	application := newApplication()
+	application.session = "unhealthy-running"
+	err := application.up()
+	require.EqualError(t, err, fmt.Sprintf("session unhealthy: lab is busy; see %s", filepath.Join(dir, "supervisor.log")))
+}
+
+func TestUpRejectsLockedButSilentSession(t *testing.T) {
+	dir, cleanup := tempUp(t, "locked-silent")
+	defer cleanup()
+	holder, err := os.OpenFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	require.NoError(t, err)
+	defer holder.Close()
+	require.NoError(t, syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+	stubCallAndServe(t,
+		func(*application, request) (*response, error) {
+			return nil, errors.New("connect: no such file or directory")
+		},
+		nil,
+	)
+	application := newApplication()
+	application.session = "locked-silent"
+	err = application.up()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "session unhealthy: supervisor lock is held")
+	require.Contains(t, err.Error(), "supervisor.log")
+}
+
+func TestUpReusesHealthyRunningSupervisor(t *testing.T) {
+	_, cleanup := tempUp(t, "healthy-reuse")
+	defer cleanup()
+	var serveRunnerCalled bool
+	stubCallAndServe(t,
+		func(*application, request) (*response, error) {
+			return &response{
+				OK:                        true,
+				Output:                    "VM: running; YANET: ready",
+				SupervisorProtocolVersion: supervisorProtocolVersion,
+			}, nil
+		},
+		func(*application, string) (*response, error) {
+			serveRunnerCalled = true
+			return nil, errors.New("serveRunner must not run on reuse")
+		},
+	)
+	application := newApplication()
+	application.json = true
+	application.session = "healthy-reuse"
+	stdout, err := captureStdout(t, func() error {
+		return application.up()
+	})
+	require.NoError(t, err)
+	require.False(t, serveRunnerCalled, "serveRunner must not run when a current-protocol Supervisor already answers OK")
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, "VM: running; YANET: ready", decoded["output"])
+	require.EqualValues(t, cliProtocolVersion, decoded["protocol"])
+	require.EqualValues(t, supervisorProtocolVersion, decoded["supervisorProtocolVersion"])
+	require.Equal(t, true, decoded["ok"])
+}
+
+func TestUpRechecksShutdownMarkerBeforeSpawn(t *testing.T) {
+	// Marker is absent at the first check (so up proceeds past the gate) but
+	// the test stub plants it before the second check (the TOCTOU re-check
+	// immediately before serveRunner). The serveRunner stub would t.Fatal
+	// if invoked, proving the re-check blocked the spawn.
+	_, cleanup := tempUp(t, "marker-recheck")
+	defer cleanup()
+
+	stubCallAndServe(t,
+		func(*application, request) (*response, error) {
+			return nil, errors.New("connect: no such file or directory")
+		},
+		func(*application, string) (*response, error) {
+			t.Fatal("serveRunner must not run when the second marker check rejects up")
+			return nil, nil
+		},
+	)
+
+	session := "marker-recheck"
+	dir, _, err := sessionPaths(session)
+	require.NoError(t, err)
+	_ = dir
+
+	var callCount int
+	savedCheck := shutdownMarkerCheck
+	t.Cleanup(func() { shutdownMarkerCheck = savedCheck })
+	shutdownMarkerCheck = func(directory string) error {
+		callCount++
+		if callCount == 1 {
+			return nil
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(directory, shutdownMarkerName),
+			[]byte(`{"status":"FAILED","step":"stop-vm","reason":"qemu timed out"}`), 0o600))
+		return checkShutdownMarker(directory)
+	}
+
+	application := newApplication()
+	application.session = session
+	err = application.up()
+	require.EqualError(t, err, `previous down failed at step "stop-vm": qemu timed out; run 'yanet-lab down' to retry cleanup`)
+	require.GreaterOrEqual(t, callCount, 2, "up must invoke the marker check at least twice (initial + re-check before spawn)")
+}
+
+func TestUpAnnotatesReplacementAfterStaleTeardown(t *testing.T) {
+	_, cleanup := tempUp(t, "replacement-test")
+	defer cleanup()
+	var callIndex int
+	stubCallAndServe(t,
+		func(m *application, value request) (*response, error) {
+			callIndex++
+			switch callIndex {
+			case 1:
+				// shutdownStaleSupervisor's initial status: stale protocol.
+				return &response{OK: true, SupervisorProtocolVersion: 1}, nil
+			case 2:
+				// shutdownStaleSupervisor's down: success.
+				return &response{OK: true, Output: "lab stopped"}, nil
+			case 3:
+				// shutdownStaleSupervisor's post-teardown poll: socket gone.
+				return nil, errors.New("connect: no such file or directory")
+			}
+			return nil, errors.New("unexpected call")
+		},
+		func(*application, string) (*response, error) {
+			return &response{
+				OK:                        true,
+				Output:                    "VM: running",
+				SupervisorProtocolVersion: supervisorProtocolVersion,
+			}, nil
+		},
+	)
+	application := newApplication()
+	application.json = true
+	application.session = "replacement-test"
+	stdout, err := captureStdout(t, func() error {
+		return application.up()
+	})
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, "replaced stale supervisor (protocol 1); VM: running", decoded["output"])
+	require.EqualValues(t, cliProtocolVersion, decoded["protocol"])
+	require.EqualValues(t, supervisorProtocolVersion, decoded["supervisorProtocolVersion"])
+	require.Equal(t, true, decoded["ok"])
+}
+
+func TestSessionUnhealthyIncludesReasonAndLogPath(t *testing.T) {
+	err := sessionUnhealthy("lab is busy", "/tmp/yanet2-lab-0/abc/default/supervisor.log")
+	require.EqualError(t, err, "session unhealthy: lab is busy; see /tmp/yanet2-lab-0/abc/default/supervisor.log")
+}
+
+func TestNoteProtocolReplacement(t *testing.T) {
+	require.Equal(t, "replaced stale supervisor (protocol 1)", noteProtocolReplacement("", 1))
+	require.Equal(t, "replaced stale supervisor (protocol 1); VM: running", noteProtocolReplacement("VM: running", 1))
+	require.Equal(t, "replaced stale supervisor (protocol 0)", noteProtocolReplacement("", 0))
+}
+
+func TestProbeSessionLock(t *testing.T) {
+	t.Run("absent lock file", func(t *testing.T) {
+		require.NoError(t, probeSessionLock(t.TempDir()))
+	})
+	t.Run("free lock file", func(t *testing.T) {
+		dir := t.TempDir()
+		lock, err := os.OpenFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+		require.NoError(t, err)
+		require.NoError(t, lock.Close())
+		require.NoError(t, probeSessionLock(dir))
+	})
+	t.Run("held lock file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "supervisor.lock")
+		holder, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+		require.NoError(t, err)
+		defer holder.Close()
+		require.NoError(t, syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+		err = probeSessionLock(dir)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "supervisor lock is held")
+	})
+}
+
+func TestCheckShutdownMarkerAbsentIsNotBlocking(t *testing.T) {
+	require.NoError(t, checkShutdownMarker(t.TempDir()))
+}
+
+func TestCheckShutdownMarkerAcceptsValidMarker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, shutdownMarkerName)
+	require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"stop-vm","reason":"qemu timed out"}`), 0o600))
+	err := checkShutdownMarker(dir)
+	require.EqualError(t, err, `previous down failed at step "stop-vm": qemu timed out; run 'yanet-lab down' to retry cleanup`)
+}
+
+func TestCheckShutdownMarkerRejectsInvalidStates(t *testing.T) {
+	cases := []struct {
+		name    string
+		prepare func(string) string
+	}{
+		{
+			name: "wrong mode",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"stop-vm","reason":"qemu timed out"}`), 0o600))
+				// Open with explicit chmod after write so a restrictive umask
+				// cannot silently turn this into a 0600 success case.
+				require.NoError(t, os.Chmod(path, 0o644))
+				return path
+			},
+		},
+		{
+			name: "symlink",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.Symlink("/etc/passwd", path))
+				return path
+			},
+		},
+		{
+			name: "malformed JSON",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+				return path
+			},
+		},
+		{
+			name: "extra field",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"stop-vm","reason":"qemu timed out","extra":"x"}`), 0o600))
+				return path
+			},
+		},
+		{
+			name: "missing field",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"stop-vm"}`), 0o600))
+				return path
+			},
+		},
+		{
+			name: "wrong status",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"OK","step":"stop-vm","reason":"qemu timed out"}`), 0o600))
+				return path
+			},
+		},
+		{
+			name: "empty step",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"","reason":"qemu timed out"}`), 0o600))
+				return path
+			},
+		},
+		{
+			name: "non-string reason",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"stop-vm","reason":5}`), 0o600))
+				return path
+			},
+		},
+		{
+			name: "oversize marker",
+			prepare: func(dir string) string {
+				path := filepath.Join(dir, shutdownMarkerName)
+				padding := strings.Repeat("x", maxShutdownMarkerBytes+1)
+				require.NoError(t, os.WriteFile(path, []byte(`{"status":"FAILED","step":"`+padding+`","reason":"r"}`), 0o600))
+				return path
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tc.prepare(dir)
+			err := checkShutdownMarker(dir)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "shutdown state unknown")
+			require.Contains(t, err.Error(), "yanet-lab down")
 		})
 	}
 }
