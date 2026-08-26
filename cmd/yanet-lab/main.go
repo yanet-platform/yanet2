@@ -1223,6 +1223,10 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		streamSerial(connection, fw, value.Rows, value.Columns)
 		return
 	case "reset":
+		if !baselineReadyProbe() {
+			setError(&reply, errors.New("baseline snapshot missing; run up again"))
+			break
+		}
 		err := restore()
 		setError(&reply, err)
 		if err == nil {
@@ -1283,8 +1287,13 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		if fw != nil {
 			fw.AbortGuestSerial()
 		}
-		if err := state.Shutdown(shutdown); err != nil {
-			fmt.Fprintf(os.Stderr, "lab shutdown error: %v\n", err)
+		shutdownErr := state.Shutdown(shutdown)
+		if shutdownErr == nil {
+			if removeErr := os.Remove(filepath.Join(dir, shutdownMarkerName)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				fmt.Fprintf(os.Stderr, "remove shutdown marker: %v\n", removeErr)
+			}
+		} else if markerErr := writeShutdownMarker(dir, "down", shutdownErr.Error()); markerErr != nil {
+			fmt.Fprintf(os.Stderr, "write shutdown marker: %v\n", markerErr)
 		}
 		stop()
 		return
@@ -1455,6 +1464,20 @@ func writeFile(path string, data []byte) error {
 	return os.Rename(temporary, path)
 }
 
+// writeShutdownMarker records a failed down in dir so the next up can block
+// until an operator issues an explicit retry. The JSON shape is the exact
+// schema checkShutdownMarker requires: status "FAILED" plus the non-empty
+// step and reason naming what to clean up. The atomic rename + 0600 mode
+// come from writeFile so the marker reader cannot observe a half-written
+// file via openPrivateFile's NOFOLLOW + mode checks.
+func writeShutdownMarker(dir, step, reason string) error {
+	data, err := json.Marshal(map[string]string{"status": "FAILED", "step": step, "reason": reason})
+	if err != nil {
+		return err
+	}
+	return writeFile(filepath.Join(dir, shutdownMarkerName), data)
+}
+
 func acquireSessionLock(dir string) (*os.File, error) {
 	lock, err := openPrivateFile(filepath.Join(dir, "supervisor.lock"), os.O_CREATE|os.O_RDWR)
 	if err != nil {
@@ -1623,6 +1646,11 @@ const maxShutdownMarkerBytes = 4096
 // invocation inside up() and exercise the TOCTOU re-check race without
 // standing up a real marker-writing sibling process.
 var shutdownMarkerCheck = checkShutdownMarker
+
+// baselineReadyProbe answers whether harness.Restore's baseline fast-path can
+// succeed. It is a package var so tests can stub the reset pre-check without
+// provisioning a real baseline snapshot.
+var baselineReadyProbe = framework.HasBaselineSnapshot
 
 // checkShutdownMarker rejects up when a previous down left its marker in the
 // session runtime directory. A valid marker names the failing step and reason

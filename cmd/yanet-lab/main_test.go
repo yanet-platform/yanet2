@@ -1179,3 +1179,169 @@ func TestCheckShutdownMarkerRejectsInvalidStates(t *testing.T) {
 		})
 	}
 }
+
+func TestResetHappyPath(t *testing.T) {
+	savedProbe := baselineReadyProbe
+	t.Cleanup(func() { baselineReadyProbe = savedProbe })
+	baselineReadyProbe = func() bool { return true }
+
+	state := &supervisor{}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+
+	restoreRan := 0
+	restore := func() error {
+		restoreRan++
+		return nil
+	}
+
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, restore, nil, func() {})
+		return nil
+	})
+
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.True(t, reply.OK)
+	require.Equal(t, "baseline restored", reply.Output)
+	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
+	require.NoError(t, handlers.Wait())
+	require.Equal(t, 1, restoreRan)
+}
+
+func TestResetRejectsMissingBaseline(t *testing.T) {
+	savedProbe := baselineReadyProbe
+	t.Cleanup(func() { baselineReadyProbe = savedProbe })
+	baselineReadyProbe = func() bool { return false }
+
+	state := &supervisor{}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+
+	restore := func() error {
+		t.Fatal("restore must not run when baselineReadyProbe returns false")
+		return nil
+	}
+
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, restore, nil, func() {})
+		return nil
+	})
+
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "reset"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.False(t, reply.OK)
+	require.Equal(t, "baseline snapshot missing; run up again", reply.Error)
+	require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
+	require.NoError(t, handlers.Wait())
+
+	_, statErr := os.Stat(filepath.Join(directory, shutdownMarkerName))
+	require.True(t, os.IsNotExist(statErr), "no shutdown marker should be written when reset is rejected, got err=%v", statErr)
+}
+
+func TestWriteShutdownMarker(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, writeShutdownMarker(dir, "down", "sentinel failure"))
+
+	path := filepath.Join(dir, shutdownMarkerName)
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	require.True(t, info.Mode().IsRegular(), "marker must be a regular file")
+	require.Zero(t, info.Mode()&os.ModeSymlink, "marker must not be a symlink")
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.Equal(t, map[string]string{"status": "FAILED", "step": "down", "reason": "sentinel failure"}, got)
+}
+
+func TestDownWritesShutdownMarkerOnError(t *testing.T) {
+	state := &supervisor{}
+	sentinel := errors.New("test sentinel failure")
+	shutdown := func() error { return sentinel }
+
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+	stopCalled := make(chan struct{})
+
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, nil, shutdown, func() { close(stopCalled) })
+		return nil
+	})
+
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.True(t, reply.OK)
+	require.Equal(t, "lab stopped", reply.Output)
+
+	select {
+	case <-stopCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop callback not invoked within 5s")
+	}
+	require.NoError(t, handlers.Wait())
+
+	path := filepath.Join(directory, shutdownMarkerName)
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	require.True(t, info.Mode().IsRegular(), "marker must be a regular file")
+	require.Zero(t, info.Mode()&os.ModeSymlink, "marker must not be a symlink")
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.Equal(t, map[string]string{"status": "FAILED", "step": "down", "reason": sentinel.Error()}, got)
+
+	require.EqualError(t, checkShutdownMarker(directory),
+		fmt.Sprintf("previous down failed at step \"down\": %s; run 'yanet-lab down' to retry cleanup", sentinel.Error()))
+}
+
+func TestDownRemovesPriorMarkerOnSuccess(t *testing.T) {
+	state := &supervisor{}
+	shutdown := func() error { return nil }
+
+	directory := t.TempDir()
+	require.NoError(t, writeShutdownMarker(directory, "down", "prior failure"))
+	_, err := os.Stat(filepath.Join(directory, shutdownMarkerName))
+	require.NoError(t, err)
+
+	server, client := net.Pipe()
+	defer client.Close()
+	stopCalled := make(chan struct{})
+
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, state, nil, shutdown, func() { close(stopCalled) })
+		return nil
+	})
+
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.True(t, reply.OK)
+
+	select {
+	case <-stopCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop callback not invoked within 5s")
+	}
+	require.NoError(t, handlers.Wait())
+
+	_, err = os.Stat(filepath.Join(directory, shutdownMarkerName))
+	require.True(t, os.IsNotExist(err), "prior marker should be gone after successful down, got err=%v", err)
+}
