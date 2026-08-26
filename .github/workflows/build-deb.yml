@@ -92,9 +92,9 @@ jobs:
       - id: set
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.include_2204 }}" == "true" ]]; then
-            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"},{"unbtver":"22.04","arch":"amd64","runner":"ubuntu-22.04","artifact":"debs-22.04"}]}' >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"},{"unbtver":"22.04","arch":"amd64","runner":"ubuntu-22.04","artifact":"debs-22.04-amd64"}]}' >> "$GITHUB_OUTPUT"
           else
-            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}' >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}' >> "$GITHUB_OUTPUT"
           fi
 
   build-deb:
@@ -212,9 +212,9 @@ jobs:
           # Normal tag pushes build the two 24.04 release architectures. A
           # manually dispatched tag build may additionally verify the
           # optional Ubuntu 22.04 amd64 artifact, but it is not published.
-          expected_sets=(debs-24.04 debs-24.04-arm64)
+          expected_sets=(debs-24.04-amd64 debs-24.04-arm64)
           if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ github.event.inputs.include_2204 }}" == 'true' ]]; then
-            expected_sets+=(debs-22.04)
+            expected_sets+=(debs-22.04-amd64)
           fi
           mapfile -t expected_sets < <(printf '%s\n' "${expected_sets[@]}" | sort)
           if [[ "${artifact_sets[*]}" != "${expected_sets[*]}" ]]; then
@@ -223,7 +223,7 @@ jobs:
             exit 1
           fi
 
-          release_sets=(debs-24.04 debs-24.04-arm64)
+          release_sets=(debs-24.04-amd64 debs-24.04-arm64)
 
           release_version=''
           for artifact_set in "${artifact_sets[@]}"; do
@@ -251,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p outdeb
-          release_sets=(debs-24.04 debs-24.04-arm64)
+          release_sets=(debs-24.04-amd64 debs-24.04-arm64)
           for release_set in "${release_sets[@]}"; do
             while IFS= read -r -d '' artifact; do
               destination="outdeb/$(basename "$artifact")"
