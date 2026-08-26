@@ -24,15 +24,16 @@ const (
 	// dominates the fixed per-worker overhead: 20 empty pipelines
 	// register 6 counters each and the single device storage registers
 	// another 12, so the nil tag filter matches 132 counters across 21
-	// storages. One worker's set costs on the order of one allocation
-	// per matched counter (its value blocks) plus a few per matched
-	// storage (its tag copies), so a per-worker budget of twice the
-	// matched counter count leaves room for that fixed term.
+	// storages. One worker's set costs one value block per matched
+	// counter plus a small tag term per matched storage (one tags array
+	// and two strdup'd strings per tag), so a per-worker budget of the
+	// matched counters plus eight allocations per storage leaves room
+	// for both terms.
 	bulkCopyPipelineCount = 20
 
 	// bulkCopyCycles is the number of repeated read cycles the leak
-	// guard measures; a cycle that leaks counted allocations raises the
-	// delta of every later cycle above the first one's.
+	// guard measures; a cycle that leaks tracked allocations or bytes
+	// raises every later cycle's floor above the first cycle's.
 	bulkCopyCycles = 10
 )
 
@@ -115,12 +116,14 @@ func TestCountersByTagsPerWorkerAllocationsAreBounded(t *testing.T) {
 	)
 
 	matched := uint64(highMatched)
+	storageCount := uint64(bulkCopyPipelineCount + 1)
+	perWorkerBudget := matched + 8*storageCount
 	perWorkerLow := lowAllocs / lowWorkers
 	perWorkerHigh := highAllocs / highWorkers
 
-	require.Less(t, perWorkerHigh, 2*matched,
-		"one worker's share must cost on the order of one allocation "+
-			"per matched counter",
+	require.Less(t, perWorkerHigh, perWorkerBudget,
+		"one worker's share must cost one allocation per matched "+
+			"counter plus a small tag term per storage",
 	)
 	require.Less(t, perWorkerHigh, perWorkerLow+matched,
 		"a higher worker count must not grow a single worker's share",
@@ -132,33 +135,54 @@ func TestCountersByTagsPerWorkerAllocationsAreBounded(t *testing.T) {
 }
 
 // TestCountersByTagsRepeatedReadsDoNotAccumulate verifies that a full
-// read cycle leaves nothing behind: every counted allocation of a call
-// is released by the time the call returns, so repeated cycles allocate
-// the same count. A cycle that leaks one of the per-worker lists, tag
-// copies, or value blocks raises the delta of every later cycle.
+// read cycle leaves nothing behind: after each call the number of
+// outstanding tracked allocations and the bytes they retain return to
+// the level the first cycle settled at. A cycle that leaks one of the
+// per-worker lists, tag copies, or value blocks leaves its blocks
+// outstanding and raises every later cycle's floor.
 //
-// The probe only counts this binary's own malloc/calloc calls, so a leak
-// of memory allocated inside libc (such as strdup) stays invisible here.
+// The probe only observes this binary's own allocations: memory
+// allocated inside a precompiled shared library stays invisible here.
 func TestCountersByTagsRepeatedReadsDoNotAccumulate(t *testing.T) {
 	const workerCount = 4
 
 	dp := bulkCopyHarness(t, workerCount)
 
-	deltas := make([]uint64, 0, bulkCopyCycles)
-	for range bulkCopyCycles {
-		before := allocCount()
+	// Prime every lazy one-time allocation the first call makes, so the
+	// baseline the later cycles are compared against is steady state.
+	_, err := dp.CountersByTags(nil, nil)
+	require.NoError(t, err)
+
+	var baseline outstandingAllocs
+	var firstDelta uint64
+	deltas := make([]uint64, 0, bulkCopyCycles-1)
+	for idx := range bulkCopyCycles {
+		allocsBefore := allocCount()
 		groups, err := dp.CountersByTags(nil, nil)
-		after := allocCount()
+		after := liveOutstanding()
 		require.NoError(t, err)
 		require.NotEmpty(t, groups, "read must keep matching counters")
-		deltas = append(deltas, after-before)
+
+		delta := allocCount() - allocsBefore
+		if idx == 0 {
+			baseline = after
+			firstDelta = delta
+			continue
+		}
+		deltas = append(deltas, delta)
+		require.Equal(t, baseline, after,
+			"cycle %d left %d allocations outstanding, the first "+
+				"cycle settled at %d; a completed read must "+
+				"not retain allocations",
+			idx, after.count, baseline.count,
+		)
 	}
 
 	for idx, delta := range deltas {
-		require.Equal(t, deltas[0], delta,
+		require.Equal(t, firstDelta, delta,
 			"cycle %d allocated %d, the first cycle allocated %d; "+
-				"a repeated read must not accumulate allocations",
-			idx, delta, deltas[0],
+				"a repeated read must not change its allocation count",
+			idx+1, delta, firstDelta,
 		)
 	}
 }
