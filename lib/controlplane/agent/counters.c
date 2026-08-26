@@ -82,13 +82,13 @@ yanet_get_module_counters(
 	// yanet_get_counters_by_tags, as are relation counters on
 	// module_object_link-kind storages sharing these six tags.
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "module"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("kind", "module"),
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 7, query, NULL);
 }
@@ -108,40 +108,16 @@ counter_registry_match_count(
 	return matches;
 }
 
-// Deep-copy a tag array into freshly allocated memory.
+// Copy a tag array into freshly allocated memory, so a handle outlives
+// the generation arena the tags may live in.
 static struct counter_tag *
 counter_tags_dup(const struct counter_tag *tags, size_t tag_count) {
 	struct counter_tag *dup = malloc(tag_count * sizeof(*dup));
 	if (dup == NULL) {
 		return NULL;
 	}
-	for (size_t i = 0; i < tag_count; ++i) {
-		dup[i].key = NULL;
-		dup[i].value = NULL;
-	}
-	for (size_t i = 0; i < tag_count; ++i) {
-		dup[i].key = strdup(tags[i].key);
-		dup[i].value = strdup(tags[i].value);
-		if (dup[i].key == NULL || dup[i].value == NULL) {
-			for (size_t j = 0; j < tag_count; ++j) {
-				free((void *)dup[j].key);
-				free((void *)dup[j].value);
-			}
-			free(dup);
-			return NULL;
-		}
-	}
+	memcpy(dup, tags, tag_count * sizeof(*dup));
 	return dup;
-}
-
-static struct counter_tag *
-cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
-	struct counter_tag view[MAX_TAG_COUNT];
-	for (size_t i = 0; i < storage->tag_count; ++i) {
-		view[i].key = storage->tags[i].key;
-		view[i].value = storage->tags[i].value;
-	}
-	return counter_tags_dup(view, storage->tag_count);
 }
 
 // Copy one already-described counter's per-worker value snapshot into
@@ -348,9 +324,9 @@ worker_counter_list_build(
 				continue;
 			}
 			if (storage_tags == NULL) {
-				storage_tags =
-					cp_counter_storage_copy_tags(cp_storage
-					);
+				storage_tags = counter_tags_dup(
+					cp_storage->tags, cp_storage->tag_count
+				);
 				if (storage_tags == NULL) {
 					yanet_error_add(err, "malloc failed");
 					yanet_counter_handle_list_free(list);
@@ -865,11 +841,11 @@ yanet_get_chain_counters(
 	const char *chain_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "kind", .value = "chain"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("kind", "chain")
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 5, NULL, NULL);
 }
@@ -882,10 +858,10 @@ yanet_get_function_counters(
 	const char *function_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "kind", .value = "function"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("kind", "function")
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 4, NULL, NULL);
 }
@@ -897,9 +873,9 @@ yanet_get_pipeline_counters(
 	const char *pipeline_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "kind", .value = "pipeline"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("kind", "pipeline")
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 3, NULL, NULL);
 }
@@ -909,8 +885,8 @@ yanet_get_device_counters(
 	struct dp_config *dp_config, const char *device_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "kind", .value = "device"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("kind", "device")
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 2, NULL, NULL);
 }
@@ -922,9 +898,9 @@ yanet_get_object_counters(
 	const char *object_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "object_type", .value = object_type},
-		{.key = "object_name", .value = object_name},
-		{.key = "kind", .value = "object"}
+		counter_tag_init("object_type", object_type),
+		counter_tag_init("object_name", object_name),
+		counter_tag_init("kind", "object")
 	};
 	return yanet_get_counters_by_tags(dp_config, tags, 3, NULL, NULL);
 }
@@ -1131,11 +1107,9 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	}
 	struct counter_handle *handles = counters->counters;
 	for (size_t i = 0; i < counters->count; ++i) {
+		// Handles from one storage share that storage's tag array;
+		// free it once, on its first handle.
 		if (i == 0 || handles[i].tags != handles[i - 1].tags) {
-			for (size_t j = 0; j < handles[i].tag_count; ++j) {
-				free((void *)handles[i].tags[j].key);
-				free((void *)handles[i].tags[j].value);
-			}
 			free(handles[i].tags);
 		}
 		// This pointer is the base of the single allocation that also

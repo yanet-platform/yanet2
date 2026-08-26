@@ -43,23 +43,22 @@ cp_config_counter_storage_registry_init(
 
 static int
 validate_tag(struct counter_tag *tag, bool predicate, yanet_error **err) {
-	if (tag->key == NULL) {
-		yanet_error_add(err, "key is required");
-		return -1;
-	}
-	if (tag->value == NULL) {
-		yanet_error_add(err, "value is required");
-		return -1;
-	}
-	if (strnlen(tag->key, KEY_MAX_SIZE) == KEY_MAX_SIZE) {
+	// The fixed-size fields cannot be NULL; the length checks only guard
+	// against a struct built without NUL termination.
+	if (strnlen(tag->key, COUNTER_TAG_KEY_LEN) == COUNTER_TAG_KEY_LEN) {
 		yanet_error_add(
-			err, "key length exceeds max %d", KEY_MAX_SIZE - 1
+			err,
+			"key length exceeds max %d",
+			COUNTER_TAG_KEY_LEN - 1
 		);
 		return -1;
 	}
-	if (strnlen(tag->value, VALUE_MAX_SIZE) == VALUE_MAX_SIZE) {
+	if (strnlen(tag->value, COUNTER_TAG_VALUE_LEN) ==
+	    COUNTER_TAG_VALUE_LEN) {
 		yanet_error_add(
-			err, "value length exceeds max %d", VALUE_MAX_SIZE - 1
+			err,
+			"value length exceeds max %d",
+			COUNTER_TAG_VALUE_LEN - 1
 		);
 		return -1;
 	}
@@ -154,8 +153,7 @@ cp_config_counter_storage_registry_insert(
 	}
 	struct counter_tag tags[MAX_TAG_COUNT];
 	for (size_t i = 0; i < tag_count; ++i) {
-		tags[i].key = const_tags[i].key;
-		tags[i].value = const_tags[i].value;
+		tags[i] = const_tags[i];
 	}
 
 	if (normalize_tags(tags, tag_count, false, err) != 0) {
@@ -197,10 +195,7 @@ cp_config_counter_storage_registry_insert(
 	SET_OFFSET_OF(&dst->storage, storage);
 	dst->tag_count = tag_count;
 	for (size_t i = 0; i < tag_count; ++i) {
-		struct cp_counter_tag *dst_tag = &dst->tags[i];
-		struct counter_tag *src = &tags[i];
-		strcpy(dst_tag->key, src->key);
-		strcpy(dst_tag->value, src->value);
+		dst->tags[i] = tags[i];
 	}
 
 	registry->count += 1;
@@ -212,7 +207,7 @@ static int
 check_match(
 	const struct counter_tag *filter,
 	size_t filter_count,
-	const struct cp_counter_tag *present,
+	const struct counter_tag *present,
 	size_t present_count
 ) {
 	size_t j = 0;
@@ -252,8 +247,7 @@ cp_config_counter_storage_registry_find(
 	}
 	struct counter_tag tags[MAX_TAG_COUNT];
 	for (size_t i = 0; i < tag_count; ++i) {
-		tags[i].key = const_tags[i].key;
-		tags[i].value = const_tags[i].value;
+		tags[i] = const_tags[i];
 	}
 
 	if (normalize_tags(tags, tag_count, true, err) != 0) {
@@ -326,8 +320,8 @@ cp_config_counter_storage_registry_lookup_device(
 	const char *device_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "kind", .value = "device"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("kind", "device")
 	};
 	return get_one(registry, tags, 2);
 }
@@ -340,8 +334,8 @@ cp_config_counter_storage_registry_insert_device(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "kind", .value = "device"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("kind", "device"),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 2, counter_storage, err
@@ -355,9 +349,9 @@ cp_config_counter_storage_registry_lookup_pipeline(
 	const char *pipeline_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "kind", .value = "pipeline"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("kind", "pipeline")
 	};
 	return get_one(registry, tags, 3);
 }
@@ -371,9 +365,9 @@ cp_config_counter_storage_registry_insert_pipeline(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "kind", .value = "pipeline"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("kind", "pipeline"),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 3, counter_storage, err
@@ -388,13 +382,10 @@ cp_config_counter_storage_registry_lookup_function(
 	const char *function_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{
-			.key = "function",
-			.value = function_name,
-		},
-		{.key = "kind", .value = "function"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("kind", "function")
 	};
 	return get_one(registry, tags, 4);
 }
@@ -409,10 +400,10 @@ cp_config_counter_storage_registry_insert_function(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "kind", .value = "function"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("kind", "function"),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 4, counter_storage, err
@@ -428,14 +419,11 @@ cp_config_counter_storage_registry_lookup_chain(
 	const char *chain_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{
-			.key = "function",
-			.value = function_name,
-		},
-		{.key = "chain", .value = chain_name},
-		{.key = "kind", .value = "chain"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("kind", "chain")
 	};
 	return get_one(registry, tags, 5);
 }
@@ -451,11 +439,11 @@ cp_config_counter_storage_registry_insert_chain(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "kind", .value = "chain"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("kind", "chain"),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 5, counter_storage, err
@@ -473,13 +461,13 @@ cp_config_counter_storage_registry_lookup_module(
 	const char *module_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "module"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("kind", "module"),
 	};
 	return get_one(registry, tags, 7);
 }
@@ -497,13 +485,13 @@ cp_config_counter_storage_registry_insert_module(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "module"},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("kind", "module"),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 7, counter_storage, err
@@ -522,14 +510,14 @@ cp_config_counter_storage_registry_lookup_module_tagged(
 	const char *registry_tag
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "runtime"},
-		{.key = "config", .value = registry_tag},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("kind", "runtime"),
+		counter_tag_init("config", registry_tag),
 	};
 	return get_one(registry, tags, 8);
 }
@@ -548,14 +536,14 @@ cp_config_counter_storage_registry_insert_module_tagged(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "kind", .value = "runtime"},
-		{.key = "config", .value = registry_tag},
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("kind", "runtime"),
+		counter_tag_init("config", registry_tag),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 8, counter_storage, err
@@ -569,9 +557,9 @@ cp_config_counter_storage_registry_lookup_object(
 	const char *object_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "object_type", .value = object_type},
-		{.key = "object_name", .value = object_name},
-		{.key = "kind", .value = "object"}
+		counter_tag_init("object_type", object_type),
+		counter_tag_init("object_name", object_name),
+		counter_tag_init("kind", "object")
 	};
 	return get_one(registry, tags, 3);
 }
@@ -585,9 +573,9 @@ cp_config_counter_storage_registry_insert_object(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "object_type", .value = object_type},
-		{.key = "object_name", .value = object_name},
-		{.key = "kind", .value = "object"},
+		counter_tag_init("object_type", object_type),
+		counter_tag_init("object_name", object_name),
+		counter_tag_init("kind", "object"),
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 3, counter_storage, err
@@ -607,14 +595,14 @@ cp_config_counter_storage_registry_lookup_module_object_link(
 	const char *object_name
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "object_type", .value = object_type},
-		{.key = "object_name", .value = object_name}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("object_type", object_type),
+		counter_tag_init("object_name", object_name)
 	};
 	return get_one(registry, tags, 8);
 }
@@ -634,15 +622,15 @@ cp_config_counter_storage_registry_insert_module_object_link(
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
-		{.key = "device", .value = device_name},
-		{.key = "pipeline", .value = pipeline_name},
-		{.key = "function", .value = function_name},
-		{.key = "chain", .value = chain_name},
-		{.key = "module_type", .value = module_type},
-		{.key = "module_name", .value = module_name},
-		{.key = "object_type", .value = object_type},
-		{.key = "object_name", .value = object_name},
-		{.key = "kind", .value = "module_object_link"}
+		counter_tag_init("device", device_name),
+		counter_tag_init("pipeline", pipeline_name),
+		counter_tag_init("function", function_name),
+		counter_tag_init("chain", chain_name),
+		counter_tag_init("module_type", module_type),
+		counter_tag_init("module_name", module_name),
+		counter_tag_init("object_type", object_type),
+		counter_tag_init("object_name", object_name),
+		counter_tag_init("kind", "module_object_link")
 	};
 	return cp_config_counter_storage_registry_insert(
 		registry, tags, 9, counter_storage, err

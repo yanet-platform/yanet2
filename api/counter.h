@@ -3,15 +3,30 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/strutils.h"
 #include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
 
 struct dp_config;
 
+#define COUNTER_TAG_KEY_LEN 80
+#define COUNTER_TAG_VALUE_LEN 80
+
+// A fixed-size (key, value) pair: tags travel by value inside predicates
+// and handle snapshots, so no string outlives the struct that carries it.
 struct counter_tag {
-	const char *key;
-	const char *value;
+	char key[COUNTER_TAG_KEY_LEN];
+	char value[COUNTER_TAG_VALUE_LEN];
 };
+
+// Return a tag with key and value truncated to the fixed field sizes.
+static inline struct counter_tag
+counter_tag_init(const char *key, const char *value) {
+	struct counter_tag tag;
+	(void)strtcpy(tag.key, key, sizeof(tag.key));
+	(void)strtcpy(tag.value, value, sizeof(tag.value));
+	return tag;
+}
 
 struct counter_handle {
 	char name[COUNTER_NAME_LEN];
@@ -55,6 +70,12 @@ yanet_counter_query_compile(
 void
 yanet_counter_query_free(struct counter_query *query);
 
+// The name-parameter reads below select storages by their entity-name
+// tags; entity names are truncated to the tag field sizes before the
+// comparison, matching any entity whose name shares the first
+// COUNTER_TAG_VALUE_LEN - 1 characters. Every name a configuration
+// accepts fits untruncated, so this only relaxes the match for
+// over-long caller-supplied names.
 struct counter_handle_list *
 yanet_get_device_counters(struct dp_config *dp_config, const char *device_name);
 
@@ -198,9 +219,11 @@ yanet_get_counter_values(
 // additionally carries a "config" tag naming its counter registry.
 //
 // A tag is rejected with err filled and NULL returned if any of the
-// following holds: key is NULL; value is NULL; key is unrecognized;
-// or tags contains another predicate with the same key. Tag strings
-// are borrowed only for the duration of the call.
+// following holds: key is unrecognized; or tags contains another
+// predicate with the same key. Keys and values are copied into the
+// tags' fixed-size fields, truncating anything longer than
+// COUNTER_TAG_KEY_LEN - 1 / COUNTER_TAG_VALUE_LEN - 1 characters; the
+// Go bindings reject such tags before the call instead.
 //
 // The returned list must be released with yanet_counter_handle_list_free.
 // On failure NULL is returned and err is filled; an empty match is a

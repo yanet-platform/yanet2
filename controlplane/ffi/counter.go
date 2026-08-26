@@ -347,6 +347,39 @@ func ValidateQuery(query []string) error {
 	return nil
 }
 
+const (
+	counterTagKeyLen   = C.COUNTER_TAG_KEY_LEN
+	counterTagValueLen = C.COUNTER_TAG_VALUE_LEN
+)
+
+// ErrInvalidTag reports a counter tag the fixed-size C counter_tag fields
+// cannot carry.
+var ErrInvalidTag = errors.New("invalid counter tag")
+
+// ValidateTag rejects a tag the fixed-size C counter_tag fields cannot
+// carry: one with a NUL byte, or a key or value that does not fit.
+func ValidateTag(tag CounterTag) error {
+	if strings.ContainsRune(tag.Key, 0) || strings.ContainsRune(tag.Value, 0) {
+		return fmt.Errorf("%w: key or value contains a NUL byte", ErrInvalidTag)
+	}
+	if len(tag.Key) >= counterTagKeyLen {
+		return fmt.Errorf(
+			"%w: key exceeds %d bytes",
+			ErrInvalidTag,
+			counterTagKeyLen-1,
+		)
+	}
+	if len(tag.Value) >= counterTagValueLen {
+		return fmt.Errorf(
+			"%w: value exceeds %d bytes",
+			ErrInvalidTag,
+			counterTagValueLen-1,
+		)
+	}
+
+	return nil
+}
+
 // CounterGroup is a set of counters that share the same tag set.
 type CounterGroup struct {
 	Tags     []CounterTag
@@ -370,13 +403,21 @@ func (m *DPConfig) CountersByTags(
 		return nil, err
 	}
 
+	// The tag fields are fixed-size arrays, zero-terminated by the
+	// zeroed slice; the C side reads no pointer out of them.
 	cTags := make([]C.struct_counter_tag, len(tags))
 	for idx, tag := range tags {
-		cKey := C.CString(tag.Key)
-		cValue := C.CString(tag.Value)
-		defer C.free(unsafe.Pointer(cKey))
-		defer C.free(unsafe.Pointer(cValue))
-		cTags[idx] = C.struct_counter_tag{key: cKey, value: cValue}
+		if err := ValidateTag(tag); err != nil {
+			return nil, err
+		}
+		key := []byte(tag.Key)
+		for pos := range key {
+			cTags[idx].key[pos] = C.char(key[pos])
+		}
+		value := []byte(tag.Value)
+		for pos := range value {
+			cTags[idx].value[pos] = C.char(value[pos])
+		}
 	}
 
 	cQuery := make([]*C.char, len(query))
@@ -581,8 +622,8 @@ func decodeCounterTags(
 	out := make([]CounterTag, count)
 	for idx := range cTags {
 		out[idx] = CounterTag{
-			Key:   C.GoString(cTags[idx].key),
-			Value: C.GoString(cTags[idx].value),
+			Key:   C.GoString(&cTags[idx].key[0]),
+			Value: C.GoString(&cTags[idx].value[0]),
 		}
 	}
 	return out

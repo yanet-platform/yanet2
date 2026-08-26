@@ -175,7 +175,8 @@ func (m *Counters) ByTags(
 	dpConfig := m.shm.DPConfig(m.instanceID)
 	groups, err := dpConfig.CountersByTags(tags, request.GetQuery())
 	if err != nil {
-		if errors.Is(err, ffi.ErrInvalidQuery) {
+		if errors.Is(err, ffi.ErrInvalidQuery) ||
+			errors.Is(err, ffi.ErrInvalidTag) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		return nil, err

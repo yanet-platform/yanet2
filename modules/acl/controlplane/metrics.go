@@ -2,6 +2,7 @@ package acl
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -120,6 +121,9 @@ func (m *ACLService) RuleMetrics(req *aclpb.GetMetricsRulesRequest) ([]*commonpb
 
 	groups, err := dpConfig.CountersByTags(ruleQueryTags(req), nil)
 	if err != nil {
+		if errors.Is(err, ffi.ErrInvalidTag) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		return nil, status.Errorf(
 			codes.Internal, "failed to read rule counters: %v", err,
 		)

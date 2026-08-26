@@ -192,3 +192,41 @@ func TestCountersByTagsRejectsBadQuery(t *testing.T) {
 		})
 	}
 }
+
+// tagFieldLen mirrors the fixed size of the C counter_tag key and value
+// fields.
+const tagFieldLen = 80
+
+// A tag the fixed-size C fields cannot carry fails the call instead of
+// being silently truncated into a predicate for a different tag set.
+func TestCountersByTagsRejectsBadTag(t *testing.T) {
+	dp := installQuerySurface(t)
+
+	for _, tc := range []struct {
+		name string
+		tag  ffi.CounterTag
+	}{
+		{
+			name: "over-long key",
+			tag:  ffi.CounterTag{Key: strings.Repeat("k", tagFieldLen)},
+		},
+		{
+			name: "over-long value",
+			tag: ffi.CounterTag{
+				Key:   "device",
+				Value: strings.Repeat("v", tagFieldLen),
+			},
+		},
+		{
+			name: "embedded NUL",
+			tag:  ffi.CounterTag{Key: "device", Value: "port0\x00x"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groups, err := dp.CountersByTags([]ffi.CounterTag{tc.tag}, nil)
+			require.Error(t, err)
+			require.ErrorIs(t, err, ffi.ErrInvalidTag)
+			require.Nil(t, groups)
+		})
+	}
+}

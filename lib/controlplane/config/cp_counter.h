@@ -7,17 +7,13 @@
 
 struct memory_context;
 
-#define KEY_MAX_SIZE 80
-#define VALUE_MAX_SIZE 80
 #define MAX_TAG_COUNT 16
 
-struct cp_counter_tag {
-	char key[KEY_MAX_SIZE];
-	char value[VALUE_MAX_SIZE];
-};
-
+// Tag sets are stored by value: the fixed-size counter_tag keeps them
+// copyable between the arena and plain heap memory without per-string
+// allocation.
 struct cp_counter_storage {
-	struct cp_counter_tag tags[MAX_TAG_COUNT];
+	struct counter_tag tags[MAX_TAG_COUNT];
 	size_t tag_count;
 	struct counter_storage *storage;
 };

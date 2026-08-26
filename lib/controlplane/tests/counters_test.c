@@ -6,7 +6,8 @@
  * These port two confirmed use-after-free repros against the copy-on-read
  * fix: a value-page surface (the agent counters API snapshots
  * handle->values under cp_config_lock) and a tag-string surface (tags are
- * strdup'd instead of borrowed from the freed generation arena).
+ * copied into fixed-size fields instead of borrowed from the freed
+ * generation arena).
  */
 
 #include "api/agent.h"
