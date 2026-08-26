@@ -99,9 +99,25 @@ jobs:
             echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}' >> "$GITHUB_OUTPUT"
           fi
 
+  test-deb-artifacts:
+    name: Test Debian artifact scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run Debian artifact tests
+        run: |
+          set -euo pipefail
+          bash -n scripts/verify-deb-artifacts.sh \
+            .github/scripts/release-deb-artifacts.sh \
+            .github/scripts/verify-deb-artifacts_test.sh \
+            .github/scripts/release-deb-artifacts_test.sh
+          .github/scripts/verify-deb-artifacts_test.sh
+          .github/scripts/release-deb-artifacts_test.sh
+
   build-deb:
     name: Build DEB (${{ matrix.unbtver }}, ${{ matrix.arch }})
-    needs: set-matrix
+    needs: [set-matrix, test-deb-artifacts]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
