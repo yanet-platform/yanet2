@@ -30,6 +30,7 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/actions/**"
+      - ".github/scripts/**"
       - ".github/workflows/build-deb.yml"
       # A later match wins, so these negations drop the documentation and
       # web sources that would otherwise ride in on the source trees above.
@@ -64,6 +65,7 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/actions/**"
+      - ".github/scripts/**"
       - ".github/workflows/build-deb.yml"
       - "!**.md"
       - "!modules/**/web/**"
