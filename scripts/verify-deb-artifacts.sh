@@ -38,6 +38,41 @@ if ! changes_version=$(awk -F': ' '$1 == "Version" { print $2; exit }' "$changes
 fi
 [[ -n $changes_version ]] || fail "empty Version in $changes_file"
 
+extract_manifest_packages() {
+    local section=$1
+    awk -v section="$section" '
+        $0 == section ":" { in_section = 1; found_section = 1; next }
+        in_section && /^[^[:space:]][^:]*:/ { in_section = 0 }
+        in_section && /^[[:space:]]+/ && $NF ~ /\.(deb|ddeb)$/ {
+            package = $NF
+            sub(/^.*\//, "", package)
+            print package
+        }
+        END {
+            exit found_section ? 0 : 1
+        }
+    ' "$changes_file"
+}
+
+if ! files_manifest=$(extract_manifest_packages Files); then
+    fail "missing Files package manifest in $changes_file"
+fi
+if ! checksums_manifest=$(extract_manifest_packages Checksums-Sha256); then
+    fail "missing Checksums-Sha256 package manifest in $changes_file"
+fi
+mapfile -t files_packages < <(printf '%s\n' "$files_manifest" | awk 'NF' | sort)
+mapfile -t checksums_packages < <(printf '%s\n' "$checksums_manifest" | awk 'NF' | sort)
+(( ${#files_packages[@]} > 0 )) || fail "empty Files package manifest in $changes_file"
+(( ${#checksums_packages[@]} > 0 )) || fail "empty Checksums-Sha256 package manifest in $changes_file"
+mapfile -t duplicate_files < <(printf '%s\n' "${files_packages[@]}" | uniq -d)
+mapfile -t duplicate_checksums < <(printf '%s\n' "${checksums_packages[@]}" | uniq -d)
+(( ${#duplicate_files[@]} == 0 )) ||
+    fail "duplicate package files in Files of $changes_file: ${duplicate_files[*]}"
+(( ${#duplicate_checksums[@]} == 0 )) ||
+    fail "duplicate package files in Checksums-Sha256 of $changes_file: ${duplicate_checksums[*]}"
+[[ "${files_packages[*]}" == "${checksums_packages[*]}" ]] ||
+    fail "Files and Checksums-Sha256 package lists differ in $changes_file"
+
 if ! declared_output=$(cd "$changes_dir" && dcmd "$changes_name"); then
     fail "dcmd could not read $changes_file"
 fi
