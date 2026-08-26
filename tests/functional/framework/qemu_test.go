@@ -39,7 +39,9 @@ func findPid(t *testing.T, pattern, cmdline string) bool {
 	return matched
 }
 
-func TestExistingVMPattern_DetectsRealQEMU(t *testing.T) {
+// verifies that the built pattern matches a running qemu argv for the same
+// VM name.
+func Test_ExistingVMPattern_DetectsRealQEMU(t *testing.T) {
 	const vmName = "yanet-test-vm-suite"
 	pattern := existingVMPattern(vmName)
 
@@ -50,7 +52,8 @@ func TestExistingVMPattern_DetectsRealQEMU(t *testing.T) {
 	)
 }
 
-func TestExistingVMPattern_RejectsOtherQEMU(t *testing.T) {
+// verifies that a qemu started for a different VM name never matches.
+func Test_ExistingVMPattern_RejectsOtherQEMU(t *testing.T) {
 	const vmName = "yanet-test-vm-suite"
 	pattern := existingVMPattern(vmName)
 
@@ -61,7 +64,9 @@ func TestExistingVMPattern_RejectsOtherQEMU(t *testing.T) {
 	)
 }
 
-func TestExistingVMPattern_RejectsSimilarName(t *testing.T) {
+// verifies that the trailing boundary rejects longer VM names that merely
+// contain this one.
+func Test_ExistingVMPattern_RejectsSimilarName(t *testing.T) {
 	const vmName = "yanet-test-vm-suite"
 	pattern := existingVMPattern(vmName)
 
@@ -72,7 +77,9 @@ func TestExistingVMPattern_RejectsSimilarName(t *testing.T) {
 	)
 }
 
-func TestExistingVMPattern_RejectsPgrepSelf(t *testing.T) {
+// verifies that the bracketed first token keeps pgrep from matching its
+// own argv.
+func Test_ExistingVMPattern_RejectsPgrepSelf(t *testing.T) {
 	const vmName = "yanet-test-vm-suite"
 	pattern := existingVMPattern(vmName)
 
@@ -85,7 +92,8 @@ func TestExistingVMPattern_RejectsPgrepSelf(t *testing.T) {
 	)
 }
 
-func TestCheckForExistingVMRun_EmptyOutputIsOK(t *testing.T) {
+// verifies that an empty pgrep result reads as no conflict.
+func Test_CheckForExistingVMRun_EmptyOutputIsOK(t *testing.T) {
 	q := &QEMUManager{
 		Name: "main",
 		log:  zap.NewNop().Sugar(),
@@ -98,7 +106,8 @@ func TestCheckForExistingVMRun_EmptyOutputIsOK(t *testing.T) {
 	require.NoError(t, err, "an empty pgrep result must mean no conflict")
 }
 
-func TestCheckForExistingVMRun_PopulatedOutputIsError(t *testing.T) {
+// verifies that a non-empty pgrep result fails the check naming the VM.
+func Test_CheckForExistingVMRun_PopulatedOutputIsError(t *testing.T) {
 	q := &QEMUManager{
 		Name: "main",
 		log:  zap.NewNop().Sugar(),
@@ -118,10 +127,10 @@ func TestCheckForExistingVMRun_PopulatedOutputIsError(t *testing.T) {
 	)
 }
 
-// TestCheckForExistingVMRun_RunnerErrorIsPropagated verifies that a failing
-// pgrep (missing binary on the host, unexpected exit status) surfaces as an
-// error instead of silently passing the duplicate-VM check.
-func TestCheckForExistingVMRun_RunnerErrorIsPropagated(t *testing.T) {
+// verifies that a failing pgrep (missing binary on the host, unexpected
+// exit status) surfaces as an error instead of silently passing the
+// duplicate-VM check.
+func Test_CheckForExistingVMRun_RunnerErrorIsPropagated(t *testing.T) {
 	q := &QEMUManager{
 		Name: "main",
 		log:  zap.NewNop().Sugar(),

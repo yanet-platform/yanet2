@@ -649,9 +649,9 @@ func TestMirror_EmptyRound(t *testing.T) {
 	dataplaneut.RequireModuleCounter(t, h, path, "rule0", 0, 0)
 }
 
-// TestMirror_OutputSelfLoopHasBoundedPopulation verifies clones partition one
-// lineage budget and are reclaimed after conversion.
-func TestMirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
+// verifies that mirror clones partition one lineage budget and are
+// reclaimed after conversion.
+func Test_Mirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	packet := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 

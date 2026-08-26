@@ -786,9 +786,9 @@ func TestRoute_DeviceTranslation_Drop(t *testing.T) {
 	require.Len(t, result.Drop, 1, "expected exactly one dropped packet")
 }
 
-// TestRoute_OutputSelfLoopStopsAtTotalLimit verifies equal-length TTL updates
-// can use the full redirect budget before the target entry accounts the drop.
-func TestRoute_OutputSelfLoopStopsAtTotalLimit(t *testing.T) {
+// verifies that equal-length TTL updates can use the full redirect budget
+// before the target entry accounts the drop.
+func Test_Route_OutputSelfLoopStopsAtTotalLimit(t *testing.T) {
 	h, agent, backend := setupRouteHarnessWithLimit(t, "port0", 5)
 	applyFIB(t, backend, "loop", []FIBEntry{{
 		Prefix:   netip.MustParsePrefix("10.0.0.0/24"),

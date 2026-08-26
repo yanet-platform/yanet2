@@ -302,7 +302,7 @@ func testForward(t *testing.T, fw *framework.TestFramework) {
 }
 
 // verifies that the YAML limit reaches live module execution.
-func TestPacketRecircLimit_FromDataplaneConfig(t *testing.T) {
+func Test_PacketRecircLimit_FromDataplaneConfig(t *testing.T) {
 	withBootedVM(t, func(testFramework *framework.TestFramework) {
 		const device = "01:00.0"
 		require.NoError(t, testFramework.CreateConfigFile("recirc-forward.yaml", `
