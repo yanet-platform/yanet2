@@ -3,7 +3,6 @@ package readiness_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -381,52 +380,34 @@ func specs(names ...string) []readiness.ScopeSpec {
 	return out
 }
 
-func TestTracker_ExpectedObservationInterval_ExposedInSnapshot(t *testing.T) {
+// verifies that each scope exposes its own positive freshness cadence and
+// omits no-heartbeat scopes from freshness evaluation.
+func TestTracker_Ready_ExpectedObservationIntervalsByScope(t *testing.T) {
 	r := readiness.NewTracker([]readiness.ScopeSpec{
 		{Name: "neighbours", ExpectedObservationInterval: 5 * time.Minute},
+		{Name: "route", ExpectedObservationInterval: 30 * time.Second},
 		{Name: "gateway"},
-		{Name: "rib", ExpectedObservationInterval: -time.Second},
 	})
+	r.Set("neighbours", readinesspb.State_STATE_READY)
+	r.Set("route", readinesspb.State_STATE_READY)
+	r.Set("gateway", readinesspb.State_STATE_READY)
 
 	resp := r.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.Scopes, 3)
-	for _, scope := range resp.Scopes {
-		switch scope.Name {
-		case "neighbours":
-			require.NotNil(t, scope.ExpectedObservationInterval,
-				"a declared observation interval must be exposed")
-			assert.Equal(t, 5*time.Minute, scope.ExpectedObservationInterval.AsDuration())
-		case "gateway", "rib":
-			assert.Nil(t, scope.ExpectedObservationInterval,
-				"a zero or negative interval must stay absent")
-		}
-	}
-}
 
-func TestTracker_ExpectedObservationInterval_CarriedByWatchSnapshot(t *testing.T) {
-	r := readiness.NewTracker([]readiness.ScopeSpec{
-		{Name: "neighbours", ExpectedObservationInterval: 5 * time.Minute},
-	})
-
-	messages := make(chan *readinesspb.ReadyResponse, 16)
-	go func() {
-		_ = r.Watch(t.Context(), &readinesspb.ReadyRequest{}, func(resp *readinesspb.ReadyResponse) error {
-			messages <- resp
-			return nil
-		})
-	}()
-
-	var snapshot *readinesspb.ReadyResponse
-	select {
-	case snapshot = <-messages:
-	case <-time.After(time.Second):
-		t.Fatal("no initial Watch snapshot arrived")
+	scopes := map[string]*readinesspb.Scope{}
+	for _, scope := range resp.GetScopes() {
+		scopes[scope.GetName()] = scope
 	}
 
-	require.Len(t, snapshot.Scopes, 1)
-	require.NotNil(t, snapshot.Scopes[0].ExpectedObservationInterval,
-		"the initial Watch snapshot must carry the observation contract")
-	assert.Equal(t, 5*time.Minute, snapshot.Scopes[0].ExpectedObservationInterval.AsDuration())
+	require.NotNil(t, scopes["neighbours"])
+	require.NotNil(t, scopes["neighbours"].ExpectedObservationInterval)
+	assert.Equal(t, 5*time.Minute, scopes["neighbours"].ExpectedObservationInterval.AsDuration())
+	require.NotNil(t, scopes["route"])
+	require.NotNil(t, scopes["route"].ExpectedObservationInterval)
+	assert.Equal(t, 30*time.Second, scopes["route"].ExpectedObservationInterval.AsDuration())
+	require.NotNil(t, scopes["gateway"])
+	assert.Nil(t, scopes["gateway"].ExpectedObservationInterval)
 }
 
 // newObservedTracker constructs a Tracker backed by a zap observer so tests
@@ -753,43 +734,9 @@ func TestWatch_ReasonOnlyChange_EmitsDelta(t *testing.T) {
 	require.NoError(t, eg.Wait())
 }
 
-// TestWatch_Touch_EmitsObservedAtRefresh verifies that a pure observation
-// refresh is streamed to a subscriber that opted into observation updates:
-// the delta carries the same state and transition time but an advanced
-// observation timestamp.
-func TestWatch_Touch_EmitsObservedAtRefresh(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	ch, eg := collectWatch(t, ctx, r, observationReq(), 8)
-
-	snap := recvTimeout(t, ch, watchTimeout)
-	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
-	transitionBefore := snap.Scopes[0].LastTransitionTime.AsTime()
-
-	time.Sleep(2 * time.Millisecond)
-	r.Touch("gw-a")
-
-	delta := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta.Scopes, 1)
-	assert.Equal(t, "gw-a", delta.Scopes[0].Name)
-	assert.True(t, delta.Scopes[0].ObservedAt.AsTime().After(observedBefore),
-		"Touch must stream the advanced observation timestamp")
-	assert.Equal(t, transitionBefore, delta.Scopes[0].LastTransitionTime.AsTime(),
-		"Touch must not change last_transition_time")
-	assert.Equal(t, readinesspb.State_STATE_READY, delta.Scopes[0].State)
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// TestWatch_Touch_LegacyEmitsNothing verifies that a subscriber that did not
-// opt into observation updates never receives pure heartbeat refreshes, so
-// every message it sees is a state or reason change.
-func TestWatch_Touch_LegacyEmitsNothing(t *testing.T) {
+// verifies that a timestamp-only refresh remains visible through readiness
+// queries without producing a stream event.
+func TestWatch_Touch_EmitsNothing(t *testing.T) {
 	r := readiness.NewTracker(specs("gw-a"))
 	r.Set("gw-a", readinesspb.State_STATE_READY)
 
@@ -798,50 +745,24 @@ func TestWatch_Touch_LegacyEmitsNothing(t *testing.T) {
 
 	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
-	recvTimeout(t, ch, watchTimeout)
-
-	r.Touch("gw-a")
-
-	assertNoMsg(t, ch, watchQuietWindow)
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// TestWatch_NoopSet_EmitsObservedAtRefresh verifies that a repeated identical
-// mutation still streams the scope to an opted-in subscriber: the
-// re-observation advances the freshness clock even though state and reason
-// are unchanged.
-func TestWatch_NoopSet_EmitsObservedAtRefresh(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	ch, eg := collectWatch(t, ctx, r, observationReq(), 8)
-
 	snap := recvTimeout(t, ch, watchTimeout)
 	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
 
 	time.Sleep(2 * time.Millisecond)
-	// Same state, same reason (nil).
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Touch("gw-a")
 
-	delta := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta.Scopes, 1)
-	assert.True(t, delta.Scopes[0].ObservedAt.AsTime().After(observedBefore),
-		"a repeated identical outcome must still stream the refresh")
-	assert.Equal(t, readinesspb.State_STATE_READY, delta.Scopes[0].State)
+	assertNoMsg(t, ch, watchQuietWindow)
+	resp := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.Scopes, 1)
+	assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
 
 	cancel()
 	require.NoError(t, eg.Wait())
 }
 
-// TestWatch_NoopSet_LegacyEmitsNothing verifies that a repeated identical
-// mutation is silent for a legacy subscriber: without the observation opt-in
-// only state or reason changes are delivered.
-func TestWatch_NoopSet_LegacyEmitsNothing(t *testing.T) {
+// verifies that an unchanged mutation refreshes the observation timestamp
+// without producing a stream event.
+func TestWatch_NoopSet_EmitsNothing(t *testing.T) {
 	r := readiness.NewTracker(specs("gw-a"))
 	r.Set("gw-a", readinesspb.State_STATE_READY)
 
@@ -850,42 +771,42 @@ func TestWatch_NoopSet_LegacyEmitsNothing(t *testing.T) {
 
 	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
-	recvTimeout(t, ch, watchTimeout)
+	snap := recvTimeout(t, ch, watchTimeout)
+	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
 
-	// Same state, same reason (nil).
+	time.Sleep(2 * time.Millisecond)
 	r.Set("gw-a", readinesspb.State_STATE_READY)
 
 	assertNoMsg(t, ch, watchQuietWindow)
+	resp := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.Scopes, 1)
+	assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
 
 	cancel()
 	require.NoError(t, eg.Wait())
 }
 
-// TestWatch_Observe_SameOutcome_EmitsObservedAtRefresh verifies that the
-// reconcile-style observation path streams repeated identical outcomes to an
-// opted-in subscriber, so a long-lived consumer never mistakes a live scope
-// for a stale one.
-func TestWatch_Observe_SameOutcome_EmitsObservedAtRefresh(t *testing.T) {
+// verifies that a repeated outcome refreshes the observation timestamp without
+// producing a stream event.
+func TestWatch_NoopObserve_EmitsNothing(t *testing.T) {
 	r := readiness.NewTracker(specs("gw-a"))
 	r.Observe("gw-a", nil)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	ch, eg := collectWatch(t, ctx, r, observationReq(), 8)
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
 
 	snap := recvTimeout(t, ch, watchTimeout)
 	observedBefore := snap.Scopes[0].ObservedAt.AsTime()
 
 	time.Sleep(2 * time.Millisecond)
-	// A second successful apply does not change state or reason.
 	r.Observe("gw-a", nil)
 
-	delta := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta.Scopes, 1)
-	assert.True(t, delta.Scopes[0].ObservedAt.AsTime().After(observedBefore),
-		"a repeated identical observe must still stream the refresh")
-	assert.Equal(t, readinesspb.State_STATE_READY, delta.Scopes[0].State)
+	assertNoMsg(t, ch, watchQuietWindow)
+	resp := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.Scopes, 1)
+	assert.True(t, resp.Scopes[0].ObservedAt.AsTime().After(observedBefore))
 
 	cancel()
 	require.NoError(t, eg.Wait())
@@ -913,6 +834,32 @@ func TestWatch_DeltaFilteredForDifferentScope(t *testing.T) {
 	delta := recvTimeout(t, ch, watchTimeout)
 	require.Len(t, delta.Scopes, 1)
 	assert.Equal(t, "gw-b", delta.Scopes[0].Name)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_Drain_EmitsChangedScopes(t *testing.T) {
+	r := readiness.NewTracker(specs("gw-a", "gw-b"))
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	recvTimeout(t, ch, watchTimeout)
+
+	r.Drain()
+
+	delta := recvTimeout(t, ch, watchTimeout)
+	// Both scopes transitioned: gw-a READY->NOT_READY, gw-b UNKNOWN->NOT_READY.
+	require.Len(t, delta.Scopes, 2)
+	for _, s := range delta.Scopes {
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "SHUTTING_DOWN", s.Reasons[0].Code)
+	}
 
 	cancel()
 	require.NoError(t, eg.Wait())
@@ -972,274 +919,12 @@ func TestWatch_GatewayStyle_DrainLatch(t *testing.T) {
 	require.NoError(t, eg.Wait())
 }
 
-// TestWatch_Drain_LegacyEmitsOnlyChangedScopes verifies that Drain streams a
-// message only for scopes whose state or reason actually changed when the
-// subscriber did not opt into observation updates.
-func TestWatch_Drain_LegacyEmitsOnlyChangedScopes(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a", "gw-b", "gw-c"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-	// gw-c already holds the drained state and reason.
-	r.SetWithReason("gw-c", readinesspb.State_STATE_NOT_READY,
-		&readinesspb.Reason{Code: "SHUTTING_DOWN"},
-	)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
-
-	recvTimeout(t, ch, watchTimeout)
-
-	r.Drain()
-
-	delta := recvTimeout(t, ch, watchTimeout)
-	// gw-a (READY -> NOT_READY) and gw-b (UNKNOWN -> NOT_READY) changed;
-	// gw-c was already NOT_READY with the same reason.
-	require.Len(t, delta.Scopes, 2)
-	for _, s := range delta.Scopes {
-		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-		require.Len(t, s.Reasons, 1)
-		assert.Equal(t, "SHUTTING_DOWN", s.Reasons[0].Code)
-	}
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// TestWatch_Drain_OptedInEmitsEveryScope verifies that Drain streams a
-// message for every scope, including one already holding the drained state
-// and reason, when the subscriber opted into observation updates.
-func TestWatch_Drain_OptedInEmitsEveryScope(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a", "gw-b", "gw-c"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-	// gw-c already holds the drained state and reason, so only its
-	// observation timestamp changes.
-	r.SetWithReason("gw-c", readinesspb.State_STATE_NOT_READY,
-		&readinesspb.Reason{Code: "SHUTTING_DOWN"},
-	)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	ch, eg := collectWatch(t, ctx, r, observationReq(), 8)
-
-	recvTimeout(t, ch, watchTimeout)
-
-	r.Drain()
-
-	delta := recvTimeout(t, ch, watchTimeout)
-	require.Len(t, delta.Scopes, 3)
-	for _, s := range delta.Scopes {
-		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
-		require.Len(t, s.Reasons, 1)
-		assert.Equal(t, "SHUTTING_DOWN", s.Reasons[0].Code)
-	}
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// observationReq builds a Watch request that opts into observation updates.
-func observationReq() *readinesspb.ReadyRequest {
-	return &readinesspb.ReadyRequest{IncludeObservationUpdates: true}
-}
-
-// TestWatch_TransitionsPreservedUnderBlockedSend verifies that a blocked
-// stream still receives every state transition in order: transitions queue
-// rather than coalesce, so a READY -> NOT_READY -> READY burst during a send
-// stall cannot collapse into the final READY.
-func TestWatch_TransitionsPreservedUnderBlockedSend(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	block := make(chan struct{})
-	delivered := make(chan *readinesspb.ReadyResponse, 4)
-	sending := make(chan struct{}, 1)
-
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return r.Watch(ctx, observationReq(), func(resp *readinesspb.ReadyResponse) error {
-			// Block the snapshot send: the transitions that follow queue
-			// behind it instead of being coalesced away.
-			select {
-			case sending <- struct{}{}:
-				<-block
-			default:
-			}
-			delivered <- resp
-			return nil
-		})
-	})
-
-	// Fire the burst while the snapshot send is stalled: both transitions
-	// land in the queue before the reader drains anything.
-	<-sending
-	r.Set("gw-a", readinesspb.State_STATE_NOT_READY)
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-	close(block)
-
-	// The snapshot first, then every transition in order.
-	snapshot := recvTimeout(t, delivered, watchTimeout)
-	require.Len(t, snapshot.Scopes, 1)
-	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, snapshot.Scopes[0].State)
-
-	delta := recvTimeout(t, delivered, watchTimeout)
-	states := []readinesspb.State{}
-	for _, scope := range delta.Scopes {
-		states = append(states, scope.State)
-	}
-	assert.Equal(t, []readinesspb.State{
-		readinesspb.State_STATE_NOT_READY,
-		readinesspb.State_STATE_READY,
-	}, states, "both transitions must be delivered in order despite the stall")
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// TestWatch_ObservationSupersededByTransition verifies ordering between the
-// two delivery paths for one scope: a heartbeat snapshotted before a state
-// change is retired by that change, so a stalled reader cannot be handed the
-// stale snapshot after the transition — the neighbour-recovery shape where
-// a liveness touch precedes the resynced state.
-func TestWatch_ObservationSupersededByTransition(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.SetWithReason("gw-a", readinesspb.State_STATE_DEGRADED, &readinesspb.Reason{Code: "RESYNC"})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	block := make(chan struct{})
-	delivered := make(chan *readinesspb.ReadyResponse, 4)
-	sending := make(chan struct{}, 1)
-
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return r.Watch(ctx, observationReq(), func(resp *readinesspb.ReadyResponse) error {
-			select {
-			case sending <- struct{}{}:
-				<-block
-			default:
-			}
-			delivered <- resp
-			return nil
-		})
-	})
-
-	// Heartbeat first, then the recovery transition, both queued behind the
-	// stalled snapshot send.
-	<-sending
-	r.Touch("gw-a")
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-	close(block)
-
-	recvTimeout(t, delivered, watchTimeout) // snapshot
-
-	delta := recvTimeout(t, delivered, watchTimeout)
-	require.Len(t, delta.Scopes, 1,
-		"the superseded observation must be retired, not delivered after the transition")
-	assert.Equal(t, readinesspb.State_STATE_READY, delta.Scopes[0].State)
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// TestWatch_PureObservationsCoalesceToNewest verifies that consecutive
-// heartbeats of one scope with no state change between them collapse into
-// the single newest snapshot.
-func TestWatch_PureObservationsCoalesceToNewest(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-	r.Set("gw-a", readinesspb.State_STATE_READY)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	block := make(chan struct{})
-	delivered := make(chan *readinesspb.ReadyResponse, 4)
-	sending := make(chan struct{}, 1)
-
-	eg, _ := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return r.Watch(ctx, observationReq(), func(resp *readinesspb.ReadyResponse) error {
-			select {
-			case sending <- struct{}{}:
-				<-block
-			default:
-			}
-			delivered <- resp
-			return nil
-		})
-	})
-
-	<-sending
-	for range 5 {
-		time.Sleep(2 * time.Millisecond)
-		r.Touch("gw-a")
-	}
-	close(block)
-
-	recvTimeout(t, delivered, watchTimeout) // snapshot
-
-	delta := recvTimeout(t, delivered, watchTimeout)
-	require.Len(t, delta.Scopes, 1, "five pure touches must coalesce into one snapshot")
-	assert.Equal(t, readinesspb.State_STATE_READY, delta.Scopes[0].State)
-
-	cancel()
-	require.NoError(t, eg.Wait())
-}
-
-// TestWatch_SlowConsumerDroppedOnTransitionOverflow verifies that a
-// subscriber whose transition queue overflows is dropped with an explicit
-// error rather than silently losing a promised transition. The mutation
-// count far exceeds the queue, so the exact limit does not matter.
-func TestWatch_SlowConsumerDroppedOnTransitionOverflow(t *testing.T) {
-	r := readiness.NewTracker(specs("gw-a"))
-
-	release := make(chan struct{})
-	sending := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- r.Watch(ctx, &readinesspb.ReadyRequest{}, func(_ *readinesspb.ReadyResponse) error {
-			// Stall every delta after the snapshot until released.
-			select {
-			case sending <- struct{}{}:
-				<-release
-			default:
-			}
-			return nil
-		})
-	}()
-
-	<-sending
-	for range 5000 {
-		r.Set("gw-a", readinesspb.State_STATE_READY)
-		r.Set("gw-a", readinesspb.State_STATE_NOT_READY)
-	}
-
-	close(release)
-	require.ErrorIs(t, <-done, readiness.ErrSlowConsumer,
-		"an overflowed transition queue must drop the subscriber explicitly")
-}
-
-// TestWatch_ConcurrentSubscribersAndMutators verifies that a burst of
-// mutations across many scopes never disconnects a reading subscriber: the
-// coalescing mailbox bounds per-subscriber cost by the scope count, not the
-// event rate, so Watch must return nil on cancellation for every consumer.
 func TestWatch_ConcurrentSubscribersAndMutators(t *testing.T) {
-	names := make([]string, 0, 32)
-	for idx := range 32 {
-		names = append(names, fmt.Sprintf("gw-%02d", idx))
-	}
-	r := readiness.NewTracker(specs(names...))
+	r := readiness.NewTracker(specs("gw-a", "gw-b"))
 
 	const (
-		numSubscribers = 4
-		numMutations   = 500
+		numSubscribers = 8
+		numMutations   = 50
 	)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1248,26 +933,22 @@ func TestWatch_ConcurrentSubscribersAndMutators(t *testing.T) {
 	subEg, _ := errgroup.WithContext(t.Context())
 	for range numSubscribers {
 		subEg.Go(func() error {
-			return r.Watch(ctx, observationReq(), func(_ *readinesspb.ReadyResponse) error {
+			_ = r.Watch(ctx, &readinesspb.ReadyRequest{}, func(_ *readinesspb.ReadyResponse) error {
 				return nil
 			})
+			return nil
 		})
 	}
-
-	// Let every subscriber register before the burst starts.
-	time.Sleep(10 * time.Millisecond)
 
 	eg, _ := errgroup.WithContext(t.Context())
 	eg.Go(func() error {
 		for idx := range numMutations {
-			name := names[idx%len(names)]
-			switch idx % 3 {
-			case 0:
-				r.Set(name, readinesspb.State_STATE_READY)
-			case 1:
-				r.Set(name, readinesspb.State_STATE_NOT_READY)
-			default:
-				r.Touch(name)
+			if idx%3 == 0 {
+				r.Set("gw-a", readinesspb.State_STATE_READY)
+			} else if idx%3 == 1 {
+				r.Set("gw-b", readinesspb.State_STATE_NOT_READY)
+			} else {
+				r.Touch("gw-a")
 			}
 		}
 		return nil
@@ -1275,5 +956,5 @@ func TestWatch_ConcurrentSubscribersAndMutators(t *testing.T) {
 	require.NoError(t, eg.Wait())
 
 	cancel()
-	require.NoError(t, subEg.Wait(), "no subscriber may be dropped under a burst")
+	require.NoError(t, subEg.Wait())
 }

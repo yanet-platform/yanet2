@@ -42,48 +42,78 @@ func specs(names ...string) []readiness.ScopeSpec {
 	return out
 }
 
-// TestReadiness_ScopeSpecs_MirrorSourceIntervals verifies that each scope's
-// observation contract is the nominal interval of the ticker that
-// re-observes it, and that scopes without a heartbeat source declare none.
-func TestReadiness_ScopeSpecs_MirrorSourceIntervals(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
-	cfg.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
-	// The backoff ceiling must not inflate the fib contract: a slow or hung
-	// apply has to surface as staleness after a multiple of the nominal
-	// interval, not after a multiple of the retry ceiling.
-	cfg.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
-	cfg.Readiness.SampleInterval = 2 * time.Second
-
-	specsByName := map[string]readiness.ScopeSpec{}
-	for _, spec := range readinessScopeSpecs(cfg, "route0") {
-		specsByName[spec.Name] = spec
+// verifies that route configuration selects each production scope and its
+// source interval, including scopes that are disabled or omitted.
+func Test_ReadinessScopeSpecs_ConfigurationMappings(t *testing.T) {
+	tests := []struct {
+		name              string
+		configure         func(*Config)
+		expectedIntervals map[string]time.Duration
+		absentScopes      []string
+	}{
+		{
+			name:      "normal sources use their nominal intervals",
+			configure: func(config *Config) {},
+			expectedIntervals: map[string]time.Duration{
+				"fib:gw0:route0": 10 * time.Second,
+				"fib:gw1:route0": 10 * time.Second,
+				"neighbours":     neigh.DefaultUpdateInterval,
+				"rib":            2 * time.Second,
+				"bird-session":   2 * time.Second,
+			},
+		},
+		{
+			name: "disabled neighbours remain present without a contract",
+			configure: func(config *Config) {
+				config.NetlinkMonitor.Disabled = true
+			},
+			expectedIntervals: map[string]time.Duration{
+				"fib:gw0:route0": 10 * time.Second,
+				"fib:gw1:route0": 10 * time.Second,
+				"neighbours":     0,
+				"rib":            2 * time.Second,
+				"bird-session":   2 * time.Second,
+			},
+		},
+		{
+			name: "bird not expected omits bird session scope",
+			configure: func(config *Config) {
+				config.Readiness.ExpectBird = false
+			},
+			expectedIntervals: map[string]time.Duration{
+				"fib:gw0:route0": 10 * time.Second,
+				"fib:gw1:route0": 10 * time.Second,
+				"neighbours":     neigh.DefaultUpdateInterval,
+				"rib":            2 * time.Second,
+			},
+			absentScopes: []string{"bird-session"},
+		},
 	}
 
-	require.Len(t, specsByName, 5)
-	for _, name := range []string{"fib:gw0:route0", "fib:gw1:route0"} {
-		assert.Equal(t, 10*time.Second, specsByName[name].ExpectedObservationInterval,
-			"%s must mirror the nominal reconcile interval", name)
-	}
-	assert.Equal(t, 2*time.Second, specsByName["rib"].ExpectedObservationInterval,
-		"rib must mirror the sampler interval")
-	assert.Equal(t, 2*time.Second, specsByName["bird-session"].ExpectedObservationInterval,
-		"bird-session must mirror the sampler interval")
-	assert.Equal(t, neigh.DefaultUpdateInterval, specsByName["neighbours"].ExpectedObservationInterval,
-		"neighbours must mirror the monitor force-update interval")
-}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := DefaultConfig()
+			config.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
+			config.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
+			config.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
+			config.Readiness.SampleInterval = 2 * time.Second
+			test.configure(config)
 
-// TestReadiness_ScopeSpecs_NeighboursDisabled_NoContract verifies that a
-// set-once neighbours scope declares no freshness contract.
-func TestReadiness_ScopeSpecs_NeighboursDisabled_NoContract(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}}
-	cfg.NetlinkMonitor.Disabled = true
+			scopeSpecsByName := map[string]readiness.ScopeSpec{}
+			for _, scopeSpec := range readinessScopeSpecs(config, "route0") {
+				scopeSpecsByName[scopeSpec.Name] = scopeSpec
+			}
 
-	for _, spec := range readinessScopeSpecs(cfg, "route0") {
-		if spec.Name == "neighbours" {
-			assert.Zero(t, spec.ExpectedObservationInterval)
-		}
+			require.Len(t, scopeSpecsByName, len(test.expectedIntervals))
+			for name, expectedInterval := range test.expectedIntervals {
+				scopeSpec, ok := scopeSpecsByName[name]
+				require.True(t, ok, "required scope %q is absent", name)
+				assert.Equal(t, expectedInterval, scopeSpec.ExpectedObservationInterval)
+			}
+			for _, name := range test.absentScopes {
+				assert.NotContains(t, scopeSpecsByName, name)
+			}
+		})
 	}
 }
 

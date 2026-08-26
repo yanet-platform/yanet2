@@ -4,14 +4,14 @@
 //! registry membership line renderer used by its re-discovery sweep.
 
 use core::time::Duration;
-use std::{collections::BTreeMap, time::SystemTime};
+use std::collections::BTreeMap;
 
 use chrono::Local;
 use colored::Colorize;
 use readinesspb::pb::{Scope, State};
-use ync::{display, humanfmt, output};
+use ync::{display, output};
 
-use super::{StateStyle, Symbols, age::is_stale, dim, layout::normalize_whitespace};
+use super::{StateStyle, Symbols, dim, layout::normalize_whitespace};
 
 /// Gap between the transition line's prefix and the reason text that follows
 /// it on the same line.
@@ -393,102 +393,6 @@ pub fn print_membership_line(alias: &str, alias_width: usize, membership: Member
     println!();
 }
 
-/// One direction of a per-scope staleness verdict flip.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Staleness {
-    /// The scope crossed its per-scope threshold; `age` is the
-    /// preformatted time since its last observation.
-    Stale { age: String },
-    /// A fresh observation arrived and cleared a previous stale flag.
-    Fresh,
-}
-
-/// Recomputes every snapshot scope's staleness against the tracked
-/// verdicts and returns the flips, in snapshot order.
-///
-/// `flagged` holds the last verdict per `(service, scope name)` key. A key
-/// seen for the first time is recorded, and a first sighting that is
-/// already stale reports one `Stale` flip: a scope can enter the snapshot
-/// mid-stream with a long-dead observation (a service picked up by the
-/// re-discovery sweep, a scope first appearing between heartbeats), and
-/// staying silent would swallow the only chance to warn. A first sighting
-/// that is fresh stays silent — the absence of a warning is not news. A
-/// watch loop that renders a startup snapshot seeds the map by calling
-/// this once against it and discarding the result, since the block already
-/// shows the tags. Flips are returned rather than printed so the caller
-/// can gate them on the output format and supply its own service column.
-pub fn staleness_flips(
-    snapshot: &BTreeMap<(String, String), Scope>,
-    flagged: &mut BTreeMap<(String, String), bool>,
-    now: SystemTime,
-    multiple: u32,
-) -> Vec<((String, String), Staleness)> {
-    let mut flips = Vec::new();
-
-    for (key, scope) in snapshot {
-        let stale = is_stale(
-            scope.observed_at.as_ref(),
-            scope.expected_observation_interval.as_ref(),
-            now,
-            multiple,
-        );
-
-        match flagged.get(key) {
-            Some(&was) if was != stale => {
-                flagged.insert(key.clone(), stale);
-                if stale {
-                    let age = humanfmt::format_age(scope.observed_at.as_ref(), now).unwrap_or_default();
-                    flips.push((key.clone(), Staleness::Stale { age }));
-                } else {
-                    flips.push((key.clone(), Staleness::Fresh));
-                }
-            }
-            Some(_) => {}
-            None => {
-                flagged.insert(key.clone(), stale);
-                if stale {
-                    let age = humanfmt::format_age(scope.observed_at.as_ref(), now).unwrap_or_default();
-                    flips.push((key.clone(), Staleness::Stale { age }));
-                }
-            }
-        }
-    }
-
-    flips
-}
-
-/// Prints one append-only log line for a `--watch` staleness flip.
-///
-/// Shares the lifecycle line's dim `[!]` shape — a staleness flip is
-/// neither a readiness transition nor transport chatter, but a warning
-/// about aging data — except the verdict itself: `stale for {age}` carries
-/// the same amber as the one-shot block's stale tag, while `fresh again`
-/// stays dim, matching how the block treats a recovered scope as unworthy
-/// of a tag at all. `scope_name` must already be padded to `name_width` by
-/// the caller when it renders a column.
-pub fn print_staleness_line(service: ServiceColumn, scope_name: &str, name_width: usize, staleness: &Staleness) {
-    let colored = output::is_colored();
-    let timestamp = Local::now().format("%H:%M:%S").to_string();
-    let mark = if colored { "[!]" } else { "[--]" };
-    let name = format!("{scope_name:<name_width$}");
-
-    let prefix = format!("{timestamp}  {mark} {}{name} ", service.cell());
-    print!("{}", dim(&prefix, colored));
-
-    match staleness {
-        Staleness::Stale { age } => {
-            let tag = format!("stale for {age}");
-            if colored {
-                let (r, g, b) = super::STALE_TAG_COLOR;
-                println!("{}", tag.truecolor(r, g, b));
-            } else {
-                println!("{tag}");
-            }
-        }
-        Staleness::Fresh => println!("{}", dim("fresh again", colored)),
-    }
-}
-
 #[cfg(test)]
 mod test {
     use readinesspb::pb::Reason;
@@ -514,119 +418,6 @@ mod test {
             }],
             ..scope(name, state)
         }
-    }
-
-    /// Builds a snapshot map with `observed_at` set to `age` before a fixed
-    /// `now`, plus the given freshness contract.
-    fn aged_snapshot(
-        name: &str,
-        age: Duration,
-        expected_interval: Duration,
-        now: SystemTime,
-    ) -> BTreeMap<(String, String), Scope> {
-        let seconds_back = age.as_secs() as i64;
-        let mut entry = scope(name, State::Ready);
-        entry.observed_at = Some(prost_types::Timestamp {
-            seconds: (now.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64) - seconds_back,
-            nanos: 0,
-        });
-        entry.expected_observation_interval = Some(prost_types::Duration {
-            seconds: expected_interval.as_secs() as i64,
-            nanos: 0,
-        });
-
-        BTreeMap::from([(("svc".to_owned(), name.to_owned()), entry)])
-    }
-
-    /// verifies that a first fresh sighting records its verdict silently,
-    /// so seeding a watch loop never echoes the block's own tags as events.
-    #[test]
-    fn test_staleness_flips_first_fresh_sighting_is_silent() {
-        let now = SystemTime::UNIX_EPOCH + Duration::new(10_000, 0);
-        // 10s contract at 3x: a 20s-old observation is still fresh.
-        let snapshot = aged_snapshot("rib", Duration::from_secs(20), Duration::from_secs(10), now);
-        let mut flagged = BTreeMap::new();
-
-        let flips = staleness_flips(&snapshot, &mut flagged, now, 3);
-
-        assert!(flips.is_empty());
-        assert_eq!(
-            &false,
-            flagged
-                .get(&("svc".to_owned(), "rib".to_owned()))
-                .expect("verdict recorded")
-        );
-    }
-
-    /// verifies that a first sighting that is already stale reports exactly
-    /// one `Stale` flip, so a mid-stream newcomer whose observation died
-    /// before it ever appeared still warns.
-    #[test]
-    fn test_staleness_flips_first_stale_sighting_reports_once() {
-        let now = SystemTime::UNIX_EPOCH + Duration::new(10_000, 0);
-        // 10s contract at 3x: a 40s-old observation is already stale.
-        let snapshot = aged_snapshot("rib", Duration::from_secs(40), Duration::from_secs(10), now);
-        let mut flagged = BTreeMap::new();
-
-        let flips = staleness_flips(&snapshot, &mut flagged, now, 3);
-
-        assert_eq!(1, flips.len());
-        assert!(matches!(&flips[0].1, Staleness::Stale { .. }));
-
-        // The second evaluation of the same dead observation is not news.
-        let flips = staleness_flips(&snapshot, &mut flagged, now, 3);
-        assert!(flips.is_empty());
-    }
-
-    /// verifies that a crossing threshold between evaluations flips the
-    /// verdict to stale, and a later fresh observation flips it back.
-    #[test]
-    fn test_staleness_flips_emit_on_crossing_and_recovery() {
-        let start = SystemTime::UNIX_EPOCH + Duration::new(10_000, 0);
-        // 10s contract at 3x: stale past 30s.
-        let mut snapshot = aged_snapshot("rib", Duration::from_secs(20), Duration::from_secs(10), start);
-        let mut flagged = BTreeMap::new();
-
-        staleness_flips(&snapshot, &mut flagged, start, 3);
-
-        // Twenty seconds later the observation is 40s old: crossed.
-        let later = start + Duration::from_secs(20);
-        let flips = staleness_flips(&snapshot, &mut flagged, later, 3);
-
-        assert_eq!(1, flips.len());
-        assert!(matches!(&flips[0].1, Staleness::Stale { .. }));
-
-        // A fresh message arrives: the observation moves to now.
-        let fresh = start + Duration::from_secs(21);
-        snapshot
-            .get_mut(&("svc".to_owned(), "rib".to_owned()))
-            .expect("scope present")
-            .observed_at = Some(prost_types::Timestamp {
-            seconds: (fresh.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64),
-            nanos: 0,
-        });
-        let flips = staleness_flips(&snapshot, &mut flagged, fresh, 3);
-
-        assert_eq!(1, flips.len());
-        assert_eq!(Staleness::Fresh, flips[0].1);
-    }
-
-    /// verifies that a scope without a freshness contract never flips, so
-    /// set-once scopes stay unflagged across ticks.
-    #[test]
-    fn test_staleness_flips_never_for_contractless_scope() {
-        let now = SystemTime::UNIX_EPOCH + Duration::new(10_000, 0);
-        let mut snapshot = aged_snapshot("gateway", Duration::from_secs(20), Duration::from_secs(10), now);
-        snapshot
-            .get_mut(&("svc".to_owned(), "gateway".to_owned()))
-            .expect("scope present")
-            .expected_observation_interval = None;
-        let mut flagged = BTreeMap::new();
-
-        staleness_flips(&snapshot, &mut flagged, now, 3);
-        let flips = staleness_flips(&snapshot, &mut flagged, now + Duration::from_secs(600), 3);
-
-        assert!(flips.is_empty());
     }
 
     /// Drops every ANSI SGR escape (`ESC [ … m`) from `text`, leaving the

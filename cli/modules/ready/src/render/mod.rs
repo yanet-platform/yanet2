@@ -9,7 +9,6 @@ mod age;
 mod layout;
 mod watch;
 
-use core::time::Duration;
 use std::time::SystemTime;
 
 use colored::Colorize;
@@ -21,19 +20,9 @@ pub use self::{
     layout::name_width,
     watch::{
         Membership, ServiceColumn, Transition, print_lifecycle_line, print_lost_line, print_membership_line,
-        print_staleness_line, print_transition_line, record_transition, staleness_flips,
+        print_transition_line, record_transition,
     },
 };
-
-/// How often a `--watch` loop re-evaluates every tracked scope's
-/// staleness.
-///
-/// A stopped heartbeat produces no stream message to react to, so
-/// staleness crossings are found by polling. One second is fine enough to
-/// flag a scope within one missed observation of the finest in-tree
-/// contract (the RIB sampler's 1s) yet coarse enough to add no perceptible
-/// load: the evaluation is a map walk over the merged snapshot.
-pub const STALENESS_TICK: Duration = Duration::from_secs(1);
 
 /// Fixed width of the state label cell (`len("NOT_READY")`).
 const STATE_WIDTH: usize = 9;
@@ -92,13 +81,11 @@ impl Symbols {
 
 /// Renders the full one-shot status block for `scopes` to stdout.
 ///
-/// Renders the full one-shot status block for `scopes` to stdout.
-///
 /// `name_width` must be computed once via [`name_width`] and held constant
 /// across the render — recomputing it per row would make the column jitter.
-/// `now` is supplied by the caller so the staleness tags shown here and the
-/// verdicts a watch loop seeds from the same render agree on one point in
-/// time. The header line is `{name}{dash}{summary}`; `watching` appends a
+/// `now` is supplied by the caller so every scope in a snapshot is judged
+/// against one point in time. The header line is `{name}{dash}{summary}`;
+/// `watching` appends a
 /// `watching` suffix to that summary and, once the block is printed, adds
 /// one trailing blank line to separate it from the `--watch` transition log
 /// that follows.

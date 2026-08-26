@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
@@ -153,36 +152,42 @@ func Test_StageQueueSource_SetStagesEmptyIdles(t *testing.T) {
 	require.Nil(t, target)
 }
 
-// TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval verifies that
-// each gateway scope's observation contract is the reconcile interval — the
-// nominal cadence — not a backoff-inflated bound.
-func TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
-	cfg.Stages = []StageConfig{{Name: "stage0"}}
-	cfg.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
-	cfg.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
-
-	specs := readinessScopeSpecs(cfg)
-
-	require.Len(t, specs, 2)
-	assert.Equal(t, "pipeline:gw0", specs[0].Name)
-	assert.Equal(t, "pipeline:gw1", specs[1].Name)
-	for _, spec := range specs {
-		assert.Equal(t, 10*time.Second, spec.ExpectedObservationInterval)
+// verifies that stage activity selects the production freshness contract for
+// every gateway scope without depending on scope order.
+func Test_ReadinessScopeSpecs_StageActivityContracts(t *testing.T) {
+	tests := []struct {
+		name             string
+		stages           []StageConfig
+		expectedInterval time.Duration
+	}{
+		{
+			name:             "active stages use nominal reconcile interval",
+			stages:           []StageConfig{{Name: "stage0"}},
+			expectedInterval: 10 * time.Second,
+		},
+		{
+			name:             "no stages declare no freshness contract",
+			stages:           nil,
+			expectedInterval: 0,
+		},
 	}
-}
 
-// TestReadiness_ScopeSpecs_NoStages_NoContract verifies that with no stages
-// configured the reconcile loop stays idle, so the scopes declare no
-// freshness contract rather than a periodic one.
-func TestReadiness_ScopeSpecs_NoStages_NoContract(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}}
-	cfg.Stages = nil
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := DefaultConfig()
+			config.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
+			config.Stages = test.stages
+			config.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
+			config.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
 
-	specs := readinessScopeSpecs(cfg)
-
-	require.Len(t, specs, 1)
-	assert.Zero(t, specs[0].ExpectedObservationInterval)
+			intervalsByName := map[string]time.Duration{}
+			for _, scopeSpec := range readinessScopeSpecs(config) {
+				intervalsByName[scopeSpec.Name] = scopeSpec.ExpectedObservationInterval
+			}
+			require.Equal(t, map[string]time.Duration{
+				"pipeline:gw0": test.expectedInterval,
+				"pipeline:gw1": test.expectedInterval,
+			}, intervalsByName)
+		})
+	}
 }

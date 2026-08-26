@@ -118,12 +118,12 @@ Config parameters (under `reconcile:`):
 - `reconcile.max_backoff` (default 30s): cap on the exponential backoff during
   persistent failure. `observed_at` still advances on each failed retry.
 
-Recommended staleness threshold: base it on `max(reconcile.interval,
-reconcile.max_backoff)` — the largest gap between apply attempts in success or
-retry. At the defaults (both 30s) a threshold around twice that (~60s) covers
-jitter and slow applies. If `max_backoff` is raised above `interval`, size the
-threshold off `max_backoff` or a live, retrying operator will false-alarm as
-stale.
+Each FIB scope publishes
+`expected_observation_interval = reconcile.interval`. Consumers choose a small
+multiplier and judge the scope stale when its age exceeds that product. Retry
+backoff deliberately does not inflate the contract: a prolonged retry or slow
+apply remains visible as freshness lag instead of being hidden by
+`reconcile.max_backoff`.
 
 ### `neighbours`
 
@@ -143,9 +143,9 @@ Config parameters (under `netlink_monitor:`):
   becomes a latch (see below) and `observed_at` stops advancing entirely. The
   event-driven and periodic refresh paths have no separate config knobs.
 
-A quiet network therefore shows up to ~5min of staleness. Recommended
-threshold: roughly 10-15min (2-3 periodic intervals). An active network stays
-near-real-time.
+A quiet network therefore shows up to ~5min of age. The scope publishes that
+5min periodic interval; a multiplier of 2-3 gives a 10-15min threshold. An
+active network stays near-real-time.
 
 When the monitor is disabled, the scope is set READY once and never refreshed,
 so a staleness check is **not applicable** (treat READY as fresh regardless of
@@ -165,9 +165,8 @@ Config parameters (under `readiness:`):
   for `rib` and whether `bird-session` exists at all, but does **not** change
   the tick cadence — both modes tick at `sample_interval`.
 
-Recommended staleness threshold for both: a few `readiness.sample_interval`s
-(~5-10s only at the default 1s). If `sample_interval` is raised, scale the
-threshold with it — a healthy operator on a 30s interval goes that long between
-ticks by design. Beyond the scaled threshold the sampling ticker has stopped,
-which means the operator is shutting down or the RIB readiness worker is no
-longer running.
+Both scopes publish
+`expected_observation_interval = readiness.sample_interval`, so a consumer's
+multiplier scales automatically when the configured interval changes. Beyond
+that scaled threshold the sampling ticker has stopped, which means the
+operator is shutting down or the RIB readiness worker is no longer running.

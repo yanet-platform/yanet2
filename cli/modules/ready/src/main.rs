@@ -10,7 +10,6 @@ use clap_complete::{
 use colored::Colorize;
 use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use serde::Serialize;
-use tokio::sync::mpsc;
 use ync::{
     client::{self, Connection, ConnectionArgs},
     completion,
@@ -195,15 +194,7 @@ async fn run_service(cmd: &Cmd, connection: &Connection, name: &str) -> Result<b
 /// Run a single unary `Ready` call and return whether all scopes are ready.
 async fn run_once(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool, Error> {
     let response: ReadyResponse = connection
-        .invoke_unary(
-            "ready",
-            name,
-            "Ready",
-            ReadyRequest {
-                scopes: cmd.scopes.clone(),
-                include_observation_updates: false,
-            },
-        )
+        .invoke_unary("ready", name, "Ready", ReadyRequest { scopes: cmd.scopes.clone() })
         .await?;
 
     let returned_names: std::collections::HashSet<&str> =
@@ -243,181 +234,72 @@ async fn run_once(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool
     Ok(all_ready)
 }
 
-/// One item forwarded from the stream task to the watch loop: a `Watch`
-/// response, or the terminal outcome once the stream ends.
-enum StreamItem {
-    Message(ReadyResponse),
-    Done(Result<(), Error>),
-}
-
 /// Stream readiness updates via `Watch` until the server closes the connection.
 ///
 /// The first message is a full snapshot of all selected scopes and renders
 /// the status block; each subsequent message carries only the scopes that
-/// changed and renders one append-only log line per scope. Between messages
-/// a staleness ticker re-evaluates every tracked scope, so a heartbeat that
-/// stops while the stream stays open still surfaces as a `stale for …`
-/// line rather than leaving a dead scope reading as live. Returns the
-/// stream's own outcome on close.
+/// changed and renders one append-only log line per scope. Returns `Ok(())`
+/// on clean stream close.
 async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
     let mut snapshot: BTreeMap<(String, String), Scope> = BTreeMap::new();
-    let mut stale_flags: BTreeMap<(String, String), bool> = BTreeMap::new();
     let mut name_width: Option<usize> = None;
 
-    // The stream runs in its own task, forwarding each response, because
-    // the staleness ticker must interleave with messages rather than wait
-    // for the next one — a silent-but-open stream is exactly the case it
-    // exists for. The request opts into observation updates so heartbeats
-    // reach the staleness tracker instead of only state changes.
-    let (sender, mut receiver) = mpsc::unbounded_channel::<StreamItem>();
-    let connection_args = cmd.connection.clone();
-    let scopes_filter = cmd.scopes.clone();
-    let service = name.to_owned();
-    let stream = tokio::spawn(async move {
-        let outcome = client::invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
-            &connection_args,
-            "ready",
-            &service,
-            "Watch",
-            ReadyRequest {
-                scopes: scopes_filter,
-                include_observation_updates: true,
-            },
-            |resp: ReadyResponse| {
-                let _ = sender.send(StreamItem::Message(resp));
-            },
-        )
-        .await;
-
-        let _ = sender.send(StreamItem::Done(outcome));
-    });
-
-    let mut ticker = tokio::time::interval(render::STALENESS_TICK);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    let outcome = loop {
-        tokio::select! {
-            item = receiver.recv() => match item {
-                Some(StreamItem::Message(resp)) => {
-                    render_watch_message(
-                        cmd,
-                        name,
-                        &resp,
-                        &mut snapshot,
-                        &mut stale_flags,
-                        &mut name_width,
-                    );
-                }
-                // The sender lives only inside the stream task, so a closed
-                // channel means the task ended without reporting — a panic.
-                // Awaiting the handle surfaces it instead of ending a
-                // monitoring command with a success exit code. Returning
-                // here also detaches the already-finished task, so the
-                // loop-exit abort below stays unreachable for this path.
-                None => {
-                    return match stream.await {
-                        Ok(()) => Ok(()),
-                        Err(join) => Err(Error::new(
-                            ErrorKind::Unavailable,
-                            "ready",
-                            &cmd.connection.endpoint,
-                            format!("watch stream task failed: {join}"),
-                        )),
-                    };
-                }
-                Some(StreamItem::Done(outcome)) => break outcome,
-            },
-            _ = ticker.tick() => {
-                render_staleness_flips(&snapshot, &mut stale_flags, cmd.stale_multiple);
-            }
-        }
-    };
-
-    stream.abort();
-    outcome
-}
-
-/// Renders one `Watch` message: the first renders the status block, each
-/// later one renders a transition line per changed scope, and both record
-/// the scopes into `snapshot`. `stale_flags` is seeded on the first
-/// message — the block already shows the initial staleness tags.
-fn render_watch_message(
-    cmd: &Cmd,
-    name: &str,
-    resp: &ReadyResponse,
-    snapshot: &mut BTreeMap<(String, String), Scope>,
-    stale_flags: &mut BTreeMap<(String, String), bool>,
-    name_width: &mut Option<usize>,
-) {
-    output::data(
-        || &resp.scopes,
-        || {
-            if resp.scopes.is_empty() {
-                output::empty(format_args!("No scopes found for {name}."));
-                return;
-            }
-
-            let mut scopes = resp.scopes.clone();
-            scopes.sort_by(|a, b| a.name.cmp(&b.name));
-
-            match name_width {
-                None => {
-                    let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
-                    *name_width = Some(width);
-
-                    for scope in &scopes {
-                        snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
+    client::invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
+        &cmd.connection,
+        "ready",
+        name,
+        "Watch",
+        ReadyRequest { scopes: cmd.scopes.clone() },
+        |resp| {
+            output::data(
+                || &resp.scopes,
+                || {
+                    if resp.scopes.is_empty() {
+                        output::empty(format_args!("No scopes found for {name}."));
+                        return;
                     }
 
-                    // One clock reading for both the rendered tags and the
-                    // seeded verdicts, so a threshold crossed during the
-                    // render neither hides the first stale line nor
-                    // immediately duplicates it.
-                    let now = SystemTime::now();
-                    render::print_status_block(name, &scopes, width, cmd.stale_multiple, now, true);
+                    let mut scopes = resp.scopes.clone();
+                    scopes.sort_by(|a, b| a.name.cmp(&b.name));
 
-                    // Seed the verdicts the ticker flips against, dropping
-                    // the seed call's own flips: the block just showed them.
-                    let _ = render::staleness_flips(snapshot, stale_flags, now, cmd.stale_multiple);
-                }
-                Some(width) => {
-                    let width = *width;
-                    for scope in &scopes {
-                        let transition = render::record_transition(snapshot, name, scope);
+                    match name_width {
+                        None => {
+                            let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
+                            name_width = Some(width);
 
-                        if transition != render::Transition::Unchanged {
-                            render::print_transition_line(render::ServiceColumn::None, scope, width, transition);
+                            for scope in &scopes {
+                                snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
+                            }
+
+                            render::print_status_block(
+                                name,
+                                &scopes,
+                                width,
+                                cmd.stale_multiple,
+                                SystemTime::now(),
+                                true,
+                            );
+                        }
+                        Some(width) => {
+                            for scope in &scopes {
+                                let transition = render::record_transition(&mut snapshot, name, scope);
+
+                                if transition != render::Transition::Unchanged {
+                                    render::print_transition_line(
+                                        render::ServiceColumn::None,
+                                        scope,
+                                        width,
+                                        transition,
+                                    );
+                                }
+                            }
                         }
                     }
-
-                    // A message refreshes the observations it carries, so
-                    // its scopes may have just gone fresh again.
-                    render_staleness_flips(snapshot, stale_flags, cmd.stale_multiple);
-                }
-            }
+                },
+            );
         },
-    );
-}
-
-/// Renders every staleness flip against `snapshot`, in human output only.
-///
-/// A serializing backend sees no staleness lines: the verdict is derived
-/// from the `observed_at` and `expected_observation_interval` fields every
-/// message already carries, and re-deriving it here would multiply the
-/// wire's event vocabulary for no new information.
-fn render_staleness_flips(
-    snapshot: &BTreeMap<(String, String), Scope>,
-    stale_flags: &mut BTreeMap<(String, String), bool>,
-    stale_multiple: u32,
-) {
-    if output::serializes() {
-        return;
-    }
-
-    let flips = render::staleness_flips(snapshot, stale_flags, SystemTime::now(), stale_multiple);
-    for ((_, scope_name), staleness) in flips {
-        render::print_staleness_line(render::ServiceColumn::None, scope_name.as_str(), 0, &staleness);
-    }
+    )
+    .await
 }
 
 /// Probes every discovered readiness service over one shared connection.
@@ -470,10 +352,7 @@ async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
 
 /// Probes one service's `Ready` over the shared connection.
 async fn probe(connection: &Connection, service: String) -> ServiceReport {
-    let request = ReadyRequest {
-        scopes: Vec::new(),
-        include_observation_updates: false,
-    };
+    let request = ReadyRequest { scopes: Vec::new() };
 
     match connection
         .invoke_unary::<_, ReadyResponse>("ready", &service, "Ready", request)
@@ -710,5 +589,28 @@ mod test {
     #[test]
     fn all_flag_conflicts_with_a_named_service() {
         assert!(Cmd::try_parse_from(["yanet-cli-ready", "--all", "route"]).is_err());
+    }
+
+    #[test]
+    fn test_cmd_stale_multiple_defaults_to_three() {
+        let cmd = Cmd::try_parse_from(["yanet-cli-ready"]).expect("default command must parse");
+
+        assert_eq!(3, cmd.stale_multiple);
+    }
+
+    #[test]
+    fn test_cmd_stale_multiple_accepts_override() {
+        let cmd =
+            Cmd::try_parse_from(["yanet-cli-ready", "--stale-multiple", "7"]).expect("staleness multiplier must parse");
+
+        assert_eq!(7, cmd.stale_multiple);
+    }
+
+    #[test]
+    fn test_cmd_stale_multiple_accepts_zero() {
+        let cmd = Cmd::try_parse_from(["yanet-cli-ready", "--stale-multiple", "0"])
+            .expect("zero staleness multiplier must parse");
+
+        assert_eq!(0, cmd.stale_multiple);
     }
 }

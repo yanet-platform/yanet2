@@ -159,10 +159,9 @@ func (m *readinessLatchService) ServicesNames() []string {
 
 func (m *readinessLatchService) RegisterService(_ *grpc.Server) {}
 
-// TestGateway_Run_ReadinessDrainLatchesLateReady verifies through the public
-// run and readiness surfaces that a late READY attempt after shutdown drain
-// cannot restore the gateway's readiness state.
-func TestGateway_Run_ReadinessDrainLatchesLateReady(t *testing.T) {
+// verifies that shutdown drain blocks late readiness while the gateway's
+// set-once scope declares no freshness contract.
+func Test_GatewayRun_ReadinessDrainLatchesLateReady(t *testing.T) {
 	t.Parallel()
 
 	core, observed := observer.New(zap.InfoLevel)
@@ -235,8 +234,10 @@ func TestGateway_Run_ReadinessDrainLatchesLateReady(t *testing.T) {
 	response, err := stream.Recv()
 	require.NoError(t, err)
 	require.Len(t, response.GetScopes(), 1)
-	require.Equal(t, readinesspb.State_STATE_NOT_READY, response.GetScopes()[0].GetState())
-	require.Equal(t, "SHUTTING_DOWN", response.GetScopes()[0].GetReasons()[0].GetCode())
+	scope := response.GetScopes()[0]
+	require.Nil(t, scope.GetExpectedObservationInterval())
+	require.Equal(t, readinesspb.State_STATE_NOT_READY, scope.GetState())
+	require.Equal(t, "SHUTTING_DOWN", scope.GetReasons()[0].GetCode())
 
 	releaseReadyLogFunc()
 	watchCancel()

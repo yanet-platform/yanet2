@@ -71,3 +71,31 @@ where
         None => serializer.serialize_none(),
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_scope_json_serializes_expected_observation_interval() {
+        let scope = pb::Scope {
+            expected_observation_interval: Some(prost_types::Duration { seconds: 30, nanos: 123 }),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_value(scope).expect("readiness scope must serialize");
+
+        assert_eq!(
+            &serde_json::json!({"seconds": 30, "nanos": 123}),
+            json.get("expected_observation_interval")
+                .expect("duration field must be present")
+        );
+    }
+
+    #[test]
+    fn test_scope_json_serializes_absent_observation_interval_as_null() {
+        let json = serde_json::to_value(pb::Scope::default()).expect("readiness scope must serialize");
+
+        assert!(json["expected_observation_interval"].is_null());
+    }
+}

@@ -65,9 +65,9 @@ for a pipeline deployed without stages. Once at least one stage is queued, the
 tail stage is retained as a steady-state target and `observed_at` advances on
 every apply as described above.
 
-Recommended staleness threshold (when stages are present): base it on
-`max(reconcile.interval, reconcile.max_backoff)` — the largest gap between
-apply attempts in success or retry. At the defaults (both 30s) a threshold
-around twice that (~60s) covers jitter and slow applies. If `max_backoff` is
-raised above `interval`, size the threshold off `max_backoff` or a live,
-retrying operator will false-alarm as stale.
+When stages are present, each scope publishes
+`expected_observation_interval = reconcile.interval`. Consumers choose a small
+multiplier and judge the scope stale when its age exceeds that product. Retry
+backoff deliberately does not inflate the contract: a prolonged retry or slow
+apply remains visible as freshness lag. With no stages the field is absent, so
+staleness is not applicable.

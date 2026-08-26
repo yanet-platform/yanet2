@@ -15,13 +15,6 @@ message ReadyRequest {
   // If empty, return state for all known scopes.
   // Otherwise, return only the requested scopes.
   repeated string scopes = 1;
-  // Opt the Watch stream into observation refreshes: without it, Watch
-  // delivers only state or reason changes; with it, pure observed_at
-  // refreshes are delivered too, coalesced per scope — a burst between two
-  // reads yields the newest snapshot of each affected scope. State and
-  // reason transitions are always delivered in order and never coalesced
-  // away. Ready ignores this field.
-  bool include_observation_updates = 2;
 }
 
 message ReadyResponse { repeated Scope scopes = 1; }

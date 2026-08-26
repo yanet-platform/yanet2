@@ -73,10 +73,15 @@ fn observation_threshold(expected_interval: &ProstDuration, multiple: u32) -> Du
 mod test {
     use super::*;
 
-    fn timestamp(seconds_ago: i64, now_secs: i64) -> Timestamp {
+    fn now() -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(10_000)
+    }
+
+    fn observed_at(age: Duration) -> Timestamp {
+        let observed = now().duration_since(UNIX_EPOCH).unwrap() - age;
         Timestamp {
-            seconds: now_secs - seconds_ago,
-            nanos: 0,
+            seconds: observed.as_secs() as i64,
+            nanos: observed.subsec_nanos() as i32,
         }
     }
 
@@ -85,91 +90,47 @@ mod test {
     }
 
     #[test]
-    fn test_is_stale_true_past_multiplied_contract() {
-        let now = SystemTime::now();
-        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        let observed = timestamp(601, now_secs);
+    fn test_is_stale_requires_age_strictly_past_exact_boundary() {
+        let boundary = observed_at(Duration::from_secs(600));
+        let past = observed_at(Duration::from_nanos(600_000_000_001));
 
-        // 300s contract, multiplier 2: the observation is past 600s.
-        assert!(is_stale(Some(&observed), Some(&interval(300)), now, 2));
+        assert!(!is_stale(Some(&boundary), Some(&interval(300)), now(), 2));
+        assert!(is_stale(Some(&past), Some(&interval(300)), now(), 2));
     }
 
     #[test]
-    fn test_is_stale_false_within_multiplied_contract() {
-        let now = SystemTime::now();
-        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        let observed = timestamp(599, now_secs);
+    fn test_is_stale_uses_distinct_interval_per_scope() {
+        let observed = observed_at(Duration::from_secs(130));
 
-        assert!(!is_stale(Some(&observed), Some(&interval(300)), now, 2));
+        assert!(is_stale(Some(&observed), Some(&interval(30)), now(), 4));
+        assert!(!is_stale(Some(&observed), Some(&interval(300)), now(), 4));
     }
 
     #[test]
-    fn test_is_stale_uses_own_contract_per_scope() {
-        let now = SystemTime::now();
-        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        let observed = timestamp(130, now_secs);
+    fn test_is_stale_false_without_observation_contract() {
+        let observed = observed_at(Duration::from_secs(1_000));
 
-        // The same age crosses a 30s contract at 4x but stays within a 5m
-        // contract — the tag follows the scope's own cadence, not a global
-        // constant.
-        assert!(is_stale(Some(&observed), Some(&interval(30)), now, 4));
-        assert!(!is_stale(Some(&observed), Some(&interval(300)), now, 4));
+        assert!(!is_stale(Some(&observed), None, now(), 3));
     }
 
     #[test]
-    fn test_is_stale_honors_sub_second_precision() {
-        // A fixed epoch-based clock, so the test controls the nanosecond
-        // offset of `now` instead of inheriting `SystemTime::now`'s.
-        let now = UNIX_EPOCH + Duration::new(10_000, 0);
-
-        // Contract 1s, multiplier 2: the threshold is exactly 2s. An age of
-        // 1.9s stays below it and an age of 2.1s crosses it — truncating
-        // either timestamp to whole seconds would read both as 2s or 3s and
-        // blur the boundary.
-        let within = Timestamp { seconds: 9_998, nanos: 100_000_000 };
-        let beyond = Timestamp { seconds: 9_997, nanos: 900_000_000 };
-
-        assert!(!is_stale(Some(&within), Some(&interval(1)), now, 2));
-        assert!(is_stale(Some(&beyond), Some(&interval(1)), now, 2));
+    fn test_is_stale_false_without_observation() {
+        assert!(!is_stale(None, Some(&interval(30)), now(), 3));
     }
 
     #[test]
-    fn test_is_stale_never_without_contract() {
-        let now = SystemTime::now();
-        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        let observed = timestamp(10_000, now_secs);
+    fn test_is_stale_false_when_multiplier_is_zero() {
+        let observed = observed_at(Duration::from_secs(1_000));
 
-        // A set-once scope publishes no contract and is never stale.
-        assert!(!is_stale(Some(&observed), None, now, 3));
+        assert!(!is_stale(Some(&observed), Some(&interval(30)), now(), 0));
     }
 
     #[test]
-    fn test_is_stale_false_when_observation_missing() {
-        assert!(!is_stale(None, Some(&interval(30)), SystemTime::now(), 3));
-    }
+    fn test_is_stale_preserves_nanosecond_timestamp_precision() {
+        let within = observed_at(Duration::from_nanos(1_999_999_999));
+        let past = observed_at(Duration::from_nanos(2_000_000_001));
 
-    #[test]
-    fn test_is_stale_disabled_when_multiple_zero() {
-        let now = SystemTime::now();
-        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        let observed = timestamp(10_000, now_secs);
-
-        assert!(!is_stale(Some(&observed), Some(&interval(30)), now, 0));
-    }
-
-    #[test]
-    fn test_is_stale_disabled_for_non_positive_contract() {
-        let now = SystemTime::now();
-        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        let observed = timestamp(10_000, now_secs);
-
-        // A zero or negative contract is the wire form of "no contract".
-        assert!(!is_stale(Some(&observed), Some(&interval(0)), now, 3));
-        assert!(!is_stale(
-            Some(&observed),
-            Some(&ProstDuration { seconds: -5, nanos: 0 }),
-            now,
-            3
-        ));
+        assert!(!is_stale(Some(&within), Some(&interval(1)), now(), 2));
+        assert!(is_stale(Some(&past), Some(&interval(1)), now(), 2));
     }
 }

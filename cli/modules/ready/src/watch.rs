@@ -98,7 +98,6 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
     };
 
     let mut aggregate = Aggregate::seed(&reports);
-    let mut stale_flags: BTreeMap<(String, String), bool> = BTreeMap::new();
 
     output::data(
         || &snapshot_payload,
@@ -106,9 +105,6 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
             if reports.is_empty() {
                 output::empty(format_args!("No readiness services registered."));
             } else {
-                // One clock reading for every block and for the seeded
-                // verdicts, so the tags shown here and the first flip the
-                // ticker could report agree on one point in time.
                 let now = SystemTime::now();
                 for (idx, report) in reports.iter().enumerate() {
                     if idx > 0 {
@@ -117,11 +113,6 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
 
                     print_report(report, scope_width, cmd.stale_multiple, now);
                 }
-
-                // Seed the verdicts the ticker and message paths flip
-                // against; the blocks above just showed the tags, so the
-                // seed call's own flips are dropped.
-                let _ = render::staleness_flips(&aggregate.snapshot, &mut stale_flags, now, cmd.stale_multiple);
             }
 
             render::print_watching_line();
@@ -143,169 +134,16 @@ pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
         supervisors.insert(service.clone(), handle.abort_handle());
     }
 
-    // The render loop resolves a staleness flip's service key to its alias
-    // for the service column. It maintains its own alias map kept in
-    // lockstep with membership events rather than a shared reference: the
-    // re-discovery task owns the original and never rewrites an alias a
-    // running supervisor already holds, while every assignment it makes is
-    // announced in the membership event itself, so this copy never serves
-    // a missing or stale alias for a rediscovered service.
-    let mut alias_index = aliases.clone();
-
     tokio::spawn(rediscover(connection.clone(), supervisors, aliases, sender.clone()));
 
     drop(sender);
 
-    let mut ticker = tokio::time::interval(render::STALENESS_TICK);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    loop {
-        tokio::select! {
-            event = receiver.recv() => {
-                let Some(event) = event else { break };
-
-                // An initial message is authoritative for its service, so
-                // the render loop must also forget the service's scopes the
-                // snapshot no longer lists — they disappeared while the
-                // stream was down.
-                let mut initial_scopes: Option<(String, Vec<Scope>)> = None;
-                let carried_scopes = match &event {
-                    Event::Service { service, data: EventData::Message { scopes, initial }, .. } => {
-                        if *initial {
-                            initial_scopes = Some((service.clone(), scopes.clone()));
-                        }
-                        true
-                    }
-                    _ => false,
-                };
-                let membership_delta = match &event {
-                    Event::Membership { discovered, departed } => {
-                        Some((discovered.clone(), departed.clone()))
-                    }
-                    _ => None,
-                };
-
-                if let Some((discovered, _)) = &membership_delta {
-                    for (service, alias) in discovered {
-                        alias_index.insert(service.clone(), alias.clone());
-                    }
-                }
-
-                // An authoritative snapshot must shape the aggregate before
-                // the one readiness recompute render_event performs: forgetting
-                // absent scopes after it would leave a stale crossing (an old
-                // all-ready set with a now-empty snapshot) uncorrected.
-                if let Some((service, present)) = &initial_scopes {
-                    forget_absent_scopes(&mut aggregate.snapshot, &mut stale_flags, service, present);
-                }
-
-                grow_widths(&event, &mut scope_width, &mut alias_width);
-                render_event(event, &mut aggregate, scope_width, alias_width);
-
-                if let Some((_, departed)) = &membership_delta {
-                    for (service, _) in departed {
-                        forget_service(&mut stale_flags, &mut alias_index, service);
-                    }
-                }
-
-                // A message refreshes the observations it carries, so its
-                // scopes may have just gone fresh again; scopes it did not
-                // carry keep their verdicts until the next tick.
-                if carried_scopes {
-                    render_staleness_flips(
-                        &aggregate.snapshot,
-                        &mut stale_flags,
-                        cmd.stale_multiple,
-                        &alias_index,
-                        alias_width,
-                        scope_width,
-                    );
-                }
-            }
-            _ = ticker.tick() => {
-                render_staleness_flips(
-                    &aggregate.snapshot,
-                    &mut stale_flags,
-                    cmd.stale_multiple,
-                    &alias_index,
-                    alias_width,
-                    scope_width,
-                );
-            }
-        }
+    while let Some(event) = receiver.recv().await {
+        grow_widths(&event, &mut scope_width, &mut alias_width);
+        render_event(event, &mut aggregate, scope_width, alias_width);
     }
 
     Ok(true)
-}
-
-/// Drops a departed service's staleness verdicts and alias.
-///
-/// The aggregate snapshot already forgot the service's scopes, so their
-/// verdicts must go too: a later re-registration re-evaluates them from
-/// scratch instead of flipping against the departed era's verdict — which
-/// would print a spurious `fresh again` or swallow a warranted `stale` —
-/// and the verdict map does not grow without bound across the watch's
-/// lifetime. The alias goes with it, since the re-discovery task reassigns
-/// it independently of this copy.
-fn forget_service(
-    stale_flags: &mut BTreeMap<(String, String), bool>,
-    alias_index: &mut BTreeMap<String, String>,
-    service: &str,
-) {
-    stale_flags.retain(|(known, _), _| known != service);
-    alias_index.remove(service);
-}
-
-/// Drops a service's snapshot scopes that its authoritative initial message
-/// no longer lists, together with their staleness verdicts.
-///
-/// An initial `Watch` message after a (re)connect is the server's full and
-/// current truth: a scope it omits no longer exists, so keeping it in the
-/// snapshot would leave it influencing the readiness aggregate and letting
-/// the ticker later print a stale line for a scope that is simply gone.
-/// The present set is taken from the message itself, never derived from the
-/// snapshot, which by definition still holds the scopes in question.
-fn forget_absent_scopes(
-    snapshot: &mut BTreeMap<(String, String), Scope>,
-    stale_flags: &mut BTreeMap<(String, String), bool>,
-    service: &str,
-    present: &[Scope],
-) {
-    let present: HashSet<&str> = present.iter().map(|scope| scope.name.as_str()).collect();
-
-    snapshot.retain(|(known, scope), _| known != service || present.contains(scope.as_str()));
-    stale_flags.retain(|(known, scope), _| known != service || present.contains(scope.as_str()));
-}
-
-/// Renders every staleness flip against the aggregate snapshot, in human
-/// output only — see the single-service watch's own copy for why a
-/// serializing backend sees none.
-fn render_staleness_flips(
-    snapshot: &BTreeMap<(String, String), Scope>,
-    stale_flags: &mut BTreeMap<(String, String), bool>,
-    stale_multiple: u32,
-    aliases: &BTreeMap<String, String>,
-    alias_width: usize,
-    scope_width: usize,
-) {
-    if output::serializes() {
-        return;
-    }
-
-    let flips = render::staleness_flips(snapshot, stale_flags, SystemTime::now(), stale_multiple);
-    for ((service, scope_name), staleness) in flips {
-        let alias = aliases
-            .get(service.as_str())
-            .map(String::as_str)
-            .unwrap_or(service.as_str());
-
-        render::print_staleness_line(
-            render::ServiceColumn::Named { alias, width: alias_width },
-            scope_name.as_str(),
-            scope_width,
-            &staleness,
-        );
-    }
 }
 
 /// Grows `scope_width` and `alias_width` to fit every name `event` carries,
@@ -325,7 +163,7 @@ fn grow_widths(event: &Event, scope_width: &mut usize, alias_width: &mut usize) 
         Event::Service { alias, data, .. } => {
             *alias_width = render::name_width([alias.as_str()]).max(*alias_width);
 
-            if let EventData::Message { scopes, .. } = data {
+            if let EventData::Message(scopes) = data {
                 let names = scopes.iter().map(|scope| scope.name.as_str());
                 *scope_width = render::name_width(names).max(*scope_width);
             }
@@ -392,12 +230,9 @@ enum Event {
 /// string: the human renderer composes them into one line at render time,
 /// and the serialized payload's `error` is `cause` alone.
 enum EventData {
-    /// A `Watch` message arrived. The server's contract makes the first
-    /// message after a stream opens a full snapshot of every scope, so
-    /// `initial` marks it: the render loop treats it as authoritative
-    /// and replaces the service's scopes wholesale rather than diffing
-    /// against pre-disconnect state.
-    Message { scopes: Vec<Scope>, initial: bool },
+    /// A `Watch` message arrived, carrying the scopes it changed (or, for
+    /// the first message after a stream opens, the full snapshot).
+    Message(Vec<Scope>),
     /// The stream (re)established after a previous disconnect.
     Reattached,
     /// The stream ended or errored; the supervisor is retrying after
@@ -452,12 +287,6 @@ struct EventPayload<'a> {
     service: &'a str,
     event: EventKind,
     scopes: &'a [Scope],
-    /// Present (as `true`) only when this message is the full snapshot that
-    /// opens a stream attempt, so a JSON consumer can treat the scopes as
-    /// authoritative without inferring it from the preceding `reattached`
-    /// line.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    snapshot: bool,
     error: Option<&'a str>,
 }
 
@@ -478,11 +307,11 @@ struct MembershipPayload<'a> {
 }
 
 impl Event {
-    fn message(service: &str, alias: &str, scopes: Vec<Scope>, initial: bool) -> Self {
+    fn message(service: &str, alias: &str, scopes: Vec<Scope>) -> Self {
         Self::Service {
             service: service.to_owned(),
             alias: alias.to_owned(),
-            data: EventData::Message { scopes, initial },
+            data: EventData::Message(scopes),
         }
     }
 
@@ -583,19 +412,13 @@ async fn supervise(connection: Arc<Connection>, service: String, alias: String, 
 
     loop {
         let mut opened_this_attempt = false;
-        let mut snapshot_seen = false;
 
         let result = connection
             .invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
                 "ready",
                 &service,
                 "Watch",
-                // Opt into observation updates so heartbeats reach the
-                // staleness tracker instead of only state changes.
-                ReadyRequest {
-                    scopes: Vec::new(),
-                    include_observation_updates: true,
-                },
+                ReadyRequest { scopes: Vec::new() },
                 |resp: ReadyResponse| {
                     if !opened_this_attempt {
                         opened_this_attempt = true;
@@ -606,11 +429,7 @@ async fn supervise(connection: Arc<Connection>, service: String, alias: String, 
                         }
                     }
 
-                    // The first message of every attempt is the server's
-                    // full snapshot; later ones carry only what changed.
-                    let initial = !snapshot_seen;
-                    snapshot_seen = true;
-                    let _ = sender.send(Event::message(&service, &alias, resp.scopes, initial));
+                    let _ = sender.send(Event::message(&service, &alias, resp.scopes));
                 },
             )
             .await;
@@ -999,12 +818,11 @@ impl Aggregate {
 fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, alias_width: usize) {
     match event {
         Event::Service { service, alias, data } => match data {
-            EventData::Message { scopes, initial } => {
+            EventData::Message(scopes) => {
                 let payload = EventPayload {
                     service: &service,
                     event: EventKind::Message,
                     scopes: &scopes,
-                    snapshot: initial,
                     error: None,
                 };
 
@@ -1040,7 +858,6 @@ fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, ali
                     service: &service,
                     event: EventKind::Reattached,
                     scopes: &[],
-                    snapshot: false,
                     error: None,
                 };
 
@@ -1056,7 +873,6 @@ fn render_event(event: Event, aggregate: &mut Aggregate, scope_width: usize, ali
                     service: &service,
                     event: EventKind::Lost,
                     scopes: &[],
-                    snapshot: false,
                     error: Some(&cause),
                 };
 
@@ -1137,7 +953,7 @@ mod test {
         let event = Event::Service {
             service: "svc".to_owned(),
             alias: "x".repeat(16),
-            data: EventData::Message { scopes: Vec::new(), initial: false },
+            data: EventData::Message(Vec::new()),
         };
         grow_widths(&event, &mut scope_width, &mut alias_width);
 
@@ -1147,7 +963,7 @@ mod test {
         let shorter = Event::Service {
             service: "svc2".to_owned(),
             alias: "a".to_owned(),
-            data: EventData::Message { scopes: Vec::new(), initial: false },
+            data: EventData::Message(Vec::new()),
         };
         grow_widths(&shorter, &mut scope_width, &mut alias_width);
 
@@ -1162,7 +978,7 @@ mod test {
         let event = Event::Service {
             service: "svc".to_owned(),
             alias: "x".repeat(100),
-            data: EventData::Message { scopes: Vec::new(), initial: false },
+            data: EventData::Message(Vec::new()),
         };
         grow_widths(&event, &mut scope_width, &mut alias_width);
 
@@ -1177,10 +993,7 @@ mod test {
         let event = Event::Service {
             service: "svc".to_owned(),
             alias: "svc".to_owned(),
-            data: EventData::Message {
-                scopes: vec![scope(&"x".repeat(20), State::Ready)],
-                initial: false,
-            },
+            data: EventData::Message(vec![scope(&"x".repeat(20), State::Ready)]),
         };
         grow_widths(&event, &mut scope_width, &mut alias_width);
 
@@ -1570,75 +1383,5 @@ mod test {
 
         let departed = vec![("b".to_owned(), "b".to_owned())];
         assert!(aggregate.apply_membership(&[], &departed));
-    }
-
-    /// verifies that forgetting a departed service drops its staleness
-    /// verdicts and alias while a sibling service's survive untouched.
-    #[test]
-    fn test_forget_service_drops_verdicts_and_alias_for_that_service_only() {
-        let mut stale_flags = BTreeMap::from([
-            (("a".to_owned(), "rib".to_owned()), true),
-            (("b".to_owned(), "rib".to_owned()), false),
-        ]);
-        let mut alias_index = BTreeMap::from([
-            ("a".to_owned(), "route".to_owned()),
-            ("b".to_owned(), "forward".to_owned()),
-        ]);
-
-        forget_service(&mut stale_flags, &mut alias_index, "b");
-
-        assert!(!stale_flags.contains_key(&("b".to_owned(), "rib".to_owned())));
-        assert!(!alias_index.contains_key("b"));
-        assert_eq!(Some(&true), stale_flags.get(&("a".to_owned(), "rib".to_owned())));
-        assert_eq!(Some(&"route".to_owned()), alias_index.get("a"));
-    }
-
-    /// verifies that an authoritative initial message drops the service's
-    /// scopes it no longer lists — together with their staleness verdicts —
-    /// while keeping the ones it does list and every sibling's scopes.
-    #[test]
-    fn test_forget_absent_scopes_drops_only_unlisted_scopes_of_that_service() {
-        let mut snapshot = BTreeMap::from([
-            (("a".to_owned(), "rib".to_owned()), scope("rib", State::Ready)),
-            (("a".to_owned(), "fib".to_owned()), scope("fib", State::Ready)),
-            (("b".to_owned(), "rib".to_owned()), scope("rib", State::Ready)),
-        ]);
-        let mut stale_flags = BTreeMap::from([
-            (("a".to_owned(), "rib".to_owned()), false),
-            (("a".to_owned(), "fib".to_owned()), true),
-            (("b".to_owned(), "rib".to_owned()), false),
-        ]);
-
-        // The reconnect snapshot lists only "rib" for service "a": "fib"
-        // disappeared while the stream was down.
-        let present = vec![scope("rib", State::Ready)];
-        forget_absent_scopes(&mut snapshot, &mut stale_flags, "a", &present);
-
-        assert!(snapshot.contains_key(&("a".to_owned(), "rib".to_owned())));
-        assert!(!snapshot.contains_key(&("a".to_owned(), "fib".to_owned())));
-        assert!(snapshot.contains_key(&("b".to_owned(), "rib".to_owned())));
-        assert!(!stale_flags.contains_key(&("a".to_owned(), "fib".to_owned())));
-        assert_eq!(Some(&false), stale_flags.get(&("a".to_owned(), "rib".to_owned())));
-    }
-
-    /// verifies that an empty authoritative snapshot wipes the service's
-    /// every scope, and that the readiness recompute performed on the
-    /// resulting aggregate reports no crossing — an empty snapshot must not
-    /// read as "all subsystems are ready".
-    #[test]
-    fn test_forget_absent_scopes_empty_snapshot_leaves_no_crossing() {
-        let reports = vec![report("a", vec![scope("rib", State::Ready)])];
-        let mut aggregate = Aggregate::seed(&reports);
-        assert!(aggregate.all_ready);
-
-        let mut stale_flags = BTreeMap::from([(("a".to_owned(), "rib".to_owned()), false)]);
-        let present: Vec<Scope> = Vec::new();
-
-        forget_absent_scopes(&mut aggregate.snapshot, &mut stale_flags, "a", &present);
-
-        assert!(aggregate.snapshot.is_empty());
-        assert!(stale_flags.is_empty());
-        assert!(!aggregate.refresh(), "an emptied snapshot must not cross into ready");
-        assert!(!aggregate.all_ready);
     }
 }

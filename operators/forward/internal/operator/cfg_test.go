@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
@@ -182,23 +181,20 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-// TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval verifies that
-// each gateway scope's observation contract is the reconcile interval — the
-// nominal cadence — not a backoff-inflated bound: a slow or hung apply must
-// surface as staleness after a multiple of the nominal interval, not be
-// hidden behind the retry ceiling.
-func TestReadiness_ScopeSpecs_MirrorNominalReconcileInterval(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
-	cfg.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
-	cfg.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
+// verifies that gateway scopes map by name to the nominal reconcile interval,
+// independent of retry backoff and declaration order.
+func Test_ReadinessScopeSpecs_GatewaysUseNominalReconcileInterval(t *testing.T) {
+	config := DefaultConfig()
+	config.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
+	config.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
+	config.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
 
-	specs := readinessScopeSpecs(cfg)
-
-	require.Len(t, specs, 2)
-	assert.Equal(t, "config:gw0", specs[0].Name)
-	assert.Equal(t, "config:gw1", specs[1].Name)
-	for _, spec := range specs {
-		assert.Equal(t, 10*time.Second, spec.ExpectedObservationInterval)
+	intervalsByName := map[string]time.Duration{}
+	for _, scopeSpec := range readinessScopeSpecs(config) {
+		intervalsByName[scopeSpec.Name] = scopeSpec.ExpectedObservationInterval
 	}
+	require.Equal(t, map[string]time.Duration{
+		"config:gw0": 10 * time.Second,
+		"config:gw1": 10 * time.Second,
+	}, intervalsByName)
 }

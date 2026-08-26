@@ -51,9 +51,9 @@ never streams — a `Watch`-based checker would hold a stale `observed_at` while
 the service stays fresh.
 
 A stale `observed_at` means the reconcile loop has stopped refreshing — the
-operator is shutting down, dead, or frozen. Recommended staleness threshold:
-base it on `max(reconcile.interval, reconcile.max_backoff)` — the largest gap
-between apply attempts in success or retry. At the defaults (both 30s) a
-threshold around twice that (~60s) covers jitter and slow applies. If
-`max_backoff` is raised above `interval`, size the threshold off `max_backoff`
-or a live, retrying operator will false-alarm as stale.
+operator is shutting down, dead, or frozen. Each scope publishes
+`expected_observation_interval = reconcile.interval`; consumers choose a small
+multiplier and judge the scope stale when its age exceeds that product. Retry
+backoff deliberately does not inflate the contract: a prolonged retry or slow
+apply remains visible as freshness lag instead of being hidden by
+`reconcile.max_backoff`.
