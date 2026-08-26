@@ -20,7 +20,6 @@ if [[ -n $expected_arch && ! $expected_arch =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
 fi
 
 command -v dscverify >/dev/null 2>&1 || fail "dscverify is required"
-command -v dcmd >/dev/null 2>&1 || fail "dcmd is required"
 command -v dpkg-deb >/dev/null 2>&1 || fail "dpkg-deb is required"
 
 mapfile -d '' changes_files < <(find "$artifact_dir" -type f -name '*.changes' -print0)
@@ -73,18 +72,7 @@ mapfile -t duplicate_checksums < <(printf '%s\n' "${checksums_packages[@]}" | un
 [[ "${files_packages[*]}" == "${checksums_packages[*]}" ]] ||
     fail "Files and Checksums-Sha256 package lists differ in $changes_file"
 
-if ! declared_output=$(cd "$changes_dir" && dcmd "$changes_name"); then
-    fail "dcmd could not read $changes_file"
-fi
-mapfile -t declared_packages < <(
-    printf '%s\n' "$declared_output" |
-        awk '$NF ~ /\.(deb|ddeb)$/ { sub(/^.*\//, "", $NF); print $NF }' |
-        sort
-)
-(( ${#declared_packages[@]} > 0 )) || fail "no package files declared by $changes_file"
-mapfile -t duplicate_declared < <(printf '%s\n' "${declared_packages[@]}" | uniq -d)
-(( ${#duplicate_declared[@]} == 0 )) ||
-    fail "duplicate package files declared by $changes_file: ${duplicate_declared[*]}"
+declared_packages=("${files_packages[@]}")
 
 declare -A declared_package
 for package_file_name in "${declared_packages[@]}"; do

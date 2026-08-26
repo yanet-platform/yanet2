@@ -20,11 +20,6 @@ printf '%s\n' '#!/bin/bash' 'exit 0' >"$fake_bin/dscverify"
 printf '%s\n' \
     '#!/bin/bash' \
     'set -euo pipefail' \
-    'awk '\''$0 == "Files:" { in_files=1; next } in_files && /^[^[:space:]][^:]*:/ { in_files=0 } in_files && $NF ~ /\.(deb|ddeb)$/ { print $NF }'\'' "$1"' \
-    >"$fake_bin/dcmd"
-printf '%s\n' \
-    '#!/bin/bash' \
-    'set -euo pipefail' \
     '[[ ${1:-} == --field ]] || exit 2' \
     'case "$(basename "$2"):$3" in' \
     '  yanet-test_1.2.3_amd64.deb:Package) printf "%s\\n" yanet-test ;;' \
@@ -37,7 +32,7 @@ printf '%s\n' \
     '  *) exit 1 ;;' \
     'esac' \
     >"$fake_bin/dpkg-deb"
-chmod +x "$fake_bin/dscverify" "$fake_bin/dcmd" "$fake_bin/dpkg-deb"
+chmod +x "$fake_bin/dscverify" "$fake_bin/dpkg-deb"
 export PATH="$fake_bin:$PATH"
 
 runtime=yanet-test_1.2.3_amd64.deb
