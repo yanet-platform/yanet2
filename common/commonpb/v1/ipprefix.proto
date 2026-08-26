@@ -7,8 +7,7 @@ option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonp
 import "common/commonpb/v1/ipv4prefix.proto";
 import "common/commonpb/v1/ipv6prefix.proto";
 
-// IPPrefix represents an IPv4 or IPv6 CIDR prefix. The family is
-// structural through the oneof.
+// IPPrefix represents an IPv4 or IPv6 CIDR prefix.
 message IPPrefix {
   oneof prefix {
     IPv4Prefix v4 = 1;

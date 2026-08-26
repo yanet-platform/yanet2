@@ -8,7 +8,7 @@ import "common/commonpb/v1/ipv4network.proto";
 import "common/commonpb/v1/ipv6network.proto";
 
 // IPNetwork represents an IPv4 or IPv6 network with a general per-bit
-// mask. The family is structural through the oneof.
+// mask.
 message IPNetwork {
   oneof network {
     IPv4Network v4 = 1;

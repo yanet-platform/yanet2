@@ -72,6 +72,7 @@ func (m *IPPrefix) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return json.Marshal(prefix.String())
 }
 
