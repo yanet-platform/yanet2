@@ -127,7 +127,7 @@ func buildOperatorStatusCommand() string {
 // NOT_READY with an explicit parse reason and is never assumed healthy.
 func ParseScopeStatus(output string) []ScopeResult {
 	matches := map[string][]string{}
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != scopeStatusMarker {
 			continue
