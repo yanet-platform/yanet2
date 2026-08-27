@@ -16,7 +16,12 @@ const (
 
 // GRPCServerConfig describes how to expose the operator's gRPC server.
 type GRPCServerConfig struct {
+	// Endpoint is the address the gRPC server binds.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
+	// AdvertiseEndpoint is the address gateways are told to reach this
+	// server on. Empty advertises the bound address, so set it only when
+	// that one is unreachable for them.
+	AdvertiseEndpoint string `yaml:"advertise_endpoint"`
 }
 
 // GatewayConfig holds the name and gRPC endpoint of a single Gateway.

@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
 // Runner is a long-running goroutine driven by the operator's errgroup.
@@ -36,15 +38,16 @@ type ServiceRegistrar func(server *grpc.Server) string
 // The embedded gRPC server and gateway-registration loop are opt-in via
 // WithGRPCServer and WithGateways respectively.
 type Operator[T any] struct {
-	server       *GRPCServer
-	endpoint     string
-	reconciler   *Reconciler[T]
-	actuator     Actuator[T]
-	preRun       PreRun
-	workers      []Runner
-	gateways     []GatewayConfig
-	register     RegisterConfig
-	serviceNames []string
+	server            *GRPCServer
+	endpoint          string
+	advertiseEndpoint string
+	reconciler        *Reconciler[T]
+	actuator          Actuator[T]
+	preRun            PreRun
+	workers           []Runner
+	gateways          []GatewayConfig
+	register          RegisterConfig
+	serviceNames      []string
 
 	log *zap.Logger
 }
@@ -62,9 +65,10 @@ func NewOperator[T any](
 	log := opts.Log
 
 	var (
-		server       *GRPCServer
-		endpoint     string
-		serviceNames []string
+		server            *GRPCServer
+		endpoint          string
+		advertiseEndpoint string
+		serviceNames      []string
 	)
 
 	if opts.GRPCServer != nil {
@@ -74,6 +78,7 @@ func NewOperator[T any](
 			WithGRPCLog(log),
 		)
 		endpoint = opts.GRPCServer.Config.Endpoint.Unwrap()
+		advertiseEndpoint = opts.GRPCServer.Config.AdvertiseEndpoint
 	}
 
 	reconciler := NewReconciler(
@@ -89,16 +94,17 @@ func NewOperator[T any](
 	)
 
 	return &Operator[T]{
-		server:       server,
-		endpoint:     endpoint,
-		reconciler:   reconciler,
-		actuator:     actuator,
-		preRun:       opts.PreRun,
-		workers:      opts.Workers,
-		gateways:     opts.Gateways,
-		register:     opts.Register,
-		serviceNames: serviceNames,
-		log:          log,
+		server:            server,
+		endpoint:          endpoint,
+		advertiseEndpoint: advertiseEndpoint,
+		reconciler:        reconciler,
+		actuator:          actuator,
+		preRun:            opts.PreRun,
+		workers:           opts.Workers,
+		gateways:          opts.Gateways,
+		register:          opts.Register,
+		serviceNames:      serviceNames,
+		log:               log,
 	}
 }
 
@@ -145,7 +151,7 @@ func (m *Operator[T]) Run(ctx context.Context) error {
 				runner := NewGatewayRegRunner(
 					m.gateways,
 					m.serviceNames,
-					listener.Addr(),
+					gateway.AdvertisedEndpoint(m.advertiseEndpoint, listener.Addr()),
 					WithGatewayRegInterval(m.register.Interval.Unwrap()),
 					WithGatewayRegLog(m.log),
 				)

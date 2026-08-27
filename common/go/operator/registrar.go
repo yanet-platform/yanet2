@@ -3,7 +3,6 @@ package operator
 import (
 	"context"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -31,7 +30,7 @@ type GatewayRegRunner struct {
 	gateways []GatewayConfig
 	services []string
 	interval time.Duration
-	endpoint net.Addr
+	endpoint string
 	log      *zap.Logger
 }
 
@@ -53,11 +52,11 @@ func WithGatewayRegLog(log *zap.Logger) GatewayRegRunnerOption {
 }
 
 // NewGatewayRegRunner creates a registration runner for all configured
-// gateways.
+// gateways, advertising the given endpoint verbatim to each of them.
 func NewGatewayRegRunner(
 	gateways []GatewayConfig,
 	services []string,
-	endpoint net.Addr,
+	endpoint string,
 	options ...GatewayRegRunnerOption,
 ) *GatewayRegRunner {
 	opts := newGatewayRegRunnerOptions()
@@ -115,7 +114,7 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 			loop := gateway.NewRegistrationLoop(
 				registrar,
 				m.services,
-				m.endpoint.String(),
+				m.endpoint,
 				gateway.WithLoopInterval(m.interval),
 				gateway.WithLoopLog(log),
 			)
