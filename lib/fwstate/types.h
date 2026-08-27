@@ -31,7 +31,6 @@ struct fw4_state_key {
 	uint32_t dst_addr;
 };
 
-// FIXME: ensure that during map allocations keys are aligned on u64 boundary
 struct fw6_state_key {
 	struct fw_state_key_hdr hdr;
 	uint8_t src_addr[16];

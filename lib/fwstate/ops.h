@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "types.h"
 
@@ -128,14 +129,9 @@ fwmap_fw6_key_equal(const void *a, const void *b, size_t size) {
 	const struct fw6_state_key *k1 = (const struct fw6_state_key *)a;
 	const struct fw6_state_key *k2 = (const struct fw6_state_key *)b;
 
-	// Compare IPv6 addresses as two uint64_t values each
-	const uint64_t *src1 = (const uint64_t *)k1->src_addr;
-	const uint64_t *src2 = (const uint64_t *)k2->src_addr;
-	const uint64_t *dst1 = (const uint64_t *)k1->dst_addr;
-	const uint64_t *dst2 = (const uint64_t *)k2->dst_addr;
-
 	return k1->hdr.proto == k2->hdr.proto &&
 	       k1->hdr.src_port == k2->hdr.src_port &&
-	       k1->hdr.dst_port == k2->hdr.dst_port && src1[0] == src2[0] &&
-	       src1[1] == src2[1] && dst1[0] == dst2[0] && dst1[1] == dst2[1];
+	       k1->hdr.dst_port == k2->hdr.dst_port &&
+	       memcmp(k1->src_addr, k2->src_addr, sizeof(k1->src_addr)) == 0 &&
+	       memcmp(k1->dst_addr, k2->dst_addr, sizeof(k1->dst_addr)) == 0;
 }
