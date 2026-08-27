@@ -130,9 +130,22 @@ test_value_snapshot_survives_removal(struct yanet_shm *shm) {
 		"failed to install dev0 with input pipeline pipe0"
 	);
 
-	struct counter_handle_list *list =
-		yanet_get_pipeline_counters(dp_config, "dev0", "pipe0");
-	TEST_ASSERT_NOT_NULL(list, "yanet_get_pipeline_counters returned NULL");
+	struct counter_tag pipeline_tags[] = {
+		{.key = "device", .value = "dev0"},
+		{.key = "pipeline", .value = "pipe0"},
+		{.key = "kind", .value = "pipeline"},
+	};
+	struct counter_worker_set_list *pipeline_sets =
+		yanet_get_counters_by_tags_per_worker(
+			dp_config, pipeline_tags, 3, NULL, NULL
+		);
+	TEST_ASSERT_NOT_NULL(
+		pipeline_sets, "per-worker pipeline counter read returned NULL"
+	);
+	struct counter_worker_set *pipeline_set =
+		yanet_get_counter_worker_set(pipeline_sets, 0);
+	TEST_ASSERT_NOT_NULL(pipeline_set, "worker 0 set is missing");
+	struct counter_handle_list *list = pipeline_set->counters;
 	TEST_ASSERT(
 		list->count > 0,
 		"no pipeline counter storage matched dev0/pipe0"
@@ -167,7 +180,7 @@ test_value_snapshot_survives_removal(struct yanet_shm *shm) {
 	);
 	free(batched);
 
-	yanet_counter_handle_list_free(list);
+	yanet_counter_worker_set_list_free(pipeline_sets);
 	agent_detach(agent);
 	return TEST_SUCCESS;
 }
@@ -191,9 +204,21 @@ test_tag_strings_survive_generation_swap(struct yanet_shm *shm) {
 		"failed to install dev0"
 	);
 
-	struct counter_handle_list *list =
-		yanet_get_device_counters(dp_config, "dev0");
-	TEST_ASSERT_NOT_NULL(list, "yanet_get_device_counters returned NULL");
+	struct counter_tag device_tags[] = {
+		{.key = "device", .value = "dev0"},
+		{.key = "kind", .value = "device"},
+	};
+	struct counter_worker_set_list *device_sets =
+		yanet_get_counters_by_tags_per_worker(
+			dp_config, device_tags, 2, NULL, NULL
+		);
+	TEST_ASSERT_NOT_NULL(
+		device_sets, "per-worker device counter read returned NULL"
+	);
+	struct counter_worker_set *device_set =
+		yanet_get_counter_worker_set(device_sets, 0);
+	TEST_ASSERT_NOT_NULL(device_set, "worker 0 set is missing");
+	struct counter_handle_list *list = device_set->counters;
 	TEST_ASSERT(list->count > 0, "no counter storage matched dev0");
 
 	struct counter_handle *handle = yanet_get_counter(list, 0);
@@ -222,7 +247,7 @@ test_tag_strings_survive_generation_swap(struct yanet_shm *shm) {
 	}
 	TEST_ASSERT(found, "device tag missing after generation swap");
 
-	yanet_counter_handle_list_free(list);
+	yanet_counter_worker_set_list_free(device_sets);
 	agent_detach(agent);
 	return TEST_SUCCESS;
 }

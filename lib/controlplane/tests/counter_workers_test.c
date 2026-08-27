@@ -3,9 +3,8 @@
  *
  * Every worker's config_gen_ectx owns its own counter storage registry,
  * and those registries may hold different storages. The per-worker read
- * returns each worker's matched set independently, while the merged read
- * unions the sets and zero-fills the instances of workers that do not
- * carry a counter.
+ * returns each worker's matched set independently; the cross-worker
+ * union lives in the Go bindings.
  *
  * Divergence is produced by writing distinct values into the two workers'
  * pipeline storages and by registering an extra tagged storage in only
@@ -135,9 +134,9 @@ write_pipeline_counter(
 		counter_name
 	);
 
-	uint64_t *values =
-		counter_handle_get_value(counter_get_value_handle(idx, storage)
-		);
+	uint64_t *values = counter_handle_get_value(
+		counter_get_value_handle(idx, storage)
+	);
 	values[0] = value;
 	return TEST_SUCCESS;
 }
@@ -266,17 +265,6 @@ make_workers_diverge(
 	return TEST_SUCCESS;
 }
 
-static struct counter_handle *
-find_handle(struct counter_handle_list *list, const char *name) {
-	for (size_t idx = 0; idx < list->count; ++idx) {
-		struct counter_handle *handle = yanet_get_counter(list, idx);
-		if (handle != NULL && strcmp(handle->name, name) == 0) {
-			return handle;
-		}
-	}
-	return NULL;
-}
-
 // Verifies that the per-worker read returns each worker's matched set
 // independently: the worker-1-only storage shows up with its own values
 // in worker 1's set and not at all in worker 0's.
@@ -335,82 +323,53 @@ test_per_worker_sets(struct dp_config *dp_config) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that the merged read unions the workers' sets and zero-fills
-// the instances of workers without the counter.
+// Verifies that a counter present in every worker's registry keeps each
+// worker's own value in that worker's set: one read over both workers
+// returns distinct snapshots for the shared counter.
 static int
-test_merged_zero_fill(struct dp_config *dp_config) {
-	struct counter_tag tags[] = {
-		{.key = "object_type", .value = "extra"},
-		{.key = "object_name", .value = "w1"},
-		{.key = "kind", .value = "object"},
-	};
-
-	struct counter_handle_list *list =
-		yanet_get_counters_by_tags(dp_config, tags, 3, NULL, NULL);
-	TEST_ASSERT_NOT_NULL(list, "yanet_get_counters_by_tags returned NULL");
-	TEST_ASSERT_EQUAL(1, list->count, "merged match count");
-	TEST_ASSERT_EQUAL(
-		CW_WORKER_COUNT, list->instance_count, "merged instance count"
-	);
-
-	struct counter_handle *handle = find_handle(list, "w1_only");
-	TEST_ASSERT_NOT_NULL(handle, "merged list lacks the worker-1 counter");
-	TEST_ASSERT_EQUAL(2, handle->size, "merged counter size");
-	TEST_ASSERT_EQUAL(
-		0,
-		yanet_get_counter_value(handle->values, 0, 0),
-		"absent worker 0 slot 0 must be zero"
-	);
-	TEST_ASSERT_EQUAL(
-		0,
-		yanet_get_counter_value(handle->values, 1, 0),
-		"absent worker 0 slot 1 must be zero"
-	);
-	TEST_ASSERT_EQUAL(
-		CW_W1_EXTRA_0,
-		yanet_get_counter_value(handle->values, 0, 1),
-		"worker 1 slot 0"
-	);
-	TEST_ASSERT_EQUAL(
-		CW_W1_EXTRA_1,
-		yanet_get_counter_value(handle->values, 1, 1),
-		"worker 1 slot 1"
-	);
-
-	yanet_counter_handle_list_free(list);
-	return TEST_SUCCESS;
-}
-
-// Verifies that a counter present in every worker's registry keeps every
-// worker's own value in the merged view.
-static int
-test_merged_shared_counter(struct dp_config *dp_config) {
+test_per_worker_shared_counter(struct dp_config *dp_config) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = "dev0"},
 		{.key = "kind", .value = "pipeline"},
 	};
 
-	struct counter_handle_list *list =
-		yanet_get_counters_by_tags(dp_config, tags, 2, NULL, NULL);
-	TEST_ASSERT_NOT_NULL(list, "yanet_get_counters_by_tags returned NULL");
-	TEST_ASSERT_EQUAL(
-		CW_WORKER_COUNT, list->instance_count, "merged instance count"
+	struct counter_worker_set_list *sets =
+		yanet_get_counters_by_tags_per_worker(
+			dp_config, tags, 2, NULL, NULL
+		);
+	TEST_ASSERT_NOT_NULL(
+		sets, "yanet_get_counters_by_tags_per_worker returned NULL"
 	);
 
-	struct counter_handle *handle = find_handle(list, "input");
-	TEST_ASSERT_NOT_NULL(handle, "merged list lacks the input counter");
-	TEST_ASSERT_EQUAL(
-		CW_W0_INPUT,
-		yanet_get_counter_value(handle->values, 0, 0),
-		"worker 0 input value"
-	);
-	TEST_ASSERT_EQUAL(
-		CW_W1_INPUT,
-		yanet_get_counter_value(handle->values, 0, 1),
-		"worker 1 input value"
-	);
+	const uint64_t expected[CW_WORKER_COUNT] = {CW_W0_INPUT, CW_W1_INPUT};
+	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
+		struct counter_worker_set *set =
+			yanet_get_counter_worker_set(sets, w_idx);
+		TEST_ASSERT_NOT_NULL(set, "worker set is missing");
 
-	yanet_counter_handle_list_free(list);
+		struct counter_handle *handle = NULL;
+		for (size_t idx = 0; idx < set->counters->count; ++idx) {
+			struct counter_handle *cur =
+				yanet_get_counter(set->counters, idx);
+			if (cur != NULL && strcmp(cur->name, "input") == 0) {
+				handle = cur;
+				break;
+			}
+		}
+		TEST_ASSERT_NOT_NULL(
+			handle,
+			"worker %lu set lacks the input counter",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			expected[w_idx],
+			yanet_get_counter_value(handle->values, 0, 0),
+			"worker %lu input value",
+			(unsigned long)w_idx
+		);
+	}
+
+	yanet_counter_worker_set_list_free(sets);
 	return TEST_SUCCESS;
 }
 
@@ -463,10 +422,7 @@ main(void) {
 		res = test_per_worker_sets(dp_config);
 	}
 	if (res == TEST_SUCCESS) {
-		res = test_merged_zero_fill(dp_config);
-	}
-	if (res == TEST_SUCCESS) {
-		res = test_merged_shared_counter(dp_config);
+		res = test_per_worker_shared_counter(dp_config);
 	}
 
 	agent_detach(agent);

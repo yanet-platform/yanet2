@@ -93,99 +93,85 @@ func (m *DPConfig) encodeCounters(
 	return res
 }
 
-func (m *DPConfig) DeviceCounters(
-	deviceName string,
+// countersByTags reads the counters matching tags and query and merges
+// the per-worker sets into one flat list, in first-seen order. A failed
+// or refused read yields nil.
+func (m *DPConfig) countersByTags(
+	tags []CounterTag,
+	query []string,
 ) []CounterInfo {
-	cDeviceName := C.CString(deviceName)
-	defer C.free(unsafe.Pointer(cDeviceName))
-	counters := C.yanet_get_device_counters(m.ptr, cDeviceName)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
+	groups, err := m.CountersByTags(tags, query)
+	if err != nil {
 		return nil
 	}
 
-	return m.encodeCounters(counters)
+	counters := make([]CounterInfo, 0)
+	for _, group := range groups {
+		counters = append(counters, group.Counters...)
+	}
+	return counters
 }
 
-// PipelineCounters returns pipeline counters
+// DeviceCounters returns the device's counters, or nil when the read
+// fails.
+func (m *DPConfig) DeviceCounters(deviceName string) []CounterInfo {
+	return m.countersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "kind", Value: "device"},
+	}, nil)
+}
+
+// PipelineCounters returns the pipeline's counters, or nil when the
+// read fails.
 func (m *DPConfig) PipelineCounters(
 	deviceName string,
 	pipelineName string,
 ) []CounterInfo {
-	cDeviceName := C.CString(deviceName)
-	defer C.free(unsafe.Pointer(cDeviceName))
-	cPipelineName := C.CString(pipelineName)
-	defer C.free(unsafe.Pointer(cPipelineName))
-	counters := C.yanet_get_pipeline_counters(m.ptr, cDeviceName, cPipelineName)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
-		return nil
-	}
-
-	return m.encodeCounters(counters)
+	return m.countersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "pipeline", Value: pipelineName},
+		{Key: "kind", Value: "pipeline"},
+	}, nil)
 }
 
+// FunctionCounters returns the function's counters, or nil when the
+// read fails.
 func (m *DPConfig) FunctionCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
 ) []CounterInfo {
-	cDeviceName := C.CString(deviceName)
-	defer C.free(unsafe.Pointer(cDeviceName))
-	cPipelineName := C.CString(pipelineName)
-	defer C.free(unsafe.Pointer(cPipelineName))
-	cFunctionName := C.CString(functionName)
-	defer C.free(unsafe.Pointer(cFunctionName))
-	counters := C.yanet_get_function_counters(
-		m.ptr,
-		cDeviceName,
-		cPipelineName,
-		cFunctionName,
-	)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
-		return nil
-	}
-
-	return m.encodeCounters(counters)
+	return m.countersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "pipeline", Value: pipelineName},
+		{Key: "function", Value: functionName},
+		{Key: "kind", Value: "function"},
+	}, nil)
 }
 
+// ChainCounters returns the chain's counters, or nil when the read
+// fails.
 func (m *DPConfig) ChainCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
 	chainName string,
 ) []CounterInfo {
-	cDeviceName := C.CString(deviceName)
-	defer C.free(unsafe.Pointer(cDeviceName))
-	cPipelineName := C.CString(pipelineName)
-	defer C.free(unsafe.Pointer(cPipelineName))
-	cFunctionName := C.CString(functionName)
-	defer C.free(unsafe.Pointer(cFunctionName))
-	cChainName := C.CString(chainName)
-	defer C.free(unsafe.Pointer(cChainName))
-	counters := C.yanet_get_chain_counters(
-		m.ptr,
-		cDeviceName,
-		cPipelineName,
-		cFunctionName,
-		cChainName,
-	)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
-		return nil
-	}
-
-	return m.encodeCounters(counters)
+	return m.countersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "pipeline", Value: pipelineName},
+		{Key: "function", Value: functionName},
+		{Key: "chain", Value: chainName},
+		{Key: "kind", Value: "chain"},
+	}, nil)
 }
 
-// ModuleCounters returns module counters, optionally filtered by name.
+// ModuleCounters returns the module's predefined counters, optionally
+// filtered by name, or nil when the read fails.
 //
-// If counterQuery is nil or empty, returns all counters, a refused one none.
+// If counterQuery is nil or empty, returns all counters, a refused one
+// none. The module's per-rule counters live on runtime-kind storages;
+// read them through ModuleRuntimeCounters.
 func (m *DPConfig) ModuleCounters(
 	deviceName string,
 	pipelineName string,
@@ -195,63 +181,15 @@ func (m *DPConfig) ModuleCounters(
 	moduleName string,
 	counterQuery []string,
 ) []CounterInfo {
-	cDeviceName := C.CString(deviceName)
-	defer C.free(unsafe.Pointer(cDeviceName))
-	cPipelineName := C.CString(pipelineName)
-	defer C.free(unsafe.Pointer(cPipelineName))
-	cFunctionName := C.CString(functionName)
-	defer C.free(unsafe.Pointer(cFunctionName))
-	cChainName := C.CString(chainName)
-	defer C.free(unsafe.Pointer(cChainName))
-	cModuleType := C.CString(moduleType)
-	defer C.free(unsafe.Pointer(cModuleType))
-	cModuleName := C.CString(moduleName)
-	defer C.free(unsafe.Pointer(cModuleName))
-
-	if ValidateQuery(counterQuery) != nil {
-		return nil
-	}
-
-	var query *C.struct_counter_query
-	if len(counterQuery) > 0 {
-		cQuery := make([]*C.char, len(counterQuery))
-		for idx, name := range counterQuery {
-			cQuery[idx] = C.CString(name)
-		}
-		defer func() {
-			for _, ptr := range cQuery {
-				C.free(unsafe.Pointer(ptr))
-			}
-		}()
-
-		if C.yanet_counter_query_compile(
-			&cQuery[0],
-			C.size_t(len(cQuery)),
-			&query,
-			nil,
-		) != C.YANET_COUNTER_QUERY_OK {
-			return nil
-		}
-		defer C.yanet_counter_query_free(query)
-	}
-
-	counters := C.yanet_get_module_counters(
-		m.ptr,
-		cDeviceName,
-		cPipelineName,
-		cFunctionName,
-		cChainName,
-		cModuleType,
-		cModuleName,
-		query,
-	)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
-		return nil
-	}
-
-	return m.encodeCounters(counters)
+	return m.countersByTags([]CounterTag{
+		{Key: "device", Value: deviceName},
+		{Key: "pipeline", Value: pipelineName},
+		{Key: "function", Value: functionName},
+		{Key: "chain", Value: chainName},
+		{Key: "module_type", Value: moduleType},
+		{Key: "module_name", Value: moduleName},
+		{Key: "kind", Value: "module"},
+	}, counterQuery)
 }
 
 // ModuleRuntimeCounters returns the module's runtime counters — those
@@ -288,24 +226,17 @@ func (m *DPConfig) ModuleRuntimeCounters(
 	return counters, nil
 }
 
-// ObjectCounters returns the counters of an object identified by its type
-// and name.
+// ObjectCounters returns the counters of an object identified by its
+// type and name, or nil when the read fails.
 func (m *DPConfig) ObjectCounters(
 	objectType string,
 	objectName string,
 ) []CounterInfo {
-	cObjectType := C.CString(objectType)
-	defer C.free(unsafe.Pointer(cObjectType))
-	cObjectName := C.CString(objectName)
-	defer C.free(unsafe.Pointer(cObjectName))
-	counters := C.yanet_get_object_counters(m.ptr, cObjectType, cObjectName)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
-		return nil
-	}
-
-	return m.encodeCounters(counters)
+	return m.countersByTags([]CounterTag{
+		{Key: "object_type", Value: objectType},
+		{Key: "object_name", Value: objectName},
+		{Key: "kind", Value: "object"},
+	}, nil)
 }
 
 // RawWorkerCounters returns the worker counters, or nil when they cannot be read.

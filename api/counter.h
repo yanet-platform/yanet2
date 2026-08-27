@@ -74,61 +74,6 @@ yanet_counter_query_compile(
 void
 yanet_counter_query_free(struct counter_query *query);
 
-// The name-parameter reads below select storages by their entity-name
-// tags; entity names are truncated to the tag field sizes before the
-// comparison, matching any entity whose name shares the first
-// COUNTER_TAG_VALUE_LEN - 1 characters. Every name a configuration
-// accepts fits untruncated, so this only relaxes the match for
-// over-long caller-supplied names.
-struct counter_handle_list *
-yanet_get_device_counters(struct dp_config *dp_config, const char *device_name);
-
-struct counter_handle_list *
-yanet_get_pipeline_counters(
-	struct dp_config *dp_config,
-	const char *device_name,
-	const char *pipeline_name
-);
-
-struct counter_handle_list *
-yanet_get_function_counters(
-	struct dp_config *dp_config,
-	const char *device_name,
-	const char *pipeline_name,
-	const char *function_name
-);
-
-struct counter_handle_list *
-yanet_get_chain_counters(
-	struct dp_config *dp_config,
-	const char *device_name,
-	const char *pipeline_name,
-	const char *function_name,
-	const char *chain_name
-);
-
-// Get module counters, optionally filtered by the compiled name query.
-// Returns the module's predefined counters only; its per-rule counters
-// live on runtime-kind storages read through yanet_get_counters_by_tags.
-struct counter_handle_list *
-yanet_get_module_counters(
-	struct dp_config *dp_config,
-	const char *device_name,
-	const char *pipeline_name,
-	const char *function_name,
-	const char *chain_name,
-	const char *module_type,
-	const char *module_name,
-	const struct counter_query *query
-);
-
-struct counter_handle_list *
-yanet_get_object_counters(
-	struct dp_config *dp_config,
-	const char *object_type,
-	const char *object_name
-);
-
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config);
 
@@ -201,46 +146,6 @@ yanet_get_counter_values(
 	uint64_t *values_out
 );
 
-// Return counters that satisfy every predicate in tags and the compiled
-// name query. Pass tag_count == 0 to impose no per-tag constraint and a
-// NULL query to impose no name constraint.
-//
-// Each worker's counter storage registry is matched independently and
-// the result is the union across workers: every returned counter spans
-// instance_count == worker_count instances, and a worker whose registry
-// does not carry the counter contributes zero values for its instance.
-//
-// Each counter_tag is a predicate against the counter's tags, with
-// the check encoded in value: an empty string requires the tag to be
-// absent, "*" requires the tag to be present with any value, and any
-// other string requires the tag to be present with exactly that
-// value.
-//
-// Recognized keys are "device", "pipeline", "function", "chain",
-// "module_type", "module_name", and "kind". The "kind" value names the
-// owner level: "device", "pipeline", "function", "chain", "module",
-// "runtime", or "object". A "runtime" storage is module-owned and
-// additionally carries a "config" tag naming its counter registry.
-//
-// A tag is rejected with err filled and NULL returned if any of the
-// following holds: key is unrecognized; or tags contains another
-// predicate with the same key. Keys and values are copied into the
-// tags' fixed-size fields, truncating anything longer than
-// COUNTER_TAG_KEY_LEN - 1 / COUNTER_TAG_VALUE_LEN - 1 characters; the
-// Go bindings reject such tags before the call instead.
-//
-// The returned list must be released with yanet_counter_handle_list_free.
-// On failure NULL is returned and err is filled; an empty match is a
-// non-NULL empty list.
-struct counter_handle_list *
-yanet_get_counters_by_tags(
-	struct dp_config *dp_config,
-	const struct counter_tag *tags,
-	size_t tag_count,
-	const struct counter_query *query,
-	yanet_error **err
-);
-
 // One worker's independently matched counter set.
 //
 // counters holds only that worker's snapshot: its instance_count is 1
@@ -261,12 +166,31 @@ struct counter_worker_set_list {
 };
 
 // Return each worker's counters that satisfy every predicate in tags
-// and the compiled name query, matched against that worker's own
-// counter storage registry.
+// and the compiled name query. Pass tag_count == 0 to impose no
+// per-tag constraint and a NULL query to impose no name constraint.
 //
-// The tag predicates and their value semantics are those of
-// yanet_get_counters_by_tags; unlike it, no cross-worker union is
-// taken, so the sets may differ from worker to worker.
+// Each worker's counter storage registry is matched independently, so
+// the sets may differ from worker to worker; the union across workers
+// is the caller's to build.
+//
+// Each counter_tag is a predicate against the counter's tags, with the
+// check encoded in value: an empty string requires the tag to be
+// absent, "*" requires the tag to be present with any value, and any
+// other string requires the tag to be present with exactly that
+// value.
+//
+// Recognized keys are "device", "pipeline", "function", "chain",
+// "module_type", "module_name", and "kind". The "kind" value names the
+// owner level: "device", "pipeline", "function", "chain", "module",
+// "runtime", or "object". A "runtime" storage is module-owned and
+// additionally carries a "config" tag naming its counter registry.
+//
+// A tag is rejected with err filled and NULL returned if any of the
+// following holds: key is unrecognized; or tags contains another
+// predicate with the same key. Keys and values are copied into the
+// tags' fixed-size fields, truncating anything longer than
+// COUNTER_TAG_KEY_LEN - 1 / COUNTER_TAG_VALUE_LEN - 1 characters; the
+// Go bindings reject such tags before the call instead.
 //
 // The returned list must be released with
 // yanet_counter_worker_set_list_free. On failure NULL is returned and

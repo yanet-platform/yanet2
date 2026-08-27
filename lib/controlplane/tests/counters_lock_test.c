@@ -51,7 +51,7 @@
 
 struct reader_args {
 	struct dp_config *dp_config;
-	struct counter_handle_list *list;
+	struct counter_worker_set_list *sets;
 	// Cycle number of the read currently in flight.
 	//
 	// Bumped right before each read call. A companion flag stays set for
@@ -78,22 +78,23 @@ reader_thread(void *arg) {
 		atomic_store_explicit(
 			&args->in_progress, true, memory_order_release
 		);
-		struct counter_handle_list *list = yanet_get_counters_by_tags(
-			args->dp_config, tags, 2, NULL, NULL
-		);
+		struct counter_worker_set_list *sets =
+			yanet_get_counters_by_tags_per_worker(
+				args->dp_config, tags, 2, NULL, NULL
+			);
 		atomic_store_explicit(
 			&args->in_progress, false, memory_order_release
 		);
-		if (list == NULL) {
+		if (sets == NULL) {
 			atomic_store_explicit(
 				&args->failed, true, memory_order_release
 			);
 			break;
 		}
 		if (i + 1 == LOCK_TEST_READ_CYCLES) {
-			args->list = list;
+			args->sets = sets;
 		} else {
-			yanet_counter_handle_list_free(list);
+			yanet_counter_worker_set_list_free(sets);
 		}
 	}
 	atomic_store_explicit(&args->done, true, memory_order_release);
@@ -212,14 +213,19 @@ test_lock_released_during_value_copy(struct yanet_shm *shm) {
 		LOCK_TEST_READ_CYCLES
 	);
 
-	TEST_ASSERT_NOT_NULL(args.list, "yanet_get_counters_by_tags failed");
+	TEST_ASSERT_NOT_NULL(
+		args.sets, "yanet_get_counters_by_tags_per_worker failed"
+	);
+	struct counter_worker_set *final_set =
+		yanet_get_counter_worker_set(args.sets, 0);
+	TEST_ASSERT_NOT_NULL(final_set, "worker 0 set is missing");
 	TEST_ASSERT_EQUAL(
-		args.list->count,
+		final_set->counters->count,
 		(uint64_t)LOCK_TEST_PIPELINE_COUNT *
 			LOCK_TEST_COUNTERS_PER_PIPELINE,
 		"unexpected matched counter count"
 	);
-	yanet_counter_handle_list_free(args.list);
+	yanet_counter_worker_set_list_free(args.sets);
 
 	agent_detach(agent);
 	return TEST_SUCCESS;
@@ -255,13 +261,15 @@ race_reader_thread(void *arg) {
 	uint64_t expected_matches = (uint64_t)RACE_TEST_PIPELINE_COUNT *
 				    LOCK_TEST_COUNTERS_PER_PIPELINE;
 	for (uint64_t i = 0; i < RACE_TEST_READ_CYCLES; ++i) {
-		struct counter_handle_list *list = yanet_get_counters_by_tags(
-			state->dp_config, tags, 2, NULL, NULL
-		);
-		if (list == NULL || list->count != expected_matches) {
-			if (list != NULL) {
-				yanet_counter_handle_list_free(list);
-			}
+		struct counter_worker_set_list *sets =
+			yanet_get_counters_by_tags_per_worker(
+				state->dp_config, tags, 2, NULL, NULL
+			);
+		struct counter_worker_set *set0 =
+			sets != NULL ? yanet_get_counter_worker_set(sets, 0)
+				     : NULL;
+		if (set0 == NULL || set0->counters->count != expected_matches) {
+			yanet_counter_worker_set_list_free(sets);
 			atomic_store_explicit(
 				&state->reader_failed,
 				true,
@@ -269,7 +277,7 @@ race_reader_thread(void *arg) {
 			);
 			break;
 		}
-		yanet_counter_handle_list_free(list);
+		yanet_counter_worker_set_list_free(sets);
 		state->reader_iterations = i + 1;
 	}
 	atomic_store_explicit(&state->stop, true, memory_order_release);
@@ -435,13 +443,14 @@ test_repeated_swap_no_generation_leak(struct yanet_shm *shm) {
 	};
 
 	for (unsigned i = 0; i < LEAK_TEST_CYCLES; ++i) {
-		struct counter_handle_list *list = yanet_get_counters_by_tags(
-			dp_config, tags, 2, NULL, NULL
-		);
+		struct counter_worker_set_list *sets =
+			yanet_get_counters_by_tags_per_worker(
+				dp_config, tags, 2, NULL, NULL
+			);
 		TEST_ASSERT_NOT_NULL(
-			list, "read failed unexpectedly at cycle %u", i
+			sets, "read failed unexpectedly at cycle %u", i
 		);
-		yanet_counter_handle_list_free(list);
+		yanet_counter_worker_set_list_free(sets);
 
 		TEST_ASSERT_SUCCESS(
 			install_pipelines(
