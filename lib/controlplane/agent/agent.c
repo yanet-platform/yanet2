@@ -1,5 +1,6 @@
 #include "agent.h"
 
+#include <assert.h>
 #include <linux/mman.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,6 @@
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/zone.h"
-#include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
@@ -114,6 +114,63 @@ dataplane_instance_worker_count(struct dp_config *dp_config) {
 static void
 agent_free_unused_agents_locked(struct agent *agent);
 
+static int
+allocate_arenas(
+	struct memory_context *memory_context,
+	struct agent_arena *arenas,
+	size_t arena_count,
+	uint64_t size,
+	yanet_error **err
+) {
+	(void)arena_count;
+	size_t added = 0;
+	uint64_t left = size;
+	while (left > 0) {
+		assert(added < arena_count);
+
+		uint64_t arena_size = left > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+					      ? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+					      : left;
+
+		void *arena = memory_balloc(memory_context, arena_size);
+		if (arena == NULL) {
+			yanet_error_add(
+				err, "failed to allocate memory for arena"
+			);
+			for (uint64_t idx = 0; idx < added; ++idx) {
+				struct agent_arena *reserved = &arenas[idx];
+				memory_bfree(
+					memory_context,
+					ADDR_OF(&reserved->data),
+					reserved->size
+				);
+			}
+			return -1;
+		}
+
+		SET_OFFSET_OF(&arenas[added].data, arena);
+		arenas[added].size = arena_size;
+		++added;
+
+		left -= arena_size;
+	}
+
+	return 0;
+}
+
+static size_t
+calculate_arena_count(uint64_t size) {
+	/*
+	 * FIXME: the code bellow tries to allocate memory_limit bytes
+	 * using max possible chunk size what breaks allocator encapsulation.
+	 * Alternative multi-alloc api should be implemented.
+	 */
+	if (size == 0) {
+		return 0;
+	}
+	return (size - 1) / MEMORY_BLOCK_ALLOCATOR_MAX_SIZE + 1;
+}
+
 struct agent *
 agent_attach(
 	struct yanet_shm *shm,
@@ -172,14 +229,7 @@ agent_attach(
 		&new_agent->block_allocator
 	);
 
-	/*
-	 * FIXME: the code bellow tries to allocate memory_limit bytes
-	 * using max possible chunk size what breaks allocator encapsulation.
-	 * Alternative multi-alloc api should be implemented.
-	 */
-	uint64_t arena_count =
-		(memory_limit + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
-		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
+	uint64_t arena_count = calculate_arena_count(memory_limit);
 	struct agent_arena *arenas = (struct agent_arena *)memory_balloc(
 		&cp_config->memory_context,
 		sizeof(struct agent_arena) * arena_count
@@ -192,32 +242,33 @@ agent_attach(
 	}
 
 	memset(arenas, 0, sizeof(struct agent_arena) * arena_count);
-	SET_OFFSET_OF(&new_agent->arenas, arenas);
 
-	while (new_agent->arena_count < arena_count) {
-		uint64_t arena_size =
-			memory_limit > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-				? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-				: memory_limit;
-
-		void *arena =
-			memory_balloc(&cp_config->memory_context, arena_size);
-		if (arena == NULL) {
-			yanet_error_add(
-				err, "failed to allocate memory for arena"
-			);
-			agent_cleanup(new_agent);
-			new_agent = NULL;
-			goto unlock;
-		}
-		block_allocator_put_arena(
-			&new_agent->block_allocator, arena, arena_size
+	if (allocate_arenas(
+		    &cp_config->memory_context,
+		    arenas,
+		    arena_count,
+		    memory_limit,
+		    err
+	    ) != 0) {
+		memory_bfree(
+			&cp_config->memory_context,
+			arenas,
+			sizeof(struct agent_arena) * arena_count
 		);
-		SET_OFFSET_OF(&arenas[new_agent->arena_count].data, arena);
-		arenas[new_agent->arena_count].size = arena_size;
-		new_agent->arena_count++;
+		agent_cleanup(new_agent);
+		new_agent = NULL;
+		goto unlock;
+	}
 
-		memory_limit -= arena_size;
+	SET_OFFSET_OF(&new_agent->arenas, arenas);
+	new_agent->arena_count = arena_count;
+
+	for (uint64_t arena_idx = 0; arena_idx < arena_count; ++arena_idx) {
+		block_allocator_put_arena(
+			&new_agent->block_allocator,
+			ADDR_OF(&arenas[arena_idx].data),
+			arenas[arena_idx].size
+		);
 	}
 
 	struct cp_agent_registry *old_registry =
@@ -287,94 +338,130 @@ unlock:
 	return new_agent;
 }
 
+uint64_t
+agent_memory_limit(struct agent *agent) {
+	return agent->memory_limit;
+}
+
 int
-agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
+agent_resize(struct agent *agent, uint64_t new_size, yanet_error **err) {
 	int ret = 0;
+
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	struct memory_context *cp_memory_context = &cp_config->memory_context;
+
 	cp_config_lock(cp_config);
-	size_t need_arena_count =
-		(new_size + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
-		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
 
-	// TODO: handle case
-	// when need_arena_count == agent->arena_count == 1
-	// we need add one more arena in this case.
-
-	if (need_arena_count > agent->arena_count) {
-		struct agent_arena *arenas = memory_balloc(
-			&cp_config->memory_context,
-			need_arena_count * sizeof(struct agent_arena)
+	// An agent that draws straight from the controlplane pool owns no
+	// arena of its own and cannot be grown here.
+	//
+	// Built-in services are set up that way.
+	if (ADDR_OF(&agent->memory_context.block_allocator) !=
+	    &agent->block_allocator) {
+		yanet_error_add(
+			err,
+			"agent \"%s\" draws memory from the controlplane "
+			"pool and cannot be resized",
+			agent->name
 		);
-		if (arenas == NULL) {
-			yanet_error_add(err, "failed to allocate arenas array");
+		ret = -1;
+		goto unlock;
+	}
+
+	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
+	uint64_t arena_count = agent->arena_count;
+
+	uint64_t current_size = 0;
+	for (uint64_t arena_idx = 0; arena_idx < arena_count; ++arena_idx) {
+		current_size += arenas[arena_idx].size;
+	}
+
+	// Shrinking is not offered.
+	if (new_size < current_size) {
+		yanet_error_add(
+			err,
+			"agent memory cannot shrink: %lu bytes requested, %lu "
+			"already reserved",
+			new_size,
+			current_size
+		);
+		ret = -1;
+		goto unlock;
+	}
+
+	uint64_t needed = new_size - current_size;
+	uint64_t misaligned = needed % MEMORY_BLOCK_ALLOCATOR_MIN_SIZE;
+	if (misaligned != 0) {
+		uint64_t pad = MEMORY_BLOCK_ALLOCATOR_MIN_SIZE - misaligned;
+		if (new_size > UINT64_MAX - pad) {
+			yanet_error_add(
+				err,
+				"agent memory cannot reach %lu bytes",
+				new_size
+			);
 			ret = -1;
 			goto unlock;
 		}
-		size_t need_alloc = need_arena_count - agent->arena_count;
-		size_t alloc;
-		for (alloc = 0; alloc < need_alloc; ++alloc) {
-			void *arena = memory_balloc(
-				&cp_config->memory_context,
-				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-			);
-			if (arena == NULL) {
-				yanet_error_add(
-					err,
-					"failed to allocate arena of size %u "
-					"bytes",
-					MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-				);
-				for (size_t i = 0; i < alloc; ++i) {
-					memory_bfree(
-						&cp_config->memory_context,
-						ADDR_OF(&arenas[agent->arena_count +
-								i]
-								 .data),
-						MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-					);
-				}
-				memory_bfree(
-					&cp_config->memory_context,
-					arenas,
-					need_arena_count *
-						sizeof(struct agent_arena)
-				);
-				ret = -1;
-				goto unlock;
-			}
-			SET_OFFSET_OF(
-				&arenas[agent->arena_count + alloc].data, arena
-			);
-			arenas[agent->arena_count + alloc].size =
-				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
-		}
-
-		// put arenas in allocator
-		for (size_t i = 0; i < need_alloc; ++i) {
-			void *arena =
-				ADDR_OF(&arenas[agent->arena_count + i].data);
-			block_allocator_put_arena(
-				&agent->block_allocator,
-				arena,
-				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-			);
-		}
-
-		struct agent_arena *prev_arenas = ADDR_OF(&agent->arenas);
-		for (size_t i = 0; i < agent->arena_count; ++i) {
-			SET_OFFSET_OF(
-				&arenas[i].data, ADDR_OF(&prev_arenas[i].data)
-			);
-			arenas[i].size = prev_arenas[i].size;
-		}
-		SET_OFFSET_OF(&agent->arenas, arenas);
-		memory_bfree(
-			&cp_config->memory_context,
-			prev_arenas,
-			agent->arena_count * sizeof(struct agent_arena)
-		);
-		agent->arena_count = need_arena_count;
+		needed += pad;
 	}
+	if (needed == 0) {
+		goto unlock;
+	}
+
+	uint64_t added_count = calculate_arena_count(needed);
+	uint64_t new_arena_count = arena_count + added_count;
+
+	struct agent_arena *new_arenas = (struct agent_arena *)memory_balloc(
+		cp_memory_context, sizeof(struct agent_arena) * new_arena_count
+	);
+	if (new_arenas == NULL) {
+		yanet_error_add(err, "failed to allocate memory for arenas");
+		ret = -1;
+		goto unlock;
+	}
+	memset(new_arenas, 0, sizeof(struct agent_arena) * new_arena_count);
+
+	if (allocate_arenas(
+		    cp_memory_context,
+		    new_arenas + arena_count,
+		    added_count,
+		    needed,
+		    err
+	    ) != 0) {
+		memory_bfree(
+			cp_memory_context,
+			new_arenas,
+			sizeof(struct agent_arena) * new_arena_count
+		);
+		ret = -1;
+		goto unlock;
+	}
+
+	for (uint64_t arena_idx = 0; arena_idx < arena_count; ++arena_idx) {
+		EQUATE_OFFSET(
+			&new_arenas[arena_idx].data, &arenas[arena_idx].data
+		);
+		new_arenas[arena_idx].size = arenas[arena_idx].size;
+	}
+
+	SET_OFFSET_OF(&agent->arenas, new_arenas);
+	agent->arena_count = new_arena_count;
+	agent->memory_limit = current_size + needed;
+
+	for (uint64_t idx = 0; idx < added_count; ++idx) {
+		struct agent_arena *reserved = &new_arenas[arena_count + idx];
+		block_allocator_put_arena(
+			&agent->block_allocator,
+			ADDR_OF(&reserved->data),
+			reserved->size
+		);
+	}
+
+	memory_bfree(
+		cp_memory_context,
+		arenas,
+		sizeof(struct agent_arena) * arena_count
+	);
 
 unlock:
 	cp_config_unlock(cp_config);

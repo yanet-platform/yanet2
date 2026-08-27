@@ -18,10 +18,12 @@ package ffi
 //#include "api/agent.h"
 //#include "lib/controlplane/agent/agent.h"
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 )
 
@@ -133,6 +135,31 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 	}
 
 	return nil
+}
+
+// Resize grows the agent's shared memory to at least the given total size.
+//
+// The size is a total rather than an increment: asking for what the agent
+// already holds changes nothing, and asking for less fails. An agent that
+// draws memory straight from the controlplane pool cannot be grown.
+func (m *Agent) Resize(newSize datasize.ByteSize) error {
+	var cErr *C.yanet_error
+	rc := C.agent_resize(m.ptr, C.uint64_t(newSize), &cErr)
+	if rc != 0 {
+		return fmt.Errorf(
+			"failed to resize agent %q to %s: %w",
+			m.name,
+			newSize,
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
+	}
+
+	return nil
+}
+
+// MemoryLimit reports the shared memory currently reserved for the agent.
+func (m *Agent) MemoryLimit() datasize.ByteSize {
+	return datasize.ByteSize(C.agent_memory_limit(m.ptr))
 }
 
 func (m *Agent) DPConfig() *DPConfig {
