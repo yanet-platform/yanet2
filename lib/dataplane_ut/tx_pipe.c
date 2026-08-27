@@ -84,7 +84,45 @@ int
 dataplane_ut_tx_pipe_push(
 	struct dataplane_ut_tx_pipe *fixture, struct rte_mbuf *mbuf
 ) {
-	return worker_tx_pipe_push(&fixture->tx_pipe, mbuf);
+	struct rte_mbuf *rejected[1];
+	size_t rejected_count = 0;
+
+	return worker_tx_pipe_push_bulk(
+		       &fixture->tx_pipe, &mbuf, 1, rejected, &rejected_count
+	       ) == 1
+		       ? 0
+		       : -1;
+}
+
+int
+dataplane_ut_tx_pipe_stage(
+	struct dataplane_ut_tx_pipe *fixture, struct rte_mbuf *mbuf
+) {
+	return worker_tx_pipe_stage(&fixture->tx_pipe, mbuf) ? 0 : -1;
+}
+
+size_t
+dataplane_ut_tx_pipe_flush(
+	struct dataplane_ut_tx_pipe *fixture,
+	struct rte_mbuf **rejected,
+	size_t *rejected_count
+) {
+	return worker_tx_pipe_flush(
+		&fixture->tx_pipe, rejected, rejected_count
+	);
+}
+
+size_t
+dataplane_ut_tx_pipe_push_bulk(
+	struct dataplane_ut_tx_pipe *fixture,
+	struct rte_mbuf **mbufs,
+	size_t count,
+	struct rte_mbuf **rejected,
+	size_t *rejected_count
+) {
+	return worker_tx_pipe_push_bulk(
+		&fixture->tx_pipe, mbufs, count, rejected, rejected_count
+	);
 }
 
 struct dataplane_ut_tx_pipe_transmit_ctx {

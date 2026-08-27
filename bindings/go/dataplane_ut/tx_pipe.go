@@ -58,6 +58,63 @@ func (m *TxPipeFixture) Push(mbuf *TxPipeMbuf) error {
 	return nil
 }
 
+// TxPipeBatchSize mirrors the pipe's batch capacity, the most one Flush can
+// hold.
+const TxPipeBatchSize = 32
+
+// PushBulk pushes a batch onto the fixture's pipe in one call, returning how
+// many were accepted and the mbufs that did not enter the pipe.
+//
+// A short return is a normal outcome: the pipe or its deferred-free ring ran
+// out of room, or a chain's segments disagreed on a refcount and was refused
+// on its own. The rejected mbufs remain the caller's.
+func (m *TxPipeFixture) PushBulk(mbufs []*TxPipeMbuf) (int, []*TxPipeMbuf) {
+	if len(mbufs) == 0 {
+		return 0, nil
+	}
+
+	ptrs := make([]*C.struct_rte_mbuf, len(mbufs))
+	for idx, mbuf := range mbufs {
+		ptrs[idx] = mbuf.ptr
+	}
+
+	rejected := make([]*C.struct_rte_mbuf, len(mbufs))
+	var count C.size_t
+
+	pushed := int(C.dataplane_ut_tx_pipe_push_bulk(
+		m.ptr, &ptrs[0], C.size_t(len(ptrs)), &rejected[0], &count,
+	))
+
+	out := make([]*TxPipeMbuf, int(count))
+	for idx := range out {
+		out[idx] = &TxPipeMbuf{ptr: rejected[idx]}
+	}
+
+	return pushed, out
+}
+
+// Stage adds one mbuf to the pipe's pending batch, reporting false when the
+// batch is already full and owes a Flush.
+func (m *TxPipeFixture) Stage(mbuf *TxPipeMbuf) bool {
+	return C.dataplane_ut_tx_pipe_stage(m.ptr, mbuf.ptr) == 0
+}
+
+// Flush hands the staged batch to the pipe, returning how many it accepted
+// and the mbufs it refused, which never entered the pipe.
+func (m *TxPipeFixture) Flush() (int, []*TxPipeMbuf) {
+	rejected := make([]*C.struct_rte_mbuf, TxPipeBatchSize)
+	var count C.size_t
+
+	pushed := int(C.dataplane_ut_tx_pipe_flush(m.ptr, &rejected[0], &count))
+
+	out := make([]*TxPipeMbuf, int(count))
+	for idx := range out {
+		out[idx] = &TxPipeMbuf{ptr: rejected[idx]}
+	}
+
+	return pushed, out
+}
+
 // Drain pops the fixture's pipe, handing at most accept mbufs of each popped
 // burst to a stub transmit and freeing whatever it did not accept — the same
 // rejected-tail path a short real NIC tx_burst would take.
@@ -127,4 +184,9 @@ func (m *TxPipeMbuf) AddRefcnt(delta int16) {
 // double-frees it.
 func (m *TxPipeMbuf) CompleteSegment() {
 	C.dataplane_ut_tx_pipe_complete_segment(m.ptr)
+}
+
+// Same reports whether both handles refer to one mbuf.
+func (m *TxPipeMbuf) Same(other *TxPipeMbuf) bool {
+	return m.ptr == other.ptr
 }

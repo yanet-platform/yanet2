@@ -8,45 +8,86 @@
 
 struct worker_push_ctx {
 	struct worker_tx_pipe *tx_pipe;
-	struct rte_mbuf *mbuf;
+	struct rte_mbuf **mbufs;
+	size_t count;
+	size_t cursor;
+	struct rte_mbuf **rejected;
+	size_t *rejected_count;
 };
 
+// Pin every segment of one chain, recording the refcount they shared
+// beforehand.
+//
+// Every segment must start from one baseline, the value reclaim checks each
+// against: one above it never sinks back down and wedges the pipe, one below
+// it already reads as reclaimable while still in flight. Walked by hand
+// rather than pinning the chain blind, which offers no unwind on mismatch.
+// Returns false with every pin already taken undone.
+static bool
+worker_pin_chain(struct rte_mbuf *mbuf, uint64_t *ref_cnt) {
+	uint64_t baseline = rte_mbuf_refcnt_read(mbuf);
+
+	struct rte_mbuf *seg = mbuf;
+	do {
+		if (rte_mbuf_refcnt_read(seg) != baseline) {
+			for (struct rte_mbuf *pinned = mbuf; pinned != seg;
+			     pinned = pinned->next) {
+				rte_mbuf_refcnt_update(pinned, -1);
+			}
+			return false;
+		}
+		rte_mbuf_refcnt_update(seg, 1);
+	} while ((seg = seg->next) != NULL);
+
+	*ref_cnt = baseline;
+	return true;
+}
+
+// Fill as much of the offered run of ring slots as the batch and the
+// deferred-free ring allow.
+//
+// A chain that cannot be pinned is set aside and the walk carries on, so one
+// bad chain costs itself a place in the batch and nothing more.
 static size_t
 worker_connection_push_cb(void **item, size_t count, void *data) {
 	struct worker_push_ctx *push_ctx = (struct worker_push_ctx *)data;
 	struct worker_tx_pipe *tx_pipe = push_ctx->tx_pipe;
 
-	if (count > 0) {
-		// Every segment must share one ref_cnt, the baseline
-		// worker_pending_mbuf_ready checks each segment against: one
-		// above it never sinks back down and wedges the pipe, one
-		// below it already reads as reclaimable while still in flight.
-		// Walked by hand rather than rte_pktmbuf_refcnt_update,
-		// which pins every segment blind with no unwind on mismatch.
-		uint64_t ref_cnt = rte_mbuf_refcnt_read(push_ctx->mbuf);
-		struct rte_mbuf *seg = push_ctx->mbuf;
-		do {
-			if (rte_mbuf_refcnt_read(seg) != ref_cnt) {
-				for (struct rte_mbuf *pinned = push_ctx->mbuf;
-				     pinned != seg;
-				     pinned = pinned->next) {
-					rte_mbuf_refcnt_update(pinned, -1);
-				}
-				return 0;
-			}
-			rte_mbuf_refcnt_update(seg, 1);
-		} while ((seg = seg->next) != NULL);
+	// Backpressure: never outrun the deferred-free ring, which has to hold
+	// every pushed mbuf until its consumer-side tx completes.
+	uint64_t capacity = (uint64_t)tx_pipe->pending_mask + 1;
+	uint64_t in_flight = tx_pipe->pending_stop - tx_pipe->pending_start;
+	uint64_t pending_free = in_flight < capacity ? capacity - in_flight : 0;
 
-		memcpy(item, &push_ctx->mbuf, sizeof(struct rte_mbuf *));
+	size_t limit = count;
+	if (limit > pending_free) {
+		limit = pending_free;
+	}
+
+	size_t written = 0;
+	while (written < limit && push_ctx->cursor < push_ctx->count) {
+		struct rte_mbuf *mbuf = push_ctx->mbufs[push_ctx->cursor];
+
+		uint64_t ref_cnt;
+		if (!worker_pin_chain(mbuf, &ref_cnt)) {
+			push_ctx->rejected[(*push_ctx->rejected_count)++] =
+				mbuf;
+			++push_ctx->cursor;
+			continue;
+		}
+
+		memcpy(item + written, &mbuf, sizeof(struct rte_mbuf *));
 
 		uint32_t ofs = tx_pipe->pending_stop & tx_pipe->pending_mask;
-		tx_pipe->pending_mbufs[ofs].mbuf = push_ctx->mbuf;
+		tx_pipe->pending_mbufs[ofs].mbuf = mbuf;
 		tx_pipe->pending_mbufs[ofs].ref_cnt = ref_cnt;
 		++tx_pipe->pending_stop;
 
-		return 1;
+		++written;
+		++push_ctx->cursor;
 	}
-	return 0;
+
+	return written;
 }
 
 static size_t
@@ -75,6 +116,7 @@ worker_tx_pipe_init(struct worker_tx_pipe *tx_pipe) {
 	tx_pipe->pending_mask = pending_capacity - 1;
 	tx_pipe->pending_start = 0;
 	tx_pipe->pending_stop = 0;
+	tx_pipe->batch_count = 0;
 
 	return 0;
 }
@@ -85,26 +127,79 @@ worker_tx_pipe_fini(struct worker_tx_pipe *tx_pipe) {
 	data_pipe_fini(&tx_pipe->pipe);
 }
 
-int
-worker_tx_pipe_push(struct worker_tx_pipe *tx_pipe, struct rte_mbuf *mbuf) {
-	// Backpressure: drop when this pipe's pending ring is full.
-	if (tx_pipe->pending_stop - tx_pipe->pending_start >
-	    tx_pipe->pending_mask) {
-		return -1;
-	}
+size_t
+worker_tx_pipe_push_bulk(
+	struct worker_tx_pipe *tx_pipe,
+	struct rte_mbuf **mbufs,
+	size_t count,
+	struct rte_mbuf **rejected,
+	size_t *rejected_count
+) {
+	*rejected_count = 0;
 
 	struct worker_push_ctx push_ctx = {
 		.tx_pipe = tx_pipe,
-		.mbuf = mbuf,
+		.mbufs = mbufs,
+		.count = count,
+		.cursor = 0,
+		.rejected = rejected,
+		.rejected_count = rejected_count,
 	};
 
-	if (data_pipe_item_push(
-		    &tx_pipe->pipe, worker_connection_push_cb, &push_ctx
-	    ) != 1) {
-		return -1;
+	// A batch straddling the ring's wrap needs a second round trip to
+	// place its tail, since only the slots before the boundary are offered.
+	//
+	// Progress is how far through the batch the walk got, not how many it
+	// placed, since setting a chain aside advances without placing
+	// anything.
+	size_t pushed = 0;
+	while (push_ctx.cursor < count) {
+		size_t before = push_ctx.cursor;
+
+		pushed += data_pipe_item_push(
+			&tx_pipe->pipe, worker_connection_push_cb, &push_ctx
+		);
+
+		if (push_ctx.cursor == before) {
+			break;
+		}
 	}
 
-	return 0;
+	// Whatever the pipe had no room for never entered it and stays the
+	// caller's, collected in the order the batch was given.
+	for (size_t idx = push_ctx.cursor; idx < count; ++idx) {
+		rejected[(*rejected_count)++] = mbufs[idx];
+	}
+
+	return pushed;
+}
+
+bool
+worker_tx_pipe_stage(struct worker_tx_pipe *tx_pipe, struct rte_mbuf *mbuf) {
+	if (tx_pipe->batch_count == WORKER_TX_BATCH_SIZE) {
+		return false;
+	}
+
+	tx_pipe->batch[tx_pipe->batch_count++] = mbuf;
+	return true;
+}
+
+size_t
+worker_tx_pipe_flush(
+	struct worker_tx_pipe *tx_pipe,
+	struct rte_mbuf **rejected,
+	size_t *rejected_count
+) {
+	size_t pushed = worker_tx_pipe_push_bulk(
+		tx_pipe,
+		tx_pipe->batch,
+		tx_pipe->batch_count,
+		rejected,
+		rejected_count
+	);
+
+	tx_pipe->batch_count = 0;
+	return pushed;
 }
 
 // True once every segment has sunk back to ref_cnt: the consumer freed

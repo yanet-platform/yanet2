@@ -9,7 +9,7 @@
 
 #include "common/data_pipe.h"
 #include "lib/dataplane/packet/packet.h"
-#include "lib/dataplane/worker/tx_pipe.h"
+#include "lib/dataplane/worker/tx_stage.h"
 
 struct dataplane;
 struct dataplane_instance;
@@ -18,11 +18,6 @@ struct dp_worker;
 
 struct worker_read_ctx {
 	uint16_t read_size;
-};
-
-struct worker_tx_connection {
-	uint32_t count;
-	struct worker_tx_pipe *pipes;
 };
 
 struct worker_write_ctx {

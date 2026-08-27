@@ -25,12 +25,43 @@ dataplane_ut_tx_pipe_alloc_mbuf(
 	struct dataplane_ut_tx_pipe *fixture, size_t seg_count
 );
 
-// Push mbuf onto the fixture's pipe via worker_tx_pipe_push.
+// Push one mbuf onto the fixture's pipe as a single-element batch.
 //
 // Returns 0 on success, -1 if the pipe or its deferred-free ring is full.
 int
 dataplane_ut_tx_pipe_push(
 	struct dataplane_ut_tx_pipe *fixture, struct rte_mbuf *mbuf
+);
+
+// Stage one mbuf on the fixture's pipe via worker_tx_pipe_stage.
+//
+// Returns 0 when staged, -1 when the batch is already full.
+int
+dataplane_ut_tx_pipe_stage(
+	struct dataplane_ut_tx_pipe *fixture, struct rte_mbuf *mbuf
+);
+
+// Flush the fixture's staged batch via worker_tx_pipe_flush.
+//
+// Returns how many the pipe accepted and fills rejected, which must have
+// room for a whole batch.
+size_t
+dataplane_ut_tx_pipe_flush(
+	struct dataplane_ut_tx_pipe *fixture,
+	struct rte_mbuf **rejected,
+	size_t *rejected_count
+);
+
+// Push a batch onto the fixture's pipe via worker_tx_pipe_push_bulk.
+//
+// Returns how many were accepted; the rest stay the caller's.
+size_t
+dataplane_ut_tx_pipe_push_bulk(
+	struct dataplane_ut_tx_pipe *fixture,
+	struct rte_mbuf **mbufs,
+	size_t count,
+	struct rte_mbuf **rejected,
+	size_t *rejected_count
 );
 
 // Drain the fixture's pipe via worker_tx_pipe_drain, transmitting only the

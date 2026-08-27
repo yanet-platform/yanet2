@@ -390,7 +390,7 @@ main(void) {
 		}
 	}
 
-	free(pool);
+	test_mempool_free(pool);
 
 	if (failed == 0) {
 		LOG(INFO, "all %zu worker_clone tests passed", total);

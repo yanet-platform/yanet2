@@ -141,25 +141,6 @@ worker_tx_transmit_cb(struct rte_mbuf **mbufs, size_t count, void *data) {
 	return written;
 }
 
-/*
- * FIXME: the function below sends a packet to a different worker
- * using corresponding data pipe so the routine name might be confusing.
- */
-static int
-worker_send_to_port(struct dataplane_worker *worker, struct packet *packet) {
-	struct worker_tx_connection *tx_conn =
-		worker->write_ctx.tx_connections + packet->tx_device_id;
-
-	if (!tx_conn->count) {
-		return -1;
-	}
-
-	struct worker_tx_pipe *tx_pipe =
-		tx_conn->pipes + packet->hash % tx_conn->count;
-
-	return worker_tx_pipe_push(tx_pipe, packet_to_mbuf(packet));
-}
-
 static void
 worker_collect_from_port(struct dataplane_worker *worker) {
 	for (uint32_t conn_idx = 0; conn_idx < worker->dataplane->device_count;
@@ -200,8 +181,6 @@ static void
 worker_write(
 	struct dataplane_worker *worker, struct packet_front *packet_front
 ) {
-	struct dp_config *dp_config = worker->instance->dp_config;
-
 	struct packet_list failed;
 	packet_list_init(&failed);
 
@@ -225,28 +204,32 @@ worker_write(
 			to_write = 0;
 		}
 
-		if (packet->tx_device_id >=
-		    dp_config->dp_topology.device_count) {
-			packet_list_add(&failed, packet);
-			continue;
-		}
-
 		if (packet->tx_device_id == worker->device_id) {
 			mbufs[to_write] = packet_to_mbuf(packet);
 			++to_write;
 		} else {
-			if (worker_send_to_port(worker, packet)) {
-				*(worker->dp_worker->remote_tx_drops) += 1;
-				packet_list_add(&failed, packet);
-			} else {
-				*(worker->dp_worker->remote_tx_count) += 1;
-			}
+			worker_tx_stage(
+				worker->write_ctx.tx_connections,
+				worker->dataplane->device_count,
+				worker->dp_worker,
+				packet,
+				&failed
+			);
 		}
 	}
 
 	if (to_write > 0) {
 		worker_submit_burst(worker, mbufs, to_write, &failed);
 	}
+
+	// Batches staged above cross to their consumers here, before the round
+	// ends and their packets are discarded.
+	worker_tx_flush_all(
+		worker->write_ctx.tx_connections,
+		worker->dataplane->device_count,
+		worker->dp_worker,
+		&failed
+	);
 
 	// Move failures back to the output list, restoring counters.
 	struct packet *failed_packet;
