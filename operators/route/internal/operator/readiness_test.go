@@ -32,8 +32,7 @@ func requireScope(t *testing.T, tracker *readiness.Tracker, name string) *readin
 	return nil
 }
 
-// specs builds scope declarations without a freshness contract, for tests
-// that exercise state and timestamps rather than freshness.
+// specs returns scopes without freshness contracts for non-freshness tests.
 func specs(names ...string) []readiness.ScopeSpec {
 	out := make([]readiness.ScopeSpec, 0, len(names))
 	for _, name := range names {

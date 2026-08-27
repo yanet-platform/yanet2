@@ -46,9 +46,10 @@ where
     }
 }
 
-/// Serializes an `Option<prost_types::Duration>` as
-/// `{"seconds": i64, "nanos": i32}` or `null` when absent, keeping the
-/// nanosecond part that a floating-point seconds value would lose.
+/// Preserves nanoseconds when serializing an optional duration.
+///
+/// The output is an object with integer seconds and nanoseconds, or null when
+/// no duration is present.
 pub fn serialize_duration<S>(value: &Option<prost_types::Duration>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,

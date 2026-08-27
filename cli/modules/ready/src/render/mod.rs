@@ -83,8 +83,8 @@ impl Symbols {
 ///
 /// `name_width` must be computed once via [`name_width`] and held constant
 /// across the render — recomputing it per row would make the column jitter.
-/// `now` is supplied by the caller so every scope in a snapshot is judged
-/// against one point in time. The header line is `{name}{dash}{summary}`;
+/// Every scope in a snapshot is judged against one point in time. The header
+/// line is `{name}{dash}{summary}`;
 /// `watching` appends a
 /// `watching` suffix to that summary and, once the block is printed, adds
 /// one trailing blank line to separate it from the `--watch` transition log

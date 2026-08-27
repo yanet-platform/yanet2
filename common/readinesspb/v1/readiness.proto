@@ -30,14 +30,8 @@ message Scope {
   google.protobuf.Timestamp observed_at = 4;
   // Timestamp of the last state transition for this scope.
   google.protobuf.Timestamp last_transition_time = 5;
-  // Nominal cadence at which the scope's source re-observes it: the
-  // source's own ticker or heartbeat interval. A staleness consumer judges
-  // the scope stale once observed_at lags by more than a small multiple of
-  // this interval; retries and slow applies can legitimately exceed it,
-  // which is exactly what the consumer should surface. Absent for scopes
-  // with no natural heartbeat — such scopes are never judged stale. A
-  // scope with a contract but no observation yet stays UNKNOWN and is
-  // never judged stale: the UNKNOWN state is itself the signal.
+  // Nominal freshness cadence; absent when the scope has no heartbeat.
+  // Consumers apply their own tolerance before marking observations stale.
   google.protobuf.Duration expected_observation_interval = 6;
 }
 

@@ -8,8 +8,8 @@ use prost_types::{Duration as ProstDuration, Timestamp};
 /// Returns whether a scope's staleness tag should be shown.
 ///
 /// A scope with an observation contract goes stale once the time since its
-/// last observation exceeds the contract multiplied by `multiple`. A scope
-/// without a contract has no natural heartbeat and is never judged stale.
+/// last observation exceeds the contract times the configured multiplier. A
+/// scope without a contract has no natural heartbeat and is never judged stale.
 pub fn is_stale(
     observed_at: Option<&Timestamp>,
     expected_interval: Option<&ProstDuration>,
@@ -29,11 +29,12 @@ pub fn is_stale(
         return false;
     }
 
-    // Full nanosecond timestamps on both sides: a threshold can land
-    // between two whole seconds, so truncating either timestamp to seconds
-    // could push an age across it early. The clock's u128 nanoseconds
-    // saturate into i128 rather than truncating, so the arithmetic stays
-    // valid past u64's nanosecond horizon.
+    // Preserve subsecond precision so thresholds between whole seconds are
+    // not crossed early.
+    //
+    // The clock's nanosecond count saturates into the signed arithmetic range
+    // rather than truncating, so calculations remain valid past the unsigned
+    // 64-bit nanosecond horizon.
     let now_nanos = i128::try_from(now.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()).unwrap_or(i128::MAX);
     let observed_nanos = i128::from(observed_at.seconds)
         .saturating_mul(1_000_000_000)
@@ -44,11 +45,7 @@ pub fn is_stale(
     age > threshold
 }
 
-/// Converts an observation contract and its multiplier into the staleness
-/// threshold.
-///
-/// A contract that resolves to a non-positive span yields a zero threshold,
-/// which `is_stale` treats as "never stale".
+/// A non-positive observation contract disables staleness detection.
 fn observation_threshold(expected_interval: &ProstDuration, multiple: u32) -> Duration {
     let seconds = expected_interval.seconds;
     let nanos = expected_interval.nanos;
@@ -56,8 +53,8 @@ fn observation_threshold(expected_interval: &ProstDuration, multiple: u32) -> Du
         return Duration::ZERO;
     }
 
-    // Exact integer arithmetic in nanoseconds with saturation: no rounding
-    // and no overflow for any realistic contract and multiplier.
+    // Saturating nanosecond arithmetic avoids rounding and overflow for any
+    // realistic contract and multiplier.
     let total_nanos = (seconds as i128)
         .saturating_mul(1_000_000_000)
         .saturating_add(i128::from(nanos));
@@ -73,10 +70,12 @@ fn observation_threshold(expected_interval: &ProstDuration, multiple: u32) -> Du
 mod test {
     use super::*;
 
+    // Returns a fixed reference time for deterministic age calculations.
     fn now() -> SystemTime {
         UNIX_EPOCH + Duration::from_secs(10_000)
     }
 
+    // Returns a timestamp at the requested age before the reference time.
     fn observed_at(age: Duration) -> Timestamp {
         let observed = now().duration_since(UNIX_EPOCH).unwrap() - age;
         Timestamp {
@@ -85,6 +84,7 @@ mod test {
         }
     }
 
+    // Returns a whole-second observation contract.
     fn interval(seconds: i64) -> ProstDuration {
         ProstDuration { seconds, nanos: 0 }
     }

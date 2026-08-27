@@ -370,8 +370,7 @@ func TestTracker_Touch_UnknownScope_NoOp(t *testing.T) {
 	assert.Equal(t, "neighbours", resp.Scopes[0].Name)
 }
 
-// specs builds scope declarations without a freshness contract, for tests
-// that exercise state and timestamps rather than freshness.
+// specs returns scopes without freshness contracts for non-freshness tests.
 func specs(names ...string) []readiness.ScopeSpec {
 	out := make([]readiness.ScopeSpec, 0, len(names))
 	for _, name := range names {

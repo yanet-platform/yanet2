@@ -192,14 +192,8 @@ func WithDrainLatch() Option {
 // ScopeSpec declares one scope at tracker construction.
 type ScopeSpec struct {
 	Name string
-	// ExpectedObservationInterval is the scope's freshness contract: the
-	// nominal cadence at which the scope's source re-observes it, i.e. the
-	// source's own ticker or heartbeat interval. Consumers judge staleness
-	// per scope against this cadence instead of a single global threshold;
-	// retries and slow applies can legitimately exceed it. Leave it zero
-	// for scopes with no natural heartbeat — such scopes are never judged
-	// stale. A zero or negative value is treated as none, and the contract
-	// is fixed for the tracker's lifetime.
+	// ExpectedObservationInterval is the nominal freshness cadence.
+	// A non-positive value disables staleness detection for the scope.
 	ExpectedObservationInterval time.Duration
 }
 

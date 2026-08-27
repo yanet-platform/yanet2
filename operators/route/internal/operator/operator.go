@@ -383,18 +383,8 @@ func parseMAC(s string) ([6]byte, error) {
 	return [6]byte(hw), nil
 }
 
-// readinessScopeSpecs declares the operator's readiness scopes: one
-// fib:<gateway>:<module> scope per gateway, plus a neighbours scope, a rib
-// scope, and optionally a bird-session scope.
-//
-// Each scope's observation contract mirrors the ticker that nominally drives
-// it: the fib scopes are re-observed on every reconcile apply attempt, the
-// rib and bird-session scopes by the readiness sampler, and the neighbours
-// scope by the monitor's periodic force-update pass (netlink events only
-// make it fresher). A slow or hung apply, or a retry backoff, legitimately
-// exceeds the nominal interval — exactly the lag a staleness consumer
-// should surface. With the netlink monitor disabled the neighbours scope is
-// set once, so it declares no contract.
+// readinessScopeSpecs maps each readiness source to its nominal cadence.
+// Disabled neighbour monitoring leaves its set-once scope without a contract.
 func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
 	fibInterval := cfg.Reconcile.Interval.Unwrap()
 	specs := make([]readiness.ScopeSpec, 0, len(cfg.Gateways)+3)

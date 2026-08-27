@@ -133,15 +133,8 @@ func (m *Operator) Run(ctx context.Context) error {
 	return m.app.Run(ctx)
 }
 
-// readinessScopeSpecs declares one scope per gateway, covering all stages
-// pushed there.
-//
-// Each scope is re-observed on every apply attempt — the queue's tail stage
-// stays the steady-state target — so the nominal contract is the reconcile
-// interval. A slow or hung apply, or a retry backoff, legitimately exceeds
-// it: exactly the lag a staleness consumer should surface. With no stages
-// configured the reconcile loop stays idle and the scopes are never
-// re-observed, so they declare no contract.
+// readinessScopeSpecs uses the reconcile cadence for gateways with stages.
+// Gateways without stages have no freshness contract because they stay idle.
 func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
 	freshness := cfg.Reconcile.Interval.Unwrap()
 	if len(cfg.Stages) == 0 {

@@ -99,13 +99,7 @@ func (m *Operator) Close() error {
 	return m.app.Close()
 }
 
-// readinessScopeSpecs declares one scope per gateway, covering all configs
-// pushed there.
-//
-// Each scope is re-observed on every apply attempt, so the nominal contract
-// is the reconcile interval. A slow or hung apply, or a retry backoff,
-// legitimately exceeds it — exactly the lag a staleness consumer should
-// surface.
+// readinessScopeSpecs maps each gateway to the reconcile freshness cadence.
 func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
 	freshness := cfg.Reconcile.Interval.Unwrap()
 	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
