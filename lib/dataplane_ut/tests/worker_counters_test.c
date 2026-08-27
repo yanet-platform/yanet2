@@ -17,9 +17,10 @@
 // not rely on the same lookup that registration uses.
 static uint64_t
 lookup_id(struct counter_registry *registry, const char *name) {
-	struct counter *names = ADDR_OF(&registry->names);
 	for (uint64_t idx = 0; idx < registry->count; ++idx) {
-		if (strncmp(names[idx].name, name, COUNTER_NAME_LEN) == 0) {
+		if (strncmp(counter_registry_entry(registry, idx)->name,
+			    name,
+			    COUNTER_NAME_LEN) == 0) {
 			return idx;
 		}
 	}

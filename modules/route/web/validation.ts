@@ -2,7 +2,10 @@ import type { FIBRowItem, FIBRowErrors } from './types';
 import { normalizeIPRange } from '@yanet/core/utils/netip';
 import { rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '@yanet/core/utils';
 
-const MAX_COUNTER_NAME_BYTES = 127;
+// Mirrors the registry-side counter-name limit: COUNTER_NAME_LEN is
+// 128 minus the three uint64_t fields of struct counter, leaving 103
+// usable bytes (see lib/counters/counters.h).
+const MAX_COUNTER_NAME_BYTES = 103;
 
 /** Returns true if the row's from/to parse as a valid, non-reversed IP range. */
 export const isValidRange = (row: Pick<FIBRowItem, 'from' | 'to'>): boolean =>
@@ -20,7 +23,7 @@ export const isValidDevice = (s: string): boolean =>
 const counterError = (s: string): string | null => {
     if (!s) return null;
     if (!s.startsWith('nexthop_')) return 'Must start with nexthop_';
-    if (new TextEncoder().encode(s).length > MAX_COUNTER_NAME_BYTES) return 'Too long (max 127 bytes)';
+    if (new TextEncoder().encode(s).length > MAX_COUNTER_NAME_BYTES) return 'Too long (max 103 bytes)';
     return null;
 };
 

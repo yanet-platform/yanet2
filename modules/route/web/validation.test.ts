@@ -41,18 +41,18 @@ describe('validateRow counter field', () => {
         expect(validateRow({ ...baseRow, counter: 'my-counter' }).counter).not.toBeNull();
     });
 
-    it('rejects a counter longer than 127 bytes', () => {
-        const tooLong = 'nexthop_' + 'a'.repeat(127);
+    it('rejects a counter longer than 103 bytes', () => {
+        const tooLong = 'nexthop_' + 'a'.repeat(103);
         expect(validateRow({ ...baseRow, counter: tooLong }).counter).not.toBeNull();
     });
 
-    it('rejects a counter at exactly 128 bytes', () => {
-        const atLimit = 'nexthop_' + 'a'.repeat(128 - 'nexthop_'.length);
+    it('rejects a counter at exactly 104 bytes', () => {
+        const atLimit = 'nexthop_' + 'a'.repeat(104 - 'nexthop_'.length);
         expect(validateRow({ ...baseRow, counter: atLimit }).counter).not.toBeNull();
     });
 
-    it('accepts a counter at exactly 127 bytes', () => {
-        const exact = 'nexthop_' + 'a'.repeat(127 - 'nexthop_'.length);
+    it('accepts a counter at exactly 103 bytes', () => {
+        const exact = 'nexthop_' + 'a'.repeat(103 - 'nexthop_'.length);
         expect(validateRow({ ...baseRow, counter: exact }).counter).toBeNull();
     });
 });

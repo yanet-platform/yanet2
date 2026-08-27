@@ -21,7 +21,8 @@ counter_registry_init(
 	registry->capacity = 0;
 	registry->gen = gen;
 
-	SET_OFFSET_OF(&registry->names, NULL);
+	SET_OFFSET_OF(&registry->dirs, NULL);
+	registry->dir_page_count = 0;
 
 	if (str_index_init(&registry->str_index, memory_context)) {
 		return -1;
@@ -34,12 +35,38 @@ void
 counter_registry_fini(struct counter_registry *registry) {
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
-	struct counter *names = ADDR_OF(&registry->names);
-	if (names != NULL) {
+	struct counter ***dirs = ADDR_OF(&registry->dirs);
+	if (dirs != NULL) {
+		uint64_t chunk_slots =
+			registry->capacity / COUNTER_REGISTRY_CHUNK;
+		for (uint64_t page_idx = 0; page_idx < registry->dir_page_count;
+		     ++page_idx) {
+			struct counter **page = ADDR_OF(dirs + page_idx);
+			uint64_t page_first_slot =
+				page_idx * COUNTER_REGISTRY_DIR_SLOTS;
+			for (uint64_t slot = 0;
+			     slot < COUNTER_REGISTRY_DIR_SLOTS &&
+			     page_first_slot + slot < chunk_slots;
+			     ++slot) {
+				memory_bfree(
+					memory_context,
+					ADDR_OF(page + slot),
+					sizeof(struct counter) *
+						COUNTER_REGISTRY_CHUNK
+				);
+			}
+			memory_bfree(
+				memory_context,
+				page,
+				sizeof(struct counter *) *
+					COUNTER_REGISTRY_DIR_SLOTS
+			);
+		}
+
 		memory_bfree(
 			memory_context,
-			names,
-			sizeof(struct counter) * registry->capacity
+			dirs,
+			sizeof(struct counter **) * registry->dir_page_count
 		);
 	}
 
@@ -51,11 +78,9 @@ counter_registry_fini(struct counter_registry *registry) {
 
 static inline const char *
 counter_registry_read_index(uint32_t index, const void *data) {
-	const struct counter_registry *registry =
-		(struct counter_registry *)data;
+	struct counter_registry *registry = (struct counter_registry *)data;
 
-	struct counter *names = ADDR_OF(&registry->names);
-	return names[index].name;
+	return counter_registry_entry(registry, index)->name;
 }
 
 uint64_t
@@ -77,54 +102,101 @@ counter_registry_lookup_index(
 	return (uint64_t)-1;
 }
 
+// Grows the registry by one chunk of entries.
+//
+// The only entry allocation on this path is the fixed-size chunk itself:
+// growth never copies the existing entries and never holds old and new
+// storage live at once, so the transient arena demand is one chunk no
+// matter how large the registry already is.
 static int
-counter_registry_expand(
-	struct counter_registry *registry,
-	uint64_t new_capacity,
-	yanet_error **err
-) {
-	uint64_t old_capacity = registry->capacity;
-	if (new_capacity < registry->capacity) {
-		yanet_error_add(
-			err,
-			"requested capacity (%lu) is smaller than current "
-			"capacity (%lu)",
-			new_capacity,
-			registry->capacity
-		);
-		return -1;
-	}
-	if (new_capacity == registry->capacity) {
-		return 0;
-	}
-
+counter_registry_grow(struct counter_registry *registry, yanet_error **err) {
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 
-	struct counter *new_names = (struct counter *)memory_balloc(
-		memory_context, sizeof(struct counter) * new_capacity
+	struct counter *chunk = (struct counter *)memory_balloc(
+		memory_context, sizeof(struct counter) * COUNTER_REGISTRY_CHUNK
 	);
-	if (new_names == NULL) {
+	if (chunk == NULL) {
 		yanet_error_add(err, "failed to allocate counter names");
 		return -1;
 	}
+	memset(chunk, 0, sizeof(struct counter) * COUNTER_REGISTRY_CHUNK);
 
-	struct counter *names = ADDR_OF(&registry->names);
+	uint64_t slot = registry->capacity / COUNTER_REGISTRY_CHUNK;
 
-	/*
-	 * FIXME: copying is not efficient here so names and links should be
-	 * turned into chunked arrays.
-	 */
-	if (old_capacity > 0) {
-		memcpy(new_names, names, sizeof(struct counter) * old_capacity);
+	// A fresh directory page is needed whenever the current page runs
+	// out of slots. Page cells hold self-relative pointers, so the
+	// pages array cannot grow through realloc-copy: a copied cell would
+	// resolve against its new address instead of the one it was set
+	// for. The pages array is re-housed with EQUATE_OFFSET and stays a
+	// handful of pointers: one page covers 65,536 counters.
+	if (slot % COUNTER_REGISTRY_DIR_SLOTS == 0) {
+		struct counter **page = (struct counter **)memory_balloc(
+			memory_context,
+			sizeof(struct counter *) * COUNTER_REGISTRY_DIR_SLOTS
+		);
+		if (page == NULL) {
+			memory_bfree(
+				memory_context,
+				chunk,
+				sizeof(struct counter) * COUNTER_REGISTRY_CHUNK
+			);
+			yanet_error_add(
+				err, "failed to allocate counter directory"
+			);
+			return -1;
+		}
+		memset(page,
+		       0,
+		       sizeof(struct counter *) * COUNTER_REGISTRY_DIR_SLOTS);
+
+		uint64_t new_page_count = registry->dir_page_count + 1;
+		struct counter ***new_dirs = (struct counter ***)memory_balloc(
+			memory_context,
+			sizeof(struct counter **) * new_page_count
+		);
+		if (new_dirs == NULL) {
+			memory_bfree(
+				memory_context,
+				page,
+				sizeof(struct counter *) *
+					COUNTER_REGISTRY_DIR_SLOTS
+			);
+			memory_bfree(
+				memory_context,
+				chunk,
+				sizeof(struct counter) * COUNTER_REGISTRY_CHUNK
+			);
+			yanet_error_add(
+				err, "failed to grow counter directory array"
+			);
+			return -1;
+		}
+
+		struct counter ***dirs = ADDR_OF(&registry->dirs);
+		for (uint64_t idx = 0; idx < registry->dir_page_count; ++idx) {
+			EQUATE_OFFSET(new_dirs + idx, dirs + idx);
+		}
+		if (dirs != NULL) {
+			memory_bfree(
+				memory_context,
+				dirs,
+				sizeof(struct counter **) *
+					registry->dir_page_count
+			);
+		}
+
+		registry->dir_page_count = new_page_count;
+		SET_OFFSET_OF(&registry->dirs, new_dirs);
+		SET_OFFSET_OF(new_dirs + new_page_count - 1, page);
 	}
 
-	SET_OFFSET_OF(&registry->names, new_names);
-	registry->capacity = new_capacity;
+	struct counter ***dirs = ADDR_OF(&registry->dirs);
+	struct counter **page =
+		ADDR_OF(dirs + slot / COUNTER_REGISTRY_DIR_SLOTS);
+	SET_OFFSET_OF(page + slot % COUNTER_REGISTRY_DIR_SLOTS, chunk);
 
-	memory_bfree(
-		memory_context, names, sizeof(struct counter) * old_capacity
-	);
+	registry->capacity += COUNTER_REGISTRY_CHUNK;
 
 	return 0;
 }
@@ -142,11 +214,7 @@ counter_registry_insert(
 	}
 
 	if (registry->count >= registry->capacity) {
-		uint64_t new_capacity = registry->capacity * 2;
-		if (new_capacity == 0) {
-			new_capacity = 8;
-		}
-		if (counter_registry_expand(registry, new_capacity, err)) {
+		if (counter_registry_grow(registry, err)) {
 			yanet_error_add(
 				err, "failed to expand counter registry"
 			);
@@ -166,9 +234,8 @@ counter_registry_insert(
 		return -1;
 	}
 
-	struct counter *names = ADDR_OF(&registry->names);
-
-	struct counter *new_name = names + registry->count;
+	struct counter *new_name =
+		counter_registry_entry(registry, registry->count);
 
 	strtcpy(new_name->name, name, COUNTER_NAME_LEN);
 	new_name->size = size;
@@ -208,7 +275,7 @@ counter_registry_register(
 	uint64_t idx = counter_registry_lookup_index(registry, name);
 
 	if (idx != (uint64_t)-1) {
-		struct counter *name = ADDR_OF(&registry->names) + idx;
+		struct counter *name = counter_registry_entry(registry, idx);
 		name->gen = registry->gen;
 		if (name->size != size) {
 			yanet_error_add(
@@ -239,7 +306,7 @@ counter_registry_link(
 
 		for (uint64_t src_idx = 0; src_idx < src->count; ++src_idx) {
 			struct counter *src_name =
-				ADDR_OF(&src->names) + src_idx;
+				counter_registry_entry(src, src_idx);
 
 			// Skip outdated counters
 			if (src_name->gen != src->gen) {
@@ -259,7 +326,7 @@ counter_registry_link(
 				);
 			} else {
 				struct counter *dst_name =
-					ADDR_OF(&dst->names) + dst_idx;
+					counter_registry_entry(dst, dst_idx);
 				if (dst_name->size != src_name->size) {
 					yanet_error_add(
 						err,
@@ -274,12 +341,12 @@ counter_registry_link(
 			}
 
 			struct counter *dst_name =
-				ADDR_OF(&dst->names) + dst_idx;
+				counter_registry_entry(dst, dst_idx);
 			dst_name->offset = src_name->offset;
 		}
 	}
 	for (uint64_t dst_idx = 0; dst_idx < dst->count; ++dst_idx) {
-		struct counter *dst_name = ADDR_OF(&dst->names) + dst_idx;
+		struct counter *dst_name = counter_registry_entry(dst, dst_idx);
 
 		if (dst_name->offset != (uint64_t)-1) {
 			continue;
@@ -438,7 +505,8 @@ counter_storage_spawn(
 	}
 
 	for (uint64_t idx = 0; idx < counter_registry->count; ++idx) {
-		struct counter *name = ADDR_OF(&counter_registry->names) + idx;
+		struct counter *name =
+			counter_registry_entry(counter_registry, idx);
 
 		uint64_t pool_idx = uint64_log_up(name->size);
 

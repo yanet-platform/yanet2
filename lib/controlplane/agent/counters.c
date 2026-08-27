@@ -335,19 +335,17 @@ worker_counter_list_build(
 		struct cp_counter_storage *cp_storage = matches[i];
 		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
 		struct counter_registry *registry = ADDR_OF(&storage->registry);
-		struct counter *counters = ADDR_OF(&registry->names);
-
 		size_t storage_matches = 0;
 		size_t region = 0;
 		for (uint64_t idx = 0; idx < registry->count; ++idx) {
-			if (!counter_pattern_set_match(
-				    names, counters[idx].name
-			    )) {
+			struct counter *counter =
+				counter_registry_entry(registry, idx);
+			if (!counter_pattern_set_match(names, counter->name)) {
 				continue;
 			}
 			size_t counter_region;
 			if (!counter_value_region_size(
-				    1, counters[idx].size, &counter_region
+				    1, counter->size, &counter_region
 			    ) ||
 			    !counter_region_add(&region, counter_region)) {
 				yanet_error_add(
@@ -385,12 +383,11 @@ worker_counter_list_build(
 		struct cp_counter_storage *cp_storage = matches[i];
 		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
 		struct counter_registry *registry = ADDR_OF(&storage->registry);
-		struct counter *counters = ADDR_OF(&registry->names);
 		struct counter_tag *storage_tags = NULL;
 		for (uint64_t idx = 0; idx < registry->count; ++idx) {
-			if (!counter_pattern_set_match(
-				    names, counters[idx].name
-			    )) {
+			struct counter *counter =
+				counter_registry_entry(registry, idx);
+			if (!counter_pattern_set_match(names, counter->name)) {
 				continue;
 			}
 			if (storage_tags == NULL) {
@@ -401,7 +398,7 @@ worker_counter_list_build(
 				);
 			}
 			struct counter_handle *dst = &list->counters[next];
-			const struct counter *src = &counters[idx];
+			const struct counter *src = counter;
 			strtcpy(dst->name, src->name, sizeof(dst->name));
 			dst->size = src->size;
 			dst->gen = src->gen;
@@ -1053,16 +1050,15 @@ counter_handle_list_build(
 	uint64_t count = counter_registry->count;
 
 	size_t values_size = 0;
-	{
-		struct counter *counters = ADDR_OF(&counter_registry->names);
-		for (uint64_t idx = 0; idx < count; ++idx) {
-			size_t region;
-			if (!counter_value_region_size(
-				    worker_count, counters[idx].size, &region
-			    ) ||
-			    !counter_region_add(&values_size, region)) {
-				return NULL;
-			}
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		struct counter *counter =
+			counter_registry_entry(counter_registry, idx);
+		size_t region;
+		if (!counter_value_region_size(
+			    worker_count, counter->size, &region
+		    ) ||
+		    !counter_region_add(&values_size, region)) {
+			return NULL;
 		}
 	}
 
@@ -1089,11 +1085,12 @@ counter_handle_list_build(
 
 	uint8_t *cursor = counter_handle_list_region(list);
 	for (uint64_t idx = 0; idx < count; ++idx) {
-		struct counter *counters = ADDR_OF(&counter_registry->names);
+		struct counter *counter =
+			counter_registry_entry(counter_registry, idx);
 		struct counter_handle *dst = &handlers[idx];
-		strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
-		dst->size = counters[idx].size;
-		dst->gen = counters[idx].gen;
+		strtcpy(dst->name, counter->name, sizeof(dst->name));
+		dst->size = counter->size;
+		dst->gen = counter->gen;
 		counter_handle_fill_values(
 			dst, &cursor, worker_storages, worker_count, idx
 		);

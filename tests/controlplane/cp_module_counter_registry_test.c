@@ -31,9 +31,14 @@
 #include <unistd.h>
 
 #define ARENA_BUFFER_SIZE MEMORY_BLOCK_ALLOCATOR_MAX_ALIGN
-#define FULL_ARENA_SIZE (64u * 1024u)
+// One registry chunk ties itself to the allocator's 32 KiB class, so the
+// sweep must span module smalls, the first chunk, and the second
+// registry's chunk to hit every growth outcome. The full arena must also
+// fit the spawned storage pages, whose per-allocation redzones under the
+// sanitizer build add up, hence the headroom.
+#define FULL_ARENA_SIZE (128u * 1024u)
 #define SWEEP_MIN_ARENA_SIZE 256u
-#define SWEEP_MAX_ARENA_SIZE (16u * 1024u)
+#define SWEEP_MAX_ARENA_SIZE (80u * 1024u)
 #define SWEEP_STEP 8u
 
 // Builds a module whose runtime registry allocations come from a fresh

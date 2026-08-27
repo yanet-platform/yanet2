@@ -579,19 +579,19 @@ func TestUpdateFIBRejectsOverlongCounter(t *testing.T) {
 	backend := newFakeBackend()
 	service := route.NewRouteService(backend)
 
-	okEntry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 127-len("nexthop_"))))
+	okEntry := testFIBEntry(t, "10.0.0.0/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 103-len("nexthop_"))))
 	_, err := service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
 		ModuleName: "cfg",
 		Entries:    []*routepb.FIBEntry{okEntry},
 	})
-	require.NoError(t, err, "a 127-byte counter name must be accepted")
+	require.NoError(t, err, "a 103-byte counter name must be accepted")
 
-	tooLongEntry := testFIBEntry(t, "10.0.0.1/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 128-len("nexthop_"))))
+	tooLongEntry := testFIBEntry(t, "10.0.0.1/32", testNexthop("eth0", "nexthop_"+strings.Repeat("a", 104-len("nexthop_"))))
 	_, err = service.UpdateFIB(t.Context(), &routepb.UpdateFIBRequest{
 		ModuleName: "cfg",
 		Entries:    []*routepb.FIBEntry{tooLongEntry},
 	})
-	require.Equal(t, codes.InvalidArgument, status.Code(err), "a 128-byte counter name must be rejected")
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "a 104-byte counter name must be rejected")
 }
 
 // TestUpdateFIBRejectsCounterWithNULByte verifies that a counter name

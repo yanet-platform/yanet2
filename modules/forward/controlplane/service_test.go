@@ -236,7 +236,7 @@ func TestUpdateConfigEmptyCounterEmptyTarget(t *testing.T) {
 // long enough to overflow the counter-name limit still applies, with the
 // counter cut to exactly that limit.
 //
-// The expected length (127) is asserted as a literal, not derived from
+// The expected length (103) is asserted as a literal, not derived from
 // cforward.CounterNameMaxLen, so an off-by-one in that constant would not
 // make this test pass vacuously.
 func TestUpdateConfigMaterializesEmptyCounterLongTarget(t *testing.T) {
@@ -256,7 +256,7 @@ func TestUpdateConfigMaterializesEmptyCounterLongTarget(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, backend.rules, 1)
-	require.Len(t, backend.rules[0].Counter, 127)
+	require.Len(t, backend.rules[0].Counter, 103)
 	require.True(t, strings.HasPrefix(backend.rules[0].Counter, "to_aaa"))
 
 	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})

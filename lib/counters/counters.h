@@ -15,7 +15,10 @@
 #define CP_PIPELINE_NAME_LEN 80
 #endif
 
-#define COUNTER_NAME_LEN 128
+// The name field leaves room for the three uint64_t fields of struct
+// counter, so one entry is exactly 128 bytes: two cache lines, and a
+// power-of-two entry count packs a chunk without padding.
+#define COUNTER_NAME_LEN (128 - 8 - 8 - 8)
 #define COUNTER_INVALID (uint64_t)-1
 
 struct counter {
@@ -25,6 +28,34 @@ struct counter {
 	uint64_t offset;
 };
 
+_Static_assert(
+	sizeof(struct counter) == 128,
+	"counter entry must stay exactly 128 bytes"
+);
+
+// Entries per registry chunk: 64 entries pack into one 8 KiB allocator
+// class, so a chunk request never fragments a higher class and growth
+// caps the arena's largest registry demand at one small page whatever
+// the counter count.
+#define COUNTER_REGISTRY_CHUNK 64
+
+// Chunk-pointer slots per directory page, also one 8 KiB allocator class.
+//
+// A flat pointer array indexed by chunk would itself cross the one-chunk
+// bound at 65,536 counters (1,025 pointers), so chunk pointers live in
+// fixed directory pages instead: growth adds at most one entry chunk or
+// one directory page, never a larger block.
+#define COUNTER_REGISTRY_DIR_SLOTS 1024
+
+_Static_assert(
+	COUNTER_REGISTRY_CHUNK * sizeof(struct counter) == 8192,
+	"registry chunk must pack exactly into the 8 KiB allocator class"
+);
+_Static_assert(
+	COUNTER_REGISTRY_DIR_SLOTS * sizeof(struct counter *) == 8192,
+	"registry directory page must pack exactly into the 8 KiB class"
+);
+
 struct counter_registry {
 	struct memory_context *memory_context;
 	uint64_t gen;
@@ -32,9 +63,33 @@ struct counter_registry {
 	uint64_t count;
 	uint64_t counts[COUNTER_POOL_SIZE];
 
-	struct counter *names;
+	// Chunked names storage: entry idx lives in chunk slot
+	// idx / COUNTER_REGISTRY_CHUNK of the chunk pointed at by directory
+	// page (idx / COUNTER_REGISTRY_CHUNK) / COUNTER_REGISTRY_DIR_SLOTS,
+	// slot (idx / COUNTER_REGISTRY_CHUNK) %
+	// COUNTER_REGISTRY_DIR_SLOTS. capacity counts entries and is always
+	// a multiple of COUNTER_REGISTRY_CHUNK; dir_page_count is the
+	// allocated length of the pages array, which stays a handful of
+	// pointers for any realistic registry. All pointers are
+	// shared-memory relative.
+	struct counter ***dirs;
+	uint64_t dir_page_count;
 	struct str_index str_index;
 };
+
+// Entry idx of registry, chunk- and directory-resolved.
+//
+// Valid for idx < registry->count only: the chunk slots beyond the last
+// allocated chunk are never materialized.
+static inline struct counter *
+counter_registry_entry(struct counter_registry *registry, uint64_t idx) {
+	uint64_t slot = idx / COUNTER_REGISTRY_CHUNK;
+	struct counter ***dirs = ADDR_OF(&registry->dirs);
+	struct counter **page =
+		ADDR_OF(dirs + slot / COUNTER_REGISTRY_DIR_SLOTS);
+	return ADDR_OF(page + slot % COUNTER_REGISTRY_DIR_SLOTS) +
+	       idx % COUNTER_REGISTRY_CHUNK;
+}
 
 int
 counter_registry_init(
@@ -53,6 +108,12 @@ counter_registry_register(
 
 void
 counter_registry_fini(struct counter_registry *registry);
+
+// Index of the registered name, or (uint64_t)-1 when absent.
+uint64_t
+counter_registry_lookup_index(
+	struct counter_registry *registry, const char *name
+);
 
 int
 counter_registry_link(

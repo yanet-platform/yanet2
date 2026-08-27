@@ -457,7 +457,7 @@ func TestForward_EmptyCounterLongTargetRegistersInCounterRegistry(t *testing.T) 
 
 	wantCounter := response.GetRules()[0].GetAction().GetCounter()
 	require.NotEmpty(t, wantCounter)
-	require.Len(t, wantCounter, 127, "materialised counter must be cut to the registry's usable limit")
+	require.Len(t, wantCounter, 103, "materialised counter must be cut to the registry's usable limit")
 
 	wireForwardPipeline(t, agent, "port0", "test", nil)
 

@@ -26,19 +26,31 @@
 #include <string.h>
 
 /*
- * 16 KB: enough for cp_module_init's small allocations (empirically < 8 KB),
- * but well below the 32 KB lpm_init page-chunk request.
+ * Enough for cp_module_init's small allocations plus one registry names
+ * chunk (a 32 KB-class block since the registry moved to chunked
+ * storage), but below fitting the LPM page-chunk request next to them.
+ * The sanitizer build pays a red zone per allocation on top, measured to
+ * cross the 64 KB boundary, so each mode picks its own limit.
  */
-#define ROUTE_TEST_MEMORY_LIMIT (16u * 1024u)
+#ifdef HAVE_ASAN
+#define ROUTE_TEST_MEMORY_LIMIT (72u * 1024u)
+#else
+#define ROUTE_TEST_MEMORY_LIMIT (56u * 1024u)
+#endif
 
 /*
- * 40800 bytes, found empirically: enough for construction plus one
- * routing table's own setup, but too little for the second table to also
- * succeed. This size reaches data setup's own error path instead of the
- * shared type teardown, verifying that path frees the first table
- * exactly once.
+ * Module smalls, one registry names chunk, and the first routing table's
+ * own setup, but too little for the second table to also succeed. This
+ * reaches data setup's own error path instead of the shared type
+ * teardown, verifying that path frees the first table exactly once. The
+ * sanitizer build pays a red zone per allocation and a class bump on
+ * boundary-exact blocks, so each mode picks its own limit.
  */
-#define ROUTE_TEST_SECOND_LPM_LIMIT (40800u)
+#ifdef HAVE_ASAN
+#define ROUTE_TEST_SECOND_LPM_LIMIT (160u * 1024u)
+#else
+#define ROUTE_TEST_SECOND_LPM_LIMIT (72u * 1024u)
+#endif
 
 static int
 run_test(struct yanet_shm *shm) {

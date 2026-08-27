@@ -573,7 +573,7 @@ fib_iter_nexthop_counter_name(const struct fib_iter *it, uint64_t nexthop_idx) {
 		ADDR_OF(registries + config->routes_registry_idx);
 	struct counter_registry *registry = &entry->registry;
 	if (r->counter_id < registry->count) {
-		return ADDR_OF(&registry->names)[r->counter_id].name;
+		return counter_registry_entry(registry, r->counter_id)->name;
 	}
 	return "";
 }

@@ -103,9 +103,9 @@ install_device(
 static uint64_t
 counter_index_by_name(struct counter_storage *storage, const char *name) {
 	struct counter_registry *registry = ADDR_OF(&storage->registry);
-	struct counter *counters = ADDR_OF(&registry->names);
 	for (uint64_t idx = 0; idx < registry->count; ++idx) {
-		if (strcmp(counters[idx].name, name) == 0) {
+		if (strcmp(counter_registry_entry(registry, idx)->name, name) ==
+		    0) {
 			return idx;
 		}
 	}
