@@ -38,11 +38,11 @@ net4_collect_values(
 	uint32_t *values = ADDR_OF(&range_index->values);
 
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		if (*(uint32_t *)net4->mask == 0x00000000) {
+		if (*(const net4_word *)net4->mask == 0x00000000) {
 			continue;
 		}
-		uint32_t to =
-			*(uint32_t *)net4->addr | ~*(uint32_t *)net4->mask;
+		uint32_t to = *(const net4_word *)net4->addr |
+			      ~*(const net4_word *)net4->mask;
 		filter_key_inc(4, (uint8_t *)&to);
 
 		uint32_t start =
@@ -74,8 +74,8 @@ net4_collect_registry(
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t addr = *(uint32_t *)net4->addr;
-		uint32_t mask = *(uint32_t *)net4->mask;
+		uint32_t addr = *(const net4_word *)net4->addr;
+		uint32_t mask = *(const net4_word *)net4->mask;
 		uint32_t to = addr | ~mask;
 		if (lpm4_collect_values(
 			    lpm,
@@ -124,11 +124,11 @@ collect_net4_values(
 
 		for (struct net4 *net4 = nets; net4 < nets + net_count;
 		     ++net4) {
+			uint32_t mask = *(const net4_word *)net4->mask;
 			if (range4_collector_add(
 				    &collector,
 				    net4->addr,
-				    __builtin_popcountll(*(uint32_t *)net4->mask
-				    )
+				    __builtin_popcountll(mask)
 			    )) {
 				goto error_collector;
 			}

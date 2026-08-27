@@ -57,6 +57,19 @@ struct net {
 	};
 };
 
+// Word views over address and mask bytes, safe under strict aliasing and
+// at any byte offset.
+//
+// The byte arrays have no word type of their own and no alignment
+// guarantee, so a plain integer pointer cast over them is undefined
+// behaviour. These types may alias anything and carry byte alignment,
+// which costs nothing on targets with unaligned loads and makes strict
+// alignment targets read byte by byte.
+typedef uint32_t __attribute__((__may_alias__, __aligned__(1))) net4_word;
+typedef uint64_t __attribute__((__may_alias__, __aligned__(1))) net6_half;
+_Static_assert(_Alignof(net4_word) == 1, "net4_word must have byte alignment");
+_Static_assert(_Alignof(net6_half) == 1, "net6_half must have byte alignment");
+
 enum ip_family {
 	ip_family_ip4,
 	ip_family_ip6,

@@ -94,10 +94,11 @@ collect_net6_range(
 			uint8_t *mask;
 			get_part(&net6, &addr, &mask);
 
+			uint64_t mask_bits = *(const net6_half *)mask;
 			if (range8_collector_add(
 				    &collector,
 				    addr,
-				    __builtin_popcountll(*(uint64_t *)mask)
+				    __builtin_popcountll(mask_bits)
 			    )) {
 				goto error_collector;
 			}
@@ -156,11 +157,12 @@ net6_part_range_index_bound(
 	uint32_t *stop
 ) {
 	uint8_t next[8];
-	*(uint64_t *)next = *(uint64_t *)addr | ~*(uint64_t *)mask;
+	*(net6_half *)next =
+		*(const net6_half *)addr | ~*(const net6_half *)mask;
 	filter_key_inc(8, next);
 	*start = radix_lookup(&range_index->radix, 8, addr);
 	*stop = range_index->count;
-	if (*(uint64_t *)next != 0) {
+	if (*(const net6_half *)next != 0) {
 		*stop = radix_lookup(&range_index->radix, 8, next);
 	}
 }
@@ -230,8 +232,8 @@ touch_network_ranges(
 			struct net6 net6 = all_nets[values[idx]];
 
 			// Skip `any` network
-			if (*(uint64_t *)net6.mask == 0 &&
-			    *(uint64_t *)(net6.mask + 8) == 0) {
+			if (*(const net6_half *)net6.mask == 0 &&
+			    *(const net6_half *)(net6.mask + 8) == 0) {
 				continue;
 			}
 
