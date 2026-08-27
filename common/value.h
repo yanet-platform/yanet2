@@ -74,7 +74,8 @@ value_table_init(
 	struct memory_context *parent_context,
 	const char *name,
 	uint32_t v_dim,
-	uint32_t h_dim
+	uint32_t h_dim,
+	yanet_error **err
 ) {
 	// Balloc'd rather than embedded: a table lives inside a tree vertex,
 	// and that tree is itself embedded by value inside shared-memory
@@ -82,7 +83,7 @@ value_table_init(
 	// multiply across every vertex of every tree — an ABI change, not
 	// an inspect-tree nicety.
 	struct memory_context *memory_context = (struct memory_context *)
-		memory_balloc(parent_context, sizeof(*memory_context));
+		memory_balloc(parent_context, sizeof(*memory_context), err);
 	if (memory_context == NULL) {
 		SET_OFFSET_OF(&value_table->memory_context, NULL);
 		SET_OFFSET_OF(&value_table->values, NULL);
@@ -102,7 +103,7 @@ value_table_init(
 			       VALUE_TABLE_CHUNK_SIZE;
 
 	uint32_t **values = (uint32_t **)memory_balloc(
-		memory_context, chunk_count * sizeof(uint32_t *)
+		memory_context, chunk_count * sizeof(uint32_t *), err
 	);
 	if (values == NULL) {
 		value_table_free(value_table);
@@ -115,7 +116,8 @@ value_table_init(
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		uint32_t *chunk = (uint32_t *)memory_balloc(
 			memory_context,
-			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
+			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t),
+			err
 		);
 		if (chunk == NULL) {
 			value_table_free(value_table);

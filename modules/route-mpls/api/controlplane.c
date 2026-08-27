@@ -79,7 +79,7 @@ route_mpls_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	struct module_config *config = (struct module_config *)memory_balloc(
-		&agent->memory_context, sizeof(struct module_config)
+		&agent->memory_context, sizeof(struct module_config), err
 	);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -272,7 +272,7 @@ route_mpls_rule_target_new(
 	}
 
 	struct target *target = (struct target *)memory_balloc(
-		memory_context, target_memory_size(map_size)
+		memory_context, target_memory_size(map_size), err
 	);
 	if (target == NULL) {
 		return NULL;
@@ -281,11 +281,22 @@ route_mpls_rule_target_new(
 	memset(target, 0, target_memory_size(map_size));
 	target->nexthop_map_size = map_size;
 
+	if (route_mpls_rule->nexthop_count == 0) {
+		yanet_error_add(err, "a route must have a nexthop");
+		goto error_target;
+	}
+
 	struct nexthop *nexthops = (struct nexthop *)memory_balloc(
 		memory_context,
-		sizeof(struct nexthop) * route_mpls_rule->nexthop_count
+		sizeof(struct nexthop) * route_mpls_rule->nexthop_count,
+		err
 	);
 	if (nexthops == NULL) {
+		yanet_error_add(
+			err,
+			"failed to allocate %lu nexthops",
+			route_mpls_rule->nexthop_count
+		);
 		goto error_target;
 	}
 
@@ -375,11 +386,23 @@ route_mpls_module_config_update(
 		goto error;
 	}
 
+	if (route_mpls_rule_count == 0) {
+		yanet_error_add(err, "the ruleset must not be empty");
+		return -1;
+	}
+
 	struct target **targets = (struct target **)memory_balloc(
-		memory_context, sizeof(struct target *) * route_mpls_rule_count
+		memory_context,
+		sizeof(struct target *) * route_mpls_rule_count,
+		err
 	);
 
 	if (targets == NULL) {
+		yanet_error_add(
+			err,
+			"failed to allocate %lu route targets",
+			route_mpls_rule_count
+		);
 		return -1;
 	}
 	memset(targets, 0, sizeof(struct target *) * route_mpls_rule_count);

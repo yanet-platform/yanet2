@@ -38,7 +38,8 @@ test_reject_reta_size_too_large(void) {
 		key,
 		sizeof(key),
 		reta,
-		DP_TOPOLOGY_RSS_RETA_SIZE_MAX + 1
+		DP_TOPOLOGY_RSS_RETA_SIZE_MAX + 1,
+		NULL
 	);
 	TEST_ASSERT(rc != 0, "oversized reta_size must be rejected");
 
@@ -64,7 +65,7 @@ test_reject_reta_size_zero(void) {
 	uint16_t reta[1] = {0};
 
 	int rc = dp_topology_set_device_rss(
-		&fixture.dp_config, 0, key, sizeof(key), reta, 0
+		&fixture.dp_config, 0, key, sizeof(key), reta, 0, NULL
 	);
 	TEST_ASSERT(rc != 0, "zero reta_size must be rejected");
 
@@ -95,7 +96,8 @@ test_reject_key_len_too_short(void) {
 		key,
 		sizeof(key),
 		reta,
-		sizeof(reta) / sizeof(reta[0])
+		sizeof(reta) / sizeof(reta[0]),
+		NULL
 	);
 	TEST_ASSERT(rc != 0, "undersized key_len must be rejected");
 
@@ -132,7 +134,8 @@ test_accept_valid_rss_state(void) {
 		key,
 		sizeof(key),
 		reta,
-		sizeof(reta) / sizeof(reta[0])
+		sizeof(reta) / sizeof(reta[0]),
+		NULL
 	);
 	TEST_ASSERT_EQUAL(rc, 0, "valid RSS state must be accepted");
 

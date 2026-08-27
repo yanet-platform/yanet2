@@ -19,7 +19,7 @@ blackhole_module_config_new(
 	struct agent *agent, const char *name, yanet_error **error
 ) {
 	struct cp_module *config = (struct cp_module *)memory_balloc(
-		&agent->memory_context, sizeof(*config)
+		&agent->memory_context, sizeof(*config), error
 	);
 	if (config == NULL) {
 		yanet_error_add(error, "failed to allocate config");

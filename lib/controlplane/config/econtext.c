@@ -97,8 +97,9 @@ module_ectx_create(
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	size_t ectx_size = sizeof(struct module_ectx);
-	struct module_ectx *module_ectx =
-		(struct module_ectx *)memory_balloc(memory_context, ectx_size);
+	struct module_ectx *module_ectx = (struct module_ectx *)memory_balloc(
+		memory_context, ectx_size, err
+	);
 	if (module_ectx == NULL) {
 		yanet_error_add(
 			err,
@@ -140,7 +141,8 @@ module_ectx_create(
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
 		old_counter_storage,
-		&cp_module->counter_registry
+		&cp_module->counter_registry,
+		err
 	);
 	if (counter_storage == NULL) {
 		yanet_error_add(
@@ -222,7 +224,8 @@ module_ectx_create(
 				memory_context,
 				sizeof(struct counter_storage *) *
 					cp_module
-						->runtime_counter_registry_count
+						->runtime_counter_registry_count,
+				err
 			);
 		if (runtime_storages == NULL) {
 			yanet_error_add(
@@ -268,7 +271,8 @@ module_ectx_create(
 			struct counter_storage *storage = counter_storage_spawn(
 				&cp_config->counter_storage_memory_context,
 				old_storage,
-				&runtime_registries[idx].registry
+				&runtime_registries[idx].registry,
+				err
 			);
 			if (storage == NULL) {
 				yanet_error_add(
@@ -320,7 +324,8 @@ module_ectx_create(
 			(struct module_object_link_ectx *)memory_balloc(
 				memory_context,
 				sizeof(struct module_object_link_ectx) *
-					cp_module->object_count
+					cp_module->object_count,
+				err
 			);
 		if (object_links == NULL) {
 			yanet_error_add(
@@ -404,7 +409,8 @@ module_ectx_create(
 				counter_storage_spawn(
 					counter_storage_memory_context,
 					old_link_storage,
-					&cp_object->link_counter_registry
+					&cp_object->link_counter_registry,
+					err
 				);
 			if (link_storage == NULL) {
 				yanet_error_add(
@@ -516,8 +522,9 @@ chain_ectx_create(
 	uint64_t ectx_size =
 		sizeof(struct chain_ectx) +
 		sizeof(struct chain_module_ectx) * cp_chain->length;
-	struct chain_ectx *chain_ectx =
-		(struct chain_ectx *)memory_balloc(memory_context, ectx_size);
+	struct chain_ectx *chain_ectx = (struct chain_ectx *)memory_balloc(
+		memory_context, ectx_size, err
+	);
 	if (chain_ectx == NULL) {
 		yanet_error_add(
 			err,
@@ -551,7 +558,8 @@ chain_ectx_create(
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
 		old_counter_storage,
-		&cp_chain->counter_registry
+		&cp_chain->counter_registry,
+		err
 	);
 	if (counter_storage == NULL) {
 		yanet_error_add(
@@ -718,7 +726,7 @@ function_ectx_create(
 			   sizeof(struct chain_ectx *) * weight_sum;
 
 	struct function_ectx *function_ectx = (struct function_ectx *)
-		memory_balloc(memory_context, ectx_size);
+		memory_balloc(memory_context, ectx_size, err);
 	if (function_ectx == NULL) {
 		yanet_error_add(
 			err,
@@ -734,7 +742,8 @@ function_ectx_create(
 
 	struct chain_ectx **chains = (struct chain_ectx **)memory_balloc(
 		memory_context,
-		sizeof(struct chain_ectx *) * cp_function->chain_count
+		sizeof(struct chain_ectx *) * cp_function->chain_count,
+		err
 	);
 	if (chains == NULL) {
 		yanet_error_add(
@@ -769,7 +778,8 @@ function_ectx_create(
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
 		old_counter_storage,
-		&cp_function->counter_registry
+		&cp_function->counter_registry,
+		err
 	);
 	if (counter_storage == NULL) {
 		yanet_error_add(
@@ -915,7 +925,7 @@ pipeline_ectx_create(
 			   sizeof(struct function_ectx *) * cp_pipeline->length;
 
 	struct pipeline_ectx *pipeline_ectx = (struct pipeline_ectx *)
-		memory_balloc(memory_context, ectx_size);
+		memory_balloc(memory_context, ectx_size, err);
 	if (pipeline_ectx == NULL) {
 		yanet_error_add(
 			err,
@@ -945,7 +955,8 @@ pipeline_ectx_create(
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
 		old_counter_storage,
-		&cp_pipeline->counter_registry
+		&cp_pipeline->counter_registry,
+		err
 	);
 	if (counter_storage == NULL) {
 		yanet_error_add(
@@ -1105,7 +1116,7 @@ device_entry_ectx_create(
 
 	struct device_entry_ectx *device_entry_ectx =
 		(struct device_entry_ectx *)memory_balloc(
-			memory_context, ectx_size
+			memory_context, ectx_size, err
 		);
 	if (device_entry_ectx == NULL) {
 		yanet_error_add(
@@ -1164,7 +1175,8 @@ device_entry_ectx_create(
 		(struct pipeline_ectx **)memory_balloc(
 			memory_context,
 			sizeof(struct pipeline_ectx *) *
-				cp_device_entry->pipeline_count
+				cp_device_entry->pipeline_count,
+			err
 		);
 	if (pipelines == NULL && cp_device_entry->pipeline_count > 0) {
 		yanet_error_add(
@@ -1273,8 +1285,9 @@ device_ectx_create(
 
 	size_t ectx_size = sizeof(struct device_ectx);
 
-	struct device_ectx *device_ectx =
-		(struct device_ectx *)memory_balloc(memory_context, ectx_size);
+	struct device_ectx *device_ectx = (struct device_ectx *)memory_balloc(
+		memory_context, ectx_size, err
+	);
 	if (device_ectx == NULL) {
 		yanet_error_add(
 			err,
@@ -1300,7 +1313,8 @@ device_ectx_create(
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
 		old_counter_storage,
-		&cp_device->counter_registry
+		&cp_device->counter_registry,
+		err
 	);
 	if (counter_storage == NULL) {
 		yanet_error_add(
@@ -1404,7 +1418,7 @@ object_ectx_create(
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct object_ectx *object_ectx = (struct object_ectx *)memory_balloc(
-		memory_context, sizeof(struct object_ectx)
+		memory_context, sizeof(struct object_ectx), err
 	);
 	if (object_ectx == NULL) {
 		yanet_error_add(
@@ -1431,7 +1445,8 @@ object_ectx_create(
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
 		old_counter_storage,
-		&cp_object->counter_registry
+		&cp_object->counter_registry,
+		err
 	);
 	if (counter_storage == NULL) {
 		yanet_error_add(
@@ -1551,7 +1566,9 @@ link_module_ectx(
 	struct cp_module *cp_module = ADDR_OF(&module_ectx->cp_module);
 
 	uint64_t *cm_index = (uint64_t *)memory_balloc(
-		memory_context, sizeof(uint64_t) * config_gen_ectx->device_count
+		memory_context,
+		sizeof(uint64_t) * config_gen_ectx->device_count,
+		err
 	);
 	if (config_gen_ectx->device_count && cm_index == NULL) {
 		yanet_error_add(
@@ -1570,7 +1587,7 @@ link_module_ectx(
 	module_ectx->cm_index_size = config_gen_ectx->device_count;
 
 	uint64_t *mc_index = (uint64_t *)memory_balloc(
-		memory_context, sizeof(uint64_t) * cp_module->device_count
+		memory_context, sizeof(uint64_t) * cp_module->device_count, err
 	);
 	if (cp_module->device_count && mc_index == NULL) {
 		yanet_error_add(
@@ -1840,7 +1857,7 @@ config_gen_ectx_create(
 				   );
 
 	struct config_gen_ectx *config_gen_ectx = (struct config_gen_ectx *)
-		memory_balloc(memory_context, ectx_size);
+		memory_balloc(memory_context, ectx_size, err);
 	if (config_gen_ectx == NULL) {
 		yanet_error_add(
 			err,
@@ -1857,7 +1874,8 @@ config_gen_ectx_create(
 	struct cp_config_counter_storage_registry *registry =
 		(struct cp_config_counter_storage_registry *)memory_balloc(
 			&cp_config->memory_context,
-			sizeof(struct cp_config_counter_storage_registry)
+			sizeof(struct cp_config_counter_storage_registry),
+			err
 		);
 	if (registry == NULL) {
 		yanet_error_add(
@@ -1891,7 +1909,8 @@ config_gen_ectx_create(
 			(struct object_ectx **)memory_balloc(
 				memory_context,
 				sizeof(struct object_ectx *) *
-					config_gen_ectx->object_count
+					config_gen_ectx->object_count,
+				err
 			);
 		if (objects == NULL) {
 			yanet_error_add(
@@ -2000,7 +2019,8 @@ config_gen_ectxs_create(
 	struct config_gen_ectx **ectxs =
 		(struct config_gen_ectx **)memory_balloc(
 			memory_context,
-			sizeof(struct config_gen_ectx *) * worker_count
+			sizeof(struct config_gen_ectx *) * worker_count,
+			err
 		);
 	if (ectxs == NULL) {
 		yanet_error_add(

@@ -39,16 +39,16 @@ main() {
 	}
 
 	struct radix radix;
-	if (radix_init(&radix, &mem_ctx) < 0) {
+	if (radix_init(&radix, &mem_ctx, NULL) < 0) {
 		return 1;
 	}
 
 	uint8_t k1[4] = {192, 168, 0, 1};
 	uint8_t k2[4] = {192, 173, 255, 0};
-	if (radix_insert(&radix, 4, k1, 1) < 0) {
+	if (radix_insert(&radix, 4, k1, 1, NULL) < 0) {
 		return 1;
 	}
-	if (radix_insert(&radix, 4, k2, 2) < 0) {
+	if (radix_insert(&radix, 4, k2, 2, NULL) < 0) {
 		return 1;
 	}
 
@@ -58,7 +58,7 @@ main() {
 	uint32_t v2 = radix_lookup(&radix, 4, k2);
 	assert(v2 == 2);
 
-	if (radix_insert(&radix, 4, k1, 3) < 0) {
+	if (radix_insert(&radix, 4, k1, 3, NULL) < 0) {
 		return 1;
 	}
 	v1 = radix_lookup(&radix, 4, k1);

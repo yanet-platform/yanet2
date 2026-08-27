@@ -262,7 +262,7 @@ static int
 nat64_test_config(struct nat64_module_config *module_config) {
 	// Initialize module configuration using nat64_module_config_init_config
 	if (nat64_module_config_data_init(
-		    module_config, test_params.memory_context
+		    module_config, test_params.memory_context, NULL
 	    )) {
 		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize module config\n"
 		);
@@ -284,8 +284,9 @@ nat64_test_config(struct nat64_module_config *module_config) {
 		0x00,
 		0x00
 	};
-	if (nat64_module_config_add_prefix(&module_config->cp_module, pfx) <
-	    0) {
+	if (nat64_module_config_add_prefix(
+		    &module_config->cp_module, pfx, NULL
+	    ) < 0) {
 		goto error_add;
 	}
 
@@ -296,7 +297,8 @@ nat64_test_config(struct nat64_module_config *module_config) {
 			    &module_config->cp_module,
 			    config_data.mapping[i].ip4,
 			    (uint8_t *)config_data.mapping[i].ip6,
-			    0
+			    0,
+			    NULL
 		    ) < 0) {
 			goto error_add;
 		}
@@ -5164,7 +5166,7 @@ test_default_values(void) {
 	struct nat64_module_config module_config;
 	// Initialize module configuration using nat64_module_config_init_config
 	if (nat64_module_config_data_init(
-		    &module_config, test_params.memory_context
+		    &module_config, test_params.memory_context, NULL
 	    )) {
 		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize module config\n"
 		);

@@ -79,7 +79,7 @@ benchmark_multiworker_throughput(size_t num_workers) {
 	LOG(INFO, "Benchmarking RCU with %zu workers...", num_workers);
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS, NULL);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_ullong total_reads = 0;
@@ -189,7 +189,7 @@ benchmark_contention(void) {
 	LOG(INFO, "Running contention benchmark...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS, NULL);
 	atomic_ulong value = 0;
 	atomic_ullong total_ops = 0;
 	uint64_t worker_times[BENCH_WORKERS] = {0};
@@ -276,7 +276,7 @@ benchmark_latency_distribution(void) {
 	LOG(INFO, "Running latency distribution benchmark...");
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS, NULL);
 	atomic_ulong value = 0;
 
 	const size_t num_samples = 10000;
@@ -412,7 +412,7 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	    num_readers);
 
 	rcu_t rcu;
-	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS, NULL);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_ullong total_reads = 0;

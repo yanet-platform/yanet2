@@ -65,10 +65,11 @@ collect_net6_range(
 	net6_get_part_func get_part,
 	struct lpm *lpm,
 	const char *lpm_name,
-	struct range_index *ri
+	struct range_index *ri,
+	yanet_error **err
 ) {
 	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context)) {
+	if (range_collector_init(&collector, memory_context, err)) {
 		goto error;
 	}
 
@@ -97,25 +98,26 @@ collect_net6_range(
 			if (range8_collector_add(
 				    &collector,
 				    addr,
-				    __builtin_popcountll(*(uint64_t *)mask)
+				    __builtin_popcountll(*(uint64_t *)mask),
+				    err
 			    )) {
 				goto error_collector;
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context, lpm_name)) {
+	if (lpm_init(lpm, memory_context, lpm_name, err)) {
 		goto error_lpm;
 	}
 
-	if (range_index_init(ri, memory_context)) {
+	if (range_index_init(ri, memory_context, err)) {
 		goto error_ri_init;
 	}
 
-	if (range_collector_collect(&collector, 8, ri)) {
+	if (range_collector_collect(&collector, 8, ri, err)) {
 		goto error_collect;
 	}
 
-	if (range_index_build_lpm(ri, 8, lpm)) {
+	if (range_index_build_lpm(ri, 8, lpm, err)) {
 		goto error_collect;
 	}
 
@@ -205,14 +207,16 @@ touch_network_ranges(
 	uint32_t net_range_count,
 	const struct range_index *ri_hi,
 	const struct range_index *ri_lo,
-	struct value_table *value_table
+	struct value_table *value_table,
+	yanet_error **err
 ) {
 
 	struct remap_table remap_table;
 	if (remap_table_init(
 		    &remap_table,
 		    memory_context,
-		    (ri_hi->max_value + 1) * (ri_lo->max_value + 1)
+		    (ri_hi->max_value + 1) * (ri_lo->max_value + 1),
+		    err
 	    )) {
 		return -1;
 	}
@@ -261,7 +265,10 @@ touch_network_ranges(
 						values_lo[idx_lo]
 					);
 					if (remap_table_touch(
-						    &remap_table, *value, value
+						    &remap_table,
+						    *value,
+						    value,
+						    err
 					    ) < 0) {
 						goto error;
 					}
@@ -288,7 +295,8 @@ collect_network_values(
 	const struct range_index *ri_hi,
 	const struct range_index *ri_lo,
 	struct value_table *value_table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
 	uint32_t *values_hi = ADDR_OF(&ri_hi->values);
 	uint32_t *values_lo = ADDR_OF(&ri_lo->values);
@@ -296,7 +304,7 @@ collect_network_values(
 	for (uint32_t net_idx = 0; net_idx < all_net_count; ++net_idx) {
 		struct net6 net6 = all_nets[net_idx];
 
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			return -1;
 		}
 
@@ -324,7 +332,8 @@ collect_network_values(
 						    value_table,
 						    values_hi[idx_hi],
 						    values_lo[idx_lo]
-					    )
+					    ),
+					    err
 				    )) {
 					return -1;
 				}
@@ -353,7 +362,8 @@ build_net6_info(
 	uint64_t *net_count,
 
 	struct value_range **net_ranges,
-	uint32_t *net_range_count
+	uint32_t *net_range_count,
+	yanet_error **err
 ) {
 	*nets = NULL;
 	*net_count = 0;
@@ -361,7 +371,7 @@ build_net6_info(
 	*net_ranges = NULL;
 	*net_range_count = 0;
 
-	if (radix_init(net_radix, memory_context)) {
+	if (radix_init(net_radix, memory_context, err)) {
 		return -1;
 	}
 
@@ -390,7 +400,7 @@ build_net6_info(
 			}
 
 			if (radix_insert(
-				    net_radix, 32, net6.addr, *net_count
+				    net_radix, 32, net6.addr, *net_count, err
 			    )) {
 				goto error_nets;
 			}
@@ -398,7 +408,8 @@ build_net6_info(
 				    memory_context,
 				    (void **)nets,
 				    sizeof(**nets),
-				    net_count
+				    net_count,
+				    err
 			    )) {
 				goto error_nets;
 			}
@@ -412,13 +423,13 @@ build_net6_info(
 
 	struct value_table net_table;
 	if (value_table_init(
-		    &net_table, memory_context, "net6-nets", 1, *net_count
+		    &net_table, memory_context, "net6-nets", 1, *net_count, err
 	    )) {
 		goto error_nets;
 	}
 
 	struct remap_table net_remap;
-	if (remap_table_init(&net_remap, memory_context, *net_count)) {
+	if (remap_table_init(&net_remap, memory_context, *net_count, err)) {
 		goto error_table;
 	}
 
@@ -447,7 +458,7 @@ build_net6_info(
 				radix_lookup(net_radix, 32, net6.addr);
 			uint32_t *v =
 				value_table_get_ptr(&net_table, 0, net_idx);
-			if (remap_table_touch(&net_remap, *v, v) < 0) {
+			if (remap_table_touch(&net_remap, *v, v, err) < 0) {
 				goto error_touch;
 			}
 		}
@@ -464,7 +475,9 @@ build_net6_info(
 		}
 	}
 	*net_ranges = (struct value_range *)memory_balloc(
-		memory_context, sizeof(struct value_range) * *net_range_count
+		memory_context,
+		sizeof(struct value_range) * *net_range_count,
+		err
 	);
 	if (*net_ranges == NULL) {
 		goto error_table;
@@ -476,7 +489,8 @@ build_net6_info(
 			    memory_context,
 			    *net_ranges +
 				    value_table_get(&net_table, 0, net_idx),
-			    net_idx
+			    net_idx,
+			    err
 		    )) {
 			goto error_append;
 		}
@@ -533,7 +547,8 @@ merge_net6_range(
 	const struct range_index *ri_hi,
 	const struct range_index *ri_lo,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
 	struct net6 *nets;
 	uint64_t net_cnt = 0;
@@ -551,7 +566,8 @@ merge_net6_range(
 		    &nets,
 		    &net_cnt,
 		    &net_ranges,
-		    &net_range_count
+		    &net_range_count,
+		    err
 	    )) {
 		return -1;
 	}
@@ -561,7 +577,8 @@ merge_net6_range(
 		    memory_context,
 		    "comb",
 		    ri_hi->max_value + 1,
-		    ri_lo->max_value + 1
+		    ri_lo->max_value + 1,
+		    err
 	    )) {
 		goto error_info;
 	}
@@ -573,20 +590,21 @@ merge_net6_range(
 		    net_range_count,
 		    ri_hi,
 		    ri_lo,
-		    table
+		    table,
+		    err
 	    )) {
 		goto error_table;
 	}
 
 	struct value_registry net_registry;
 	if (value_registry_init(
-		    &net_registry, memory_context, "net6-net-registry"
+		    &net_registry, memory_context, "net6-net-registry", err
 	    )) {
 		goto error_table;
 	}
 
 	if (collect_network_values(
-		    nets, net_cnt, ri_hi, ri_lo, table, &net_registry
+		    nets, net_cnt, ri_hi, ri_lo, table, &net_registry, err
 	    )) {
 		goto error_net_registry;
 	}
@@ -599,7 +617,7 @@ merge_net6_range(
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_registry;
 		}
 
@@ -624,7 +642,7 @@ merge_net6_range(
 			uint32_t *vls = ADDR_OF(&rng->values);
 			for (uint32_t idx = 0; idx < rng->count; ++idx) {
 				if (value_registry_collect(
-					    registry, vls[idx]
+					    registry, vls[idx], err
 				    )) {
 					goto error_registry;
 				}
@@ -694,10 +712,12 @@ init_net6(
 	void **data,
 	const struct filter_rule **actions,
 	size_t count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	struct net6_classifier *net6 =
-		memory_balloc(memory_context, sizeof(struct net6_classifier));
+	struct net6_classifier *net6 = memory_balloc(
+		memory_context, sizeof(struct net6_classifier), err
+	);
 	if (net6 == NULL) {
 		return -1;
 	}
@@ -712,7 +732,8 @@ init_net6(
 		    net6_get_hi_part,
 		    &net6->hi,
 		    "lpm_hi",
-		    &ri_hi
+		    &ri_hi,
+		    err
 	    )) {
 		goto error_hi;
 	}
@@ -726,7 +747,8 @@ init_net6(
 		    net6_get_lo_part,
 		    &net6->lo,
 		    "lpm_lo",
-		    &ri_lo
+		    &ri_lo,
+		    err
 	    )) {
 		goto error_lo;
 	}
@@ -739,7 +761,8 @@ init_net6(
 		    &ri_hi,
 		    &ri_lo,
 		    &net6->comb,
-		    registry
+		    registry,
+		    err
 	    )) {
 		goto error_merge;
 	}
@@ -771,7 +794,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_src)(
 	void **data,
 	const struct filter_rule **rules,
 	size_t actions_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	return init_net6(
 		registry,
@@ -779,7 +803,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_src)(
 		data,
 		rules,
 		actions_count,
-		memory_context
+		memory_context,
+		err
 	);
 }
 
@@ -790,7 +815,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_dst)(
 	void **data,
 	const struct filter_rule **rules,
 	size_t actions_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	return init_net6(
 		registry,
@@ -798,7 +824,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_dst)(
 		data,
 		rules,
 		actions_count,
-		memory_context
+		memory_context,
+		err
 	);
 }
 
@@ -906,14 +933,14 @@ net6_share_build_remap(
 ) {
 	size_t size = sizeof(uint32_t) * class_count;
 
-	uint32_t *a = (uint32_t *)memory_balloc(mctx, size);
+	uint32_t *a = (uint32_t *)memory_balloc(mctx, size, err);
 	if (a == NULL) {
 		yanet_error_add(
 			err, "out of memory: failed to allocate remap array"
 		);
 		return -1;
 	}
-	uint32_t *b = (uint32_t *)memory_balloc(mctx, size);
+	uint32_t *b = (uint32_t *)memory_balloc(mctx, size, err);
 	if (b == NULL) {
 		memory_bfree(mctx, a, size);
 		yanet_error_add(
@@ -984,7 +1011,8 @@ filter_net6_share_init(
 		    net6_get_hi_part,
 		    &out->hi,
 		    is_src ? "net6_share_src_hi" : "net6_share_dst_hi",
-		    &ri
+		    &ri,
+		    err
 	    )) {
 		yanet_error_add(
 			err,
@@ -1003,7 +1031,8 @@ filter_net6_share_init(
 		    net6_get_lo_part,
 		    &out->lo,
 		    is_src ? "net6_share_src_lo" : "net6_share_dst_lo",
-		    &ri
+		    &ri,
+		    err
 	    )) {
 		yanet_error_add(
 			err,

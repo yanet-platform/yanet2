@@ -22,7 +22,8 @@ typedef int (*filter_lookup_init_func)(
 	void **data,
 	const struct filter_rule **rules,
 	size_t rule_count,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 );
 
 typedef void (*filter_lookup_free_func)(
@@ -196,7 +197,8 @@ filter_init(
 		struct memory_context *attr_ctx =
 			(struct memory_context *)memory_balloc(
 				&filter->memory_context,
-				sizeof(struct memory_context)
+				sizeof(struct memory_context),
+				err
 			);
 		if (attr_ctx == NULL) {
 			yanet_error_add(
@@ -213,7 +215,9 @@ filter_init(
 			filter_compiler->lookups[lookup_idx].name
 		);
 
-		if (value_registry_init(&v->registry, attr_ctx, "registry")) {
+		if (value_registry_init(
+			    &v->registry, attr_ctx, "registry", err
+		    )) {
 			yanet_error_add(
 				err,
 				"out of memory: failed to init registry for "
@@ -233,7 +237,12 @@ filter_init(
 		// parents, so the attribute receives it directly rather than
 		// the registry's own context.
 		if (filter_compiler->lookups[lookup_idx].init(
-			    &v->registry, &v->data, rules, rule_count, attr_ctx
+			    &v->registry,
+			    &v->data,
+			    rules,
+			    rule_count,
+			    attr_ctx,
+			    err
 		    )) {
 			yanet_error_add(
 				err,
@@ -248,7 +257,7 @@ filter_init(
 	if (filter_compiler->lookup_count == 1) {
 		struct value_registry dummy;
 		if (init_dummy_registry(
-			    &filter->memory_context, rule_count, &dummy
+			    &filter->memory_context, rule_count, &dummy, err
 		    )) {
 			yanet_error_add(
 				err,
@@ -262,7 +271,8 @@ filter_init(
 			    &filter->memory_context,
 			    &dummy,
 			    &filter->v[1].registry,
-			    &filter->v[0].table
+			    &filter->v[0].table,
+			    err
 		    )) {
 			yanet_error_add(
 				err,
@@ -307,7 +317,8 @@ filter_init(
 		if (value_registry_init(
 			    &filter->v[idx].registry,
 			    &filter->memory_context,
-			    name
+			    name,
+			    err
 		    )) {
 			yanet_error_add(
 				err,
@@ -331,7 +342,8 @@ filter_init(
 			    &filter->v[2 * idx + 1].registry,
 			    &filter->v[idx].table,
 			    &filter->v[idx].registry,
-			    table_name
+			    table_name,
+			    err
 		    )) {
 			yanet_error_add(
 				err,
@@ -347,7 +359,8 @@ filter_init(
 		    &filter->memory_context,
 		    &filter->v[2 * 1].registry,
 		    &filter->v[2 * 1 + 1].registry,
-		    &filter->v[1].table
+		    &filter->v[1].table,
+		    err
 	    )) {
 		yanet_error_add(
 			err,

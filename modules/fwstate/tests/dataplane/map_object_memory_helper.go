@@ -83,6 +83,7 @@ func InsertMapV4Layer(
 		C.uint32_t(indexSize),
 		C.uint32_t(extraBucketCount),
 		C.uint16_t(workerCount),
+		nil,
 	))
 }
 

@@ -69,7 +69,7 @@ test_env_create(void *arena, const char *name) {
 	cfg.index_size = 128;
 	cfg.extra_bucket_count = 8;
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 
 	now = 1000;

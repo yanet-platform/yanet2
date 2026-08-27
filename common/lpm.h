@@ -57,7 +57,7 @@ lpm_page(const struct lpm *lpm, uint32_t page_idx) {
 }
 
 static inline int
-lpm_new_page(struct lpm *lpm, union lpm_value *value) {
+lpm_new_page(struct lpm *lpm, union lpm_value *value, yanet_error **err) {
 	if (!(lpm->page_count % LPM_CHUNK_SIZE)) {
 		uint32_t old_chunk_count = lpm->page_count / LPM_CHUNK_SIZE;
 		uint32_t new_chunk_count = old_chunk_count + 1;
@@ -66,7 +66,8 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 
 		struct lpm_page **pages = (struct lpm_page **)memory_balloc(
 			memory_context,
-			sizeof(struct lpm_page *) * new_chunk_count
+			sizeof(struct lpm_page *) * new_chunk_count,
+			err
 		);
 		if (pages == NULL) {
 			errno = ENOMEM;
@@ -74,7 +75,9 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 		}
 
 		struct lpm_page *page = (struct lpm_page *)memory_balloc(
-			memory_context, sizeof(struct lpm_page) * LPM_CHUNK_SIZE
+			memory_context,
+			sizeof(struct lpm_page) * LPM_CHUNK_SIZE,
+			err
 		);
 		if (page == NULL) {
 			memory_bfree(
@@ -124,12 +127,15 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 
 static inline int
 lpm_init(
-	struct lpm *lpm, struct memory_context *memory_context, const char *name
+	struct lpm *lpm,
+	struct memory_context *memory_context,
+	const char *name,
+	yanet_error **err
 ) {
 	memory_context_init_from(&lpm->memory_context, memory_context, name);
 	lpm->pages = NULL;
 	lpm->page_count = 0;
-	return lpm_new_page(lpm, NULL);
+	return lpm_new_page(lpm, NULL, err);
 }
 
 static inline void
@@ -211,7 +217,8 @@ lpm_insert(
 	uint8_t key_size,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint32_t value
+	uint32_t value,
+	yanet_error **err
 ) {
 	uint8_t key[key_size];
 	struct lpm_page *pages[key_size];
@@ -231,7 +238,7 @@ lpm_insert(
 			if (hop < key_size - 1 &&
 			    (lpm_check_range_lo(key_size, key, from, hop) ||
 			     lpm_check_range_hi(key_size, key, to, hop))) {
-				if (lpm_new_page(lpm, stored_value)) {
+				if (lpm_new_page(lpm, stored_value, err)) {
 					return -1;
 				}
 				++hop;
@@ -818,9 +825,13 @@ out:
 
 static inline int
 lpm8_insert(
-	struct lpm *lpm8, const uint8_t *from, const uint8_t *to, uint32_t value
+	struct lpm *lpm8,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value,
+	yanet_error **err
 ) {
-	return lpm_insert(lpm8, 8, from, to, value);
+	return lpm_insert(lpm8, 8, from, to, value, err);
 }
 
 static inline uint32_t
@@ -874,9 +885,13 @@ lpm8_compact(struct lpm *lpm8) {
 
 static inline int
 lpm4_insert(
-	struct lpm *lpm4, const uint8_t *from, const uint8_t *to, uint32_t value
+	struct lpm *lpm4,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value,
+	yanet_error **err
 ) {
-	return lpm_insert(lpm4, 4, from, to, value);
+	return lpm_insert(lpm4, 4, from, to, value, err);
 }
 
 static inline uint32_t

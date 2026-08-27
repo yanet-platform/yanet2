@@ -80,17 +80,19 @@ func (m *ModuleConfig) Free() error {
 
 // addMapping maps 1:1 to nat64_module_config_add_mapping.
 func (m *ModuleConfig) addMapping(ipv4 [4]byte, ipv6 [16]byte, prefixIndex uint32) error {
-	rc, err := C.nat64_module_config_add_mapping(
+	var cErr *C.yanet_error
+	rc := C.nat64_module_config_add_mapping(
 		m.asRawPtr(),
 		*(*C.uint32_t)(unsafe.Pointer(&ipv4[0])),
 		(*C.uint8_t)(unsafe.Pointer(&ipv6[0])),
 		C.size_t(prefixIndex),
+		&cErr,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to add mapping: %w", err)
-	}
 	if rc < 0 {
-		return fmt.Errorf("failed to add mapping: return code %d", rc)
+		return fmt.Errorf(
+			"failed to add mapping: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return nil
@@ -98,15 +100,17 @@ func (m *ModuleConfig) addMapping(ipv4 [4]byte, ipv6 [16]byte, prefixIndex uint3
 
 // addPrefix maps 1:1 to nat64_module_config_add_prefix.
 func (m *ModuleConfig) addPrefix(prefix [12]byte) error {
-	rc, err := C.nat64_module_config_add_prefix(
+	var cErr *C.yanet_error
+	rc := C.nat64_module_config_add_prefix(
 		m.asRawPtr(),
 		(*C.uint8_t)(unsafe.Pointer(&prefix[0])),
+		&cErr,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to add prefix: %w", err)
-	}
 	if rc < 0 {
-		return fmt.Errorf("failed to add prefix: return code %d", rc)
+		return fmt.Errorf(
+			"failed to add prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return nil

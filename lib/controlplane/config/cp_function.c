@@ -17,10 +17,15 @@ cp_function_alloc_size(uint64_t chain_count) {
 }
 
 struct cp_function *
-cp_function_new(struct memory_context *memory_context, uint64_t chain_count) {
+cp_function_new(
+	struct memory_context *memory_context,
+	uint64_t chain_count,
+	yanet_error **err
+) {
 	size_t alloc_size = cp_function_alloc_size(chain_count);
-	struct cp_function *self =
-		(struct cp_function *)memory_balloc(memory_context, alloc_size);
+	struct cp_function *self = (struct cp_function *)memory_balloc(
+		memory_context, alloc_size, err
+	);
 	if (self == NULL) {
 		return NULL;
 	}
@@ -147,7 +152,7 @@ cp_function_init(
 
 	for (uint64_t idx = 0; idx < cp_function_config->chain_count; ++idx) {
 		struct cp_chain *new_chain = cp_chain_new(
-			mctx, cp_function_config->chains[idx].chain->length
+			mctx, cp_function_config->chains[idx].chain->length, err
 		);
 		if (new_chain == NULL) {
 			yanet_error_add(
@@ -205,7 +210,7 @@ cp_function_registry_init(
 	yanet_error **err
 ) {
 	if (registry_init(
-		    memory_context, &new_function_registry->registry, 8
+		    memory_context, &new_function_registry->registry, 8, err
 	    )) {
 		yanet_error_add(err, "failed to initialize function registry");
 		return -1;
@@ -225,7 +230,8 @@ cp_function_registry_copy(
 	if (registry_copy(
 		    memory_context,
 		    &new_function_registry->registry,
-		    &old_function_registry->registry
+		    &old_function_registry->registry,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to copy function registry");
 		return -1;
@@ -352,12 +358,21 @@ cp_function_registry_upsert(
 			}
 		}
 		// TODO: unlink on fail?
-		counter_registry_link(
-			&new_chain->counter_registry,
-			(old_chain != NULL) ? &old_chain->counter_registry
-					    : NULL,
-			err
-		);
+		if (counter_registry_link(
+			    &new_chain->counter_registry,
+			    (old_chain != NULL) ? &old_chain->counter_registry
+						: NULL,
+			    err
+		    )) {
+			yanet_error_add(
+				err,
+				"failed to link counter registry for chain "
+				"%lu of function '%s'",
+				idx,
+				name
+			);
+			return -1;
+		}
 	}
 
 	if (registry_replace(
@@ -366,7 +381,8 @@ cp_function_registry_upsert(
 		    name,
 		    &new_function->config_item,
 		    cp_function_registry_item_free_cb,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to replace function in registry");
 		return -1;
@@ -377,7 +393,9 @@ cp_function_registry_upsert(
 
 int
 cp_function_registry_delete(
-	struct cp_function_registry *function_registry, const char *name
+	struct cp_function_registry *function_registry,
+	const char *name,
+	yanet_error **err
 ) {
 	return registry_replace(
 		&function_registry->registry,
@@ -385,6 +403,7 @@ cp_function_registry_delete(
 		name,
 		NULL,
 		cp_function_registry_item_free_cb,
-		NULL
+		NULL,
+		err
 	);
 }

@@ -93,7 +93,7 @@ cp_device_entry_new(
 	uint64_t alloc_size =
 		cp_device_entry_alloc_size(cp_device_entry_config->count);
 	struct cp_device_entry *cp_device_entry = (struct cp_device_entry *)
-		memory_balloc(memory_context, alloc_size);
+		memory_balloc(memory_context, alloc_size, err);
 	if (cp_device_entry == NULL) {
 		yanet_error_add(
 			err, "failed to allocate memory for device entry"
@@ -117,9 +117,9 @@ cp_device_entry_new(
 }
 
 struct cp_device *
-cp_device_new(struct memory_context *mctx) {
+cp_device_new(struct memory_context *mctx, yanet_error **err) {
 	struct cp_device *self = (struct cp_device *)memory_balloc(
-		mctx, sizeof(struct cp_device)
+		mctx, sizeof(struct cp_device), err
 	);
 	if (self == NULL) {
 		return NULL;
@@ -395,7 +395,9 @@ cp_device_registry_init(
 	struct cp_device_registry *new_device_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, &new_device_registry->registry, 8)) {
+	if (registry_init(
+		    memory_context, &new_device_registry->registry, 8, err
+	    )) {
 		yanet_error_add(err, "failed to initialize device registry");
 		return -1;
 	}
@@ -414,7 +416,8 @@ cp_device_registry_copy(
 	if (registry_copy(
 		    memory_context,
 		    &new_device_registry->registry,
-		    &old_device_registry->registry
+		    &old_device_registry->registry,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to copy device registry");
 		return -1;
@@ -651,7 +654,8 @@ cp_device_registry_upsert(
 		    &cmp_data,
 		    &new_device->config_item,
 		    NULL,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to replace device in registry");
 		return -1;
@@ -679,7 +683,9 @@ cp_device_registry_upsert(
 
 int
 cp_device_registry_delete(
-	struct cp_device_registry *device_registry, const char *name
+	struct cp_device_registry *device_registry,
+	const char *name,
+	yanet_error **err
 ) {
 	struct cp_device *old_device =
 		cp_device_registry_lookup_name(device_registry, name);
@@ -690,7 +696,8 @@ cp_device_registry_delete(
 		    name,
 		    NULL,
 		    NULL,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		return -1;
 	}

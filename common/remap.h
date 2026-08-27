@@ -61,13 +61,16 @@ static inline int
 remap_table_init(
 	struct remap_table *table,
 	struct memory_context *memory_context,
-	uint32_t capacity
+	uint32_t capacity,
+	yanet_error **err
 ) {
 	SET_OFFSET_OF(&table->memory_context, memory_context);
 	table->gen = 1;
 	table->count = 1;
 	struct remap_item **keys = (struct remap_item **)memory_balloc(
-		ADDR_OF(&table->memory_context), sizeof(struct remap_item *)
+		ADDR_OF(&table->memory_context),
+		sizeof(struct remap_item *),
+		err
 	);
 
 	if (keys == NULL) {
@@ -76,7 +79,8 @@ remap_table_init(
 
 	struct remap_item *chunk = (struct remap_item *)memory_balloc(
 		ADDR_OF(&table->memory_context),
-		sizeof(struct remap_item) * REMAP_TABLE_CHUNK_SIZE
+		sizeof(struct remap_item) * REMAP_TABLE_CHUNK_SIZE,
+		err
 	);
 	if (chunk == NULL) {
 		memory_bfree(
@@ -145,7 +149,9 @@ remap_table_item(struct remap_table *table, uint32_t key) {
  * chunk if required and returns first available key.
  */
 static inline int
-remap_table_new_key(struct remap_table *table, uint32_t *key) {
+remap_table_new_key(
+	struct remap_table *table, uint32_t *key, yanet_error **err
+) {
 	/*		if (table->free_list != REMAP_TABLE_INVALID) {
 				*key = table->free_list;
 				struct remap_item *free_item =
@@ -160,7 +166,8 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 			(struct remap_item *)memory_balloc(
 				ADDR_OF(&table->memory_context),
 				sizeof(struct remap_item) *
-					REMAP_TABLE_CHUNK_SIZE
+					REMAP_TABLE_CHUNK_SIZE,
+				err
 			);
 
 		if (new_chunk == NULL) {
@@ -176,7 +183,8 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 		struct remap_item **new_keys =
 			(struct remap_item **)memory_balloc(
 				ADDR_OF(&table->memory_context),
-				new_chunk_count * sizeof(struct remap_item *)
+				new_chunk_count * sizeof(struct remap_item *),
+				err
 			);
 		if (new_keys == NULL) {
 			memory_bfree(
@@ -212,14 +220,19 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 }
 
 static inline int
-remap_table_touch(struct remap_table *table, uint32_t key, uint32_t *value) {
+remap_table_touch(
+	struct remap_table *table,
+	uint32_t key,
+	uint32_t *value,
+	yanet_error **err
+) {
 	int res = 0;
 	struct remap_item *item = remap_table_item(table, key);
 
 	if (item->gen != table->gen) {
 		// Allocate new key and update generation
 		uint32_t new_key;
-		if (remap_table_new_key(table, &new_key)) {
+		if (remap_table_new_key(table, &new_key, err)) {
 			return -1;
 		}
 		item->gen = table->gen;

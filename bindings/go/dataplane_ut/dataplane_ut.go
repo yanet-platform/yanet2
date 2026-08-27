@@ -32,6 +32,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/lib/controlplane/config
 #cgo LDFLAGS: -L../../../build/lib/counters
 #cgo LDFLAGS: -L../../../build/lib/errors
+#cgo LDFLAGS: -L../../../build/lib/cancellation
 #cgo LDFLAGS: -L../../../build/lib/filter
 #cgo LDFLAGS: -L../../../build/lib/fwstate
 #cgo LDFLAGS: -L../../../build/lib/utils
@@ -44,7 +45,7 @@ package dataplaneut
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -L../../../build/subprojects/regex
-#cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
+#cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lcancellation -lfilter_compiler -lfwstate -llib_utils
 #cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
 #cgo LDFLAGS: -Wl,--end-group
 

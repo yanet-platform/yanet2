@@ -20,11 +20,13 @@ struct range_index {
 
 static inline int
 range_index_init(
-	struct range_index *range_index, struct memory_context *memory_context
+	struct range_index *range_index,
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	SET_OFFSET_OF(&range_index->memory_context, memory_context);
 
-	if (radix_init(&range_index->radix, memory_context)) {
+	if (radix_init(&range_index->radix, memory_context, err)) {
 		return -1;
 	}
 
@@ -40,7 +42,8 @@ range_index_insert(
 	struct range_index *range_index,
 	uint8_t key_size,
 	uint8_t *key,
-	uint32_t value
+	uint32_t value,
+	yanet_error **err
 ) {
 	struct memory_context *memory_context =
 		ADDR_OF(&range_index->memory_context);
@@ -58,7 +61,7 @@ range_index_insert(
 			new_count = 1;
 		}
 		new_values = (uint32_t *)memory_balloc(
-			memory_context, new_count * sizeof(uint32_t)
+			memory_context, new_count * sizeof(uint32_t), err
 		);
 
 		if (new_values == NULL) {
@@ -72,7 +75,7 @@ range_index_insert(
 	}
 
 	if (radix_insert(
-		    &range_index->radix, key_size, key, range_index->count
+		    &range_index->radix, key_size, key, range_index->count, err
 	    )) {
 		if (new_values != old_values) {
 			memory_bfree(
@@ -143,6 +146,7 @@ struct range_index_lpm_ctx {
 	const uint32_t *values;
 	uint8_t prev_from[LPM_KEY_SIZE_MAX];
 	uint32_t prev_value;
+	yanet_error **err;
 };
 
 static inline int
@@ -160,7 +164,8 @@ range_index_lpm_cb(
 			    key_size,
 			    ctx->prev_from,
 			    to,
-			    ctx->prev_value
+			    ctx->prev_value,
+			    ctx->err
 		    )) {
 			return -1;
 		}
@@ -173,12 +178,16 @@ range_index_lpm_cb(
 
 static inline int
 range_index_build_lpm(
-	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+	const struct range_index *range_index,
+	uint8_t key_size,
+	struct lpm *lpm,
+	yanet_error **err
 ) {
 	struct range_index_lpm_ctx ctx;
 	ctx.lpm = lpm;
 	ctx.values = ADDR_OF(&range_index->values);
 	ctx.prev_value = LPM_VALUE_INVALID;
+	ctx.err = err;
 
 	if (radix_walk(
 		    &range_index->radix, key_size, range_index_lpm_cb, &ctx
@@ -190,7 +199,12 @@ range_index_build_lpm(
 		uint8_t to[key_size];
 		memset(to, 0xff, key_size);
 		if (lpm_insert(
-			    lpm, key_size, ctx.prev_from, to, ctx.prev_value
+			    lpm,
+			    key_size,
+			    ctx.prev_from,
+			    to,
+			    ctx.prev_value,
+			    err
 		    )) {
 			return -1;
 		}

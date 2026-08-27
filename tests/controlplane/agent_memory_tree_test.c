@@ -33,10 +33,12 @@ test_memory_tree_exported(void) {
 
 	struct dp_config *dp = NULL;
 	struct cp_config *cp = NULL;
-	int rc = dp_storage_init(0, 0, storage, DP_MEMORY, CP_MEMORY, &dp, &cp);
+	int rc = dp_storage_init(
+		0, 0, storage, DP_MEMORY, CP_MEMORY, &dp, &cp, NULL
+	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
-	struct agent *sys = dp_system_agent_new(cp, dp, "dataplane");
+	struct agent *sys = dp_system_agent_new(cp, dp, "dataplane", NULL);
 	TEST_ASSERT_NOT_NULL(sys, "dp_system_agent_new failed");
 
 	yanet_error *err = NULL;
@@ -45,8 +47,9 @@ test_memory_tree_exported(void) {
 	SET_OFFSET_OF(&cp->cp_config_gen, gen);
 
 	// Build a small named agent directly in shared memory.
-	struct agent *ag =
-		(struct agent *)memory_balloc(&cp->memory_context, sizeof(*ag));
+	struct agent *ag = (struct agent *)memory_balloc(
+		&cp->memory_context, sizeof(*ag), NULL
+	);
 	TEST_ASSERT_NOT_NULL(ag, "agent alloc failed");
 	memset(ag, 0, sizeof(*ag));
 	strtcpy(ag->name, "myagent", sizeof(ag->name));
@@ -62,7 +65,8 @@ test_memory_tree_exported(void) {
 
 	// Seed the agent's own allocator with a real arena, as agent_attach
 	// does, so the child contexts below actually allocate from it.
-	void *arena = memory_balloc(&cp->memory_context, ag->memory_limit);
+	void *arena =
+		memory_balloc(&cp->memory_context, ag->memory_limit, NULL);
 	TEST_ASSERT_NOT_NULL(arena, "arena alloc failed");
 	block_allocator_put_arena(
 		&ag->block_allocator, arena, ag->memory_limit
@@ -70,21 +74,21 @@ test_memory_tree_exported(void) {
 
 	// Add a child context "mod" and a grandchild "lpm".
 	struct memory_context *mod_ctx = (struct memory_context *)memory_balloc(
-		&cp->memory_context, sizeof(*mod_ctx)
+		&cp->memory_context, sizeof(*mod_ctx), NULL
 	);
 	TEST_ASSERT_NOT_NULL(mod_ctx, "mod_ctx alloc failed");
 	memory_context_init_from(mod_ctx, &ag->memory_context, "mod");
 
 	struct memory_context *lpm_ctx = (struct memory_context *)memory_balloc(
-		&cp->memory_context, sizeof(*lpm_ctx)
+		&cp->memory_context, sizeof(*lpm_ctx), NULL
 	);
 	TEST_ASSERT_NOT_NULL(lpm_ctx, "lpm_ctx alloc failed");
 	memory_context_init_from(lpm_ctx, mod_ctx, "lpm");
 
 	// Do a couple of allocations so balloc_size is non-zero.
-	void *b1 = memory_balloc(mod_ctx, 128);
+	void *b1 = memory_balloc(mod_ctx, 128, NULL);
 	TEST_ASSERT_NOT_NULL(b1, "mod alloc failed");
-	void *b2 = memory_balloc(lpm_ctx, 256);
+	void *b2 = memory_balloc(lpm_ctx, 256, NULL);
 	TEST_ASSERT_NOT_NULL(b2, "lpm alloc failed");
 
 	// Register the agent in the registry.
@@ -93,7 +97,8 @@ test_memory_tree_exported(void) {
 		(struct cp_agent_registry *)memory_balloc(
 			&cp->memory_context,
 			sizeof(struct cp_agent_registry) +
-				(old_reg->count + 1) * sizeof(struct agent *)
+				(old_reg->count + 1) * sizeof(struct agent *),
+			NULL
 		);
 	TEST_ASSERT_NOT_NULL(new_reg, "registry alloc failed");
 	for (uint64_t idx = 0; idx < old_reg->count; ++idx) {
@@ -201,10 +206,12 @@ test_memory_tree_after_fini(void) {
 
 	struct dp_config *dp = NULL;
 	struct cp_config *cp = NULL;
-	int rc = dp_storage_init(0, 0, storage, DP_MEMORY, CP_MEMORY, &dp, &cp);
+	int rc = dp_storage_init(
+		0, 0, storage, DP_MEMORY, CP_MEMORY, &dp, &cp, NULL
+	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
-	struct agent *sys = dp_system_agent_new(cp, dp, "dataplane");
+	struct agent *sys = dp_system_agent_new(cp, dp, "dataplane", NULL);
 	TEST_ASSERT_NOT_NULL(sys, "dp_system_agent_new failed");
 
 	yanet_error *err = NULL;
@@ -212,8 +219,9 @@ test_memory_tree_after_fini(void) {
 	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_new failed");
 	SET_OFFSET_OF(&cp->cp_config_gen, gen);
 
-	struct agent *ag =
-		(struct agent *)memory_balloc(&cp->memory_context, sizeof(*ag));
+	struct agent *ag = (struct agent *)memory_balloc(
+		&cp->memory_context, sizeof(*ag), NULL
+	);
 	TEST_ASSERT_NOT_NULL(ag, "agent alloc failed");
 	memset(ag, 0, sizeof(*ag));
 	strtcpy(ag->name, "fini-agent", sizeof(ag->name));
@@ -228,12 +236,12 @@ test_memory_tree_after_fini(void) {
 	);
 
 	struct memory_context *child_ctx = (struct memory_context *)
-		memory_balloc(&cp->memory_context, sizeof(*child_ctx));
+		memory_balloc(&cp->memory_context, sizeof(*child_ctx), NULL);
 	TEST_ASSERT_NOT_NULL(child_ctx, "child_ctx alloc failed");
 	memory_context_init_from(child_ctx, &ag->memory_context, "child");
 
 	struct memory_context *grand_ctx = (struct memory_context *)
-		memory_balloc(&cp->memory_context, sizeof(*grand_ctx));
+		memory_balloc(&cp->memory_context, sizeof(*grand_ctx), NULL);
 	TEST_ASSERT_NOT_NULL(grand_ctx, "grand_ctx alloc failed");
 	memory_context_init_from(grand_ctx, child_ctx, "grand");
 
@@ -242,7 +250,8 @@ test_memory_tree_after_fini(void) {
 		(struct cp_agent_registry *)memory_balloc(
 			&cp->memory_context,
 			sizeof(struct cp_agent_registry) +
-				(old_reg->count + 1) * sizeof(struct agent *)
+				(old_reg->count + 1) * sizeof(struct agent *),
+			NULL
 		);
 	TEST_ASSERT_NOT_NULL(new_reg, "registry alloc failed");
 	for (uint64_t idx = 0; idx < old_reg->count; ++idx) {

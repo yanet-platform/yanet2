@@ -52,7 +52,7 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
 	struct cp_object *object = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
 	TEST_ASSERT_SUCCESS(
@@ -128,7 +128,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// "foo" carries a named counter so a later replace can verify the
 	// counter definition is linked forward to its replacement.
 	struct cp_object *foo = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(foo, "object allocation (foo) failed");
 	TEST_ASSERT_SUCCESS(
@@ -144,7 +144,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 
 	struct cp_object *bar = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(bar, "object allocation (bar) failed");
 	TEST_ASSERT_SUCCESS(
@@ -232,7 +232,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// foo2 gains the copy's generation reference while foo loses it, so
 	// the two changes cancel and the count stays at four.
 	struct cp_object *foo2 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(foo2, "object allocation (foo2) failed");
 	TEST_ASSERT_SUCCESS(
@@ -270,7 +270,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// the original registry, so the delete drops only the copy's
 	// generation reference. The reinserted bar2 gains one back.
 	TEST_ASSERT_SUCCESS(
-		cp_object_registry_delete(&copied, "test", "bar"),
+		cp_object_registry_delete(&copied, "test", "bar", NULL),
 		"delete(bar) failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -280,7 +280,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"of two registries"
 	);
 	struct cp_object *bar2 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(bar2, "object allocation (bar2) failed");
 	TEST_ASSERT_SUCCESS(
@@ -404,7 +404,7 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 	);
 
 	struct cp_object *object = (struct cp_object *)memory_balloc(
-		&agent1->memory_context, sizeof(struct cp_object)
+		&agent1->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
 	TEST_ASSERT_SUCCESS(
@@ -491,7 +491,7 @@ test_cp_object_init_unknown_type_fails(struct yanet_shm *shm) {
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
 	struct cp_object *object = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(object, "object allocation failed");
 

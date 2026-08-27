@@ -25,7 +25,9 @@ cp_device_trafgen_new(
 ) {
 	struct cp_device_trafgen *cp_device_trafgen =
 		(struct cp_device_trafgen *)memory_balloc(
-			&agent->memory_context, sizeof(struct cp_device_trafgen)
+			&agent->memory_context,
+			sizeof(struct cp_device_trafgen),
+			err
 		);
 	if (cp_device_trafgen == NULL) {
 		yanet_error_add(err, "memory allocation failed");
@@ -55,7 +57,8 @@ cp_device_trafgen_new(
 			sizeof(struct trafgen_worker_state) * worker_count;
 		struct trafgen_worker_state *states = memory_balloc(
 			&cp_device_trafgen->cp_device.memory_context,
-			states_size
+			states_size,
+			err
 		);
 		if (states == NULL) {
 			yanet_error_add(err, "failed to allocate worker state");
@@ -231,9 +234,9 @@ cp_device_trafgen_set_frames(
 	}
 
 	uint64_t index_size = sizeof(uint32_t) * frame_count;
-	uint8_t *frames_buf = memory_balloc(memory_context, frames_size);
-	uint32_t *lengths_buf = memory_balloc(memory_context, index_size);
-	uint32_t *offsets_buf = memory_balloc(memory_context, index_size);
+	uint8_t *frames_buf = memory_balloc(memory_context, frames_size, err);
+	uint32_t *lengths_buf = memory_balloc(memory_context, index_size, err);
+	uint32_t *offsets_buf = memory_balloc(memory_context, index_size, err);
 
 	if (frames_buf == NULL || lengths_buf == NULL || offsets_buf == NULL) {
 		yanet_error_add(err, "failed to allocate frame storage");

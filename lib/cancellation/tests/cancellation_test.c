@@ -9,7 +9,7 @@
 
 #include "common/test_assert.h"
 
-#include "lib/controlplane/cancellation/cancellation.h"
+#include "lib/cancellation/cancellation.h"
 
 #include "lib/logging/log.h"
 

@@ -39,7 +39,7 @@ struct fwstate_map_v6_object {
 // cp_object_fini) and is idempotent. free deallocates ONLY the struct and
 // is NULL-safe.
 struct fwstate_map_v6_object *
-fwstate_map_v6_object_new(struct agent *agent);
+fwstate_map_v6_object_new(struct agent *agent, yanet_error **err);
 
 int
 fwstate_map_v6_object_init(
@@ -89,7 +89,8 @@ fwstate_map_v6_object_insert_layer(
 	struct fwstate_map_v6_object *self,
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
-	uint16_t worker_count
+	uint16_t worker_count,
+	yanet_error **err
 );
 
 // Unlink stale layers from the object's table chain.

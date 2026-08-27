@@ -106,7 +106,8 @@ fwstate_module_config_new(
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct fwstate_module_config)
+			sizeof(struct fwstate_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");

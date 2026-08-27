@@ -105,6 +105,8 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
+	yanet_error *err = NULL;
+
 	struct dataplane_ut *ut = calloc(1, sizeof(*ut));
 	if (ut == NULL) {
 		LOG(ERROR,
@@ -135,9 +137,13 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		    cfg->dp_memory,
 		    cfg->cp_memory,
 		    &ut->dp_config,
-		    &ut->cp_config
+		    &ut->cp_config,
+		    &err
 	    ) == -1) {
-		LOG(ERROR, "dataplane_ut_new: dp_storage_init failed");
+		LOG(ERROR,
+		    "dataplane_ut_new: dp_storage_init failed: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		dataplane_ut_free(ut);
 		return NULL;
 	}
@@ -203,11 +209,15 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 			(struct dp_object *)memory_balloc(
 				&ut->dp_config->memory_context,
 				cfg->objects_to_load_count *
-					sizeof(struct dp_object)
+					sizeof(struct dp_object),
+				&err
 			);
 		if (dp_objects == NULL) {
 			LOG(ERROR,
-			    "dataplane_ut_new: failed to allocate dp_objects");
+			    "dataplane_ut_new: failed to allocate dp_objects: "
+			    "%s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			dataplane_ut_free(ut);
 			return NULL;
 		}
@@ -226,10 +236,13 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// process-local addresses and produce SIGBUS on cross-process
 	// dereference.
 	struct agent *agent = dp_system_agent_new(
-		ut->cp_config, ut->dp_config, "dataplane_ut"
+		ut->cp_config, ut->dp_config, "dataplane_ut", &err
 	);
 	if (agent == NULL) {
-		LOG(ERROR, "dataplane_ut_new: failed to allocate system agent");
+		LOG(ERROR,
+		    "dataplane_ut_new: failed to allocate system agent: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		dataplane_ut_free(ut);
 		return NULL;
 	}
@@ -238,11 +251,14 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// Populate dp_topology with the logical port names from cfg.
 	if (cfg->device_count > 0) {
 		struct dp_port *ports = dp_topology_alloc_devices(
-			ut->dp_config, cfg->device_count
+			ut->dp_config, cfg->device_count, &err
 		);
 		if (ports == NULL) {
 			LOG(ERROR,
-			    "dataplane_ut_new: failed to allocate dp_topology");
+			    "dataplane_ut_new: failed to allocate dp_topology: "
+			    "%s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			dataplane_ut_free(ut);
 			return NULL;
 		}
@@ -255,7 +271,6 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 
 	// Create the initial cp_config_gen so agents can register modules
 	// and pipelines.
-	yanet_error *err = NULL;
 	struct cp_config_gen *cp_config_gen = cp_config_gen_new(agent, &err);
 	if (cp_config_gen == NULL) {
 		LOG(ERROR,
@@ -307,12 +322,15 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// Allocate dp_workers array inside dp_config memory.
 	struct dp_worker **workers_array = (struct dp_worker **)memory_balloc(
 		&ut->dp_config->memory_context,
-		cfg->worker_count * sizeof(struct dp_worker *)
+		cfg->worker_count * sizeof(struct dp_worker *),
+		&err
 	);
 	if (workers_array == NULL) {
 		LOG(ERROR,
 		    "dataplane_ut_new: failed to allocate workers pointer "
-		    "array");
+		    "array: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		dataplane_ut_free(ut);
 		return NULL;
 	}
@@ -340,13 +358,17 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 
 		struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
-			&ut->dp_config->memory_context, sizeof(struct dp_worker)
+			&ut->dp_config->memory_context,
+			sizeof(struct dp_worker),
+			&err
 		);
 		if (dp_worker == NULL) {
 			LOG(ERROR,
 			    "dataplane_ut_new: failed to allocate dp_worker "
-			    "%zu",
-			    idx);
+			    "%zu: %s",
+			    idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			dataplane_ut_free(ut);
 			return NULL;
 		}

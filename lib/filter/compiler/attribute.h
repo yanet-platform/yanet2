@@ -3,6 +3,7 @@
 #include "common/memory.h"
 #include "common/registry.h"
 
+#include "lib/errors/errors.h"
 #include "lib/filter/rule.h"
 
 #include "declare.h"
@@ -13,7 +14,8 @@
 		void **data,                                                   \
 		const struct filter_rule **rules,                              \
 		size_t rule_count,                                             \
-		struct memory_context *mctx                                    \
+		struct memory_context *mctx,                                   \
+		yanet_error **err                                              \
 	);                                                                     \
 	void FILTER_ATTR_COMPILER_FREE_FUNC(name)(                             \
 		void *data, struct memory_context *mctx                        \

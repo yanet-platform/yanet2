@@ -148,24 +148,20 @@ big_array_fini(struct big_array *array);
  * @param array Pointer to uninitialized big_array structure
  * @param size Total size in bytes for the array
  * @param mctx Parent memory context for allocations
+ * @param err Slot the failing step reports through
  *
- * @return 0 on success, -1 on allocation failure
+ * @return 0 on success, -1 on failure
  *
  * @note On failure, the function calls big_array_fini() to clean up any
  *       partial allocations, so the array is left in a safe state.
  * @note If size is 0, the function succeeds but allocates no subarrays.
- *
- * Example:
- * ```c
- * struct big_array array;
- * if (big_array_init(&array, 1000000, &mctx) != 0) {
- *     // Handle allocation failure
- * }
- * ```
  */
 static inline int
 big_array_init(
-	struct big_array *array, size_t size, struct memory_context *mctx
+	struct big_array *array,
+	size_t size,
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	memory_context_init_from(&array->mctx, mctx, "big_array");
 	array->size = size;
@@ -181,7 +177,7 @@ big_array_init(
 	}
 
 	void **subarrays = memory_balloc(
-		&array->mctx, sizeof(void *) * array->subarrays_count
+		&array->mctx, sizeof(void *) * array->subarrays_count, err
 	);
 	if (subarrays == NULL) {
 		goto free_on_error;
@@ -201,7 +197,7 @@ big_array_init(
 			}
 		}
 
-		void *subarray = memory_balloc(&array->mctx, alloc_size);
+		void *subarray = memory_balloc(&array->mctx, alloc_size, err);
 		if (subarray == NULL) {
 			goto free_on_error;
 		}

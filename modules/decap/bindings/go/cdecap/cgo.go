@@ -76,24 +76,34 @@ func (m *ModuleConfig) Free() error {
 
 // addPrefixV4 maps 1:1 to decap_module_config_add_prefix_v4.
 func (m *ModuleConfig) addPrefixV4(from [4]byte, to [4]byte) error {
+	var cErr *C.yanet_error
 	if rc := C.decap_module_config_add_prefix_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&from[0]),
 		(*C.uint8_t)(&to[0]),
+		&cErr,
 	); rc != 0 {
-		return fmt.Errorf("failed to add v4 prefix: error code=%d", rc)
+		return fmt.Errorf(
+			"failed to add v4 prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	return nil
 }
 
 // addPrefixV6 maps 1:1 to decap_module_config_add_prefix_v6.
 func (m *ModuleConfig) addPrefixV6(from [16]byte, to [16]byte) error {
+	var cErr *C.yanet_error
 	if rc := C.decap_module_config_add_prefix_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&from[0]),
 		(*C.uint8_t)(&to[0]),
+		&cErr,
 	); rc != 0 {
-		return fmt.Errorf("failed to add v6 prefix: error code=%d", rc)
+		return fmt.Errorf(
+			"failed to add v6 prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	return nil
 }

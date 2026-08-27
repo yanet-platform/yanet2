@@ -71,24 +71,34 @@ func (m *ModuleConfig) Free() error {
 }
 
 func (m *ModuleConfig) prefixAdd4(addrStart [4]byte, addrEnd [4]byte) error {
+	var cErr *C.yanet_error
 	if rc := C.dscp_module_config_add_prefix_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
 		(*C.uint8_t)(&addrEnd[0]),
+		&cErr,
 	); rc != 0 {
-		return fmt.Errorf("failed to add v4 prefix: unknown error code=%d", rc)
+		return fmt.Errorf(
+			"failed to add v4 prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return nil
 }
 
 func (m *ModuleConfig) prefixAdd6(addrStart [16]byte, addrEnd [16]byte) error {
+	var cErr *C.yanet_error
 	if rc := C.dscp_module_config_add_prefix_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
 		(*C.uint8_t)(&addrEnd[0]),
+		&cErr,
 	); rc != 0 {
-		return fmt.Errorf("failed to add v6 prefix: unknown error code=%d", rc)
+		return fmt.Errorf(
+			"failed to add v6 prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return nil

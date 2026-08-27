@@ -2,6 +2,7 @@
 #include "common/registry.h"
 #include "common/value.h"
 #include "declare.h"
+#include "lib/errors/errors.h"
 #include "lib/filter/rule.h"
 
 #include <stdint.h>
@@ -12,21 +13,22 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 	void **data,
 	const struct filter_rule **rules,
 	size_t rule_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	struct value_table *t =
-		memory_balloc(memory_context, sizeof(struct value_table));
+		memory_balloc(memory_context, sizeof(struct value_table), err);
 	if (t == NULL) {
 		return -1;
 	}
 
-	if (value_table_init(t, memory_context, "ipfrag", 1, 2)) {
+	if (value_table_init(t, memory_context, "ipfrag", 1, 2, err)) {
 		goto error_init;
 	}
 	SET_OFFSET_OF(data, t);
 
 	struct remap_table remap_table;
-	if (remap_table_init(&remap_table, memory_context, 2)) {
+	if (remap_table_init(&remap_table, memory_context, 2, err)) {
 		goto error_remap_table;
 	}
 
@@ -49,7 +51,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 			id = 1;
 		}
 		uint32_t *value = value_table_get_ptr(t, 0, id);
-		if (remap_table_touch(&remap_table, *value, value) < 0) {
+		if (remap_table_touch(&remap_table, *value, value, err) < 0) {
 			goto error_touch;
 		}
 	}
@@ -62,7 +64,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
 		// A value range should be created even for empty rules
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_collect;
 		}
 		if (*r_ptr == NULL) {
@@ -72,10 +74,10 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 
 		if (r->fragment == FILTER_IP_FRAG_ANY) {
 			if (value_registry_collect(
-				    registry, value_table_get(t, 0, 0)
+				    registry, value_table_get(t, 0, 0), err
 			    ) ||
 			    value_registry_collect(
-				    registry, value_table_get(t, 0, 1)
+				    registry, value_table_get(t, 0, 1), err
 			    )) {
 				goto error_collect;
 			}
@@ -88,7 +90,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(ip_frag)(
 					    r->fragment == FILTER_IP_FRAG_NONE
 						    ? 0
 						    : 1
-				    )
+				    ),
+				    err
 			    )) {
 				goto error_collect;
 			}

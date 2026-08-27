@@ -19,7 +19,7 @@ test_free_after_failed_init(void) {
 	struct value_table table;
 	memset(&table, 0xa5, sizeof(table));
 
-	res = value_table_init(&table, &mem_ctx, "test-table", 1, 10);
+	res = value_table_init(&table, &mem_ctx, "test-table", 1, 10, NULL);
 	assert(res == -1);
 
 	value_table_free(&table);
@@ -49,7 +49,7 @@ test_partial_failure_no_child(void) {
 	assert(res == 0);
 
 	struct value_table table;
-	res = value_table_init(&table, &mem_ctx, "test-table", 1, 10);
+	res = value_table_init(&table, &mem_ctx, "test-table", 1, 10, NULL);
 	assert(res == -1);
 
 	assert(ADDR_OF(&mem_ctx.first_child) == NULL);
@@ -83,7 +83,7 @@ main() {
 	size_t bfree_size_before = mem_ctx.bfree_size;
 
 	struct value_table table;
-	int res = value_table_init(&table, &mem_ctx, "test-table", 1, 10);
+	int res = value_table_init(&table, &mem_ctx, "test-table", 1, 10, NULL);
 	assert(res == 0);
 
 	// The table gets its own child node, named after the call site, in
@@ -94,7 +94,7 @@ main() {
 	assert(ADDR_OF(&child->next_sibling) == NULL);
 
 	struct remap_table remap_table;
-	res = remap_table_init(&remap_table, &mem_ctx, 10);
+	res = remap_table_init(&remap_table, &mem_ctx, 10, NULL);
 	assert(res == 0);
 
 	uint32_t l[5] = {2, 3, 0, 8, 6};
@@ -108,7 +108,7 @@ main() {
 		for (size_t x = l[i]; x < r[i]; ++x) {
 			mask[x] |= 1 << i;
 			uint32_t *value = value_table_get_ptr(&table, 0, x);
-			remap_table_touch(&remap_table, *value, value);
+			remap_table_touch(&remap_table, *value, value, NULL);
 		}
 	}
 

@@ -30,7 +30,7 @@ test_layermap_basic_operations(void *arena) {
 		.extra_bucket_count = 16,
 	};
 
-	fwmap_t *active_layer = fwmap_new(&config, ctx);
+	fwmap_t *active_layer = fwmap_new(&config, ctx, NULL);
 	assert(active_layer != NULL);
 
 	// Test insertion
@@ -87,7 +87,7 @@ test_layermap_basic_operations(void *arena) {
 
 	// Test rotation by creating a new layer and linking it
 	SET_OFFSET_OF(&active_layer, active_layer);
-	ret = layermap_insert_new_layer_cp(&active_layer, &config, ctx);
+	ret = layermap_insert_new_layer_cp(&active_layer, &config, ctx, NULL);
 	assert(ret == 0);
 	// Reload active_layer using ADDR_OF to dereference the offset
 	active_layer = ADDR_OF(&active_layer);
@@ -195,8 +195,9 @@ exhaust_memory_context(
 ) {
 	*coarse_count = 0;
 	while (*coarse_count < ALLOC_FAILURE_MAX_COARSE_BLOCKS) {
-		void *block =
-			memory_balloc(ctx, ALLOC_FAILURE_COARSE_CHUNK_SIZE);
+		void *block = memory_balloc(
+			ctx, ALLOC_FAILURE_COARSE_CHUNK_SIZE, NULL
+		);
 		if (block == NULL) {
 			break;
 		}
@@ -206,7 +207,7 @@ exhaust_memory_context(
 
 	*fine_count = 0;
 	while (*fine_count < ALLOC_FAILURE_MAX_FINE_BLOCKS) {
-		void *block = memory_balloc(ctx, sizeof(layermap_list_t));
+		void *block = memory_balloc(ctx, sizeof(layermap_list_t), NULL);
 		if (block == NULL) {
 			break;
 		}
@@ -251,10 +252,11 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	// Allocate the active-layer pointer in the arena (not on the stack)
 	// because layermap functions and ADDR_OF require it to reside in
 	// shared memory.
-	fwmap_t **active_layer_offset = memory_balloc(ctx, sizeof(fwmap_t *));
+	fwmap_t **active_layer_offset =
+		memory_balloc(ctx, sizeof(fwmap_t *), NULL);
 	assert(active_layer_offset != NULL);
 
-	fwmap_t *layer1 = fwmap_new(&config, ctx);
+	fwmap_t *layer1 = fwmap_new(&config, ctx, NULL);
 	assert(layer1 != NULL);
 	SET_OFFSET_OF(active_layer_offset, layer1);
 
@@ -263,8 +265,9 @@ test_layermap_alloc_failure_rollback(void *arena) {
 		layermap_put(layer1, 0, now, now + 60, &key1, &value1, NULL);
 	assert(ret >= 0);
 
-	int insert_result =
-		layermap_insert_new_layer_cp(active_layer_offset, &config, ctx);
+	int insert_result = layermap_insert_new_layer_cp(
+		active_layer_offset, &config, ctx, NULL
+	);
 	assert(insert_result == 0);
 	fwmap_t *layer2 = ADDR_OF(active_layer_offset);
 
@@ -272,8 +275,9 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	ret = layermap_put(layer2, 0, now, now + 60, &key2, &value2, NULL);
 	assert(ret >= 0);
 
-	insert_result =
-		layermap_insert_new_layer_cp(active_layer_offset, &config, ctx);
+	insert_result = layermap_insert_new_layer_cp(
+		active_layer_offset, &config, ctx, NULL
+	);
 	assert(insert_result == 0);
 	fwmap_t *layer3 = ADDR_OF(active_layer_offset);
 
@@ -289,7 +293,7 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	exhaust_memory_context(
 		ctx, coarse_blocks, &coarse_count, fine_blocks, &fine_count
 	);
-	void *probe = memory_balloc(ctx, sizeof(layermap_list_t));
+	void *probe = memory_balloc(ctx, sizeof(layermap_list_t), NULL);
 	assert(probe == NULL);
 
 	// Total failure: no layermap_list_t node can be allocated at all, so
@@ -297,7 +301,7 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	// left fully intact.
 	layermap_list_t *outdated_head = NULL;
 	int trim_ret = layermap_trim_stale_layers_cp(
-		active_layer_offset, ctx, trim_now, &outdated_head
+		active_layer_offset, ctx, trim_now, &outdated_head, NULL
 	);
 	assert(trim_ret == -1);
 	assert(outdated_head == NULL);
@@ -311,7 +315,7 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	memory_bfree(ctx, fine_blocks[fine_count], sizeof(layermap_list_t));
 
 	trim_ret = layermap_trim_stale_layers_cp(
-		active_layer_offset, ctx, trim_now, &outdated_head
+		active_layer_offset, ctx, trim_now, &outdated_head, NULL
 	);
 	assert(trim_ret == -1);
 	assert(outdated_head != NULL);
@@ -340,7 +344,7 @@ test_layermap_alloc_failure_rollback(void *arena) {
 	coarse_count = 0;
 
 	trim_ret = layermap_trim_stale_layers_cp(
-		active_layer_offset, ctx, trim_now, &outdated_head
+		active_layer_offset, ctx, trim_now, &outdated_head, NULL
 	);
 	assert(trim_ret == 0);
 	assert(count_chain_layers(ADDR_OF(active_layer_offset)) == 1);
@@ -404,7 +408,8 @@ rotator_worker(void *arg) {
 				layermap_insert_new_layer_cp(
 					args->active_layer_offset,
 					args->config,
-					args->ctx
+					args->ctx,
+					NULL
 				);
 				fprintf(stderr, "Layer is rotated\n");
 			}
@@ -495,10 +500,11 @@ test_layermap_multithreaded(void *arena) {
 
 	// Allocate active_layer pointer in arena (not on stack) because
 	// layermap functions and ADDR_OF require it to be in shared memory
-	fwmap_t **active_layer_offset = memory_balloc(ctx, sizeof(fwmap_t *));
+	fwmap_t **active_layer_offset =
+		memory_balloc(ctx, sizeof(fwmap_t *), NULL);
 	assert(active_layer_offset != NULL);
 
-	fwmap_t *first_layer = fwmap_new(&config, ctx);
+	fwmap_t *first_layer = fwmap_new(&config, ctx, NULL);
 	assert(first_layer != NULL);
 	SET_OFFSET_OF(active_layer_offset, first_layer);
 

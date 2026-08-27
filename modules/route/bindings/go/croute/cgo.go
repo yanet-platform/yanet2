@@ -119,16 +119,21 @@ func (m *ModuleConfig) addRouteList(indices []uint32) (int, error) {
 		cIndices[i] = C.uint32_t(v)
 	}
 
+	var cErr *C.yanet_error
 	idx, err := C.route_module_config_add_route_list(
 		m.asRawPtr(),
 		C.size_t(len(indices)),
 		&cIndices[0],
+		&cErr,
 	)
 	if err != nil {
 		return -1, fmt.Errorf("route_module_config_add_route_list: %w", err)
 	}
 	if idx < 0 {
-		return -1, fmt.Errorf("route_module_config_add_route_list: unknown error")
+		return -1, fmt.Errorf(
+			"failed to add route list: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 
 	return int(idx), nil
@@ -136,26 +141,36 @@ func (m *ModuleConfig) addRouteList(indices []uint32) (int, error) {
 
 // addPrefixV4 maps 1:1 to route_module_config_add_prefix_v4.
 func (m *ModuleConfig) addPrefixV4(from [4]byte, to [4]byte, routeListIndex uint32) error {
+	var cErr *C.yanet_error
 	if rc := C.route_module_config_add_prefix_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&from[0]),
 		(*C.uint8_t)(&to[0]),
 		C.uint32_t(routeListIndex),
+		&cErr,
 	); rc != 0 {
-		return fmt.Errorf("route_module_config_add_prefix_v4: error code=%d", rc)
+		return fmt.Errorf(
+			"failed to add v4 prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	return nil
 }
 
 // addPrefixV6 maps 1:1 to route_module_config_add_prefix_v6.
 func (m *ModuleConfig) addPrefixV6(from [16]byte, to [16]byte, routeListIndex uint32) error {
+	var cErr *C.yanet_error
 	if rc := C.route_module_config_add_prefix_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&from[0]),
 		(*C.uint8_t)(&to[0]),
 		C.uint32_t(routeListIndex),
+		&cErr,
 	); rc != 0 {
-		return fmt.Errorf("route_module_config_add_prefix_v6: error code=%d", rc)
+		return fmt.Errorf(
+			"failed to add v6 prefix: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
 	}
 	return nil
 }

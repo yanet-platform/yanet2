@@ -37,7 +37,8 @@ route_module_config_free(struct cp_module *cp_module, yanet_error **err);
 int
 route_module_config_data_init(
 	struct route_module_config *config,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 );
 
 // Registers the module-level counters and records their ids in the config.
@@ -66,7 +67,10 @@ route_module_config_add_route(
 
 int
 route_module_config_add_route_list(
-	struct cp_module *cp_module, size_t count, const uint32_t *indexes
+	struct cp_module *cp_module,
+	size_t count,
+	const uint32_t *indexes,
+	yanet_error **err
 );
 
 int
@@ -74,7 +78,8 @@ route_module_config_add_prefix_v4(
 	struct cp_module *cp_module,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint32_t route_list_index
+	uint32_t route_list_index,
+	yanet_error **err
 );
 
 int
@@ -82,7 +87,8 @@ route_module_config_add_prefix_v6(
 	struct cp_module *cp_module,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint32_t route_list_index
+	uint32_t route_list_index,
+	yanet_error **err
 );
 
 // Returns the number of distinct hardware routes held by the config.

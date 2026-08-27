@@ -6,6 +6,7 @@ package nat64_test
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 //#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
+//#cgo LDFLAGS: -L../../../../build/lib/cancellation -lcancellation
 /*
 #include <errno.h>
 #include <stdint.h>
@@ -123,6 +124,7 @@ func nat64ModuleConfig(prefix [12]byte, mappings []nat64Mapping, memCtx testutil
 	m := (*C.struct_nat64_module_config)(C.memory_balloc(
 		(*C.struct_memory_context)(memCtx.AsRawPtr()),
 		C.sizeof_struct_nat64_module_config,
+		nil,
 	))
 	if m == nil {
 		panic("failed to allocate nat64 module config")
@@ -140,18 +142,18 @@ func nat64ModuleConfig(prefix [12]byte, mappings []nat64Mapping, memCtx testutil
 		cName,
 	)
 
-	if C.nat64_module_config_data_init(m, &m.cp_module.memory_context) != 0 {
+	if C.nat64_module_config_data_init(m, &m.cp_module.memory_context, nil) != 0 {
 		panic("failed to init nat64 module config data")
 	}
 
 	cPrefix := (*C.uint8_t)(unsafe.Pointer(&prefix[0]))
-	if C.nat64_module_config_add_prefix(&m.cp_module, cPrefix) < 0 {
+	if C.nat64_module_config_add_prefix(&m.cp_module, cPrefix, nil) < 0 {
 		panic("failed to add nat64 prefix")
 	}
 
 	for idx := range mappings {
 		cIP6 := (*C.uint8_t)(unsafe.Pointer(&mappings[idx].IP6[0]))
-		if C.nat64_module_config_add_mapping(&m.cp_module, C.uint32_t(mappings[idx].IP4), cIP6, 0) < 0 {
+		if C.nat64_module_config_add_mapping(&m.cp_module, C.uint32_t(mappings[idx].IP4), cIP6, 0, nil) < 0 {
 			panic(fmt.Sprintf("failed to add nat64 mapping at index %d", idx))
 		}
 	}

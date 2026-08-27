@@ -38,13 +38,15 @@ radix_page(const struct radix *radix, uint32_t page_idx) {
 }
 
 static inline int
-radix_new_page(struct radix *radix, uint32_t *page_idx) {
+radix_new_page(struct radix *radix, uint32_t *page_idx, yanet_error **err) {
 	if (!(radix->page_count % RADIX_CHUNK_SIZE)) {
 		struct memory_context *memory_context =
 			ADDR_OF(&radix->memory_context);
 
 		radix_page_t *new_chunk = memory_balloc(
-			memory_context, sizeof(radix_page_t) * RADIX_CHUNK_SIZE
+			memory_context,
+			sizeof(radix_page_t) * RADIX_CHUNK_SIZE,
+			err
 		);
 
 		if (new_chunk == NULL) {
@@ -55,7 +57,9 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 		uint64_t old_chunk_count = radix->page_count / RADIX_CHUNK_SIZE;
 		uint64_t new_chunk_count = old_chunk_count + 1;
 		radix_page_t **new_pages = (radix_page_t **)memory_balloc(
-			memory_context, new_chunk_count * sizeof(*new_pages)
+			memory_context,
+			new_chunk_count * sizeof(*new_pages),
+			err
 		);
 		if (new_pages == NULL) {
 			memory_bfree(
@@ -90,11 +94,15 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 }
 
 static inline int
-radix_init(struct radix *radix, struct memory_context *memory_context) {
+radix_init(
+	struct radix *radix,
+	struct memory_context *memory_context,
+	yanet_error **err
+) {
 	SET_OFFSET_OF(&radix->memory_context, memory_context);
 	radix->pages = NULL;
 	radix->page_count = 0;
-	return radix_new_page(radix, NULL);
+	return radix_new_page(radix, NULL, err);
 }
 
 static inline void
@@ -127,14 +135,15 @@ radix_insert(
 	struct radix *radix,
 	uint8_t key_size,
 	const uint8_t *key,
-	uint32_t value
+	uint32_t value,
+	yanet_error **err
 ) {
 	radix_page_t *page = radix_page(radix, 0);
 
 	for (uint8_t iter = 0; iter < key_size - 1; ++iter) {
 		uint32_t *stored_value = (*page) + key[iter];
 		if ((*stored_value == RADIX_VALUE_INVALID) &&
-		    radix_new_page(radix, stored_value)) {
+		    radix_new_page(radix, stored_value, err)) {
 			return -1;
 		}
 		page = radix_page(radix, *stored_value);
@@ -231,8 +240,13 @@ radix_walk(
 }
 
 static inline int
-radix64_insert(struct radix *radix64, const uint8_t *key, uint32_t value) {
-	return radix_insert(radix64, 8, key, value);
+radix64_insert(
+	struct radix *radix64,
+	const uint8_t *key,
+	uint32_t value,
+	yanet_error **err
+) {
+	return radix_insert(radix64, 8, key, value, err);
 }
 
 static inline uint32_t
@@ -250,8 +264,13 @@ radix64_walk(
 }
 
 static inline int
-radix32_insert(struct radix *radix32, const uint8_t *key, uint32_t value) {
-	return radix_insert(radix32, 4, key, value);
+radix32_insert(
+	struct radix *radix32,
+	const uint8_t *key,
+	uint32_t value,
+	yanet_error **err
+) {
+	return radix_insert(radix32, 4, key, value, err);
 }
 
 static inline uint32_t

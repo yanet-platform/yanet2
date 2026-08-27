@@ -29,7 +29,8 @@ static inline int
 hash_index_init(
 	struct hash_index *hash_index,
 	struct memory_context *memory_context,
-	uint32_t capacity
+	uint32_t capacity,
+	yanet_error **err
 ) {
 	SET_OFFSET_OF(&hash_index->memory_context, memory_context);
 
@@ -42,7 +43,8 @@ hash_index_init(
 
 	uint32_t *entries = (uint32_t *)memory_balloc(
 		ADDR_OF(&hash_index->memory_context),
-		sizeof(uint32_t) * capacity * HASH_INDEX_SPARSE_FACTOR
+		sizeof(uint32_t) * capacity * HASH_INDEX_SPARSE_FACTOR,
+		err
 	);
 	if (entries == NULL) {
 		SET_OFFSET_OF(&hash_index->entries, NULL);

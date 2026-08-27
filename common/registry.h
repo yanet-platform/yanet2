@@ -81,7 +81,9 @@ value_collector_reset(struct value_collector *collector) {
  * 0 if it was seen, and -1 in case of error.
  */
 static inline int
-value_collector_check(struct value_collector *collector, uint32_t value) {
+value_collector_check(
+	struct value_collector *collector, uint32_t value, yanet_error **err
+) {
 	struct memory_context *memory_context =
 		ADDR_OF(&collector->memory_context);
 	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
@@ -91,7 +93,9 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		uint32_t new_chunk_count = chunk_idx + 1;
 
 		uint32_t **new_use_map = (uint32_t **)memory_balloc(
-			memory_context, new_chunk_count * sizeof(uint32_t *)
+			memory_context,
+			new_chunk_count * sizeof(uint32_t *),
+			err
 		);
 
 		if (new_use_map == NULL) {
@@ -125,7 +129,8 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 	if (chunk == NULL) {
 		chunk = (uint32_t *)memory_balloc(
 			memory_context,
-			VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
+			VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t),
+			err
 		);
 
 		if (chunk == NULL) {
@@ -150,8 +155,10 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
  * the current generation, 1 for new values and -1 in case of error
  */
 static inline int
-value_collector_collect(struct value_collector *collector, uint32_t value) {
-	int check = value_collector_check(collector, value);
+value_collector_collect(
+	struct value_collector *collector, uint32_t value, yanet_error **err
+) {
+	int check = value_collector_check(collector, value, err);
 	if (check != 1) {
 		return check;
 	}
@@ -186,7 +193,8 @@ static inline int
 value_registry_init(
 	struct value_registry *registry,
 	struct memory_context *parent_context,
-	const char *name
+	const char *name,
+	yanet_error **err
 ) {
 	// Balloc'd rather than embedded: a registry lives inside a tree
 	// vertex, and that tree is itself embedded by value inside
@@ -194,7 +202,7 @@ value_registry_init(
 	// here would multiply across every vertex of every tree — an ABI
 	// change, not an inspect-tree nicety.
 	struct memory_context *memory_context = (struct memory_context *)
-		memory_balloc(parent_context, sizeof(*memory_context));
+		memory_balloc(parent_context, sizeof(*memory_context), err);
 	if (memory_context == NULL) {
 		SET_OFFSET_OF(&registry->memory_context, NULL);
 		return -1;
@@ -226,7 +234,7 @@ value_registry_init(
  * the routine start a new registry generation creating new key mapping range.
  */
 static inline int
-value_registry_start(struct value_registry *registry) {
+value_registry_start(struct value_registry *registry, yanet_error **err) {
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 	value_collector_reset(&registry->collector);
@@ -240,7 +248,8 @@ value_registry_start(struct value_registry *registry) {
 		struct value_range *new_ranges =
 			(struct value_range *)memory_balloc(
 				memory_context,
-				new_capacity * sizeof(struct value_range)
+				new_capacity * sizeof(struct value_range),
+				err
 			);
 
 		if (new_ranges == NULL) {
@@ -277,7 +286,8 @@ static inline int
 value_range_append(
 	struct memory_context *memory_context,
 	struct value_range *value_range,
-	uint32_t value
+	uint32_t value,
+	yanet_error **err
 ) {
 	uint32_t *values = ADDR_OF(&value_range->values);
 
@@ -285,7 +295,8 @@ value_range_append(
 		    memory_context,
 		    (void **)&values,
 		    sizeof(*values),
-		    &value_range->count
+		    &value_range->count,
+		    err
 	    )) {
 		return -1;
 	}
@@ -298,8 +309,10 @@ value_range_append(
 }
 
 static inline int
-value_registry_collect(struct value_registry *registry, uint32_t value) {
-	int rc = value_collector_collect(&registry->collector, value);
+value_registry_collect(
+	struct value_registry *registry, uint32_t value, yanet_error **err
+) {
+	int rc = value_collector_collect(&registry->collector, value, err);
 	if (rc < 0) {
 		return -1;
 	}
@@ -308,7 +321,10 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 		struct value_range *range =
 			ADDR_OF(&registry->ranges) + registry->range_count - 1;
 		if (value_range_append(
-			    ADDR_OF(&registry->memory_context), range, value
+			    ADDR_OF(&registry->memory_context),
+			    range,
+			    value,
+			    err
 		    )) {
 			return -1;
 		}

@@ -89,7 +89,7 @@ yanet_error_free(yanet_error *err) {
 
 const char *
 yanet_error_message(const yanet_error *err) {
-	return err != NULL ? err->message : NULL;
+	return err != NULL ? err->message : "no reason reported";
 }
 
 const yanet_error *

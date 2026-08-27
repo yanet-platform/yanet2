@@ -53,7 +53,8 @@ forward_module_config_init(
 	struct forward_module_config *config =
 		(struct forward_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct forward_module_config)
+			sizeof(struct forward_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -299,11 +300,20 @@ forward_module_config_update(
 		cp_module, struct forward_module_config, cp_module
 	);
 
+	if (rule_count == 0) {
+		yanet_error_add(err, "the ruleset must not be empty");
+		goto error;
+	}
+
 	struct forward_target *targets = (struct forward_target *)memory_balloc(
 		&cp_module->memory_context,
-		sizeof(struct forward_target) * rule_count
+		sizeof(struct forward_target) * rule_count,
+		err
 	);
 	if (targets == NULL) {
+		yanet_error_add(
+			err, "failed to allocate %u forward targets", rule_count
+		);
 		goto error;
 	}
 

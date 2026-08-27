@@ -4,6 +4,8 @@ package dscp_test
 //#cgo LDFLAGS: -L../../../../build/modules/dscp/dataplane -ldscp_dp
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
+//#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
+//#cgo LDFLAGS: -L../../../../build/lib/cancellation -lcancellation
 /*
 #include "lib/dataplane/packet/dscp.h"
 #include "lib/dataplane/pipeline/econtext.h"
@@ -66,11 +68,11 @@ func buildLPMs(
 	t.Helper()
 
 	lpm4Name := C.CString("lpm_v4")
-	C.lpm_init(lpm4, memCtx, lpm4Name)
+	C.lpm_init(lpm4, memCtx, lpm4Name, nil)
 	C.free(unsafe.Pointer(lpm4Name))
 
 	lpm6Name := C.CString("lpm_v6")
-	C.lpm_init(lpm6, memCtx, lpm6Name)
+	C.lpm_init(lpm6, memCtx, lpm6Name, nil)
 	C.free(unsafe.Pointer(lpm6Name))
 
 	for _, prefix := range prefixes {
@@ -82,13 +84,13 @@ func buildLPMs(
 			mask := network.LastAddr().As4()
 			from := (*C.uint8_t)(&ipv4[0])
 			to := (*C.uint8_t)(&mask[0])
-			C.lpm_insert(lpm4, 4, from, to, 1)
+			C.lpm_insert(lpm4, 4, from, to, 1, nil)
 		} else {
 			ipv6 := prefix.Addr().As16()
 			mask := network.LastAddr().As16()
 			from := (*C.uint8_t)(&ipv6[0])
 			to := (*C.uint8_t)(&mask[0])
-			C.lpm_insert(lpm6, 16, from, to, 1)
+			C.lpm_insert(lpm6, 16, from, to, 1, nil)
 		}
 	}
 }
@@ -105,6 +107,7 @@ func dscpModuleConfig(
 	m := (*C.struct_dscp_module_config)(C.memory_balloc(
 		(*C.struct_memory_context)(memCtx.AsRawPtr()),
 		C.sizeof_struct_dscp_module_config,
+		nil,
 	))
 	if m == nil {
 		panic("failed to allocate dscp module config")

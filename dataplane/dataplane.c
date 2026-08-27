@@ -500,12 +500,15 @@ dataplane_init(
 			instance_config->dp_memory,
 			instance_config->cp_memory,
 			&instance->dp_config,
-			&instance->cp_config
+			&instance->cp_config,
+			&err
 		);
 		if (rc == -1) {
 			LOG(ERROR,
-			    "failed to initialize storage for instance %u",
-			    instance_idx);
+			    "failed to initialize storage for instance %u: %s",
+			    instance_idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			return -1;
 		}
 
@@ -518,23 +521,31 @@ dataplane_init(
 		// FIXME: not paired with a free: released only when shm is torn
 		// down.
 		struct agent *agent = dp_system_agent_new(
-			instance->cp_config, instance->dp_config, "dataplane"
+			instance->cp_config,
+			instance->dp_config,
+			"dataplane",
+			&err
 		);
 		if (agent == NULL) {
 			LOG(ERROR,
-			    "failed to allocate system agent for instance %u",
-			    instance_idx);
+			    "failed to allocate system agent for instance "
+			    "%u: %s",
+			    instance_idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			return -1;
 		}
 
 		struct dp_port *ports = dp_topology_alloc_devices(
-			instance->dp_config, config->device_count
+			instance->dp_config, config->device_count, &err
 		);
 		if (ports == NULL) {
 			LOG(ERROR,
 			    "failed to allocate dp_topology devices for "
-			    "instance %u",
-			    instance_idx);
+			    "instance %u: %s",
+			    instance_idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			return -1;
 		}
 		for (uint64_t idx = 0; idx < config->device_count; ++idx) {
@@ -695,12 +706,17 @@ dataplane_init(
 			dataplane->instances + instance_idx;
 		struct dp_config *dp_config = instance->dp_config;
 
+		yanet_error *err = NULL;
 		instance->device_xstat_map = (uint32_t **)memory_balloc(
 			&dp_config->memory_context,
-			sizeof(uint32_t *) * dataplane->device_count
+			sizeof(uint32_t *) * dataplane->device_count,
+			&err
 		);
 		if (instance->device_xstat_map == NULL) {
-			LOG(ERROR, "failed allocate device xstat map");
+			LOG(ERROR,
+			    "failed allocate device xstat map: %s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			return -1;
 		}
 
@@ -708,10 +724,14 @@ dataplane_init(
 			(struct dp_port_counters *)memory_balloc(
 				&dp_config->memory_context,
 				sizeof(struct dp_port_counters) *
-					dataplane->device_count
+					dataplane->device_count,
+				&err
 			);
 		if (port_counters == NULL) {
-			LOG(ERROR, "failed allocate port counters");
+			LOG(ERROR,
+			    "failed allocate port counters: %s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			return -1;
 		}
 		dp_config->port_count = dataplane->device_count;
@@ -740,10 +760,14 @@ dataplane_init(
 			instance->device_xstat_map[device_idx] =
 				(uint32_t *)memory_balloc(
 					&dp_config->memory_context,
-					sizeof(uint32_t) * device->xstat_count
+					sizeof(uint32_t) * device->xstat_count,
+					&err
 				);
 			if (instance->device_xstat_map[device_idx] == NULL) {
-				LOG(ERROR, "failed allocate device xstat map");
+				LOG(ERROR,
+				    "failed allocate device xstat map: %s",
+				    yanet_error_message(err));
+				yanet_error_free(err);
 				return -1;
 			}
 

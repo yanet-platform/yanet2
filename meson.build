@@ -270,6 +270,10 @@ if host_machine.cpu_family() == 'aarch64'
 endif
 add_project_arguments(yanet_project_args, language: 'c')
 
+# Error reporting and cancellation are dependencies of common/memory.h,
+# so they must be declared before the common dependency that carries them.
+subdir('lib/errors')
+subdir('lib/cancellation')
 subdir('common')
 subdir('lib')
 module_test_dirs = []

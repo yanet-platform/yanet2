@@ -12,10 +12,15 @@ cp_chain_alloc_size(uint64_t length) {
 }
 
 struct cp_chain *
-cp_chain_new(struct memory_context *memory_context, uint64_t length) {
+cp_chain_new(
+	struct memory_context *memory_context,
+	uint64_t length,
+	yanet_error **err
+) {
 	size_t alloc_size = cp_chain_alloc_size(length);
-	struct cp_chain *self =
-		(struct cp_chain *)memory_balloc(memory_context, alloc_size);
+	struct cp_chain *self = (struct cp_chain *)memory_balloc(
+		memory_context, alloc_size, err
+	);
 	if (self == NULL) {
 		return NULL;
 	}

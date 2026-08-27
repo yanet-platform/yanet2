@@ -9,9 +9,16 @@
 #include "lib/logging/log.h"
 
 struct dp_port *
-dp_topology_alloc_devices(struct dp_config *dp_config, size_t count) {
+dp_topology_alloc_devices(
+	struct dp_config *dp_config, size_t count, yanet_error **err
+) {
+	if (count == 0) {
+		yanet_error_add(err, "the topology must hold a device");
+		return NULL;
+	}
+
 	struct dp_port *ports = (struct dp_port *)memory_balloc(
-		&dp_config->memory_context, sizeof(struct dp_port) * count
+		&dp_config->memory_context, sizeof(struct dp_port) * count, err
 	);
 	if (ports == NULL) {
 		return NULL;
@@ -31,7 +38,8 @@ dp_topology_set_device_rss(
 	const uint8_t *key,
 	uint16_t key_len,
 	const uint16_t *reta,
-	uint16_t reta_size
+	uint16_t reta_size,
+	yanet_error **err
 ) {
 	// Reject an out-of-contract report before allocating or storing
 	// anything, so every consumer of dp_port's RSS fields can trust
@@ -45,30 +53,40 @@ dp_topology_set_device_rss(
 	    (reta_size & (reta_size - 1)) != 0 ||
 	    key_len < DP_TOPOLOGY_RSS_KEY_LEN_MIN || key == NULL ||
 	    reta == NULL) {
+		yanet_error_add(
+			err,
+			"rss report is out of contract: reta size %u, key "
+			"length %u",
+			reta_size,
+			key_len
+		);
 		return -1;
 	}
 
 	uint64_t device_count = dp_config->dp_topology.device_count;
 	if (device_id >= device_count) {
-		LOG(ERROR,
-		    "device_id %u out of range (device_count %lu)",
-		    device_id,
-		    device_count);
+		yanet_error_add(
+			err,
+			"device %u is out of range, the topology holds %lu",
+			device_id,
+			device_count
+		);
 		return -1;
 	}
 
 	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
 	struct dp_port *device = devices + device_id;
 
-	uint8_t *key_copy =
-		(uint8_t *)memory_balloc(&dp_config->memory_context, key_len);
+	uint8_t *key_copy = (uint8_t *)memory_balloc(
+		&dp_config->memory_context, key_len, err
+	);
 	if (key_copy == NULL) {
 		return -1;
 	}
 	memcpy(key_copy, key, key_len);
 
 	uint16_t *reta_copy = (uint16_t *)memory_balloc(
-		&dp_config->memory_context, sizeof(uint16_t) * reta_size
+		&dp_config->memory_context, sizeof(uint16_t) * reta_size, err
 	);
 	if (reta_copy == NULL) {
 		memory_bfree(&dp_config->memory_context, key_copy, key_len);

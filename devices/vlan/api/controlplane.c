@@ -28,7 +28,9 @@ cp_device_vlan_new(
 ) {
 	struct cp_device_vlan *cp_device_vlan =
 		(struct cp_device_vlan *)memory_balloc(
-			&agent->memory_context, sizeof(struct cp_device_vlan)
+			&agent->memory_context,
+			sizeof(struct cp_device_vlan),
+			err
 		);
 	if (cp_device_vlan == NULL) {
 		yanet_error_add(err, "memory allocation failed");

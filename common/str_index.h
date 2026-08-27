@@ -141,11 +141,13 @@ str_index_expand(
 	uint32_t key_size,
 	uint32_t new_capacity,
 	str_index_read_func read_func,
-	const void *read_func_data
+	const void *read_func_data,
+	yanet_error **err
 ) {
 	uint32_t *new_values = (uint32_t *)memory_balloc(
 		ADDR_OF(&str_index->memory_context),
-		sizeof(uint32_t) * new_capacity
+		sizeof(uint32_t) * new_capacity,
+		err
 	);
 	if (new_values == NULL) {
 		return -1;
@@ -184,7 +186,8 @@ str_index_insert(
 	uint32_t key_size,
 	uint32_t value,
 	str_index_read_func read_func,
-	const void *read_func_data
+	const void *read_func_data,
+	yanet_error **err
 ) {
 	if (str_index->size >= str_index->capacity / STR_INDEX_SPARSE_FACTOR) {
 		if (str_index_expand(
@@ -193,7 +196,8 @@ str_index_insert(
 			    (str_index->size + !str_index->size) *
 				    STR_INDEX_SPARSE_FACTOR * 2,
 			    read_func,
-			    read_func_data
+			    read_func_data,
+			    err
 		    )) {
 			return -1;
 		}

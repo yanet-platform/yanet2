@@ -30,7 +30,9 @@ cp_device_plain_new(
 ) {
 	struct cp_device_plain *cp_device_plain =
 		(struct cp_device_plain *)memory_balloc(
-			&agent->memory_context, sizeof(struct cp_device_plain)
+			&agent->memory_context,
+			sizeof(struct cp_device_plain),
+			err
 		);
 	if (cp_device_plain == NULL) {
 		yanet_error_add(err, "memory allocation failed");

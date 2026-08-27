@@ -20,11 +20,13 @@ struct range_collector {
 
 static inline int
 range_collector_init(
-	struct range_collector *collector, struct memory_context *memory_context
+	struct range_collector *collector,
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	SET_OFFSET_OF(&collector->memory_context, memory_context);
 
-	if (radix_init(&collector->radix, memory_context)) {
+	if (radix_init(&collector->radix, memory_context, err)) {
 		return -1;
 	}
 	collector->masks = NULL;
@@ -51,7 +53,8 @@ static inline int
 range_collector_add_mask(
 	struct range_collector *collector,
 	uint8_t key_size,
-	uint32_t *mask_index
+	uint32_t *mask_index,
+	yanet_error **err
 ) {
 	uint8_t *masks = ADDR_OF(&collector->masks);
 
@@ -59,7 +62,8 @@ range_collector_add_mask(
 		    ADDR_OF(&collector->memory_context),
 		    (void **)&masks,
 		    sizeof(*masks) * key_size,
-		    &collector->mask_count
+		    &collector->mask_count,
+		    err
 	    )) {
 		return -1;
 	}
@@ -88,7 +92,8 @@ range_collector_add(
 	struct range_collector *collector,
 	uint8_t key_size,
 	const uint8_t *value,
-	const uint8_t prefix
+	const uint8_t prefix,
+	yanet_error **err
 ) {
 	if (!prefix) {
 		return 0;
@@ -97,13 +102,13 @@ range_collector_add(
 	uint32_t mask_index = radix_lookup(&collector->radix, key_size, value);
 	if (mask_index == RADIX_VALUE_INVALID) {
 		if (range_collector_add_mask(
-			    collector, key_size, &mask_index
+			    collector, key_size, &mask_index, err
 		    )) {
 			return -1;
 		}
 
 		if (radix_insert(
-			    &collector->radix, key_size, value, mask_index
+			    &collector->radix, key_size, value, mask_index, err
 		    )) {
 			/*
 			 * Mask added above leaked but this should not be
@@ -130,6 +135,8 @@ struct range_collector_ctx {
 	uint8_t *to;
 
 	uint8_t *pos;
+
+	yanet_error **err;
 };
 
 struct range_collector_stack_item {
@@ -176,7 +183,7 @@ range_collector_stack_emit(
 	}
 
 	if (range_index_insert(
-		    ctx->range_index, key_size, ctx->pos, *item.value
+		    ctx->range_index, key_size, ctx->pos, *item.value, ctx->err
 	    )) {
 		return -1;
 	}
@@ -263,11 +270,13 @@ static inline int
 range_collector_collect(
 	struct range_collector *collector,
 	uint8_t key_size,
-	struct range_index *range_index
+	struct range_index *range_index,
+	yanet_error **err
 ) {
 	struct range_collector_ctx ctx;
 	ctx.collector = collector;
 	ctx.max_value = 0;
+	ctx.err = err;
 
 	ctx.range_index = range_index;
 
@@ -312,14 +321,20 @@ error:
 
 static inline int
 range8_collector_add(
-	struct range_collector *collector, const uint8_t *from, uint8_t prefix
+	struct range_collector *collector,
+	const uint8_t *from,
+	uint8_t prefix,
+	yanet_error **err
 ) {
-	return range_collector_add(collector, 8, from, prefix);
+	return range_collector_add(collector, 8, from, prefix, err);
 }
 
 static inline int
 range4_collector_add(
-	struct range_collector *collector, const uint8_t *from, uint8_t prefix
+	struct range_collector *collector,
+	const uint8_t *from,
+	uint8_t prefix,
+	yanet_error **err
 ) {
-	return range_collector_add(collector, 4, from, prefix);
+	return range_collector_add(collector, 4, from, prefix, err);
 }

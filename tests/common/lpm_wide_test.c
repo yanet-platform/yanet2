@@ -71,7 +71,7 @@ test_overlapping_prefixes(void) {
 	memory_context_init(&mctx, "lpm_overlap", &ba);
 
 	struct lpm_wide tree;
-	if (lpm_wide_init(&tree, &mctx)) {
+	if (lpm_wide_init(&tree, &mctx, NULL)) {
 		free(arena);
 		return -1;
 	}
@@ -80,11 +80,11 @@ test_overlapping_prefixes(void) {
 	uint8_t from[4], to[4];
 	memset(from, 0x00, 4);
 	memset(to, 0xff, 4);
-	lpm_wide_insert(&tree, 4, from, to, 42);
+	lpm_wide_insert(&tree, 4, from, to, 42, NULL);
 	from[1] = 0x01;
 	to[0] = 0x00;
 	to[1] = 0x01;
-	lpm_wide_insert(&tree, 4, from, to, 99);
+	lpm_wide_insert(&tree, 4, from, to, 99, NULL);
 
 	int rc = -1;
 	uint8_t k1[4] = {0x00, 0x01, 0x02, 0x03};
@@ -127,7 +127,7 @@ main(int argc, char **argv) {
 	memory_context_init(&mctx, "lpm", &ba);
 
 	struct lpm_wide lpm;
-	if (lpm_wide_init(&lpm, &mctx)) {
+	if (lpm_wide_init(&lpm, &mctx, NULL)) {
 		fprintf(stdout, "could not initialize lpm\n");
 		return -1;
 	}
@@ -144,7 +144,7 @@ main(int argc, char **argv) {
 		from[15] = 4;
 		write_u32(to + 8, htobe32(idx * 256));
 		to[15] = 8;
-		if (lpm_wide_insert(&lpm, 16, from, to, idx)) {
+		if (lpm_wide_insert(&lpm, 16, from, to, idx, NULL)) {
 			break;
 		}
 		++idx;
@@ -152,7 +152,7 @@ main(int argc, char **argv) {
 	uint32_t fail_idx = idx;
 
 	// Check we do not fail after failed insert
-	if (!lpm_wide_insert(&lpm, 16, from, to, idx)) {
+	if (!lpm_wide_insert(&lpm, 16, from, to, idx, NULL)) {
 		fprintf(stdout, "insertion repeat should fail\n");
 		return -1;
 	}
@@ -171,7 +171,7 @@ main(int argc, char **argv) {
 		from[15] = 4;
 		write_u32(to + 8, htobe32(idx * 256));
 		to[15] = 8;
-		if (lpm_wide_insert(&lpm, 16, from, to, idx)) {
+		if (lpm_wide_insert(&lpm, 16, from, to, idx, NULL)) {
 			break;
 		}
 		++idx;

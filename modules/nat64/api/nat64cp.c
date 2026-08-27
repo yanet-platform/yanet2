@@ -48,7 +48,8 @@ nat64_module_config_create(
 	struct nat64_module_config *config =
 		(struct nat64_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct nat64_module_config)
+			sizeof(struct nat64_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -66,7 +67,7 @@ nat64_module_config_create(
 	}
 
 	if (nat64_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.memory_context, err
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -101,22 +102,30 @@ nat64_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 int
 nat64_module_config_data_init(
 	struct nat64_module_config *config,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	// Initialize LPM structures
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
+	if (lpm_init(
+		    &config->mappings.v4_to_v6, memory_context, "v4_to_v6", err
+	    )) {
 		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
 		goto error_lpm_v4;
 	}
 
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
+	if (lpm_init(
+		    &config->mappings.v6_to_v4, memory_context, "v6_to_v4", err
+	    )) {
 		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
 		goto error_lpm_v6;
 	}
 
 	// Initialize v6 prefixes LPM
 	if (lpm_init(
-		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
+		    &config->prefixes.v6_prefixes,
+		    memory_context,
+		    "v6_prefixes",
+		    err
 	    )) {
 		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
 		goto error_lpm_prefixes;
@@ -177,17 +186,21 @@ nat64_module_config_add_mapping(
 	struct cp_module *cp_module,
 	uint32_t ip4,
 	uint8_t ip6[16],
-	size_t prefix_num
+	size_t prefix_num,
+	yanet_error **err
 ) {
 	struct nat64_module_config *config =
 		container_of(cp_module, struct nat64_module_config, cp_module);
 
 	// Validate prefix index
 	if (prefix_num >= config->prefixes.count) {
-		LOG(ERROR,
-		    "Invalid prefix index %zu (max %zu)",
-		    prefix_num,
-		    config->prefixes.count);
+		yanet_error_add(
+			err,
+			"prefix index %zu is out of range, %zu prefixes are "
+			"configured",
+			prefix_num,
+			config->prefixes.count
+		);
 		errno = EINVAL;
 		return -1;
 	}
@@ -198,7 +211,8 @@ nat64_module_config_add_mapping(
 		    &config->cp_module.memory_context,
 		    (void **)&mappings,
 		    sizeof(*mappings),
-		    &config->mappings.count
+		    &config->mappings.count,
+		    err
 	    )) {
 		LOG(ERROR, "Failed to expand mapping array");
 		errno = ENOMEM;
@@ -218,7 +232,8 @@ nat64_module_config_add_mapping(
 		    16,
 		    ip6,
 		    ip6,
-		    config->mappings.count - 1
+		    config->mappings.count - 1,
+		    err
 	    )) {
 		LOG(ERROR, "Failed to insert mapping into v6_to_v4 LPM");
 		errno = ENOMEM;
@@ -231,7 +246,8 @@ nat64_module_config_add_mapping(
 		    4,
 		    (uint8_t *)&ip4,
 		    (uint8_t *)&ip4,
-		    config->mappings.count - 1
+		    config->mappings.count - 1,
+		    err
 	    )) {
 		LOG(ERROR, "Failed to insert mapping into v4_to_v6 LPM");
 		errno = ENOMEM;
@@ -248,7 +264,7 @@ nat64_module_config_add_mapping(
 
 int
 nat64_module_config_add_prefix(
-	struct cp_module *cp_module, uint8_t prefix[12]
+	struct cp_module *cp_module, uint8_t prefix[12], yanet_error **err
 ) {
 	struct nat64_module_config *config =
 		container_of(cp_module, struct nat64_module_config, cp_module);
@@ -259,7 +275,8 @@ nat64_module_config_add_prefix(
 		    &config->cp_module.memory_context,
 		    (void **)&prefixes,
 		    sizeof(*prefixes),
-		    &config->prefixes.count
+		    &config->prefixes.count,
+		    err
 	    )) {
 		LOG(ERROR, "Failed to expand prefix array");
 		errno = ENOMEM;
@@ -277,7 +294,8 @@ nat64_module_config_add_prefix(
 		    12,
 		    prefix,
 		    prefix,
-		    config->prefixes.count - 1
+		    config->prefixes.count - 1,
+		    err
 	    )) {
 		LOG(ERROR, "Failed to insert prefix into v6_prefixes LPM");
 		errno = ENOMEM;

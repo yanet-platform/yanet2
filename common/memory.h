@@ -8,6 +8,9 @@
 #include "memory_block.h"
 #include "strutils.h"
 
+#include "lib/cancellation/cancellation.h"
+#include "lib/errors/errors.h"
+
 struct memory_context {
 	struct block_allocator *block_allocator;
 	size_t balloc_count;
@@ -141,12 +144,31 @@ memory_context_fini(struct memory_context *self) {
 	memset(self, 0, sizeof(*self));
 }
 
+// Allocates a block, reporting why it could not be served.
+//
+// Polling here makes every allocation a give-up point for the operation
+// the calling thread runs under: a cancelled caller stops paying for work
+// it has walked away from, and unwinds through the paths that already
+// handle a failed allocation.
 static inline void *
-memory_balloc(struct memory_context *context, size_t size) {
+memory_balloc(struct memory_context *context, size_t size, yanet_error **err) {
+	// The allocator serves no zero-size block and several callers ask
+	// for one whenever a count is zero, so an empty request is not a
+	// failure and leaves the error slot alone.
+	if (!size) {
+		return NULL;
+	}
+
+	if (cancellation_requested()) {
+		yanet_error_add(err, "allocation cancelled");
+		return NULL;
+	}
+
 	void *result = block_allocator_balloc(
 		ADDR_OF(&context->block_allocator), size
 	);
 	if (result == NULL) {
+		yanet_error_add(err, "failed to allocate %zu bytes", size);
 		return NULL;
 	}
 	// A single memory_context (e.g. an agent's own context) can now be
@@ -185,12 +207,17 @@ memory_bfree(struct memory_context *context, void *block, size_t size) {
 	);
 }
 
+// Grows or shrinks a block, reporting why it could not be served.
+//
+// A NULL return with the error slot untouched means there was nothing to
+// allocate, not a failure.
 static inline void *
 memory_brealloc(
 	struct memory_context *context,
 	void *data,
 	size_t old_size,
-	size_t new_size
+	size_t new_size,
+	yanet_error **err
 ) {
 	if (!new_size && !old_size) {
 		return NULL;
@@ -201,7 +228,7 @@ memory_brealloc(
 		return NULL;
 	}
 
-	void *new_data = memory_balloc(context, new_size);
+	void *new_data = memory_balloc(context, new_size, err);
 	if (new_data == NULL) {
 		return NULL;
 	}

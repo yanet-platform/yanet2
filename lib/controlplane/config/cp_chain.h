@@ -47,10 +47,13 @@ struct cp_config_gen;
 
 // Allocate a new cp_chain with capacity for length modules.
 //
-// Returns NULL on allocation failure; caller is responsible for reporting the
-// error.
+// Returns NULL on failure, with the reason reported through the error slot.
 struct cp_chain *
-cp_chain_new(struct memory_context *memory_context, uint64_t length);
+cp_chain_new(
+	struct memory_context *memory_context,
+	uint64_t length,
+	yanet_error **err
+);
 
 // Free the memory backing self.
 //

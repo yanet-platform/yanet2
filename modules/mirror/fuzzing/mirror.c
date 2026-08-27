@@ -23,7 +23,9 @@ static int
 mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	struct mirror_module_config *config =
 		(struct mirror_module_config *)memory_balloc(
-			&fuzz_params.mctx, sizeof(struct mirror_module_config)
+			&fuzz_params.mctx,
+			sizeof(struct mirror_module_config),
+			NULL
 		);
 
 	if (!config) {
@@ -145,7 +147,10 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	}
 
 	struct counter_storage *cs = counter_storage_spawn(
-		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
+		&fuzz_params.mctx,
+		NULL,
+		&config->cp_module.counter_registry,
+		NULL
 	);
 	if (cs == NULL) {
 		goto fail;
@@ -155,7 +160,7 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	// Set up "mc_index" so "module_ectx_encode_device" returns invalid
 	// device, causing all matched packets to be dropped safely.
 	uint64_t *mc_index =
-		memory_balloc(&fuzz_params.mctx, sizeof(uint64_t) * 2);
+		memory_balloc(&fuzz_params.mctx, sizeof(uint64_t) * 2, NULL);
 	if (mc_index == NULL) {
 		goto fail;
 	}
@@ -200,8 +205,9 @@ fuzz_setup(yanet_error **err) {
 	);
 
 	// Create a minimal "dp_worker" for counter access and packet cloning.
-	fuzz_params.worker =
-		memory_balloc(&fuzz_params.mctx, sizeof(struct dp_worker));
+	fuzz_params.worker = memory_balloc(
+		&fuzz_params.mctx, sizeof(struct dp_worker), NULL
+	);
 	if (fuzz_params.worker == NULL) {
 		return EXIT_FAILURE;
 	}

@@ -35,19 +35,20 @@ int
 init_dummy_registry(
 	struct memory_context *memory_context,
 	uint32_t actions,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
-	int res = value_registry_init(registry, memory_context, "dummy");
+	int res = value_registry_init(registry, memory_context, "dummy", err);
 	if (res < 0) {
 		return res;
 	}
 	for (uint32_t i = 0; i < actions; ++i) {
-		res = value_registry_start(registry);
+		res = value_registry_start(registry, err);
 		if (res < 0) {
 			value_registry_fini(registry);
 			return res;
 		}
-		res = value_registry_collect(registry, 0);
+		res = value_registry_collect(registry, 0, err);
 		if (res < 0) {
 			value_registry_fini(registry);
 			return res;
@@ -77,14 +78,16 @@ merge_and_set_registry_values(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
-	struct value_table *table
+	struct value_table *table,
+	yanet_error **err
 ) {
 	if (value_table_init(
 		    table,
 		    memory_context,
 		    "action-table",
 		    value_registry_capacity(registry1),
-		    value_registry_capacity(registry2)
+		    value_registry_capacity(registry2),
+		    err
 	    )) {
 		return -1;
 	}
@@ -126,6 +129,7 @@ error_join:
 struct collect_ctx {
 	struct value_table *value_table;
 	struct remap_table remap_table;
+	yanet_error **err;
 };
 
 static int
@@ -134,7 +138,9 @@ value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct collect_ctx *collect_ctx = (struct collect_ctx *)data;
 
 	uint32_t *value = value_table_get_ptr(collect_ctx->value_table, v1, v2);
-	if (remap_table_touch(&collect_ctx->remap_table, *value, value) < 0) {
+	if (remap_table_touch(
+		    &collect_ctx->remap_table, *value, value, collect_ctx->err
+	    ) < 0) {
 		return -1;
 	}
 	return 0;
@@ -146,25 +152,29 @@ merge_registry_values(
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
-	const char *table_name
+	const char *table_name,
+	yanet_error **err
 ) {
 	if (value_table_init(
 		    table,
 		    memory_context,
 		    table_name,
 		    value_registry_capacity(registry1),
-		    value_registry_capacity(registry2)
+		    value_registry_capacity(registry2),
+		    err
 	    )) {
 		return -1;
 	}
 
 	struct collect_ctx collect_ctx;
 	collect_ctx.value_table = table;
+	collect_ctx.err = err;
 	if (remap_table_init(
 		    &collect_ctx.remap_table,
 		    memory_context,
 		    value_registry_capacity(registry1) *
-			    value_registry_capacity(registry2)
+			    value_registry_capacity(registry2),
+		    err
 	    )) {
 		goto error_remap_table;
 	}
@@ -201,6 +211,7 @@ error_remap_table:
 struct value_collect_ctx {
 	struct value_table *table;
 	struct value_registry *registry;
+	yanet_error **err;
 };
 
 static int
@@ -210,7 +221,8 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 		(struct value_collect_ctx *)data;
 	return value_registry_collect(
 		collect_ctx->registry,
-		value_table_get(collect_ctx->table, v1, v2)
+		value_table_get(collect_ctx->table, v1, v2),
+		collect_ctx->err
 	);
 
 	return 0;
@@ -225,15 +237,17 @@ collect_registry_values(
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
 	struct value_collect_ctx collect_ctx;
 	collect_ctx.table = table;
 	collect_ctx.registry = registry;
+	collect_ctx.err = err;
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_registry;
 		}
 		if (value_registry_join_range(
@@ -262,15 +276,18 @@ merge_and_collect_registry(
 	struct value_registry *registry2,
 	struct value_table *table,
 	struct value_registry *registry,
-	const char *table_name
+	const char *table_name,
+	yanet_error **err
 ) {
 	if (merge_registry_values(
-		    memory_context, registry1, registry2, table, table_name
+		    memory_context, registry1, registry2, table, table_name, err
 	    )) {
 		return -1;
 	}
 
-	if (collect_registry_values(registry1, registry2, table, registry)) {
+	if (collect_registry_values(
+		    registry1, registry2, table, registry, err
+	    )) {
 		value_table_free(table);
 		return -1;
 	}

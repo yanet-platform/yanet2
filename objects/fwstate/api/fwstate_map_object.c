@@ -103,9 +103,11 @@ map_insert_layer(
 	map_init_keys_fn init_keys,
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
-	uint16_t worker_count
+	uint16_t worker_count,
+	yanet_error **err
 ) {
 	if (worker_count == 0) {
+		yanet_error_add(err, "worker count must not be zero");
 		errno = EINVAL;
 		return -1;
 	}
@@ -116,7 +118,7 @@ map_insert_layer(
 	);
 	init_keys(&config);
 
-	return fwtable_insert_layer_cp(table, &config, ctx);
+	return fwtable_insert_layer_cp(table, &config, ctx, err);
 }
 
 // --- IPv4 object -------------------------------------------------------------
@@ -137,9 +139,11 @@ fwstate_map_v4_object_destroy(struct cp_object *cp_object) {
 }
 
 struct fwstate_map_v4_object *
-fwstate_map_v4_object_new(struct agent *agent) {
+fwstate_map_v4_object_new(struct agent *agent, yanet_error **err) {
 	return (struct fwstate_map_v4_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct fwstate_map_v4_object)
+		&agent->memory_context,
+		sizeof(struct fwstate_map_v4_object),
+		err
 	);
 }
 
@@ -190,7 +194,8 @@ struct cp_object *
 fwstate_map_v4_object_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
-	struct fwstate_map_v4_object *self = fwstate_map_v4_object_new(agent);
+	struct fwstate_map_v4_object *self =
+		fwstate_map_v4_object_new(agent, err);
 	if (self == NULL) {
 		yanet_error_add(
 			err, "failed to allocate fwstate-map v4 object"
@@ -242,7 +247,8 @@ fwstate_map_v4_object_insert_layer(
 	struct fwstate_map_v4_object *self,
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
-	uint16_t worker_count
+	uint16_t worker_count,
+	yanet_error **err
 ) {
 	int rc = map_insert_layer(
 		&self->table,
@@ -250,7 +256,8 @@ fwstate_map_v4_object_insert_layer(
 		map_v4_init_keys,
 		index_size,
 		extra_bucket_count,
-		worker_count
+		worker_count,
+		err
 	);
 	if (rc == 0) {
 		self->generation += 1;
@@ -292,9 +299,11 @@ fwstate_map_v6_object_destroy(struct cp_object *cp_object) {
 }
 
 struct fwstate_map_v6_object *
-fwstate_map_v6_object_new(struct agent *agent) {
+fwstate_map_v6_object_new(struct agent *agent, yanet_error **err) {
 	return (struct fwstate_map_v6_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct fwstate_map_v6_object)
+		&agent->memory_context,
+		sizeof(struct fwstate_map_v6_object),
+		err
 	);
 }
 
@@ -345,7 +354,8 @@ struct cp_object *
 fwstate_map_v6_object_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
-	struct fwstate_map_v6_object *self = fwstate_map_v6_object_new(agent);
+	struct fwstate_map_v6_object *self =
+		fwstate_map_v6_object_new(agent, err);
 	if (self == NULL) {
 		yanet_error_add(
 			err, "failed to allocate fwstate-map v6 object"
@@ -397,7 +407,8 @@ fwstate_map_v6_object_insert_layer(
 	struct fwstate_map_v6_object *self,
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
-	uint16_t worker_count
+	uint16_t worker_count,
+	yanet_error **err
 ) {
 	int rc = map_insert_layer(
 		&self->table,
@@ -405,7 +416,8 @@ fwstate_map_v6_object_insert_layer(
 		map_v6_init_keys,
 		index_size,
 		extra_bucket_count,
-		worker_count
+		worker_count,
+		err
 	);
 	if (rc == 0) {
 		self->generation += 1;

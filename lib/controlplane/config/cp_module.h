@@ -331,7 +331,8 @@ int
 cp_module_registry_delete(
 	struct cp_module_registry *module_registry,
 	const char *type,
-	const char *name
+	const char *name,
+	yanet_error **err
 );
 
 /**

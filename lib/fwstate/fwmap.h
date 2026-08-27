@@ -313,16 +313,17 @@ fwmap_balloc_aligned(
 	struct memory_context *ctx,
 	size_t size,
 	size_t alignment,
-	uint8_t *offset_ptr
+	uint8_t *offset_ptr,
+	yanet_error **err
 ) {
 	if (size + alignment >= FWMAP_CHUNK_MAX_SIZE) {
 		*offset_ptr = 0;
-		return memory_balloc(ctx, size);
+		return memory_balloc(ctx, size, err);
 	}
 
 	// Allocate extra space for alignment
 	size_t alloc_size = size + alignment - 1;
-	void *raw = memory_balloc(ctx, alloc_size);
+	void *raw = memory_balloc(ctx, alloc_size, err);
 	if (!raw) {
 		return NULL;
 	}
@@ -523,13 +524,15 @@ fwmap_allocate_chunks(
 	uint32_t size,
 	uint32_t chunk_size,
 	uint32_t chunks,
-	uint32_t item_size
+	uint32_t item_size,
+	yanet_error **err
 ) {
 	for (uint32_t i = 0; i < chunks; i++) {
 		uint32_t keys = size > chunk_size ? chunk_size : size;
 
 		size_t chunk_store_size = keys * item_size;
-		uint8_t *chunk_store = memory_balloc(ctx, chunk_store_size);
+		uint8_t *chunk_store =
+			memory_balloc(ctx, chunk_store_size, err);
 		if (!chunk_store) {
 			// Mark the stopping point for deallocation.
 			store[i] = NULL;
@@ -738,7 +741,11 @@ fwmap_free(fwmap_t *map, struct memory_context *ctx) {
 }
 
 static inline fwmap_t *
-fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
+fwmap_new(
+	const fwmap_config_t *user_config,
+	struct memory_context *ctx,
+	yanet_error **err
+) {
 	// Create a mutable copy of config to set defaults
 	fwmap_config_t config = *user_config;
 	fwmap_config_set_defaults(&config);
@@ -752,6 +759,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	// Ensure index_size is a power of 2.
 	index_size = next_power_of_two(index_size);
 	if (!index_size) {
+		yanet_error_add(err, "index size overflows a power of two");
 		errno = EINVAL;
 		return NULL;
 	}
@@ -761,12 +769,21 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	// keys), memory for buckets alone is ~32 GB, which is unlikely to be
 	// allocated.
 	if (index_size > UINT32_MAX / 2) {
+		yanet_error_add(
+			err, "index size %u exceeds the maximum", index_size
+		);
 		errno = EINVAL;
 		return NULL;
 	}
 
 	if (extra_size) {
 		if (extra_size > FWMAP_CHUNK_INDEX_MAX_SIZE) {
+			yanet_error_add(
+				err,
+				"extra bucket count %u exceeds the maximum %u",
+				extra_size,
+				(uint32_t)FWMAP_CHUNK_INDEX_MAX_SIZE
+			);
 			errno = EINVAL;
 			return NULL;
 		}
@@ -787,6 +804,9 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	// Check for overflow.
 	if (keys_per_chunk * keys_chunk_cnt < index_size ||
 	    values_per_chunk * values_chunk_cnt < index_size) {
+		yanet_error_add(
+			err, "index size %u overflows its chunking", index_size
+		);
 		errno = EINVAL;
 		return NULL;
 	}
@@ -799,7 +819,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 
 	// Allocate with extra space for 64-byte alignment
 	size_t alloc_size = map_size + 63;
-	void *raw_map = memory_balloc(ctx, alloc_size);
+	void *raw_map = memory_balloc(ctx, alloc_size, err);
 	if (!raw_map) {
 		errno = ENOMEM;
 		return NULL;
@@ -857,14 +877,14 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	uint32_t chunk_count =
 		(map->index_mask >> map->buckets_chunk_shift) + 1;
 	size_t chunks_array_size = sizeof(fwmap_bucket_t *) * chunk_count;
-	if (!(chunks = memory_balloc(ctx, chunks_array_size))) {
+	if (!(chunks = memory_balloc(ctx, chunks_array_size, err))) {
 		errno = ENOMEM;
 		goto fail;
 	}
 	SET_OFFSET_OF(&map->buckets, chunks);
 
 	if (!(buckets_offsets =
-		      memory_balloc(ctx, sizeof(uint8_t) * chunk_count))) {
+		      memory_balloc(ctx, sizeof(uint8_t) * chunk_count, err))) {
 		errno = ENOMEM;
 		goto fail;
 	}
@@ -877,7 +897,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	for (uint32_t i = 0; i < chunk_count; i++) {
 		// Allocate with 64-byte alignment
 		fwmap_bucket_t *chunk = fwmap_balloc_aligned(
-			ctx, index_chunk_size, 64, &buckets_offsets[i]
+			ctx, index_chunk_size, 64, &buckets_offsets[i], err
 		);
 		if (!chunk) {
 			// Stop point for the deallocation code.
@@ -901,7 +921,8 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 			ctx,
 			extra_buckets_size,
 			64,
-			&map->extra_buckets_alloc_offset
+			&map->extra_buckets_alloc_offset,
+			err
 		);
 		if (!extra_buckets) {
 			errno = ENOMEM;
@@ -917,7 +938,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	// Key/Value store.
 	// Allocate keys storage chunks array.
 	size_t key_store_array_size = sizeof(uint8_t *) * map->keys_chunk_cnt;
-	if (!(key_store = memory_balloc(ctx, key_store_array_size))) {
+	if (!(key_store = memory_balloc(ctx, key_store_array_size, err))) {
 		errno = ENOMEM;
 		goto fail;
 	}
@@ -929,7 +950,8 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 		    index_size,
 		    map->keys_in_chunk,
 		    map->keys_chunk_cnt,
-		    map->key_size
+		    map->key_size,
+		    err
 	    ) == -1) {
 		goto fail;
 	}
@@ -937,7 +959,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	// Allocate values storage chunks array.
 	size_t value_store_array_size =
 		sizeof(uint8_t *) * map->values_chunk_cnt;
-	if (!(value_store = memory_balloc(ctx, value_store_array_size))) {
+	if (!(value_store = memory_balloc(ctx, value_store_array_size, err))) {
 		errno = ENOMEM;
 		goto fail;
 	}
@@ -949,7 +971,8 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 		    index_size,
 		    map->values_in_chunk,
 		    map->values_chunk_cnt,
-		    map->value_size
+		    map->value_size,
+		    err
 	    ) == -1) {
 		goto fail;
 	}

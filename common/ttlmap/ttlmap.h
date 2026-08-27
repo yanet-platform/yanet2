@@ -17,9 +17,9 @@ struct ttlmap_bucket_iter {
 	size_t bucket_count;
 };
 
-#define TTLMAP_INIT(map_ptr, mctx_ptr, key_type, value_type, kv_entries)       \
+#define TTLMAP_INIT(map_ptr, mctx_ptr, key_type, value_type, kv_entries, err)  \
 	__TTLMAP_INIT_INTERNAL(                                                \
-		map_ptr, mctx_ptr, key_type, value_type, kv_entries            \
+		map_ptr, mctx_ptr, key_type, value_type, kv_entries, err       \
 	)
 
 #define TTLMAP_FREE(map_ptr) __TTLMAP_FREE_INTERNAL(map_ptr)

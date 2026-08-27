@@ -130,7 +130,9 @@ acl_module_config_init(
 ) {
 	struct acl_module_config *config =
 		(struct acl_module_config *)memory_balloc(
-			&agent->memory_context, sizeof(struct acl_module_config)
+			&agent->memory_context,
+			sizeof(struct acl_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -718,7 +720,8 @@ acl_module_compile_rules(
 	if (rule_count > 0) {
 		targets = (struct acl_target *)memory_balloc(
 			&cp_module->memory_context,
-			sizeof(struct acl_target) * rule_count
+			sizeof(struct acl_target) * rule_count,
+			err
 		);
 		if (targets == NULL) {
 			goto error;

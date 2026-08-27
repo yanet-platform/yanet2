@@ -24,7 +24,8 @@ decap_module_config_free(struct cp_module *cp_module, yanet_error **err);
 int
 decap_module_config_data_init(
 	struct decap_module_config *config,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 );
 
 void
@@ -32,10 +33,16 @@ decap_module_config_data_fini(struct decap_module_config *config);
 
 int
 decap_module_config_add_prefix_v4(
-	struct cp_module *cp_module, const uint8_t *from, const uint8_t *to
+	struct cp_module *cp_module,
+	const uint8_t *from,
+	const uint8_t *to,
+	yanet_error **err
 );
 
 int
 decap_module_config_add_prefix_v6(
-	struct cp_module *cp_module, const uint8_t *from, const uint8_t *to
+	struct cp_module *cp_module,
+	const uint8_t *from,
+	const uint8_t *to,
+	yanet_error **err
 );

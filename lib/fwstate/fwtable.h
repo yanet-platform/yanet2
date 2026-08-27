@@ -32,14 +32,16 @@ typedef struct fwtable {
 // The previous head becomes the first stale layer.  Works on an empty
 // table (head == NULL) to install the very first layer.
 //
-// Returns 0 on success or -1 on allocation failure.
+// Returns 0 on success, or -1 with the reason reported through the error
+// slot.
 static inline int
 fwtable_insert_layer_cp(
 	fwtable_t *table,
 	const fwmap_config_t *config,
-	struct memory_context *ctx
+	struct memory_context *ctx,
+	yanet_error **err
 ) {
-	fwmap_t *new_layer = fwmap_new(config, ctx);
+	fwmap_t *new_layer = fwmap_new(config, ctx, err);
 	if (!new_layer) {
 		return -1;
 	}

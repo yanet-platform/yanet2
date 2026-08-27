@@ -52,7 +52,8 @@ mirror_module_config_init(
 	struct mirror_module_config *config =
 		(struct mirror_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct mirror_module_config)
+			sizeof(struct mirror_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -291,11 +292,20 @@ mirror_module_config_update(
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
 
+	if (rule_count == 0) {
+		yanet_error_add(err, "the ruleset must not be empty");
+		goto error;
+	}
+
 	struct mirror_target *targets = (struct mirror_target *)memory_balloc(
 		&cp_module->memory_context,
-		sizeof(struct mirror_target) * rule_count
+		sizeof(struct mirror_target) * rule_count,
+		err
 	);
 	if (targets == NULL) {
+		yanet_error_add(
+			err, "failed to allocate %u mirror targets", rule_count
+		);
 		goto error;
 	}
 

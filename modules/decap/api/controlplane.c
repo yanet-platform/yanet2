@@ -37,7 +37,8 @@ decap_module_config_new(
 	struct decap_module_config *config =
 		(struct decap_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct decap_module_config)
+			sizeof(struct decap_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -56,7 +57,7 @@ decap_module_config_new(
 	}
 
 	if (decap_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.memory_context, err
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -91,12 +92,13 @@ decap_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 int
 decap_module_config_data_init(
 	struct decap_module_config *config,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	if (lpm_init(&config->prefixes4, memory_context, "prefixes4")) {
+	if (lpm_init(&config->prefixes4, memory_context, "prefixes4", err)) {
 		return -1;
 	}
-	if (lpm_init(&config->prefixes6, memory_context, "prefixes6")) {
+	if (lpm_init(&config->prefixes6, memory_context, "prefixes6", err)) {
 		goto error_lpm_v6;
 	}
 
@@ -116,18 +118,24 @@ decap_module_config_data_fini(struct decap_module_config *config) {
 
 int
 decap_module_config_add_prefix_v4(
-	struct cp_module *cp_module, const uint8_t *from, const uint8_t *to
+	struct cp_module *cp_module,
+	const uint8_t *from,
+	const uint8_t *to,
+	yanet_error **err
 ) {
 	struct decap_module_config *config =
 		container_of(cp_module, struct decap_module_config, cp_module);
-	return lpm_insert(&config->prefixes4, 4, from, to, 1);
+	return lpm_insert(&config->prefixes4, 4, from, to, 1, err);
 }
 
 int
 decap_module_config_add_prefix_v6(
-	struct cp_module *cp_module, const uint8_t *from, const uint8_t *to
+	struct cp_module *cp_module,
+	const uint8_t *from,
+	const uint8_t *to,
+	yanet_error **err
 ) {
 	struct decap_module_config *config =
 		container_of(cp_module, struct decap_module_config, cp_module);
-	return lpm_insert(&config->prefixes6, 16, from, to, 1);
+	return lpm_insert(&config->prefixes6, 16, from, to, 1, err);
 }

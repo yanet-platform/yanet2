@@ -86,7 +86,9 @@ unrdup_test_config(struct cp_module **cp_module, yanet_error **err) {
 
 	struct unrdup_module_config *config =
 		(struct unrdup_module_config *)memory_balloc(
-			&unrdup_fuzz_mctx, sizeof(struct unrdup_module_config)
+			&unrdup_fuzz_mctx,
+			sizeof(struct unrdup_module_config),
+			NULL
 		);
 	if (config == NULL) {
 		return -ENOMEM;
@@ -172,7 +174,10 @@ unrdup_test_config(struct cp_module **cp_module, yanet_error **err) {
 	}
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
-		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
+		&fuzz_params.mctx,
+		NULL,
+		&config->cp_module.counter_registry,
+		NULL
 	);
 	if (counter_storage == NULL) {
 		goto free_registry;
@@ -203,8 +208,9 @@ fuzz_setup(yanet_error **err) {
 		return EXIT_FAILURE;
 	}
 
-	fuzz_params.worker =
-		memory_balloc(&fuzz_params.mctx, sizeof(struct dp_worker));
+	fuzz_params.worker = memory_balloc(
+		&fuzz_params.mctx, sizeof(struct dp_worker), NULL
+	);
 	if (fuzz_params.worker == NULL) {
 		return EXIT_FAILURE;
 	}

@@ -3,6 +3,7 @@
 #include "common/value.h"
 
 #include "declare.h"
+#include "lib/errors/errors.h"
 #include "lib/filter/rule.h"
 
 #include <stdint.h>
@@ -13,7 +14,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	void **data,
 	const struct filter_rule **rules,
 	size_t rule_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	uint64_t max_device_id = 0;
 	for (const struct filter_rule **r_ptr = rules;
@@ -32,12 +34,12 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	}
 
 	struct value_table *t =
-		memory_balloc(memory_context, sizeof(struct value_table));
+		memory_balloc(memory_context, sizeof(struct value_table), err);
 	if (t == NULL) {
 		return -1;
 	}
 	int res = value_table_init(
-		t, memory_context, "device", 1, max_device_id + 1
+		t, memory_context, "device", 1, max_device_id + 1, err
 	);
 	if (res < 0) {
 		goto error_init;
@@ -45,7 +47,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	SET_OFFSET_OF(data, t);
 
 	struct remap_table remap_table;
-	if (remap_table_init(&remap_table, memory_context, max_device_id + 1)) {
+	if (remap_table_init(
+		    &remap_table, memory_context, max_device_id + 1, err
+	    )) {
 		goto error_remap_table;
 	}
 
@@ -64,8 +68,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 		for (uint16_t idx = 0; idx < r->device_count; ++idx) {
 			uint32_t *value =
 				value_table_get_ptr(t, 0, r->devices[idx].id);
-			if (remap_table_touch(&remap_table, *value, value) <
-			    0) {
+			if (remap_table_touch(
+				    &remap_table, *value, value, err
+			    ) < 0) {
 				goto error_touch;
 			}
 		}
@@ -78,7 +83,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	for (const struct filter_rule **r_ptr = rules;
 	     r_ptr < rules + rule_count;
 	     ++r_ptr) {
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_collect;
 		}
 
@@ -90,7 +95,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 		if (r->device_count == 0) {
 			for (uint64_t id = 0; id < max_device_id + 1; ++id) {
 				if (value_registry_collect(
-					    registry, value_table_get(t, 0, id)
+					    registry,
+					    value_table_get(t, 0, id),
+					    err
 				    )) {
 					goto error_collect;
 				}
@@ -101,7 +108,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 					    registry,
 					    value_table_get(
 						    t, 0, r->devices[idx].id
-					    )
+					    ),
+					    err
 				    )) {
 					goto error_collect;
 				}

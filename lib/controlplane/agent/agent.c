@@ -148,7 +148,7 @@ agent_attach(
 	cp_config_lock(cp_config);
 
 	struct agent *new_agent = (struct agent *)memory_balloc(
-		&cp_config->memory_context, sizeof(struct agent)
+		&cp_config->memory_context, sizeof(struct agent), err
 	);
 	if (new_agent == NULL) {
 		yanet_error_add(err, "failed to allocate memory for agent");
@@ -182,7 +182,8 @@ agent_attach(
 		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
 	struct agent_arena *arenas = (struct agent_arena *)memory_balloc(
 		&cp_config->memory_context,
-		sizeof(struct agent_arena) * arena_count
+		sizeof(struct agent_arena) * arena_count,
+		err
 	);
 	if (arenas == NULL) {
 		yanet_error_add(err, "failed to allocate memory for arenas");
@@ -200,8 +201,9 @@ agent_attach(
 				? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 				: memory_limit;
 
-		void *arena =
-			memory_balloc(&cp_config->memory_context, arena_size);
+		void *arena = memory_balloc(
+			&cp_config->memory_context, arena_size, err
+		);
 		if (arena == NULL) {
 			yanet_error_add(
 				err, "failed to allocate memory for arena"
@@ -244,7 +246,8 @@ agent_attach(
 				&cp_config->memory_context,
 				sizeof(struct cp_agent_registry) +
 					(old_registry->count + 1) *
-						sizeof(struct agent *)
+						sizeof(struct agent *),
+				err
 			);
 		if (new_registry == NULL) {
 			yanet_error_add(
@@ -303,7 +306,8 @@ agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 	if (need_arena_count > agent->arena_count) {
 		struct agent_arena *arenas = memory_balloc(
 			&cp_config->memory_context,
-			need_arena_count * sizeof(struct agent_arena)
+			need_arena_count * sizeof(struct agent_arena),
+			err
 		);
 		if (arenas == NULL) {
 			yanet_error_add(err, "failed to allocate arenas array");
@@ -315,7 +319,8 @@ agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 		for (alloc = 0; alloc < need_alloc; ++alloc) {
 			void *arena = memory_balloc(
 				&cp_config->memory_context,
-				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE,
+				err
 			);
 			if (arena == NULL) {
 				yanet_error_add(
@@ -1655,7 +1660,7 @@ agent_storage_put(
 	struct memory_context *mctx = &agent->memory_context;
 
 	struct agent_storage *new_storage =
-		memory_balloc(mctx, sizeof(struct agent_storage) + size);
+		memory_balloc(mctx, sizeof(struct agent_storage) + size, err);
 	if (new_storage == NULL) {
 		yanet_error_add(err, "memory not enough");
 		return -1;

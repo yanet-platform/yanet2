@@ -42,7 +42,7 @@ dataplane_test_fixture_init(
 		&cfg->memory_context, name, &fixture->block_allocator
 	);
 	TEST_ASSERT_NOT_NULL(
-		dp_topology_alloc_devices(cfg, device_count),
+		dp_topology_alloc_devices(cfg, device_count, NULL),
 		"alloc_devices failed"
 	);
 
