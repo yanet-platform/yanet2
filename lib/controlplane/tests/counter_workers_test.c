@@ -134,9 +134,9 @@ write_pipeline_counter(
 		counter_name
 	);
 
-	uint64_t *values = counter_handle_get_value(
-		counter_get_value_handle(idx, storage)
-	);
+	uint64_t *values =
+		counter_handle_get_value(counter_get_value_handle(idx, storage)
+		);
 	values[0] = value;
 	return TEST_SUCCESS;
 }
