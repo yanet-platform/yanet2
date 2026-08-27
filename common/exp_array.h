@@ -9,7 +9,8 @@ mem_array_expand_exp(
 	struct memory_context *memory_context,
 	void **array,
 	size_t item_size,
-	uint64_t *count
+	uint64_t *count,
+	yanet_error **err
 ) {
 	if (!((*count - 1) & *count)) {
 		uint64_t old_size = *count * item_size;
@@ -19,7 +20,7 @@ mem_array_expand_exp(
 			new_size = item_size;
 		}
 		void *new_array = memory_brealloc(
-			memory_context, *array, old_size, new_size
+			memory_context, *array, old_size, new_size, err
 		);
 		if (!new_array) {
 			return -1;
@@ -46,12 +47,15 @@ mem_array_free_exp(
 	memory_bfree(memory_context, array, capacity * item_size);
 }
 
+// A NULL return with the error slot untouched means the array is empty,
+// not that the allocation failed.
 static inline void *
 mem_array_alloc_exp(
 	struct memory_context *memory_context,
 	size_t item_size,
 	uint64_t count,
-	uint64_t *res_capacity
+	uint64_t *res_capacity,
+	yanet_error **err
 ) {
 	if (!count) {
 		if (res_capacity) {
@@ -63,5 +67,5 @@ mem_array_alloc_exp(
 	if (res_capacity) {
 		*res_capacity = capacity;
 	}
-	return memory_balloc(memory_context, capacity * item_size);
+	return memory_balloc(memory_context, capacity * item_size, err);
 }

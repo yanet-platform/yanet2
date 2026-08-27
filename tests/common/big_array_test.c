@@ -52,7 +52,7 @@ test_init_and_free_basic(void) {
 	// Initialize a small array (1000 bytes)
 	struct big_array array;
 	const size_t array_size = 1000;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed");
 
 	// Verify array was initialized
@@ -116,7 +116,7 @@ test_init_large_array(void) {
 	// ASAN)
 	const size_t array_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE * 3 - 1000;
 	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed for large array");
 
 	// Verify multiple subarrays were created
@@ -173,7 +173,7 @@ test_init_exact_boundary(void) {
 	// Initialize with size exactly at boundary
 	const size_t array_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE * 2 + 1505;
 	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed at boundary");
 
 	// Verify correct subarray count (using ceiling division)
@@ -216,7 +216,7 @@ test_init_zero_size(void) {
 
 	// Initialize with size 0
 	struct big_array array;
-	int res = big_array_init(&array, 0, &mctx);
+	int res = big_array_init(&array, 0, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed with size 0");
 
 	// Verify array state
@@ -258,7 +258,7 @@ test_get_access_patterns(void) {
 	// Initialize array with known size
 	const size_t array_size = 10000;
 	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed");
 
 	// Access first element
@@ -331,7 +331,7 @@ test_get_multiple_subarrays(void) {
 	// Create array spanning multiple subarrays
 	const size_t array_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE * 2 + 1000;
 	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed");
 
 	TEST_ASSERT(
@@ -401,7 +401,7 @@ test_double_free_safety(void) {
 
 	// Initialize array
 	struct big_array array;
-	int res = big_array_init(&array, 1000, &mctx);
+	int res = big_array_init(&array, 1000, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed");
 
 	// First free
@@ -448,7 +448,7 @@ test_size_bigger_than_max(void) {
 	// Create array significantly larger than max block size
 	const size_t array_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE * 5 + 12345;
 	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(
 		res == 0,
 		"big_array_init failed for size > "
@@ -531,7 +531,7 @@ test_last_subarray_size_optimization(void) {
 	const size_t array_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE * 2 +
 				  MEMORY_BLOCK_ALLOCATOR_MAX_SIZE / 2;
 	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
+	int res = big_array_init(&array, array_size, &mctx, NULL);
 	TEST_ASSERT(res == 0, "big_array_init failed");
 
 	// Verify size field is set correctly

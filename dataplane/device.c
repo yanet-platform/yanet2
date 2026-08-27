@@ -44,19 +44,23 @@ dataplane_device_start_query_rss(
 	     ++instance_idx) {
 		struct dataplane_instance *instance =
 			dataplane->instances + instance_idx;
+		yanet_error *err = NULL;
 		if (dp_topology_set_device_rss(
 			    instance->dp_config,
 			    device->device_id,
 			    key_buf,
 			    key_len,
 			    reta_buf,
-			    reta_size
+			    reta_size,
+			    &err
 		    )) {
 			LOG(WARN,
 			    "failed to store RSS state for device id=%u "
-			    "instance=%u",
+			    "instance=%u: %s",
 			    device->device_id,
-			    instance_idx);
+			    instance_idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
 		}
 	}
 }

@@ -64,7 +64,8 @@ test_initialised_segment_magic_and_cp_config_valid() {
 		TEST_DP_MEMORY,
 		TEST_CP_MEMORY,
 		&dp_config,
-		&cp_config
+		&cp_config,
+		NULL
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
@@ -129,7 +130,8 @@ test_ready_predicate_initialised_segment_returns_true() {
 		TEST_DP_MEMORY,
 		TEST_CP_MEMORY,
 		&dp_config,
-		&cp_config
+		&cp_config,
+		NULL
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
@@ -166,14 +168,15 @@ test_attach_initialised_segment_succeeds() {
 		TEST_DP_MEMORY,
 		TEST_CP_MEMORY,
 		&dp_config,
-		&cp_config
+		&cp_config,
+		NULL
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
 	// A system agent and cp_config_gen are required before agent_attach
 	// can succeed — agent_attach reads cp_config_gen->gen after locking.
 	struct agent *sys_agent =
-		dp_system_agent_new(cp_config, dp_config, "dataplane");
+		dp_system_agent_new(cp_config, dp_config, "dataplane", NULL);
 	TEST_ASSERT_NOT_NULL(sys_agent, "dp_system_agent_new failed");
 
 	yanet_error *setup_err = NULL;
@@ -216,7 +219,8 @@ test_get_port_counters_unpublished_array_returns_null() {
 		TEST_DP_MEMORY,
 		TEST_CP_MEMORY,
 		&dp_config,
-		&cp_config
+		&cp_config,
+		NULL
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
@@ -251,7 +255,8 @@ test_get_port_counters_zero_port_count_returns_empty_list() {
 		TEST_DP_MEMORY,
 		TEST_CP_MEMORY,
 		&dp_config,
-		&cp_config
+		&cp_config,
+		NULL
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
@@ -376,7 +381,8 @@ test_detach_initialised_segment_releases_mapping() {
 		TEST_DP_MEMORY,
 		TEST_CP_MEMORY,
 		&dp_config,
-		&cp_config
+		&cp_config,
+		NULL
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 	dp_config->instance_count = 1;

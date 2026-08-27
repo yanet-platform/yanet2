@@ -13,7 +13,8 @@ dp_storage_init(
 	size_t dp_memory,
 	size_t cp_memory,
 	struct dp_config **res_dp_config,
-	struct cp_config **res_cp_config
+	struct cp_config **res_cp_config,
+	yanet_error **err
 ) {
 	struct dp_config *dp_config = (struct dp_config *)storage;
 
@@ -73,8 +74,13 @@ dp_storage_init(
 	struct cp_agent_registry *cp_agent_registry =
 		(struct cp_agent_registry *)memory_balloc(
 			&cp_config->memory_context,
-			sizeof(struct cp_agent_registry)
+			sizeof(struct cp_agent_registry),
+			err
 		);
+	if (cp_agent_registry == NULL) {
+		yanet_error_add(err, "failed to allocate the agent registry");
+		return -1;
+	}
 	cp_agent_registry->count = 0;
 	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
 

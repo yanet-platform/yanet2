@@ -77,7 +77,7 @@ stress_worker(void *arg) {
 			slots[idx] = NULL;
 		} else {
 			size_t size = kSizes[rand_r(&seed) % NUM_SIZES];
-			void *ptr = memory_balloc(&g_root, size);
+			void *ptr = memory_balloc(&g_root, size, NULL);
 			if (ptr != NULL) {
 				slots[idx] = ptr;
 				slot_sizes[idx] = size;
@@ -93,7 +93,7 @@ stress_worker(void *arg) {
 				"memory_context_init_from failed"
 			);
 
-			void *cp = memory_balloc(&child, 32);
+			void *cp = memory_balloc(&child, 32, NULL);
 			if (cp != NULL) {
 				memory_bfree(&child, cp, 32);
 			}
@@ -248,8 +248,9 @@ test_concurrent_balloc_and_context_churn(void) {
 
 	size_t swept_count = 0;
 	for (;;) {
-		void *p =
-			memory_balloc(&g_root, MEMORY_BLOCK_ALLOCATOR_MIN_SIZE);
+		void *p = memory_balloc(
+			&g_root, MEMORY_BLOCK_ALLOCATOR_MIN_SIZE, NULL
+		);
 		if (p == NULL) {
 			break;
 		}

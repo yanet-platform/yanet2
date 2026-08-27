@@ -204,6 +204,7 @@ func (m *MapObjectConfig) insertLayer(
 	extraBucketCount uint32,
 	workerCount uint16,
 ) error {
+	var cErr *C.yanet_error
 	var rc C.int
 	if m.kind == KindV6 {
 		rc = C.fwstate_map_v6_object_insert_layer(
@@ -211,6 +212,7 @@ func (m *MapObjectConfig) insertLayer(
 			C.uint32_t(indexSize),
 			C.uint32_t(extraBucketCount),
 			C.uint16_t(workerCount),
+			&cErr,
 		)
 	} else {
 		rc = C.fwstate_map_v4_object_insert_layer(
@@ -218,11 +220,13 @@ func (m *MapObjectConfig) insertLayer(
 			C.uint32_t(indexSize),
 			C.uint32_t(extraBucketCount),
 			C.uint16_t(workerCount),
+			&cErr,
 		)
 	}
 	if rc != 0 {
 		return fmt.Errorf(
-			"failed to insert fwstate-map layer: error code=%d", rc,
+			"failed to insert fwstate-map layer: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}
 	return nil

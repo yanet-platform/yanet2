@@ -213,7 +213,7 @@ test_multithreaded_benchmark(void *mt_arena) {
 		.extra_bucket_count = index_size >> 8,
 	};
 
-	fwmap_t *map = fwmap_new(&config, ctx);
+	fwmap_t *map = fwmap_new(&config, ctx, NULL);
 	if (!map) {
 		if (errno != 0) {
 			perror("failed to create FWMap: ");

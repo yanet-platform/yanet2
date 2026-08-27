@@ -64,7 +64,8 @@ fwmap4_new(
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
 	uint16_t worker_count,
-	struct memory_context *ctx
+	struct memory_context *ctx,
+	yanet_error **err
 ) {
 	if (index_size == 0) {
 		index_size = FWMAP4_DEFAULT_INDEX_SIZE;
@@ -88,7 +89,7 @@ fwmap4_new(
 		.promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE,
 	};
 
-	return fwmap4_from_raw(fwmap_new(&cfg, ctx));
+	return fwmap4_from_raw(fwmap_new(&cfg, ctx, err));
 }
 
 static inline fwmap6_t
@@ -96,7 +97,8 @@ fwmap6_new(
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
 	uint16_t worker_count,
-	struct memory_context *ctx
+	struct memory_context *ctx,
+	yanet_error **err
 ) {
 	if (index_size == 0) {
 		index_size = FWMAP6_DEFAULT_INDEX_SIZE;
@@ -120,7 +122,7 @@ fwmap6_new(
 		.promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE,
 	};
 
-	return fwmap6_from_raw(fwmap_new(&cfg, ctx));
+	return fwmap6_from_raw(fwmap_new(&cfg, ctx, err));
 }
 
 static inline void
@@ -236,7 +238,8 @@ fwmap4_insert_new_layer_cp(
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
 	uint16_t worker_count,
-	struct memory_context *ctx
+	struct memory_context *ctx,
+	yanet_error **err
 ) {
 	if (index_size == 0) {
 		index_size = FWMAP4_DEFAULT_INDEX_SIZE;
@@ -260,7 +263,9 @@ fwmap4_insert_new_layer_cp(
 		.promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE,
 	};
 
-	return layermap_insert_new_layer_cp(active_layer_offset, &cfg, ctx);
+	return layermap_insert_new_layer_cp(
+		active_layer_offset, &cfg, ctx, err
+	);
 }
 
 static inline int
@@ -269,7 +274,8 @@ fwmap6_insert_new_layer_cp(
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
 	uint16_t worker_count,
-	struct memory_context *ctx
+	struct memory_context *ctx,
+	yanet_error **err
 ) {
 	if (index_size == 0) {
 		index_size = FWMAP6_DEFAULT_INDEX_SIZE;
@@ -293,7 +299,9 @@ fwmap6_insert_new_layer_cp(
 		.promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE,
 	};
 
-	return layermap_insert_new_layer_cp(active_layer_offset, &cfg, ctx);
+	return layermap_insert_new_layer_cp(
+		active_layer_offset, &cfg, ctx, err
+	);
 }
 
 /* ====================================================================

@@ -13,6 +13,7 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/device/device.h"
 #include "lib/dataplane/module/module.h"
+#include "lib/errors/errors.h"
 #include "lib/logging/log.h"
 
 int
@@ -58,13 +59,19 @@ dp_load_module(
 	}
 
 	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
+	yanet_error *err = NULL;
 	if (mem_array_expand_exp(
 		    &dp_config->memory_context,
 		    (void **)&dp_modules,
 		    sizeof(*dp_modules),
-		    &dp_config->module_count
+		    &dp_config->module_count,
+		    &err
 	    )) {
-		LOG(ERROR, "failed to allocate memory for module %s", name);
+		LOG(ERROR,
+		    "failed to allocate memory for module %s: %s",
+		    name,
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		free(module);
 		return -1;
 	}
@@ -99,13 +106,19 @@ dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	}
 
 	struct dp_device *dp_devices = ADDR_OF(&dp_config->dp_devices);
+	yanet_error *err = NULL;
 	if (mem_array_expand_exp(
 		    &dp_config->memory_context,
 		    (void **)&dp_devices,
 		    sizeof(*dp_devices),
-		    &dp_config->device_count
+		    &dp_config->device_count,
+		    &err
 	    )) {
-		LOG(ERROR, "failed to allocate memory for device %s", name);
+		LOG(ERROR,
+		    "failed to allocate memory for device %s: %s",
+		    name,
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		free(device);
 		return -1;
 	}

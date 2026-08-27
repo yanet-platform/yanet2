@@ -29,9 +29,12 @@ cancellation_token_bind(struct cancellation_token *token);
 
 // Reports whether the token bound to the calling thread was raised.
 //
-// A thread with no binding is never cancelled. Giving up on a raise is
-// only safe where nothing has been published and no lock is held: the
-// shared-memory locks have no owner-death recovery, and a generation the
-// workers can already reach cannot be withdrawn.
+// A thread with no binding is never cancelled. Every allocation polls
+// this, so a raise is observed at points that hold a shared-memory lock
+// or sit inside a half-built structure: it must unwind through the paths
+// that already handle a failed allocation, releasing the lock on the way
+// out, never abandon in place. The shared-memory locks have no
+// owner-death recovery, and a generation the workers can already reach
+// cannot be withdrawn, so no poll site may sit past a publish.
 bool
 cancellation_requested(void);

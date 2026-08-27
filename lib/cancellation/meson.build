@@ -2,7 +2,7 @@ sources = files(
   'cancellation.c',
 )
 
-lib_cancellation_cp = static_library(
+lib_cancellation = static_library(
   'cancellation',
   sources,
   c_args: yanet_c_args,
@@ -10,7 +10,7 @@ lib_cancellation_cp = static_library(
   install: false,
 )
 
-lib_cancellation_cp_dep = declare_dependency(
-  link_with: lib_cancellation_cp,
+lib_cancellation_dep = declare_dependency(
+  link_with: lib_cancellation,
   include_directories: yanet_rootdir,
 )

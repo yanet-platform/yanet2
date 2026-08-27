@@ -74,9 +74,16 @@ pdump_module_config_update_filter_str(struct cp_module *module, char *filter) {
 		}
 		pdump_log(RTE_LOG_INFO, "update filter string");
 		uint64_t filter_len = strlen(filter) + 1; // +1 for '\0'
+		yanet_error *err = NULL;
 		char *filter_buf =
-			memory_balloc(&agent->memory_context, filter_len);
+			memory_balloc(&agent->memory_context, filter_len, &err);
 		if (filter_buf == NULL) {
+			pdump_log(
+				RTE_LOG_ERR,
+				"failed to allocate the filter string: %s",
+				yanet_error_message(err)
+			);
+			yanet_error_free(err);
 			errno = ENOMEM;
 			return -1;
 		}
@@ -156,7 +163,8 @@ pdump_module_config_new(
 	struct pdump_module_config *config =
 		(struct pdump_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct pdump_module_config)
+			sizeof(struct pdump_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -251,11 +259,15 @@ pdump_module_config_set_filter(
 
 	// Allocate space in shared memory for struct rte_bpf and EBPF code
 	uint64_t buf_sz = bpf_on_heap->sz;
-	uint8_t *buf = memory_balloc(&agent->memory_context, buf_sz);
+	yanet_error *err = NULL;
+	uint8_t *buf = memory_balloc(&agent->memory_context, buf_sz, &err);
 	if (buf == NULL) {
 		pdump_log(
-			RTE_LOG_ERR, "failed to ballocate memory for eBPF code"
+			RTE_LOG_ERR,
+			"failed to ballocate memory for eBPF code: %s",
+			yanet_error_message(err)
 		);
+		yanet_error_free(err);
 		rte_bpf_destroy(bpf_on_heap);
 		errno = ENOMEM;
 		return -1;
@@ -375,14 +387,17 @@ pdump_module_config_set_per_worker_ring(
 	uint64_t rings_meta_size =
 		sizeof(struct ring_buffer) * dp_config->worker_count;
 
+	yanet_error *err = NULL;
 	struct ring_buffer *rings =
-		memory_balloc(&agent->memory_context, rings_meta_size);
+		memory_balloc(&agent->memory_context, rings_meta_size, &err);
 	if (rings == NULL) {
 		pdump_log(
 			RTE_LOG_ERR,
-			"failed to ballocate %lu bytes for rings metadata",
-			rings_meta_size
+			"failed to ballocate %lu bytes for rings metadata: %s",
+			rings_meta_size,
+			yanet_error_message(err)
 		);
+		yanet_error_free(err);
 		errno = ENOMEM;
 		return NULL;
 	}
@@ -391,13 +406,15 @@ pdump_module_config_set_per_worker_ring(
 	for (size_t idx = 0; idx < dp_config->worker_count; idx++) {
 		struct ring_buffer *ring = rings + idx;
 		uint8_t *ring_data =
-			memory_balloc(&agent->memory_context, size);
+			memory_balloc(&agent->memory_context, size, &err);
 		if (ring_data == NULL) {
 			pdump_log(
 				RTE_LOG_ERR,
-				"failed to ballocate data for ring %lu",
-				idx
+				"failed to ballocate data for ring %lu: %s",
+				idx,
+				yanet_error_message(err)
 			);
+			yanet_error_free(err);
 
 			for (size_t j = 0; j < idx; j++) {
 				ring = rings + j;

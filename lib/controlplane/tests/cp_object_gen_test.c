@@ -61,7 +61,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
 	struct cp_object *obj1 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(obj1, "object allocation (obj1) failed");
 	TEST_ASSERT_SUCCESS(
@@ -71,7 +71,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	);
 
 	struct cp_object *obj2 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(obj2, "object allocation (obj2) failed");
 	TEST_ASSERT_SUCCESS(
@@ -209,7 +209,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	// obj1 carries a named counter so the replace step can verify the
 	// counter definition is linked forward to its replacement.
 	struct cp_object *obj1 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(obj1, "object allocation (obj1) failed");
 	TEST_ASSERT_SUCCESS(
@@ -225,7 +225,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	);
 
 	struct cp_object *obj2 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(obj2, "object allocation (obj2) failed");
 	TEST_ASSERT_SUCCESS(
@@ -263,7 +263,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	// freed by the install; the replace and the retire each mirror their
 	// reference change into loaded_object_count and the two cancel.
 	struct cp_object *new_obj1 = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(new_obj1, "object allocation (new_obj1) failed");
 	TEST_ASSERT_SUCCESS(
@@ -382,7 +382,7 @@ test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
 	struct cp_object *obj = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(obj, "object allocation failed");
 	TEST_ASSERT_SUCCESS(
@@ -521,7 +521,7 @@ test_cp_module_link_object(struct yanet_shm *shm) {
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
 	struct cp_module *module = (struct cp_module *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_module)
+		&agent->memory_context, sizeof(struct cp_module), NULL
 	);
 	TEST_ASSERT_NOT_NULL(module, "module allocation failed");
 	memset(module, 0, sizeof(struct cp_module));
@@ -670,7 +670,7 @@ test_module_object_link_ectx(struct yanet_shm *shm) {
 	// Install the object first so its per-worker ectx exists before the
 	// module ectx build resolves the link.
 	struct cp_object *obj = (struct cp_object *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_object)
+		&agent->memory_context, sizeof(struct cp_object), NULL
 	);
 	TEST_ASSERT_NOT_NULL(obj, "object allocation failed");
 	TEST_ASSERT_SUCCESS(

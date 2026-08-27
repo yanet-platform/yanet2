@@ -106,7 +106,8 @@ __ttlmap_init_internal( // NOLINT
 	struct memory_context *mctx,
 	size_t bucket_align,
 	size_t bucket_size,
-	size_t bucket_count
+	size_t bucket_count,
+	yanet_error **err
 ) {
 	if ((bucket_count & (bucket_count - 1)) !=
 	    0) { // bucket count must be power of 2
@@ -139,7 +140,7 @@ __ttlmap_init_internal( // NOLINT
 		if (need_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
 			need_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
 		}
-		void *chunk = memory_balloc(&map->mctx, need_size);
+		void *chunk = memory_balloc(&map->mctx, need_size, err);
 		if (chunk == NULL) {
 			break;
 		}
@@ -167,7 +168,7 @@ __ttlmap_init_internal( // NOLINT
 }
 
 #define __TTLMAP_INIT_INTERNAL(                                                \
-	map_ptr, mctx_ptr, key_type, value_type, entries                       \
+	map_ptr, mctx_ptr, key_type, value_type, entries, err                  \
 )                                                                              \
 	__extension__({                                                        \
 		__label__ __done;                                              \
@@ -180,7 +181,8 @@ __ttlmap_init_internal( // NOLINT
 			mctx_ptr,                                              \
 			alignof(__bucket_t),                                   \
 			sizeof(__bucket_t),                                    \
-			__bucket_count                                         \
+			__bucket_count,                                        \
+			err                                                    \
 		);                                                             \
 		if (__res < 0) {                                               \
 			goto __done;                                           \

@@ -87,10 +87,9 @@ cp_device_config_fini(struct cp_device_config *config);
 
 // Allocate a new cp_device from mctx.
 //
-// Returns NULL on allocation failure; caller is responsible for reporting the
-// error.
+// Returns NULL on failure, with the reason reported through the error slot.
 struct cp_device *
-cp_device_new(struct memory_context *mctx);
+cp_device_new(struct memory_context *mctx, yanet_error **err);
 
 // Initialize device resources: sub-context, pipelines, counter registry.
 //
@@ -186,7 +185,9 @@ cp_device_registry_upsert(
 
 int
 cp_device_registry_delete(
-	struct cp_device_registry *device_registry, const char *name
+	struct cp_device_registry *device_registry,
+	const char *name,
+	yanet_error **err
 );
 
 static inline uint64_t

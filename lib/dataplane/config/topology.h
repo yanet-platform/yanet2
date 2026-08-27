@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
+
 struct dp_port {
 	uint16_t port_id;
 	char device_name[80];
@@ -62,14 +64,17 @@ struct dp_topology {
 struct dp_config;
 
 // Allocate the dp_topology.devices array of count slots and wire it into
-// dp_config. Returns NULL on out-of-memory.
+// dp_config. Returns NULL on failure, with the reason reported through the
+// error slot.
 //
 // The slots are zero-initialised, so a device whose RSS state is never
 // filled reads back as the not-valid sentinel: rss_valid false and the
 // key and reta offset pointers NULL. The caller only needs to fill the
 // entries it has RSS state for.
 struct dp_port *
-dp_topology_alloc_devices(struct dp_config *dp_config, size_t count);
+dp_topology_alloc_devices(
+	struct dp_config *dp_config, size_t count, yanet_error **err
+);
 
 // Store the RSS hash key and redirection table for device_id in dp_topology,
 // copying key and reta into fresh shared-memory blocks owned by
@@ -89,7 +94,8 @@ dp_topology_alloc_devices(struct dp_config *dp_config, size_t count);
 // key and reta arrays instead of freeing them.
 //
 // On success the device's rss_valid flag is set. Returns non-zero on
-// rejection or allocation failure, leaving the device's RSS state untouched.
+// rejection or allocation failure, leaving the device's RSS state untouched
+// and the reason reported through the error slot.
 int
 dp_topology_set_device_rss(
 	struct dp_config *dp_config,
@@ -97,7 +103,8 @@ dp_topology_set_device_rss(
 	const uint8_t *key,
 	uint16_t key_len,
 	const uint16_t *reta,
-	uint16_t reta_size
+	uint16_t reta_size,
+	yanet_error **err
 );
 
 // Set the count of workers bound to device_id, across every instance, so

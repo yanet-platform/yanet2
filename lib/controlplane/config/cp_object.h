@@ -151,7 +151,8 @@ int
 cp_object_registry_delete(
 	struct cp_object_registry *registry,
 	const char *object_type,
-	const char *object_name
+	const char *object_name,
+	yanet_error **err
 );
 
 static inline uint64_t

@@ -244,7 +244,8 @@ unrdup_module_config_new(
 	struct unrdup_module_config *config =
 		(struct unrdup_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct unrdup_module_config)
+			sizeof(struct unrdup_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -379,7 +380,8 @@ static int
 unrdup_service_init(
 	struct memory_context *memory_context,
 	struct unrdup_service *service,
-	const struct unrdup_service_config *service_config
+	const struct unrdup_service_config *service_config,
+	yanet_error **err
 ) {
 	if (service_config->peer_count == 0) {
 		return 0;
@@ -388,7 +390,7 @@ unrdup_service_init(
 	size_t size = sizeof(struct unrdup_peer) * service_config->peer_count;
 
 	struct unrdup_peer *peers =
-		(struct unrdup_peer *)memory_balloc(memory_context, size);
+		(struct unrdup_peer *)memory_balloc(memory_context, size, err);
 	if (peers == NULL) {
 		return -1;
 	}
@@ -468,8 +470,8 @@ unrdup_family_publish(
 	}
 
 	size_t size = sizeof(struct unrdup_endpoint) * count;
-	struct unrdup_endpoint *endpoints =
-		(struct unrdup_endpoint *)memory_balloc(memory_context, size);
+	struct unrdup_endpoint *endpoints = (struct unrdup_endpoint *)
+		memory_balloc(memory_context, size, err);
 	if (endpoints == NULL) {
 		yanet_error_add(err, "failed to allocate %s endpoints", name);
 		goto error_slots;
@@ -483,7 +485,7 @@ unrdup_family_publish(
 	// The filter keeps relative pointers into itself, so it is built where
 	// it will stay and published by swapping the pointer.
 	struct filter *filter = (struct filter *)memory_balloc(
-		memory_context, sizeof(struct filter)
+		memory_context, sizeof(struct filter), err
 	);
 	if (filter == NULL) {
 		yanet_error_add(err, "failed to allocate %s", name);
@@ -541,8 +543,8 @@ unrdup_module_config_update_services(
 
 	size_t size = sizeof(struct unrdup_service) * service_count;
 
-	struct unrdup_service *services =
-		(struct unrdup_service *)memory_balloc(memory_context, size);
+	struct unrdup_service *services = (struct unrdup_service *)
+		memory_balloc(memory_context, size, err);
 	if (services == NULL) {
 		yanet_error_add(err, "failed to allocate services");
 		return -1;
@@ -554,7 +556,8 @@ unrdup_module_config_update_services(
 		if (unrdup_service_init(
 			    memory_context,
 			    services + idx,
-			    service_configs + idx
+			    service_configs + idx,
+			    err
 		    )) {
 			yanet_error_add(
 				err, "failed to allocate service %lu", idx

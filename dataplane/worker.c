@@ -365,10 +365,15 @@ dataplane_worker_init(
 	worker->config = *config;
 
 	struct dp_config *dp_config = worker->instance->dp_config;
+	yanet_error *err = NULL;
 	struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
-		&dp_config->memory_context, sizeof(struct dp_worker)
+		&dp_config->memory_context, sizeof(struct dp_worker), &err
 	);
 	if (dp_worker == NULL) {
+		LOG(ERROR,
+		    "failed to allocate worker state: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		return -1;
 	}
 	memset(dp_worker, 0, sizeof(struct dp_worker));
@@ -395,9 +400,14 @@ dataplane_worker_init(
 	worker->dp_worker = dp_worker;
 	struct dp_worker **new_workers = (struct dp_worker **)memory_balloc(
 		&dp_config->memory_context,
-		sizeof(struct dp_worker **) * (dp_config->worker_count + 1)
+		sizeof(struct dp_worker **) * (dp_config->worker_count + 1),
+		&err
 	);
 	if (new_workers == NULL) {
+		LOG(ERROR,
+		    "failed to allocate the worker table: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		memory_bfree(
 			&dp_config->memory_context,
 			dp_worker,

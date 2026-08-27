@@ -73,25 +73,25 @@ flatmap_build(
 
 	map->capacity = capacity;
 
-	map->keys = memory_balloc(mctx, keys_memory);
+	map->keys = memory_balloc(mctx, keys_memory, error);
 	SET_OFFSET_OF(&map->keys, map->keys);
 	if (map->keys == NULL) {
-		yanet_error_add(error, "allocation failed");
+		yanet_error_add(error, "failed to allocate map keys");
 		return -1;
 	}
 
-	map->values = memory_balloc(mctx, values_memory);
+	map->values = memory_balloc(mctx, values_memory, error);
 	SET_OFFSET_OF(&map->values, map->values);
 	if (map->values == NULL) {
 		flatmap_free(map, mctx, key_size, value_size);
-		yanet_error_add(error, "allocation failed");
+		yanet_error_add(error, "failed to allocate map values");
 		return -1;
 	}
 
-	uint8_t *present = memory_balloc(mctx, capacity);
+	uint8_t *present = memory_balloc(mctx, capacity, error);
 	if (present == NULL) {
 		flatmap_free(map, mctx, key_size, value_size);
-		yanet_error_add(error, "allocation failed");
+		yanet_error_add(error, "failed to allocate the map occupancy");
 		return -1;
 	}
 	memset(present, 0, capacity);

@@ -15,7 +15,9 @@ static int
 route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	struct route_module_config *config =
 		(struct route_module_config *)memory_balloc(
-			&fuzz_params.mctx, sizeof(struct route_module_config)
+			&fuzz_params.mctx,
+			sizeof(struct route_module_config),
+			NULL
 		);
 
 	if (!config) {
@@ -48,10 +50,10 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
-	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
+	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4", NULL)) {
 		goto error_lpm_v4;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
+	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6", NULL)) {
 		goto error_lpm_v6;
 	}
 	config->route_count = 0;
@@ -82,7 +84,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	}
 
 	int route_list_idx = route_module_config_add_route_list(
-		rmc, 1, (uint32_t[]){route_idx}
+		rmc, 1, (uint32_t[]){route_idx}, NULL
 	);
 	if (route_list_idx == -1) {
 		goto error_lpm_v6;
@@ -93,7 +95,8 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		rmc,
 		(uint8_t[4]){127, 0, 0, 0},
 		(uint8_t[4]){127, 0, 0, 0xff},
-		route_list_idx
+		route_list_idx,
+		NULL
 	);
 	if (rc != 0) {
 		goto error_lpm_v6;
@@ -105,7 +108,8 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		(uint8_t[16]
 		){0xfe, 0x80, [12] = 0xff, [13] = 0xff, [14] = 0xff, [15] = 0xff
 		},
-		route_list_idx
+		route_list_idx,
+		NULL
 	);
 	if (rc != 0) {
 		goto error_lpm_v6;
@@ -124,7 +128,10 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	}
 
 	struct counter_storage *cs = counter_storage_spawn(
-		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
+		&fuzz_params.mctx,
+		NULL,
+		&config->cp_module.counter_registry,
+		NULL
 	);
 	if (cs == NULL) {
 		goto error_lpm_v6;

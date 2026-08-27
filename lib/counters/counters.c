@@ -102,7 +102,7 @@ counter_registry_expand(
 		ADDR_OF(&registry->memory_context);
 
 	struct counter *new_names = (struct counter *)memory_balloc(
-		memory_context, sizeof(struct counter) * new_capacity
+		memory_context, sizeof(struct counter) * new_capacity, err
 	);
 	if (new_names == NULL) {
 		yanet_error_add(err, "failed to allocate counter names");
@@ -138,6 +138,7 @@ counter_registry_insert(
 	yanet_error **err
 ) {
 	if (!size) {
+		yanet_error_add(err, "counter '%s' has zero size", name);
 		return -1;
 	}
 
@@ -160,7 +161,8 @@ counter_registry_insert(
 		    COUNTER_NAME_LEN,
 		    registry->count,
 		    counter_registry_read_index,
-		    registry
+		    registry,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to insert counter registry index");
 		return -1;
@@ -298,10 +300,12 @@ counter_registry_link(
 // Each block now backs a single instance's counters; the per-instance page
 // striding was removed together with the counter storage allocator.
 static struct counter_storage_page *
-counter_storage_new_page(struct memory_context *memory_context) {
+counter_storage_new_page(
+	struct memory_context *memory_context, yanet_error **err
+) {
 	struct counter_storage_page *page =
 		(struct counter_storage_page *)memory_balloc(
-			memory_context, sizeof(struct counter_storage_page)
+			memory_context, sizeof(struct counter_storage_page), err
 		);
 	if (page == NULL) {
 		return NULL;
@@ -325,7 +329,8 @@ struct counter_storage *
 counter_storage_spawn(
 	struct memory_context *memory_context,
 	struct counter_storage *old_counter_storage,
-	struct counter_registry *counter_registry
+	struct counter_registry *counter_registry,
+	yanet_error **err
 ) {
 	// Fast path: if the old generation's storage was built for the same
 	// counter_registry (same pointer — the registry item was shared by
@@ -338,8 +343,10 @@ counter_storage_spawn(
 		return old_counter_storage;
 	}
 
-	struct counter_storage *new_counter_storage = (struct counter_storage *)
-		memory_balloc(memory_context, sizeof(struct counter_storage));
+	struct counter_storage *new_counter_storage =
+		(struct counter_storage *)memory_balloc(
+			memory_context, sizeof(struct counter_storage), err
+		);
 	if (new_counter_storage == NULL) {
 		return NULL;
 	}
@@ -371,7 +378,8 @@ counter_storage_spawn(
 			new_counter_storage->pools + pool_idx;
 		struct counter_storage_block **new_blocks = memory_balloc(
 			memory_context,
-			block_count * sizeof(struct counter_storage_block *)
+			block_count * sizeof(struct counter_storage_block *),
+			err
 		);
 		if (new_blocks == NULL && block_count > 0) {
 			goto error;
@@ -407,7 +415,8 @@ counter_storage_spawn(
 			struct counter_storage_block *block =
 				(struct counter_storage_block *)memory_balloc(
 					memory_context,
-					sizeof(struct counter_storage_block)
+					sizeof(struct counter_storage_block),
+					err
 				);
 			if (block == NULL) {
 				goto error;
@@ -417,7 +426,7 @@ counter_storage_spawn(
 			SET_OFFSET_OF(new_blocks + idx, block);
 
 			struct counter_storage_page *pages =
-				counter_storage_new_page(memory_context);
+				counter_storage_new_page(memory_context, err);
 			if (pages == NULL) {
 				goto error;
 			}
@@ -431,7 +440,8 @@ counter_storage_spawn(
 		(struct counter_value_handle **)memory_balloc(
 			memory_context,
 			sizeof(struct counter_value_handle *) *
-				counter_registry->count
+				counter_registry->count,
+			err
 		);
 	if (counter_value_handles == NULL && counter_registry->count > 0) {
 		goto error;

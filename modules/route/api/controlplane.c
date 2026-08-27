@@ -88,7 +88,8 @@ route_module_config_new(
 	struct route_module_config *config =
 		(struct route_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct route_module_config)
+			sizeof(struct route_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -106,7 +107,7 @@ route_module_config_new(
 	}
 
 	if (route_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.memory_context, err
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -144,12 +145,13 @@ route_module_config_new(
 int
 route_module_config_data_init(
 	struct route_module_config *config,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
+	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4", err)) {
 		return -1;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
+	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6", err)) {
 		lpm_free(&config->lpm_v4);
 		return -1;
 	}
@@ -275,7 +277,8 @@ route_module_config_add_route(
 		    &config->cp_module.memory_context,
 		    (void **)&routes,
 		    sizeof(*routes),
-		    &config->route_count
+		    &config->route_count,
+		    err
 	    )) {
 		return -1;
 	}
@@ -293,7 +296,10 @@ route_module_config_add_route(
 
 int
 route_module_config_add_route_list(
-	struct cp_module *cp_module, size_t count, const uint32_t *indexes
+	struct cp_module *cp_module,
+	size_t count,
+	const uint32_t *indexes,
+	yanet_error **err
 ) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
@@ -313,7 +319,8 @@ route_module_config_add_route_list(
 			    &config->cp_module.memory_context,
 			    (void **)&route_indexes,
 			    sizeof(*route_indexes),
-			    &config->route_index_count
+			    &config->route_index_count,
+			    err
 		    )) {
 			return -1;
 		}
@@ -332,7 +339,8 @@ route_module_config_add_route_list(
 		    &config->cp_module.memory_context,
 		    (void **)&route_lists,
 		    sizeof(*route_lists),
-		    &config->route_list_count
+		    &config->route_list_count,
+		    err
 	    )) {
 		return -1;
 	}
@@ -351,11 +359,12 @@ route_module_config_add_prefix_v4(
 	struct cp_module *cp_module,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint32_t route_list_index
+	uint32_t route_list_index,
+	yanet_error **err
 ) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
-	return lpm_insert(&config->lpm_v4, 4, from, to, route_list_index);
+	return lpm_insert(&config->lpm_v4, 4, from, to, route_list_index, err);
 }
 
 int
@@ -363,11 +372,12 @@ route_module_config_add_prefix_v6(
 	struct cp_module *cp_module,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint32_t route_list_index
+	uint32_t route_list_index,
+	yanet_error **err
 ) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
-	return lpm_insert(&config->lpm_v6, 16, from, to, route_list_index);
+	return lpm_insert(&config->lpm_v6, 16, from, to, route_list_index, err);
 }
 
 // Counts the LPM ranges over the whole key space of the given tree.

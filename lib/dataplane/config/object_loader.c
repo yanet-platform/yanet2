@@ -9,6 +9,7 @@
 #include "common/strutils.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
+#include "lib/errors/errors.h"
 #include "lib/logging/log.h"
 
 int
@@ -29,13 +30,19 @@ dp_load_object(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	}
 
 	struct dp_object *dp_objects = ADDR_OF(&dp_config->dp_objects);
+	yanet_error *err = NULL;
 	if (mem_array_expand_exp(
 		    &dp_config->memory_context,
 		    (void **)&dp_objects,
 		    sizeof(*dp_objects),
-		    &dp_config->object_count
+		    &dp_config->object_count,
+		    &err
 	    )) {
-		LOG(ERROR, "failed to allocate memory for object %s", name);
+		LOG(ERROR,
+		    "failed to allocate memory for object %s: %s",
+		    name,
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		// FIXME: free object
 		return -1;
 	}

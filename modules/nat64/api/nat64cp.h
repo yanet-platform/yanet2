@@ -45,7 +45,8 @@ nat64_module_config_free(struct cp_module *cp_module, yanet_error **err);
 int
 nat64_module_config_data_init(
 	struct nat64_module_config *config,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 );
 
 void
@@ -73,7 +74,8 @@ nat64_module_config_add_mapping(
 	struct cp_module *cp_module,
 	uint32_t ip4,
 	uint8_t ip6[16],
-	size_t prefix_num
+	size_t prefix_num,
+	yanet_error **err
 );
 
 /**
@@ -89,7 +91,9 @@ nat64_module_config_add_mapping(
  *         - ENOMEM: Memory allocation failed
  */
 int
-nat64_module_config_add_prefix(struct cp_module *cp_module, uint8_t prefix[12]);
+nat64_module_config_add_prefix(
+	struct cp_module *cp_module, uint8_t prefix[12], yanet_error **err
+);
 
 /**
  * @brief Sets drop_unknown_prefix and drop_unknown_mapping flags

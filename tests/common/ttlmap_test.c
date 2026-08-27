@@ -276,7 +276,9 @@ ttlmap_init(void *memory, size_t memory_size, size_t kv_entries) {
 	assert(res == 0);
 
 	ttlmap_t map;
-	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
+	res = TTLMAP_INIT(
+		&map, &mctx, test_key_t, test_value_t, kv_entries, NULL
+	);
 	assert(res == 0);
 
 	TTLMAP_FREE(&map);
@@ -299,7 +301,9 @@ ttlmap_init_and_get_buckets(
 	assert(res == 0);
 
 	ttlmap_t map;
-	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
+	res = TTLMAP_INIT(
+		&map, &mctx, test_key_t, test_value_t, kv_entries, NULL
+	);
 	assert(res == 0);
 
 	for (size_t i = 0; i < ((size_t)1 << map.buckets_exp); ++i) {
@@ -353,7 +357,9 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 	assert(res == 0);
 
 	ttlmap_t map;
-	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
+	res = TTLMAP_INIT(
+		&map, &mctx, test_key_t, test_value_t, kv_entries, NULL
+	);
 	assert(res == 0);
 
 	size_t inserted = 0;
@@ -459,7 +465,7 @@ ttlmap_iter(void *memory, size_t memory_size) {
 	assert(res == 0);
 
 	ttlmap_t map;
-	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 100);
+	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 100, NULL);
 	assert(res == 0);
 
 	size_t inserted = 0;
@@ -636,7 +642,7 @@ ttlmap_bucket_iter(void *memory, size_t memory_size) {
 	       ) == 0);
 
 	ttlmap_t map;
-	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 64);
+	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 64, NULL);
 	assert(res == 0);
 	assert((1ull << map.buckets_exp) == 4);
 
@@ -767,7 +773,7 @@ ttlmap_bucket_iter(void *memory, size_t memory_size) {
 
 	// Early stop inside a bucket skips the rest of that bucket, still
 	// reports delivered, and advances by exactly one bucket.
-	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 64);
+	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 64, NULL);
 	assert(res == 0);
 	ttlmap_test_insert_bucket(&map, 1, 100, 100, 0, 10);
 	ttlmap_test_insert_bucket(&map, 1, 101, 101, 0, 10);

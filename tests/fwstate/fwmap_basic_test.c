@@ -81,7 +81,7 @@ test_lifecycle(void *arena) {
 	cfg.hash_seed = 0x12345678;
 
 	/* Create map */
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 	assert(fwmap_empty(map));
 	assert(fwmap_size(map) == 0);
@@ -128,7 +128,7 @@ test_bulk_operations(void *arena) {
 	fwmap_config_t cfg;
 	setup_test_config(&cfg, 256, 16);
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 
 	/* Insert 100 sequential entries */
@@ -209,7 +209,7 @@ test_collision_chains(void *arena) {
 	void *original_hash = fwmap_func_registry[FWMAP_HASH_FNV1A];
 	fwmap_func_registry[FWMAP_HASH_FNV1A] = (void *)collision_hash;
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 
 	/* Insert many entries that will all collide */
@@ -265,7 +265,7 @@ test_ttl_expiration(void *arena) {
 	fwmap_config_t cfg;
 	setup_test_config(&cfg, 128, 8);
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 
 	/* Insert entry with short TTL */
@@ -306,7 +306,7 @@ test_entry_access(void *arena) {
 	fwmap_config_t cfg;
 	setup_test_config(&cfg, 128, 8);
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 
 	/* Get entry for new key - should allocate slot */
@@ -376,7 +376,7 @@ test_capacity_limits(void *arena) {
 	cfg.extra_bucket_count =
 		4000; /* Extra buckets for collision handling */
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 
 	printf("    Chunks: %u keys, %u values (extra buckets: %u)\n",
@@ -479,7 +479,7 @@ test_overwrite(void *arena) {
 	cfg.hash_seed = 0x12345678;
 
 	/* Create map */
-	fwmap_t *map = fwmap_new(&cfg, ctx);
+	fwmap_t *map = fwmap_new(&cfg, ctx, NULL);
 	assert(map != NULL);
 	assert(fwmap_empty(map));
 	assert(fwmap_size(map) == 0);

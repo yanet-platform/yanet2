@@ -1,5 +1,8 @@
+# errors and cancellation are entered from the root before common, which
+# carries them as dependencies.
 subdir('logging')
-subdir('errors')
+# The library itself is entered from the root; its test needs logging.
+subdir('cancellation/tests')
 subdir('counters')
 subdir('dataplane')
 subdir('controlplane')

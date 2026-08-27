@@ -223,7 +223,7 @@ main(int argc, char **argv) {
 		     pool_idx + 1 > 0 && attempt < MEMORY_BLOCK_ALLOCATOR_EXP;
 		     ++attempt) {
 			req = pool_req_size(&ba, pool_idx);
-			p = memory_balloc(&mctx, req);
+			p = memory_balloc(&mctx, req, NULL);
 			if (p != NULL) {
 				break;
 			}
@@ -276,7 +276,7 @@ main(int argc, char **argv) {
 		     pool_idx + 1 > 0 && attempt < MEMORY_BLOCK_ALLOCATOR_EXP;
 		     ++attempt) {
 			req = pool_req_size(&ba, pool_idx);
-			p = memory_balloc(&mctx, req);
+			p = memory_balloc(&mctx, req, NULL);
 			if (p != NULL) {
 				break;
 			}

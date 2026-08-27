@@ -17,10 +17,15 @@ cp_pipeline_alloc_size(uint64_t length) {
 }
 
 struct cp_pipeline *
-cp_pipeline_new(struct memory_context *memory_context, uint64_t length) {
+cp_pipeline_new(
+	struct memory_context *memory_context,
+	uint64_t length,
+	yanet_error **err
+) {
 	size_t alloc_size = cp_pipeline_alloc_size(length);
-	struct cp_pipeline *self =
-		(struct cp_pipeline *)memory_balloc(memory_context, alloc_size);
+	struct cp_pipeline *self = (struct cp_pipeline *)memory_balloc(
+		memory_context, alloc_size, err
+	);
 	if (self == NULL) {
 		return NULL;
 	}
@@ -195,7 +200,7 @@ cp_pipeline_registry_init(
 	yanet_error **err
 ) {
 	if (registry_init(
-		    memory_context, &new_pipeline_registry->registry, 8
+		    memory_context, &new_pipeline_registry->registry, 8, err
 	    )) {
 		yanet_error_add(err, "failed to initialize pipeline registry");
 		return -1;
@@ -215,7 +220,8 @@ cp_pipeline_registry_copy(
 	if (registry_copy(
 		    memory_context,
 		    &new_pipeline_registry->registry,
-		    &old_pipeline_registry->registry
+		    &old_pipeline_registry->registry,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to copy pipeline registry");
 		return -1;
@@ -331,13 +337,16 @@ cp_pipeline_registry_upsert(
 		name,
 		&new_pipeline->config_item,
 		cp_pipeline_registry_item_free_cb,
-		NULL
+		NULL,
+		err
 	);
 }
 
 int
 cp_pipeline_registry_delete(
-	struct cp_pipeline_registry *pipeline_registry, const char *name
+	struct cp_pipeline_registry *pipeline_registry,
+	const char *name,
+	yanet_error **err
 ) {
 	return registry_replace(
 		&pipeline_registry->registry,
@@ -345,6 +354,7 @@ cp_pipeline_registry_delete(
 		name,
 		NULL,
 		cp_pipeline_registry_item_free_cb,
-		NULL
+		NULL,
+		err
 	);
 }

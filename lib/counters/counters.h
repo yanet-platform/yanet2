@@ -95,7 +95,8 @@ struct counter_storage *
 counter_storage_spawn(
 	struct memory_context *memory_context,
 	struct counter_storage *old_counter_storage,
-	struct counter_registry *registry
+	struct counter_registry *registry,
+	yanet_error **err
 );
 
 void

@@ -72,7 +72,7 @@
  * @subsection rcu_init_example Initialization
  * @code{.c}
  * rcu_t rcu;
- * rcu_init(&rcu, mctx, worker_count);
+ * rcu_init(&rcu, mctx, worker_count, &err);
  * atomic_ulong shared_value = 0;
  * // ...later, on teardown:
  * rcu_fini(&rcu, mctx);
@@ -468,9 +468,14 @@ rcu_update(rcu_t *rcu, atomic_ulong *value, uint64_t upd) {
  * touches the structure.
  */
 static inline int
-rcu_init(rcu_t *rcu, struct memory_context *mctx, size_t worker_count) {
+rcu_init(
+	rcu_t *rcu,
+	struct memory_context *mctx,
+	size_t worker_count,
+	yanet_error **err
+) {
 	size_t bytes = sizeof(rcu_worker_t) * worker_count;
-	rcu_worker_t *workers = memory_balloc(mctx, bytes);
+	rcu_worker_t *workers = memory_balloc(mctx, bytes, err);
 	if (workers == NULL && worker_count > 0) {
 		return -1;
 	}

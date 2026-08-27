@@ -38,7 +38,8 @@ dscp_module_config_new(
 	struct dscp_module_config *config =
 		(struct dscp_module_config *)memory_balloc(
 			&agent->memory_context,
-			sizeof(struct dscp_module_config)
+			sizeof(struct dscp_module_config),
+			err
 		);
 	if (config == NULL) {
 		yanet_error_add(err, "failed to allocate config");
@@ -57,7 +58,7 @@ dscp_module_config_new(
 	}
 
 	if (dscp_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.memory_context, err
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -91,12 +92,14 @@ dscp_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 
 int
 dscp_module_config_data_init(
-	struct dscp_module_config *config, struct memory_context *memory_context
+	struct dscp_module_config *config,
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
+	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4", err)) {
 		return -1;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
+	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6", err)) {
 		lpm_free(&config->lpm_v4);
 		return -1;
 	}
@@ -116,22 +119,28 @@ dscp_module_config_data_fini(struct dscp_module_config *config) {
 
 int
 dscp_module_config_add_prefix_v4(
-	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+	struct cp_module *module,
+	uint8_t *addr_start,
+	uint8_t *addr_end,
+	yanet_error **err
 ) {
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	return lpm_insert(&config->lpm_v4, 4, addr_start, addr_end, 1);
+	return lpm_insert(&config->lpm_v4, 4, addr_start, addr_end, 1, err);
 }
 
 int
 dscp_module_config_add_prefix_v6(
-	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+	struct cp_module *module,
+	uint8_t *addr_start,
+	uint8_t *addr_end,
+	yanet_error **err
 ) {
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	return lpm_insert(&config->lpm_v6, 16, addr_start, addr_end, 1);
+	return lpm_insert(&config->lpm_v6, 16, addr_start, addr_end, 1, err);
 }
 
 int

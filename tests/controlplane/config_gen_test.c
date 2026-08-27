@@ -23,7 +23,7 @@
 // stale content.
 static void
 pollute_allocator(struct memory_context *ctx, size_t size) {
-	void *block = memory_balloc(ctx, size);
+	void *block = memory_balloc(ctx, size, NULL);
 	assert(block != NULL);
 	memset(block, 0xAB, size);
 	memory_bfree(ctx, block, size);

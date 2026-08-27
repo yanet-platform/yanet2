@@ -90,7 +90,9 @@ static int
 fwstate_test_config(struct cp_module **cp_module) {
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)memory_balloc(
-			&fuzz_params.mctx, sizeof(struct fwstate_module_config)
+			&fuzz_params.mctx,
+			sizeof(struct fwstate_module_config),
+			NULL
 		);
 
 	if (!config) {
@@ -176,7 +178,10 @@ fwstate_test_config(struct cp_module **cp_module) {
 	}
 
 	struct counter_storage *cs = counter_storage_spawn(
-		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
+		&fuzz_params.mctx,
+		NULL,
+		&config->cp_module.counter_registry,
+		NULL
 	);
 	if (cs == NULL) {
 		goto error_registry;
@@ -205,7 +210,8 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (fwtable_insert_layer_cp(
 		    &fuzz_map_v4.table,
 		    &fw4config,
-		    &config->cp_module.memory_context
+		    &config->cp_module.memory_context,
+		    NULL
 	    )) {
 		goto error_storage;
 	}
@@ -227,7 +233,8 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (fwtable_insert_layer_cp(
 		    &fuzz_map_v6.table,
 		    &fw6config,
-		    &config->cp_module.memory_context
+		    &config->cp_module.memory_context,
+		    NULL
 	    )) {
 		goto error_table_v4;
 	}
@@ -299,8 +306,9 @@ fuzz_setup() {
 	}
 
 	// Create a minimal dp_worker structure for fwstate
-	fuzz_params.worker =
-		memory_balloc(&fuzz_params.mctx, sizeof(struct dp_worker));
+	fuzz_params.worker = memory_balloc(
+		&fuzz_params.mctx, sizeof(struct dp_worker), NULL
+	);
 	if (fuzz_params.worker == NULL) {
 		return -ENOMEM;
 	}

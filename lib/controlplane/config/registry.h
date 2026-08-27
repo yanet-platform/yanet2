@@ -88,13 +88,14 @@ static inline int
 registry_init(
 	struct memory_context *memory_context,
 	struct registry *registry,
-	uint64_t capacity
+	uint64_t capacity,
+	yanet_error **err
 ) {
 	SET_OFFSET_OF(&registry->memory_context, memory_context);
 	registry->capacity = capacity;
 
 	struct registry_item **items = (struct registry_item **)memory_balloc(
-		memory_context, sizeof(struct registry_item *) * capacity
+		memory_context, sizeof(struct registry_item *) * capacity, err
 	);
 	if (items == NULL) {
 		return -1;
@@ -147,10 +148,11 @@ static inline int
 registry_copy(
 	struct memory_context *memory_context,
 	struct registry *new_registry,
-	struct registry *old_registry
+	struct registry *old_registry,
+	yanet_error **err
 ) {
 	if (registry_init(
-		    memory_context, new_registry, old_registry->capacity
+		    memory_context, new_registry, old_registry->capacity, err
 	    )) {
 		return -1;
 	}
@@ -169,7 +171,7 @@ registry_copy(
 }
 
 static inline int
-registry_extend(struct registry *registry) {
+registry_extend(struct registry *registry, yanet_error **err) {
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 
@@ -181,7 +183,8 @@ registry_extend(struct registry *registry) {
 	struct registry_item **new_items =
 		(struct registry_item **)memory_balloc(
 			memory_context,
-			sizeof(struct registry_item **) * new_capacity
+			sizeof(struct registry_item **) * new_capacity,
+			err
 		);
 	if (new_items == NULL) {
 		return -1;
@@ -233,7 +236,9 @@ registry_lookup(
 }
 
 static inline int
-registry_get_unused_index(struct registry *registry, uint64_t *index) {
+registry_get_unused_index(
+	struct registry *registry, uint64_t *index, yanet_error **err
+) {
 	*index = 0;
 	while (*index < registry->capacity) {
 		if (registry_get(registry, *index) == NULL) {
@@ -242,13 +247,17 @@ registry_get_unused_index(struct registry *registry, uint64_t *index) {
 		*index += 1;
 	}
 
-	return registry_extend(registry);
+	return registry_extend(registry, err);
 }
 
 static inline int
-registry_insert(struct registry *registry, struct registry_item *new_item) {
+registry_insert(
+	struct registry *registry,
+	struct registry_item *new_item,
+	yanet_error **err
+) {
 	uint64_t index;
-	if (registry_get_unused_index(registry, &index)) {
+	if (registry_get_unused_index(registry, &index, err)) {
 		return -1;
 	}
 
@@ -265,7 +274,8 @@ registry_replace(
 	const void *cmp_func_data,
 	struct registry_item *new_item,
 	registry_item_free_func item_free_func,
-	void *item_free_func_data
+	void *item_free_func_data,
+	yanet_error **err
 ) {
 #ifdef REGISTRY_SANITIZE
 	if (new_item != NULL && cmp_func(new_item, cmp_func_data)) {
@@ -280,7 +290,7 @@ registry_replace(
 			return -1;
 		}
 
-		if (registry_get_unused_index(registry, &index)) {
+		if (registry_get_unused_index(registry, &index, err)) {
 			return -1;
 		}
 	}

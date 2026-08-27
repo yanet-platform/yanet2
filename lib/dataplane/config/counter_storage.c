@@ -29,10 +29,14 @@ dp_counter_storage_init(
 	struct counter_storage **storages =
 		(struct counter_storage **)memory_balloc(
 			&dp_config->memory_context,
-			sizeof(struct counter_storage *) * worker_count
+			sizeof(struct counter_storage *) * worker_count,
+			&err
 		);
 	if (storages == NULL && worker_count > 0) {
-		LOG(ERROR, "failed to allocate worker counter storage array");
+		LOG(ERROR,
+		    "failed to allocate worker counter storage array: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
 		return -1;
 	}
 	memset(storages, 0, sizeof(struct counter_storage *) * worker_count);
@@ -41,13 +45,16 @@ dp_counter_storage_init(
 		struct counter_storage *storage = counter_storage_spawn(
 			&dp_config->memory_context,
 			NULL,
-			&dp_config->worker_counters
+			&dp_config->worker_counters,
+			&err
 		);
 		if (storage == NULL) {
 			LOG(ERROR,
 			    "failed to spawn worker counter storage for worker "
-			    "%lu",
-			    worker_idx);
+			    "%lu: %s",
+			    worker_idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			for (uint64_t idx = 0; idx < worker_idx; ++idx) {
 				counter_storage_free(ADDR_OF(storages + idx));
 			}
@@ -80,10 +87,16 @@ dp_counter_storage_init(
 
 		struct counter_storage *port_counter_storage =
 			counter_storage_spawn(
-				&dp_config->memory_context, NULL, &pc->registry
+				&dp_config->memory_context,
+				NULL,
+				&pc->registry,
+				&err
 			);
 		if (port_counter_storage == NULL) {
-			LOG(ERROR, "failed to allocate port counter storage");
+			LOG(ERROR,
+			    "failed to allocate port counter storage: %s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
 			return -1;
 		}
 

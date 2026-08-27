@@ -25,7 +25,8 @@ cp_config_counter_storage_registry_init(
 ) {
 	struct cp_counter_storage *items = memory_balloc(
 		memory_context,
-		sizeof(struct cp_counter_storage) * COUNTER_REGISTRY_PREALLOC
+		sizeof(struct cp_counter_storage) * COUNTER_REGISTRY_PREALLOC,
+		err
 	);
 	if (items == NULL) {
 		yanet_error_add(
@@ -170,7 +171,7 @@ cp_config_counter_storage_registry_insert(
 		struct memory_context *mctx =
 			ADDR_OF(&registry->memory_context);
 		struct cp_counter_storage *items = memory_balloc(
-			mctx, registry->capacity * 2 * sizeof(*items)
+			mctx, registry->capacity * 2 * sizeof(*items), err
 		);
 		if (items == NULL) {
 			yanet_error_add(err, "failed to allocate storage");

@@ -45,7 +45,7 @@ build_arena(struct arena *a) {
 	if (memory_context_init(&a->root, "root", &a->alloc)) {
 		_exit(5);
 	}
-	if (value_registry_init(&a->registry, &a->root, "reg")) {
+	if (value_registry_init(&a->registry, &a->root, "reg", NULL)) {
 		_exit(6);
 	}
 
@@ -53,17 +53,19 @@ build_arena(struct arena *a) {
 	// use-map chunks and the ranges array really allocate and the fini
 	// path has something to walk.
 	for (int gen = 0; gen < 2; ++gen) {
-		if (value_registry_start(&a->registry)) {
+		if (value_registry_start(&a->registry, NULL)) {
 			_exit(7);
 		}
 		for (uint32_t v = 0; v < 24; ++v) {
-			if (value_registry_collect(&a->registry, v + gen)) {
+			if (value_registry_collect(
+				    &a->registry, v + gen, NULL
+			    )) {
 				_exit(8);
 			}
 		}
 	}
 
-	if (value_table_init(&a->table, &a->root, "tab", 8, 8)) {
+	if (value_table_init(&a->table, &a->root, "tab", 8, 8, NULL)) {
 		_exit(9);
 	}
 }

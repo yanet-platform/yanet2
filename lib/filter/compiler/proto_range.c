@@ -3,6 +3,7 @@
 #include "common/registry.h"
 #include "common/value.h"
 #include "declare.h"
+#include "lib/errors/errors.h"
 #include "lib/filter/rule.h"
 
 #include <stdint.h>
@@ -15,14 +16,16 @@ collect_proto_values(
 	const struct filter_rule **rules,
 	uint32_t count,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
 	if (value_table_init(
 		    table,
 		    memory_context,
 		    "proto-range",
 		    1,
-		    PROTO_RANGE_CLASSIFIER_MAX_VALUE
+		    PROTO_RANGE_CLASSIFIER_MAX_VALUE,
+		    err
 	    )) {
 		return -1;
 	}
@@ -31,7 +34,8 @@ collect_proto_values(
 	if (remap_table_init(
 		    &remap_table,
 		    memory_context,
-		    PROTO_RANGE_CLASSIFIER_MAX_VALUE
+		    PROTO_RANGE_CLASSIFIER_MAX_VALUE,
+		    err
 	    )) {
 		goto error_remap_table;
 	}
@@ -59,7 +63,7 @@ collect_proto_values(
 				uint32_t *value =
 					value_table_get_ptr(table, 0, proto);
 				if (remap_table_touch(
-					    &remap_table, *value, value
+					    &remap_table, *value, value, err
 				    ) < 0) {
 					goto error_touch;
 				}
@@ -75,7 +79,7 @@ collect_proto_values(
 	     rule_ptr < rules + count;
 	     ++rule_ptr) {
 		// A value range should be created even for empty rules
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_collect;
 		}
 		if (*rule_ptr == NULL) {
@@ -96,7 +100,8 @@ collect_proto_values(
 			     ++proto) {
 				if (value_registry_collect(
 					    registry,
-					    value_table_get(table, 0, proto)
+					    value_table_get(table, 0, proto),
+					    err
 				    )) {
 					goto error_collect;
 				}
@@ -122,16 +127,17 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 	void **data,
 	const struct filter_rule **rules,
 	size_t rule_count,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	struct proto_range_classifier *classifier =
-		memory_balloc(mctx, sizeof(struct proto_range_classifier));
+		memory_balloc(mctx, sizeof(struct proto_range_classifier), err);
 	if (classifier == NULL) {
 		return -1;
 	}
 	SET_OFFSET_OF(data, classifier);
 	if (collect_proto_values(
-		    mctx, rules, rule_count, &classifier->table, registry
+		    mctx, rules, rule_count, &classifier->table, registry, err
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(mctx, classifier, sizeof(*classifier));

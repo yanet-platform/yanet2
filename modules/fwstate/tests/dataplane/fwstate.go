@@ -11,6 +11,7 @@ package fwstate
 //#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 //#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
+//#cgo LDFLAGS: -L../../../../build/lib/cancellation -lcancellation
 /*
 #include <harness.h>
 */

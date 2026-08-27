@@ -14,7 +14,9 @@ static int
 dscp_test_config(struct cp_module **cp_module) {
 	struct dscp_module_config *config =
 		(struct dscp_module_config *)memory_balloc(
-			&fuzz_params.mctx, sizeof(struct dscp_module_config)
+			&fuzz_params.mctx,
+			sizeof(struct dscp_module_config),
+			NULL
 		);
 
 	if (!config) {
@@ -36,10 +38,10 @@ dscp_test_config(struct cp_module **cp_module) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
-	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
+	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4", NULL)) {
 		goto error_lpm_v4;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
+	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6", NULL)) {
 		goto error_lpm_v6;
 	}
 
@@ -47,7 +49,8 @@ dscp_test_config(struct cp_module **cp_module) {
 	int rc = dscp_module_config_add_prefix_v4(
 		&config->cp_module,
 		(uint8_t[4]){127, 0, 0, 0},
-		(uint8_t[4]){127, 0, 0, 0xff}
+		(uint8_t[4]){127, 0, 0, 0xff},
+		NULL
 	);
 	if (rc != 0) {
 		goto error_lpm_v6;
@@ -58,7 +61,8 @@ dscp_test_config(struct cp_module **cp_module) {
 		(uint8_t[16]){0xfe, 0x80, [15] = 0},
 		(uint8_t[16]
 		){0xfe, 0x80, [12] = 0xff, [13] = 0xff, [14] = 0xff, [15] = 0xff
-		}
+		},
+		NULL
 	);
 	if (rc != 0) {
 		goto error_lpm_v6;

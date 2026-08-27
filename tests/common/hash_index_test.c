@@ -62,8 +62,9 @@ fixture_init(struct fixture *fix, uint32_t capacity) {
 	);
 
 	TEST_ASSERT(
-		hash_index_init(&fix->index, &fix->memory_context, capacity) ==
-			0,
+		hash_index_init(
+			&fix->index, &fix->memory_context, capacity, NULL
+		) == 0,
 		"hash_index_init failed"
 	);
 
@@ -125,8 +126,8 @@ test_lookup_empty(void) {
 
 // Exercises the zero-capacity index.
 //
-// hash_index_init(0) must yield an index whose lookups always miss and
-// whose inserts are rejected without dereferencing the NULL entries slot.
+// A zero-capacity index must yield lookups that always miss and inserts
+// rejected without dereferencing the empty entries slot.
 static int
 test_zero_capacity(void) {
 	struct fixture fix;

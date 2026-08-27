@@ -447,7 +447,7 @@ test_value_table_child_context(void) {
 
 	struct value_table table;
 	TEST_ASSERT(
-		value_table_init(&table, &root, "vt", 4, 4) == 0,
+		value_table_init(&table, &root, "vt", 4, 4, NULL) == 0,
 		"value_table_init failed"
 	);
 
@@ -499,7 +499,7 @@ test_value_registry_child_context(void) {
 
 	struct value_registry registry;
 	TEST_ASSERT(
-		value_registry_init(&registry, &root, "vr") == 0,
+		value_registry_init(&registry, &root, "vr", NULL) == 0,
 		"value_registry_init failed"
 	);
 
@@ -514,11 +514,11 @@ test_value_registry_child_context(void) {
 	// allocate through the shared child context.
 	for (uint32_t range_idx = 0; range_idx < 4; ++range_idx) {
 		TEST_ASSERT(
-			value_registry_start(&registry) == 0,
+			value_registry_start(&registry, NULL) == 0,
 			"value_registry_start failed"
 		);
 		TEST_ASSERT(
-			value_registry_collect(&registry, range_idx) == 0,
+			value_registry_collect(&registry, range_idx, NULL) == 0,
 			"value_registry_collect failed"
 		);
 	}

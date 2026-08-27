@@ -19,6 +19,9 @@ void
 yanet_error_free(yanet_error *err);
 
 // Returns the message of this frame (not the whole chain).
+//
+// Never NULL: callers format the result straight into a message, and a
+// failure that reported nothing still has to say so.
 const char *
 yanet_error_message(const yanet_error *err);
 

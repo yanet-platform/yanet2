@@ -6,6 +6,7 @@
 
 #include "declare.h"
 #include "helper.h"
+#include "lib/errors/errors.h"
 
 typedef void (*rule_get_net4_func)(
 	const struct filter_rule *rule, struct net4 **net, uint32_t *count
@@ -33,7 +34,8 @@ net4_collect_values(
 	uint32_t count,
 	struct range_index *range_index,
 	struct value_table *table,
-	struct remap_table *remap_table
+	struct remap_table *remap_table,
+	yanet_error **err
 ) {
 	uint32_t *values = ADDR_OF(&range_index->values);
 
@@ -57,7 +59,8 @@ net4_collect_values(
 		for (uint32_t idx = start; idx < stop; ++idx) {
 			uint32_t *value =
 				value_table_get_ptr(table, 0, values[idx]);
-			if (remap_table_touch(remap_table, *value, value) < 0) {
+			if (remap_table_touch(remap_table, *value, value, err) <
+			    0) {
 				return -1;
 			}
 		}
@@ -71,8 +74,11 @@ net4_collect_registry(
 	struct net4 *start,
 	uint32_t count,
 	struct lpm *lpm,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
+	struct lpm_collect_registry_ctx ctx = {registry, err};
+
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
 		uint32_t addr = *(uint32_t *)net4->addr;
 		uint32_t mask = *(uint32_t *)net4->mask;
@@ -82,7 +88,7 @@ net4_collect_registry(
 			    (uint8_t *)&addr,
 			    (uint8_t *)&to,
 			    lpm_collect_registry_iterator,
-			    registry
+			    &ctx
 		    )) {
 			return -1;
 		}
@@ -98,10 +104,11 @@ collect_net4_values(
 	uint32_t count,
 	rule_get_net4_func get_net4,
 	struct lpm *lpm,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
 	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context)) {
+	if (range_collector_init(&collector, memory_context, err)) {
 		goto error;
 	}
 
@@ -128,37 +135,40 @@ collect_net4_values(
 				    &collector,
 				    net4->addr,
 				    __builtin_popcountll(*(uint32_t *)net4->mask
-				    )
+				    ),
+				    err
 			    )) {
 				goto error_collector;
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context, "lpm")) {
+	if (lpm_init(lpm, memory_context, "lpm", err)) {
 		goto error_lpm;
 	}
 	struct range_index range_index;
-	if (range_index_init(&range_index, memory_context)) {
+	if (range_index_init(&range_index, memory_context, err)) {
 		goto error_lpm;
 	}
 
-	if (range_collector_collect(&collector, 4, &range_index)) {
+	if (range_collector_collect(&collector, 4, &range_index, err)) {
 		goto error_range_collect;
 	}
 
-	if (range_index_build_lpm(&range_index, 4, lpm)) {
+	if (range_index_build_lpm(&range_index, 4, lpm, err)) {
 		goto error_range_collect;
 	}
 
 	struct value_table table;
 	if (value_table_init(
-		    &table, memory_context, "net4", 1, collector.count
+		    &table, memory_context, "net4", 1, collector.count, err
 	    )) {
 		goto error_table;
 	}
 
 	struct remap_table remap_table;
-	if (remap_table_init(&remap_table, memory_context, collector.count)) {
+	if (remap_table_init(
+		    &remap_table, memory_context, collector.count, err
+	    )) {
 		goto error_remap;
 	}
 
@@ -179,7 +189,12 @@ collect_net4_values(
 		get_net4(action, &nets, &net_count);
 
 		if (net4_collect_values(
-			    nets, net_count, &range_index, &table, &remap_table
+			    nets,
+			    net_count,
+			    &range_index,
+			    &table,
+			    &remap_table,
+			    err
 		    )) {
 			goto error_net_collect;
 		}
@@ -193,7 +208,7 @@ collect_net4_values(
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_net_collect;
 		}
 
@@ -206,7 +221,9 @@ collect_net4_values(
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
-		if (net4_collect_registry(nets, net_count, lpm, registry)) {
+		if (net4_collect_registry(
+			    nets, net_count, lpm, registry, err
+		    )) {
 			goto error_net_collect;
 		}
 	}
@@ -245,9 +262,11 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	void **data,
 	const struct filter_rule **actions,
 	size_t actions_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	struct lpm *lpm =
+		memory_balloc(memory_context, sizeof(struct lpm), err);
 	if (lpm == NULL) {
 		return -1;
 	}
@@ -258,7 +277,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 		    actions_count,
 		    action_get_net4_src,
 		    lpm,
-		    registry
+		    registry,
+		    err
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(memory_context, lpm, sizeof(struct lpm));
@@ -274,9 +294,11 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	void **data,
 	const struct filter_rule **actions,
 	size_t actions_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	struct lpm *lpm =
+		memory_balloc(memory_context, sizeof(struct lpm), err);
 	if (lpm == NULL) {
 		return -1;
 	}
@@ -287,7 +309,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 		    actions_count,
 		    action_get_net4_dst,
 		    lpm,
-		    registry
+		    registry,
+		    err
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(memory_context, lpm, sizeof(struct lpm));

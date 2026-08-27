@@ -110,7 +110,7 @@ allocator_restored_and_reusable(
 		memory_context->balloc_count == memory_context->bfree_count &&
 		memory_context->balloc_size == memory_context->bfree_size;
 
-	void *reuse_probe = memory_balloc(memory_context, 1);
+	void *reuse_probe = memory_balloc(memory_context, 1, NULL);
 	if (reuse_probe == NULL) {
 		return false;
 	}
@@ -159,7 +159,7 @@ run_oom_sweep(
 			block_allocator_free_size(&allocator);
 
 		struct counter_storage *storage = counter_storage_spawn(
-			&memory_context, NULL, &fixture.registry
+			&memory_context, NULL, &fixture.registry, NULL
 		);
 		if (storage == NULL) {
 			saw_oom = true;

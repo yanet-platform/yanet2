@@ -2,6 +2,8 @@
 #include "common/memory_block.h"
 #include "common/numutils.h"
 #include "common/test_assert.h"
+#include "lib/cancellation/cancellation.h"
+#include "lib/errors/errors.h"
 #include "lib/logging/log.h"
 
 #include <assert.h>
@@ -86,7 +88,7 @@ test_init_and_empty_alloc(void) {
 		"mctx init failed"
 	);
 
-	void *p = memory_balloc(&mctx, 16);
+	void *p = memory_balloc(&mctx, 16, NULL);
 	TEST_ASSERT(
 		p == NULL, "allocation on empty allocator must return NULL"
 	);
@@ -168,7 +170,7 @@ test_put_arena_single_block_and_exact_alloc(void) {
 
 	// Exact allocation hits the 2MiB block without borrowing.
 	size_t req = BIG_ALIGN - 2 * ASAN_RED_ZONE;
-	void *ptr = memory_balloc(&mctx, req);
+	void *ptr = memory_balloc(&mctx, req, NULL);
 	dump_allocator_state("after exact alloc", &ba);
 	TEST_ASSERT(ptr != NULL, "exact 2MiB allocation returned NULL");
 
@@ -261,7 +263,7 @@ test_small_alloc_borrow_chain_and_mask_logic(void) {
 	const size_t req = 1;
 	const size_t target_pi = compute_target_pool(&ba, req);
 	const size_t target_block = block_allocator_pool_size(&ba, target_pi);
-	void *ptr = memory_balloc(&mctx, req);
+	void *ptr = memory_balloc(&mctx, req, NULL);
 	dump_allocator_state("after small alloc", &ba);
 	TEST_ASSERT(ptr != NULL, "small allocation returned NULL");
 
@@ -366,7 +368,7 @@ test_alignment_matrix(void) {
 		size_t req = (k_b > 2 * ASAN_RED_ZONE)
 				     ? (k_b - 2 * ASAN_RED_ZONE)
 				     : 1;
-		void *p = memory_balloc(&mctx, req);
+		void *p = memory_balloc(&mctx, req, NULL);
 		TEST_ASSERT(
 			p != NULL,
 			"align matrix: alloc failed for pool %zu (B=%zu, "
@@ -445,12 +447,103 @@ test_reduction_loop_small_region(void) {
 		memory_context_init(&mctx, "balloc.reduce", &ba) == 0,
 		"mctx init failed"
 	);
-	void *p = memory_balloc(&mctx, 1);
+	void *p = memory_balloc(&mctx, 1, NULL);
 	TEST_ASSERT(p != NULL, "reduction loop: small alloc failed");
 	memory_bfree(&mctx, p, 1);
 
 	memory_context_fini(&mctx);
 	free(raw_big);
+	return 0;
+}
+
+// Verifies that an allocation reports through its error slot: nothing on
+// success or on an empty request, and a frame when the allocator refuses.
+static int
+test_error_reporting(void) {
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	void *raw = aligned_alloc(MAX_GUAR_ALIGN, RAW_ALLOC_SZ);
+	TEST_ASSERT(raw != NULL, "aligned_alloc failed");
+	block_allocator_put_arena(&ba, raw, RAW_ALLOC_SZ);
+
+	struct memory_context mctx;
+	TEST_ASSERT(
+		memory_context_init(&mctx, "balloc.error", &ba) == 0,
+		"mctx init failed"
+	);
+
+	yanet_error *err = NULL;
+
+	void *block = memory_balloc(&mctx, 64, &err);
+	TEST_ASSERT(block != NULL, "small alloc failed");
+	TEST_ASSERT(err == NULL, "a served allocation reported an error");
+	memory_bfree(&mctx, block, 64);
+
+	TEST_ASSERT(
+		memory_balloc(&mctx, 0, &err) == NULL,
+		"an empty allocation was served"
+	);
+	TEST_ASSERT(err == NULL, "an empty allocation reported an error");
+
+	TEST_ASSERT(
+		memory_balloc(&mctx, RAW_ALLOC_SZ * 4, &err) == NULL,
+		"an oversized allocation was served"
+	);
+	TEST_ASSERT(err != NULL, "a refused allocation reported no error");
+	yanet_error_reset(&err);
+
+	memory_context_fini(&mctx);
+	free(raw);
+	return 0;
+}
+
+// Verifies that an allocation made under a raised cancellation token is
+// refused as cancelled without reaching the allocator, and that unbinding
+// the token restores service.
+static int
+test_cancellation_short_circuits(void) {
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	void *raw = aligned_alloc(MAX_GUAR_ALIGN, RAW_ALLOC_SZ);
+	TEST_ASSERT(raw != NULL, "aligned_alloc failed");
+	block_allocator_put_arena(&ba, raw, RAW_ALLOC_SZ);
+
+	struct memory_context mctx;
+	TEST_ASSERT(
+		memory_context_init(&mctx, "balloc.cancel", &ba) == 0,
+		"mctx init failed"
+	);
+
+	struct cancellation_token token = {0};
+	struct cancellation_token *previous = cancellation_token_bind(&token);
+	cancellation_token_fire(&token);
+
+	yanet_error *err = NULL;
+	size_t balloc_count = mctx.balloc_count;
+	TEST_ASSERT(
+		memory_balloc(&mctx, 64, &err) == NULL,
+		"a cancelled allocation was served"
+	);
+	TEST_ASSERT(
+		mctx.balloc_count == balloc_count,
+		"a cancelled allocation reached the allocator"
+	);
+	TEST_ASSERT(
+		err != NULL &&
+			strstr(yanet_error_message(err), "cancelled") != NULL,
+		"a cancelled allocation was not reported as cancelled"
+	);
+	yanet_error_reset(&err);
+
+	cancellation_token_bind(previous);
+
+	void *block = memory_balloc(&mctx, 64, &err);
+	TEST_ASSERT(block != NULL, "unbinding did not lift the cancellation");
+	TEST_ASSERT(err == NULL, "a served allocation reported an error");
+	memory_bfree(&mctx, block, 64);
+
+	memory_context_fini(&mctx);
+	free(raw);
 	return 0;
 }
 
@@ -478,6 +571,14 @@ main(void) {
 	}
 	if (test_reduction_loop_small_region() != 0) {
 		LOG(ERROR, "test_reduction_loop_small_region failed");
+		return -1;
+	}
+	if (test_error_reporting() != 0) {
+		LOG(ERROR, "test_error_reporting failed");
+		return -1;
+	}
+	if (test_cancellation_short_circuits() != 0) {
+		LOG(ERROR, "test_cancellation_short_circuits failed");
 		return -1;
 	}
 

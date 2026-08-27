@@ -2,6 +2,7 @@
 #include "common/registry.h"
 #include "common/value.h"
 #include "declare.h"
+#include "lib/errors/errors.h"
 #include "lib/filter/rule.h"
 
 #include <stdint.h>
@@ -19,14 +20,15 @@ collect_port_values(
 	uint32_t count,
 	action_get_port_range_func get_port_range,
 	struct value_table *table,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 ) {
-	if (value_table_init(table, memory_context, "port", 1, 65536)) {
+	if (value_table_init(table, memory_context, "port", 1, 65536, err)) {
 		return -1;
 	}
 
 	struct remap_table remap_table;
-	if (remap_table_init(&remap_table, memory_context, 65536)) {
+	if (remap_table_init(&remap_table, memory_context, 65536, err)) {
 		goto error_remap_table;
 	}
 
@@ -55,7 +57,7 @@ collect_port_values(
 				uint32_t *value =
 					value_table_get_ptr(table, 0, port);
 				if (remap_table_touch(
-					    &remap_table, *value, value
+					    &remap_table, *value, value, err
 				    ) < 0) {
 					goto error_touch;
 				}
@@ -71,7 +73,7 @@ collect_port_values(
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		if (value_registry_start(registry)) {
+		if (value_registry_start(registry, err)) {
 			goto error_collect;
 		}
 		if (*action_ptr == NULL) {
@@ -89,7 +91,8 @@ collect_port_values(
 			     ++port) {
 				if (value_registry_collect(
 					    registry,
-					    value_table_get(table, 0, port)
+					    value_table_get(table, 0, port),
+					    err
 				    )) {
 					goto error_collect;
 				}
@@ -101,7 +104,8 @@ collect_port_values(
 			for (uint32_t port = 0; port <= 65535; ++port) {
 				if (value_registry_collect(
 					    registry,
-					    value_table_get(table, 0, port)
+					    value_table_get(table, 0, port),
+					    err
 				    )) {
 					goto error_collect;
 				}
@@ -146,10 +150,11 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 	void **data,
 	const struct filter_rule **actions,
 	size_t actions_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	struct value_table *table =
-		memory_balloc(memory_context, sizeof(struct value_table));
+		memory_balloc(memory_context, sizeof(struct value_table), err);
 	if (table == NULL) {
 		return -1;
 	}
@@ -160,7 +165,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 		    actions_count,
 		    get_port_range_dst,
 		    table,
-		    registry
+		    registry,
+		    err
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(memory_context, table, sizeof(struct value_table));
@@ -175,10 +181,11 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 	void **data,
 	const struct filter_rule **actions,
 	size_t actions_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
 	struct value_table *table =
-		memory_balloc(memory_context, sizeof(struct value_table));
+		memory_balloc(memory_context, sizeof(struct value_table), err);
 	if (table == NULL) {
 		return -1;
 	}
@@ -189,7 +196,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 		    actions_count,
 		    get_port_range_src,
 		    table,
-		    registry
+		    registry,
+		    err
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(memory_context, table, sizeof(struct value_table));

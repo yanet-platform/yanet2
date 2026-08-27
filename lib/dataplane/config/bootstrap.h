@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
+
 struct dp_config;
 struct cp_config;
 
@@ -20,7 +22,8 @@ dp_storage_init(
 	size_t dp_memory,
 	size_t cp_memory,
 	struct dp_config **res_dp_config,
-	struct cp_config **res_cp_config
+	struct cp_config **res_cp_config,
+	yanet_error **err
 );
 
 // Publish the readiness marker for this instance.

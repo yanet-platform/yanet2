@@ -89,7 +89,7 @@ cp_object_registry_init(
 	struct cp_object_registry *new_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, &new_registry->registry, 8)) {
+	if (registry_init(memory_context, &new_registry->registry, 8, err)) {
 		yanet_error_add(err, "failed to initialize object registry");
 		return -1;
 	}
@@ -108,7 +108,8 @@ cp_object_registry_copy(
 	if (registry_copy(
 		    memory_context,
 		    &new_registry->registry,
-		    &old_registry->registry
+		    &old_registry->registry,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to copy object registry");
 		return -1;
@@ -340,7 +341,8 @@ cp_object_registry_upsert(
 		    &cmp_data,
 		    &new_object->config_item,
 		    NULL,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to replace object in registry");
 		return -1;
@@ -364,7 +366,8 @@ int
 cp_object_registry_delete(
 	struct cp_object_registry *registry,
 	const char *object_type,
-	const char *object_name
+	const char *object_name,
+	yanet_error **err
 ) {
 	struct cp_object *old_object =
 		cp_object_registry_lookup(registry, object_type, object_name);
@@ -379,7 +382,8 @@ cp_object_registry_delete(
 		    &cmp_data,
 		    NULL,
 		    NULL,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		return -1;
 	}

@@ -25,19 +25,27 @@ extern long filter_test_oom_fail_at;
 extern long filter_test_oom_calls;
 
 static inline void *
-filter_test_balloc(struct memory_context *context, size_t size) {
-	if (!filter_test_oom_armed) {
-		return (memory_balloc)(context, size);
+filter_test_balloc(
+	struct memory_context *context, size_t size, yanet_error **err
+) {
+	// An empty request is served by neither allocator, so it is not an
+	// injection point and must not be counted as one.
+	if (!size || !filter_test_oom_armed) {
+		return (memory_balloc)(context, size, err);
 	}
 
 	if (filter_test_oom_calls++ == filter_test_oom_fail_at) {
+		// Mirror the real allocator, which leaves a frame behind
+		// whenever it refuses a non-empty request.
+		yanet_error_add(err, "failed to allocate %zu bytes", size);
 		return NULL;
 	}
 
-	return (memory_balloc)(context, size);
+	return (memory_balloc)(context, size, err);
 }
 
-#define memory_balloc(context, size) filter_test_balloc((context), (size))
+#define memory_balloc(context, size, err)                                      \
+	filter_test_balloc((context), (size), (err))
 
 // The real memory_brealloc body was parsed before this header existed, so it
 // still calls the real memory_balloc directly and stays outside the counter
@@ -48,17 +56,19 @@ filter_test_brealloc(
 	struct memory_context *context,
 	void *data,
 	size_t old_size,
-	size_t new_size
+	size_t new_size,
+	yanet_error **err
 ) {
 	// A zero new_size only frees or no-ops, so it never allocates and is
 	// not an injection point.
 	if (new_size != 0 && filter_test_oom_armed &&
 	    filter_test_oom_calls++ == filter_test_oom_fail_at) {
+		yanet_error_add(err, "failed to allocate %zu bytes", new_size);
 		return NULL;
 	}
 
-	return (memory_brealloc)(context, data, old_size, new_size);
+	return (memory_brealloc)(context, data, old_size, new_size, err);
 }
 
-#define memory_brealloc(context, data, old_size, new_size)                     \
-	filter_test_brealloc((context), (data), (old_size), (new_size))
+#define memory_brealloc(context, data, old_size, new_size, err)                \
+	filter_test_brealloc((context), (data), (old_size), (new_size), (err))

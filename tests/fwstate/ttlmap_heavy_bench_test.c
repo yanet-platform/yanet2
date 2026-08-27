@@ -139,8 +139,9 @@ test_multithreaded_benchmark(void *mt_arena) {
 		init_context_from_arena(mt_arena, MT_ARENA_SIZE, "benchmark");
 
 	ttlmap_t map;
-	int res =
-		TTLMAP_INIT(&map, ctx, test_key_t, test_value_t, TOTAL_VALUES);
+	int res = TTLMAP_INIT(
+		&map, ctx, test_key_t, test_value_t, TOTAL_VALUES, NULL
+	);
 	if (res != 0) {
 		printf("Failed to create TTLMap (error=%d)\n", res);
 		free_arena(mt_arena, MT_ARENA_SIZE);

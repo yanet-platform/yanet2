@@ -248,7 +248,8 @@ cp_module_counter_registry(
 			&cp_module->memory_context,
 			runtime_registries,
 			sizeof(*runtime_registries) * old_count,
-			sizeof(*runtime_registries) * new_count
+			sizeof(*runtime_registries) * new_count,
+			err
 		);
 	if (new_registries == NULL) {
 		yanet_error_add(
@@ -311,7 +312,8 @@ cp_module_link_device(
 		&cp_module->memory_context,
 		devices,
 		sizeof(struct cp_module_device) * cp_module->device_count,
-		sizeof(struct cp_module_device) * (cp_module->device_count + 1)
+		sizeof(struct cp_module_device) * (cp_module->device_count + 1),
+		err
 	);
 	if (devices == NULL) {
 		yanet_error_add(
@@ -357,7 +359,8 @@ cp_module_link_object(
 		&cp_module->memory_context,
 		objects,
 		sizeof(struct cp_module_object) * cp_module->object_count,
-		sizeof(struct cp_module_object) * (cp_module->object_count + 1)
+		sizeof(struct cp_module_object) * (cp_module->object_count + 1),
+		err
 	);
 	if (objects == NULL) {
 		yanet_error_add(
@@ -429,7 +432,9 @@ cp_module_registry_init(
 	struct cp_module_registry *new_module_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, &new_module_registry->registry, 8)) {
+	if (registry_init(
+		    memory_context, &new_module_registry->registry, 8, err
+	    )) {
 		yanet_error_add(err, "failed to initialize module registry");
 		return -1;
 	}
@@ -448,7 +453,8 @@ cp_module_registry_copy(
 	if (registry_copy(
 		    memory_context,
 		    &new_module_registry->registry,
-		    &old_module_registry->registry
+		    &old_module_registry->registry,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to copy module registry");
 		return -1;
@@ -665,7 +671,8 @@ cp_module_registry_upsert(
 		    &cmp_data,
 		    &new_module->config_item,
 		    NULL,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to replace module in registry");
 		return -1;
@@ -695,7 +702,8 @@ int
 cp_module_registry_delete(
 	struct cp_module_registry *module_registry,
 	const char *type,
-	const char *name
+	const char *name,
+	yanet_error **err
 ) {
 	struct cp_module_cmp_data cmp_data = {
 		.type = type,
@@ -711,7 +719,8 @@ cp_module_registry_delete(
 		    &cmp_data,
 		    NULL,
 		    NULL,
-		    NULL
+		    NULL,
+		    err
 	    )) {
 		return -1;
 	}

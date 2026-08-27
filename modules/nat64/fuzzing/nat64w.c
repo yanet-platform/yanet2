@@ -16,7 +16,9 @@ static int
 nat64_test_config(struct cp_module **cp_module) {
 	struct nat64_module_config *config =
 		(struct nat64_module_config *)memory_balloc(
-			&fuzz_params.mctx, sizeof(struct nat64_module_config)
+			&fuzz_params.mctx,
+			sizeof(struct nat64_module_config),
+			NULL
 		);
 
 	if (!config) {
@@ -44,22 +46,30 @@ nat64_test_config(struct cp_module **cp_module) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
+	if (lpm_init(
+		    &config->mappings.v4_to_v6, memory_context, "v4_to_v6", NULL
+	    )) {
 		goto error_config;
 	}
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
+	if (lpm_init(
+		    &config->mappings.v6_to_v4, memory_context, "v6_to_v4", NULL
+	    )) {
 		goto error_lpm_v4;
 	}
 	if (lpm_init(
-		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
+		    &config->prefixes.v6_prefixes,
+		    memory_context,
+		    "v6_prefixes",
+		    NULL
 	    )) {
 		goto error_lpm_v6;
 	}
 
 	// Add prefix
 	uint8_t pfx[12] = {0x20, 0x01, 0x0d, 0xb8, [11] = 0x00};
-	if (nat64_module_config_add_prefix((struct cp_module *)config, pfx) <
-	    0) {
+	if (nat64_module_config_add_prefix(
+		    (struct cp_module *)config, pfx, NULL
+	    ) < 0) {
 		goto error_lpm_prefixes;
 	}
 
@@ -91,7 +101,8 @@ nat64_test_config(struct cp_module **cp_module) {
 			    (struct cp_module *)config,
 			    mappings[i].ip4,
 			    (uint8_t *)mappings[i].ip6,
-			    0
+			    0,
+			    NULL
 		    ) < 0) {
 			goto error_mappings;
 		}

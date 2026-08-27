@@ -59,10 +59,13 @@ struct cp_config_gen;
 
 // Allocate a new cp_function with capacity for chain_count chains.
 //
-// Returns NULL on allocation failure; caller is responsible for reporting the
-// error.
+// Returns NULL on failure, with the reason reported through the error slot.
 struct cp_function *
-cp_function_new(struct memory_context *memory_context, uint64_t chain_count);
+cp_function_new(
+	struct memory_context *memory_context,
+	uint64_t chain_count,
+	yanet_error **err
+);
 
 // Free the memory backing self.
 //
@@ -147,7 +150,9 @@ cp_function_registry_upsert(
 
 int
 cp_function_registry_delete(
-	struct cp_function_registry *function_registry, const char *name
+	struct cp_function_registry *function_registry,
+	const char *name,
+	yanet_error **err
 );
 
 static inline uint64_t

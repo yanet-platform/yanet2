@@ -45,7 +45,9 @@ lpm_wide_page(const struct lpm_wide *lpm, uint32_t page_idx) {
 }
 
 static inline int
-lpm_wide_new_page(struct lpm_wide *lpm, union lpm_wide_value *value) {
+lpm_wide_new_page(
+	struct lpm_wide *lpm, union lpm_wide_value *value, yanet_error **err
+) {
 	if (!(lpm->page_count % LPM_WIDE_CHUNK_SIZE)) {
 		uint32_t old_chunk_count =
 			lpm->page_count / LPM_WIDE_CHUNK_SIZE;
@@ -56,7 +58,9 @@ lpm_wide_new_page(struct lpm_wide *lpm, union lpm_wide_value *value) {
 		struct lpm_wide_page **pages =
 			(struct lpm_wide_page **)memory_balloc(
 				memory_context,
-				sizeof(struct lpm_wide_page *) * new_chunk_count
+				sizeof(struct lpm_wide_page *) *
+					new_chunk_count,
+				err
 			);
 		if (pages == NULL) {
 			errno = ENOMEM;
@@ -67,7 +71,8 @@ lpm_wide_new_page(struct lpm_wide *lpm, union lpm_wide_value *value) {
 			(struct lpm_wide_page *)memory_balloc(
 				memory_context,
 				sizeof(struct lpm_wide_page) *
-					LPM_WIDE_CHUNK_SIZE
+					LPM_WIDE_CHUNK_SIZE,
+				err
 			);
 		if (page == NULL) {
 			memory_bfree(
@@ -114,13 +119,17 @@ lpm_wide_new_page(struct lpm_wide *lpm, union lpm_wide_value *value) {
 }
 
 static inline int
-lpm_wide_init(struct lpm_wide *lpm, struct memory_context *memory_context) {
+lpm_wide_init(
+	struct lpm_wide *lpm,
+	struct memory_context *memory_context,
+	yanet_error **err
+) {
 	memory_context_init_from(
 		&lpm->memory_context, memory_context, "lpm_wide"
 	);
 	lpm->pages = NULL;
 	lpm->page_count = 0;
-	return lpm_wide_new_page(lpm, NULL);
+	return lpm_wide_new_page(lpm, NULL, err);
 }
 
 static inline void
@@ -240,7 +249,8 @@ lpm_wide_insert(
 	uint8_t key_size,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint32_t value
+	uint32_t value,
+	yanet_error **err
 ) {
 	if (lpm_wide_check_key_size(key_size)) {
 		return -1;
@@ -273,7 +283,7 @@ lpm_wide_insert(
 			     lpm_wide_check_range_hi(
 				     word_size, key, to_words, hop
 			     ))) {
-				if (lpm_wide_new_page(lpm, stored_value)) {
+				if (lpm_wide_new_page(lpm, stored_value, err)) {
 					return -1;
 				}
 				++hop;

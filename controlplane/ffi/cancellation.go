@@ -1,9 +1,9 @@
 package ffi
 
 //#cgo CFLAGS: -I../../
-//#cgo LDFLAGS: -L../../build/lib/controlplane/cancellation -lcancellation
+//#cgo LDFLAGS: -L../../build/lib/cancellation -lcancellation
 //
-//#include "lib/controlplane/cancellation/cancellation.h"
+//#include "lib/cancellation/cancellation.h"
 import "C"
 
 import (

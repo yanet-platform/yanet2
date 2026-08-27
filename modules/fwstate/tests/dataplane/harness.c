@@ -25,8 +25,9 @@
 // a valid uncontended state.
 struct agent *
 fwstate_test_agent_new(struct memory_context *parent, const char *name) {
-	struct agent *agent =
-		(struct agent *)memory_balloc(parent, sizeof(struct agent));
+	struct agent *agent = (struct agent *)memory_balloc(
+		parent, sizeof(struct agent), NULL
+	);
 	if (agent == NULL) {
 		return NULL;
 	}
@@ -35,14 +36,14 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 	memory_context_init_from(&agent->memory_context, parent, name);
 
 	struct dp_config *dp_config =
-		memory_balloc(parent, sizeof(struct dp_config));
+		memory_balloc(parent, sizeof(struct dp_config), NULL);
 	if (dp_config == NULL) {
 		return NULL;
 	}
 	memset(dp_config, 0, sizeof(struct dp_config));
 
 	struct dp_object *dp_objects =
-		memory_balloc(parent, 2 * sizeof(struct dp_object));
+		memory_balloc(parent, 2 * sizeof(struct dp_object), NULL);
 	if (dp_objects == NULL) {
 		return NULL;
 	}
@@ -61,7 +62,7 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 	// dataplane. The handler rides along for faithfulness; nothing on
 	// the control-plane path dispatches through it.
 	struct dp_module *dp_modules =
-		memory_balloc(parent, sizeof(struct dp_module));
+		memory_balloc(parent, sizeof(struct dp_module), NULL);
 	if (dp_modules == NULL) {
 		return NULL;
 	}
@@ -75,14 +76,14 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 	SET_OFFSET_OF(&agent->dp_config, dp_config);
 
 	struct cp_config *cp_config =
-		memory_balloc(parent, sizeof(struct cp_config));
+		memory_balloc(parent, sizeof(struct cp_config), NULL);
 	if (cp_config == NULL) {
 		return NULL;
 	}
 	memset(cp_config, 0, sizeof(struct cp_config));
 
 	struct cp_config_gen *config_gen =
-		memory_balloc(parent, sizeof(struct cp_config_gen));
+		memory_balloc(parent, sizeof(struct cp_config_gen), NULL);
 	if (config_gen == NULL) {
 		return NULL;
 	}
@@ -117,7 +118,7 @@ fwstate_test_counter_storage_setup(struct cp_module *cp_module) {
 	}
 
 	struct counter_storage *storage = counter_storage_spawn(
-		&cp_module->memory_context, NULL, registry
+		&cp_module->memory_context, NULL, registry, NULL
 	);
 	if (storage == NULL) {
 		// Allocation failed: same bogus-pointer hazard as above if the
@@ -260,13 +261,15 @@ fwstate_test_object_insert_layer(struct cp_object *cp_object) {
 		struct fwstate_map_v6_object *object = container_of(
 			cp_object, struct fwstate_map_v6_object, cp_object
 		);
-		return fwstate_map_v6_object_insert_layer(object, 1024, 64, 1);
+		return fwstate_map_v6_object_insert_layer(
+			object, 1024, 64, 1, NULL
+		);
 	}
 
 	struct fwstate_map_v4_object *object = container_of(
 		cp_object, struct fwstate_map_v4_object, cp_object
 	);
-	return fwstate_map_v4_object_insert_layer(object, 1024, 64, 1);
+	return fwstate_map_v4_object_insert_layer(object, 1024, 64, 1, NULL);
 }
 
 struct cp_object *
@@ -322,10 +325,10 @@ fwstate_test_insert_new_layer(struct cp_module *cp_module) {
 	struct fwstate_map_v6_object *object6 =
 		container_of(fw6table, struct fwstate_map_v6_object, table);
 
-	if (fwstate_map_v4_object_insert_layer(object4, 1024, 64, 1)) {
+	if (fwstate_map_v4_object_insert_layer(object4, 1024, 64, 1, NULL)) {
 		return -1;
 	}
-	return fwstate_map_v6_object_insert_layer(object6, 1024, 64, 1);
+	return fwstate_map_v6_object_insert_layer(object6, 1024, 64, 1, NULL);
 }
 
 int

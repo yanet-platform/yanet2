@@ -13,10 +13,11 @@ struct agent *
 dp_system_agent_new(
 	struct cp_config *cp_config,
 	struct dp_config *dp_config,
-	const char *name
+	const char *name,
+	yanet_error **err
 ) {
 	struct agent *agent = (struct agent *)memory_balloc(
-		&cp_config->memory_context, sizeof(struct agent)
+		&cp_config->memory_context, sizeof(struct agent), err
 	);
 	if (agent == NULL) {
 		return NULL;

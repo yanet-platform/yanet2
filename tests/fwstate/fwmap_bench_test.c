@@ -39,7 +39,7 @@ benchmark_performance(void *arena) {
 		.extra_bucket_count = index_size >> 8,
 	};
 
-	fwmap_t *map = fwmap_new(&config, ctx);
+	fwmap_t *map = fwmap_new(&config, ctx, NULL);
 	assert(map != NULL);
 
 	// Benchmark insertions.

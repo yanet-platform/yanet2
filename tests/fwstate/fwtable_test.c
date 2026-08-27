@@ -49,14 +49,14 @@ test_lookup_head_miss_then_insert(void *arena) {
 	fwmap_config_t config = table_test_config();
 
 	fwtable_t table = {0};
-	assert(fwtable_insert_layer_cp(&table, &config, ctx) == 0);
+	assert(fwtable_insert_layer_cp(&table, &config, ctx, NULL) == 0);
 
 	int key = 42, value = 4242;
 	assert(fwtable_insert(&table, 0, now_time, 60, &key, &value, NULL) >= 0
 	);
 
 	// Rotation: a fresh head layer, the entry now lives one layer down.
-	assert(fwtable_insert_layer_cp(&table, &config, ctx) == 0);
+	assert(fwtable_insert_layer_cp(&table, &config, ctx, NULL) == 0);
 
 	void *found = NULL;
 	rwlock_t *lock = NULL;

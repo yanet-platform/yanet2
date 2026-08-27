@@ -24,7 +24,9 @@ dscp_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 int
 dscp_module_config_data_init(
-	struct dscp_module_config *config, struct memory_context *memory_context
+	struct dscp_module_config *config,
+	struct memory_context *memory_context,
+	yanet_error **err
 );
 
 void
@@ -33,13 +35,19 @@ dscp_module_config_data_fini(struct dscp_module_config *config);
 // Add IPv4 prefix to the DSCP module configuration
 int
 dscp_module_config_add_prefix_v4(
-	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+	struct cp_module *module,
+	uint8_t *addr_start,
+	uint8_t *addr_end,
+	yanet_error **err
 );
 
 // Add IPv6 prefix to the DSCP module configuration
 int
 dscp_module_config_add_prefix_v6(
-	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+	struct cp_module *module,
+	uint8_t *addr_start,
+	uint8_t *addr_end,
+	yanet_error **err
 );
 
 // Set DSCP marking options for the module

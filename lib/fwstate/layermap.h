@@ -21,7 +21,8 @@ layermap_trim_stale_layers_cp(
 	fwmap_t **active_layer_offset,
 	struct memory_context *ctx,
 	uint64_t now,
-	layermap_list_t **outdated_layers
+	layermap_list_t **outdated_layers,
+	yanet_error **err
 ) {
 	fwmap_t *active_layer = ADDR_OF(active_layer_offset);
 	// Start from the layer after the active layer
@@ -34,8 +35,9 @@ layermap_trim_stale_layers_cp(
 			// that a failed allocation leaves the layer in place
 			// to be retried on the next trim instead of being
 			// orphaned.
-			layermap_list_t *node =
-				memory_balloc(ctx, sizeof(layermap_list_t));
+			layermap_list_t *node = memory_balloc(
+				ctx, sizeof(layermap_list_t), err
+			);
 			if (!node) {
 				return -1;
 			}
@@ -65,11 +67,12 @@ static inline int
 layermap_insert_new_layer_cp(
 	fwmap_t **active_layer_offset,
 	fwmap_config_t *config,
-	struct memory_context *ctx
+	struct memory_context *ctx,
+	yanet_error **err
 ) {
 
 	// Allocate new layer
-	fwmap_t *new_layer = fwmap_new(config, ctx);
+	fwmap_t *new_layer = fwmap_new(config, ctx, err);
 	if (!new_layer) {
 		return -1;
 	}

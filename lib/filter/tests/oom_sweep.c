@@ -21,6 +21,7 @@
 
 #include "lib/logging/log.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -192,6 +193,9 @@ sweep_reset_fixture(
 
 // Compiles one filter with the injector armed at fail_at (-1 disables
 // failure and just counts) and returns filter_init's return code.
+//
+// The error chain is collected and released here so the sweep also pins
+// that the slot reaches every allocation site and survives the unwind.
 static int
 sweep_compile(
 	const struct filter_compiler *compiler,
@@ -199,18 +203,25 @@ sweep_compile(
 	uint32_t rule_count,
 	struct memory_context *mctx,
 	long fail_at,
-	struct filter *filter
+	struct filter *filter,
+	bool *reported
 ) {
 	filter_test_oom_calls = 0;
 	filter_test_oom_fail_at = fail_at;
 	filter_test_oom_armed = 1;
 
+	yanet_error *err = NULL;
 	int rc = filter_init(
-		filter, compiler, rule_ptrs, rule_count, mctx, "filter", NULL
+		filter, compiler, rule_ptrs, rule_count, mctx, "filter", &err
 	);
 
 	filter_test_oom_armed = 0;
 	filter_test_oom_fail_at = -1;
+
+	if (reported != NULL) {
+		*reported = err != NULL;
+	}
+	yanet_error_free(err);
 
 	return rc;
 }
@@ -276,10 +287,23 @@ sweep_signature(
 	);
 
 	struct filter filter;
+	bool clean_reported = false;
 	int rc = sweep_compile(
-		compiler, rule_ptrs, SWEEP_RULE_COUNT, &mctx, -1, &filter
+		compiler,
+		rule_ptrs,
+		SWEEP_RULE_COUNT,
+		&mctx,
+		-1,
+		&filter,
+		&clean_reported
 	);
 	SWEEP_ASSERT_EQUAL(rc, 0, "%s: clean compile failed", name);
+	SWEEP_ASSERT_EQUAL(
+		clean_reported,
+		false,
+		"%s: a clean compile reported a reason",
+		name
+	);
 	long total_calls = filter_test_oom_calls;
 	filter_free(&filter, compiler);
 
@@ -297,19 +321,29 @@ sweep_signature(
 		size_t free_before = block_allocator_free_size(&allocator);
 
 		struct filter failed_filter;
+		bool reported = false;
 		int frc = sweep_compile(
 			compiler,
 			rule_ptrs,
 			SWEEP_RULE_COUNT,
 			&mctx,
 			fail_at,
-			&failed_filter
+			&failed_filter,
+			&reported
 		);
 		SWEEP_ASSERT_EQUAL(
 			frc,
 			-1,
 			"%s: injecting a failure at call %ld did not produce "
 			"a clean OOM",
+			name,
+			fail_at
+		);
+		SWEEP_ASSERT_EQUAL(
+			reported,
+			true,
+			"%s: injecting a failure at call %ld reported no "
+			"reason",
 			name,
 			fail_at
 		);

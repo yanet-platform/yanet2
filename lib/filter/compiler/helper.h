@@ -16,7 +16,8 @@ merge_and_collect_registry(
 	struct value_registry *registry2,
 	struct value_table *table,
 	struct value_registry *registry,
-	const char *table_name
+	const char *table_name,
+	yanet_error **err
 );
 
 int
@@ -24,20 +25,30 @@ merge_and_set_registry_values(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
-	struct value_table *table
+	struct value_table *table,
+	yanet_error **err
 );
 
 int
 init_dummy_registry(
 	struct memory_context *memory_context,
 	uint32_t actions,
-	struct value_registry *registry
+	struct value_registry *registry,
+	yanet_error **err
 );
+
+// Carries the destination registry and the caller's error slot through the
+// value-collecting walk's opaque callback data.
+struct lpm_collect_registry_ctx {
+	struct value_registry *registry;
+	yanet_error **err;
+};
 
 static inline int
 lpm_collect_registry_iterator(uint32_t value, void *data) {
-	struct value_registry *registry = (struct value_registry *)data;
-	return value_registry_collect(registry, value);
+	struct lpm_collect_registry_ctx *ctx =
+		(struct lpm_collect_registry_ctx *)data;
+	return value_registry_collect(ctx->registry, value, ctx->err);
 }
 
 // Checks that an IPv4 network mask is a contiguous prefix mask.

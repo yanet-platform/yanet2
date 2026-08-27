@@ -1637,7 +1637,7 @@ test_service_update_alloc_failure(void) {
 	size_t block_count = 0;
 	while (block_count < ALLOC_MAX_BLOCKS) {
 		void *block = memory_balloc(
-			&subject.cp_module.memory_context, ALLOC_CHUNK
+			&subject.cp_module.memory_context, ALLOC_CHUNK, NULL
 		);
 		if (block == NULL) {
 			break;
@@ -1934,7 +1934,7 @@ setup_counters(void) {
 	}
 
 	test_counter_storage = counter_storage_spawn(
-		&test_mctx, NULL, &config.cp_module.counter_registry
+		&test_mctx, NULL, &config.cp_module.counter_registry, NULL
 	);
 
 	return test_counter_storage == NULL ? -1 : 0;

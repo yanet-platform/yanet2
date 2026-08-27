@@ -72,7 +72,9 @@ cp_config_gen_new_from(
 ) {
 	struct cp_config_gen *new_config_gen =
 		(struct cp_config_gen *)memory_balloc(
-			&cp_config->memory_context, sizeof(struct cp_config_gen)
+			&cp_config->memory_context,
+			sizeof(struct cp_config_gen),
+			err
 		);
 	if (new_config_gen == NULL) {
 		yanet_error_add(
@@ -275,7 +277,10 @@ cp_config_delete_module(
 	}
 
 	if (cp_module_registry_delete(
-		    &new_config_gen->module_registry, module_type, module_name
+		    &new_config_gen->module_registry,
+		    module_type,
+		    module_name,
+		    err
 	    )) {
 		yanet_error_add(
 			err,
@@ -412,7 +417,8 @@ cp_config_update_functions(
 	for (uint64_t idx = 0; idx < function_count; ++idx) {
 		struct cp_function *new_cp_function = cp_function_new(
 			&cp_config->memory_context,
-			cp_function_configs[idx]->chain_count
+			cp_function_configs[idx]->chain_count,
+			err
 		);
 		if (new_cp_function == NULL) {
 			yanet_error_add(
@@ -450,6 +456,10 @@ cp_config_update_functions(
 				"failed to upsert function '%s'",
 				new_cp_function->name
 			);
+			// The registry never took ownership, so the arena
+			// block is still ours to return.
+			cp_function_fini(new_cp_function);
+			cp_function_free(new_cp_function);
 			goto error_free;
 		}
 	}
@@ -487,7 +497,7 @@ cp_config_delete_function(
 	}
 
 	if (cp_function_registry_delete(
-		    &new_config_gen->function_registry, name
+		    &new_config_gen->function_registry, name, err
 	    )) {
 		yanet_error_add(err, "failed to delete function from registry");
 		goto error_free;
@@ -532,7 +542,8 @@ cp_config_update_pipelines(
 	for (uint64_t idx = 0; idx < pipeline_count; ++idx) {
 		struct cp_pipeline *new_cp_pipeline = cp_pipeline_new(
 			&cp_config->memory_context,
-			cp_pipeline_configs[idx]->length
+			cp_pipeline_configs[idx]->length,
+			err
 		);
 		if (new_cp_pipeline == NULL) {
 			yanet_error_add(
@@ -569,6 +580,10 @@ cp_config_update_pipelines(
 				"failed to upsert pipeline '%s'",
 				new_cp_pipeline->name
 			);
+			// The registry never took ownership, so the arena
+			// block is still ours to return.
+			cp_pipeline_fini(new_cp_pipeline);
+			cp_pipeline_free(new_cp_pipeline);
 			goto error_free;
 		}
 	}
@@ -612,7 +627,7 @@ cp_config_delete_pipeline(
 	}
 
 	if (cp_pipeline_registry_delete(
-		    &new_config_gen->pipeline_registry, name
+		    &new_config_gen->pipeline_registry, name, err
 	    )) {
 		yanet_error_add(err, "failed to delete pipeline");
 		goto error_free;
@@ -785,7 +800,9 @@ cp_config_delete_device(
 		goto error_unlock;
 	}
 
-	if (cp_device_registry_delete(&new_config_gen->device_registry, name)) {
+	if (cp_device_registry_delete(
+		    &new_config_gen->device_registry, name, err
+	    )) {
 		yanet_error_add(err, "device '%s' not found", name);
 		goto error_free;
 	}
@@ -929,7 +946,10 @@ cp_config_delete_object(
 	}
 
 	if (cp_object_registry_delete(
-		    &new_config_gen->object_registry, object_type, object_name
+		    &new_config_gen->object_registry,
+		    object_type,
+		    object_name,
+		    err
 	    )) {
 		yanet_error_add(err, "failed to delete object");
 		goto error_free;
@@ -955,7 +975,9 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct cp_config_gen *cp_config_gen =
 		(struct cp_config_gen *)memory_balloc(
-			&cp_config->memory_context, sizeof(struct cp_config_gen)
+			&cp_config->memory_context,
+			sizeof(struct cp_config_gen),
+			err
 		);
 
 	if (cp_config_gen == NULL) {
@@ -1045,7 +1067,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 		device_config.input_pipelines = &pipe_cfg;
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
-			cp_device_new(&agent->memory_context);
+			cp_device_new(&agent->memory_context, err);
 		if (cp_device == NULL) {
 			yanet_error_add(
 				err,
