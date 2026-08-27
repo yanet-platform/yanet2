@@ -249,9 +249,9 @@ static inline bool
 fwmap_default_key_equal(const void *a, const void *b, size_t size) {
 	switch (size) {
 	case 4:
-		return *(uint32_t *)a == *(uint32_t *)b;
+		return memcmp(a, b, sizeof(uint32_t)) == 0;
 	case 8:
-		return *(uint64_t *)a == *(uint64_t *)b;
+		return memcmp(a, b, sizeof(uint64_t)) == 0;
 	default:
 		return memcmp(a, b, size) == 0;
 	}

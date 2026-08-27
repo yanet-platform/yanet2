@@ -159,17 +159,18 @@ static void
 clamp_mss_option(
 	struct rte_tcp_hdr *tcp, struct tcp_option *opt, uint16_t clamp_mss
 ) {
-	uint16_t *mss_ptr = (uint16_t *)opt->data;
-	uint16_t old_mss = rte_be_to_cpu_16(*mss_ptr);
-	if (old_mss <= clamp_mss) {
+	uint16_t old_mss_be;
+	memcpy(&old_mss_be, opt->data, sizeof(old_mss_be));
+	if (rte_be_to_cpu_16(old_mss_be) <= clamp_mss) {
 		return;
 	}
 
 	/* Incremental TCP checksum update per RFC 1624. */
 	uint16_t cksum = ~tcp->cksum;
-	cksum = csum_minus(cksum, *mss_ptr);
-	*mss_ptr = rte_cpu_to_be_16(clamp_mss);
-	cksum = csum_plus(cksum, *mss_ptr);
+	cksum = csum_minus(cksum, old_mss_be);
+	uint16_t new_mss_be = rte_cpu_to_be_16(clamp_mss);
+	memcpy(opt->data, &new_mss_be, sizeof(new_mss_be));
+	cksum = csum_plus(cksum, new_mss_be);
 	/* preserve all-ones checksum (RFC 1624). */
 	tcp->cksum = (cksum == 0xffff) ? cksum : ~cksum;
 }
@@ -196,7 +197,8 @@ write_into_mss_gap(struct rte_mbuf *mbuf, uint16_t offset, uint16_t mss) {
 		rte_pktmbuf_mtod_offset(mbuf, struct tcp_option *, offset);
 	opt->kind = TCP_OPTION_KIND_MSS;
 	opt->len = TCP_OPTION_MSS_LEN;
-	*(uint16_t *)opt->data = rte_cpu_to_be_16(mss);
+	uint16_t mss_be = rte_cpu_to_be_16(mss);
+	memcpy(opt->data, &mss_be, sizeof(mss_be));
 	return opt;
 }
 
@@ -207,10 +209,15 @@ write_into_mss_gap(struct rte_mbuf *mbuf, uint16_t offset, uint16_t mss) {
  */
 static void
 tcp_cksum_add_mss(struct rte_tcp_hdr *tcp, struct tcp_option *opt) {
+	uint16_t kind_and_len;
+	memcpy(&kind_and_len, opt, sizeof(kind_and_len));
+	uint16_t mss_be;
+	memcpy(&mss_be, opt->data, sizeof(mss_be));
+
 	uint16_t cksum = ~tcp->cksum;
 	cksum = csum_plus(cksum, TCP_DATA_OFF_ONE_WORD);
-	cksum = csum_plus(cksum, *(uint16_t *)opt);
-	cksum = csum_plus(cksum, *(uint16_t *)opt->data);
+	cksum = csum_plus(cksum, kind_and_len);
+	cksum = csum_plus(cksum, mss_be);
 	cksum = csum_plus(cksum, rte_cpu_to_be_16(TCP_OPTION_MSS_LEN));
 	/* preserve all-ones checksum (RFC 1624). */
 	tcp->cksum = (cksum == 0xffff) ? cksum : ~cksum;
