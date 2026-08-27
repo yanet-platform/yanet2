@@ -115,8 +115,12 @@ func NewTestListener(t *testing.T) net.Listener {
 	return listener
 }
 
-// newTestUnixSocketPath returns a unique short filesystem path for a Unix
-// socket, independent of TMPDIR and the test name.
+// newTestUnixSocketPath returns a unique path short enough for Unix socket
+// limits, independent of the configured temporary root and test name.
+//
+// Cleanup preserves the prior testing.TempDir behavior and runs after both
+// success and ordinary test failure. The directory contains only the socket
+// entry, not diagnostic state worth preserving after the test.
 func newTestUnixSocketPath(t *testing.T) string {
 	t.Helper()
 
