@@ -2,7 +2,6 @@ package gateway_test
 
 import (
 	"context"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -183,7 +182,7 @@ func Test_GatewayRun_ReadinessDrainLatchesLateReady(t *testing.T) {
 
 	listener := NewTestListener(t)
 	service := &readinessLatchService{
-		endpoint: filepath.Join(t.TempDir(), "readiness-latch.sock"),
+		endpoint: newTestUnixSocketPath(t),
 	}
 	gw, err := gateway.NewGateway(
 		gateway.DefaultConfig(),
