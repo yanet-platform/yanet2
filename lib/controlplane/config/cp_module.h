@@ -9,11 +9,7 @@
 #include "lib/controlplane/config/defines.h"
 #include "lib/controlplane/config/registry.h"
 
-#include "lib/dataplane/counters/module.h"
 #include "lib/errors/errors.h"
-
-struct counter_handle;
-struct module_performance_counter;
 
 /*
  * Structure cp_module reflects module configuration
@@ -86,13 +82,6 @@ struct cp_module {
 	uint64_t pending_input_counter_id;
 	// Pending-output packet/byte counter (size 2: [packets, bytes])
 	uint64_t pending_output_counter_id;
-
-	// Runtime indices for the performance histogram counters.
-	// These indices map to the actual counter storage locations for
-	// the performance counters defined in cp_module->perf_counters_indices.
-	// Used during packet processing to efficiently access latency tracking
-	// histograms for different batch sizes.
-	uint64_t perf_counters_indices[MODULE_ECTX_PERF_COUNTERS];
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
@@ -350,72 +339,3 @@ cp_module_registry_delete(
  */
 size_t
 cp_module_registry_size(struct cp_module_registry *module_registry);
-
-/**
- * Parse raw performance counter data into structured performance metrics.
- *
- * This function processes a raw histogram counter (named "hist_N" where N is
- * 0-5) and converts it into a module_performance_counter structure. It:
- * 1. Extracts the batch size index from the counter name
- * 2. Aggregates counter values across all worker threads
- * 3. Calculates mean latency from accumulated nanoseconds
- * 4. Populates latency histogram buckets with batch counts
- *
- * The counter must be one of the 6 performance histogram counters (hist_0
- * through hist_5) that track latency for different batch sizes:
- * - hist_0: 1 packet
- * - hist_1: 2-3 packets
- * - hist_2: 4-7 packets
- * - hist_3: 8-15 packets
- * - hist_4: 16-31 packets
- * - hist_5: 32+ packets
- *
- * The output counter structure will have its latency_ranges array allocated
- * and populated with histogram data. The caller is responsible for freeing
- * this memory.
- *
- * @param counter_handle Handle to the raw counter data from the registry
- * @param workers Number of worker threads to aggregate data from
- * @param idx Output parameter for the batch size index (0-5)
- * @param counter Output parameter for the parsed performance counter structure
- * @return 0 on success, -1 on failure (sets errno to EINVAL or ENOMEM)
- */
-int
-cp_module_parse_performance_counter(
-	struct counter_handle *counter_handle,
-	size_t workers,
-	size_t *idx,
-	struct module_performance_counter *counter
-);
-
-/**
- * Parse raw tx/rx counter data and aggregate across workers.
- *
- * This function checks if the provided counter handle corresponds to one of
- * the module's tx/rx counters (tx, rx, tx_bytes, rx_bytes). If it matches,
- * the function aggregates the counter values across all worker threads and
- * stores the result in the appropriate output parameter.
- *
- * The function is designed to be called iteratively for each counter in a
- * module's counter list, allowing selective processing of tx/rx counters
- * while ignoring other counter types.
- *
- * @param counter_handle Handle to the raw counter data from the registry
- * @param workers Number of worker threads to aggregate data from
- * @param tx Output parameter for aggregated tx packet counter
- * @param rx Output parameter for aggregated rx packet counter
- * @param tx_bytes Output parameter for aggregated tx bytes counter
- * @param rx_bytes Output parameter for aggregated rx bytes counter
- * @return 0 on success (counter matched and aggregated),
- *         1 if counter name doesn't match any tx/rx counter (not an error),
- *         -1 on failure (sets errno to EINVAL for invalid parameters)
- */
-int
-cp_module_parse_tx_rx(
-	struct counter_handle *counter_handle,
-	size_t workers,
-	uint64_t *tx,
-	uint64_t *rx,
-	uint64_t *tx_bytes,
-	uint64_t *rx_bytes
-);

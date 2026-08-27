@@ -152,11 +152,9 @@ func (m *FWStateService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]
 // The dataplane registers a set of well-known fwstate counters (see
 // fwstate_module_config_new) plus the generic per-module counters registered
 // by cp_module_init: rx, tx, drop, pending_input, pending_output (each a
-// size-2 [packets, bytes] vector) and hist_0..hist_5 (latency histograms, see
-// skipHistCounters). Each known counter is exported under a dedicated metric
-// name with the correct semantic suffix (_packets, _bytes or _entries). The
-// histogram counters are skipped entirely (proper histogram export is a
-// separate task). Any other counter (one added in the future) is exported
+// size-2 [packets, bytes] vector). Each known counter is exported under a
+// dedicated metric name with the correct semantic suffix (_packets, _bytes or
+// _entries). Any other counter (one added in the future) is exported
 // through a generic pair labelled with the counter name so it is never
 // silently dropped.
 //
@@ -258,9 +256,6 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 			commonpb.NewMetricCounter("fwstate_pending_output_packets", packets, baseLabels...),
 			commonpb.NewMetricCounter("fwstate_pending_output_bytes", bytes, baseLabels...),
 		}
-	case "hist_0", "hist_1", "hist_2", "hist_3", "hist_4", "hist_5":
-		// TODO: handle
-		return nil
 	default:
 		// Any counter not listed above (e.g. one added in the future) is
 		// exported through a generic pair labelled with the counter name so it

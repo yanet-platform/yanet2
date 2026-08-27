@@ -1,17 +1,11 @@
 #include "pipeline.h"
 
-#include "common/numutils.h"
-
-#include "lib/counters/histogram.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
-#include "lib/dataplane/time/tsc.h"
-
-#include <rte_cycles.h>
 
 static inline void
 counter_add_packets_bytes(
@@ -62,30 +56,7 @@ module_ectx_process(
 		input_bytes
 	);
 
-	uint64_t tsc_start = rte_rdtsc();
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
-	uint64_t tsc_end = rte_rdtsc();
-
-	// update counter for corresponding batch
-	uint64_t elapsed_ns = tsc_elapsed_ns(tsc_end - tsc_start);
-	if (packets_count > 0) {
-		size_t idx = uint64_log_up(packets_count);
-		size_t batch_idx = idx < MODULE_ECTX_PERF_COUNTERS
-					   ? idx
-					   : MODULE_ECTX_PERF_COUNTERS - 1;
-		size_t hist_idx = counters_hybrid_histogram_batch(
-			&module_ectx_perf_counter, elapsed_ns / packets_count
-		);
-		struct module_ectx_perf_counter_layout *counter =
-			(struct module_ectx_perf_counter_layout *)
-				counter_handle_get_value(ADDR_OF_NONNULL(
-					&module_ectx->perf_counters[batch_idx]
-				));
-		counter->summary_latency += elapsed_ns;
-		counter->packets += packets_count;
-		counter->bytes += input_bytes;
-		counter->batch_count[hist_idx] += 1;
-	}
 
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&module_ectx->tx_counter),
@@ -143,10 +114,6 @@ chain_ectx_process(
 		return;
 	}
 
-	uint64_t input_size = packet_front_input_count(packet_front);
-
-	uint64_t tsc_start = rte_rdtsc();
-
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		if (idx > 0) {
 			packet_front_switch(packet_front);
@@ -156,16 +123,6 @@ chain_ectx_process(
 			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
 
 		module_ectx_process(dp_worker, module_ectx, packet_front);
-
-		uint64_t tsc_stop = rte_rdtsc();
-		counter_hist_exp2_inc(
-			ADDR_OF_NONNULL(&chain_ectx->modules[idx].tsc_counter),
-			0,
-			7,
-			input_size,
-			tsc_stop - tsc_start
-		);
-		tsc_start = tsc_stop;
 	}
 
 	counter_add_packets_bytes(

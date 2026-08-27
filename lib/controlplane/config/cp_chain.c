@@ -3,7 +3,6 @@
 #include "lib/controlplane/config/zone.h"
 
 #include <assert.h>
-#include <stdio.h>
 
 static inline size_t
 cp_chain_alloc_size(uint64_t length) {
@@ -99,28 +98,6 @@ cp_chain_init(
 		strtcpy(self->modules[idx].name,
 			cp_chain_config->modules[idx].name,
 			sizeof(self->modules[idx].name));
-
-		char tsc_counter_name[COUNTER_NAME_LEN];
-		snprintf(
-			tsc_counter_name,
-			sizeof(tsc_counter_name),
-			"stage %lu tsc",
-			idx
-		);
-
-		self->modules[idx].tsc_counter_id = counter_registry_register(
-			&self->counter_registry, tsc_counter_name, 8, err
-		);
-		if (self->modules[idx].tsc_counter_id == COUNTER_INVALID) {
-			yanet_error_add(
-				err,
-				"failed to register '%s' counter for chain "
-				"'%s'",
-				tsc_counter_name,
-				cp_chain_config->name
-			);
-			goto err_out;
-		}
 	}
 
 	return 0;

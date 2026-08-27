@@ -101,53 +101,6 @@ func (m *Counters) encodeCounters(
 	return res
 }
 
-// Perf returns performance counters.
-func (m *Counters) Perf(
-	ctx context.Context,
-	request *ynpb.PerfCountersRequest,
-) (*ynpb.PerfCountersResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
-	perfCounters, err := dpConfig.PerformanceCounters(
-		request.GetDevice(),
-		request.GetPipeline(),
-		request.GetFunction(),
-		request.GetChain(),
-		request.GetModuleType(),
-		request.GetModuleName(),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	response := &ynpb.PerfCountersResponse{
-		Counters: make([]*ynpb.PerfCounter, 0, len(perfCounters.Counters)),
-		Tx:       perfCounters.Tx,
-		Rx:       perfCounters.Rx,
-		TxBytes:  perfCounters.TxBytes,
-		RxBytes:  perfCounters.RxBytes,
-	}
-
-	for _, counter := range perfCounters.Counters {
-		latencies := make([]*ynpb.LatencyRangeCounter, 0, len(counter.LatencyRanges))
-		for _, latencyRange := range counter.LatencyRanges {
-			latencies = append(latencies, &ynpb.LatencyRangeCounter{
-				MinLatency: uint32(latencyRange.MinLatency),
-				Batches:    latencyRange.Batches,
-			})
-		}
-
-		response.Counters = append(response.Counters, &ynpb.PerfCounter{
-			MinBatchSize:   uint32(counter.MinBatchSize),
-			SummaryLatency: uint64(counter.SummaryLatency),
-			Packets:        uint64(counter.Packets),
-			Bytes:          uint64(counter.Bytes),
-			Latencies:      latencies,
-		})
-	}
-
-	return response, nil
-}
-
 // ByTags returns counters grouped by tag set, filtered by the request's
 // tag predicates and name patterns.
 func (m *Counters) ByTags(

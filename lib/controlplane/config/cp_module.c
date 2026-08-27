@@ -1,47 +1,14 @@
 #include "cp_module.h"
 
-#include "api/counter.h"
 #include "common/container_of.h"
 
 #include "lib/counters/counters.h"
-#include "lib/counters/histogram.h"
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"
 
 #include <errno.h>
-#include <stdio.h>
-
-static int
-cp_module_build_perf_counters(struct cp_module *cp_module, yanet_error **err) {
-	for (size_t counter_idx = 0; counter_idx < MODULE_ECTX_PERF_COUNTERS;
-	     ++counter_idx) {
-		char name[16];
-		sprintf(name, "hist_%zu", counter_idx);
-		cp_module->perf_counters_indices[counter_idx] =
-			counter_registry_register(
-				&cp_module->counter_registry,
-				name,
-				MODULE_ECTX_PERF_COUNTER_SIZE,
-				err
-			);
-		if (cp_module->perf_counters_indices[counter_idx] ==
-		    COUNTER_INVALID) {
-			yanet_error_add(
-				err,
-				"failed to register histogram counter at index "
-				"%zu for module '%s:%s'",
-				counter_idx,
-				cp_module->type,
-				cp_module->name
-			);
-			return -1;
-		}
-	}
-
-	return 0;
-}
 
 int
 cp_module_init(
@@ -150,10 +117,6 @@ cp_module_init(
 			module_type,
 			module_name
 		);
-		goto fail;
-	}
-
-	if (cp_module_build_perf_counters(cp_module, err)) {
 		goto fail;
 	}
 
@@ -773,152 +736,4 @@ cp_module_registry_delete(
 size_t
 cp_module_registry_size(struct cp_module_registry *module_registry) {
 	return module_registry->registry.capacity;
-}
-
-int
-cp_module_parse_performance_counter(
-	struct counter_handle *counter_handle,
-	size_t workers,
-	size_t *idx,
-	struct module_performance_counter *counter
-) {
-	// Validate inputs
-	if (counter_handle == NULL || idx == NULL || counter == NULL) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (workers == 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	// Parse counter name to extract index (expecting "hist_N" format)
-	size_t counter_idx;
-	if (sscanf(counter_handle->name, "hist_%zu", &counter_idx) != 1) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	// Validate counter index is in valid range [0, 5]
-	if (counter_idx >= MODULE_ECTX_PERF_COUNTERS) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	// Calculate total number of histogram buckets
-	const size_t hist_buckets =
-		counters_hybrid_histogram_batches(&module_ectx_perf_counter);
-
-	// Determine minimum batch size based on counter index
-	// Batch sizes: 1, 2-3, 4-7, 8-15, 16-31, 32+
-	const uint64_t batch_sizes[MODULE_ECTX_PERF_COUNTERS] = {
-		1, 2, 4, 8, 16, 32
-	};
-
-	// Allocate memory for latency ranges
-	counter->latency_ranges =
-		(struct module_performance_counter_latency_range *)malloc(
-			sizeof(struct module_performance_counter_latency_range
-			) *
-			hist_buckets
-		);
-
-	if (counter->latency_ranges == NULL) {
-		errno = ENOMEM;
-		return -1;
-	}
-
-	// Set counter metadata
-	counter->min_batch_size = batch_sizes[counter_idx];
-	counter->latency_ranges_count = hist_buckets;
-
-	// Salc summary tx and summary latency
-	counter->summary_latency = 0;
-	counter->packets = 0;
-	counter->bytes = 0;
-	for (size_t instance_idx = 0; instance_idx < workers; ++instance_idx) {
-		struct module_ectx_perf_counter_layout *perf_counter =
-			(struct module_ectx_perf_counter_layout *)
-				counter_handle->values[instance_idx];
-		counter->summary_latency += perf_counter->summary_latency;
-		counter->packets += perf_counter->packets;
-		counter->bytes += perf_counter->bytes;
-	}
-
-	// Fill in latency ranges and accumulate counter values across all
-	// workers
-	for (size_t range_idx = 0; range_idx < hist_buckets; ++range_idx) {
-		struct module_performance_counter_latency_range *latency_range =
-			&counter->latency_ranges[range_idx];
-		// Calculate minimum latency for this bucket
-		latency_range->min_latency =
-			counters_hybrid_histogram_batch_first_elem(
-				&module_ectx_perf_counter, range_idx
-			);
-
-		// Accumulate counter values across all worker instances
-		latency_range->batches = 0;
-		for (size_t worker_idx = 0; worker_idx < workers;
-		     ++worker_idx) {
-			struct module_ectx_perf_counter_layout *perf_counter =
-				(struct module_ectx_perf_counter_layout *)
-					counter_handle->values[worker_idx];
-			latency_range->batches +=
-				perf_counter->batch_count[range_idx];
-		}
-	}
-
-	// Set output index
-	*idx = counter_idx;
-
-	return 0;
-}
-
-int
-cp_module_parse_tx_rx(
-	struct counter_handle *counter_handle,
-	size_t workers,
-	uint64_t *tx,
-	uint64_t *rx,
-	uint64_t *tx_bytes,
-	uint64_t *rx_bytes
-) {
-	if (counter_handle == NULL || workers == 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	const char *name = counter_handle->name;
-
-	uint64_t *packets_target = NULL;
-	uint64_t *bytes_target = NULL;
-
-	if (strcmp(name, "tx") == 0) {
-		packets_target = tx;
-		bytes_target = tx_bytes;
-	} else if (strcmp(name, "rx") == 0) {
-		packets_target = rx;
-		bytes_target = rx_bytes;
-	} else {
-		return 1;
-	}
-
-	if (packets_target == NULL || bytes_target == NULL) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	uint64_t total_packets = 0;
-	uint64_t total_bytes = 0;
-	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
-		uint64_t *counter_values = counter_handle->values[worker_idx];
-		// size-2 counter: [0] = packets, [1] = bytes
-		total_packets += counter_values[0];
-		total_bytes += counter_values[1];
-	}
-
-	*packets_target = total_packets;
-	*bytes_target = total_bytes;
-	return 0;
 }

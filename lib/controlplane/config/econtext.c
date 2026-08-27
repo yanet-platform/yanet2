@@ -183,17 +183,6 @@ module_ectx_create(
 		)
 	);
 
-	for (size_t counter_idx = 0; counter_idx < MODULE_ECTX_PERF_COUNTERS;
-	     ++counter_idx) {
-		SET_OFFSET_OF(
-			&module_ectx->perf_counters[counter_idx],
-			counter_get_value_handle(
-				cp_module->perf_counters_indices[counter_idx],
-				counter_storage
-			)
-		);
-	}
-
 	if (cp_config_counter_storage_registry_insert_module(
 		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
 		    cp_device->name,
@@ -643,13 +632,6 @@ chain_ectx_create(
 
 		SET_OFFSET_OF(
 			&chain_ectx->modules[idx].module_ectx, module_ectx
-		);
-		SET_OFFSET_OF(
-			&chain_ectx->modules[idx].tsc_counter,
-			counter_get_value_handle(
-				cp_chain->modules[idx].tsc_counter_id,
-				counter_storage
-			)
 		);
 	}
 

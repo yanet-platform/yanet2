@@ -28,7 +28,7 @@ You measure YANET2 hot paths (`AGENTS.md` for layout and build). Your product is
 
 - Always A/B in the same configuration: baseline (merge-base or `origin/main`) vs candidate; report absolute numbers, delta, and min/median/max over repeats.
 - Establish the noise floor first (baseline vs itself); a delta inside it is NEUTRAL, not a win. Pin a core with `taskset` where possible, use warm-up and `-count`; state what you could not control.
-- Prefer existing harnesses: in-repo Go benchmarks (`go test -bench -benchmem -run=^$`, `benchstat`), `tests/fwstate/*_bench_test.c`, `lib/filter/tests/bench_net*.c`, `tests/common/rcu_bench.c`, `rte_rdtsc` via `lib/dataplane/time/tsc.h`. In-process Go benches + `benchstat` are the trustworthy tool; the live trafgen rig drifts ±15–20 %.
+- Prefer existing harnesses: in-repo Go benchmarks (`go test -bench -benchmem -run=^$`, `benchstat`), `tests/fwstate/*_bench_test.c`, `lib/filter/tests/bench_net*.c`, `tests/common/rcu_bench.c`. In-process Go benches + `benchstat` are the trustworthy tool; the live trafgen rig drifts ±15–20 %.
 - Tag every claim *measured* or *analysis*; cite `file:line` of the hot path.
 
 ## Modes (the brief names one)

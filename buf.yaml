@@ -26,6 +26,9 @@ breaking:
     - PACKAGE
   ignore:
     - modules/balancer2
+    # The Perf RPC and its messages went away together with the tsc perf
+    # counters they exported.
+    - controlplane/ynpb/v1/counters.proto
     # TODO: drop once main carries the fwstate-map object cutover (acl/fwstate
     # resolve state tables through named map objects).
     - modules/acl/controlplane/aclpb/v1/acl.proto

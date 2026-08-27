@@ -25,15 +25,15 @@ type ctxObservation struct {
 	err error
 }
 
-// perfProbeServer blocks CountersService.Perf on the request context,
+// workersProbeServer blocks CountersService.Workers on the request context,
 // signaling entry and then publishing the context's terminal state.
-type perfProbeServer struct {
+type workersProbeServer struct {
 	ynpb.UnimplementedCountersServiceServer
 	entered chan struct{}
 	results chan ctxObservation
 }
 
-func (m *perfProbeServer) Perf(ctx context.Context, _ *ynpb.PerfCountersRequest) (*ynpb.PerfCountersResponse, error) {
+func (m *workersProbeServer) Workers(ctx context.Context, _ *ynpb.WorkerCountersRequest) (*ynpb.WorkerCountersResponse, error) {
 	m.entered <- struct{}{}
 	<-ctx.Done()
 	m.results <- ctxObservation{err: ctx.Err()}
@@ -101,7 +101,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx(t *testing.T) {
 	results := make(chan ctxObservation, 1)
 
 	grpcServer := grpc.NewServer()
-	ynpb.RegisterCountersServiceServer(grpcServer, &perfProbeServer{entered: entered, results: results})
+	ynpb.RegisterCountersServiceServer(grpcServer, &workersProbeServer{entered: entered, results: results})
 	go func() { _ = grpcServer.Serve(listener) }()
 	t.Cleanup(grpcServer.Stop)
 
@@ -122,7 +122,7 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx(t *testing.T) {
 
 	req, err := http.NewRequestWithContext(
 		reqCtx, http.MethodPost,
-		server.URL+"/api"+ynpb.CountersService_Perf_FullMethodName,
+		server.URL+"/api"+ynpb.CountersService_Workers_FullMethodName,
 		strings.NewReader("{}"),
 	)
 	require.NoError(t, err)

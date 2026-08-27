@@ -12,7 +12,6 @@
 
 struct cp_pipeline_function {
 	char name[CP_FUNCTION_NAME_LEN];
-	uint64_t tsc_counter_id;
 };
 
 /*

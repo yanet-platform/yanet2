@@ -10,7 +10,8 @@ def get_args():
     parser.add_argument("--pipeline", required=True, help="Pipeline identifier")
     parser.add_argument("--function", required=True, help="Function identifier")
     parser.add_argument("--chain", required=True, help="Chain identifier")
-    parser.add_argument("--module", required=True, help="Module identifier")
+    parser.add_argument("--module-type", required=True, help="Module type identifier")
+    parser.add_argument("--module-name", required=True, help="Module name identifier")
     parser.add_argument("--interval", type=float, default=2.0, help="Polling interval in seconds (default: 2.0)")
     return parser.parse_args()
 
@@ -19,13 +20,14 @@ def run_yanet_command(args):
     Constructs and runs the shell command, returning the parsed JSON.
     """
     cmd = [
-        "yanet-cli-counters", "perf",
-        "--device", args.device,
-        "--pipeline", args.pipeline,
-        "--function", args.function,
-        "--chain", args.chain,
-        "--module", args.module,
-        "--json"
+        "yanet-cli-counters", "module",
+        "--device-name", args.device,
+        "--pipeline-name", args.pipeline,
+        "--function-name", args.function,
+        "--chain-name", args.chain,
+        "--module-type", args.module_type,
+        "--module-name", args.module_name,
+        "--format", "json"
     ]
 
     try:
@@ -43,13 +45,36 @@ def run_yanet_command(args):
         print("Error: 'yanet-cli-counters' executable not found in PATH.", file=sys.stderr)
         sys.exit(1)
 
+def extract_stats(data):
+    """
+    Sums the tx/rx packet and byte values of the module's counters across
+    every instance (worker) reported by `yanet-cli-counters module --format json`.
+    """
+    stats = {'tx': 0, 'rx': 0, 'tx_bytes': 0, 'rx_bytes': 0}
+    packets_bytes = {'tx': ('tx', 'tx_bytes'), 'rx': ('rx', 'rx_bytes')}
+
+    for group in data.get('groups', []):
+        for counter in group.get('counters', []):
+            name = counter.get('name')
+            if name not in packets_bytes:
+                continue
+            packets_field, bytes_field = packets_bytes[name]
+            for instance in counter.get('instances', []):
+                values = instance.get('values', [])
+                if len(values) > 0:
+                    stats[packets_field] += values[0]
+                if len(values) > 1:
+                    stats[bytes_field] += values[1]
+
+    return stats
+
 def format_unit(value, unit_type='k', is_bytes=False):
     """
     Helper to format large numbers (e.g., 1000000 -> 1.00 M).
     is_bytes=True calculates bits per second (value * 8) usually used for bandwidth.
     """
     suffix = ""
-    
+
     if is_bytes:
         # Convert bytes to bits for bandwidth display
         value = value * 8
@@ -62,17 +87,17 @@ def format_unit(value, unit_type='k', is_bytes=False):
     while value >= 1000 and idx < len(units) - 1:
         value /= 1000.0
         idx += 1
-    
+
     return f"{value:.2f} {units[idx]}"
 
 def main():
     args = get_args()
-    
+
     # State variables for the previous poll
     prev_time = None
     prev_stats = None
 
-    print(f"Starting monitor for Device: {args.device}, Module: {args.module}...")
+    print(f"Starting monitor for Device: {args.device}, Module: {args.module_type}:{args.module_name}...")
     print(f"Polling every {args.interval} seconds.")
     print("-" * 95)
     print(f"{'Timestamp':<20} | {'TX PPS':<15} | {'RX PPS':<15} | {'TX Bandwidth':<15} | {'RX Bandwidth':<15}")
@@ -82,19 +107,14 @@ def main():
         while True:
             # 1. Capture current time accurately before/at execution
             # We use monotonic for accurate delta calculation, time() for display
-            now_monotonic = time.monotonic() 
+            now_monotonic = time.monotonic()
             display_time = time.strftime("%H:%M:%S")
-            
+
             # 2. Execute Command
             data = run_yanet_command(args)
 
             # 3. Extract relevant fields
-            curr_stats = {
-                'tx': data.get('tx', 0),
-                'rx': data.get('rx', 0),
-                'tx_bytes': data.get('tx_bytes', 0),
-                'rx_bytes': data.get('rx_bytes', 0)
-            }
+            curr_stats = extract_stats(data)
 
             # 4. Calculate Throughput
             if prev_stats is not None:
@@ -129,8 +149,8 @@ def main():
             prev_stats = curr_stats
 
             # 6. Wait for next interval
-            # Note: We sleep for the interval. The actual loop time will be 
-            # interval + command_execution_time. This is handled correctly 
+            # Note: We sleep for the interval. The actual loop time will be
+            # interval + command_execution_time. This is handled correctly
             # because we measure actual time difference (delta_time) every loop.
             time.sleep(args.interval)
 

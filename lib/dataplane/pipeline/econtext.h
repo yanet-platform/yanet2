@@ -7,8 +7,6 @@
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 
-#include "lib/dataplane/counters/module.h"
-
 struct counter_value_handle;
 struct counter_storage;
 
@@ -32,8 +30,6 @@ struct module_ectx {
 	struct counter_value_handle *drop_counter;
 	struct counter_value_handle *pending_input_counter;
 	struct counter_value_handle *pending_output_counter;
-
-	struct counter_value_handle *perf_counters[MODULE_ECTX_PERF_COUNTERS];
 
 	struct counter_storage *counter_storage;
 
@@ -106,7 +102,6 @@ module_ectx_decode_device(struct module_ectx *module_ectx, uint64_t index) {
 
 struct chain_module_ectx {
 	struct module_ectx *module_ectx;
-	struct counter_value_handle *tsc_counter;
 };
 
 struct chain_ectx {

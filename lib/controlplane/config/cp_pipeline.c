@@ -7,7 +7,6 @@
 #include "lib/errors/errors.h"
 
 #include <assert.h>
-#include <stdio.h>
 #include <string.h>
 
 static inline size_t
@@ -151,27 +150,6 @@ cp_pipeline_init(
 		strtcpy(self->functions[idx].name,
 			cp_pipeline_config->functions[idx],
 			sizeof(self->functions[idx].name));
-		char counter_name[COUNTER_NAME_LEN];
-		snprintf(
-			counter_name,
-			sizeof(counter_name),
-			"stage %lu tsc histogram",
-			idx
-		);
-
-		self->functions[idx].tsc_counter_id = counter_registry_register(
-			&self->counter_registry, counter_name, 8, err
-		);
-		if (self->functions[idx].tsc_counter_id == COUNTER_INVALID) {
-			yanet_error_add(
-				err,
-				"failed to register '%s' counter for pipeline "
-				"'%s'",
-				counter_name,
-				cp_pipeline_config->name
-			);
-			goto err_out;
-		}
 	}
 
 	return 0;
