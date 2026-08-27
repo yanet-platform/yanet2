@@ -13,8 +13,8 @@ ifeq ($(UNAME_S),Darwin)
 	QEMU_ACCEL :=
 else
 	MKISOFS := mkisofs -output
-	# Check if KVM is available
-	KVM_AVAILABLE := $(shell [ -r /dev/kvm ] && echo "yes" || echo "no")
+	# QEMU needs both read and write access to initialize KVM.
+	KVM_AVAILABLE := $(shell [ -e /dev/kvm ] && (exec 3<>/dev/kvm) 2>/dev/null && echo "yes" || echo "no")
 	ifeq ($(KVM_AVAILABLE),yes)
 		QEMU_ACCEL := -enable-kvm
 	else

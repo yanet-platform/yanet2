@@ -1244,12 +1244,18 @@ func copyFile(src, dst string) error {
 	return out.Sync()
 }
 
-// isKVMEnabled checks if KVM is available on the system.
+// isKVMEnabled reports whether QEMU can open the KVM device.
 func isKVMEnabled() bool {
-	if _, err := os.Stat("/dev/kvm"); err == nil {
-		return true
+	return isKVMDeviceAccessible("/dev/kvm")
+}
+
+func isKVMDeviceAccessible(path string) bool {
+	device, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return false
 	}
-	return false
+	defer device.Close()
+	return true
 }
 
 // existingVMPattern builds the pgrep -f pattern that detects a real QEMU

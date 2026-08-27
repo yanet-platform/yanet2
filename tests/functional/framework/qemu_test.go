@@ -2,6 +2,7 @@ package framework
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -155,4 +156,18 @@ func Test_CheckForExistingVMRun_RunnerErrorIsPropagated(t *testing.T) {
 		strings.Contains(err.Error(), "executable file not found"),
 		"underlying pgrep error must be wrapped, not swallowed",
 	)
+}
+
+// verifies that an existing path without read-write device access disables KVM.
+func Test_KVMDeviceAccessible_ReadWriteAccessRequired(t *testing.T) {
+	require.False(t, isKVMDeviceAccessible(t.TempDir()))
+}
+
+// verifies that a path openable for reading and writing enables KVM.
+func Test_KVMDeviceAccessible_ReadWriteAccessAvailable(t *testing.T) {
+	device, err := os.CreateTemp(t.TempDir(), "kvm-device-")
+	require.NoError(t, err)
+	require.NoError(t, device.Close())
+
+	require.True(t, isKVMDeviceAccessible(device.Name()))
 }
