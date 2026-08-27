@@ -8,8 +8,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-
-	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
 // Runner is a long-running goroutine driven by the operator's errgroup.
@@ -147,11 +145,16 @@ func (m *Operator[T]) Run(ctx context.Context) error {
 		})
 
 		if len(m.gateways) > 0 {
+			advertiseEndpoint := m.advertiseEndpoint
+			if advertiseEndpoint == "" {
+				advertiseEndpoint = listener.Addr().String()
+			}
+
 			wg.Go(func() error {
 				runner := NewGatewayRegRunner(
 					m.gateways,
 					m.serviceNames,
-					gateway.AdvertisedEndpoint(m.advertiseEndpoint, listener.Addr()),
+					advertiseEndpoint,
 					WithGatewayRegInterval(m.register.Interval.Unwrap()),
 					WithGatewayRegLog(m.log),
 				)

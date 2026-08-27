@@ -2,6 +2,7 @@ package operator
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -18,10 +19,33 @@ const (
 type GRPCServerConfig struct {
 	// Endpoint is the address the gRPC server binds.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
-	// AdvertiseEndpoint is the address gateways are told to reach this
-	// server on. Empty advertises the bound address, so set it only when
-	// that one is unreachable for them.
+	// AdvertiseEndpoint is the address registered with gateways.
+	//
+	// Empty uses the bound address. Set it for an unreachable wildcard or
+	// loopback bind.
 	AdvertiseEndpoint string `yaml:"advertise_endpoint"`
+}
+
+// Validate checks the advertised endpoint without resolving its host.
+func (m *GRPCServerConfig) Validate() error {
+	if m.AdvertiseEndpoint == "" {
+		return nil
+	}
+
+	host, port, err := net.SplitHostPort(m.AdvertiseEndpoint)
+	if err != nil {
+		return fmt.Errorf("invalid advertise_endpoint: %w", err)
+	}
+	if host == "" {
+		return fmt.Errorf("invalid advertise_endpoint: host is empty")
+	}
+
+	portNumber, err := net.LookupPort("tcp", port)
+	if err != nil || portNumber == 0 {
+		return fmt.Errorf("invalid advertise_endpoint port %q", port)
+	}
+
+	return nil
 }
 
 // GatewayConfig holds the name and gRPC endpoint of a single Gateway.

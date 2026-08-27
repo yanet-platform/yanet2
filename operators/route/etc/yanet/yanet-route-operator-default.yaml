@@ -9,11 +9,13 @@ gateways:
   - name: numa0
     endpoint: "[::1]:8080"
 
-# The operator's own gRPC server. `endpoint` is what it binds, port 0 picking a
-# free one; `advertise_endpoint` is what the gateways above are told to reach it
-# on. Set the latter only when the bound address is unreachable for them, as a
-# wildcard bind or a separate network namespace makes it. It is registered as
-# written, so a name is resolved by the gateway on each dial.
+# The operator's own gRPC server.
+#
+# `endpoint` is what it binds, with port 0 picking a free one.
+# `advertise_endpoint` overrides the address registered with gateways. Leave it
+# empty when the bound address is reachable; set it for a wildcard or loopback
+# bind that gateways reach through another address. Names are registered as
+# written and resolved by the gateway on each dial.
 #
 #   server:
 #     endpoint: "[::]:8080"
