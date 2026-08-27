@@ -56,17 +56,26 @@ repository files, run git writes, or exceed the caller's build/test posture.
   Bugs normally use `fix`, Features `feat`, and Tasks the semantic type. An epic
   keeps the semantic type and gains label `epic`; never use `epic(scope)`.
 - Body schemas, omitting empty optional sections:
-  - Bug: `Motivation` (observed behavior/impact), `Evidence`, `Scope`, `Acceptance`.
+  - Bug: `Motivation` (observed vs expected behavior, impact), `Evidence`
+    (reproduction steps, environment, logs, code references), `Scope`,
+    `Acceptance`.
   - Feature: `Motivation`, `Outcome`, `Scope`, `Acceptance`.
   - Task: `Motivation`, `Closing outcome`, `Scope`, `Acceptance`.
   - Container: `Goal`, `Scope`, `Children`, `Done`.
-- State observable properties before possible implementation. Add Constraints,
-  Out of scope, Alternatives, or Source only when informative. Acceptance is a
-  short checklist; investigations close on a verdict plus evidence/repro, and
-  decisions close on a recorded choice plus affected contracts.
+- A leaf body describes the problem and how to observe or reproduce it, never
+  how to fix it. No body proposes a solution path, design, candidate change, or
+  the files to edit, even when one seems obvious: there is usually more than
+  one, and choosing is the job of whoever closes the issue. A contract the user
+  has already decided is part of the outcome, not a proposal. A proven cause
+  belongs in Evidence, but a fix does not. `Scope` bounds the affected
+  behavior, and `Outcome`/`Acceptance` state observable results rather than
+  implementation steps. Add Constraints, Out of scope, or Source only when
+  informative. Acceptance is a short checklist; investigations close on a
+  verdict plus evidence/repro, and decisions close on a recorded choice plus
+  affected contracts.
 - Distinguish reproduced, code-proven, user-reported, and hypothetical claims.
   Use stable blob links and explain what each proves. Do not invent impact,
-  cause, solution, or tests. The issue must stand without inaccessible links.
+  cause, or tests. The issue must stand without inaccessible links.
 
 ## Metadata
 
