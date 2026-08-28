@@ -13,6 +13,7 @@
 
 #include "lib/dataplane/config/zone.h"
 
+#include "lib/controlplane/config/config_lock.h"
 #include "lib/controlplane/config/cp_chain.h"
 #include "lib/controlplane/config/cp_device.h"
 #include "lib/controlplane/config/cp_function.h"
@@ -154,10 +155,10 @@ cp_config_lock(struct cp_config *cp_config);
 
 /*
  * Unlock controplane configuration.
- * The function returns false in case when controplane was not locked
- * by the current process.
+ * Aborts in debug builds when the current thread does not hold this
+ * configuration's lock.
  */
-bool
+void
 cp_config_unlock(struct cp_config *cp_config);
 
 /*
@@ -260,6 +261,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err);
 // current during that window.
 static inline struct cp_config_gen *
 cp_config_gen_acquire(struct cp_config *cp_config) {
+	cp_config_assert_locked(cp_config);
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	config_gen->refcnt += 1;
 	return config_gen;

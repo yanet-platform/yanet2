@@ -169,11 +169,12 @@ cp_pipeline_fini(struct cp_pipeline *self) {
 int
 cp_pipeline_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_pipeline_registry *new_pipeline_registry,
 	yanet_error **err
 ) {
 	if (registry_init(
-		    memory_context, &new_pipeline_registry->registry, 8
+		    memory_context, owner, &new_pipeline_registry->registry, 8
 	    )) {
 		yanet_error_add(err, "failed to initialize pipeline registry");
 		return -1;

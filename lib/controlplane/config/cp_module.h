@@ -222,6 +222,8 @@ struct cp_module_registry {
  * specified memory context.
  *
  * @param memory_context Memory context for registry allocations
+ * @param owner Configuration whose lock guards the reference counts;
+ * NULL exempts the registry from the lock check
  * @param registry Pointer to the registry structure to initialize
  * @param err Error output parameter
  * @return 0 on success, negative error code on failure
@@ -229,6 +231,7 @@ struct cp_module_registry {
 int
 cp_module_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_module_registry *registry,
 	yanet_error **err
 );

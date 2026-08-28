@@ -86,10 +86,11 @@ cp_object_fini(struct cp_object *self) {
 int
 cp_object_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_object_registry *new_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, &new_registry->registry, 8)) {
+	if (registry_init(memory_context, owner, &new_registry->registry, 8)) {
 		yanet_error_add(err, "failed to initialize object registry");
 		return -1;
 	}

@@ -105,6 +105,7 @@ struct cp_object_cmp_data {
 int
 cp_object_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_object_registry *registry,
 	yanet_error **err
 );

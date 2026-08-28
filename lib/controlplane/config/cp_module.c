@@ -427,10 +427,13 @@ cp_module_try_destroy(struct cp_module *cp_module, yanet_error **err) {
 int
 cp_module_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_module_registry *new_module_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, &new_module_registry->registry, 8)) {
+	if (registry_init(
+		    memory_context, owner, &new_module_registry->registry, 8
+	    )) {
 		yanet_error_add(err, "failed to initialize module registry");
 		return -1;
 	}

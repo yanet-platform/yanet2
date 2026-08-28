@@ -93,7 +93,9 @@ test_referenced_free_eagain_then_destroy(struct yanet_shm *shm) {
 	// exactly like an install would take.
 	struct cp_module_registry reg;
 	TEST_ASSERT_SUCCESS(
-		cp_module_registry_init(&agent->memory_context, &reg, &err),
+		cp_module_registry_init(
+			&agent->memory_context, NULL, &reg, &err
+		),
 		"cp_module_registry_init failed"
 	);
 	TEST_ASSERT_SUCCESS(
@@ -153,7 +155,9 @@ test_typed_destroy_is_per_owner(struct yanet_shm *shm) {
 
 	struct cp_module_registry reg;
 	TEST_ASSERT_SUCCESS(
-		cp_module_registry_init(&agent->memory_context, &reg, &err),
+		cp_module_registry_init(
+			&agent->memory_context, NULL, &reg, &err
+		),
 		"cp_module_registry_init failed"
 	);
 	TEST_ASSERT_SUCCESS(

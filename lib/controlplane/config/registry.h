@@ -2,6 +2,8 @@
 
 #include "common/memory.h"
 
+#include "lib/controlplane/config/config_lock.h"
+
 struct registry_item {
 	uint64_t refcnt;
 	// Set by registry_item_mark_destroying once an owner won the right
@@ -18,8 +20,16 @@ registry_item_init(struct registry_item *item) {
 	item->destroying = 0;
 }
 
+// Take one reference for a registry slot; like every registry
+// mutation this must run under the control-plane configuration lock
+// (cp_config_lock) of the owning configuration.
+//
+// Checked in debug builds against the owner: a caller outside that
+// lock loses updates and leaks the counted item. An owner of NULL
+// exempts ownerless test registries.
 static inline void
-registry_item_ref(struct registry_item *item) {
+registry_item_ref(struct registry_item *item, const struct cp_config *owner) {
+	cp_config_assert_locked(owner);
 	item->refcnt += 1;
 }
 
@@ -40,16 +50,21 @@ registry_item_is_destroying(const struct registry_item *item) {
 typedef void (*registry_item_free_func)(struct registry_item *item, void *data);
 
 // Drop one reference. A NULL free_func makes the zero transition a no-op:
-// the item stays alive, dangling, and only its owner may destroy it. Every
-// mutation of a registry or its items' reference counts runs under the
-// configuration lock, so an owner reading the count under that lock sees a
-// value no concurrent registry operation can still change.
+// the item stays alive, dangling, and only its owner may destroy it.
+//
+// Every mutation of a registry or its items' reference counts runs under
+// the control-plane configuration lock (cp_config_lock) of the owning
+// configuration, checked in debug builds, so an owner reading the count
+// under that lock sees a value no concurrent registry operation can
+// still change.
 static inline void
 registry_item_unref(
 	struct registry_item *item,
+	const struct cp_config *owner,
 	registry_item_free_func free_func,
 	void *free_func_data
 ) {
+	cp_config_assert_locked(owner);
 	item->refcnt -= 1;
 	if (!item->refcnt && free_func != NULL) {
 		free_func(item, free_func_data);
@@ -58,6 +73,9 @@ registry_item_unref(
 
 struct registry {
 	struct memory_context *memory_context;
+	// Configuration whose lock must be held for every reference-count
+	// mutation; NULL exempts ownerless test registries.
+	struct cp_config *owner;
 	uint64_t capacity;
 	struct registry_item **items;
 };
@@ -87,10 +105,12 @@ registry_set(
 static inline int
 registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct registry *registry,
 	uint64_t capacity
 ) {
 	SET_OFFSET_OF(&registry->memory_context, memory_context);
+	SET_OFFSET_OF(&registry->owner, owner);
 	registry->capacity = capacity;
 
 	struct registry_item **items = (struct registry_item **)memory_balloc(
@@ -124,6 +144,7 @@ registry_fini(
 
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
+	struct cp_config *owner = ADDR_OF(&registry->owner);
 
 	for (uint64_t idx = 0; idx < registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(registry, idx);
@@ -131,7 +152,9 @@ registry_fini(
 			continue;
 		}
 
-		registry_item_unref(item, item_free_func, item_free_func_data);
+		registry_item_unref(
+			item, owner, item_free_func, item_free_func_data
+		);
 	}
 
 	memory_bfree(
@@ -150,7 +173,10 @@ registry_copy(
 	struct registry *old_registry
 ) {
 	if (registry_init(
-		    memory_context, new_registry, old_registry->capacity
+		    memory_context,
+		    ADDR_OF(&old_registry->owner),
+		    new_registry,
+		    old_registry->capacity
 	    )) {
 		return -1;
 	}
@@ -159,7 +185,7 @@ registry_copy(
 		struct registry_item *item = registry_get(old_registry, idx);
 
 		if (item != NULL) {
-			registry_item_ref(item);
+			registry_item_ref(item, ADDR_OF(&old_registry->owner));
 		}
 
 		registry_set(new_registry, idx, item);
@@ -253,7 +279,7 @@ registry_insert(struct registry *registry, struct registry_item *new_item) {
 	}
 
 	registry_set(registry, index, new_item);
-	registry_item_ref(new_item);
+	registry_item_ref(new_item, ADDR_OF(&registry->owner));
 
 	return 0;
 }
@@ -287,14 +313,17 @@ registry_replace(
 
 	struct registry_item *old_item = registry_get(registry, index);
 	if (new_item != NULL) {
-		registry_item_ref(new_item);
+		registry_item_ref(new_item, ADDR_OF(&registry->owner));
 	}
 
 	registry_set(registry, index, new_item);
 
 	if (old_item != NULL) {
 		registry_item_unref(
-			old_item, item_free_func, item_free_func_data
+			old_item,
+			ADDR_OF(&registry->owner),
+			item_free_func,
+			item_free_func_data
 		);
 	}
 

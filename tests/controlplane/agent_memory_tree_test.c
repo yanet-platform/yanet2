@@ -36,6 +36,8 @@ test_memory_tree_exported(void) {
 	int rc = dp_storage_init(0, 0, storage, DP_MEMORY, CP_MEMORY, &dp, &cp);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
+	cp_config_lock(cp);
+
 	struct agent *sys = dp_system_agent_new(cp, dp, "dataplane");
 	TEST_ASSERT_NOT_NULL(sys, "dp_system_agent_new failed");
 
@@ -203,6 +205,8 @@ test_memory_tree_after_fini(void) {
 	struct cp_config *cp = NULL;
 	int rc = dp_storage_init(0, 0, storage, DP_MEMORY, CP_MEMORY, &dp, &cp);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
+
+	cp_config_lock(cp);
 
 	struct agent *sys = dp_system_agent_new(cp, dp, "dataplane");
 	TEST_ASSERT_NOT_NULL(sys, "dp_system_agent_new failed");

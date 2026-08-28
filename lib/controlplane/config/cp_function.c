@@ -201,11 +201,12 @@ cp_function_fini(struct cp_function *self) {
 int
 cp_function_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_function_registry *new_function_registry,
 	yanet_error **err
 ) {
 	if (registry_init(
-		    memory_context, &new_function_registry->registry, 8
+		    memory_context, owner, &new_function_registry->registry, 8
 	    )) {
 		yanet_error_add(err, "failed to initialize function registry");
 		return -1;

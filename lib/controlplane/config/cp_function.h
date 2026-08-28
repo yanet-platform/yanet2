@@ -105,6 +105,7 @@ struct cp_function_registry {
 int
 cp_function_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_function_registry *registry,
 	yanet_error **err
 );

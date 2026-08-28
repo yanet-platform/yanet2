@@ -119,7 +119,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	struct cp_object_registry registry;
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_init(
-			&agent->memory_context, &registry, &err
+			&agent->memory_context, NULL, &registry, &err
 		),
 		"object registry init failed: %s",
 		err ? yanet_error_message(err) : "?"
@@ -416,7 +416,7 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 	struct cp_object_registry registry;
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_init(
-			&agent1->memory_context, &registry, &err
+			&agent1->memory_context, NULL, &registry, &err
 		),
 		"object registry init failed: %s",
 		err ? yanet_error_message(err) : "?"

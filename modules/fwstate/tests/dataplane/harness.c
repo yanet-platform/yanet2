@@ -92,7 +92,10 @@ fwstate_test_agent_new(struct memory_context *parent, const char *name) {
 
 	yanet_error *err = NULL;
 	if (cp_object_registry_init(
-		    &agent->memory_context, &config_gen->object_registry, &err
+		    &agent->memory_context,
+		    cp_config,
+		    &config_gen->object_registry,
+		    &err
 	    )) {
 		yanet_error_free(err);
 		return NULL;
@@ -294,6 +297,8 @@ fwstate_test_register_object(struct agent *agent, struct cp_object *cp_object) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 
+	cp_config_lock(cp_config);
+
 	yanet_error *err = NULL;
 	if (cp_object_registry_upsert(
 		    &config_gen->object_registry,
@@ -303,8 +308,11 @@ fwstate_test_register_object(struct agent *agent, struct cp_object *cp_object) {
 		    &err
 	    )) {
 		yanet_error_free(err);
+		cp_config_unlock(cp_config);
 		return -1;
 	}
+
+	cp_config_unlock(cp_config);
 	return 0;
 }
 

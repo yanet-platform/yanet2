@@ -18,22 +18,37 @@
 
 #include "lib/controlplane/agent/agent.h"
 
+__thread struct cp_config *cp_config_locked_by_thread = NULL;
+
 bool
 cp_config_try_lock(struct cp_config *cp_config) {
+	// A thread locks at most one configuration at a time; acquiring a
+	// second one, or the same one again, is a discipline violation.
+	assert(cp_config_locked_by_thread == NULL);
+
 	pid_t pid = getpid();
 	pid_t zero = 0;
-	return __atomic_compare_exchange_n(
-		&cp_config->config_lock,
-		&zero,
-		pid,
-		false,
-		__ATOMIC_ACQUIRE,
-		__ATOMIC_RELAXED
-	);
+	if (__atomic_compare_exchange_n(
+		    &cp_config->config_lock,
+		    &zero,
+		    pid,
+		    false,
+		    __ATOMIC_ACQUIRE,
+		    __ATOMIC_RELAXED
+	    )) {
+		cp_config_locked_by_thread = cp_config;
+		return true;
+	}
+
+	return false;
 }
 
 void
 cp_config_lock(struct cp_config *cp_config) {
+	// A thread locks at most one configuration at a time; acquiring a
+	// second one, or the same one again, is a discipline violation.
+	assert(cp_config_locked_by_thread == NULL);
+
 	pid_t pid = getpid();
 	int spins = 0;
 	for (;;) {
@@ -46,6 +61,7 @@ cp_config_lock(struct cp_config *cp_config) {
 			    __ATOMIC_ACQUIRE,
 			    __ATOMIC_RELAXED
 		    )) {
+			cp_config_locked_by_thread = cp_config;
 			return;
 		}
 
@@ -61,11 +77,17 @@ cp_config_lock(struct cp_config *cp_config) {
 	}
 }
 
-bool
+void
 cp_config_unlock(struct cp_config *cp_config) {
+	// Abort in debug builds when the calling thread does not own the
+	// acquisition: releasing on another thread's behalf would leave
+	// that thread's record stale, letting a later unlocked mutation
+	// pass the debug assert.
+	assert(cp_config_locked_by_thread == cp_config);
+
 	pid_t pid = getpid();
 	pid_t zero = 0;
-	return __atomic_compare_exchange_n(
+	__atomic_compare_exchange_n(
 		&cp_config->config_lock,
 		&pid,
 		zero,
@@ -73,6 +95,7 @@ cp_config_unlock(struct cp_config *cp_config) {
 		__ATOMIC_RELEASE,
 		__ATOMIC_RELAXED
 	);
+	cp_config_locked_by_thread = NULL;
 }
 
 static inline void
@@ -86,6 +109,8 @@ cp_config_gen_new_from(
 	struct cp_config_gen *old_config_gen,
 	yanet_error **err
 ) {
+	cp_config_assert_locked(cp_config);
+
 	struct cp_config_gen *new_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
@@ -221,6 +246,8 @@ void
 cp_config_gen_release(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 ) {
+	cp_config_assert_locked(cp_config);
+
 	if (--config_gen->refcnt == 0) {
 		cp_config_gen_free(cp_config, config_gen);
 	}
@@ -305,6 +332,7 @@ cp_config_delete_module(
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
+	cp_config_assert_locked(cp_config);
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -1001,6 +1029,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 
 	if (cp_module_registry_init(
 		    &cp_config->memory_context,
+		    cp_config,
 		    &cp_config_gen->module_registry,
 		    err
 	    )) {
@@ -1010,6 +1039,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 
 	if (cp_function_registry_init(
 		    &cp_config->memory_context,
+		    cp_config,
 		    &cp_config_gen->function_registry,
 		    err
 	    )) {
@@ -1019,6 +1049,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 
 	if (cp_pipeline_registry_init(
 		    &cp_config->memory_context,
+		    cp_config,
 		    &cp_config_gen->pipeline_registry,
 		    err
 	    )) {
@@ -1028,6 +1059,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 
 	if (cp_device_registry_init(
 		    &cp_config->memory_context,
+		    cp_config,
 		    &cp_config_gen->device_registry,
 		    err
 	    )) {
@@ -1037,6 +1069,7 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 
 	if (cp_object_registry_init(
 		    &cp_config->memory_context,
+		    cp_config,
 		    &cp_config_gen->object_registry,
 		    err
 	    )) {

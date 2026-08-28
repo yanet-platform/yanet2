@@ -47,6 +47,10 @@ dp_storage_init(
 	struct cp_config *cp_config =
 		(struct cp_config *)((uintptr_t)storage + dp_memory);
 
+	// The lock is taken and released inside this routine: callers pair
+	// their own control-plane mutations themselves. Nobody else can
+	// reach the zone before readiness is published, so the pair is
+	// uncontended discipline rather than exclusion.
 	cp_config_lock(cp_config);
 
 	block_allocator_init(&cp_config->block_allocator);
@@ -82,6 +86,8 @@ dp_storage_init(
 
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
 	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
+
+	cp_config_unlock(cp_config);
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;

@@ -11,7 +11,9 @@ struct cp_config;
 //
 // On success *res_dp_config and *res_cp_config point into storage and
 // are mutually navigable via offset pointers. Caller owns storage.
-// Returns 0 on success, -1 on failure.
+// The control-plane zone's lock is taken and released inside this
+// routine; callers pair their own lock around any further control-plane
+// mutations. Returns 0 on success, -1 on failure.
 int
 dp_storage_init(
 	uint32_t numa_idx,
@@ -25,7 +27,8 @@ dp_storage_init(
 
 // Publish the readiness marker for this instance.
 //
-// Call this after releasing cp_config, once the instance is fully initialised
-// and ready for attach.
+// Call this only after every control-plane mutation is complete and no
+// lock is held, once the instance is fully initialised and ready for
+// attach.
 void
 dp_config_mark_ready(struct dp_config *dp_config);

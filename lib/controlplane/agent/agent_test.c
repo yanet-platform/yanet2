@@ -47,7 +47,7 @@ test_attach_zeroed_segment_returns_error() {
 	return TEST_SUCCESS;
 }
 
-// Verify that the readiness sequence (dp_storage_init -> cp_config_unlock ->
+// Verify that the readiness sequence (dp_storage_init ->
 // dp_config_mark_ready) leaves ready_magic set and the cp_config offset
 // pointer navigable. This confirms the attach gate will open for a correctly
 // initialised segment.
@@ -69,7 +69,7 @@ test_initialised_segment_magic_and_cp_config_valid() {
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
-	cp_config_unlock(cp_config);
+	(void)cp_config;
 	dp_config_mark_ready(dp_config);
 
 	// The release store in dp_config_mark_ready must be visible once we
@@ -113,7 +113,7 @@ test_ready_predicate_zeroed_segment_returns_false() {
 }
 
 // Verify that agent_dp_config_ready returns 1 after the full readiness
-// sequence: dp_storage_init -> cp_config_unlock -> dp_config_mark_ready.
+// sequence: dp_storage_init -> dp_config_mark_ready.
 // Also sets instance_count so the instance_idx bound check in the predicate
 // passes.
 static int
@@ -135,7 +135,7 @@ test_ready_predicate_initialised_segment_returns_true() {
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
 	dp_config->instance_count = 1;
-	cp_config_unlock(cp_config);
+	(void)cp_config;
 	dp_config_mark_ready(dp_config);
 
 	struct yanet_shm shm = {.base = storage, .size = TEST_STORAGE_SIZE};
@@ -151,8 +151,8 @@ test_ready_predicate_initialised_segment_returns_true() {
 
 // Verify that agent_attach succeeds on a fully initialised segment. This
 // proves the attach gate opens once the instance is marked ready. Mirrors
-// the dataplane init sequence: dp_storage_init, system agent, cp_config_gen,
-// unlock, mark_ready.
+// the dataplane init sequence: dp_storage_init, system agent and
+// cp_config_gen under the configuration lock, mark_ready.
 static int
 test_attach_initialised_segment_succeeds() {
 	void *storage = calloc(1, TEST_STORAGE_SIZE);
@@ -173,6 +173,7 @@ test_attach_initialised_segment_succeeds() {
 
 	// A system agent and cp_config_gen are required before agent_attach
 	// can succeed — agent_attach reads cp_config_gen->gen after locking.
+	cp_config_lock(cp_config);
 	struct agent *sys_agent =
 		dp_system_agent_new(cp_config, dp_config, "dataplane");
 	TEST_ASSERT_NOT_NULL(sys_agent, "dp_system_agent_new failed");
@@ -182,9 +183,9 @@ test_attach_initialised_segment_succeeds() {
 		cp_config_gen_new(sys_agent, &setup_err);
 	TEST_ASSERT_NOT_NULL(cp_config_gen, "cp_config_gen_new failed");
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
+	cp_config_unlock(cp_config);
 
 	dp_config->instance_count = 1;
-	cp_config_unlock(cp_config);
 	dp_config_mark_ready(dp_config);
 
 	struct yanet_shm shm = {.base = storage, .size = TEST_STORAGE_SIZE};
@@ -381,7 +382,6 @@ test_detach_initialised_segment_releases_mapping() {
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 	dp_config->instance_count = 1;
-	cp_config_unlock(cp_config);
 	dp_config_mark_ready(dp_config);
 
 	uint8_t *base = (uint8_t *)dp_config;
@@ -421,6 +421,8 @@ extend_env_init(
 		return -1;
 	}
 
+	cp_config_lock(cp_config);
+
 	struct agent *sys_agent =
 		dp_system_agent_new(cp_config, dp_config, "dataplane");
 	if (sys_agent == NULL) {
@@ -434,9 +436,9 @@ extend_env_init(
 		return -1;
 	}
 	SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	cp_config_unlock(cp_config);
 
 	dp_config->instance_count = 1;
-	cp_config_unlock(cp_config);
 	dp_config_mark_ready(dp_config);
 
 	*res_cp_config = cp_config;
@@ -532,6 +534,7 @@ test_extend_rejects_borrowing_agent() {
 	);
 	TEST_ASSERT(rc == 0, "dp_storage_init failed");
 
+	cp_config_lock(cp_config);
 	struct agent *sys_agent =
 		dp_system_agent_new(cp_config, dp_config, "dataplane");
 	TEST_ASSERT_NOT_NULL(sys_agent, "dp_system_agent_new failed");

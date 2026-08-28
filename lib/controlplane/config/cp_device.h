@@ -149,6 +149,7 @@ struct cp_device_registry {
 int
 cp_device_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_device_registry *registry,
 	yanet_error **err
 );

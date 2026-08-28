@@ -418,10 +418,13 @@ cp_device_fini(struct cp_device *self) {
 int
 cp_device_registry_init(
 	struct memory_context *memory_context,
+	struct cp_config *owner,
 	struct cp_device_registry *new_device_registry,
 	yanet_error **err
 ) {
-	if (registry_init(memory_context, &new_device_registry->registry, 8)) {
+	if (registry_init(
+		    memory_context, owner, &new_device_registry->registry, 8
+	    )) {
 		yanet_error_add(err, "failed to initialize device registry");
 		return -1;
 	}

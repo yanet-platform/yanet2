@@ -195,21 +195,6 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		ut->dp_config->object_count = cfg->objects_to_load_count;
 	}
 
-	// Allocate the system agent inside cp_config memory so that its
-	// offset pointers remain valid across all processes that map the
-	// same arena. A stack agent would mix shm-relative offsets with
-	// process-local addresses and produce SIGBUS on cross-process
-	// dereference.
-	struct agent *agent = dp_system_agent_new(
-		ut->cp_config, ut->dp_config, "dataplane_ut"
-	);
-	if (agent == NULL) {
-		LOG(ERROR, "dataplane_ut_new: failed to allocate system agent");
-		dataplane_ut_free(ut);
-		return NULL;
-	}
-	ut->agent = agent;
-
 	// Populate dp_topology with the logical port names from cfg.
 	if (cfg->device_count > 0) {
 		struct dp_port *ports = dp_topology_alloc_devices(
@@ -228,6 +213,24 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 	}
 
+	// Allocate the system agent inside cp_config memory so that its
+	// offset pointers remain valid across all processes that map the
+	// same arena. A stack agent would mix shm-relative offsets with
+	// process-local addresses and produce SIGBUS on cross-process
+	// dereference.
+	cp_config_lock(ut->cp_config);
+
+	struct agent *agent = dp_system_agent_new(
+		ut->cp_config, ut->dp_config, "dataplane_ut"
+	);
+	if (agent == NULL) {
+		LOG(ERROR, "dataplane_ut_new: failed to allocate system agent");
+		cp_config_unlock(ut->cp_config);
+		dataplane_ut_free(ut);
+		return NULL;
+	}
+	ut->agent = agent;
+
 	// Create the initial cp_config_gen so agents can register modules
 	// and pipelines.
 	yanet_error *err = NULL;
@@ -237,10 +240,12 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		    "dataplane_ut_new: cp_config_gen_new failed: %s",
 		    yanet_error_message(err));
 		yanet_error_free(err);
+		cp_config_unlock(ut->cp_config);
 		dataplane_ut_free(ut);
 		return NULL;
 	}
 	SET_OFFSET_OF(&ut->cp_config->cp_config_gen, cp_config_gen);
+	cp_config_unlock(ut->cp_config);
 
 	counter_registry_init(
 		&ut->dp_config->worker_counters,
@@ -268,7 +273,6 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
-	cp_config_unlock(ut->cp_config);
 	dp_config_mark_ready(ut->dp_config);
 
 	// Create the mock mempool now so step 2 can allocate mbufs.

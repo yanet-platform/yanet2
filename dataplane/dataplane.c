@@ -511,24 +511,6 @@ dataplane_init(
 		instance->dp_config->packet_recirc_limit =
 			config->packet_recirc_limit;
 
-		// System agent for this instance.
-		//
-		// Owns the phy devices created in cp_config_gen_new
-		// and lives in shm so their parent_memory_context offsets
-		// remain valid in every process that maps the same shm region.
-		//
-		// FIXME: not paired with a free: released only when shm is torn
-		// down.
-		struct agent *agent = dp_system_agent_new(
-			instance->cp_config, instance->dp_config, "dataplane"
-		);
-		if (agent == NULL) {
-			LOG(ERROR,
-			    "failed to allocate system agent for instance %u",
-			    instance_idx);
-			return -1;
-		}
-
 		struct dp_port *ports = dp_topology_alloc_devices(
 			instance->dp_config, config->device_count
 		);
@@ -623,6 +605,27 @@ dataplane_init(
 			}
 		}
 
+		// System agent for this instance.
+		//
+		// Owns the phy devices created in cp_config_gen_new
+		// and lives in shm so their parent_memory_context offsets
+		// remain valid in every process that maps the same shm region.
+		//
+		// FIXME: not paired with a free: released only when shm is torn
+		// down.
+		cp_config_lock(instance->cp_config);
+
+		struct agent *agent = dp_system_agent_new(
+			instance->cp_config, instance->dp_config, "dataplane"
+		);
+		if (agent == NULL) {
+			LOG(ERROR,
+			    "failed to allocate system agent for instance %u",
+			    instance_idx);
+			cp_config_unlock(instance->cp_config);
+			return -1;
+		}
+
 		struct cp_config_gen *cp_config_gen =
 			cp_config_gen_new(agent, &err);
 		if (cp_config_gen == NULL) {
@@ -630,11 +633,13 @@ dataplane_init(
 			    "failed to create cp_config_gen: %s",
 			    yanet_error_message(err));
 			yanet_error_free(err);
+			cp_config_unlock(instance->cp_config);
 			return -1;
 		}
 		SET_OFFSET_OF(
 			&instance->cp_config->cp_config_gen, cp_config_gen
 		);
+		cp_config_unlock(instance->cp_config);
 
 		instance_offset += instance_size;
 	}
@@ -842,7 +847,6 @@ dataplane_init(
 			}
 		}
 
-		cp_config_unlock(cp_config);
 		dp_config_mark_ready(dp_config);
 	}
 
