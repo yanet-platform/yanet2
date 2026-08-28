@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -11,73 +12,73 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// FunctionApplier publishes a fixed function definition to a gateway.
-type FunctionApplier struct {
-	client   ynpb.FunctionServiceClient
-	function *ynpb.Function
-	compare  functionCompare
+// FunctionActuator publishes network functions to a gateway, leaving alone
+// the ones the gateway already holds.
+type FunctionActuator struct {
+	client  ynpb.FunctionServiceClient
+	compare functionCompare
+	log     *zap.Logger
 }
 
-// NewFunctionApplier returns a FunctionApplier that will publish function to
-// client on each Apply call.
-func NewFunctionApplier(
+// NewFunctionActuator returns a FunctionActuator publishing through client.
+func NewFunctionActuator(
 	client ynpb.FunctionServiceClient,
-	function *ynpb.Function,
-	options ...FunctionApplierOption,
-) *FunctionApplier {
-	opts := newFunctionApplierOptions()
+	options ...FunctionActuatorOption,
+) *FunctionActuator {
+	opts := newFunctionActuatorOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
-	return &FunctionApplier{
-		client:   client,
-		function: function,
-		compare:  opts.Compare,
+	return &FunctionActuator{
+		client:  client,
+		compare: opts.Compare,
+		log:     opts.Log,
 	}
 }
 
-// Name returns the function identifier the applier publishes.
-func (m *FunctionApplier) Name() string {
-	return m.function.GetId().GetName()
-}
-
-// Apply publishes the captured definition to the gateway, or returns true
-// if the gateway is already correctly configured.
-func (m *FunctionApplier) Apply(ctx context.Context) (bool, error) {
-	if len(m.function.GetChains()) == 0 {
-		return false, fmt.Errorf("function %q has no chains", m.Name())
+// Apply publishes function to the gateway unless it already holds it.
+func (m *FunctionActuator) Apply(ctx context.Context, function *ynpb.Function) error {
+	name := function.GetId().GetName()
+	if len(function.GetChains()) == 0 {
+		return fmt.Errorf("function %q has no chains", name)
 	}
 
-	ok, err := m.alreadyCorrect(ctx)
+	ok, err := m.alreadyCorrect(ctx, function)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if ok {
-		return true, nil
+		m.log.Debug("function already correct, skipped", zap.String("function", name))
+		return nil
 	}
 
-	req := &ynpb.UpdateFunctionRequest{Function: m.function}
+	req := &ynpb.UpdateFunctionRequest{Function: function}
 	if _, err := m.client.Update(ctx, req); err != nil {
-		return false, fmt.Errorf("failed to update function %q: %w", m.Name(), err)
+		return fmt.Errorf("failed to update function %q: %w", name, err)
 	}
+	m.log.Info("updated function", zap.String("function", name))
 
-	return false, nil
+	return nil
 }
 
-// alreadyCorrect reports whether the gateway already holds the wanted function.
-func (m *FunctionApplier) alreadyCorrect(ctx context.Context) (bool, error) {
+// Close is a no-op, the client's connection belongs to the caller.
+func (m *FunctionActuator) Close() error {
+	return nil
+}
+
+// alreadyCorrect reports whether the gateway already holds function.
+func (m *FunctionActuator) alreadyCorrect(ctx context.Context, function *ynpb.Function) (bool, error) {
+	name := function.GetId().GetName()
 	resp, err := m.client.Get(ctx, &ynpb.GetFunctionRequest{
-		Id: &commonpb.FunctionId{
-			Name: m.Name(),
-		},
+		Id: &commonpb.FunctionId{Name: name},
 	})
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return false, nil
 		}
-		return false, fmt.Errorf("failed to get function %q: %w", m.Name(), err)
+		return false, fmt.Errorf("failed to get function %q: %w", name, err)
 	}
 
-	return m.compare(resp.GetFunction(), m.function), nil
+	return m.compare(resp.GetFunction(), function), nil
 }

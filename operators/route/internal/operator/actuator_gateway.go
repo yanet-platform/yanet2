@@ -20,13 +20,14 @@ import (
 // GatewayActuator applies route-operator state to a single Gateway via
 // the route module's UpdateFIB unary RPC.
 type GatewayActuator struct {
-	name        string
-	conn        *grpc.ClientConn
-	routes      routepb.RouteServiceClient
-	funcApplier *operator.FunctionApplier
-	devices     []string
-	onFIBBuilt  func(module string, stats FIBBuildStats)
-	log         *zap.Logger
+	name             string
+	conn             *grpc.ClientConn
+	routes           routepb.RouteServiceClient
+	function         *ynpb.Function
+	functionActuator *operator.FunctionActuator
+	devices          []string
+	onFIBBuilt       func(module string, stats FIBBuildStats)
+	log              *zap.Logger
 }
 
 // NewGatewayActuator dials the Gateway endpoint and returns a
@@ -68,26 +69,21 @@ func NewGatewayActuator(
 		}},
 	}
 
-	var applierOptions []operator.FunctionApplierOption
+	log := opts.Log.With(zap.String("gateway", cfg.Name))
+	actuatorOptions := []operator.FunctionActuatorOption{operator.WithFunctionLog(log)}
 	if fn.IgnorePdump {
-		applierOptions = append(applierOptions, operator.WithIgnorePDump())
+		actuatorOptions = append(actuatorOptions, operator.WithIgnorePDump())
 	}
 
 	return &GatewayActuator{
-		name:   cfg.Name,
-		conn:   conn,
-		routes: routepb.NewRouteServiceClient(conn),
-		funcApplier: operator.NewFunctionApplier(
-			ynpb.NewFunctionServiceClient(conn),
-			function,
-			applierOptions...,
-		),
-		devices:    opts.Devices,
-		onFIBBuilt: opts.OnFIBBuilt,
-		log: opts.Log.With(
-			zap.String("gateway", cfg.Name),
-			zap.String("function", fn.Name.Unwrap()),
-		),
+		name:             cfg.Name,
+		conn:             conn,
+		routes:           routepb.NewRouteServiceClient(conn),
+		function:         function,
+		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(conn), actuatorOptions...),
+		devices:          opts.Devices,
+		onFIBBuilt:       opts.OnFIBBuilt,
+		log:              log.With(zap.String("function", fn.Name.Unwrap())),
 	}, nil
 }
 
@@ -125,15 +121,8 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 // applyFunction publishes the operator's single network-function definition to
 // the gateway.
 func (m *GatewayActuator) applyFunction(ctx context.Context) error {
-	skipped, err := m.funcApplier.Apply(ctx)
-	if err != nil {
+	if err := m.functionActuator.Apply(ctx, m.function); err != nil {
 		return fmt.Errorf("failed to update function on gateway %q: %w", m.name, err)
-	}
-
-	if skipped {
-		m.log.Debug("function already correct, skipped")
-	} else {
-		m.log.Info("updated function")
 	}
 
 	return nil

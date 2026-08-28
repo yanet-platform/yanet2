@@ -69,26 +69,26 @@ func makeGetResp(modules ...*commonpb.ModuleId) *ynpb.GetFunctionResponse {
 	}
 }
 
-var functionApplierSpecModules = []*commonpb.ModuleId{
+var functionActuatorSpecModules = []*commonpb.ModuleId{
 	{
 		Type: "forward",
 		Name: "fwd0",
 	},
 }
 
-// functionApplierSpec builds the single-chain function the legacy cases
+// functionActuatorSpec builds the single-chain function the legacy cases
 // publish, one forward module under the default chain.
-func functionApplierSpec() *ynpb.Function {
+func functionActuatorSpec() *ynpb.Function {
 	return &ynpb.Function{
 		Id: &commonpb.FunctionId{Name: "fn:test"},
 		Chains: []*ynpb.FunctionChain{{
-			Chain:  &ynpb.Chain{Name: "default", Modules: functionApplierSpecModules},
+			Chain:  &ynpb.Chain{Name: "default", Modules: functionActuatorSpecModules},
 			Weight: 1,
 		}},
 	}
 }
 
-func Test_FunctionApplier_Basic(t *testing.T) {
+func Test_FunctionActuator_Basic(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -98,26 +98,22 @@ func Test_FunctionApplier_Basic(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.True(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-func Test_FunctionApplier_GetErrorAbortsWithoutUpdateDefaultStrategy(t *testing.T) {
+func Test_FunctionActuator_GetErrorAbortsWithoutUpdateDefaultStrategy(t *testing.T) {
 	c := &fakeFunctionClient{
 		getErr: errors.New("not found"),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), functionActuatorSpec())
 	require.Error(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-func Test_FunctionApplier_PdumpPresentExactStrategyNotSkipped(t *testing.T) {
+func Test_FunctionActuator_PdumpPresentExactStrategyNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -131,26 +127,22 @@ func Test_FunctionApplier_PdumpPresentExactStrategyNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-func Test_FunctionApplier_GetErrorAbortsWithoutUpdate(t *testing.T) {
+func Test_FunctionActuator_GetErrorAbortsWithoutUpdate(t *testing.T) {
 	c := &fakeFunctionClient{
 		getErr: errors.New("not found"),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.Error(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-func Test_FunctionApplier_ChainMissingNotSkipped(t *testing.T) {
+func Test_FunctionActuator_ChainMissingNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: &ynpb.GetFunctionResponse{
 			Function: &ynpb.Function{
@@ -158,7 +150,7 @@ func Test_FunctionApplier_ChainMissingNotSkipped(t *testing.T) {
 				Chains: []*ynpb.FunctionChain{{
 					Chain: &ynpb.Chain{
 						Name:    "other",
-						Modules: functionApplierSpecModules,
+						Modules: functionActuatorSpecModules,
 					},
 					Weight: 1,
 				}},
@@ -166,14 +158,12 @@ func Test_FunctionApplier_ChainMissingNotSkipped(t *testing.T) {
 		},
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-func Test_FunctionApplier_ChainMatchesExactlyNoPdumpSkipped(t *testing.T) {
+func Test_FunctionActuator_ChainMatchesExactlyNoPdumpSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -183,14 +173,12 @@ func Test_FunctionApplier_ChainMatchesExactlyNoPdumpSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.True(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-func Test_FunctionApplier_PdumpBeforeAndAfterMatchingSurvivorsSkipped(t *testing.T) {
+func Test_FunctionActuator_PdumpBeforeAndAfterMatchingSurvivorsSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -208,14 +196,12 @@ func Test_FunctionApplier_PdumpBeforeAndAfterMatchingSurvivorsSkipped(t *testing
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.True(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-func Test_FunctionApplier_PdumpBetweenModulesAndAtStartSkipped(t *testing.T) {
+func Test_FunctionActuator_PdumpBetweenModulesAndAtStartSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -229,14 +215,12 @@ func Test_FunctionApplier_PdumpBetweenModulesAndAtStartSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.True(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-func Test_FunctionApplier_WrongModuleTypeNotSkipped(t *testing.T) {
+func Test_FunctionActuator_WrongModuleTypeNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(&commonpb.ModuleId{
 			Type: "route",
@@ -244,14 +228,12 @@ func Test_FunctionApplier_WrongModuleTypeNotSkipped(t *testing.T) {
 		}),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-func Test_FunctionApplier_CorrectTypeWrongOrderNotSkipped(t *testing.T) {
+func Test_FunctionActuator_CorrectTypeWrongOrderNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: &ynpb.GetFunctionResponse{
 			Function: &ynpb.Function{
@@ -270,14 +252,12 @@ func Test_FunctionApplier_CorrectTypeWrongOrderNotSkipped(t *testing.T) {
 		},
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-func Test_FunctionApplier_ExtraNonPdumpModuleNotSkipped(t *testing.T) {
+func Test_FunctionActuator_ExtraNonPdumpModuleNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -291,14 +271,12 @@ func Test_FunctionApplier_ExtraNonPdumpModuleNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-func Test_FunctionApplier_ForwardWithWrongNameNotSkipped(t *testing.T) {
+func Test_FunctionActuator_ForwardWithWrongNameNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -308,14 +286,12 @@ func Test_FunctionApplier_ForwardWithWrongNameNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-func Test_FunctionApplier_PdumpxPrefixNotFilteredNotSkipped(t *testing.T) {
+func Test_FunctionActuator_PdumpxPrefixNotFilteredNotSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: makeGetResp(
 			&commonpb.ModuleId{
@@ -329,10 +305,8 @@ func Test_FunctionApplier_PdumpxPrefixNotFilteredNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
-		Apply(t.Context())
+	err := NewFunctionActuator(c, WithIgnorePDump()).Apply(t.Context(), functionActuatorSpec())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
@@ -363,50 +337,48 @@ func functionDefinition() *ynpb.Function {
 	}
 }
 
-// Test_FunctionApplier_MatchingDefinitionSkipped verifies that a
+// Test_FunctionActuator_MatchingDefinitionSkipped verifies that a
 // gateway holding the same chains, weights and modules is left alone.
-func Test_FunctionApplier_MatchingDefinitionSkipped(t *testing.T) {
+func Test_FunctionActuator_MatchingDefinitionSkipped(t *testing.T) {
 	c := &fakeFunctionClient{
 		getResp: &ynpb.GetFunctionResponse{Function: functionDefinition()},
 	}
 
-	skipped, err := NewFunctionApplier(c, functionDefinition()).Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), functionDefinition())
 	require.NoError(t, err)
-	require.True(t, skipped)
 	require.Equal(t, 0, c.updates)
 }
 
-// Test_FunctionApplier_ChainOrderMatters verifies that chains in another
+// Test_FunctionActuator_ChainOrderMatters verifies that chains in another
 // order count as drift, as the order decides which packets each chain gets.
-func Test_FunctionApplier_ChainOrderMatters(t *testing.T) {
+func Test_FunctionActuator_ChainOrderMatters(t *testing.T) {
 	reordered := functionDefinition()
 	reordered.Chains[0], reordered.Chains[1] = reordered.Chains[1], reordered.Chains[0]
 	c := &fakeFunctionClient{
 		getResp: &ynpb.GetFunctionResponse{Function: reordered},
 	}
 
-	skipped, err := NewFunctionApplier(c, functionDefinition()).Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), functionDefinition())
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
 
-// Test_FunctionApplier_RejectsChainlessDefinition verifies that a definition
+// Test_FunctionActuator_RejectsChainlessDefinition verifies that a definition
 // without chains is refused before it can reach the gateway.
-func Test_FunctionApplier_RejectsChainlessDefinition(t *testing.T) {
+func Test_FunctionActuator_RejectsChainlessDefinition(t *testing.T) {
 	c := &fakeFunctionClient{}
 	definition := functionDefinition()
 	definition.Chains = nil
 
-	_, err := NewFunctionApplier(c, definition).Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), definition)
 
 	require.ErrorContains(t, err, "has no chains")
 	require.Equal(t, 0, c.updates)
 }
 
-// Test_FunctionApplier_Drift verifies that each way the gateway can drift
+// Test_FunctionActuator_Drift verifies that each way the gateway can drift
 // from the definition triggers an update under either comparison strategy.
-func Test_FunctionApplier_Drift(t *testing.T) {
+func Test_FunctionActuator_Drift(t *testing.T) {
 	cases := []struct {
 		name  string
 		drift func(current *ynpb.Function)
@@ -460,7 +432,7 @@ func Test_FunctionApplier_Drift(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/ignore pdump %t", tc.name, ignorePdump), func(t *testing.T) {
 				current := functionDefinition()
 				tc.drift(current)
-				var options []FunctionApplierOption
+				var options []FunctionActuatorOption
 				if ignorePdump {
 					options = append(options, WithIgnorePDump())
 					chain := current.Chains[0].Chain
@@ -470,34 +442,32 @@ func Test_FunctionApplier_Drift(t *testing.T) {
 					getResp: &ynpb.GetFunctionResponse{Function: current},
 				}
 
-				skipped, err := NewFunctionApplier(c, functionDefinition(), options...).
-					Apply(t.Context())
+				err := NewFunctionActuator(c, options...).Apply(t.Context(), functionDefinition())
 				require.NoError(t, err)
-				require.False(t, skipped)
 				require.Equal(t, 1, c.updates)
 			})
 		}
 	}
 }
 
-// Test_FunctionApplier_PdumpInDefinition verifies that a definition carrying
+// Test_FunctionActuator_PdumpInDefinition verifies that a definition carrying
 // pdump itself is skipped when pdump is ignored and updated otherwise.
-func Test_FunctionApplier_PdumpInDefinition(t *testing.T) {
+func Test_FunctionActuator_PdumpInDefinition(t *testing.T) {
 	cases := []struct {
 		name        string
-		options     []FunctionApplierOption
+		options     []FunctionActuatorOption
 		gateway     []*commonpb.ModuleId
 		wantUpdates int
 	}{
 		{
 			name:        "ignored, gateway lacks pdump",
-			options:     []FunctionApplierOption{WithIgnorePDump()},
+			options:     []FunctionActuatorOption{WithIgnorePDump()},
 			gateway:     []*commonpb.ModuleId{{Type: "forward", Name: "fwd0"}},
 			wantUpdates: 0,
 		},
 		{
 			name:    "ignored, gateway holds another pdump",
-			options: []FunctionApplierOption{WithIgnorePDump()},
+			options: []FunctionActuatorOption{WithIgnorePDump()},
 			gateway: []*commonpb.ModuleId{
 				{Type: "forward", Name: "fwd0"},
 				{Type: "pdump", Name: "pd1"},
@@ -513,33 +483,30 @@ func Test_FunctionApplier_PdumpInDefinition(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			definition := functionApplierSpec()
+			definition := functionActuatorSpec()
 			definition.Chains[0].Chain.Modules = []*commonpb.ModuleId{
 				{Type: "pdump", Name: "pd0"},
 				{Type: "forward", Name: "fwd0"},
 			}
 			c := &fakeFunctionClient{getResp: makeGetResp(tc.gateway...)}
 
-			skipped, err := NewFunctionApplier(c, definition, tc.options...).
-				Apply(t.Context())
+			err := NewFunctionActuator(c, tc.options...).Apply(t.Context(), definition)
 			require.NoError(t, err)
-			require.Equal(t, tc.wantUpdates == 0, skipped)
 			require.Equal(t, tc.wantUpdates, c.updates)
 		})
 	}
 }
 
-// Test_FunctionApplier_AbsentFunctionPublished verifies that a
+// Test_FunctionActuator_AbsentFunctionPublished verifies that a
 // function the gateway does not know is published as is.
-func Test_FunctionApplier_AbsentFunctionPublished(t *testing.T) {
+func Test_FunctionActuator_AbsentFunctionPublished(t *testing.T) {
 	c := &fakeFunctionClient{
 		getErr: status.Error(codes.NotFound, "no such function"),
 	}
 	definition := functionDefinition()
 
-	skipped, err := NewFunctionApplier(c, definition).Apply(t.Context())
+	err := NewFunctionActuator(c).Apply(t.Context(), definition)
 	require.NoError(t, err)
-	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 	require.True(t, proto.Equal(definition, c.lastUpdate.GetFunction()), "got %v", c.lastUpdate)
 }

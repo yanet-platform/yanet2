@@ -292,22 +292,14 @@ func (m *staticGatewayActuator) Apply(ctx context.Context, targets []StaticTarge
 		if target.Function == nil {
 			continue
 		}
-		var options []FunctionApplierOption
+		options := []FunctionActuatorOption{WithFunctionLog(m.log)}
 		if target.IgnorePdump {
 			options = append(options, WithIgnorePDump())
 		}
-		applier := NewFunctionApplier(m.functions, target.Function, options...)
-		skipped, e := applier.Apply(ctx)
-		if e != nil {
+		if e := NewFunctionActuator(m.functions, options...).Apply(ctx, target.Function); e != nil {
 			err = errors.Join(err, fmt.Errorf(
-				"failed to update function %q on gateway %q: %w", applier.Name(), m.name, e,
+				"failed to update function %q on gateway %q: %w", target.Function.GetId().GetName(), m.name, e,
 			))
-			continue
-		}
-		if skipped {
-			m.log.Debug("function already correct, skipped", zap.String("function", applier.Name()))
-		} else {
-			m.log.Info("updated function", zap.String("function", applier.Name()))
 		}
 	}
 

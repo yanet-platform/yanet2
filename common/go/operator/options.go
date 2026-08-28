@@ -184,24 +184,34 @@ func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
 	}
 }
 
-type functionApplierOptions struct {
+type functionActuatorOptions struct {
 	// Compare decides whether the gateway already holds the wanted function.
 	Compare functionCompare
+	// Log receives the outcome of every Apply.
+	Log *zap.Logger
 }
 
-func newFunctionApplierOptions() *functionApplierOptions {
-	return &functionApplierOptions{
+func newFunctionActuatorOptions() *functionActuatorOptions {
+	return &functionActuatorOptions{
 		Compare: (*ynpb.Function).Equal,
+		Log:     zap.NewNop(),
 	}
 }
 
-// FunctionApplierOption configures NewFunctionApplier.
-type FunctionApplierOption func(*functionApplierOptions)
+// FunctionActuatorOption configures NewFunctionActuator.
+type FunctionActuatorOption func(*functionActuatorOptions)
+
+// WithFunctionLog sets the logger for the function actuator.
+func WithFunctionLog(log *zap.Logger) FunctionActuatorOption {
+	return func(o *functionActuatorOptions) {
+		o.Log = log
+	}
+}
 
 // WithIgnorePDump leaves pdump modules on both sides out of the check
 // whether the gateway already holds the wanted function.
-func WithIgnorePDump() FunctionApplierOption {
-	return func(o *functionApplierOptions) {
+func WithIgnorePDump() FunctionActuatorOption {
+	return func(o *functionActuatorOptions) {
 		o.Compare = compareFunctionsIgnorePdump
 	}
 }
