@@ -1,4 +1,4 @@
-import type { Rule, SyncConfig } from '@yanet/core/api/acl';
+import type { Rule } from '@yanet/core/api/acl';
 
 /** Monotonically increasing counter for generating stable tmp- ids. */
 let tmpIdCounter = 0;
@@ -20,11 +20,6 @@ export interface AclDraftState {
     serverFwtableName: Record<string, FwtableNames>;
     /** Draft fwstate-map names; diverges from serverFwtableName while edited. */
     draftFwtableName: Record<string, FwtableNames>;
-    /**
-     * Emission sync config currently stored on the server, per config name.
-     * The web layer carries it along on save instead of editing it.
-     */
-    serverSyncConfig: Record<string, SyncConfig | undefined>;
     draft: Record<string, Rule[]>;
     /**
      * Stable row ids parallel to draft[configName].
@@ -43,7 +38,6 @@ export const initialAclDraftState: AclDraftState = {
     server: {},
     serverFwtableName: {},
     draftFwtableName: {},
-    serverSyncConfig: {},
     draft: {},
     draftIds: {},
     serverConfigs: [],
@@ -53,7 +47,7 @@ export const initialAclDraftState: AclDraftState = {
 };
 
 export type AclDraftAction =
-    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwtableName: FwtableNames; syncConfig?: SyncConfig }> }
+    | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[]; fwtableName: FwtableNames }> }
     | { type: 'ADD_RULE'; configName: string; rule: Rule }
     | { type: 'UPDATE_RULE_AT_INDEX'; configName: string; index: number; rule: Rule }
     | { type: 'REMOVE_RULES'; configName: string; indices: number[] }
@@ -73,14 +67,13 @@ export const aclDraftReducer = (
             const newServer: Record<string, Rule[]> = { ...state.server };
             const newServerFwtableName: Record<string, FwtableNames> = { ...state.serverFwtableName };
             const newDraftFwtableName: Record<string, FwtableNames> = { ...state.draftFwtableName };
-            const newServerSyncConfig: Record<string, SyncConfig | undefined> = { ...state.serverSyncConfig };
             const newDraft: Record<string, Rule[]> = { ...state.draft };
             const newDraftIds: Record<string, string[]> = { ...state.draftIds };
             const serverConfigs: string[] = [];
             // Use reference equality to detect whether the user has local edits:
             // if draft[name] === server[name] the config was never mutated locally,
             // so it is safe to fast-forward to the new server snapshot.
-            for (const { name, rules, fwtableName, syncConfig } of action.configs) {
+            for (const { name, rules, fwtableName } of action.configs) {
                 newServer[name] = rules;
                 newServerFwtableName[name] = fwtableName;
                 // Same reference-equality rule for the map names: an edited
@@ -88,7 +81,6 @@ export const aclDraftReducer = (
                 newDraftFwtableName[name] = state.draftFwtableName[name] === state.serverFwtableName[name]
                     ? fwtableName
                     : (state.draftFwtableName[name] ?? fwtableName);
-                newServerSyncConfig[name] = syncConfig;
                 if (state.draft[name] === state.server[name]) {
                     newDraft[name] = rules;
                     newDraftIds[name] = serverIds(rules);
@@ -108,7 +100,6 @@ export const aclDraftReducer = (
                 server: newServer,
                 serverFwtableName: newServerFwtableName,
                 draftFwtableName: newDraftFwtableName,
-                serverSyncConfig: newServerSyncConfig,
                 draft: newDraft,
                 draftIds: newDraftIds,
                 serverConfigs,
@@ -274,7 +265,6 @@ export const aclDraftReducer = (
                 const { [action.configName]: _s, ...serverRest } = state.server;
                 const { [action.configName]: _f, ...fwtableNameRest } = state.serverFwtableName;
                 const { [action.configName]: _df, ...draftFwtableNameRest } = state.draftFwtableName;
-                const { [action.configName]: _sc, ...syncConfigRest } = state.serverSyncConfig;
                 const { [action.configName]: _d, ...draftRest } = state.draft;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;
                 return {
@@ -282,7 +272,6 @@ export const aclDraftReducer = (
                     server: serverRest,
                     serverFwtableName: fwtableNameRest,
                     draftFwtableName: draftFwtableNameRest,
-                    serverSyncConfig: syncConfigRest,
                     draft: draftRest,
                     draftIds: draftIdsRest,
                     serverConfigs: state.serverConfigs.filter(n => n !== action.configName),

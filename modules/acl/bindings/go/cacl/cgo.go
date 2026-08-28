@@ -19,7 +19,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 // ModuleConfig is an opaque handle to the ACL module configuration in
@@ -36,14 +35,12 @@ type ModuleConfig struct {
 // fwstate_map_v6 objects whose fwtables back state lookups; the names
 // are declared as object links here and resolve against published
 // objects when the config is published. An empty name declares no link,
-// and CHECK_STATE then finds no state for that family. Pass nil
-// emitConfig for a ruleset that emits no sync packets.
+// and CHECK_STATE then finds no state for that family.
 func NewModuleConfig(
 	agent *ffi.Agent,
 	name string,
 	rules []AclRule,
 	fw4MapName, fw6MapName string,
-	emitConfig *cfwstate.SyncEmitConfig,
 ) (*ModuleConfig, error) {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
@@ -70,15 +67,6 @@ func NewModuleConfig(
 		defer C.free(unsafe.Pointer(cFw6Name))
 	}
 
-	var cEmitPtr unsafe.Pointer
-	if emitConfig != nil {
-		cEmitPtr = cfwstate.NewCEmitSyncConfig(*emitConfig)
-		if cEmitPtr == nil {
-			return nil, errors.New("failed to allocate ACL sync emission config")
-		}
-		defer cfwstate.FreeCEmitSyncConfig(cEmitPtr)
-	}
-
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -90,7 +78,6 @@ func NewModuleConfig(
 		C.uint32_t(len(cRules)),
 		cFw4Name,
 		cFw6Name,
-		(*C.struct_fwstate_sync_emit_config)(cEmitPtr),
 		&cErr,
 	)
 	if ptr == nil {

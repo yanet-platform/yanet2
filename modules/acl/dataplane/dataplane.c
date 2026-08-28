@@ -157,8 +157,6 @@ acl_handle_packets(
 	const bool net6_share =
 		net6_share_dir_is_built(&acl_config->net6_share_src);
 
-	struct fwstate_sync_emit_config *sync_config = &acl_config->sync_config;
-
 	// fwtables of the linked map objects, one per family. NULL when the
 	// config declared no link for the family, in which case CHECK_STATE
 	// finds no state for that family.
@@ -621,11 +619,9 @@ acl_handle_packets(
 			pass_cnt[0] += 1;
 			packet_front_output(packet_front, packet);
 
-			if (push_sync_packet != SYNC_NONE &&
-			    fwstate_sync_emit_config_usable(sync_config)) {
+			if (push_sync_packet != SYNC_NONE) {
 				create_cnt[0] += 1;
 
-				// Allocate a new packet for the sync frame
 				struct packet *sync_pkt =
 					worker_packet_alloc(dp_worker);
 				if (unlikely(sync_pkt == NULL)) {
@@ -635,7 +631,6 @@ acl_handle_packets(
 				}
 				if (unlikely(
 					    fwstate_craft_state_sync_packet(
-						    sync_config,
 						    packet,
 						    push_sync_packet,
 						    sync_pkt
@@ -646,6 +641,8 @@ acl_handle_packets(
 					    "failed to craft sync packet");
 					continue;
 				}
+				sync_pkt->flags |=
+					1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
 
 				sync_cnt[0] += 1;
 				sync_cnt[1] += packet_data_len(sync_pkt);

@@ -113,7 +113,6 @@ acl_module_compile_rules(
 	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
-	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
 );
 
@@ -125,7 +124,6 @@ acl_module_config_init(
 	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
-	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
 ) {
 	struct acl_module_config *config =
@@ -160,11 +158,6 @@ acl_module_config_init(
 
 	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
 	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
-
-	// Zero the emission sync config, which acl_module_config_init
-	// overwrites with the caller's config when one is given.
-	memset(&config->sync_config, 0, sizeof(struct fwstate_sync_emit_config)
-	);
 
 	config->v4_object_link_idx = ACL_OBJECT_LINK_NONE;
 	config->v6_object_link_idx = ACL_OBJECT_LINK_NONE;
@@ -237,7 +230,6 @@ acl_module_config_init(
 		    rule_count,
 		    fw4_map_name,
 		    fw6_map_name,
-		    emit_config,
 		    err
 	    )) {
 		acl_module_config_destroy(&config->cp_module);
@@ -693,7 +685,6 @@ acl_module_compile_rules(
 	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
-	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
 ) {
 	struct acl_module_config *config =
@@ -893,14 +884,6 @@ acl_module_compile_rules(
 		(uint64_t)((int64_t)(ts_end.tv_sec - ts_start.tv_sec) *
 				   1000000000LL +
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
-
-	// Copy the emission sync config that drives CREATE_STATE frames, or
-	// leave the zeroed one in place so the config emits none.
-	if (emit_config != NULL) {
-		config->sync_config = *emit_config;
-	} else {
-		memset(&config->sync_config, 0, sizeof(config->sync_config));
-	}
 
 	// Link the fwstate-map objects whose fwtables back state lookups.
 	// The module is freshly constructed, so no earlier links exist.

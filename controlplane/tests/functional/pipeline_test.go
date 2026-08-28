@@ -74,7 +74,7 @@ func publishACL(t *testing.T, agent *ffi.Agent, name string) {
 		},
 		Fragment: filter.FragmentAny,
 	}
-	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "", nil)
+	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	require.NoError(t, backend.UpdateModule(handle))

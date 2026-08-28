@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { useConfigListCache } from '@yanet/core/hooks';
 import { toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
-import type { Rule, SyncConfig } from '@yanet/core/api/acl';
+import type { Rule } from '@yanet/core/api/acl';
 import {
     aclDraftReducer,
     initialAclDraftState,
@@ -49,11 +49,6 @@ export const useAclDraft = (): UseAclDraftResult => {
     const [loadFailed, setLoadFailed] = useState(false);
     const { write: writeCache } = useConfigListCache('acl');
 
-    // Latest stored sync config per name, read by the identity-stable save
-    // wrapper below so a web save keeps the config's emission settings
-    // instead of dropping them; the sync config has no editing UI yet.
-    const serverSyncConfigRef = useRef<Record<string, SyncConfig | undefined>>({});
-    serverSyncConfigRef.current = state.serverSyncConfig;
     // The map names are editable, so a save sends their draft values.
     const draftFwtableNameRef = useRef<Record<string, FwtableNames>>({});
     draftFwtableNameRef.current = state.draftFwtableName;
@@ -65,7 +60,6 @@ export const useAclDraft = (): UseAclDraftResult => {
             rules,
             fwtable_name_v4: fwtableName.v4 || undefined,
             fwtable_name_v6: fwtableName.v6 || undefined,
-            sync_config: serverSyncConfigRef.current[name],
         });
     }, []);
 
@@ -84,7 +78,7 @@ export const useAclDraft = (): UseAclDraftResult => {
 
             const configs = await loadKnownConfigs(
                 names,
-                async (name): Promise<{ name: string; rules: Rule[]; fwtableName: FwtableNames; syncConfig?: SyncConfig }> => {
+                async (name): Promise<{ name: string; rules: Rule[]; fwtableName: FwtableNames }> => {
                     const resp = await API.acl.showConfig({ name });
                     return {
                         name,
@@ -93,7 +87,6 @@ export const useAclDraft = (): UseAclDraftResult => {
                             v4: resp.fwtable_name_v4 ?? '',
                             v6: resp.fwtable_name_v6 ?? '',
                         },
-                        syncConfig: resp.sync_config,
                     };
                 },
                 { onDropped: warnConfigsUnknown('acl-configs-unknown', 'ACL') },

@@ -9,13 +9,6 @@
 #   Rule 5: CreateState for TCP from 2001:db8:1::/48 -> 2001:db8:2::/48 port 80.
 #   Rule 6: CheckState for return TCP traffic (2001:db8:2::/48 -> 2001:db8:1::/48).
 
-# Emission parameters for the state-sync frames the CREATE_STATE rules
-# synthesize.
-sync_config:
-  dst_ether: "33:33:00:00:00:01"
-  dst_addr_multicast: "ff02::1"
-  port_multicast: 9999
-
 rules:
   # === IPv4 ===
 

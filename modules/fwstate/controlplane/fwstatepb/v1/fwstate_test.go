@@ -117,7 +117,7 @@ func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
 // Test_SyncConfig_Validate_DestinationIsAllOrNothing verifies that a
 // merged config naming part of the sync destination is rejected.
 //
-// One naming all of that destination, or none of it, is accepted.
+// One naming all of an endpoint, or none of the endpoints, is accepted.
 func Test_SyncConfig_Validate_DestinationIsAllOrNothing(t *testing.T) {
 	addr := func() *commonpb.IPAddress {
 		return &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
@@ -139,10 +139,10 @@ func Test_SyncConfig_Validate_DestinationIsAllOrNothing(t *testing.T) {
 	})
 
 	t.Run("only the source address", func(t *testing.T) {
-		err := (&SyncConfig{SrcAddr: addr()}).Validate()
-
-		require.ErrorContains(t, err, "dst_addr_multicast")
-		require.ErrorContains(t, err, "port_multicast")
+		// Source/MAC values can remain stored after the last destination is
+		// removed; without an endpoint they are inert and synchronization is
+		// disabled.
+		require.NoError(t, (&SyncConfig{SrcAddr: addr()}).Validate())
 	})
 
 	t.Run("no destination at all", func(t *testing.T) {
@@ -161,8 +161,27 @@ func Test_SyncConfig_Validate_DestinationIsAllOrNothing(t *testing.T) {
 	t.Run("complete destination", func(t *testing.T) {
 		require.NoError(t, (&SyncConfig{
 			SrcAddr:          addr(),
+			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
 			DstAddrMulticast: addr(),
 			PortMulticast:    1,
 		}).Validate())
+	})
+
+	t.Run("complete unicast destination", func(t *testing.T) {
+		require.NoError(t, (&SyncConfig{
+			SrcAddr:        addr(),
+			DstEther:       &commonpb.MACAddress{Addr: 0x333300000001},
+			DstAddrUnicast: addr(),
+			PortUnicast:    1,
+		}).Validate())
+	})
+
+	t.Run("unicast multicast address", func(t *testing.T) {
+		require.ErrorContains(t, (&SyncConfig{
+			SrcAddr:        addr(),
+			DstEther:       &commonpb.MACAddress{Addr: 0x333300000001},
+			DstAddrUnicast: &commonpb.IPAddress{Addr: []byte{0xff, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
+			PortUnicast:    1,
+		}).Validate(), "dst_addr_unicast")
 	})
 }

@@ -4,7 +4,6 @@
 
 #include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
-#include "lib/fwstate/config.h"
 
 #define ACTION_ALLOW 0
 #define ACTION_DENY 1
@@ -43,9 +42,6 @@ struct acl_module_config {
 	// cp_module.runtime_counter_registries. Each per-rule counter_id is
 	// resolved against this registry's per-worker storage.
 	uint64_t rules_registry_idx;
-
-	// Emission-side sync parameters for CREATE_STATE frames.
-	struct fwstate_sync_emit_config sync_config;
 
 	// Object link indices for the v4 and v6 fwtables, declared by
 	// acl_module_config_update via cp_module_link_object and resolved at

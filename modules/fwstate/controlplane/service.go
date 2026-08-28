@@ -213,6 +213,9 @@ func (m *FWStateService) UpdateConfig(
 	if err := req.GetSyncConfig().ValidateFields(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}
+	if err := req.ValidateEndpointClears(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid sync endpoint update: %v", err)
+	}
 
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
@@ -269,7 +272,12 @@ func (m *FWStateService) prepareUpdate(
 	oldConfig := m.configs[name]
 
 	// Validate the merged sync config before any C state is touched.
-	syncConfig := mergedSyncConfig(oldConfig, req.SyncConfig)
+	syncConfig := mergedSyncConfigWithClears(
+		oldConfig,
+		req.SyncConfig,
+		req.GetClearMulticast(),
+		req.GetClearUnicast(),
+	)
 	if err := syncConfig.Validate(); err != nil {
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
@@ -281,11 +289,13 @@ func (m *FWStateService) prepareUpdate(
 	// and declares the map-name links: the names resolve against
 	// published objects when the new generation installs, so an unknown
 	// name surfaces from the publish, not from here.
-	newConfig, err := NewFWStateModuleConfig(
+	newConfig, err := NewFWStateModuleConfigWithEndpointClears(
 		m.agent,
 		name,
 		oldConfig,
 		req.SyncConfig,
+		req.GetClearMulticast(),
+		req.GetClearUnicast(),
 		mapNameV4,
 		mapNameV6,
 	)

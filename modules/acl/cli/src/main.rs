@@ -1,4 +1,3 @@
-use core::net::IpAddr;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
@@ -192,14 +191,13 @@ fn print_rule_metrics_table(metrics: &[commonpb::Metric]) {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ACLConfig {
     rules: Vec<aclpb::Rule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fwtable_name_v4: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fwtable_name_v6: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    sync_config: Option<aclpb::SyncConfig>,
 }
 
 impl ACLConfig {
@@ -216,8 +214,7 @@ impl ACLConfig {
 
 /// Display view of an ACL config returned by the show command.
 ///
-/// `fwtable_name_v4`, `fwtable_name_v6`, and `sync_config` are omitted
-/// when absent.
+/// Map names are omitted when absent.
 #[derive(Debug, Serialize)]
 struct ShowConfig {
     rules: Vec<aclpb::Rule>,
@@ -225,8 +222,6 @@ struct ShowConfig {
     fwtable_name_v4: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     fwtable_name_v6: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sync_config: Option<aclpb::SyncConfig>,
 }
 
 /// ACL module CLI.
@@ -328,7 +323,6 @@ impl ACLService {
                     } else {
                         Some(response.fwtable_name_v6.clone())
                     },
-                    sync_config: response.sync_config.clone(),
                 };
                 print!(
                     "{}",
@@ -361,45 +355,6 @@ impl ACLService {
         Ok(())
     }
 
-    /// Merge the emission sync config from the YAML file and the flags.
-    ///
-    /// The YAML section is the base; every flag that was passed overrides
-    /// its field. A config with neither source carries no sync config.
-    fn merge_sync_config(&self, base: Option<aclpb::SyncConfig>, cmd: &UpdateCmd) -> Option<aclpb::SyncConfig> {
-        let mut sync = match base {
-            Some(base) => base,
-            None => {
-                let no_flags = cmd.dst_ether.is_none()
-                    && cmd.dst_addr_multicast.is_none()
-                    && cmd.port_multicast.is_none()
-                    && cmd.dst_addr_unicast.is_none()
-                    && cmd.port_unicast.is_none();
-                if no_flags {
-                    return None;
-                }
-                aclpb::SyncConfig::default()
-            }
-        };
-
-        if let Some(dst_ether) = cmd.dst_ether {
-            sync.dst_ether = Some(commonpb::MacAddress::from(dst_ether));
-        }
-        if let Some(dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync.dst_addr_multicast = Some(commonpb::IpAddress::from(IpAddr::V6(dst_addr_multicast)));
-        }
-        if let Some(port_multicast) = cmd.port_multicast {
-            sync.port_multicast = u32::from(port_multicast);
-        }
-        if let Some(dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync.dst_addr_unicast = Some(commonpb::IpAddress::from(IpAddr::V6(dst_addr_unicast)));
-        }
-        if let Some(port_unicast) = cmd.port_unicast {
-            sync.port_unicast = u32::from(port_unicast);
-        }
-
-        Some(sync)
-    }
-
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         let config = ACLConfig::load(&cmd.file).map_err(|err| {
             self.service.invalid(
@@ -423,14 +378,12 @@ impl ACLService {
             .clone()
             .or(config.fwtable_name_v6.clone())
             .unwrap_or_default();
-        let sync_config = self.merge_sync_config(config.sync_config, &cmd);
-
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
             fwtable_name_v4,
             fwtable_name_v6,
-            sync_config,
+            ..Default::default()
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self
@@ -668,6 +621,13 @@ mod test {
         let content = include_str!("../../../../tests/functional/testdata/acl+fwstate.yaml");
         let config: ACLConfig = serde_yaml::from_str(content).expect("acl+fwstate.yaml fixture must deserialize");
         assert!(!config.rules.is_empty());
+    }
+
+    #[test]
+    fn test_acl_config_rejects_legacy_sync_config() {
+        let err = serde_yaml::from_str::<ACLConfig>("rules: []\nsync_config: {}\n").unwrap_err();
+
+        assert!(err.to_string().contains("unknown field `sync_config`"));
     }
 
     #[test]

@@ -33,7 +33,31 @@ func NewFWStateModuleConfig(
 	syncConfig *fwstatepb.SyncConfig,
 	fw4MapName, fw6MapName string,
 ) (*FwStateConfig, error) {
-	merged := mergedSyncConfigC(old, syncConfig)
+	return newFWStateModuleConfig(agent, name, old, syncConfig, false, false, fw4MapName, fw6MapName)
+}
+
+// NewFWStateModuleConfigWithEndpointClears builds a replacement config while
+// honoring explicit requests to disable either synchronization endpoint.
+func NewFWStateModuleConfigWithEndpointClears(
+	agent *ffi.Agent,
+	name string,
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+	fw4MapName, fw6MapName string,
+) (*FwStateConfig, error) {
+	return newFWStateModuleConfig(agent, name, old, syncConfig, clearMulticast, clearUnicast, fw4MapName, fw6MapName)
+}
+
+func newFWStateModuleConfig(
+	agent *ffi.Agent,
+	name string,
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+	fw4MapName, fw6MapName string,
+) (*FwStateConfig, error) {
+	merged := mergedSyncConfigCWithClears(old, syncConfig, clearMulticast, clearUnicast)
 
 	moduleCfg, err := cfwstate.NewModuleConfig(
 		agent,
@@ -82,7 +106,15 @@ func mergedSyncConfig(
 	old *FwStateConfig,
 	syncConfig *fwstatepb.SyncConfig,
 ) *fwstatepb.SyncConfig {
-	return fwstatepb.FromCSyncConfig(mergedSyncConfigC(old, syncConfig))
+	return mergedSyncConfigWithClears(old, syncConfig, false, false)
+}
+
+func mergedSyncConfigWithClears(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+) *fwstatepb.SyncConfig {
+	return fwstatepb.FromCSyncConfig(mergedSyncConfigCWithClears(old, syncConfig, clearMulticast, clearUnicast))
 }
 
 // mergedSyncConfigC is the merge in the form the construction consumes.
@@ -95,14 +127,22 @@ func mergedSyncConfigC(
 	old *FwStateConfig,
 	syncConfig *fwstatepb.SyncConfig,
 ) cfwstate.SyncConfig {
+	return mergedSyncConfigCWithClears(old, syncConfig, false, false)
+}
+
+func mergedSyncConfigCWithClears(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+) cfwstate.SyncConfig {
 	current := cfwstate.DefaultSyncConfig()
 	if old != nil {
 		current = old.ModuleConfig.GetSyncConfig()
 	}
-	if syncConfig == nil {
+	if syncConfig == nil && !clearMulticast && !clearUnicast {
 		return current
 	}
-	return syncConfig.ToCWithDefaults(current)
+	return syncConfig.ToCWithDefaultsAndClears(current, clearMulticast, clearUnicast)
 }
 
 // MergedSyncConfig returns the request's sync config merged with the

@@ -3,8 +3,11 @@ import { createService, type CallOptions } from './client';
 export interface SyncConfig {
     // commonpb.IPAddress, serialized by the gateway as a bare IP string.
     src_addr?: string;
+    dst_ether?: string;
     dst_addr_multicast?: string;
     port_multicast?: number;
+    dst_addr_unicast?: string;
+    port_unicast?: number;
     tcp_syn_ack?: number;
     tcp_syn?: number;
     tcp_fin?: number;
@@ -33,6 +36,8 @@ export interface UpdateConfigRequest {
     map_name_v4?: string;
     map_name_v6?: string;
     sync_config?: SyncConfig;
+    clear_multicast?: boolean;
+    clear_unicast?: boolean;
 }
 
 export interface DeleteConfigRequest {

@@ -23,9 +23,8 @@ struct fwstate_module_config {
 	uint64_t v4_object_link_idx;
 	uint64_t v6_object_link_idx;
 
-	// Receive-side sync parameters: packet matching, timeouts, and
-	// suppression. Kept standalone so the struct mirrors what the module
-	// consumes.
+	// Synchronization parameters for receive matching, state updates,
+	// suppression, and local emission.
 	struct fwstate_sync_config sync_config;
 
 	// Module-level counters, registered by fwstate_module_config_new.

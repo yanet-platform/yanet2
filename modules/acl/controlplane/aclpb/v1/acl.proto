@@ -51,12 +51,8 @@ message UpdateConfigRequest {
   //
   // Same linking contract as fwtable_name_v4.
   string fwtable_name_v6 = 4;
-  // sync_config carries the emission-side synchronization parameters the
-  // ACL dataplane uses for CREATE_STATE sync packets.
-  //
-  // Required when any rule uses ACTION_KIND_CREATE_STATE; otherwise
-  // optional.
-  SyncConfig sync_config = 5;
+  // Deprecated: synchronization emission belongs to fwstate.
+  SyncConfig sync_config = 5 [ deprecated = true ];
 }
 
 message UpdateConfigResponse {}
@@ -72,9 +68,8 @@ message ShowConfigResponse {
   // fwtable_name_v6 is the standalone fwstate-map (kind V6) this ACL config
   // references.
   string fwtable_name_v6 = 5;
-  // sync_config is the emission-side synchronization parameters this ACL
-  // config uses, absent when the config carries none.
-  SyncConfig sync_config = 6;
+  // Deprecated: synchronization emission belongs to fwstate.
+  SyncConfig sync_config = 6 [ deprecated = true ];
 }
 
 message Rule {
@@ -124,16 +119,14 @@ message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
 
-// SyncConfig carries the emission-side state-sync addressing: the outer
-// header fields of the sync frames a CREATE_STATE action synthesizes.
-// The receive-side parameters (timeouts, suppression) belong to the
-// fwstate module's own configuration.
+// Deprecated: synchronization emission belongs to fwstate.
 message SyncConfig {
-  common.commonpb.v1.MACAddress dst_ether = 1;         // Destination MAC address;
-  common.commonpb.v1.IPAddress dst_addr_multicast = 2; // Multicast IPv6 address;
-  uint32 port_multicast = 3;                           // Multicast port. Required. Accepted range: 1..65535.
-  common.commonpb.v1.IPAddress dst_addr_unicast = 4;   // Unicast IPv6 address;
-  uint32 port_unicast = 5;                             // Unicast port. Accepted range: 0..65535.
+  option deprecated = true;
+  common.commonpb.v1.MACAddress dst_ether = 1;
+  common.commonpb.v1.IPAddress dst_addr_multicast = 2;
+  uint32 port_multicast = 3;
+  common.commonpb.v1.IPAddress dst_addr_unicast = 4;
+  uint32 port_unicast = 5;
 }
 
 // Request for per-rule counters. An empty name returns the rule counters

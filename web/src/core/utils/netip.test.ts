@@ -10,10 +10,25 @@ import {
     partitionCidrsToTyped,
     parseIPToBytes,
     parseIPv6ToBytes,
+    isIPv6MulticastAddress,
     IPv4Prefix,
     IPv6Address,
     CIDRParseError,
 } from './netip';
+
+describe('isIPv6MulticastAddress', () => {
+    it('identifies an IPv6 multicast address', () => {
+        expect(isIPv6MulticastAddress('ff02::1')).toBe(true);
+    });
+
+    it('does not identify an IPv6 unicast address as multicast', () => {
+        expect(isIPv6MulticastAddress('2001:db8::1')).toBe(false);
+    });
+
+    it('does not identify malformed input as multicast', () => {
+        expect(isIPv6MulticastAddress('not-an-ip')).toBe(false);
+    });
+});
 
 describe('stringToIPAddress', () => {
     it('validates and returns a valid IPv4 address', () => {

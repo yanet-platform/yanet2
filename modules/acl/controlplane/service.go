@@ -3,10 +3,9 @@ package acl
 import (
 	"context"
 	"errors"
-	"fmt"
-	"github.com/yanet-platform/xnetip"
 	"sync"
 
+	"github.com/yanet-platform/xnetip"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,14 +21,12 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
-	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
-// shared memory. The handle is fully built — rules compiled, emission
-// sync config installed — at construction and never updated afterwards;
-// Free releases it.
+// shared memory. The handle is fully built at construction and never
+// updated afterwards; Free releases it.
 type ModuleHandle interface {
 	Free() error
 	AsFFIModule() ffi.ModuleConfig
@@ -45,7 +42,6 @@ type Backend interface {
 		name string,
 		rules []cacl.AclRule,
 		fw4MapName, fw6MapName string,
-		emitConfig *cfwstate.SyncEmitConfig,
 	) (ModuleHandle, error)
 	// UpdateModule publishes handle to dp_config_gen so the dataplane
 	// picks it up on the next round.
@@ -93,7 +89,6 @@ type aclConfig struct {
 	acl        ModuleHandle
 	fw4MapName string
 	fw6MapName string
-	syncConfig *aclpb.SyncConfig
 }
 
 // Rules returns the rules held by the config.
@@ -114,12 +109,6 @@ func (m *aclConfig) Fw4MapName() string {
 // Fw6MapName returns the name of the referenced v6 fwstate-map object.
 func (m *aclConfig) Fw6MapName() string {
 	return m.fw6MapName
-}
-
-// SyncConfig returns the stored emission-side sync configuration, or nil
-// when the config carries none.
-func (m *aclConfig) SyncConfig() *aclpb.SyncConfig {
-	return m.syncConfig
 }
 
 // Free releases the module handle held by the config.
@@ -489,37 +478,6 @@ func rulesEqual(a, b []*aclpb.Rule) bool {
 	return true
 }
 
-// rulesNeedCreateState reports whether any rule uses CREATE_STATE, the
-// action that synthesizes state-sync packets and therefore requires the
-// emission-side sync config. CHECK_STATE-only rulesets read state and
-// carry no sync config.
-func rulesNeedCreateState(rules []*aclpb.Rule) bool {
-	for _, rule := range rules {
-		for _, action := range rule.GetActions() {
-			if action.GetKind() == aclpb.ActionKind_ACTION_KIND_CREATE_STATE {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// syncConfigsEqual reports whether two sync configs are equal. Both nil
-// compares equal; one nil and one non-nil does not.
-func syncConfigsEqual(a, b *aclpb.SyncConfig) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if a == nil {
-		return true
-	}
-	return proto.Equal(a, b)
-}
-
-// validateSyncConfig rejects an emission sync config that could not
-// produce valid sync frames: a missing destination MAC, a missing
-// multicast destination pair (the only destination the craft path
-// uses), or out-of-range ports.
 // validateMapNameOptional applies the C-side round-trip rules to a map
 // link name; the empty name declares no link and stays valid.
 func validateMapNameOptional(name string) error {
@@ -527,51 +485,6 @@ func validateMapNameOptional(name string) error {
 		return nil
 	}
 	return fwstatemap.ValidateMapName(name)
-}
-
-func validateSyncConfig(cfg *aclpb.SyncConfig) error {
-	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
-		return fmt.Errorf("port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
-	}
-	if portUnicast := cfg.GetPortUnicast(); portUnicast > maxSyncPort {
-		return fmt.Errorf("port_unicast %d exceeds maximum allowed value %d", portUnicast, maxSyncPort)
-	}
-
-	var missing []string
-
-	if dstEther := cfg.GetDstEther(); dstEther == nil {
-		missing = append(missing, "dst_ether")
-	} else {
-		eui := dstEther.EUI48()
-		if isAllZeroBytes(eui[:]) {
-			missing = append(missing, "dst_ether")
-		}
-	}
-
-	if len(cfg.GetDstAddrMulticast().GetAddr()) != 16 || isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) {
-		missing = append(missing, "dst_addr_multicast")
-	}
-	if cfg.GetPortMulticast() == 0 {
-		missing = append(missing, "port_multicast")
-	}
-
-	if len(missing) > 0 {
-		return fmt.Errorf("missing required sync config fields: %v", missing)
-	}
-	return nil
-}
-
-// maxSyncPort is the highest value accepted for the sync config ports,
-// matching the width of the C-side uint16 port field.
-const maxSyncPort uint32 = 65535
-
-func isAllZeroBytes(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 func (m *ACLService) UpdateConfig(
@@ -595,7 +508,10 @@ func (m *ACLService) UpdateConfig(
 
 		fw4MapName := req.GetFwtableNameV4()
 		fw6MapName := req.GetFwtableNameV6()
-		syncConfig := req.GetSyncConfig()
+		if req.GetSyncConfig() != nil {
+			return status.Error(codes.InvalidArgument,
+				"sync_config belongs to fwstate")
+		}
 
 		// A non-empty name must round-trip through the fixed-size C
 		// object registry: cp_module_link_object silently truncates
@@ -609,22 +525,9 @@ func (m *ACLService) UpdateConfig(
 			return err
 		}
 
-		if rulesNeedCreateState(req.Rules) {
-			if syncConfig == nil {
-				return status.Error(codes.InvalidArgument,
-					"sync_config is required when any rule uses ACTION_KIND_CREATE_STATE")
-			}
-		}
-		if syncConfig != nil {
-			if err := validateSyncConfig(syncConfig); err != nil {
-				return status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-			}
-		}
-
 		if oldConfig != nil && rulesEqual(oldConfig.Rules(), req.Rules) &&
 			oldConfig.Fw4MapName() == fw4MapName &&
-			oldConfig.Fw6MapName() == fw6MapName &&
-			syncConfigsEqual(oldConfig.SyncConfig(), syncConfig) {
+			oldConfig.Fw6MapName() == fw6MapName {
 			resp = &aclpb.UpdateConfigResponse{}
 			return nil
 		}
@@ -634,14 +537,8 @@ func (m *ACLService) UpdateConfig(
 			return err
 		}
 
-		var emitCfg *cfwstate.SyncEmitConfig
-		if syncConfig != nil {
-			emit := syncConfig.ToC()
-			emitCfg = &emit
-		}
-
 		handle, err := m.backend.NewModule(
-			name, rules, fw4MapName, fw6MapName, emitCfg,
+			name, rules, fw4MapName, fw6MapName,
 		)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to create module config: %v", err)
@@ -658,18 +555,12 @@ func (m *ACLService) UpdateConfig(
 			return status.Errorf(codes.Internal, "failed to update module: %v", err)
 		}
 
-		var storedSync *aclpb.SyncConfig
-		if syncConfig != nil {
-			storedSync = proto.Clone(syncConfig).(*aclpb.SyncConfig)
-		}
-
 		m.mu.Lock()
 		entry.Publish(&aclConfig{
 			rules:      req.Rules,
 			acl:        handle,
 			fw4MapName: fw4MapName,
 			fw6MapName: fw6MapName,
-			syncConfig: storedSync,
 		})
 		m.publishMetricsSnapshotLocked()
 		m.mu.Unlock()
@@ -717,7 +608,6 @@ func (m *ACLService) ShowConfig(
 		Rules:         config.Rules(),
 		FwtableNameV4: config.Fw4MapName(),
 		FwtableNameV6: config.Fw6MapName(),
-		SyncConfig:    config.SyncConfig(),
 	}
 
 	return response, nil

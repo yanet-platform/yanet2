@@ -6,14 +6,14 @@ struct agent;
 struct cp_module;
 struct fwstate_sync_config;
 
-// Set the C-side default receive-side sync timeouts.
+// Clear all synchronization fields, then install the production timeouts.
 void
 fwstate_config_set_defaults(struct fwstate_sync_config *config);
 
 // Allocate an fwstate module config fully built in one step: a config
 // handle is created once and never updated afterwards.
 //
-// sync_config is the receive-side sync config to install, or NULL to
+// sync_config is the sync config to install, or NULL to
 // keep the defaults.
 //
 // fw4_map_name and fw6_map_name name standalone fwstate_map_v4 /
