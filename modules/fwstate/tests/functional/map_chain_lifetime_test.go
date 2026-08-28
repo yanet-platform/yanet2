@@ -56,7 +56,7 @@ func newMapChainConfig(
 	)
 	require.NoError(t, err)
 
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{modCfg.AsFFIModule()}))
 
 	return modCfg
 }
@@ -109,7 +109,7 @@ func TestFWStateUpdate_SecondUpdateKeepsLiveMaps(t *testing.T) {
 		agent, "fw0", &syncConfig, mapV4.Name(), mapV6.Name(),
 	)
 	require.NoError(t, err)
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{v2.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{v2.AsFFIModule()}))
 
 	afterPublish := mapChainAgentRootMemoryNode(t, shm, agentName)
 

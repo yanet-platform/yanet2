@@ -106,6 +106,7 @@ func TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy(t *testing.T) {
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
 	handle, err := decap.NewBackend(agent).UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
 	)
 	require.NoError(t, err)
@@ -141,6 +142,7 @@ func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) 
 	backend := decap.NewBackend(agent)
 
 	first, err := backend.UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
 	)
 	require.NoError(t, err)
@@ -149,6 +151,7 @@ func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) 
 	mid := agentRootMemoryNode(t, shm, "cpml-supersede")
 
 	second, err := backend.UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")},
 	)
 	require.NoError(t, err)
@@ -178,6 +181,7 @@ func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) 
 	)
 
 	_, err = backend.UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")},
 	)
 	require.NoError(t, err)
@@ -210,6 +214,7 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	backend := decap.NewBackend(agent)
 
 	first, err := backend.UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
 	)
 	require.NoError(t, err)
@@ -226,6 +231,7 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	mid := agentRootMemoryNode(t, shm, "cpml-pinned")
 
 	second, err := backend.UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:db9::/32")},
 	)
 	require.NoError(t, err)
@@ -247,6 +253,7 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	)
 
 	_, err = backend.UpdateModule(
+		t.Context(),
 		"decap0", []netip.Prefix{netip.MustParsePrefix("2001:dba::/32")},
 	)
 	require.NoError(t, err)

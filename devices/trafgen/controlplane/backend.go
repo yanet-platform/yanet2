@@ -1,6 +1,7 @@
 package trafgen
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -20,6 +21,7 @@ func NewBackend(agent *ffi.Agent) Backend {
 }
 
 func (m *backend) UpdateDevice(
+	ctx context.Context,
 	name string,
 	input []Pipeline,
 	output []Pipeline,
@@ -27,6 +29,10 @@ func (m *backend) UpdateDevice(
 	lengths []uint32,
 	ratePps uint64,
 ) (*ctrafgen.DeviceConfig, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	device, err := ctrafgen.NewDeviceConfig(
 		m.agent,
 		name,
@@ -41,6 +47,7 @@ func (m *backend) UpdateDevice(
 	}
 
 	if err := m.agent.UpdateDevices(
+		ctx,
 		[]ffi.ShmDeviceConfig{device.AsFFIDevice()},
 	); err != nil {
 		if err := device.Free(); err != nil {

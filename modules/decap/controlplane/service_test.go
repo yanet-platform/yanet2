@@ -1,6 +1,7 @@
 package decap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -68,6 +69,7 @@ func (m *mockModuleHandle) Free() error {
 type mockBackend struct{}
 
 func (m *mockBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
@@ -85,6 +87,7 @@ type flakyBackend struct {
 }
 
 func (m *flakyBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {

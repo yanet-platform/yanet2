@@ -117,7 +117,7 @@ func wirePipeline(
 ) {
 	tb.Helper()
 
-	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(tb, agent.UpdateFunction(tb.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -129,14 +129,14 @@ func wirePipeline(
 			},
 		}},
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(tb.Context(), agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -184,7 +184,7 @@ func applyFIB(
 ) route.ModuleHandle {
 	tb.Helper()
 
-	handle, err := backend.UpdateModule(name, toFIBEntries(tb, entries))
+	handle, err := backend.UpdateModule(tb.Context(), name, toFIBEntries(tb, entries))
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = handle.Free() })
 	return handle
@@ -537,7 +537,7 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 
 	// Wire both devices through the pipeline. Each device gets its own
 	// function and chain so the module config reference ("test") resolves.
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: "test",
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -549,17 +549,17 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      "test",
 		Functions: []string{"test"},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name: "dummy0",
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name: "dummy1",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "test", Weight: 1}},

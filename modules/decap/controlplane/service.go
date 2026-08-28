@@ -31,7 +31,7 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config, adds prefixes, and publishes
 	// it to the dataplane.
-	UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, prefixes []netip.Prefix) (ModuleHandle, error)
 }
 
 type config struct {
@@ -149,7 +149,7 @@ func (m *DecapService) UpdateConfig(
 		Prefixes4: normalizePrefixes(prefixes4),
 		Prefixes6: normalizePrefixes(prefixes6),
 	}
-	if err := m.updateConfig(name, cfg); err != nil {
+	if err := m.updateConfig(ctx, name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -177,8 +177,8 @@ func normalizePrefixes(prefixes []netip.Prefix) []netip.Prefix {
 // deferred handles (the publish retired the generations that were
 // holding them), frees or defers the old module handle, and stores the
 // new config. The caller must hold m.mu.
-func (m *DecapService) updateConfig(name string, cfg *config) error {
-	mod, err := m.backend.UpdateModule(name, slices.Concat(cfg.Prefixes4, cfg.Prefixes6))
+func (m *DecapService) updateConfig(ctx context.Context, name string, cfg *config) error {
+	mod, err := m.backend.UpdateModule(ctx, name, slices.Concat(cfg.Prefixes4, cfg.Prefixes6))
 	if err != nil {
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}

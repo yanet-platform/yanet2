@@ -25,7 +25,7 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config, applies mutations, and publishes it
 	// to the dataplane.
-	UpdateModule(name string, prefixes []netip.Prefix, flag uint8, mark uint8) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, prefixes []netip.Prefix, flag uint8, mark uint8) (ModuleHandle, error)
 }
 
 type DscpService struct {
@@ -171,7 +171,7 @@ func (m *DscpService) AddPrefixes(
 	cfg.Prefixes4 = mergePrefixes(cfg.Prefixes4, toAdd4)
 	cfg.Prefixes6 = mergePrefixes(cfg.Prefixes6, toAdd6)
 
-	if err := m.updateModuleConfig(name, cfg); err != nil {
+	if err := m.updateModuleConfig(ctx, name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -227,7 +227,7 @@ func (m *DscpService) RemovePrefixes(
 	cfg.Prefixes4 = removePrefixes(cfg.Prefixes4, toRemove4)
 	cfg.Prefixes6 = removePrefixes(cfg.Prefixes6, toRemove6)
 
-	if err := m.updateModuleConfig(name, cfg); err != nil {
+	if err := m.updateModuleConfig(ctx, name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -268,15 +268,16 @@ func (m *DscpService) SetDscpMarking(
 		Mark: mark,
 	}
 
-	if err := m.updateModuleConfig(name, cfg); err != nil {
+	if err := m.updateModuleConfig(ctx, name, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
 	return &dscppb.SetDscpMarkingResponse{}, nil
 }
 
-func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
+func (m *DscpService) updateModuleConfig(ctx context.Context, name string, cfg *config) error {
 	module, err := m.backend.UpdateModule(
+		ctx,
 		name,
 		slices.Concat(cfg.Prefixes4, cfg.Prefixes6),
 		cfg.Config.Flag,

@@ -39,7 +39,7 @@ func BenchmarkPipelineRound(b *testing.B) {
 	require.NoError(b, err)
 	defer func() { _ = agent.CleanUp() }()
 
-	require.NoError(b, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(b, agent.UpdateFunction(b.Context(), ffi.FunctionConfig{
 		Name: "bench",
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -49,14 +49,14 @@ func BenchmarkPipelineRound(b *testing.B) {
 			},
 		}},
 	}))
-	require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(b, agent.UpdatePipeline(b.Context(), ffi.PipelineConfig{
 		Name:      "bench",
 		Functions: []string{"bench"},
 	}))
-	require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(b, agent.UpdatePipeline(b.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(b.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "bench", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

@@ -77,11 +77,11 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(t.Context(), sinkName, sinkRules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: name,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -94,9 +94,9 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: name, Functions: []string{name}}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: name, Functions: []string{name}}))
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: name, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

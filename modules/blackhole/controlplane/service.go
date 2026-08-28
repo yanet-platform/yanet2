@@ -25,9 +25,9 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config and publishes it to the
 	// dataplane.
-	UpdateModule(name string) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string) (ModuleHandle, error)
 	// DeleteModule removes a module config.
-	DeleteModule(name string) error
+	DeleteModule(ctx context.Context, name string) error
 }
 
 type config struct {
@@ -117,7 +117,7 @@ func (m *BlackholeService) UpdateConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.updateConfig(name); err != nil {
+	if err := m.updateConfig(ctx, name); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update module config %q: %v", name, err,
@@ -131,8 +131,8 @@ func (m *BlackholeService) UpdateConfig(
 // handle and stores the new one.
 //
 // The caller must hold m.mu.
-func (m *BlackholeService) updateConfig(name string) error {
-	mod, err := m.backend.UpdateModule(name)
+func (m *BlackholeService) updateConfig(ctx context.Context, name string) error {
+	mod, err := m.backend.UpdateModule(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ func (m *BlackholeService) DeleteConfig(
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err := m.backend.DeleteModule(ctx, name); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to delete module config %q: %v", name, err,

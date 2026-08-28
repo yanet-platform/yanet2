@@ -24,9 +24,9 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config, writes rules, and publishes
 	// it to the dataplane.
-	UpdateModule(name string, rules []cmirror.MirrorRule) (ModuleHandle, error)
+	UpdateModule(ctx context.Context, name string, rules []cmirror.MirrorRule) (ModuleHandle, error)
 	// DeleteModule removes a module config.
-	DeleteModule(name string) error
+	DeleteModule(ctx context.Context, name string) error
 }
 
 type mirrorConfig struct {
@@ -177,7 +177,7 @@ func (m *MirrorService) UpdateConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	module, err := m.backend.UpdateModule(name, rules)
+	module, err := m.backend.UpdateModule(ctx, name, rules)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
@@ -213,7 +213,7 @@ func (m *MirrorService) DeleteConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err := m.backend.DeleteModule(ctx, name); err != nil {
 		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
 	}
 

@@ -87,11 +87,11 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 			Devices: filter.Devices{{Name: "port0"}},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(t.Context(), sinkName, sinkRules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -104,12 +104,12 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -126,7 +126,7 @@ func applyDecapConfig(
 ) {
 	t.Helper()
 
-	handle, err := backend.UpdateModule(name, prefixes)
+	handle, err := backend.UpdateModule(t.Context(), name, prefixes)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	wireDecapPipeline(t, agent, name)

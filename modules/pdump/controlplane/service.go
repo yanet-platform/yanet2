@@ -122,7 +122,6 @@ func (m *PdumpService) ListConfigs(
 	ctx context.Context,
 	request *pdumppb.ListConfigsRequest,
 ) (*pdumppb.ListConfigsResponse, error) {
-
 	response := &pdumppb.ListConfigsResponse{
 		Configs: make([]string, 0),
 	}
@@ -187,7 +186,7 @@ func (m *PdumpService) SetConfig(
 		name,
 		request,
 		func(config *pdumpConfig) error {
-			return m.updateModuleConfig(name, config)
+			return m.updateModuleConfig(ctx, name, config)
 		},
 	)
 	if err != nil {
@@ -223,7 +222,7 @@ func (m *PdumpService) DeleteConfig(
 		func() error {
 			// Delete the module config from the data plane if it exists.
 			if config.FFIModule != nil {
-				if err := m.agent.DeleteModuleConfig(moduleType, name); err != nil {
+				if err := m.agent.DeleteModuleConfig(ctx, moduleType, name); err != nil {
 					return status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 				}
 
@@ -281,6 +280,7 @@ func (m *PdumpService) transferConfigParameters(
 // updateModuleConfig publishes the current configuration after all readers of
 // the previous ring have stopped and the state lock has been reacquired.
 func (m *PdumpService) updateModuleConfig(
+	ctx context.Context,
 	name string,
 	modConfig *pdumpConfig,
 ) error {
@@ -305,7 +305,7 @@ func (m *PdumpService) updateModuleConfig(
 		}
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{ffiConfig.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules(ctx, []ffi.ModuleConfig{ffiConfig.AsFFIModule()}); err != nil {
 		if err := ffiConfig.Free(); err != nil {
 			m.log.Error("failed to free unpublished pdump module",
 				zap.String("name", name), zap.Error(err))

@@ -11,6 +11,7 @@ package cacl
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -37,14 +38,20 @@ type ModuleConfig struct {
 // are declared as object links here and resolve against published
 // objects when the config is published. An empty name declares no link,
 // and CHECK_STATE then finds no state for that family. Pass nil
-// emitConfig for a ruleset that emits no sync packets.
+// emitConfig for a ruleset that emits no sync packets. A context that is
+// already done returns without compiling anything.
 func NewModuleConfig(
+	ctx context.Context,
 	agent *ffi.Agent,
 	name string,
 	rules []AclRule,
 	fw4MapName, fw6MapName string,
 	emitConfig *cfwstate.SyncEmitConfig,
 ) (*ModuleConfig, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
@@ -83,18 +90,29 @@ func NewModuleConfig(
 	defer C.free(unsafe.Pointer(cName))
 
 	var cErr *C.yanet_error
-	ptr := C.acl_module_config_init(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		cName,
-		cRulesPtr,
-		C.uint32_t(len(cRules)),
-		cFw4Name,
-		cFw6Name,
-		(*C.struct_fwstate_sync_emit_config)(cEmitPtr),
-		&cErr,
-	)
-	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	var ptr *C.struct_cp_module
+
+	// Compiling the ruleset is the long step of an update, so it runs
+	// under the caller's cancellation rather than ahead of it.
+	err := ffi.WithCancellation(ctx, func() error {
+		ptr = C.acl_module_config_init(
+			(*C.struct_agent)(agent.AsRawPtr()),
+			cName,
+			cRulesPtr,
+			C.uint32_t(len(cRules)),
+			cFw4Name,
+			cFw6Name,
+			(*C.struct_fwstate_sync_emit_config)(cEmitPtr),
+			&cErr,
+		)
+		if ptr == nil {
+			return fmt.Errorf("failed to initialize module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &ModuleConfig{

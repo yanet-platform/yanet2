@@ -125,10 +125,10 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 		},
 		Fragment: filter.FragmentAny,
 	}
-	handle, err := backend.NewModule(name, []cacl.AclRule{rule}, "", "", nil)
+	handle, err := backend.NewModule(t.Context(), name, []cacl.AclRule{rule}, "", "", nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(t, backend.UpdateModule(t.Context(), handle))
 }
 
 // TestZeroWeightFunctionDropsAllPackets verifies that a function whose only
@@ -145,7 +145,7 @@ func TestZeroWeightFunctionDropsAllPackets(t *testing.T) {
 
 	// Register an ACL function whose single chain has weight 0, which the
 	// dataplane treats as fully disabled.
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 0,
@@ -155,12 +155,12 @@ func TestZeroWeightFunctionDropsAllPackets(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
+	_, err := plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -205,7 +205,7 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 	publishMatchAllACL(t, backend, aclB, cacl.ActionDeny)
 
 	// Wire both single-chain functions into one pipeline in order.
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: aclA,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -215,7 +215,7 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: aclB,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -225,12 +225,12 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      pipelineAB,
 		Functions: []string{aclA, aclB},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
+	_, err := plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: pipelineAB, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -272,7 +272,7 @@ func TestZeroWeightDeviceEntryDropsAllPackets(t *testing.T) {
 	h, agent, backend := setupACLBackend(t, "zw-dev-test")
 	publishMatchAllACL(t, backend, configName, cacl.ActionAllow)
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -282,15 +282,15 @@ func TestZeroWeightDeviceEntryDropsAllPackets(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
 
 	// Bind the input pipeline with weight 0, which leaves the device entry's
 	// pipeline-map size at 0, so every packet is unroutable.
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 0}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -337,12 +337,13 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/8")},
 	}
 	handle, err := forwardBackend.UpdateModule(
+		t.Context(),
 		forwardName, []cforward.ForwardRule{rule},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -355,12 +356,12 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -395,10 +396,10 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 func TestEmptyPipelineDeviceDropsAllPackets(t *testing.T) {
 	h, agent, _ := setupACLBackend(t, "empty-dev-test")
 
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
 	// The device input binds no pipeline at all, so the entry has nothing to
 	// dispatch to.
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

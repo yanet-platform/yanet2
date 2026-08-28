@@ -83,7 +83,7 @@ func setupHarness(
 		Endpoints: []cunrdup.Endpoint{{Port: servicePort, Proto: ipprotoTCP}},
 	}}))
 
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{module.AsFFIModule()}))
 	wirePipeline(t, agent)
 
 	return harness
@@ -109,11 +109,11 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
 	sinkName := configName + "-sink"
-	sink, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllRules())
+	sink, err := forward.NewBackend(agent).UpdateModule(t.Context(), sinkName, catchAllRules())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sink.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -126,12 +126,12 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{Name: "dummy"}))
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

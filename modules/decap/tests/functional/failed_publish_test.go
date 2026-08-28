@@ -67,7 +67,7 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	// before the module is ever upserted into it.
 	originalWorkerCount := zeroWorkerCount(agent.AsRawPtr())
 
-	err = agent.UpdateModules([]ffi.ModuleConfig{mod.AsFFIModule()})
+	err = agent.UpdateModules(t.Context(), []ffi.ModuleConfig{mod.AsFFIModule()})
 	restoreWorkerCount(agent.AsRawPtr(), originalWorkerCount)
 	require.Error(
 		t, err,

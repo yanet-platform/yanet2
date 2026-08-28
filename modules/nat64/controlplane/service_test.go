@@ -1,6 +1,7 @@
 package nat64
 
 import (
+	"context"
 	"errors"
 	"net/netip"
 	"testing"
@@ -30,7 +31,7 @@ type mockBackend struct {
 	failAt  int
 }
 
-func (m *mockBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
+func (m *mockBackend) UpdateModule(ctx context.Context, name string, cfg *NAT64Config) (ModuleHandle, error) {
 	if m.failAt != 0 && len(m.configs)+1 == m.failAt {
 		return nil, errInjectedBackend
 	}

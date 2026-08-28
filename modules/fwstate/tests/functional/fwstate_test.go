@@ -97,7 +97,7 @@ func newPublishedFWStateMaps(
 		mapObject, err := objfwstate.NewMapObjectConfig(agent, objectName, kind)
 		require.NoError(t, err)
 		require.NoError(t, mapObject.CreateMap(indexSize, 64, 1))
-		require.NoError(t, mapObject.Publish(agent))
+		require.NoError(t, mapObject.Publish(t.Context(), agent))
 		t.Cleanup(func() { _ = mapObject.Free() })
 		return mapObject
 	}
@@ -123,7 +123,7 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = modCfg.Free() })
 
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{modCfg.AsFFIModule()}))
 }
 
 // wireFWSPipeline wires chain[fwstate:name -> forward:sink] into a pipeline
@@ -152,11 +152,11 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(t.Context(), sinkName, sinkRules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: name,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -169,14 +169,14 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      name,
 		Functions: []string{name},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: name, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

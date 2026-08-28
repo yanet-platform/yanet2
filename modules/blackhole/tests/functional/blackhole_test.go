@@ -57,7 +57,7 @@ func setupBlackholeHarness(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = mod.Free() })
 
-	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{mod.AsFFIModule()}))
+	require.NoError(t, agent.UpdateModules(t.Context(), []ffi.ModuleConfig{mod.AsFFIModule()}))
 
 	return h, agent, mod
 }
@@ -71,7 +71,7 @@ func wirePipeline(
 ) {
 	t.Helper()
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -83,14 +83,14 @@ func wirePipeline(
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

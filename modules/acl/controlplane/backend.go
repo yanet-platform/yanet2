@@ -1,6 +1,7 @@
 package acl
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -19,13 +20,14 @@ func NewBackend(agent *ffi.Agent) Backend {
 }
 
 func (m *backend) NewModule(
+	ctx context.Context,
 	name string,
 	rules []cacl.AclRule,
 	fw4MapName, fw6MapName string,
 	emitConfig *cfwstate.SyncEmitConfig,
 ) (ModuleHandle, error) {
 	handle, err := cacl.NewModuleConfig(
-		m.agent, name, rules, fw4MapName, fw6MapName, emitConfig,
+		ctx, m.agent, name, rules, fw4MapName, fw6MapName, emitConfig,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -34,12 +36,12 @@ func (m *backend) NewModule(
 	return handle, nil
 }
 
-func (m *backend) UpdateModule(handle ModuleHandle) error {
-	return m.agent.UpdateModules([]ffi.ModuleConfig{handle.AsFFIModule()})
+func (m *backend) UpdateModule(ctx context.Context, handle ModuleHandle) error {
+	return m.agent.UpdateModules(ctx, []ffi.ModuleConfig{handle.AsFFIModule()})
 }
 
-func (m *backend) DeleteModule(name string) error {
-	return m.agent.DeleteModuleConfig(moduleType, name)
+func (m *backend) DeleteModule(ctx context.Context, name string) error {
+	return m.agent.DeleteModuleConfig(ctx, moduleType, name)
 }
 
 func (m *backend) DPConfig() *ffi.DPConfig {

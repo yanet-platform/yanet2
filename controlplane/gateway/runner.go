@@ -73,6 +73,9 @@ func NewServiceRunner(
 	if provider, ok := module.(UnaryInterceptedService); ok {
 		interceptors = append(interceptors, provider.UnaryServerInterceptors()...)
 	}
+	// Innermost, so the outer logging and metrics observe the outcome it
+	// rewrites rather than the internal failure the handler reported.
+	interceptors = append(interceptors, xgrpc.ContextStatusInterceptor())
 
 	return &ServiceRunner{
 		module:          module,

@@ -454,16 +454,16 @@ func deployRules(t *testing.T, rules []croutempls.Rule) *dataplaneut.Harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	handle, err := routempls.NewBackend(agent).UpdateModule(mplsConfigName, rules)
+	handle, err := routempls.NewBackend(agent).UpdateModule(t.Context(), mplsConfigName, rules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 
 	sinkName := mplsConfigName + "-sink"
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllForwardRules(mplsDevice))
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(t.Context(), sinkName, catchAllForwardRules(mplsDevice))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(t, agent.UpdateFunction(t.Context(), ffi.FunctionConfig{
 		Name: mplsConfigName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -476,15 +476,15 @@ func deployRules(t *testing.T, rules []croutempls.Rule) *dataplaneut.Harness {
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name:      mplsConfigName,
 		Functions: []string{mplsConfigName},
 	}))
 	// A pipeline with no functions passes egress packets straight through.
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(t, agent.UpdatePipeline(t.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(t.Context(), agent, []ffi.DeviceConfig{{
 		Name:   mplsDevice,
 		Input:  []ffi.DevicePipelineConfig{{Name: mplsConfigName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

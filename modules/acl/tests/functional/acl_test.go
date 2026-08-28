@@ -115,11 +115,11 @@ func applyACLRules(
 ) acl.ModuleHandle {
 	tb.Helper()
 
-	handle, err := backend.NewModule(name, rules, "", "", nil)
+	handle, err := backend.NewModule(tb.Context(), name, rules, "", "", nil)
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = handle.Free() })
 
-	require.NoError(tb, backend.UpdateModule(handle))
+	require.NoError(tb, backend.UpdateModule(tb.Context(), handle))
 	return handle
 }
 
@@ -153,11 +153,11 @@ func wireACLPipeline(
 			Counter: "sink6",
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(tb.Context(), sinkName, sinkRules)
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = sinkHandle.Free() })
 
-	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(tb, agent.UpdateFunction(tb.Context(), ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -170,14 +170,14 @@ func wireACLPipeline(
 			},
 		}},
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(tb.Context(), ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(tb.Context(), agent, []ffi.DeviceConfig{{
 		Name:   device,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

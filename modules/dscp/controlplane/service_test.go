@@ -1,6 +1,7 @@
 package dscp
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 	"sync"
@@ -71,6 +72,7 @@ func (m *mockModuleHandle) Free() error {
 type mockBackend struct{}
 
 func (m *mockBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	prefixes []netip.Prefix,
 	flag uint8,
@@ -91,6 +93,7 @@ type flakyBackend struct {
 }
 
 func (m *flakyBackend) UpdateModule(
+	ctx context.Context,
 	name string,
 	prefixes []netip.Prefix,
 	flag uint8,
@@ -104,7 +107,7 @@ func (m *flakyBackend) UpdateModule(
 		return nil, errBackendFailure
 	}
 
-	return m.backend.UpdateModule(name, prefixes, flag, mark)
+	return m.backend.UpdateModule(ctx, name, prefixes, flag, mark)
 }
 
 // Test_DscpService_ListShowAddRemoveSetMarking verifies that prefix mutations

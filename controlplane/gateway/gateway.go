@@ -299,6 +299,10 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			serverMetrics.UnaryServerInterceptor(),
 			auth.UnaryServerInterceptor(authManager, log),
 			xgrpc.AccessLogInterceptor(log),
+			// Innermost, so the outer logging and metrics observe the
+			// outcome it rewrites rather than the internal failure the
+			// handler reported.
+			xgrpc.ContextStatusInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
 			serverMetrics.StreamServerInterceptor(),

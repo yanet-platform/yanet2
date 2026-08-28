@@ -128,11 +128,11 @@ func wireRedirect(
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/8")},
 	}
-	handle, err := backend.UpdateModule(name, []cforward.ForwardRule{rule})
+	handle, err := backend.UpdateModule(b.Context(), name, []cforward.ForwardRule{rule})
 	require.NoError(b, err)
 	b.Cleanup(func() { _ = handle.Free() })
 
-	require.NoError(b, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(b, agent.UpdateFunction(b.Context(), ffi.FunctionConfig{
 		Name: name,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -142,19 +142,19 @@ func wireRedirect(
 			},
 		}},
 	}))
-	require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(b, agent.UpdatePipeline(b.Context(), ffi.PipelineConfig{
 		Name:      name,
 		Functions: []string{name},
 	}))
 
 	// A pipeline with no functions passes packets straight through.
-	require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+	require.NoError(b, agent.UpdatePipeline(b.Context(), ffi.PipelineConfig{Name: "dummy"}))
 
 	for _, dev := range extra {
-		require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{
+		require.NoError(b, agent.UpdatePipeline(b.Context(), ffi.PipelineConfig{
 			Name: "dummy_out_" + dev,
 		}))
-		require.NoError(b, agent.UpdatePipeline(ffi.PipelineConfig{
+		require.NoError(b, agent.UpdatePipeline(b.Context(), ffi.PipelineConfig{
 			Name: "dummy_in_" + dev,
 		}))
 	}
@@ -171,7 +171,7 @@ func wireRedirect(
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_" + dev, Weight: 1}},
 		})
 	}
-	_, err = plain.UpdateDevices(agent, devices)
+	_, err = plain.UpdateDevices(b.Context(), agent, devices)
 	require.NoError(b, err)
 }
 
