@@ -66,12 +66,16 @@ func Unmarshal(data []byte, msg proto.Message) error {
 
 // isEmptyDocument tells a bare separator, which the parser reports as a
 // document holding an unspelled null, from a document that spells one.
+//
+// A spelled null, tagged or quoted, carries a style, and an unspelled one
+// carries none.
 func isEmptyDocument(node *yaml.Node) bool {
 	if node.Kind != yaml.DocumentNode || len(node.Content) != 1 {
 		return len(node.Content) == 0
 	}
 	content := node.Content[0]
-	return content.Kind == yaml.ScalarNode && content.Tag == "!!null" && content.Value == ""
+	return content.Kind == yaml.ScalarNode && content.Tag == "!!null" &&
+		content.Value == "" && content.Style == 0
 }
 
 // rejectNullEntries fails on a null list entry anywhere in the document.

@@ -69,6 +69,15 @@ func Test_Unmarshal_ResolvesTags(t *testing.T) {
 	require.Equal(t, "2024-01-01T00:00:00Z", value.GetValue())
 }
 
+// Test_Unmarshal_KeepsLargeIntegersExact verifies that an integer written
+// as an integer survives at the top of the 64-bit range.
+func Test_Unmarshal_KeepsLargeIntegersExact(t *testing.T) {
+	value := &wrapperspb.UInt64Value{}
+	require.NoError(t, xproto.Unmarshal([]byte("value: 18446744073709551615\n"), value))
+
+	require.Equal(t, uint64(18446744073709551615), value.GetValue())
+}
+
 // Test_Unmarshal_RejectsAliasBlowup verifies that the parser rejects a
 // document whose aliases expand far beyond what it spells out.
 func Test_Unmarshal_RejectsAliasBlowup(t *testing.T) {
@@ -176,6 +185,18 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 		{
 			name:    "explicit null as a second document",
 			input:   "value: a\n---\nnull\n",
+			message: &wrapperspb.StringValue{},
+			wantErr: "more than one document",
+		},
+		{
+			name:    "tagged empty null as a second document",
+			input:   "value: a\n---\n!!null \"\"\n",
+			message: &wrapperspb.StringValue{},
+			wantErr: "more than one document",
+		},
+		{
+			name:    "tagged null on the separator line",
+			input:   "value: a\n--- !!null\n",
 			message: &wrapperspb.StringValue{},
 			wantErr: "more than one document",
 		},
