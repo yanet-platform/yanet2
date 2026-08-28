@@ -1,8 +1,11 @@
 #include "zone.h"
 
 #include <errno.h>
+#include <sched.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "common/cpu_pause.h"
 
 #include "lib/controlplane/config/econtext.h"
 
@@ -32,17 +35,30 @@ cp_config_try_lock(struct cp_config *cp_config) {
 void
 cp_config_lock(struct cp_config *cp_config) {
 	pid_t pid = getpid();
-	pid_t zero = 0;
-	while (!__atomic_compare_exchange_n(
-		&cp_config->config_lock,
-		&zero,
-		pid,
-		false,
-		__ATOMIC_ACQUIRE,
-		__ATOMIC_RELAXED
-	)) {
-		zero = 0;
-	};
+	int spins = 0;
+	for (;;) {
+		pid_t zero = 0;
+		if (__atomic_compare_exchange_n(
+			    &cp_config->config_lock,
+			    &zero,
+			    pid,
+			    false,
+			    __ATOMIC_ACQUIRE,
+			    __ATOMIC_RELAXED
+		    )) {
+			return;
+		}
+
+		while (__atomic_load_n(
+			       &cp_config->config_lock, __ATOMIC_RELAXED
+		       ) != 0) {
+			cpu_pause();
+			if (++spins >= 1024) {
+				sched_yield();
+				spins = 0;
+			}
+		}
+	}
 }
 
 bool
