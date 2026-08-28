@@ -878,14 +878,14 @@ func (f *TestFramework) ResetConnections() {
 //	    t.Logf("Output: %s", output)
 //	})
 func (f *TestFramework) ExecuteCommand(command string) (string, error) {
-	return f.cli.ExecuteCommand(command)
+	return f.cli.ExecuteCommand(f.resolveCLIPaths(command))
 }
 
 // ExecuteCommandWithTimeout executes a single CLI command with a custom
 // timeout. Use this for operations that may take longer than the default
 // 30s, such as copying large binaries on slow emulated VMs.
 func (f *TestFramework) ExecuteCommandWithTimeout(command string, timeout time.Duration) (string, error) {
-	return f.cli.ExecuteCommandWithTimeout(command, timeout)
+	return f.cli.ExecuteCommandWithTimeout(f.resolveCLIPaths(command), timeout)
 }
 
 // ExecuteCommands executes multiple CLI commands sequentially within the QEMU
@@ -915,13 +915,28 @@ func (f *TestFramework) ExecuteCommandWithTimeout(command string, timeout time.D
 //	    t.Logf("Outputs: %v", outputs)
 //	})
 func (f *TestFramework) ExecuteCommands(commands ...string) ([]string, error) {
-	return f.cli.ExecuteCommands(commands...)
+	return f.cli.ExecuteCommands(f.resolveCLICommands(commands)...)
 }
 
 // ExecuteCommandsSeparately runs every command to completion regardless of
 // individual failures, pairing each output with its own error.
 func (f *TestFramework) ExecuteCommandsSeparately(commands ...string) ([]string, []error) {
-	return f.cli.ExecuteCommandsSeparately(commands...)
+	return f.cli.ExecuteCommandsSeparately(f.resolveCLICommands(commands)...)
+}
+
+func (f *TestFramework) resolveCLIPaths(command string) string {
+	if !f.Paths.LocalMode {
+		return command
+	}
+	return strings.ReplaceAll(command, CLIBasePath+"/", f.Paths.CLIBase+"/")
+}
+
+func (f *TestFramework) resolveCLICommands(commands []string) []string {
+	resolved := make([]string, len(commands))
+	for i, command := range commands {
+		resolved[i] = f.resolveCLIPaths(command)
+	}
+	return resolved
 }
 
 // getDumpFilePaths returns dump file paths for a test.

@@ -64,3 +64,19 @@ func TestConfigureTemplateSetsGuestPathsForSelectedSnapshot(t *testing.T) {
 		})
 	}
 }
+
+// Test_ResolveCLIPaths_GuestStorageMode verifies that snapshot-backed guests
+// use copied CLIs while booted guests use the shared mount.
+func Test_ResolveCLIPaths_GuestStorageMode(t *testing.T) {
+	command := "/mnt/target/release/yanet-cli-route list"
+
+	local := &TestFramework{Paths: LocalGuestPaths()}
+	if got, want := local.resolveCLIPaths(command), "/tmp/yanet/cli/yanet-cli-route list"; got != want {
+		t.Errorf("resolveCLIPaths() = %q, want %q", got, want)
+	}
+
+	mounted := &TestFramework{Paths: DefaultGuestPaths()}
+	if got := mounted.resolveCLIPaths(command); got != command {
+		t.Errorf("resolveCLIPaths() = %q, want %q", got, command)
+	}
+}

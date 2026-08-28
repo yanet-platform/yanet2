@@ -235,6 +235,12 @@ func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 			})
 		}
 
+		fw.Run("yanet-cli_dispatches_sibling", func(fw *framework.TestFramework, t *testing.T) {
+			output, err := fw.ExecuteCommand(framework.CLIGeneric + " route --help")
+			require.NoError(t, err)
+			require.NotEmpty(t, output)
+		})
+
 		// Check main YANET components
 		fw.Run("yanet_components", func(fw *framework.TestFramework, t *testing.T) {
 			components := []string{
