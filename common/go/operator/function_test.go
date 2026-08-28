@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -142,7 +143,7 @@ func Test_FunctionApplier_GetErrorAbortsWithoutUpdate(t *testing.T) {
 		getErr: errors.New("not found"),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.Error(t, err)
 	require.False(t, skipped)
@@ -182,7 +183,7 @@ func Test_FunctionApplier_ChainMatchesExactlyNoPdumpSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.True(t, skipped)
@@ -207,7 +208,7 @@ func Test_FunctionApplier_PdumpBeforeAndAfterMatchingSurvivorsSkipped(t *testing
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.True(t, skipped)
@@ -228,7 +229,7 @@ func Test_FunctionApplier_PdumpBetweenModulesAndAtStartSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.True(t, skipped)
@@ -243,7 +244,7 @@ func Test_FunctionApplier_WrongModuleTypeNotSkipped(t *testing.T) {
 		}),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.False(t, skipped)
@@ -269,7 +270,7 @@ func Test_FunctionApplier_CorrectTypeWrongOrderNotSkipped(t *testing.T) {
 		},
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.False(t, skipped)
@@ -290,7 +291,7 @@ func Test_FunctionApplier_ExtraNonPdumpModuleNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.False(t, skipped)
@@ -307,7 +308,7 @@ func Test_FunctionApplier_ForwardWithWrongNameNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.False(t, skipped)
@@ -328,7 +329,7 @@ func Test_FunctionApplier_PdumpxPrefixNotFilteredNotSkipped(t *testing.T) {
 		),
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePDump()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.False(t, skipped)
@@ -403,8 +404,8 @@ func Test_FunctionApplier_RejectsChainlessDefinition(t *testing.T) {
 	require.Equal(t, 0, c.updates)
 }
 
-// Test_FunctionApplier_Drift verifies that each way the gateway
-// can drift from the definition triggers an update.
+// Test_FunctionApplier_Drift verifies that each way the gateway can drift
+// from the definition triggers an update under either comparison strategy.
 func Test_FunctionApplier_Drift(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -455,17 +456,75 @@ func Test_FunctionApplier_Drift(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			current := functionDefinition()
-			tc.drift(current)
-			c := &fakeFunctionClient{
-				getResp: &ynpb.GetFunctionResponse{Function: current},
-			}
+		for _, ignorePdump := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/ignore pdump %t", tc.name, ignorePdump), func(t *testing.T) {
+				current := functionDefinition()
+				tc.drift(current)
+				var options []FunctionApplierOption
+				if ignorePdump {
+					options = append(options, WithIgnorePDump())
+					chain := current.Chains[0].Chain
+					chain.Modules = append([]*commonpb.ModuleId{{Type: "pdump", Name: "pd0"}}, chain.Modules...)
+				}
+				c := &fakeFunctionClient{
+					getResp: &ynpb.GetFunctionResponse{Function: current},
+				}
 
-			skipped, err := NewFunctionApplier(c, functionDefinition()).Apply(t.Context())
+				skipped, err := NewFunctionApplier(c, functionDefinition(), options...).
+					Apply(t.Context())
+				require.NoError(t, err)
+				require.False(t, skipped)
+				require.Equal(t, 1, c.updates)
+			})
+		}
+	}
+}
+
+// Test_FunctionApplier_PdumpInDefinition verifies that a definition carrying
+// pdump itself is skipped when pdump is ignored and updated otherwise.
+func Test_FunctionApplier_PdumpInDefinition(t *testing.T) {
+	cases := []struct {
+		name        string
+		options     []FunctionApplierOption
+		gateway     []*commonpb.ModuleId
+		wantUpdates int
+	}{
+		{
+			name:        "ignored, gateway lacks pdump",
+			options:     []FunctionApplierOption{WithIgnorePDump()},
+			gateway:     []*commonpb.ModuleId{{Type: "forward", Name: "fwd0"}},
+			wantUpdates: 0,
+		},
+		{
+			name:    "ignored, gateway holds another pdump",
+			options: []FunctionApplierOption{WithIgnorePDump()},
+			gateway: []*commonpb.ModuleId{
+				{Type: "forward", Name: "fwd0"},
+				{Type: "pdump", Name: "pd1"},
+			},
+			wantUpdates: 0,
+		},
+		{
+			name:        "exact, gateway lacks pdump",
+			gateway:     []*commonpb.ModuleId{{Type: "forward", Name: "fwd0"}},
+			wantUpdates: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			definition := functionApplierSpec()
+			definition.Chains[0].Chain.Modules = []*commonpb.ModuleId{
+				{Type: "pdump", Name: "pd0"},
+				{Type: "forward", Name: "fwd0"},
+			}
+			c := &fakeFunctionClient{getResp: makeGetResp(tc.gateway...)}
+
+			skipped, err := NewFunctionApplier(c, definition, tc.options...).
+				Apply(t.Context())
 			require.NoError(t, err)
-			require.False(t, skipped)
-			require.Equal(t, 1, c.updates)
+			require.Equal(t, tc.wantUpdates == 0, skipped)
+			require.Equal(t, tc.wantUpdates, c.updates)
 		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 type grpcServerOption struct {
@@ -184,20 +185,33 @@ func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
 }
 
 type functionApplierOptions struct {
-	IgnorePdump bool
+	// Compare decides whether the gateway already holds the wanted function.
+	Compare functionCompare
 }
 
 func newFunctionApplierOptions() *functionApplierOptions {
-	return &functionApplierOptions{}
+	return &functionApplierOptions{
+		Compare: (*ynpb.Function).Equal,
+	}
 }
 
 // FunctionApplierOption configures NewFunctionApplier.
 type FunctionApplierOption func(*functionApplierOptions)
 
-// WithIgnorePdump, when enabled, hides pdump modules on the gateway from the
-// check whether a chain already carries the wanted modules.
-func WithIgnorePdump(enabled bool) FunctionApplierOption {
+// WithIgnorePDump leaves pdump modules on both sides out of the check
+// whether the gateway already holds the wanted function.
+func WithIgnorePDump() FunctionApplierOption {
 	return func(o *functionApplierOptions) {
-		o.IgnorePdump = enabled
+		o.Compare = compareFunctionsIgnorePdump
 	}
+}
+
+// functionCompare reports whether the function satisfies the wanted
+// definition.
+type functionCompare func(have, want *ynpb.Function) bool
+
+// compareFunctionsIgnorePdump leaves pdump modules on both sides out of the
+// comparison, so a definition carrying pdump itself does not drift forever.
+func compareFunctionsIgnorePdump(have, want *ynpb.Function) bool {
+	return have.WithoutModules("pdump").Equal(want.WithoutModules("pdump"))
 }

@@ -68,6 +68,11 @@ func NewGatewayActuator(
 		}},
 	}
 
+	var applierOptions []operator.FunctionApplierOption
+	if fn.IgnorePdump {
+		applierOptions = append(applierOptions, operator.WithIgnorePDump())
+	}
+
 	return &GatewayActuator{
 		name:   cfg.Name,
 		conn:   conn,
@@ -75,7 +80,7 @@ func NewGatewayActuator(
 		funcApplier: operator.NewFunctionApplier(
 			ynpb.NewFunctionServiceClient(conn),
 			function,
-			operator.WithIgnorePdump(fn.IgnorePdump),
+			applierOptions...,
 		),
 		devices:    opts.Devices,
 		onFIBBuilt: opts.OnFIBBuilt,

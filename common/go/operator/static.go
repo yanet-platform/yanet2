@@ -31,7 +31,7 @@ type StaticTarget struct {
 	Request proto.Message
 	// Function is published after the config, nil when the target owns none.
 	Function *ynpb.Function
-	// IgnorePdump leaves pdump modules on the gateway out of the function
+	// IgnorePdump leaves pdump modules on both sides out of the function
 	// comparison.
 	IgnorePdump bool
 }
@@ -292,7 +292,11 @@ func (m *staticGatewayActuator) Apply(ctx context.Context, targets []StaticTarge
 		if target.Function == nil {
 			continue
 		}
-		applier := NewFunctionApplier(m.functions, target.Function, WithIgnorePdump(target.IgnorePdump))
+		var options []FunctionApplierOption
+		if target.IgnorePdump {
+			options = append(options, WithIgnorePDump())
+		}
+		applier := NewFunctionApplier(m.functions, target.Function, options...)
 		skipped, e := applier.Apply(ctx)
 		if e != nil {
 			err = errors.Join(err, fmt.Errorf(
