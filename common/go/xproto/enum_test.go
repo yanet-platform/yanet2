@@ -30,11 +30,11 @@ func Test_UnmarshalEnumJSON_Spellings(t *testing.T) {
 		want    filterpb.FragmentKind
 		wantErr string
 	}{
-		{name: "declared name", input: `"Frag"`, want: filterpb.FragmentKind_Frag},
-		{name: "declared number", input: `2`, want: filterpb.FragmentKind_Frag},
+		{name: "declared name", input: `"None"`, want: filterpb.FragmentKind_None},
+		{name: "declared number", input: `1`, want: filterpb.FragmentKind_None},
 		{name: "undeclared number is kept", input: `7`, want: filterpb.FragmentKind(7)},
-		{name: "null leaves the value", input: `null`, want: filterpb.FragmentKind_None},
-		{name: "wrong letter case", input: `"frag"`, wantErr: "want one of Any, None, Frag"},
+		{name: "null leaves the seeded value", input: `null`, want: filterpb.FragmentKind_Frag},
+		{name: "wrong letter case", input: `"none"`, wantErr: "want one of Any, None, Frag"},
 		{name: "fraction", input: `2.5`, wantErr: "not a valid number"},
 		{name: "out of int32 range", input: `4294967296`, wantErr: "not a valid number"},
 		{name: "boolean", input: `true`, wantErr: "expected a name or a number"},
@@ -43,7 +43,9 @@ func Test_UnmarshalEnumJSON_Spellings(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			kind := filterpb.FragmentKind_None
+			// Seeded with a nonzero value that no case decodes to, so a decode
+			// that resets or ignores the target is caught either way.
+			kind := filterpb.FragmentKind_Frag
 			err := xproto.UnmarshalEnumJSON([]byte(tc.input), &kind)
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
