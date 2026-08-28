@@ -11,15 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Unmarshal decodes a single YAML document into the message.
-//
-// The document spells the message in its JSON form, with proto field names
-// as keys. Whatever the message cannot hold — an unknown key, a second
-// non-empty document, a value of the wrong kind, a null list entry — is an
-// error that leaves the message unusable, except that a message defining
-// its own JSON form judges its own keys. A null leaves a field at the zero
-// value, and an unquoted value keeps the type YAML gives it, so a bare date
-// reaches a string field as a timestamp and a bare number does not.
+// Unmarshal decodes a single YAML document, spelled as the message's JSON
+// form, into the message.
 func Unmarshal(data []byte, msg proto.Message) error {
 	if msg == nil || !msg.ProtoReflect().IsValid() {
 		return errors.New("the target message is nil")
@@ -64,11 +57,8 @@ func Unmarshal(data []byte, msg proto.Message) error {
 	return jsonDecoder.Decode(msg)
 }
 
-// isEmptyDocument tells a bare separator, which the parser reports as a
-// document holding an unspelled null, from a document that spells one.
-//
-// A spelled null, tagged or quoted, carries a style, and an unspelled one
-// carries none.
+// isEmptyDocument tells a bare separator, which the parser reports as an
+// unstyled null, from a document that spells a value.
 func isEmptyDocument(node *yaml.Node) bool {
 	if node.Kind != yaml.DocumentNode || len(node.Content) != 1 {
 		return len(node.Content) == 0
@@ -78,10 +68,8 @@ func isEmptyDocument(node *yaml.Node) bool {
 		content.Value == "" && content.Style == 0
 }
 
-// rejectNullEntries fails on a null list entry anywhere in the document.
-//
-// Such an entry would land as an empty value and fail far from the file
-// that caused it, or pass as a real one.
+// rejectNullEntries fails on a null list entry, which would otherwise land
+// as an empty value far from the file that caused it.
 func rejectNullEntries(node any, path string) error {
 	switch value := node.(type) {
 	case []any:
