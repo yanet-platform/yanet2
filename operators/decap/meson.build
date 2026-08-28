@@ -26,7 +26,6 @@ if not get_option('fuzzing').enabled()
           ynpb_gen,
           common_protoc_gen,
           decap_protoc_gen,
-          decap_operator_protoc_gen,
           common_readiness_protoc_gen,
       ],
       install: true,

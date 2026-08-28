@@ -3,7 +3,6 @@ package operator
 import (
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -207,24 +206,6 @@ func TestConfigValidate(t *testing.T) {
 			}
 		})
 	}
-}
-
-// verifies that gateway scopes map by name to the nominal reconcile interval,
-// independent of retry backoff and declaration order.
-func Test_ReadinessScopeSpecs_GatewaysUseNominalReconcileInterval(t *testing.T) {
-	config := DefaultConfig()
-	config.Gateways = []operator.GatewayConfig{{Name: "gw0"}, {Name: "gw1"}}
-	config.Reconcile.Interval = xcfg.MustNonZero(10 * time.Second)
-	config.Reconcile.MaxBackoff = xcfg.MustNonZero(2 * time.Minute)
-
-	intervalsByName := map[string]time.Duration{}
-	for _, scopeSpec := range readinessScopeSpecs(config) {
-		intervalsByName[scopeSpec.Name] = scopeSpec.ExpectedObservationInterval
-	}
-	require.Equal(t, map[string]time.Duration{
-		"config:gw0": 10 * time.Second,
-		"config:gw1": 10 * time.Second,
-	}, intervalsByName)
 }
 
 // Test_Decode_WeightMustBeSpelled verifies that an omitted weight is refused

@@ -302,8 +302,6 @@ if not dataplane_only
   subdir('operators/bird-adapter/adapterpb')
   subdir('operators/pipeline/operatorpb')
   subdir('operators/route/operatorpb')
-  subdir('operators/forward/operatorpb')
-  subdir('operators/decap/operatorpb')
   subdir('controlplane')
   subdir('operators')
   foreach dir : module_test_dirs

@@ -1,17 +1,19 @@
-# Forward operator readiness
+# Static module operator readiness
 
-The forward operator exposes one readiness scope per configured gateway,
-covering all module function configs pushed to that gateway.
+A static module operator exposes one readiness scope per configured gateway,
+covering every module config and function pushed to that gateway.
 
-- gRPC FQN: `operators.forward.operatorpb.v1.ReadinessService`
-- Service implementation: `readiness_service.go` (`ReadinessService`).
-- Scope logic: `operator.go` (the observed actuator wiring).
+- gRPC FQN: `operators.<name>.operatorpb.v1.ReadinessService`, where `<name>`
+  is the operator's own name (`forward`, `decap`, ...). The service is the
+  `controlplane.ynpb.v1.ReadinessService` contract registered under that name,
+  so several operators can share one gateway.
+- Service implementation and scope logic: `static.go`.
 
 ## Scopes
 
-| Scope              | Meaning                                                |
-| ------------------ | ----------------------------------------------------- |
-| `config:<gateway>` | Per-gateway apply outcome of all forwarded function configs. |
+| Scope              | Meaning                                                    |
+| ------------------ | ---------------------------------------------------------- |
+| `config:<gateway>` | Per-gateway apply outcome of all module configs and functions. |
 
 One scope per entry in `gateways`, named `config:<gateway.name>`. Each scope
 starts at `STATE_UNKNOWN`.

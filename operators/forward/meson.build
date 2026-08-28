@@ -29,7 +29,6 @@ if not get_option('fuzzing').enabled()
           ynpb_gen,
           common_protoc_gen,
           forward_protoc_gen,
-          forward_operator_protoc_gen,
           common_readiness_protoc_gen,
           filter_protoc_gen,
       ],

@@ -1,112 +1,61 @@
 package operator
 
 import (
-	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/common/go/readiness"
-	operatorpb "github.com/yanet-platform/yanet2/operators/forward/operatorpb/v1"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
-// Operator is the forward operator's thin wrapper around the generic
-// operator framework.
-type Operator struct {
-	cfg *Config
-	app *operator.Operator[State]
-	log *zap.Logger
-}
-
-// NewOperator constructs an Operator from the supplied configuration.
-func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
+// NewOperator builds the forward operator: one target per configured
+// function, its rules loaded once from the rules file.
+func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
-	log := opts.Log
-
-	modules := make([]ModuleConfig, 0, len(cfg.Functions))
+	targets := make([]operator.StaticTarget, 0, len(cfg.Functions))
 	for _, fn := range cfg.Functions {
 		rules, err := LoadForwardRules(fn.RulesFile.Unwrap())
 		if err != nil {
 			return nil, fmt.Errorf("failed to load rules file %q: %w", fn.RulesFile.Unwrap(), err)
 		}
-		modules = append(modules, ModuleConfig{
-			Name:  fn.Module.Unwrap(),
-			Rules: rules,
+		targets = append(targets, operator.StaticTarget{
+			Name:   fn.Module.Unwrap(),
+			Method: forwardpb.ForwardService_UpdateConfig_FullMethodName,
+			Request: &forwardpb.UpdateConfigRequest{
+				Name:  fn.Module.Unwrap(),
+				Rules: rules,
+			},
+			Function: &ynpb.Function{
+				Id: &commonpb.FunctionId{Name: fn.Name.Unwrap()},
+				Chains: []*ynpb.FunctionChain{{
+					Chain: &ynpb.Chain{
+						Name: fn.Chain.Unwrap(),
+						Modules: []*commonpb.ModuleId{{
+							Type: "forward",
+							Name: fn.Module.Unwrap(),
+						}},
+					},
+					Weight: fn.Weight.Unwrap(),
+				}},
+			},
+			IgnorePdump: fn.IgnorePdump,
 		})
 	}
 
-	tracker := readiness.NewTracker(readinessScopeSpecs(cfg),
-		readiness.WithLog(log.With(zap.String("operator", "forward"))),
+	return operator.NewStaticModuleOperator(
+		"forward",
+		operator.StaticConfig{
+			Server:    cfg.Server,
+			Gateways:  cfg.Gateways,
+			Register:  cfg.Register,
+			Reconcile: cfg.Reconcile,
+		},
+		targets,
+		operator.WithStaticLog(opts.Log),
 	)
-
-	actuators := make([]operator.Actuator[State], 0, len(cfg.Gateways))
-	for _, gw := range cfg.Gateways {
-		actuator, err := NewGatewayActuator(gw, cfg.Functions, WithGatewayActuatorLog(log))
-		if err != nil {
-			for _, a := range actuators {
-				_ = a.Close()
-			}
-			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
-		}
-		observed := operator.NewObservedActuator(actuator, fmt.Sprintf("config:%s", gw.Name), tracker.Observe)
-		actuators = append(actuators, observed)
-	}
-
-	fanOut := operator.NewFanOutActuator(actuators, operator.WithFanOutLog(log))
-	source := NewStaticSource(modules, WithSourceLog(log))
-
-	svc := NewReadinessService(tracker)
-	registrar := func(s *grpc.Server) string {
-		operatorpb.RegisterReadinessServiceServer(s, svc)
-		return operatorpb.ReadinessService_ServiceDesc.ServiceName
-	}
-
-	app := operator.NewOperator(
-		fanOut,
-		source,
-		operator.WithGRPCServer(cfg.Server, registrar),
-		operator.WithGateways(cfg.Register, cfg.Gateways...),
-		operator.WithWorkers(func(ctx context.Context) error {
-			<-ctx.Done()
-			tracker.Drain()
-			return nil
-		}),
-		operator.WithLog(log),
-		operator.WithReconcile(cfg.Reconcile),
-	)
-
-	return &Operator{
-		cfg: cfg,
-		app: app,
-		log: log,
-	}, nil
-}
-
-// Run drives the operator until the supplied context is cancelled.
-func (m *Operator) Run(ctx context.Context) error {
-	return m.app.Run(ctx)
-}
-
-// Close releases resources owned by the operator.
-func (m *Operator) Close() error {
-	return m.app.Close()
-}
-
-// readinessScopeSpecs maps each gateway to the reconcile freshness cadence.
-func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
-	freshness := cfg.Reconcile.Interval.Unwrap()
-	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
-	for idx, gw := range cfg.Gateways {
-		specs[idx] = readiness.ScopeSpec{
-			Name:                        fmt.Sprintf("config:%s", gw.Name),
-			ExpectedObservationInterval: freshness,
-		}
-	}
-	return specs
 }

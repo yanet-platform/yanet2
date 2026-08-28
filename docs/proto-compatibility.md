@@ -32,7 +32,8 @@ The following versioned package families are covered by the breaking gate.
 **Operators** — `operators/<name>/.../v1/`
 - `operators.pipeline.operatorpb.v1`
 - `operators.route.operatorpb.v1`
-- `operators.forward.operatorpb.v1`
+- `operators.forward.operatorpb.v1` and `operators.decap.operatorpb.v1` exist only as runtime service
+  names of the static module operator (`common/go/operator/static.go`), not as proto packages
 - `operators.bird_adapter.adapterpb.v1` (directory `bird-adapter`, package `bird_adapter` — see Exclusions)
 
 `modules/balancer2` (`modules.balancer2.controlplane.balancerpb.v1`) is **pre-v1** and explicitly excluded from the breaking gate. See Freeze Status.

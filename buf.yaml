@@ -36,3 +36,8 @@ breaking:
     # ListEntries changes from a bidi stream to cursor-paginated unary calls
     # in the same cutover.
     - objects/fwstate/controlplane/fwstatemappb/v1/fwstatemap.proto
+    # The forward and decap readiness services keep their names, but as
+    # runtime service names of the shared static module operator, not as
+    # proto packages of their own.
+    - operators/forward/operatorpb
+    - operators/decap/operatorpb
