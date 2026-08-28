@@ -72,6 +72,46 @@ YANET employs a multi-language approach to leverage the strengths of different p
 - Ninja build system.
 - GCC/Clang.
 
+### Nix development shell
+
+On a machine with Nix installed, the repository provides the build tools and
+libraries except Rust, which is managed separately with `rustup`:
+
+Install Nix with `sh <(curl -L https://nixos.org/nix/install) --daemon` if it is not already available.
+See the [official Nix installation documentation](https://nixos.org/download/) for platform-specific options.
+
+```bash
+nix develop
+git submodule update --init --recursive
+meson setup build
+```
+
+`flake.lock` pins the environment. The flake does not select a Nix store path:
+each machine uses its own Nix configuration, so a standard `/nix` store and an
+administrator-configured external-disk store both work without repository
+changes.
+
+QEMU is included in the development shell. KVM is optional acceleration; the
+functional-test harness falls back to QEMU TCG when `/dev/kvm` is unavailable.
+To use KVM on Linux, add the current user to its group and log in again:
+
+```bash
+sudo usermod -aG kvm "$(id -un)"
+test -r /dev/kvm && test -w /dev/kvm
+```
+
+The host or VM platform must expose `/dev/kvm`; group membership cannot create
+the device. Functional tests configure hugepages inside the guest. Host
+hugepages are needed only when running the dataplane directly on the host.
+
+On x86-64, build the release artifacts with `make all`, then run
+`make test-functional`. The test harness stages Nix-built executables so they
+run with the guest system loader; the guest does not need `/nix/store`.
+Functional tests from aarch64 hosts are not yet supported.
+
+See the [Nix development workflow](docs/nix-develop-workflow.md) for everyday
+commands and store cleanup behaviour.
+
 ### Build Instructions
 
 1. Clone the repository:
