@@ -115,10 +115,10 @@ const scopeStatusMarker = "YANET2_SCOPE"
 func BuildOperatorStatusCommand(scopes []OperatorScope) string {
 	var builder strings.Builder
 	for _, scope := range scopes {
-		fmt.Fprintf(&builder, "if %s; then printf '%s %s ready\\n'; else printf '%s %s not_ready\\n'; fi\n",
+		fmt.Fprintf(&builder, "if %s; then printf '%s %s ready\\n'; else printf '%s %s not_ready\\n'; fi; ",
 			scope.Command, scopeStatusMarker, scope.Name, scopeStatusMarker, scope.Name)
 	}
-	return strings.TrimSuffix(builder.String(), "\n")
+	return strings.TrimSuffix(builder.String(), "; ")
 }
 
 // operatorStatusCommand is the status command over the pinned Operator Profile.
@@ -136,11 +136,21 @@ func ParseScopeStatus(output string) []ScopeResult {
 // table, failing closed exactly like ParseScopeStatus. Exported so the parser
 // can be pinned to the output of BuildOperatorStatusCommand on any scope set.
 func ParseScopeStatusFor(output string, scopes []OperatorScope) []ScopeResult {
+	known := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		known[scope.Name] = struct{}{}
+	}
 	matches := map[string][]string{}
+	unknownNames := []string{}
 	for line := range strings.SplitSeq(output, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != scopeStatusMarker {
 			continue
+		}
+		if _, ok := known[fields[1]]; !ok {
+			if _, seen := matches[fields[1]]; !seen {
+				unknownNames = append(unknownNames, fields[1])
+			}
 		}
 		matches[fields[1]] = append(matches[fields[1]], line)
 	}
@@ -155,6 +165,9 @@ func ParseScopeStatusFor(output string, scopes []OperatorScope) []ScopeResult {
 		default:
 			results = append(results, parseScopeStatusLine(scope, lines[0]))
 		}
+	}
+	for _, name := range unknownNames {
+		results = append(results, ScopeResult{Name: name, State: StateNotReady, Reason: "unknown scope"})
 	}
 	return results
 }

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1052,14 +1053,7 @@ func statusVerdict(scopes []lab.ScopeResult) string {
 			return statusNotReady
 		}
 		seen[scope.Name] = struct{}{}
-		known := false
-		for _, name := range expected {
-			if scope.Name == name {
-				known = true
-				break
-			}
-		}
-		if !known || scope.State != lab.StateReady {
+		if !slices.Contains(expected, scope.Name) || scope.State != lab.StateReady {
 			return statusNotReady
 		}
 	}

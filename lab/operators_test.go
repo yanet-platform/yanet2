@@ -154,6 +154,14 @@ func TestParseScopeStatus(t *testing.T) {
 			},
 		},
 		{
+			name:   "unknown scope fails closed",
+			output: statusStatusLines(nil) + "\nYANET2_SCOPE forged ready",
+			assert: func(t *testing.T, scopes []lab.ScopeResult) {
+				require.Len(t, scopes, len(lab.ScopeNames())+1)
+				require.Equal(t, lab.ScopeResult{Name: "forged", State: lab.StateNotReady, Reason: "unknown scope"}, scopes[len(scopes)-1])
+			},
+		},
+		{
 			name:   "missing scope line",
 			output: strings.Replace(statusStatusLines(nil), "YANET2_SCOPE bird ready\n", "", 1),
 			assert: func(t *testing.T, scopes []lab.ScopeResult) {
@@ -208,6 +216,7 @@ func TestStatusCommandFormatContract(t *testing.T) {
 		{Name: "b-down", Command: "false", Reason: "r-b"},
 	}
 	script := lab.BuildOperatorStatusCommand(scopes)
+	require.NotContains(t, script, "\n")
 	output, err := exec.Command("sh", "-c", "echo start; "+script+"; echo end").CombinedOutput()
 	require.NoError(t, err)
 	require.Contains(t, string(output), "end")
