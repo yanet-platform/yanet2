@@ -119,10 +119,19 @@ func Test_Unmarshal_NullLeavesZeroValue(t *testing.T) {
 // Test_Unmarshal_RejectedStreamLeavesMessage verifies that a stream
 // rejected as a whole leaves the message as it was.
 func Test_Unmarshal_RejectedStreamLeavesMessage(t *testing.T) {
-	value := &wrapperspb.StringValue{Value: "keep"}
-	require.Error(t, xproto.Unmarshal([]byte("value: a\n---\nvalue: b\n"), value))
+	for _, input := range []string{"value: a\n---\nvalue: b\n", "value: .nan\n"} {
+		value := &wrapperspb.StringValue{Value: "keep"}
+		require.Error(t, xproto.Unmarshal([]byte(input), value), "%q", input)
+		require.Equal(t, "keep", value.GetValue(), "%q", input)
+	}
+}
 
-	require.Equal(t, "keep", value.GetValue())
+// Test_Unmarshal_RejectsNilTarget verifies that a nil target, typed or
+// not, is an error rather than a crash.
+func Test_Unmarshal_RejectsNilTarget(t *testing.T) {
+	require.ErrorContains(t, xproto.Unmarshal([]byte("value: x\n"), nil), "nil")
+	var typed *wrapperspb.StringValue
+	require.ErrorContains(t, xproto.Unmarshal([]byte("value: x\n"), typed), "nil")
 }
 
 // Test_Unmarshal_RejectsMalformedDocuments verifies that each malformed
@@ -163,6 +172,36 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 			input:   "---\n---\nvalue: a\n",
 			message: &wrapperspb.StringValue{},
 			wantErr: "more than one document",
+		},
+		{
+			name:    "explicit null as a second document",
+			input:   "value: a\n---\nnull\n",
+			message: &wrapperspb.StringValue{},
+			wantErr: "more than one document",
+		},
+		{
+			name:    "empty mapping as a second document",
+			input:   "value: a\n---\n{}\n",
+			message: &wrapperspb.StringValue{},
+			wantErr: "more than one document",
+		},
+		{
+			name:    "null list entry",
+			input:   "message_type: [{name: a}, null]\n",
+			message: &descriptorpb.FileDescriptorProto{},
+			wantErr: "message_type[1] is null",
+		},
+		{
+			name:    "null entry in a list of scalars",
+			input:   "dependency: [a, null, b]\n",
+			message: &descriptorpb.FileDescriptorProto{},
+			wantErr: "dependency[1] is null",
+		},
+		{
+			name:    "null list entry in a nested message",
+			input:   "message_type: [{name: a, field: [null]}]\n",
+			message: &descriptorpb.FileDescriptorProto{},
+			wantErr: "message_type[0].field[0] is null",
 		},
 		{
 			name:    "syntax error in the second document",

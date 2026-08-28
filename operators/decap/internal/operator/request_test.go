@@ -92,3 +92,13 @@ func Test_LoadModuleConfig_ReportsMissingFile(t *testing.T) {
 
 	require.ErrorContains(t, err, path)
 }
+
+// Test_LoadModuleConfig_RejectsEmptyPrefixEntry verifies that an empty
+// list entry fails the load instead of reaching the gateway as no prefix.
+func Test_LoadModuleConfig_RejectsEmptyPrefixEntry(t *testing.T) {
+	path := writeModuleConfig(t, "prefixes4: [10.0.0.0/8, null]\n")
+
+	_, err := operator.LoadModuleConfig(path, "decap0")
+
+	require.ErrorContains(t, err, "prefixes4[1] is null")
+}
