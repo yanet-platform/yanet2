@@ -13,14 +13,12 @@ import (
 
 // Unmarshal decodes a single YAML document into msg.
 //
-// The document is re-encoded as JSON and read through encoding/json, so
-// every type keeps its own JSON form: a bare string for a commonpb
-// address, a name or a number for an enum with a JSON form. Keys are proto
-// field names matched without regard to letter case, an unknown key or a
-// second non-empty document is an error, a null leaves its field at the
-// zero value, and YAML tags are resolved before a scalar reaches a string
-// field. A failure before the JSON stage leaves msg untouched, one inside
-// it leaves msg partly written.
+// The document spells the message in its JSON form, with proto field names
+// as keys. Whatever the message cannot hold — an unknown key, a second
+// non-empty document, a value of the wrong kind — is an error that leaves
+// msg unusable. A null leaves its field at the zero value, and an unquoted
+// value keeps the type YAML gives it, so a bare date reaches a string field
+// as a timestamp and a bare number does not reach it at all.
 func Unmarshal(data []byte, msg proto.Message) error {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var tree any
