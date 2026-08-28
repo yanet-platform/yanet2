@@ -108,18 +108,15 @@ agent_attach(
 uint64_t
 agent_memory_limit(struct agent *agent);
 
-// Grows an attached agent's shared memory to at least the given total size.
-//
-// The size is a total rather than an increment. A request for what the agent
-// already holds succeeds and changes nothing; a smaller one is rejected.
+// Grows an attached agent's shared memory by the given increment.
 //
 // @param agent Handle to the agent
-// @param new_size Total size the agent should reach, in bytes
+// @param size Number of bytes to add
 // @param err Error output parameter
 //
 // @return 0 on success, -1 on error.
 int
-agent_resize(struct agent *agent, uint64_t new_size, yanet_error **err);
+agent_extend(struct agent *agent, uint64_t size, yanet_error **err);
 
 // Returns number of dataplane instances in the specified shared memory segment.
 //

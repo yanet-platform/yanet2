@@ -137,19 +137,18 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 	return nil
 }
 
-// Resize grows the agent's shared memory to at least the given total size.
+// Extend grows the agent's shared memory by the given size.
 //
-// The size is a total rather than an increment: asking for what the agent
-// already holds changes nothing, and asking for less fails. An agent that
-// draws memory straight from the controlplane pool cannot be grown.
-func (m *Agent) Resize(newSize datasize.ByteSize) error {
+// An agent that draws memory straight from the controlplane pool cannot be
+// grown.
+func (m *Agent) Extend(size datasize.ByteSize) error {
 	var cErr *C.yanet_error
-	rc := C.agent_resize(m.ptr, C.uint64_t(newSize), &cErr)
+	rc := C.agent_extend(m.ptr, C.uint64_t(size), &cErr)
 	if rc != 0 {
 		return fmt.Errorf(
-			"failed to resize agent %q to %s: %w",
+			"failed to extend agent %q by %s: %w",
 			m.name,
-			newSize,
+			size,
 			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}

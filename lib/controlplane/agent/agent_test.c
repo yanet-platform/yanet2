@@ -397,14 +397,14 @@ test_detach_initialised_segment_releases_mapping() {
 	return TEST_SUCCESS;
 }
 
-// Allocates zeroed storage for a resize test.
+// Allocates zeroed storage for an extend test.
 static void *
-resize_storage_alloc(size_t size) {
+extend_storage_alloc(size_t size) {
 	return calloc(1, size);
 }
 
 static int
-resize_env_init(
+extend_env_init(
 	void *storage, size_t cp_memory, struct cp_config **res_cp_config
 ) {
 	struct dp_config *dp_config = NULL;
@@ -459,7 +459,7 @@ agent_reserved_size(struct agent *agent) {
 }
 
 static void
-resize_agent_release(struct agent *agent, struct cp_config *cp_config) {
+extend_agent_release(struct agent *agent, struct cp_config *cp_config) {
 	cp_config_lock(cp_config);
 	agent_cleanup(agent);
 	cp_config_unlock(cp_config);
@@ -468,17 +468,17 @@ resize_agent_release(struct agent *agent, struct cp_config *cp_config) {
 // Verify that growing an agent adds usable capacity, records the new arena
 // and publishes the new limit, all while staying inside a single chunk.
 static int
-test_resize_grows_agent_capacity_and_shrink_fails() {
-	void *storage = resize_storage_alloc(1 << 25);
+test_extend_grows_agent_capacity() {
+	void *storage = extend_storage_alloc(1 << 25);
 	TEST_ASSERT_NOT_NULL(storage, "storage allocation failed");
 
 	struct cp_config *cp_config = NULL;
-	int rc = resize_env_init(storage, 1 << 24, &cp_config);
+	int rc = extend_env_init(storage, 1 << 24, &cp_config);
 	TEST_ASSERT(rc == 0, "storage setup failed");
 
 	struct yanet_shm shm = {.base = storage, .size = 1 << 25};
 	yanet_error *err = NULL;
-	struct agent *agent = agent_attach(&shm, 0, "resize", 1 << 12, &err);
+	struct agent *agent = agent_attach(&shm, 0, "extend", 1 << 12, &err);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
 
 	TEST_ASSERT_EQUAL(
@@ -494,18 +494,18 @@ test_resize_grows_agent_capacity_and_shrink_fails() {
 	block = memory_balloc(&agent->memory_context, 1 << 13);
 	TEST_ASSERT_NULL(block, "agent allocated more memory than it has");
 
-	rc = agent_resize(agent, 1u << 20, &err);
+	rc = agent_extend(agent, 1u << 20, &err);
 	TEST_ASSERT(rc == 0, "growing an attached agent must succeed");
-	TEST_ASSERT_NULL(err, "a successful resize must not set an error");
+	TEST_ASSERT_NULL(err, "a successful extend must not set an error");
 
 	TEST_ASSERT_EQUAL(
 		agent_memory_limit(agent),
-		(uint64_t)(1u << 20),
-		"the reported limit must follow a successful resize"
+		(uint64_t)((1u << 12) + (1u << 20)),
+		"the reported limit must follow a successful extend"
 	);
 	TEST_ASSERT_EQUAL(
 		agent_reserved_size(agent),
-		(size_t)(1u << 20),
+		(size_t)((1u << 12) + (1u << 20)),
 		"the recorded arenas must add up to the new limit"
 	);
 
@@ -515,19 +515,14 @@ test_resize_grows_agent_capacity_and_shrink_fails() {
 	TEST_ASSERT_NOT_NULL(block, "the added capacity must be usable");
 	memory_bfree(&agent->memory_context, block, 1 << 14);
 
-	rc = agent_resize(agent, 1 << 19, &err);
-	TEST_ASSERT(rc != 0, "shrink is not supported");
-	TEST_ASSERT_NOT_NULL(err, "a rejected resize must set an error");
-	yanet_error_free(err);
-
-	resize_agent_release(agent, cp_config);
+	extend_agent_release(agent, cp_config);
 	free(storage);
 	return TEST_SUCCESS;
 }
 
 static int
-test_resize_rejects_borrowing_agent() {
-	void *storage = resize_storage_alloc(1 << 25);
+test_extend_rejects_borrowing_agent() {
+	void *storage = extend_storage_alloc(1 << 25);
 	TEST_ASSERT_NOT_NULL(storage, "storage allocation failed");
 
 	struct dp_config *dp_config = NULL;
@@ -543,18 +538,18 @@ test_resize_rejects_borrowing_agent() {
 	cp_config_unlock(cp_config);
 
 	yanet_error *err = NULL;
-	rc = agent_resize(sys_agent, 1u << 20, &err);
-	TEST_ASSERT(rc == -1, "a borrowing agent must not be resized");
-	TEST_ASSERT_NOT_NULL(err, "a rejected resize must set an error");
+	rc = agent_extend(sys_agent, 1u << 20, &err);
+	TEST_ASSERT(rc == -1, "a borrowing agent must not be extended");
+	TEST_ASSERT_NOT_NULL(err, "a rejected extend must set an error");
 	TEST_ASSERT_EQUAL(
 		sys_agent->arena_count,
 		(uint64_t)0,
-		"a rejected resize must not record an arena"
+		"a rejected extend must not record an arena"
 	);
 	TEST_ASSERT_EQUAL(
 		sys_agent->memory_limit,
 		(uint64_t)0,
-		"a rejected resize must not move the limit"
+		"a rejected extend must not move the limit"
 	);
 	yanet_error_free(err);
 
@@ -565,17 +560,17 @@ test_resize_rejects_borrowing_agent() {
 // Verify that a request the controlplane pool cannot satisfy leaves the
 // agent, its capacity and its reported limit exactly as they were.
 static int
-test_resize_rolls_back_on_exhausted_pool() {
-	void *storage = resize_storage_alloc(1 << 25);
+test_extend_rolls_back_on_exhausted_pool() {
+	void *storage = extend_storage_alloc(1 << 25);
 	TEST_ASSERT_NOT_NULL(storage, "storage allocation failed");
 
 	struct cp_config *cp_config = NULL;
-	int rc = resize_env_init(storage, 1 << 19, &cp_config);
+	int rc = extend_env_init(storage, 1 << 19, &cp_config);
 	TEST_ASSERT(rc == 0, "storage setup failed");
 
 	struct yanet_shm shm = {.base = storage, .size = 1 << 25};
 	yanet_error *err = NULL;
-	struct agent *agent = agent_attach(&shm, 0, "resize", 4096, &err);
+	struct agent *agent = agent_attach(&shm, 0, "extend", 4096, &err);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
 
 	uint64_t arena_count = agent->arena_count;
@@ -583,9 +578,9 @@ test_resize_rolls_back_on_exhausted_pool() {
 	size_t free_before = block_allocator_free_size(&agent->block_allocator);
 	size_t pool_before = cp_pool_free_size(cp_config);
 
-	rc = agent_resize(agent, 1 << 20, &err);
-	TEST_ASSERT(rc == -1, "an unsatisfiable resize must fail");
-	TEST_ASSERT_NOT_NULL(err, "a failed resize must set an error");
+	rc = agent_extend(agent, 1 << 20, &err);
+	TEST_ASSERT(rc == -1, "an unsatisfiable extend must fail");
+	TEST_ASSERT_NOT_NULL(err, "a failed extend must set an error");
 	yanet_error_free(err);
 	err = NULL;
 
@@ -608,10 +603,10 @@ test_resize_rolls_back_on_exhausted_pool() {
 
 	// The agent must still be serviceable after the failure.
 	void *block = memory_balloc(&agent->memory_context, 256);
-	TEST_ASSERT_NOT_NULL(block, "the agent must survive a failed resize");
+	TEST_ASSERT_NOT_NULL(block, "the agent must survive a failed extend");
 	memory_bfree(&agent->memory_context, block, 256);
 
-	resize_agent_release(agent, cp_config);
+	extend_agent_release(agent, cp_config);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -706,23 +701,21 @@ main() {
 	}
 
 	++tests_count;
-	if (test_resize_grows_agent_capacity_and_shrink_fails() !=
-	    TEST_SUCCESS) {
+	if (test_extend_grows_agent_capacity() != TEST_SUCCESS) {
 		++tests_failed;
-		LOG(ERROR,
-		    "test_resize_grows_agent_capacity_and_shrink_fails failed");
+		LOG(ERROR, "test_extend_grows_agent_capacity failed");
 	}
 
 	++tests_count;
-	if (test_resize_rejects_borrowing_agent() != TEST_SUCCESS) {
+	if (test_extend_rejects_borrowing_agent() != TEST_SUCCESS) {
 		++tests_failed;
-		LOG(ERROR, "test_resize_rejects_borrowing_agent failed");
+		LOG(ERROR, "test_extend_rejects_borrowing_agent failed");
 	}
 
 	++tests_count;
-	if (test_resize_rolls_back_on_exhausted_pool() != TEST_SUCCESS) {
+	if (test_extend_rolls_back_on_exhausted_pool() != TEST_SUCCESS) {
 		++tests_failed;
-		LOG(ERROR, "test_resize_rolls_back_on_exhausted_pool failed");
+		LOG(ERROR, "test_extend_rolls_back_on_exhausted_pool failed");
 	}
 
 	if (tests_failed != 0) {

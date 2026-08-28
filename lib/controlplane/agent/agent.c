@@ -344,7 +344,7 @@ agent_memory_limit(struct agent *agent) {
 }
 
 int
-agent_resize(struct agent *agent, uint64_t new_size, yanet_error **err) {
+agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	int ret = 0;
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
@@ -361,43 +361,20 @@ agent_resize(struct agent *agent, uint64_t new_size, yanet_error **err) {
 		yanet_error_add(
 			err,
 			"agent \"%s\" draws memory from the controlplane "
-			"pool and cannot be resized",
+			"pool and cannot be extended",
 			agent->name
 		);
 		ret = -1;
 		goto unlock;
 	}
 
-	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
-	uint64_t arena_count = agent->arena_count;
-
-	uint64_t current_size = 0;
-	for (uint64_t arena_idx = 0; arena_idx < arena_count; ++arena_idx) {
-		current_size += arenas[arena_idx].size;
-	}
-
-	// Shrinking is not offered.
-	if (new_size < current_size) {
-		yanet_error_add(
-			err,
-			"agent memory cannot shrink: %lu bytes requested, %lu "
-			"already reserved",
-			new_size,
-			current_size
-		);
-		ret = -1;
-		goto unlock;
-	}
-
-	uint64_t needed = new_size - current_size;
+	uint64_t needed = size;
 	uint64_t misaligned = needed % MEMORY_BLOCK_ALLOCATOR_MIN_SIZE;
 	if (misaligned != 0) {
 		uint64_t pad = MEMORY_BLOCK_ALLOCATOR_MIN_SIZE - misaligned;
-		if (new_size > UINT64_MAX - pad) {
+		if (needed > UINT64_MAX - pad) {
 			yanet_error_add(
-				err,
-				"agent memory cannot reach %lu bytes",
-				new_size
+				err, "agent cannot grow by %lu bytes", size
 			);
 			ret = -1;
 			goto unlock;
@@ -407,6 +384,9 @@ agent_resize(struct agent *agent, uint64_t new_size, yanet_error **err) {
 	if (needed == 0) {
 		goto unlock;
 	}
+
+	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
+	uint64_t arena_count = agent->arena_count;
 
 	uint64_t added_count = calculate_arena_count(needed);
 	uint64_t new_arena_count = arena_count + added_count;
@@ -446,7 +426,7 @@ agent_resize(struct agent *agent, uint64_t new_size, yanet_error **err) {
 
 	SET_OFFSET_OF(&agent->arenas, new_arenas);
 	agent->arena_count = new_arena_count;
-	agent->memory_limit = current_size + needed;
+	agent->memory_limit += needed;
 
 	for (uint64_t idx = 0; idx < added_count; ++idx) {
 		struct agent_arena *reserved = &new_arenas[arena_count + idx];
