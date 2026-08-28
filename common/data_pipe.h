@@ -3,10 +3,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 
-// TODO: move to project constants, since cache line size is not always 64.
-#ifndef DATA_PIPE_CACHE_LINE_SIZE
-#define DATA_PIPE_CACHE_LINE_SIZE 64
-#endif
+#include "common/cache.h"
 
 // Lock-free SPSC ring buffer.
 //
@@ -54,10 +51,8 @@
 // Memory layout
 // =============
 //
-// w_pos and f_pos are placed in the same cache line (both accessed by the
-// producer).
-// r_pos is DATA_PIPE_CACHE_LINE_SIZE bytes away on a separate cache line to
-// avoid false sharing with the consumer.
+// The producer's write and free positions share a cache line. The consumer's
+// read position is one cache line away to avoid false sharing.
 //
 //
 // Callback pattern
@@ -98,14 +93,14 @@ data_pipe_init(struct data_pipe *pipe, size_t size) {
 	if (pipe->data == NULL) {
 		return -1;
 	}
-	pipe->w_pos = (_Atomic size_t *)malloc(2 * DATA_PIPE_CACHE_LINE_SIZE);
+	pipe->w_pos = (_Atomic size_t *)malloc(2 * YANET_CACHE_LINE_SIZE);
 	if (pipe->w_pos == NULL) {
 		free(pipe->data);
 		return -1;
 	}
 	pipe->f_pos = pipe->w_pos + 1;
-	pipe->r_pos = (_Atomic size_t *)((char *)pipe->w_pos +
-					 DATA_PIPE_CACHE_LINE_SIZE);
+	pipe->r_pos =
+		(_Atomic size_t *)((char *)pipe->w_pos + YANET_CACHE_LINE_SIZE);
 
 	atomic_store_explicit(pipe->w_pos, 0, memory_order_relaxed);
 	atomic_store_explicit(pipe->f_pos, 0, memory_order_relaxed);

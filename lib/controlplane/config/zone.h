@@ -1,10 +1,12 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <sys/types.h>
 
+#include "common/cache.h"
 #include "common/memory.h"
 
 #include "lib/counters/counters.h"
@@ -110,6 +112,12 @@ struct cp_config {
 	 */
 	pid_t config_lock;
 
+	// Keep lock ownership writes away from the published generation.
+	//
+	// Every dataplane worker reads the generation once per round, so lock
+	// contention must not invalidate the same cache line.
+	uint8_t _config_lock_pad[YANET_CACHE_LINE_SIZE - sizeof(pid_t)];
+
 	/*
 	 * Relative pointer to the current active packet processing
 	 * configuration.
@@ -122,6 +130,13 @@ struct cp_config {
 	 */
 	struct cp_agent_registry *agent_registry;
 };
+
+_Static_assert(
+	offsetof(struct cp_config, cp_config_gen) -
+			offsetof(struct cp_config, config_lock) >=
+		YANET_CACHE_LINE_SIZE,
+	"config lock and generation publication must use separate cache lines"
+);
 
 /*
  * Try to lock controlplane configuration.

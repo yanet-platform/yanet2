@@ -4,6 +4,8 @@ RULESYNC_GENERATE_ARGS := generate --targets claudecode,codexcli,opencode --feat
 
 # Compile database consumed by lint/clang-syntax.
 COMPILE_DB ?= build/compile_commands.json
+RTE_CONFIG ?= build/subprojects/dpdk/rte_build_config.h
+YANET_CACHE_LINE_CPPFLAG = -DYANET_CACHE_LINE_SIZE=$$(awk '$$2 == "RTE_CACHE_LINE_SIZE" { print $$3; exit }' "$(RTE_CONFIG)")
 
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
@@ -335,7 +337,7 @@ test:
 	$(MAKE) test-only
 
 test-only: dataplane
-	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-asan:
@@ -352,7 +354,7 @@ test-asan-only:
 # Set as a default only, mirroring the same if-absent condition meson uses for
 # its own injection: without it, a recoverable diagnostic would go unseen and
 # the package would still pass.
-	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
 	meson test -C build
 
 test-tsan:
@@ -375,7 +377,7 @@ test-functional:
 bench:
 	$(MAKE) go-cache-clean
 	$(MAKE) dataplane
-	go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
 fuzz:
 	@if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value' | grep -q enabled; then \
