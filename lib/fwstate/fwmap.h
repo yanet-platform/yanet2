@@ -248,10 +248,18 @@ fwmap_rand_secure(void) {
 static inline bool
 fwmap_default_key_equal(const void *a, const void *b, size_t size) {
 	switch (size) {
-	case 4:
-		return memcmp(a, b, sizeof(uint32_t)) == 0;
-	case 8:
-		return memcmp(a, b, sizeof(uint64_t)) == 0;
+	case 4: {
+		uint32_t a_value, b_value;
+		memcpy(&a_value, a, sizeof(a_value));
+		memcpy(&b_value, b, sizeof(b_value));
+		return a_value == b_value;
+	}
+	case 8: {
+		uint64_t a_value, b_value;
+		memcpy(&a_value, a, sizeof(a_value));
+		memcpy(&b_value, b, sizeof(b_value));
+		return a_value == b_value;
+	}
 	default:
 		return memcmp(a, b, size) == 0;
 	}
