@@ -49,18 +49,22 @@ func NewGatewayActuator(
 	fnClient := ynpb.NewFunctionServiceClient(conn)
 	appliers := make([]*operator.FunctionApplier, 0, len(functions))
 	for _, fn := range functions {
-		spec := operator.FunctionChainSpec{
-			Name:   fn.Name.Unwrap(),
-			Chain:  fn.Chain.Unwrap(),
-			Weight: fn.Weight,
-			Modules: []*commonpb.ModuleId{{
-				Type: "forward",
-				Name: fn.Module.Unwrap(),
+		function := &ynpb.Function{
+			Id: &commonpb.FunctionId{Name: fn.Name.Unwrap()},
+			Chains: []*ynpb.FunctionChain{{
+				Chain: &ynpb.Chain{
+					Name: fn.Chain.Unwrap(),
+					Modules: []*commonpb.ModuleId{{
+						Type: "forward",
+						Name: fn.Module.Unwrap(),
+					}},
+				},
+				Weight: fn.Weight.Unwrap(),
 			}},
 		}
 		appliers = append(appliers, operator.NewFunctionApplier(
 			fnClient,
-			spec,
+			function,
 			operator.WithIgnorePdump(fn.IgnorePdump),
 		))
 	}

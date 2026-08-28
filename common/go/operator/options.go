@@ -194,9 +194,8 @@ func newFunctionApplierOptions() *functionApplierOptions {
 // FunctionApplierOption configures NewFunctionApplier.
 type FunctionApplierOption func(*functionApplierOptions)
 
-// WithIgnorePdump sets the chain-modules comparison strategy: when enabled,
-// pdump modules on the gateway are ignored when checking whether the chain
-// already matches spec.Modules.
+// WithIgnorePdump, when enabled, hides pdump modules on the gateway from the
+// check whether a chain already carries the wanted modules.
 func WithIgnorePdump(enabled bool) FunctionApplierOption {
 	return func(o *functionApplierOptions) {
 		o.IgnorePdump = enabled

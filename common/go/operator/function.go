@@ -11,31 +11,17 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// FunctionChainSpec is the desired single-chain function definition that
-// FunctionApplier publishes.
-type FunctionChainSpec struct {
-	// Name is the function identifier (Function.Id.Name).
-	Name string
-	// Chain is the chain name (Chain.Name).
-	Chain string
-	// Weight is the chain weight (FunctionChain.Weight).
-	Weight uint64
-	// Modules is the ordered list of module IDs for the chain.
-	Modules []*commonpb.ModuleId
-}
+// chainModulesCompare reports whether the modules the gateway holds satisfy
+// the wanted module list for a single chain.
+type chainModulesCompare func(gateway, want []*commonpb.ModuleId) bool
 
-// chainModulesCompare reports whether current modules satisfy the desired
-// module list for a single chain.
-type chainModulesCompare func(current, want []*commonpb.ModuleId) bool
-
-func compareChainModulesExact(current, want []*commonpb.ModuleId) bool {
-	if len(current) != len(want) {
+func compareChainModulesExact(gateway, want []*commonpb.ModuleId) bool {
+	if len(gateway) != len(want) {
 		return false
 	}
 
-	for idx, mod := range current {
-		spec := want[idx]
-		if mod.GetType() != spec.GetType() || mod.GetName() != spec.GetName() {
+	for idx, module := range gateway {
+		if module.GetType() != want[idx].GetType() || module.GetName() != want[idx].GetName() {
 			return false
 		}
 	}
@@ -51,15 +37,15 @@ func compareChainModulesIgnorePdump(gateway, want []*commonpb.ModuleId) bool {
 // FunctionApplier publishes a fixed function definition to a gateway.
 type FunctionApplier struct {
 	client         ynpb.FunctionServiceClient
-	spec           FunctionChainSpec
+	function       *ynpb.Function
 	compareModules chainModulesCompare
 }
 
-// NewFunctionApplier returns a FunctionApplier that will publish spec to
+// NewFunctionApplier returns a FunctionApplier that will publish function to
 // client on each Apply call.
 func NewFunctionApplier(
 	client ynpb.FunctionServiceClient,
-	spec FunctionChainSpec,
+	function *ynpb.Function,
 	options ...FunctionApplierOption,
 ) *FunctionApplier {
 	opts := newFunctionApplierOptions()
@@ -74,19 +60,23 @@ func NewFunctionApplier(
 
 	return &FunctionApplier{
 		client:         client,
-		spec:           spec,
+		function:       function,
 		compareModules: compare,
 	}
 }
 
 // Name returns the function identifier the applier publishes.
 func (m *FunctionApplier) Name() string {
-	return m.spec.Name
+	return m.function.GetId().GetName()
 }
 
-// Apply publishes the captured spec to the gateway, or returns true
+// Apply publishes the captured definition to the gateway, or returns true
 // if the gateway is already correctly configured.
 func (m *FunctionApplier) Apply(ctx context.Context) (bool, error) {
+	if len(m.function.GetChains()) == 0 {
+		return false, fmt.Errorf("function %q has no chains", m.Name())
+	}
+
 	ok, err := m.alreadyCorrect(ctx)
 	if err != nil {
 		return false, err
@@ -95,53 +85,45 @@ func (m *FunctionApplier) Apply(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
-	req := &ynpb.UpdateFunctionRequest{
-		Function: &ynpb.Function{
-			Id: &commonpb.FunctionId{
-				Name: m.spec.Name,
-			},
-			Chains: []*ynpb.FunctionChain{{
-				Chain: &ynpb.Chain{
-					Name:    m.spec.Chain,
-					Modules: m.spec.Modules,
-				},
-				Weight: m.spec.Weight,
-			}},
-		},
-	}
+	req := &ynpb.UpdateFunctionRequest{Function: m.function}
 	if _, err := m.client.Update(ctx, req); err != nil {
-		return false, fmt.Errorf("failed to update function %q: %w", m.spec.Name, err)
+		return false, fmt.Errorf("failed to update function %q: %w", m.Name(), err)
 	}
 
 	return false, nil
 }
 
+// alreadyCorrect reports whether the gateway holds the wanted chains in the
+// wanted order, each with the wanted weight and modules.
 func (m *FunctionApplier) alreadyCorrect(ctx context.Context) (bool, error) {
 	resp, err := m.client.Get(ctx, &ynpb.GetFunctionRequest{
 		Id: &commonpb.FunctionId{
-			Name: m.spec.Name,
+			Name: m.Name(),
 		},
 	})
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return false, nil
 		}
-		return false, fmt.Errorf("failed to get function %q: %w", m.spec.Name, err)
+		return false, fmt.Errorf("failed to get function %q: %w", m.Name(), err)
 	}
 
-	for _, fc := range resp.GetFunction().GetChains() {
-		if fc.GetChain().GetName() != m.spec.Chain {
-			continue
-		}
-
-		if m.compareModules(fc.GetChain().GetModules(), m.spec.Modules) {
-			return true, nil
-		}
-
+	gateway := resp.GetFunction().GetChains()
+	want := m.function.GetChains()
+	if len(gateway) != len(want) {
 		return false, nil
 	}
+	for idx, chain := range gateway {
+		if chain.GetChain().GetName() != want[idx].GetChain().GetName() ||
+			chain.GetWeight() != want[idx].GetWeight() {
+			return false, nil
+		}
+		if !m.compareModules(chain.GetChain().GetModules(), want[idx].GetChain().GetModules()) {
+			return false, nil
+		}
+	}
 
-	return false, nil
+	return true, nil
 }
 
 // filterPdump returns a new slice containing only the modules whose type is

@@ -116,7 +116,7 @@ func validConfig() *Config {
 			{
 				Name:         xcfg.MustNonEmptyString("fn:decap"),
 				Chain:        xcfg.MustNonEmptyString("default"),
-				Weight:       1,
+				Weight:       xcfg.NewRequired(uint64(1)),
 				Module:       xcfg.MustNonEmptyString("decap0"),
 				PrefixesFile: xcfg.MustNonEmptyString("/etc/yanet2/decap.d/default.yaml"),
 			},
@@ -160,7 +160,7 @@ func TestConfigValidate(t *testing.T) {
 				cfg.Functions = append(cfg.Functions, FunctionConfig{
 					Name:         xcfg.MustNonEmptyString("fn:decap"),
 					Chain:        xcfg.MustNonEmptyString("default"),
-					Weight:       1,
+					Weight:       xcfg.NewRequired(uint64(1)),
 					Module:       xcfg.MustNonEmptyString("other-module"),
 					PrefixesFile: xcfg.MustNonEmptyString("/etc/yanet2/decap.d/other.yaml"),
 				})
@@ -175,7 +175,7 @@ func TestConfigValidate(t *testing.T) {
 				cfg.Functions = append(cfg.Functions, FunctionConfig{
 					Name:         xcfg.MustNonEmptyString("fn:decap-other"),
 					Chain:        xcfg.MustNonEmptyString("default"),
-					Weight:       1,
+					Weight:       xcfg.NewRequired(uint64(1)),
 					Module:       xcfg.MustNonEmptyString("decap0"),
 					PrefixesFile: xcfg.MustNonEmptyString("/etc/yanet2/decap.d/other.yaml"),
 				})
@@ -225,4 +225,43 @@ func Test_ReadinessScopeSpecs_GatewaysUseNominalReconcileInterval(t *testing.T) 
 		"config:gw0": 10 * time.Second,
 		"config:gw1": 10 * time.Second,
 	}, intervalsByName)
+}
+
+// Test_Decode_WeightMustBeSpelled verifies that an omitted weight is refused
+// at load time, while an explicit zero, a disabled chain, is accepted.
+func Test_Decode_WeightMustBeSpelled(t *testing.T) {
+	cases := []struct {
+		name    string
+		weight  string
+		wantErr bool
+	}{
+		{name: "omitted weight", weight: "", wantErr: true},
+		{name: "explicit zero", weight: "    weight: 0\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := `
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+functions:
+  - name: fn:decap
+    chain: default
+    module: decap0
+    prefixes_file: /etc/yanet2/decap.d/default.yaml
+` + tc.weight
+			cfg := DefaultConfig()
+			err := xcfg.Decode([]byte(input), cfg)
+
+			if tc.wantErr {
+				var pathErr *xcfg.PathError
+				require.ErrorAs(t, err, &pathErr)
+				require.Contains(t, pathErr.Path, "functions[0].weight")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, uint64(0), cfg.Functions[0].Weight.Unwrap())
+		})
+	}
 }

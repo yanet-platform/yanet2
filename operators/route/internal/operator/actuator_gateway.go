@@ -54,13 +54,17 @@ func NewGatewayActuator(
 	}
 
 	fn := opts.Function
-	spec := operator.FunctionChainSpec{
-		Name:   fn.Name.Unwrap(),
-		Chain:  fn.Chain.Unwrap(),
-		Weight: fn.Weight,
-		Modules: []*commonpb.ModuleId{{
-			Type: "route",
-			Name: fn.Module.Unwrap(),
+	function := &ynpb.Function{
+		Id: &commonpb.FunctionId{Name: fn.Name.Unwrap()},
+		Chains: []*ynpb.FunctionChain{{
+			Chain: &ynpb.Chain{
+				Name: fn.Chain.Unwrap(),
+				Modules: []*commonpb.ModuleId{{
+					Type: "route",
+					Name: fn.Module.Unwrap(),
+				}},
+			},
+			Weight: fn.Weight,
 		}},
 	}
 
@@ -70,7 +74,7 @@ func NewGatewayActuator(
 		routes: routepb.NewRouteServiceClient(conn),
 		funcApplier: operator.NewFunctionApplier(
 			ynpb.NewFunctionServiceClient(conn),
-			spec,
+			function,
 			operator.WithIgnorePdump(fn.IgnorePdump),
 		),
 		devices:    opts.Devices,

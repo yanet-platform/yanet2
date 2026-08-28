@@ -98,7 +98,7 @@ type FunctionConfig struct {
 	// Chain is the chain name (e.g. "default").
 	Chain xcfg.NonEmptyString `yaml:"chain"`
 	// Weight is the chain weight inside the function.
-	Weight uint64 `yaml:"weight"`
+	Weight xcfg.Required[uint64] `yaml:"weight"`
 	// Module is the decap module config name this function targets
 	// (e.g. "decap0").
 	Module xcfg.NonEmptyString `yaml:"module"`
