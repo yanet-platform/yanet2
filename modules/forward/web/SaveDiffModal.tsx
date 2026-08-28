@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { Rule } from '@yanet/core/api/forward';
-import { ForwardMode, FORWARD_MODE_LABELS } from '@yanet/core/api/forward';
+import { FORWARD_MODE_LABELS, parseForwardMode } from '@yanet/core/api/forward';
 import { dumpYamlDoc } from '@yanet/core/utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '@yanet/core/components';
 import { effectiveCounterName } from './hooks';
@@ -43,7 +43,7 @@ export const rulesToDiffYaml = (rules: Rule[], showEffectiveCounter = false): st
         if (devices.length > 0) {
             entry['devices'] = devices;
         }
-        entry['mode'] = FORWARD_MODE_LABELS[r.action?.mode ?? ForwardMode.NONE] ?? 'NONE';
+        entry['mode'] = FORWARD_MODE_LABELS[parseForwardMode(r.action?.mode)];
 
         return entry;
     });

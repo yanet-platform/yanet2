@@ -5,10 +5,12 @@ import { createService, type CallOptions } from './client';
 import type { Device, VlanRange, ListConfigsResponse } from './shared';
 export type { Device, VlanRange, ListConfigsResponse };
 
+// The gateway serializes a declared mode by its proto name. A gateway that
+// predates that form, or a value this build does not know, sends a number.
 export enum ForwardMode {
-    NONE = 0,
-    IN = 1,
-    OUT = 2,
+    NONE = 'NONE',
+    IN = 'IN',
+    OUT = 'OUT',
 }
 
 export const FORWARD_MODE_LABELS: Record<ForwardMode, string> = {
@@ -17,9 +19,29 @@ export const FORWARD_MODE_LABELS: Record<ForwardMode, string> = {
     [ForwardMode.OUT]: 'OUT',
 };
 
+const FORWARD_MODE_BY_NUMBER: Record<number, ForwardMode> = {
+    0: ForwardMode.NONE,
+    1: ForwardMode.IN,
+    2: ForwardMode.OUT,
+};
+
+/**
+ * Reads a mode off the wire in either spelling.
+ *
+ * A name or a declared number maps to the mode. Anything else, including a
+ * value this build does not know, reads as NONE, the same fallback the page
+ * used before names existed.
+ */
+export const parseForwardMode = (value: ForwardMode | number | undefined): ForwardMode => {
+    if (typeof value === 'number') {
+        return FORWARD_MODE_BY_NUMBER[value] ?? ForwardMode.NONE;
+    }
+    return value !== undefined && value in FORWARD_MODE_LABELS ? value : ForwardMode.NONE;
+};
+
 export interface Action {
     target?: string;
-    mode?: ForwardMode;
+    mode?: ForwardMode | number;
     counter?: string;
 }
 

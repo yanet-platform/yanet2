@@ -1,5 +1,5 @@
 import type { Rule, VlanRange } from '@yanet/core/api/forward';
-import { ForwardMode } from '@yanet/core/api/forward';
+import { parseForwardMode } from '@yanet/core/api/forward';
 import { formatRange, parseRangesRaw, partitionCidrsToTyped } from '@yanet/core/utils';
 import type { RuleItem, RuleDraft } from './types';
 
@@ -37,7 +37,7 @@ export const rulesToNgItems = (rules: Rule[]): RuleItem[] => {
         const isAllVlans = computeIsAllVlans(rule.vlan_ranges);
         const sourceCidrs = [...(rule.sources4 || []), ...(rule.sources6 || [])];
         const dstCidrs = [...(rule.destinations4 || []), ...(rule.destinations6 || [])];
-        const mode = rule.action?.mode ?? ForwardMode.NONE;
+        const mode = parseForwardMode(rule.action?.mode);
 
         return {
             id: `ng-rule-${index}`,
