@@ -62,10 +62,10 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 	return h, agent
 }
 
-// fwstateTestSyncConfig is the shared receive-side sync configuration:
-// sync enabled for syncMulticastAddr:syncPort with production timeouts.
+// fwstateTestSyncConfig enables synchronization with production timeouts.
 func fwstateTestSyncConfig() cfwstate.SyncConfig {
 	return cfwstate.SyncConfig{
+		DstEther: [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01},
 		DstAddrMulticast: [16]byte{
 			0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
 		},

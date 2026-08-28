@@ -8,11 +8,8 @@
 /**
  * FWState configuration structures.
  *
- * The sync parameters split by consumer: the fwstate module matches
- * incoming sync packets, inserts state, and rewrites forwarded internal
- * frames, so its config carries the receive-side fields. A module that
- * synthesizes sync packets (ACL CREATE_STATE) needs only the emission
- * addressing.
+ * The fwstate module owns synchronization end to end: receive matching,
+ * local state insertion, suppression, and emission.
  */
 
 struct fwstate_timeouts {
@@ -24,14 +21,13 @@ struct fwstate_timeouts {
 	uint64_t default_;    // 16
 };
 
-// Receive-side sync parameters for the fwstate module: packet matching,
-// state insertion, and the internal-frame rewrite.
 struct fwstate_sync_config {
-	// Source IPv6 address stamped on forwarded internal sync frames.
+	// IPv6 source stamped on locally emitted sync frames.
 	uint8_t src_addr[16];
 
-	// Multicast destination the module matches incoming sync packets
-	// against.
+	// Ethernet destination shared by multicast and unicast emission.
+	struct ether_addr dst_ether;
+	// Multicast IPv6 destination used for wire matching and emission.
 	uint8_t dst_addr_multicast[16];
 	/**
 	 * Multicast destination port in network byte order (big-endian).
@@ -41,6 +37,13 @@ struct fwstate_sync_config {
 	 * populating this field.
 	 */
 	uint16_t port_multicast;
+	// Unicast IPv6 destination used only for local emission.
+	uint8_t dst_addr_unicast[16];
+	/**
+	 * Unicast destination port in network byte order (big-endian).
+	 * The control plane converts it before publishing the config.
+	 */
+	uint16_t port_unicast;
 
 	struct fwstate_timeouts timeouts;
 
@@ -51,24 +54,4 @@ struct fwstate_sync_config {
 	// Every entry TTL is inflated by this value so the effective keep-alive
 	// never falls below the configured timeout. Zero disables suppression.
 	uint64_t sync_suppress_timeout;
-};
-
-// Emission-side sync parameters for a module that synthesizes state-sync
-// packets (ACL CREATE_STATE): the outer addressing of the frames it
-// emits. The IPv6 source is left zeroed — the fwstate module stamps its
-// own src_addr when forwarding internal frames.
-struct fwstate_sync_emit_config {
-	struct ether_addr dst_ether;
-	uint8_t dst_addr_multicast[16];
-	/**
-	 * Multicast destination port in network byte order (big-endian).
-	 * Same convention as fwstate_sync_config::port_multicast.
-	 */
-	uint16_t port_multicast;
-	uint8_t dst_addr_unicast[16];
-	/**
-	 * Unicast destination port in network byte order (big-endian).
-	 * Same convention as port_multicast - converted by the controlplane.
-	 */
-	uint16_t port_unicast;
 };

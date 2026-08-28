@@ -1,7 +1,11 @@
-use core::{net::Ipv6Addr, time::Duration};
+use core::{
+    net::{Ipv6Addr, SocketAddrV6},
+    time::Duration,
+};
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;
+use netip::MacAddr;
 
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {
@@ -64,13 +68,44 @@ pub struct UpdateCmd {
     #[arg(long)]
     pub src_addr: Option<Ipv6Addr>,
 
-    /// Multicast IPv6 address (e.g., "ff02::1")
+    /// Destination MAC address (e.g., "00:11:22:33:44:55").
+    #[arg(long)]
+    pub dst_ether: Option<MacAddr>,
+
+    /// Multicast synchronization endpoint (e.g., "[ff02::1]:9999").
+    #[arg(long, value_name = "[ADDR]:PORT", conflicts_with_all = ["dst_addr_multicast", "port_multicast", "no_multicast"])]
+    pub multicast: Option<SocketAddrV6>,
+
+    /// Unicast synchronization endpoint (e.g., "[2001:db8::2]:9999").
+    #[arg(long, value_name = "[ADDR]:PORT", conflicts_with_all = ["dst_addr_unicast", "port_unicast", "no_unicast"])]
+    pub unicast: Option<SocketAddrV6>,
+
+    /// Deprecated: use --multicast instead.
     #[arg(long)]
     pub dst_addr_multicast: Option<Ipv6Addr>,
 
-    /// Multicast port
+    /// Deprecated: use --multicast instead.
     #[arg(long)]
     pub port_multicast: Option<u16>,
+
+    /// Deprecated: use --unicast instead.
+    #[arg(long)]
+    pub dst_addr_unicast: Option<Ipv6Addr>,
+
+    /// Deprecated: use --unicast instead.
+    #[arg(long)]
+    pub port_unicast: Option<u16>,
+
+    /// Remove the multicast synchronization endpoint.
+    #[arg(
+        long,
+        conflicts_with_all = ["multicast", "dst_addr_multicast", "port_multicast"]
+    )]
+    pub no_multicast: bool,
+
+    /// Remove the unicast synchronization endpoint.
+    #[arg(long, conflicts_with_all = ["unicast", "dst_addr_unicast", "port_unicast"])]
+    pub no_unicast: bool,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h")
     #[arg(long, value_parser = parse_duration)]

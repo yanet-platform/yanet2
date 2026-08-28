@@ -17,7 +17,8 @@ import { useConfigListCache, useSearchParamHelpers, usePageContribution, useCont
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { Direction, MapKind, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstatemap';
 import { ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
-import { isValidIPAddress, parseIPToBytes, stringToIPAddress } from '@yanet/core/utils/netip';
+import { isIPv6MulticastAddress, isValidIPAddress, parseIPToBytes, stringToIPAddress } from '@yanet/core/utils/netip';
+import { normalizeMAC, parseMACToBytes } from '@yanet/core/utils/mac';
 import { formatBytes, toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import { AddConfigModal, CommandPaletteHeader, ConfirmModal, DeleteConfigModal } from '@yanet/core/components';
 import { SaveIcon, TrashIcon } from '@yanet/core/components/draft';
@@ -29,8 +30,11 @@ interface DraftConfig {
     mapNameV4: string;
     mapNameV6: string;
     srcAddr: string;
+    dstEther: string;
     dstAddrMulticast: string;
     portMulticast: number;
+    dstAddrUnicast: string;
+    portUnicast: number;
     tcpSynAck: string;
     tcpSyn: string;
     tcpFin: string;
@@ -97,14 +101,30 @@ const isValidNonzeroIPv6Address = (value: string): boolean => {
     return isValidIPv6Address(value) && !isZeroIPv6Address(value);
 };
 
+const isValidNonzeroUnicastIPv6Address = (value: string): boolean => {
+    return isValidNonzeroIPv6Address(value) && !isIPv6MulticastAddress(value);
+};
+
+const isValidNonzeroMAC = (value: string): boolean => {
+    const parsed = parseMACToBytes(value);
+    return Boolean(parsed && parsed.some((byte) => byte !== 0));
+};
+
+const isValidPort = (value: number): boolean => {
+    return Number.isInteger(value) && value >= 0 && value <= 65535;
+};
+
 const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>> | null, isLocalOnly: boolean): DraftConfig => {
     const sync = config?.sync_config;
     return {
         mapNameV4: config?.map_name_v4 ?? '',
         mapNameV6: config?.map_name_v6 ?? '',
         srcAddr: sync?.src_addr ?? '',
+        dstEther: sync?.dst_ether ?? '',
         dstAddrMulticast: sync?.dst_addr_multicast ?? '',
         portMulticast: sync?.port_multicast ?? 0,
+        dstAddrUnicast: sync?.dst_addr_unicast ?? '',
+        portUnicast: sync?.port_unicast ?? 0,
         tcpSynAck: formatDurationNsAsSeconds(sync?.tcp_syn_ack ?? DEFAULT_NS.tcpSynAck),
         tcpSyn: formatDurationNsAsSeconds(sync?.tcp_syn ?? DEFAULT_NS.tcpSyn),
         tcpFin: formatDurationNsAsSeconds(sync?.tcp_fin ?? DEFAULT_NS.tcpFin),
@@ -1032,7 +1052,6 @@ interface MapNameFieldProps {
     /** Every known map's family keyed by name, scoping existence checks. */
     mapKinds: Record<string, MapKind>;
     busy: boolean;
-    requiredError: string;
     placeholder: string;
     onUpdate: (value: string) => void;
     onCreate: (name: string, kind: MapKind) => void;
@@ -1053,7 +1072,6 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
     familyMapNames,
     mapKinds,
     busy,
-    requiredError,
     placeholder,
     onUpdate,
     onCreate,
@@ -1091,7 +1109,6 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
                         controlProps={{ list: datalistId }}
                         value={value}
                         onUpdate={onUpdate}
-                        error={!value.trim() ? requiredError : undefined}
                         placeholder={placeholder}
                     />
                     <datalist id={datalistId}>
@@ -1384,10 +1401,15 @@ const FWStatePage: React.FC = () => {
     const validateCurrent = (): boolean => {
         if (!current) return false;
         const durationFields = [current.tcpSynAck, current.tcpSyn, current.tcpFin, current.tcp, current.udp, current.defaultTimeout];
-        if (!current.mapNameV4.trim() || !current.mapNameV6.trim()) return false;
-        if (current.portMulticast < 0 || current.portMulticast > 65535) return false;
-        if (!isValidNonzeroIPv6Address(current.srcAddr)) return false;
-        if (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0) return false;
+        const multicastConfigured = current.dstAddrMulticast.trim() !== '' || current.portMulticast !== 0;
+        const unicastConfigured = current.dstAddrUnicast.trim() !== '' || current.portUnicast !== 0;
+        const endpointConfigured = multicastConfigured || unicastConfigured;
+        if (!isValidPort(current.portMulticast) || !isValidPort(current.portUnicast)) return false;
+        if (current.srcAddr.trim() !== '' && !isValidIPv6Address(current.srcAddr)) return false;
+        if (current.dstEther.trim() !== '' && !parseMACToBytes(current.dstEther)) return false;
+        if (endpointConfigured && (!isValidNonzeroIPv6Address(current.srcAddr) || !isValidNonzeroMAC(current.dstEther))) return false;
+        if (multicastConfigured && (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0)) return false;
+        if (unicastConfigured && (!isValidNonzeroUnicastIPv6Address(current.dstAddrUnicast) || current.portUnicast === 0)) return false;
         if (durationFields.some((value) => parseDurationToNs(value) === null)) return false;
         return true;
     };
@@ -1403,10 +1425,15 @@ const FWStatePage: React.FC = () => {
             return;
         }
         const requestName = currentName;
+        const clearMulticast = current.dstAddrMulticast.trim() === '' && current.portMulticast === 0;
+        const clearUnicast = current.dstAddrUnicast.trim() === '' && current.portUnicast === 0;
         const syncConfig = {
             src_addr: stringToIPAddress(current.srcAddr),
-            dst_addr_multicast: stringToIPAddress(current.dstAddrMulticast),
-            port_multicast: current.portMulticast,
+            dst_ether: normalizeMAC(current.dstEther),
+            dst_addr_multicast: current.dstAddrMulticast ? stringToIPAddress(current.dstAddrMulticast) : undefined,
+            port_multicast: current.portMulticast || undefined,
+            dst_addr_unicast: current.dstAddrUnicast ? stringToIPAddress(current.dstAddrUnicast) : undefined,
+            port_unicast: current.portUnicast || undefined,
             tcp_syn_ack: parseDurationToNs(current.tcpSynAck) ?? undefined,
             tcp_syn: parseDurationToNs(current.tcpSyn) ?? undefined,
             tcp_fin: parseDurationToNs(current.tcpFin) ?? undefined,
@@ -1420,6 +1447,8 @@ const FWStatePage: React.FC = () => {
                 map_name_v4: current.mapNameV4.trim(),
                 map_name_v6: current.mapNameV6.trim(),
                 sync_config: syncConfig,
+                clear_multicast: clearMulticast,
+                clear_unicast: clearUnicast,
             });
             toaster.success('fwstate-save', `Config "${requestName}" saved.`);
             setDirtyConfigs((prev) => {
@@ -1643,8 +1672,19 @@ const FWStatePage: React.FC = () => {
     }
 
     const configurationTab = current && (() => {
-        const multicastAddrError = !isValidNonzeroIPv6Address(current.dstAddrMulticast) ? 'Non-zero IPv6 required' : undefined;
-        const multicastPortError = current.portMulticast === 0 ? 'Port required' : current.portMulticast < 0 || current.portMulticast > 65535 ? '0..65535' : undefined;
+        const multicastConfigured = current.dstAddrMulticast.trim() !== '' || current.portMulticast !== 0;
+        const unicastConfigured = current.dstAddrUnicast.trim() !== '' || current.portUnicast !== 0;
+        const endpointConfigured = multicastConfigured || unicastConfigured;
+        const sourceAddrError = endpointConfigured
+            ? !isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined
+            : current.srcAddr.trim() !== '' && !isValidIPv6Address(current.srcAddr) ? 'IPv6 required' : undefined;
+        const dstEtherError = endpointConfigured
+            ? !isValidNonzeroMAC(current.dstEther) ? 'Non-zero MAC required' : undefined
+            : current.dstEther.trim() !== '' && !parseMACToBytes(current.dstEther) ? 'MAC required' : undefined;
+        const multicastAddrError = multicastConfigured && !isValidNonzeroIPv6Address(current.dstAddrMulticast) ? 'Non-zero IPv6 required' : undefined;
+        const multicastPortError = !isValidPort(current.portMulticast) ? 'Integer 0..65535' : multicastConfigured && current.portMulticast === 0 ? 'Port required' : undefined;
+        const unicastAddrError = unicastConfigured && !isValidNonzeroUnicastIPv6Address(current.dstAddrUnicast) ? 'Non-zero unicast IPv6 required' : undefined;
+        const unicastPortError = !isValidPort(current.portUnicast) ? 'Integer 0..65535' : unicastConfigured && current.portUnicast === 0 ? 'Port required' : undefined;
 
         return (
             <div className="fwstate-config-panel">
@@ -1655,7 +1695,7 @@ const FWStatePage: React.FC = () => {
                         </div>
                         <div className="fwstate-field-grid fwstate-field-grid--map">
                             <MapNameField
-                                label="IPv4 map name"
+                                label="IPv4 map name (optional)"
                                 kind={MapKind.V4}
                                 inputId="fwstate-map-name-v4"
                                 datalistId="fwstate-map-options-v4"
@@ -1663,14 +1703,13 @@ const FWStatePage: React.FC = () => {
                                 familyMapNames={mapNames.filter((name) => mapKinds[name] === MapKind.V4)}
                                 mapKinds={mapKinds}
                                 busy={mapMutationBusy}
-                                requiredError="map_name_v4 is required"
                                 placeholder="fwstate-map-v4"
                                 onUpdate={(mapNameV4) => updateCurrent({ mapNameV4 })}
                                 onCreate={handleCreateMap}
                                 onDeleteRequest={requestDeleteMap}
                             />
                             <MapNameField
-                                label="IPv6 map name"
+                                label="IPv6 map name (optional)"
                                 kind={MapKind.V6}
                                 inputId="fwstate-map-name-v6"
                                 datalistId="fwstate-map-options-v6"
@@ -1678,7 +1717,6 @@ const FWStatePage: React.FC = () => {
                                 familyMapNames={mapNames.filter((name) => mapKinds[name] === MapKind.V6)}
                                 mapKinds={mapKinds}
                                 busy={mapMutationBusy}
-                                requiredError="map_name_v6 is required"
                                 placeholder="fwstate-map-v6"
                                 onUpdate={(mapNameV6) => updateCurrent({ mapNameV6 })}
                                 onCreate={handleCreateMap}
@@ -1701,7 +1739,11 @@ const FWStatePage: React.FC = () => {
                         <div className="fwstate-sync-grid">
                             <label className="fwstate-field fwstate-sync-grid__src">
                                 <Text variant="caption-2" color="secondary">Sync source address</Text>
-                                <TextInput value={current.srcAddr} onUpdate={(srcAddr) => updateCurrent({ srcAddr })} error={!isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined} placeholder="2001:db8::1" />
+                                <TextInput value={current.srcAddr} onUpdate={(srcAddr) => updateCurrent({ srcAddr })} error={sourceAddrError} placeholder="2001:db8::1" />
+                            </label>
+                            <label className="fwstate-field fwstate-sync-grid__mac">
+                                <Text variant="caption-2" color="secondary">Destination MAC</Text>
+                                <TextInput value={current.dstEther} onUpdate={(dstEther) => updateCurrent({ dstEther })} error={dstEtherError} placeholder="aa:bb:cc:dd:ee:ff" />
                             </label>
                             <div className="fwstate-sync-grid__endpoint">
                                 <div className="fwstate-field">
@@ -1714,6 +1756,21 @@ const FWStatePage: React.FC = () => {
                                         <label className="fwstate-field">
                                             <Text variant="caption-2" color="secondary">Port</Text>
                                             <TextInput type="number" value={String(current.portMulticast)} onUpdate={(v) => updateCurrent({ portMulticast: Number(v) })} error={multicastPortError} placeholder="2000" />
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="fwstate-sync-grid__endpoint">
+                                <div className="fwstate-field">
+                                    <Text variant="caption-2" color="secondary">Unicast endpoint</Text>
+                                    <div className="fwstate-endpoint-row">
+                                        <label className="fwstate-field">
+                                            <Text variant="caption-2" color="secondary">Address</Text>
+                                            <TextInput value={current.dstAddrUnicast} onUpdate={(dstAddrUnicast) => updateCurrent({ dstAddrUnicast })} error={unicastAddrError} placeholder="2001:db8::2" />
+                                        </label>
+                                        <label className="fwstate-field">
+                                            <Text variant="caption-2" color="secondary">Port</Text>
+                                            <TextInput type="number" value={String(current.portUnicast)} onUpdate={(v) => updateCurrent({ portUnicast: Number(v) })} error={unicastPortError} placeholder="2000" />
                                         </label>
                                     </div>
                                 </div>

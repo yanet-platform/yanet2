@@ -3,9 +3,9 @@ use core::net::IpAddr;
 use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
-use commonpb::pb::IpAddress;
+use commonpb::pb::{IpAddress, MacAddress};
 use fwstatepb::{
-    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, UpdateConfigRequest,
     fw_state_service_client::FwStateServiceClient,
 };
 use tabled::Tabled;
@@ -108,8 +108,6 @@ impl SettingRow {
 }
 
 /// Lays out one stored configuration for a human reader.
-///
-/// Fields the module documents as ignored are left out.
 fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
     let mut rows = vec![
         SettingRow::new("name", escape_wire_text(&response.name)),
@@ -124,6 +122,13 @@ fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
     let address = |addr: Option<&IpAddress>| addr.map_or_else(|| "-".to_string(), ToString::to_string);
     rows.push(SettingRow::new("src addr", address(sync_config.src_addr.as_ref())));
     rows.push(SettingRow::new(
+        "dst ether",
+        sync_config
+            .dst_ether
+            .as_ref()
+            .map_or_else(|| "-".to_string(), ToString::to_string),
+    ));
+    rows.push(SettingRow::new(
         "dst addr multicast",
         address(sync_config.dst_addr_multicast.as_ref()),
     ));
@@ -131,6 +136,11 @@ fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
         "port multicast",
         sync_config.port_multicast.to_string(),
     ));
+    rows.push(SettingRow::new(
+        "dst addr unicast",
+        address(sync_config.dst_addr_unicast.as_ref()),
+    ));
+    rows.push(SettingRow::new("port unicast", sync_config.port_unicast.to_string()));
 
     for (setting, nanos) in [
         ("tcp syn-ack timeout", sync_config.tcp_syn_ack),
@@ -159,6 +169,55 @@ fn merged_map_names(current: &ShowConfigResponse, cmd: &UpdateCmd) -> (String, S
         cmd.map_name_v4.clone().unwrap_or_else(|| current.map_name_v4.clone()),
         cmd.map_name_v6.clone().unwrap_or_else(|| current.map_name_v6.clone()),
     )
+}
+
+fn remove_multicast_endpoint(sync_config: &mut SyncConfig) {
+    sync_config.dst_addr_multicast = None;
+    sync_config.port_multicast = 0;
+}
+
+fn remove_unicast_endpoint(sync_config: &mut SyncConfig) {
+    sync_config.dst_addr_unicast = None;
+    sync_config.port_unicast = 0;
+}
+
+fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) -> Result<(), &'static str> {
+    if cmd.multicast.is_some_and(|endpoint| endpoint.scope_id() != 0) {
+        return Err("--multicast does not support IPv6 scope IDs");
+    }
+    if cmd.unicast.is_some_and(|endpoint| endpoint.scope_id() != 0) {
+        return Err("--unicast does not support IPv6 scope IDs");
+    }
+
+    if let Some(multicast) = cmd.multicast {
+        sync_config.dst_addr_multicast = Some(IpAddress::from(IpAddr::V6(*multicast.ip())));
+        sync_config.port_multicast = u32::from(multicast.port());
+    }
+    if let Some(dst_addr_multicast) = cmd.dst_addr_multicast {
+        sync_config.dst_addr_multicast = Some(IpAddress::from(IpAddr::V6(dst_addr_multicast)));
+    }
+    if let Some(port_multicast) = cmd.port_multicast {
+        sync_config.port_multicast = u32::from(port_multicast);
+    }
+
+    if let Some(unicast) = cmd.unicast {
+        sync_config.dst_addr_unicast = Some(IpAddress::from(IpAddr::V6(*unicast.ip())));
+        sync_config.port_unicast = u32::from(unicast.port());
+    }
+    if let Some(dst_addr_unicast) = cmd.dst_addr_unicast {
+        sync_config.dst_addr_unicast = Some(IpAddress::from(IpAddr::V6(dst_addr_unicast)));
+    }
+    if let Some(port_unicast) = cmd.port_unicast {
+        sync_config.port_unicast = u32::from(port_unicast);
+    }
+
+    if cmd.no_multicast {
+        remove_multicast_endpoint(sync_config);
+    }
+    if cmd.no_unicast {
+        remove_unicast_endpoint(sync_config);
+    }
+    Ok(())
 }
 
 pub struct FWStateService {
@@ -262,13 +321,11 @@ impl FWStateService {
             sync_config.src_addr = Some(IpAddress::from(IpAddr::V6(src_addr)));
         }
 
-        if let Some(dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync_config.dst_addr_multicast = Some(IpAddress::from(IpAddr::V6(dst_addr_multicast)));
+        if let Some(dst_ether) = cmd.dst_ether {
+            sync_config.dst_ether = Some(MacAddress::from(dst_ether));
         }
 
-        if let Some(port_multicast) = cmd.port_multicast {
-            sync_config.port_multicast = u32::from(port_multicast);
-        }
+        update_sync_endpoints(&mut sync_config, &cmd).map_err(|err| self.service.invalid("update", err))?;
 
         // Convert timeouts from Duration to nanoseconds if provided
         if let Some(tcp_syn_ack) = cmd.tcp_syn_ack {
@@ -304,6 +361,8 @@ impl FWStateService {
             map_name_v4,
             map_name_v6,
             sync_config: Some(sync_config),
+            clear_multicast: cmd.no_multicast,
+            clear_unicast: cmd.no_unicast,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         self.service
@@ -366,8 +425,15 @@ mod tests {
             map_name_v4: map_name_v4.map(str::to_string),
             map_name_v6: map_name_v6.map(str::to_string),
             src_addr: None,
+            dst_ether: None,
+            multicast: None,
+            unicast: None,
             dst_addr_multicast: None,
             port_multicast: None,
+            dst_addr_unicast: None,
+            port_unicast: None,
+            no_multicast: false,
+            no_unicast: false,
             tcp_syn_ack: None,
             tcp_syn: None,
             tcp_fin: None,
@@ -414,10 +480,16 @@ mod tests {
     }
 
     #[test]
-    fn test_config_rows_carry_converted_timeouts() {
+    fn test_config_rows_carry_endpoints_and_converted_timeouts() {
         let response = ShowConfigResponse {
             name: "fwstate0".to_string(),
             sync_config: Some(fwstatepb::SyncConfig {
+                src_addr: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+                dst_ether: Some(MacAddress { addr: 0x3333_0000_0001 }),
+                dst_addr_multicast: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::UNSPECIFIED))),
+                port_multicast: 9999,
+                dst_addr_unicast: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+                port_unicast: 10000,
                 tcp: 60_000_000_000,
                 sync_suppress_timeout: 0,
                 ..Default::default()
@@ -425,12 +497,28 @@ mod tests {
             ..Default::default()
         };
 
-        let values: Vec<String> = config_rows(&response).into_iter().map(|row| row.value).collect();
-        assert!(values.contains(&"60000 ms".to_string()), "{values:?}");
-        assert!(values.contains(&"0 ms".to_string()), "{values:?}");
+        let rows: Vec<(String, String)> = config_rows(&response)
+            .into_iter()
+            .map(|row| (row.setting, row.value))
+            .collect();
+        for expected in [
+            ("src addr", "::1"),
+            ("dst ether", "33:33:00:00:00:01"),
+            ("dst addr multicast", "::"),
+            ("port multicast", "9999"),
+            ("dst addr unicast", "::1"),
+            ("port unicast", "10000"),
+            ("tcp timeout", "60000 ms"),
+            ("sync suppress timeout", "0 ms"),
+        ] {
+            assert!(
+                rows.iter().any(|row| row.0 == expected.0 && row.1 == expected.1),
+                "missing {expected:?} in {rows:?}"
+            );
+        }
         assert!(
-            !values.iter().any(|value| value.contains("60000000000")),
-            "no row may carry the stored nanoseconds: {values:?}"
+            !rows.iter().any(|row| row.1.contains("60000000000")),
+            "no row may carry the stored nanoseconds: {rows:?}"
         );
     }
 
@@ -503,5 +591,118 @@ mod tests {
         let (map_name_v4, map_name_v6) = merged_map_names(&reply, &update_cmd("cfg", Some("new4"), None));
 
         assert_eq!(("new4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
+    }
+
+    #[test]
+    fn test_update_sync_endpoints_switches_to_unicast_only() {
+        let mut sync_config = SyncConfig {
+            dst_addr_multicast: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+            port_multicast: 9999,
+            ..Default::default()
+        };
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.unicast = Some("[2001:db8::1]:10000".parse().unwrap());
+        cmd.no_multicast = true;
+
+        update_sync_endpoints(&mut sync_config, &cmd).unwrap();
+
+        assert_eq!(None, sync_config.dst_addr_multicast);
+        assert_eq!(0, sync_config.port_multicast);
+        assert_eq!(
+            Some(IpAddress::from(IpAddr::V6("2001:db8::1".parse().unwrap()))),
+            sync_config.dst_addr_unicast
+        );
+        assert_eq!(10000, sync_config.port_unicast);
+    }
+
+    #[test]
+    fn test_update_sync_endpoints_rejects_scoped_multicast() {
+        let mut sync_config = SyncConfig::default();
+        let current = sync_config.clone();
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.multicast = Some(core::net::SocketAddrV6::new(core::net::Ipv6Addr::LOCALHOST, 9999, 0, 3));
+
+        let err = update_sync_endpoints(&mut sync_config, &cmd).unwrap_err();
+
+        assert_eq!("--multicast does not support IPv6 scope IDs", err);
+        assert_eq!(current, sync_config);
+    }
+
+    #[test]
+    fn test_update_sync_endpoints_rejects_scoped_unicast() {
+        let mut sync_config = SyncConfig::default();
+        let current = sync_config.clone();
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.unicast = Some(core::net::SocketAddrV6::new(
+            core::net::Ipv6Addr::LOCALHOST,
+            10000,
+            0,
+            3,
+        ));
+
+        let err = update_sync_endpoints(&mut sync_config, &cmd).unwrap_err();
+
+        assert_eq!("--unicast does not support IPv6 scope IDs", err);
+        assert_eq!(current, sync_config);
+    }
+
+    #[test]
+    fn test_remove_multicast_endpoint_clears_last_destination() {
+        let mut sync_config = SyncConfig {
+            dst_addr_multicast: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+            port_multicast: 9999,
+            ..Default::default()
+        };
+
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.no_multicast = true;
+
+        update_sync_endpoints(&mut sync_config, &cmd).unwrap();
+
+        assert_eq!(None, sync_config.dst_addr_multicast);
+        assert_eq!(0, sync_config.port_multicast);
+        assert_eq!(None, sync_config.dst_addr_unicast);
+        assert_eq!(0, sync_config.port_unicast);
+    }
+
+    #[test]
+    fn test_update_sync_endpoints_switches_to_multicast_only() {
+        let mut sync_config = SyncConfig {
+            dst_addr_unicast: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+            port_unicast: 10000,
+            ..Default::default()
+        };
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.multicast = Some("[ff02::1]:9999".parse().unwrap());
+        cmd.no_unicast = true;
+
+        update_sync_endpoints(&mut sync_config, &cmd).unwrap();
+
+        assert_eq!(None, sync_config.dst_addr_unicast);
+        assert_eq!(0, sync_config.port_unicast);
+        assert_eq!(
+            Some(IpAddress::from(IpAddr::V6("ff02::1".parse().unwrap()))),
+            sync_config.dst_addr_multicast
+        );
+        assert_eq!(9999, sync_config.port_multicast);
+    }
+
+    #[test]
+    fn test_remove_unicast_endpoint_clears_last_destination() {
+        let mut sync_config = SyncConfig {
+            dst_addr_unicast: Some(IpAddress::from(IpAddr::V6(core::net::Ipv6Addr::LOCALHOST))),
+            port_unicast: 10000,
+            ..Default::default()
+        };
+
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.no_unicast = true;
+
+        update_sync_endpoints(&mut sync_config, &cmd).unwrap();
+
+        assert_eq!(None, sync_config.dst_addr_unicast);
+        assert_eq!(0, sync_config.port_unicast);
+        assert_eq!(None, sync_config.dst_addr_multicast);
+        assert_eq!(0, sync_config.port_multicast);
     }
 }

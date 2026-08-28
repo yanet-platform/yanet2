@@ -115,7 +115,7 @@ func applyACLRules(
 ) acl.ModuleHandle {
 	tb.Helper()
 
-	handle, err := backend.NewModule(name, rules, "", "", nil)
+	handle, err := backend.NewModule(name, rules, "", "")
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = handle.Free() })
 

@@ -630,6 +630,9 @@ export const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
     return bytes;
 };
 
+export const isIPv6MulticastAddress = (ipStr: string): boolean =>
+    parseIPv6ToBytes(ipStr)?.[0] === 0xff;
+
 /**
  * Parse IP address string to bytes array (auto-detects IPv4 or IPv6)
  * @param ipStr - IP address string

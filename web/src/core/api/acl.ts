@@ -3,8 +3,6 @@ import { createService, type CallOptions } from './client';
 // Types matching aclpb/acl.proto and filterpb/filter.proto exactly.
 // No Action.counter, no keep_state, no MapConfig, no DUMP kind.
 
-import type { MACAddress } from './neighbours';
-
 import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
 export type { IPNet, VlanRange, Device, ListConfigsResponse };
 
@@ -64,21 +62,11 @@ export interface ShowConfigRequest {
     name?: string;
 }
 
-export interface SyncConfig {
-    dst_ether?: MACAddress;
-    // commonpb.IPAddress, serialized by the gateway as a bare IP string.
-    dst_addr_multicast?: string;
-    port_multicast?: number;
-    dst_addr_unicast?: string;
-    port_unicast?: number;
-}
-
 export interface ShowConfigResponse {
     name?: string;
     rules?: Rule[];
     fwtable_name_v4?: string;
     fwtable_name_v6?: string;
-    sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigRequest {
@@ -86,7 +74,6 @@ export interface UpdateConfigRequest {
     rules?: Rule[];
     fwtable_name_v4?: string;
     fwtable_name_v6?: string;
-    sync_config?: SyncConfig;
 }
 
 export interface UpdateConfigResponse {}

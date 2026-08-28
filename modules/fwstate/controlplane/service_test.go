@@ -13,11 +13,201 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
-// Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination verifies
-// that a request naming part of the sync destination is refused.
-//
-// The InvalidArgument it fails with names every part left out, and the
-// agent is not touched before it does.
+// Test_SyncConfig_ValidateFields verifies that explicit values which would be
+// lost or truncated by the C representation are rejected before merging.
+func Test_SyncConfig_ValidateFields(t *testing.T) {
+	cases := []struct {
+		name          string
+		portMulticast uint32
+		portUnicast   uint32
+		dstEther      uint64
+		srcAddr       []byte
+		dstMulticast  []byte
+		dstUnicast    []byte
+		wantErr       bool
+		wantDetail    string
+	}{
+		{
+			name:          "zero",
+			portMulticast: 0,
+			wantErr:       false,
+		},
+		{
+			name:          "boundary value",
+			portMulticast: 65535,
+			wantErr:       false,
+		},
+		{
+			name:          "just above boundary",
+			portMulticast: 65536,
+			wantErr:       true,
+			wantDetail:    "port_multicast",
+		},
+		{
+			name:        "unicast just above boundary",
+			portUnicast: 65536,
+			wantErr:     true,
+			wantDetail:  "port_unicast",
+		},
+		{
+			name:       "MAC outside EUI-48",
+			dstEther:   0x100333300000001,
+			wantErr:    true,
+			wantDetail: "dst_ether",
+		},
+		{
+			name:       "short source address",
+			srcAddr:    make([]byte, 4),
+			wantErr:    true,
+			wantDetail: "src_addr",
+		},
+		{
+			name:         "multicast address without port",
+			dstMulticast: make([]byte, 16),
+			wantErr:      true,
+			wantDetail:   "port_multicast",
+		},
+		{
+			name:          "short multicast address",
+			portMulticast: 1,
+			dstMulticast:  make([]byte, 4),
+			wantErr:       true,
+			wantDetail:    "dst_addr_multicast",
+		},
+		{
+			name:       "unicast address without port",
+			dstUnicast: make([]byte, 16),
+			wantErr:    true,
+			wantDetail: "port_unicast",
+		},
+		{
+			name:        "long unicast address",
+			portUnicast: 1,
+			dstUnicast:  make([]byte, 17),
+			wantErr:     true,
+			wantDetail:  "dst_addr_unicast",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &fwstatepb.SyncConfig{
+				SrcAddr:       &commonpb.IPAddress{Addr: tc.srcAddr},
+				PortMulticast: tc.portMulticast,
+				PortUnicast:   tc.portUnicast,
+				DstEther:      &commonpb.MACAddress{Addr: tc.dstEther},
+				DstAddrMulticast: &commonpb.IPAddress{
+					Addr: tc.dstMulticast,
+				},
+				DstAddrUnicast: &commonpb.IPAddress{
+					Addr: tc.dstUnicast,
+				},
+			}
+
+			err := cfg.ValidateFields()
+			if !tc.wantErr {
+				require.NoError(t, err)
+				return
+			}
+
+			require.ErrorContains(t, err, tc.wantDetail)
+		})
+	}
+}
+
+// Test_ValidateSyncConfig_DestinationPairs verifies that every configured
+// destination is complete and unicast rejects multicast addresses.
+func Test_ValidateSyncConfig_DestinationPairs(t *testing.T) {
+	newConfig := func() *fwstatepb.SyncConfig {
+		return &fwstatepb.SyncConfig{
+			SrcAddr:       &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+			DstEther:      &commonpb.MACAddress{Addr: 0x333300000001},
+			PortMulticast: 1,
+		}
+	}
+
+	t.Run("missing multicast address", func(t *testing.T) {
+		err := newConfig().Validate()
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "dst_addr_multicast"))
+	})
+
+	t.Run("zero multicast port", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+		cfg.PortMulticast = 0
+
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "port_multicast"))
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+
+		err := cfg.Validate()
+		require.NoError(t, err)
+	})
+
+	t.Run("unicast only", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.PortMulticast = 0
+		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+		cfg.PortUnicast = 2
+
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("unicast address without port", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.PortMulticast = 0
+		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "port_unicast")
+	})
+
+	t.Run("unicast port without address", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.PortMulticast = 0
+		cfg.PortUnicast = 2
+
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "dst_addr_unicast")
+	})
+
+	t.Run("multicast address in unicast destination", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.PortMulticast = 0
+		cfg.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
+		cfg.PortUnicast = 2
+
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "dst_addr_unicast")
+	})
+}
+
+// Test_UpdateConfigRequest_ValidateEndpointClears verifies that contradictory
+// endpoint fields are rejected when an update explicitly clears that endpoint.
+func Test_UpdateConfigRequest_ValidateEndpointClears(t *testing.T) {
+	request := &fwstatepb.UpdateConfigRequest{
+		ClearMulticast: true,
+		SyncConfig: &fwstatepb.SyncConfig{
+			DstAddrMulticast: syncTestAddr(),
+			PortMulticast:    syncTestPort,
+		},
+	}
+
+	require.ErrorContains(t, request.ValidateEndpointClears(), "clear_multicast")
+}
+
+// Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination verifies that
+// the service rejects a destination port without its address before it
+// attempts to build or publish a C-side module.
 func Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination(t *testing.T) {
 	service := fwstate.NewFWStateService(nil)
 
@@ -105,8 +295,8 @@ func showConfig(
 // Test_FWStateService_UpdateConfig_CreatesConfigWithoutSyncOrMaps
 // verifies that a create naming only the config succeeds.
 //
-// The installed module links no map and matches no sync packet, leaving
-// both to a later update.
+// The installed module links no map and leaves external synchronization
+// disabled, while trusted internal events are consumed until a later update.
 func Test_FWStateService_UpdateConfig_CreatesConfigWithoutSyncOrMaps(t *testing.T) {
 	const configName = "fwstate-bare"
 
@@ -124,7 +314,7 @@ func Test_FWStateService_UpdateConfig_CreatesConfigWithoutSyncOrMaps(t *testing.
 	require.Empty(t, stored.GetMapNameV6())
 	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
 	require.Equal(t, make([]byte, 16), stored.GetSyncConfig().GetSrcAddr().GetAddr())
-	require.Equal(t, make([]byte, 16), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+	require.Nil(t, stored.GetSyncConfig().GetDstAddrMulticast())
 
 	// The timeouts are not part of the sync destination and always carry
 	// the defaults, so an unconfigured config is still a usable one.
@@ -151,6 +341,7 @@ func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
 		MapNameV6: maps.v6Name(),
 		SyncConfig: &fwstatepb.SyncConfig{
 			SrcAddr:          syncTestAddr(),
+			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
 			DstAddrMulticast: syncTestAddr(),
 			PortMulticast:    syncTestPort,
 		},
@@ -162,6 +353,35 @@ func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
 	require.Equal(t, maps.v6Name(), stored.GetMapNameV6())
 	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
 	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+}
+
+// Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint verifies that an
+// explicit clear reaches the installed config instead of being treated as an
+// omitted destination update.
+func Test_FWStateService_UpdateConfig_ClearsLastSyncEndpoint(t *testing.T) {
+	const configName = "fwstate-clear-last-endpoint"
+
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-clear-last-endpoint")
+	maps := newFWStateTestMaps(t, agent, "clear-last-endpoint", 1024)
+	service := fwstate.NewFWStateService(agent)
+
+	_, err := service.UpdateConfig(t.Context(), validDeleteTestUpdateRequest(
+		configName, maps.v4Name(), maps.v6Name(),
+	))
+	require.NoError(t, err)
+
+	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name:           configName,
+		SyncConfig:     &fwstatepb.SyncConfig{},
+		ClearMulticast: true,
+	})
+	require.NoError(t, err)
+
+	stored := showConfig(t, service, configName)
+	require.Nil(t, stored.GetSyncConfig().GetDstAddrMulticast())
+	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
+	require.Empty(t, stored.GetSyncConfig().GetDstAddrUnicast())
+	require.Zero(t, stored.GetSyncConfig().GetPortUnicast())
 }
 
 // Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync

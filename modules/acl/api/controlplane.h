@@ -19,8 +19,6 @@ enum acl_rule_action_kind {
 
 struct agent;
 struct cp_module;
-struct fwstate_sync_emit_config;
-
 // Destroy the module when it is dangling, per cp_module_try_destroy.
 //
 // Returns -1 with errno EAGAIN while a live generation still references
@@ -64,9 +62,6 @@ struct acl_rule {
 // fwstate_map_v6 objects whose fwtables the module uses for state
 // lookups. Either may be NULL or empty, in which case no link is
 // declared and CHECK_STATE finds no state for that family.
-// emit_config is copied by value when non-NULL and drives the
-// CREATE_STATE sync frames; NULL leaves the emission config zeroed.
-//
 // Returns NULL with err set on failure; nothing is left allocated.
 struct cp_module *
 acl_module_config_init(
@@ -76,7 +71,6 @@ acl_module_config_init(
 	uint32_t rule_count,
 	const char *fw4_map_name,
 	const char *fw6_map_name,
-	const struct fwstate_sync_emit_config *emit_config,
 	yanet_error **err
 );
 

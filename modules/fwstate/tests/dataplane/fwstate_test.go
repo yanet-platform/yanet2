@@ -22,9 +22,8 @@ type syncPacketConfig struct {
 	dstPort      uint16
 	srcAddr      string
 	dstAddr      string
-	outerDstAddr string
-	outerDstPort uint16
 	isExternal   bool
+	neutralOuter bool
 	flags        uint8
 	fib          uint8
 }
@@ -45,19 +44,18 @@ func WithAddrs(srcAddr, dstAddr string) SyncPacketOption {
 	}
 }
 
-// WithOuterDst sets the sync destination the packet is addressed to, the
-// pair a module matches its own configuration against.
-func WithOuterDst(addr string, port uint16) SyncPacketOption {
-	return func(c *syncPacketConfig) {
-		c.outerDstAddr = addr
-		c.outerDstPort = port
-	}
-}
-
 // WithExternal marks the packet as external (from outside source)
 func WithExternal() SyncPacketOption {
 	return func(c *syncPacketConfig) {
 		c.isExternal = true
+	}
+}
+
+// WithNeutralOuter makes the outer headers match a local ACL event before
+// fwstate stamps its configured destination.
+func WithNeutralOuter() SyncPacketOption {
+	return func(c *syncPacketConfig) {
+		c.neutralOuter = true
 	}
 }
 
@@ -80,13 +78,11 @@ func WithFib(fib uint8) SyncPacketOption {
 func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketOption) gopacket.Packet {
 	// Apply defaults
 	cfg := syncPacketConfig{
-		srcPort:      12345,
-		dstPort:      9999,
-		srcAddr:      "2001:db8::1",
-		dstAddr:      "2001:db8::2",
-		outerDstAddr: "ff02::1",
-		outerDstPort: 9999,
-		isExternal:   false,
+		srcPort:    12345,
+		dstPort:    9999,
+		srcAddr:    "2001:db8::1",
+		dstAddr:    "2001:db8::2",
+		isExternal: false,
 	}
 
 	// Apply options
@@ -94,9 +90,18 @@ func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketO
 		opt(&cfg)
 	}
 
+	dstMAC := xerror.Unwrap(net.ParseMAC("33:33:00:00:00:01"))
+	outerDstIP := net.ParseIP("ff02::1")
+	outerDstPort := layers.UDPPort(9999)
+	if cfg.neutralOuter {
+		dstMAC = xerror.Unwrap(net.ParseMAC("00:00:00:00:00:00"))
+		outerDstIP = net.IPv6zero
+		outerDstPort = 0
+	}
+
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("02:00:00:00:00:00")),
-		DstMAC:       xerror.Unwrap(net.ParseMAC("33:33:00:00:00:01")), // Multicast
+		DstMAC:       dstMAC,
 		EthernetType: layers.EthernetTypeDot1Q,
 	}
 
@@ -117,12 +122,12 @@ func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketO
 		NextHeader: layers.IPProtocolUDP,
 		HopLimit:   64,
 		SrcIP:      srcIP,
-		DstIP:      net.ParseIP(cfg.outerDstAddr), // Multicast destination
+		DstIP:      outerDstIP,
 	}
 
 	udp := layers.UDP{
 		SrcPort: 12345,
-		DstPort: layers.UDPPort(cfg.outerDstPort), // Sync port
+		DstPort: outerDstPort,
 	}
 	udp.SetNetworkLayerForChecksum(&ip6)
 
@@ -156,6 +161,31 @@ func TestFWStateInternalPacket(t *testing.T) {
 	require.Empty(t, result.Drop, "Internal packet should not be dropped")
 }
 
+// Test_FWStateInternalPacket_UnicastOnly verifies that a local event is still
+// consumed and emitted when multicast reception is disabled.
+func Test_FWStateInternalPacket_UnicastOnly(t *testing.T) {
+	pkt := createSyncPacket(t, layers.IPProtocolTCP)
+
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+	ClearSyncDestination(cpModule)
+	SetSyncUnicastDestination(cpModule)
+
+	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+	require.Len(t, result.Output, 1, "unicast-only internal event should be emitted")
+	require.Empty(t, result.Drop)
+
+	parsed := gopacket.NewPacket(result.Output[0], layers.LayerTypeEthernet, gopacket.Default)
+	ipv6, ok := parsed.Layer(layers.LayerTypeIPv6).(*layers.IPv6)
+	require.True(t, ok, "emitted packet should retain its IPv6 header")
+	require.Equal(t, net.ParseIP("2001:db8::3"), ipv6.DstIP)
+	udp, ok := parsed.Layer(layers.LayerTypeUDP).(*layers.UDP)
+	require.True(t, ok, "emitted packet should retain its UDP header")
+	require.Equal(t, layers.UDPPort(10000), udp.DstPort)
+}
+
 func TestFWStateExternalPacket(t *testing.T) {
 	// Create external sync packet (should be dropped)
 	pkt := createSyncPacket(t, layers.IPProtocolUDP, WithExternal())
@@ -165,28 +195,35 @@ func TestFWStateExternalPacket(t *testing.T) {
 	defer memCtx.Free()
 	cpModule, storage := fwstateModuleConfig(memCtx)
 	defer fwstateCounterStorageFree(storage)
-	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, storage, pkt))
 
 	// External packets should be dropped
 	require.Empty(t, result.Output, "External packet should not be forwarded")
 	require.NotEmpty(t, result.Drop, "External packet should be dropped")
 }
 
-// Test_FWStateModule_UnconfiguredSync_PassesSyncPacketThrough verifies
-// that a module carrying no sync destination claims no packet at all.
+// Test_FWState_WirePacketWithUnspecifiedSource verifies that receive-only mode
+// consumes synchronization packets without emitting new copies.
+func Test_FWState_WirePacketWithUnspecifiedSource(t *testing.T) {
+	pkt := createSyncPacket(t, layers.IPProtocolUDP)
+
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, storage, pkt))
+
+	require.Empty(t, result.Output, "wire packet must not be emitted")
+	require.NotEmpty(t, result.Drop, "wire packet must be consumed")
+}
+
+// Test_FWStateModule_UnconfiguredSync_DropsInternalEvent verifies
+// that a module carrying no sync destination consumes a local event.
 //
-// A packet an otherwise identical configured module would consume is
-// passed through instead.
-func Test_FWStateModule_UnconfiguredSync_PassesSyncPacketThrough(t *testing.T) {
-	// The packet is addressed to the unset destination itself, the only
-	// one such a config could match.
-	//
-	// It is external, and a claimed external packet is dropped after its
-	// frames are applied, so passing it through can only mean it was
-	// never claimed.
-	pkt := createSyncPacket(
-		t, layers.IPProtocolUDP, WithExternal(), WithOuterDst("::", 0),
-	)
+// Internal events are trusted notifications from ACL, so the neutral
+// zero-address frame must not continue through ordinary modules.
+func Test_FWStateModule_UnconfiguredSync_DropsInternalEvent(t *testing.T) {
+	pkt := createSyncPacket(t, layers.IPProtocolUDP, WithNeutralOuter())
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
@@ -196,8 +233,24 @@ func Test_FWStateModule_UnconfiguredSync_PassesSyncPacketThrough(t *testing.T) {
 
 	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
 
-	require.NotEmpty(t, result.Output, "an unclaimed packet should be passed through")
-	require.Empty(t, result.Drop, "an unclaimed packet should not be dropped")
+	require.Empty(t, result.Output, "an internal event without a destination must not leak")
+	require.NotEmpty(t, result.Drop, "an internal event without a destination must be consumed")
+}
+
+// Test_FWState_WirePacketWithoutMulticastEndpoint verifies that disabling the
+// receive endpoint leaves matching wire packets in ordinary processing.
+func Test_FWState_WirePacketWithoutMulticastEndpoint(t *testing.T) {
+	pkt := createSyncPacket(t, layers.IPProtocolUDP)
+
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+	ClearSyncDestination(cpModule)
+	result := xerror.Unwrap(fwstateHandleWirePackets(cpModule, storage, pkt))
+
+	require.Len(t, result.Output, 1, "wire receive is disabled without multicast")
+	require.Empty(t, result.Drop)
 }
 
 func TestFWStateNonSyncPacket(t *testing.T) {
@@ -508,11 +561,8 @@ func TestFWStateMergeFromStaleLayer(t *testing.T) {
 		"packets_backward from active layer must be summed in (got %d)", snap.PacketsBackward)
 }
 
-// TestFWStateSyncSuppression verifies the sync suppression debounce:
-// configured with a large suppress window, the first sync frame creates the
-// entry and is forwarded, while an immediately following frame for the same
-// 5-tuple is suppressed (entry untouched) and its packet is dropped instead of
-// forwarded.
+// TestFWStateSyncSuppression verifies that a fully suppressed local event is
+// not emitted.
 func TestFWStateSyncSuppression(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_suppress_test", datasize.MB*64)
 	defer memCtx.Free()
@@ -535,12 +585,11 @@ func TestFWStateSyncSuppression(t *testing.T) {
 	require.Greater(t, snap1.Deadline, uint64(0))
 
 	// Second frame, same 5-tuple, arrives immediately: within the window, so
-	// the fwmap record is left untouched and the packet is dropped (no peer
-	// refresh needed).
+	// the state record and the wire are both left untouched.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
 	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
-	require.Empty(t, res2.Output, "suppressed frame must not be forwarded")
-	require.NotEmpty(t, res2.Drop, "suppressed frame must be dropped")
+	require.Empty(t, res2.Output)
+	require.Len(t, res2.Drop, 1)
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
@@ -550,9 +599,8 @@ func TestFWStateSyncSuppression(t *testing.T) {
 		"deadline must not change when the frame is suppressed")
 }
 
-// TestFWStateSyncSuppressionDisabled verifies that with a zero suppress window
-// (the default) every frame refreshes the entry and is forwarded, i.e. the
-// feature is off.
+// TestFWStateSyncSuppressionDisabled verifies that a zero window refreshes the
+// state record on every frame.
 func TestFWStateSyncSuppressionDisabled(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("fwstate_suppress_off_test", datasize.MB*64)
 	defer memCtx.Free()
@@ -567,8 +615,7 @@ func TestFWStateSyncSuppressionDisabled(t *testing.T) {
 	require.True(t, snap1.Found)
 
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
-	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
-	require.NotEmpty(t, res2.Output, "second frame must be forwarded when suppression is off")
+	xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
 	require.GreaterOrEqual(t, snap2.UpdatedAt, snap1.UpdatedAt,
@@ -601,8 +648,7 @@ func TestFWStateSyncSuppressionAllowsShorterTTL(t *testing.T) {
 	// suppressed, so the deadline shrinks toward the FIN timeout.
 	const finBit = 0x01 // FWSTATE_FIN, src nibble
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(finBit))
-	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
-	require.NotEmpty(t, res2.Output, "FIN frame must be forwarded, not suppressed")
+	xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)
@@ -637,8 +683,7 @@ func TestFWStateSyncSuppressionAppliesFlagChanges(t *testing.T) {
 	// ACK frame, same TTL, within the window: must not be suppressed because
 	// it carries a new flag bit that the merge path must record.
 	pkt2 := createSyncPacket(t, layers.IPProtocolTCP, WithFlags(ackBit))
-	res2 := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
-	require.NotEmpty(t, res2.Output, "flag-changing frame must be forwarded, not suppressed")
+	xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt2))
 
 	snap2 := GetStateValue(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, snap2.Found)

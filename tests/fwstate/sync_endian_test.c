@@ -1,13 +1,8 @@
 /*
- * FWState Sync Frame Endianness Test
+ * FWState sync packet crafting regression tests.
  *
- * Verifies that fwstate_craft_state_sync_packet() correctly converts
- * transport layer ports from big-endian byte order to little-endian
- * in the sync frame for both TCP and UDP.
- *
- * This is a regression test for a bug where UDP ports were copied
- * directly from the packet header without rte_be_to_cpu_16() conversion,
- * while TCP ports were correctly converted.
+ * Verifies transport-port byte order in the payload and configurable outer
+ * destinations without changing the crafted packet metadata.
  */
 
 #include <assert.h>
@@ -33,20 +28,10 @@
 #define TEST_SRC_PORT 12345
 #define TEST_DST_PORT 80
 
-// Dummy sync config (only used for packet construction, not for port logic)
-static struct fwstate_sync_emit_config test_sync_config;
+static const struct ether_addr test_dst_ether = {
+	.addr = {0x02, 0x00, 0x00, 0x00, 0x00, 0x02},
+};
 static struct rte_mempool *test_pool;
-
-static void
-init_sync_config(void) {
-	memset(&test_sync_config, 0, sizeof(test_sync_config));
-	// Multicast IPv6 address: ff02::1
-	test_sync_config.dst_addr_multicast[0] = 0xff;
-	test_sync_config.dst_addr_multicast[1] = 0x02;
-	test_sync_config.dst_addr_multicast[15] = 0x01;
-	// Port in big-endian as expected by the sync packet builder
-	test_sync_config.port_multicast = rte_cpu_to_be_16(9999);
-}
 
 /*
  * Build a minimal IPv6 + transport packet in an mbuf.
@@ -155,6 +140,79 @@ extract_sync_frame(struct rte_mbuf *mbuf) {
 	);
 }
 
+static void
+test_sync_packet_destination(void) {
+	struct packet src_pkt = {};
+	int rc = build_test_packet(
+		&src_pkt, IPPROTO_UDP, TEST_SRC_PORT, TEST_DST_PORT
+	);
+	assert(rc == 0);
+	src_pkt.rx_device_id = 7;
+	src_pkt.tx_device_id = 9;
+
+	struct rte_mbuf *sync_mbuf = rte_pktmbuf_alloc(test_pool);
+	assert(sync_mbuf != NULL);
+	struct packet sync_pkt = {.mbuf = sync_mbuf};
+	const uint8_t dst_addr[16] = {
+		0x20,
+		0x01,
+		0x0d,
+		0xb8,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		2,
+	};
+	const uint16_t dst_port = rte_cpu_to_be_16(10000);
+
+	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
+	assert(rc == 0);
+	fwstate_sync_set_destination(
+		&sync_pkt, &test_dst_ether, dst_addr, dst_port
+	);
+
+	struct rte_ether_hdr *ether_hdr =
+		rte_pktmbuf_mtod(sync_mbuf, struct rte_ether_hdr *);
+	const uint16_t ipv6_offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr);
+	const uint16_t udp_offset = ipv6_offset + sizeof(struct rte_ipv6_hdr);
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+		sync_mbuf, struct rte_ipv6_hdr *, ipv6_offset
+	);
+	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+		sync_mbuf, struct rte_udp_hdr *, udp_offset
+	);
+	const uint16_t payload_len =
+		sizeof(struct rte_udp_hdr) + sizeof(struct fw_state_sync_frame);
+
+	assert(memcmp(&ether_hdr->dst_addr,
+		      &test_dst_ether,
+		      sizeof(test_dst_ether)) == 0);
+	assert(memcmp(ipv6_hdr->dst_addr, dst_addr, sizeof(dst_addr)) == 0);
+	assert(ipv6_hdr->payload_len == rte_cpu_to_be_16(payload_len));
+	assert(udp_hdr->src_port == dst_port);
+	assert(udp_hdr->dst_port == dst_port);
+	assert(udp_hdr->dgram_len == rte_cpu_to_be_16(payload_len));
+	assert((sync_pkt.flags & (1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL)) == 0
+	);
+	assert(sync_pkt.rx_device_id == src_pkt.rx_device_id);
+	assert(sync_pkt.tx_device_id == src_pkt.tx_device_id);
+	assert(sync_pkt.network_header.offset == ipv6_offset);
+	assert(sync_pkt.transport_header.offset == udp_offset);
+	assert(sync_pkt.data_len == udp_offset + payload_len);
+
+	rte_pktmbuf_free(src_pkt.mbuf);
+	rte_pktmbuf_free(sync_mbuf);
+}
+
 /*
  * Test that TCP ports in sync frames are in host byte order.
  * This should always pass (TCP conversion is correct).
@@ -175,9 +233,7 @@ test_tcp_sync_frame_ports(void) {
 	assert(sync_mbuf != NULL);
 	struct packet sync_pkt = {.mbuf = sync_mbuf};
 
-	rc = fwstate_craft_state_sync_packet(
-		&test_sync_config, &src_pkt, SYNC_INGRESS, &sync_pkt
-	);
+	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
 	assert(rc == 0);
 
 	/* Extract and verify sync frame ports */
@@ -209,9 +265,7 @@ test_tcp_sync_frame_ports(void) {
 	assert(sync_mbuf != NULL);
 	sync_pkt.mbuf = sync_mbuf;
 
-	rc = fwstate_craft_state_sync_packet(
-		&test_sync_config, &src_pkt, SYNC_EGRESS, &sync_pkt
-	);
+	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_EGRESS, &sync_pkt);
 	assert(rc == 0);
 
 	frame = extract_sync_frame(sync_mbuf);
@@ -257,9 +311,7 @@ test_udp_sync_frame_ports(void) {
 	assert(sync_mbuf != NULL);
 	struct packet sync_pkt = {.mbuf = sync_mbuf};
 
-	rc = fwstate_craft_state_sync_packet(
-		&test_sync_config, &src_pkt, SYNC_INGRESS, &sync_pkt
-	);
+	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_INGRESS, &sync_pkt);
 	assert(rc == 0);
 
 	/* Extract and verify sync frame ports */
@@ -306,9 +358,7 @@ test_udp_sync_frame_ports(void) {
 	assert(sync_mbuf != NULL);
 	sync_pkt.mbuf = sync_mbuf;
 
-	rc = fwstate_craft_state_sync_packet(
-		&test_sync_config, &src_pkt, SYNC_EGRESS, &sync_pkt
-	);
+	rc = fwstate_craft_state_sync_packet(&src_pkt, SYNC_EGRESS, &sync_pkt);
 	assert(rc == 0);
 
 	frame = extract_sync_frame(sync_mbuf);
@@ -354,7 +404,7 @@ main(void) {
 		return EXIT_FAILURE;
 	}
 
-	init_sync_config();
+	test_sync_packet_destination();
 
 	/* TCP test (control — should always pass) */
 	test_tcp_sync_frame_ports();
