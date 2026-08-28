@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "common/memory_address.h"
+#include "common/rlist.h"
 #include "lib/dataplane/device/device.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -142,8 +143,26 @@ struct pipeline_ectx {
 	struct function_ectx *functions[];
 };
 
+enum device_entry_direction {
+	device_entry_direction_input,
+	device_entry_direction_output,
+};
+
 struct device_entry_ectx {
 	device_handler handler;
+
+	// Worker-side worklist membership and round dispatch.
+	//
+	// The node links this entry into one of the generation's two
+	// worklists and the direction selects input or output processing;
+	// the back reference reaches the owning device without an array
+	// walk (an offset pointer filled by the control plane, as is the
+	// direction). List links are the owning worker's business only.
+	struct rlist schedule_node;
+	uint8_t schedule_list;
+	uint8_t direction;
+	struct device_ectx *device_ectx;
+
 	struct counter_value_handle *counter_packet_rx;
 	struct counter_value_handle *counter_packet_entry;
 	struct counter_value_handle *counter_packet_tx;
@@ -200,6 +219,22 @@ struct config_gen_ectx {
 	// end of every worker round, so the worker loop reuses it in place
 	// instead of reinitializing a fresh front on each iteration.
 	struct packet_front packet_front;
+
+	// Two device-entry worklists whose roles swap every tick; the
+	// active one is the to-execute list.
+	//
+	// Every entry is linked into exactly one: the active list holds
+	// entries still to execute this tick, the other the processed
+	// ones. Tick start flips the roles, turning the whole processed
+	// list back into the to-execute list at constant cost, so every
+	// entry still runs at least once per tick; a packet routed to a
+	// processed entry moves it back so it runs again within the tick.
+	// Links are raw pointers built only by the owning worker, which
+	// also raises the ready flag on first build; the control plane
+	// leaves all three fields zeroed.
+	struct rlist schedule_lists[2];
+	uint8_t schedule_active;
+	uint8_t schedules_ready;
 
 	uint64_t device_count;
 	struct device_ectx *devices[];

@@ -1336,6 +1336,8 @@ device_ectx_create(
 		goto error;
 	}
 	SET_OFFSET_OF(&device_ectx->input_pipelines, input);
+	SET_OFFSET_OF(&input->device_ectx, device_ectx);
+	input->direction = device_entry_direction_input;
 
 	struct device_entry_ectx *output = device_entry_ectx_create(
 		cp_config_gen,
@@ -1351,6 +1353,8 @@ device_ectx_create(
 		goto error;
 	}
 	SET_OFFSET_OF(&device_ectx->output_pipelines, output);
+	SET_OFFSET_OF(&output->device_ectx, device_ectx);
+	output->direction = device_entry_direction_output;
 
 	return device_ectx;
 

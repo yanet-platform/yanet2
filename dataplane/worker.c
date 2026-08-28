@@ -112,8 +112,9 @@ worker_read(
 			*(worker->dp_worker->drop_count) += 1;
 			continue;
 		}
-		packet_front_input(
-			&ADDR_OF(&device_ectx->input_pipelines)->schedule,
+		device_entry_ectx_schedule(
+			config_gen_ectx,
+			ADDR_OF(&device_ectx->input_pipelines),
 			packet
 		);
 	}

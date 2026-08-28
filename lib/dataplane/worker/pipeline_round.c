@@ -1,5 +1,6 @@
 #include "pipeline_round.h"
 
+#include "common/container_of.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
@@ -16,73 +17,50 @@ worker_pipeline_round(
 ) {
 	(void)cp_config_gen;
 
-	uint64_t device_count = config_gen_ectx->device_count;
+	struct rlist *active_head =
+		&config_gen_ectx
+			 ->schedule_lists[config_gen_ectx->schedule_active];
+	struct rlist *inactive_head =
+		&config_gen_ectx
+			 ->schedule_lists[config_gen_ectx->schedule_active ^ 1];
 
 	/*
-	 * Force a full traversal on the first iteration.
+	 * Every entry executes at least once per tick.
 	 *
-	 * Every device, and through it every pipeline, function, chain and
-	 * module, runs once per tick even when no packets arrived, so periodic
-	 * work has a chance to make progress. Later iterations only revisit
-	 * devices whose input or output entry received packets, whether
-	 * straight from RX or routed in by a module.
+	 * Tick preparation hands over a list that still holds every
+	 * entry, so all of them run even when no packets arrived and
+	 * periodic work has a chance to make progress. Within the tick,
+	 * an entry re-enters the list only when a packet is routed onto
+	 * it, and the round ends once that quiesces.
 	 */
-	int force_poll = 1;
+	while (!rlist_empty(active_head)) {
+		struct rlist *node = rlist_first(active_head);
 
-	while (1) {
-		if (!force_poll) {
-			int has_work = 0;
-			for (uint64_t idx = 0; idx < device_count; ++idx) {
-				struct device_ectx *device_ectx =
-					config_gen_ectx_get_device(
-						config_gen_ectx, idx
-					);
-				if (device_ectx == NULL) {
-					continue;
-				}
-				if (packet_list_first(
-					    &ADDR_OF(&device_ectx
-							      ->input_pipelines)
-						     ->schedule.input
-				    ) != NULL ||
-				    packet_list_first(
-					    &ADDR_OF(&device_ectx
-							      ->output_pipelines
-					    )
-						     ->schedule.input
-				    ) != NULL) {
-					has_work = 1;
-					break;
-				}
-			}
-			if (!has_work) {
-				break;
-			}
-		}
+		/*
+		 * Park the entry before executing it: a packet routed
+		 * into it while it runs moves it back onto the active
+		 * list so it runs again this tick.
+		 */
+		rlist_remove(node);
+		rlist_add(inactive_head, node);
 
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			struct device_ectx *device_ectx =
-				config_gen_ectx_get_device(
-					config_gen_ectx, idx
-				);
-			if (device_ectx == NULL) {
-				continue;
-			}
+		struct device_entry_ectx *device_entry_ectx = container_of(
+			node, struct device_entry_ectx, schedule_node
+		);
+		device_entry_ectx->schedule_list =
+			config_gen_ectx->schedule_active ^ 1;
 
-			struct packet_front *schedule =
-				&ADDR_OF(&device_ectx->input_pipelines)
-					 ->schedule;
+		struct device_ectx *device_ectx =
+			ADDR_OF(&device_entry_ectx->device_ectx);
+		struct packet_front *schedule = &device_entry_ectx->schedule;
 
-			if (!force_poll &&
-			    packet_list_first(&schedule->input) == NULL) {
-				continue;
-			}
+		// Detach the batch so redirects land in the reusable
+		// inbox.
+		struct packet_front active = *schedule;
+		packet_front_init(schedule);
 
-			// Detach the batch so redirects land in the reusable
-			// inbox.
-			struct packet_front active = *schedule;
-			packet_front_init(schedule);
-
+		if (device_entry_ectx->direction ==
+		    device_entry_direction_input) {
 			device_ectx_process_input(
 				dp_worker, device_ectx, &active
 			);
@@ -94,40 +72,12 @@ worker_pipeline_round(
 			 * routed into a device entry by a module.
 			 */
 			packet_front_drop_output(&active);
-
-			packet_front_merge(packet_front, &active);
-		}
-
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			struct device_ectx *device_ectx =
-				config_gen_ectx_get_device(
-					config_gen_ectx, idx
-				);
-			if (device_ectx == NULL) {
-				continue;
-			}
-
-			struct packet_front *schedule =
-				&ADDR_OF(&device_ectx->output_pipelines)
-					 ->schedule;
-
-			if (!force_poll &&
-			    packet_list_first(&schedule->input) == NULL) {
-				continue;
-			}
-
-			// Detach the batch so redirects land in the reusable
-			// inbox.
-			struct packet_front active = *schedule;
-			packet_front_init(schedule);
-
+		} else {
 			device_ectx_process_output(
 				dp_worker, device_ectx, &active
 			);
-
-			packet_front_merge(packet_front, &active);
 		}
 
-		force_poll = 0;
+		packet_front_merge(packet_front, &active);
 	}
 }

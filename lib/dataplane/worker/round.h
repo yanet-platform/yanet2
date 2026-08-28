@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/memory_address.h"
+#include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
 
@@ -32,6 +33,12 @@ worker_round_prepare(
 		&dp_worker->gen, round.cp_config_gen->gen, __ATOMIC_RELEASE
 	);
 	*dp_worker->iterations += 1;
+
+	// Flip or first-build the worklists before any packet of this tick
+	// is scheduled onto them.
+	if (round.config_gen_ectx != NULL) {
+		config_gen_ectx_schedules_prepare(round.config_gen_ectx);
+	}
 
 	return round;
 }

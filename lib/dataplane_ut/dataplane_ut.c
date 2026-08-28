@@ -526,8 +526,9 @@ dataplane_ut_run(
 			packet_front_drop(&packet_front, packet);
 			continue;
 		}
-		packet_front_input(
-			&ADDR_OF(&device_ectx->input_pipelines)->schedule,
+		device_entry_ectx_schedule(
+			config_gen_ectx,
+			ADDR_OF(&device_ectx->input_pipelines),
 			packet
 		);
 	}
