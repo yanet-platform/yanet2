@@ -340,7 +340,13 @@ unlock:
 
 uint64_t
 agent_memory_limit(struct agent *agent) {
-	return agent->memory_limit;
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	cp_config_lock(cp_config);
+	uint64_t memory_limit = agent->memory_limit;
+	cp_config_unlock(cp_config);
+
+	return memory_limit;
 }
 
 int
