@@ -187,8 +187,8 @@ type resolvedMethod struct {
 	Reply protoreflect.MessageType
 }
 
-// resolveMethod looks the method up among the linked descriptors and checks
-// that request is what it takes.
+// resolveMethod turns the spelled method into a call, refusing one the binary
+// does not know, a streaming one, or a request of another type.
 func resolveMethod(method string, request proto.Message) (resolvedMethod, error) {
 	service, name, ok := strings.Cut(strings.TrimPrefix(method, "/"), "/")
 	if !ok || service == "" || name == "" {
