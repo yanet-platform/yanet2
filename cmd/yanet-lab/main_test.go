@@ -550,6 +550,7 @@ func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
 		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "fast action %q", action)
 	}
 	assert.Equal(t, supervisorStatusTimeout, requestTimeout("status"))
+	assert.Greater(t, requestTimeout("status"), 30*time.Second)
 	assert.Equal(t, supervisorManifestTimeout+30*time.Second, requestTimeout("manifest"))
 	assert.Equal(t, supervisorExecTimeout, requestTimeout("exec"))
 	assert.Equal(t, supervisorResetTimeout, requestTimeout("reset"))
@@ -1173,6 +1174,22 @@ func TestStatusProtocolMismatchWithoutStateChange(t *testing.T) {
 	require.Contains(t, decoded["error"], "protocol mismatch")
 }
 
+func TestStatusProtocolZeroIsPreservedInJSON(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{OK: true}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.Error(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Contains(t, decoded, "supervisorProtocolVersion")
+	require.EqualValues(t, 0, decoded["supervisorProtocolVersion"])
+}
+
 func TestStatusCurrentProtocolHealthy(t *testing.T) {
 	stubCallAndServe(t, func(*application, request) (*response, error) {
 		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion, Scopes: readyScopes()}, nil
@@ -1233,6 +1250,31 @@ func TestStatusErrorMessageAlwaysIncludesFailingScopeNames(t *testing.T) {
 	require.Equal(t, "operator profile is not ready: route0-session", decoded.Error)
 }
 
+func TestStatusFailedReplyNeverRendersReady(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{
+			OK:                        false,
+			Error:                     "status probe failed",
+			Status:                    statusReady,
+			SupervisorProtocolVersion: supervisorProtocolVersion,
+			Scopes:                    readyScopes(),
+		}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.EqualError(t, err, "status probe failed")
+	var decoded struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.False(t, decoded.OK)
+	require.Equal(t, statusNotReady, decoded.Status)
+}
+
 func TestStatusHandlerPopulatesScopes(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1240,6 +1282,7 @@ func TestStatusHandlerPopulatesScopes(t *testing.T) {
 		checkErr   error
 		wantOK     bool
 		wantStatus string
+		wantError  string
 	}{
 		{
 			name:       "ready",
@@ -1252,6 +1295,15 @@ func TestStatusHandlerPopulatesScopes(t *testing.T) {
 			results:    failingScopes("bird", "bird process is not running"),
 			wantOK:     false,
 			wantStatus: statusNotReady,
+			wantError:  "operator profile is not ready: bird",
+		},
+		{
+			name:       "probe error",
+			results:    readyScopes(),
+			checkErr:   errors.New("status probe failed"),
+			wantOK:     false,
+			wantStatus: statusNotReady,
+			wantError:  "status probe failed",
 		},
 	}
 	for _, tc := range cases {
@@ -1262,11 +1314,18 @@ func TestStatusHandlerPopulatesScopes(t *testing.T) {
 			}
 			t.Cleanup(func() { checkOperatorStatus = saved })
 			state := &supervisor{}
+			stateChanges := 0
 			server, client := net.Pipe()
 			defer client.Close()
 			var handlers errgroup.Group
 			handlers.Go(func() error {
-				handleConnection(server, nil, t.TempDir(), state, nil, nil, func() {})
+				handleConnection(server, nil, t.TempDir(), state, func() error {
+					stateChanges++
+					return nil
+				}, func() error {
+					stateChanges++
+					return nil
+				}, func() { stateChanges++ })
 				return nil
 			})
 			require.NoError(t, json.NewEncoder(client).Encode(request{Action: "status"}))
@@ -1274,9 +1333,11 @@ func TestStatusHandlerPopulatesScopes(t *testing.T) {
 			require.NoError(t, json.NewDecoder(client).Decode(&reply))
 			require.Equal(t, tc.wantOK, reply.OK)
 			require.Equal(t, tc.wantStatus, reply.Status)
-			require.Len(t, reply.Scopes, len(lab.ScopeNames()))
+			require.Equal(t, tc.wantError, reply.Error)
+			require.Equal(t, tc.results, reply.Scopes)
 			require.Equal(t, supervisorProtocolVersion, reply.SupervisorProtocolVersion)
 			require.NoError(t, handlers.Wait())
+			require.Zero(t, stateChanges)
 		})
 	}
 }

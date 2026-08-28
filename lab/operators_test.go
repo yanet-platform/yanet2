@@ -208,8 +208,9 @@ func TestStatusCommandFormatContract(t *testing.T) {
 		{Name: "b-down", Command: "false", Reason: "r-b"},
 	}
 	script := lab.BuildOperatorStatusCommand(scopes)
-	output, err := exec.Command("sh", "-c", script).CombinedOutput()
+	output, err := exec.Command("sh", "-c", "echo start; "+script+"; echo end").CombinedOutput()
 	require.NoError(t, err)
+	require.Contains(t, string(output), "end")
 	results := lab.ParseScopeStatusFor(string(output), scopes)
 	require.Len(t, results, 2)
 	require.Equal(t, lab.StateReady, results[0].State)

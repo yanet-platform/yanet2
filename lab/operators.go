@@ -118,7 +118,7 @@ func BuildOperatorStatusCommand(scopes []OperatorScope) string {
 		fmt.Fprintf(&builder, "if %s; then printf '%s %s ready\\n'; else printf '%s %s not_ready\\n'; fi\n",
 			scope.Command, scopeStatusMarker, scope.Name, scopeStatusMarker, scope.Name)
 	}
-	return builder.String()
+	return strings.TrimSuffix(builder.String(), "\n")
 }
 
 // operatorStatusCommand is the status command over the pinned Operator Profile.
@@ -180,7 +180,7 @@ func parseScopeStatusLine(scope OperatorScope, line string) ScopeResult {
 // returns the parsed per-scope outcomes. It changes no Lab state and does not
 // run the forwarding packet probe, which stays in startup health only.
 func CheckStatus(fw *framework.TestFramework) ([]ScopeResult, error) {
-	output, err := fw.ExecuteCommand(operatorStatusCommand)
+	output, err := fw.ExecuteCommandWithTimeout(operatorStatusCommand, 30*time.Second)
 	results := ParseScopeStatus(output)
 	if err != nil {
 		return results, fmt.Errorf("operator profile status: %w\n%s", err, TruncateOutput(output))

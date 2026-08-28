@@ -120,7 +120,7 @@ type response struct {
 	Protocol int `json:"protocol,omitempty"`
 	// SupervisorProtocolVersion is the Supervisor protocol version the
 	// Supervisor stamps on every reply.
-	SupervisorProtocolVersion int `json:"supervisorProtocolVersion,omitempty"`
+	SupervisorProtocolVersion int `json:"supervisorProtocolVersion"`
 	// Status is the overall Operator Profile verdict for status replies:
 	// READY when every scope is ready, NOT_READY otherwise.
 	Status string `json:"status,omitempty"`
@@ -1025,6 +1025,9 @@ func (m *application) status() error {
 	// Re-derive the verdict from the reported scopes so a Supervisor reply can
 	// never force a ready verdict the scopes contradict.
 	reply.Status = statusVerdict(reply.Scopes)
+	if !reply.OK {
+		reply.Status = statusNotReady
+	}
 	if reply.Status == statusNotReady && reply.Error == "" {
 		reply.OK = false
 		reply.Error = operatorProfileNotReadyError(reply.Scopes)
@@ -1420,6 +1423,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		reply.Scopes = results
 		reply.Status = statusVerdict(results)
 		if checkErr != nil {
+			reply.Status = statusNotReady
 			setError(&reply, checkErr)
 		} else if reply.Status == statusNotReady {
 			setError(&reply, errors.New(operatorProfileNotReadyError(results)))
