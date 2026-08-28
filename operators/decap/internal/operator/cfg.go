@@ -102,8 +102,8 @@ type FunctionConfig struct {
 	// Module is the decap module config name this function targets
 	// (e.g. "decap0").
 	Module xcfg.NonEmptyString `yaml:"module"`
-	// PrefixesFile is the path to the decap prefixes YAML file for this
-	// function.
+	// PrefixesFile is the path to the module config for this function: the
+	// decap update request in YAML, whose name may be omitted.
 	PrefixesFile xcfg.NonEmptyString `yaml:"prefixes_file"`
 	// IgnorePdump skips function updates when the existing chain already
 	// matches Modules once every pdump:* module is filtered out.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
+	decappb "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 	operatorpb "github.com/yanet-platform/yanet2/operators/decap/operatorpb/v1"
 )
 
@@ -29,17 +30,13 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	log := opts.Log
 
-	modules := make([]ModuleConfig, 0, len(cfg.Functions))
+	modules := make([]*decappb.UpdateConfigRequest, 0, len(cfg.Functions))
 	for _, fn := range cfg.Functions {
-		prefixes4, prefixes6, err := LoadDecapPrefixes(fn.PrefixesFile.Unwrap())
+		request, err := LoadModuleConfig(fn.PrefixesFile.Unwrap(), fn.Module.Unwrap())
 		if err != nil {
-			return nil, fmt.Errorf("failed to load prefixes file %q: %w", fn.PrefixesFile.Unwrap(), err)
+			return nil, err
 		}
-		modules = append(modules, ModuleConfig{
-			Name:      fn.Module.Unwrap(),
-			Prefixes4: prefixes4,
-			Prefixes6: prefixes6,
-		})
+		modules = append(modules, request)
 	}
 
 	tracker := readiness.NewTracker(readinessScopeSpecs(cfg),

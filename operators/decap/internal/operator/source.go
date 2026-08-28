@@ -3,23 +3,14 @@ package operator
 import (
 	"go.uber.org/zap"
 
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	decappb "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
-
-// ModuleConfig holds the desired prefix set for one decap module config.
-type ModuleConfig struct {
-	// Name is the decap module config name.
-	Name string
-	// Prefixes4 is the desired IPv4 tunnel prefix set.
-	Prefixes4 []*commonpb.IPv4Prefix
-	// Prefixes6 is the desired IPv6 tunnel prefix set.
-	Prefixes6 []*commonpb.IPv6Prefix
-}
 
 // State is the desired payload pushed by each reconcile pass.
 type State struct {
-	Modules []ModuleConfig
+	// Modules holds one update request per decap module config, sent as is.
+	Modules []*decappb.UpdateConfigRequest
 }
 
 // staticSource is a StateSource that holds a fixed set of module configs
@@ -27,15 +18,20 @@ type State struct {
 // slice. Wake is never signalled — the reconcile interval is the sole
 // pacing mechanism.
 type staticSource struct {
-	modules []ModuleConfig
+	modules []*decappb.UpdateConfigRequest
 	wake    chan struct{}
 	log     *zap.Logger
 }
 
 // NewStaticSource constructs a staticSource holding the supplied module
-// configs. The slice is not copied — callers must not modify it after
-// passing it in.
-func NewStaticSource(modules []ModuleConfig, options ...StaticSourceOption) operator.StateSource[State] {
+// configs, which callers must not modify afterwards.
+//
+// Neither the slice nor the requests it holds are copied, and every
+// reconcile pass sends the same requests.
+func NewStaticSource(
+	modules []*decappb.UpdateConfigRequest,
+	options ...StaticSourceOption,
+) operator.StateSource[State] {
 	opts := newStaticSourceOptions()
 	for _, o := range options {
 		o(opts)

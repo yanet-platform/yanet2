@@ -83,16 +83,12 @@ func NewGatewayActuator(
 func (m *GatewayActuator) Apply(ctx context.Context, state State) error {
 	var err error
 
-	for _, mc := range state.Modules {
-		_, e := m.decap.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
-			Name:      mc.Name,
-			Prefixes4: mc.Prefixes4,
-			Prefixes6: mc.Prefixes6,
-		})
+	for _, request := range state.Modules {
+		_, e := m.decap.UpdateConfig(ctx, request)
 		if e != nil {
 			err = errors.Join(err, fmt.Errorf(
 				"failed to apply module config %q to gateway %q: %w",
-				mc.Name, m.name, e,
+				request.GetName(), m.name, e,
 			))
 		}
 	}

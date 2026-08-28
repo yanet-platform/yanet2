@@ -22,12 +22,14 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 	require.NoError(t, xcfg.CheckKnownKeys[Config](data))
 }
 
-// Test_ShippedPrefixesDefault_NoUnknownKeys guards the shipped decap
-// prefixes file against a key that matches no field in yamlPrefixFile.
-func Test_ShippedPrefixesDefault_NoUnknownKeys(t *testing.T) {
-	data, err := os.ReadFile("../../etc/yanet/decap.d/default.yaml")
+// Test_ShippedPrefixesDefault_Loads verifies that the shipped decap module
+// config loads with the function's name bound and both prefix lists empty.
+func Test_ShippedPrefixesDefault_Loads(t *testing.T) {
+	request, err := LoadModuleConfig("../../etc/yanet/decap.d/default.yaml", "decap0")
 	require.NoError(t, err)
-	require.NoError(t, xcfg.CheckKnownKeys[yamlPrefixFile](data))
+	require.Equal(t, "decap0", request.GetName())
+	require.Empty(t, request.GetPrefixes4())
+	require.Empty(t, request.GetPrefixes6())
 }
 
 // Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort verifies
