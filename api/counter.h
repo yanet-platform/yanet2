@@ -185,12 +185,15 @@ struct counter_worker_set_list {
 // "runtime", or "object". A "runtime" storage is module-owned and
 // additionally carries a "config" tag naming its counter registry.
 //
+// That key list names what the built-in storages carry, not an allowed
+// vocabulary: any other key is accepted, matching only the storages
+// that carry it.
+//
 // A tag is rejected with err filled and NULL returned if any of the
-// following holds: key is unrecognized; or tags contains another
-// predicate with the same key. Keys and values are copied into the
-// tags' fixed-size fields, truncating anything longer than
-// COUNTER_TAG_KEY_LEN - 1 / COUNTER_TAG_VALUE_LEN - 1 characters; the
-// Go bindings reject such tags before the call instead.
+// following holds: the tag count exceeds its limit; a key or value is
+// longer than COUNTER_TAG_KEY_LEN - 1 / COUNTER_TAG_VALUE_LEN - 1
+// characters, since nothing is truncated on the way in; or tags
+// contains another predicate with the same key.
 //
 // The returned list must be released with
 // yanet_counter_worker_set_list_free. On failure NULL is returned and

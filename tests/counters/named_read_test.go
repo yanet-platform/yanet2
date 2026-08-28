@@ -6,10 +6,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDeviceCountersSpanEveryWorker verifies that a name-based counter
-// read merges the per-worker sets: every returned counter carries one
-// value set per dataplane worker.
-func TestDeviceCountersSpanEveryWorker(t *testing.T) {
+// verifies that a name-based counter read merges the per-worker sets:
+// every returned counter carries one value set per dataplane worker.
+func Test_DeviceCounters_NameReadSpansEveryWorker(t *testing.T) {
 	const workerCount = 4
 
 	dp := bulkCopyHarness(t, workerCount)
@@ -31,10 +30,9 @@ func TestDeviceCountersSpanEveryWorker(t *testing.T) {
 	}
 }
 
-// TestDeviceCountersUnknownDeviceIsEmpty verifies that a name-based
-// read for a device nothing carries yields an empty result, not nil or
-// an error path.
-func TestDeviceCountersUnknownDeviceIsEmpty(t *testing.T) {
+// verifies that a name-based read for a device nothing carries yields
+// an empty result, not nil or an error path.
+func Test_DeviceCounters_UnknownNameIsEmpty(t *testing.T) {
 	dp := bulkCopyHarness(t, 2)
 
 	counters := dp.DeviceCounters("no-such-device")
