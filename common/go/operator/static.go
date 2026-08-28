@@ -314,8 +314,8 @@ func (m *staticGatewayActuator) Close() error {
 	return m.conn.Close()
 }
 
-// readinessService serves the tracker's scopes on the operator's own gRPC
-// server.
+// readinessService is the gateway's readiness contract, served by an
+// operator under its own name.
 type readinessService struct {
 	ynpb.UnimplementedReadinessServiceServer
 
