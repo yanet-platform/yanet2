@@ -1,5 +1,13 @@
 #!/bin/sh
 
+# Rejects commits on the main branch: work lands through feature branches
+# and pull requests, so the trunk stays a fast-forward of origin/main.
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+	echo "committing to main is not allowed; create a branch, or bypass with 'git commit --no-verify'" >&2
+	exit 1
+fi
+
 # Rejects commits that violate one of this repository's Go style
 # conventions in CLAUDE.md: the options-pattern rule for loggers,
 # call-site encapsulation (reaching into a private field or method
