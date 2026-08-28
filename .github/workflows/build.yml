@@ -297,6 +297,7 @@ jobs:
             build/controlplane/yanet-controlplane
             target/release/yanet-cli*
             yanet-*-operator
+            yanet-bird-adapter
 
   functional-tests:
     name: Run Functional Tests
