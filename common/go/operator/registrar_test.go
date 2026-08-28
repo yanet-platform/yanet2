@@ -74,9 +74,9 @@ func awaitEndpoint(t *testing.T, service *recordingGateway) string {
 	}
 }
 
+// verifies that the runner registers the given endpoint as written, keeping a
+// name unresolved for the gateway to resolve on each dial.
 func Test_GatewayRegRunner_Run_RegistersGivenEndpointVerbatim(t *testing.T) {
-	// verifies that the runner registers the given endpoint as written, keeping
-	// a name unresolved for the gateway to resolve on each dial.
 	t.Parallel()
 
 	const advertised = "route-operator.yanet.svc.cluster.local:8080"

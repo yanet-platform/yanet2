@@ -8,9 +8,9 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
+// verifies that valid names and addresses pass without resolving their hosts,
+// while malformed or unusable host-port pairs fail at startup.
 func Test_GRPCServerConfig_Validate_AdvertiseEndpoint(t *testing.T) {
-	// verifies that valid names and addresses pass without resolving their
-	// hosts, while malformed or unusable host-port pairs fail at startup.
 	tests := []struct {
 		name     string
 		endpoint string
@@ -18,9 +18,14 @@ func Test_GRPCServerConfig_Validate_AdvertiseEndpoint(t *testing.T) {
 	}{
 		{name: "unset", endpoint: ""},
 		{name: "DNS name", endpoint: "route-operator.yanet:8080"},
+		{name: "absolute DNS name", endpoint: "route-operator.yanet.:8080"},
 		{name: "IPv6 literal", endpoint: "[2001:db8::1]:8080"},
 		{name: "missing port", endpoint: "route-operator.yanet", wantErr: true},
 		{name: "empty host", endpoint: ":8080", wantErr: true},
+		{name: "space in host", endpoint: "bad host:8080", wantErr: true},
+		{name: "slash in host", endpoint: "bad/host:8080", wantErr: true},
+		{name: "empty DNS label", endpoint: "route..yanet:8080", wantErr: true},
+		{name: "leading hyphen", endpoint: "-route.yanet:8080", wantErr: true},
 		{name: "empty port", endpoint: "route-operator.yanet:", wantErr: true},
 		{name: "zero port", endpoint: "route-operator.yanet:0", wantErr: true},
 		{name: "out-of-range port", endpoint: "route-operator.yanet:65536", wantErr: true},

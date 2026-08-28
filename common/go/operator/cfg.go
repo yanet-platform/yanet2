@@ -3,6 +3,8 @@ package operator
 import (
 	"fmt"
 	"net"
+	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -39,6 +41,9 @@ func (m *GRPCServerConfig) Validate() error {
 	if host == "" {
 		return fmt.Errorf("invalid advertise_endpoint: host is empty")
 	}
+	if !isValidEndpointHost(host) {
+		return fmt.Errorf("invalid advertise_endpoint host %q", host)
+	}
 
 	portNumber, err := net.LookupPort("tcp", port)
 	if err != nil || portNumber == 0 {
@@ -46,6 +51,39 @@ func (m *GRPCServerConfig) Validate() error {
 	}
 
 	return nil
+}
+
+func isValidEndpointHost(host string) bool {
+	if _, err := netip.ParseAddr(host); err == nil {
+		return true
+	}
+
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || len(host) > 253 {
+		return false
+	}
+
+	hasNonNumeric := false
+	for label := range strings.SplitSeq(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+
+		for idx := range len(label) {
+			character := label[idx]
+			switch {
+			case 'a' <= character && character <= 'z',
+				'A' <= character && character <= 'Z',
+				character == '_', character == '-':
+				hasNonNumeric = true
+			case '0' <= character && character <= '9':
+			default:
+				return false
+			}
+		}
+	}
+
+	return hasNonNumeric
 }
 
 // GatewayConfig holds the name and gRPC endpoint of a single Gateway.
