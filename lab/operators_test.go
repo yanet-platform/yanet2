@@ -3,6 +3,7 @@ package lab_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,6 +194,28 @@ func TestParseScopeStatus(t *testing.T) {
 			tc.assert(t, lab.ParseScopeStatus(tc.output))
 		})
 	}
+}
+
+// TestStatusCommandFormatContract pins the generated status command to its
+// parser: the script BuildOperatorStatusCommand emits must, when run under sh
+// with synthetic probes, produce output that ParseScopeStatusFor turns back
+// into the configured outcomes. A drift in the marker, field count, or state
+// token would otherwise ship an all-scopes-failed live status with green unit
+// tests.
+func TestStatusCommandFormatContract(t *testing.T) {
+	scopes := []lab.OperatorScope{
+		{Name: "a-ready", Command: "true", Reason: "r-a"},
+		{Name: "b-down", Command: "false", Reason: "r-b"},
+	}
+	script := lab.BuildOperatorStatusCommand(scopes)
+	output, err := exec.Command("sh", "-c", script).CombinedOutput()
+	require.NoError(t, err)
+	results := lab.ParseScopeStatusFor(string(output), scopes)
+	require.Len(t, results, 2)
+	require.Equal(t, lab.StateReady, results[0].State)
+	require.Empty(t, results[0].Reason)
+	require.Equal(t, lab.StateNotReady, results[1].State)
+	require.Equal(t, "r-b", results[1].Reason)
 }
 
 // statusStatusLines renders one marked status line per scope, overriding the

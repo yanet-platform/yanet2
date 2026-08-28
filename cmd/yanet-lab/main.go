@@ -279,7 +279,7 @@ func (m *application) command() *cobra.Command {
 	root.AddCommand(
 		&cobra.Command{Use: "doctor", Short: "Check host prerequisites", RunE: func(*cobra.Command, []string) error { return m.doctor() }},
 		m.upCommand(),
-		&cobra.Command{Use: "status", Short: "Show lab and YANET readiness", RunE: func(*cobra.Command, []string) error { return m.status() }},
+		m.statusCommand(),
 		&cobra.Command{Use: "reset", Short: "Restore the baseline snapshot", RunE: func(*cobra.Command, []string) error { return m.simple("reset", nil) }},
 		&cobra.Command{Use: "report", Short: "Collect an inspect and readiness report", RunE: func(*cobra.Command, []string) error { return m.simple("report", nil) }},
 		&cobra.Command{Use: "down", Short: "Stop the lab VM", RunE: func(*cobra.Command, []string) error { return m.simple("down", nil) }},
@@ -300,6 +300,16 @@ func (m *application) upCommand() *cobra.Command {
 	return &cobra.Command{Use: "up [SESSION]", Short: "Start or reuse the lab VM", Args: cobra.MaximumNArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 		m.selectSession(args)
 		return m.up()
+	}}
+}
+
+// statusCommand wires the optional positional session name used in the recipe
+// invocations (`just lab status my-session`) on top of the --session flag,
+// matching the up command.
+func (m *application) statusCommand() *cobra.Command {
+	return &cobra.Command{Use: "status [SESSION]", Short: "Show lab and YANET readiness", Args: cobra.MaximumNArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+		m.selectSession(args)
+		return m.status()
 	}}
 }
 
@@ -1012,43 +1022,77 @@ func (m *application) status() error {
 	if reply.Scopes == nil {
 		reply.Scopes = []lab.ScopeResult{}
 	}
-	if reply.Status == "" {
-		reply.Status = statusVerdict(reply.Scopes)
-	}
-	if !reply.OK && reply.Status == statusReady {
-		reply.Status = statusNotReady
-	}
+	// Re-derive the verdict from the reported scopes so a Supervisor reply can
+	// never force a ready verdict the scopes contradict.
+	reply.Status = statusVerdict(reply.Scopes)
 	if reply.Status == statusNotReady && reply.Error == "" {
 		reply.OK = false
-		reply.Error = "operator profile is not ready"
+		reply.Error = operatorProfileNotReadyError(reply.Scopes)
 	}
 	return m.printResponse(reply)
 }
 
 // statusVerdict reduces per-scope state to the overall READY/NOT_READY
-// verdict. An empty scope list is NOT_READY so a missing check can never be
-// mistaken for a healthy profile.
+// verdict. It fails closed: the report must cover every AD-11 scope exactly
+// once (any order), every scope must be a known AD-11 name, and every scope
+// must be ready. A missing, duplicated, unknown, or non-ready scope is
+// NOT_READY, so an incomplete or forged report can never be mistaken for a
+// healthy profile.
 func statusVerdict(scopes []lab.ScopeResult) string {
-	if len(scopes) == 0 {
+	expected := lab.ScopeNames()
+	if len(scopes) != len(expected) {
 		return statusNotReady
 	}
+	seen := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
-		if scope.State != lab.StateReady {
+		if _, duplicate := seen[scope.Name]; duplicate {
+			return statusNotReady
+		}
+		seen[scope.Name] = struct{}{}
+		known := false
+		for _, name := range expected {
+			if scope.Name == name {
+				known = true
+				break
+			}
+		}
+		if !known || scope.State != lab.StateReady {
 			return statusNotReady
 		}
 	}
 	return statusReady
 }
 
-// failedScopeNames returns the non-ready scope names of a status result.
+// failedScopeNames returns the AD-11 scope names that a status result does not
+// report as ready: it walks the expected scope table and names every expected
+// scope that is missing from the result or present but not ready. Duplicated
+// result entries collapse into one, and extra unknown names carried by the
+// result are not iterated here.
 func failedScopeNames(scopes []lab.ScopeResult) []string {
-	failed := make([]string, 0, len(scopes))
+	byName := make(map[string]lab.ScopeResult, len(scopes))
 	for _, scope := range scopes {
-		if scope.State != lab.StateReady {
-			failed = append(failed, scope.Name)
+		byName[scope.Name] = scope
+	}
+	failed := make([]string, 0, len(lab.ScopeNames()))
+	for _, name := range lab.ScopeNames() {
+		scope, present := byName[name]
+		if !present || scope.State != lab.StateReady {
+			failed = append(failed, name)
 		}
 	}
 	return failed
+}
+
+// operatorProfileNotReadyError renders the shared NOT_READY error message used
+// by both the Supervisor status handler and the CLI fallback, so scripts
+// grepping the message observe one shape. The message names the failing scopes
+// when any are known and stays a bare message otherwise.
+func operatorProfileNotReadyError(scopes []lab.ScopeResult) string {
+	names := failedScopeNames(scopes)
+	if len(names) == 0 {
+		return "operator profile is not ready"
+	}
+	return "operator profile is not ready: " + strings.Join(names, ", ")
 }
 
 // checkOperatorStatus gathers the per-scope Operator Profile status from the
@@ -1378,7 +1422,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		if checkErr != nil {
 			setError(&reply, checkErr)
 		} else if reply.Status == statusNotReady {
-			setError(&reply, fmt.Errorf("operator profile is not ready: %s", strings.Join(failedScopeNames(results), ", ")))
+			setError(&reply, errors.New(operatorProfileNotReadyError(results)))
 		}
 	case "exec":
 		output, err := fw.ExecuteCommand(lab.ShellJoin(value.Argv))

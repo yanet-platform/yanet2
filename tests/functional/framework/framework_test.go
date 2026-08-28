@@ -64,6 +64,25 @@ func TestReceiveAllPacketsUnfilteredReportsPartialFrame(t *testing.T) {
 	}
 }
 
+// TestReceiveAllPacketsUnfilteredReturnsEmptyOnIdleTimeout pins the idle-window
+// contract for drop probes: when the link stays quiet for the whole capture
+// window, the receive returns an empty list with no error. This is what backs
+// `expect: {drop: true}` in manifests.
+func TestReceiveAllPacketsUnfilteredReturnsEmptyOnIdleTimeout(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	clientSocket := &SocketClient{inner: &socketClientInner{conn: client}}
+
+	packets, err := clientSocket.ReceiveAllPacketsUnfiltered(20*time.Millisecond, "")
+	if err != nil {
+		t.Fatalf("idle capture returned error: %v", err)
+	}
+	if len(packets) != 0 {
+		t.Fatalf("idle capture returned %d packets, want 0", len(packets))
+	}
+}
+
 // TestAdoptRunningConfigRecordsConfig verifies that AdoptRunningConfig
 // records both configuration YAML documents.
 //

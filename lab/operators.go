@@ -50,10 +50,10 @@ type ScopeResult struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// operatorScope is one named probe of the pinned Operator Profile (AD-11). The
+// OperatorScope is one named probe of the pinned Operator Profile (AD-11). The
 // Command exits zero while the scope is ready in the guest and Reason names
 // the failure the probe detects.
-type operatorScope struct {
+type OperatorScope struct {
 	Name    string
 	Command string
 	Reason  string
@@ -62,7 +62,7 @@ type operatorScope struct {
 // operatorScopes is the shared Operator Profile check table (AD-11). Startup
 // health, waiting, and status derive commands from it so the surfaces cannot
 // diverge.
-var operatorScopes = []operatorScope{
+var operatorScopes = []OperatorScope{
 	{Name: "dataplane", Command: "pgrep -f '[y]anet-dataplane' >/dev/null", Reason: "yanet-dataplane process is not running"},
 	{Name: "controlplane", Command: "pgrep -f '[y]anet-controlplane' >/dev/null", Reason: "yanet-controlplane process is not running"},
 	{Name: "route-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-route-operator ' >/dev/null", Reason: "yanet-route-operator process is not running"},
@@ -107,25 +107,35 @@ func buildOperatorHealthCommand() string {
 // so the parser cannot confuse probe noise with the report.
 const scopeStatusMarker = "YANET2_SCOPE"
 
-// operatorStatusCommand runs every scope probe without short-circuiting and
-// prints one marked line per scope, so a single guest command bounds the
-// complete reporting pass.
-var operatorStatusCommand = buildOperatorStatusCommand()
-
-func buildOperatorStatusCommand() string {
+// BuildOperatorStatusCommand renders the per-scope status command for the
+// given scopes: every probe runs without short-circuiting and prints one
+// marked line per scope, so a single guest command bounds the complete
+// reporting pass. Exported so the generated wire format can be exercised on
+// any scope table, not only the pinned AD-11 one.
+func BuildOperatorStatusCommand(scopes []OperatorScope) string {
 	var builder strings.Builder
-	for _, scope := range operatorScopes {
+	for _, scope := range scopes {
 		fmt.Fprintf(&builder, "if %s; then printf '%s %s ready\\n'; else printf '%s %s not_ready\\n'; fi\n",
 			scope.Command, scopeStatusMarker, scope.Name, scopeStatusMarker, scope.Name)
 	}
 	return builder.String()
 }
 
+// operatorStatusCommand is the status command over the pinned Operator Profile.
+var operatorStatusCommand = BuildOperatorStatusCommand(operatorScopes)
+
 // ParseScopeStatus parses the marked per-scope lines of the Operator Profile
 // status command into one result per scope. It fails closed: a scope whose
 // line is absent, truncated, duplicated, or otherwise malformed is reported
 // NOT_READY with an explicit parse reason and is never assumed healthy.
 func ParseScopeStatus(output string) []ScopeResult {
+	return ParseScopeStatusFor(output, operatorScopes)
+}
+
+// ParseScopeStatusFor parses marked per-scope output against an explicit scope
+// table, failing closed exactly like ParseScopeStatus. Exported so the parser
+// can be pinned to the output of BuildOperatorStatusCommand on any scope set.
+func ParseScopeStatusFor(output string, scopes []OperatorScope) []ScopeResult {
 	matches := map[string][]string{}
 	for line := range strings.SplitSeq(output, "\n") {
 		fields := strings.Fields(line)
@@ -134,8 +144,8 @@ func ParseScopeStatus(output string) []ScopeResult {
 		}
 		matches[fields[1]] = append(matches[fields[1]], line)
 	}
-	results := make([]ScopeResult, 0, len(operatorScopes))
-	for _, scope := range operatorScopes {
+	results := make([]ScopeResult, 0, len(scopes))
+	for _, scope := range scopes {
 		lines := matches[scope.Name]
 		switch {
 		case len(lines) == 0:
@@ -149,7 +159,7 @@ func ParseScopeStatus(output string) []ScopeResult {
 	return results
 }
 
-func parseScopeStatusLine(scope operatorScope, line string) ScopeResult {
+func parseScopeStatusLine(scope OperatorScope, line string) ScopeResult {
 	fields := strings.Fields(line)
 	if len(fields) != 3 {
 		return ScopeResult{Name: scope.Name, State: StateNotReady, Reason: "malformed status output"}

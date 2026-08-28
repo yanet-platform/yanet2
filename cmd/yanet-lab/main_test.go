@@ -1032,6 +1032,23 @@ func TestStatusVerdict(t *testing.T) {
 	require.Equal(t, statusNotReady, statusVerdict(failingScopes("bird", "bird process is not running")))
 }
 
+func TestStatusVerdictRejectsUnknownScopeName(t *testing.T) {
+	scopes := readyScopes()
+	scopes[0].Name = "ghost"
+	require.Equal(t, statusNotReady, statusVerdict(scopes))
+}
+
+func TestStatusVerdictRejectsDuplicateScope(t *testing.T) {
+	scopes := readyScopes()
+	scopes[len(scopes)-1] = scopes[0]
+	require.Equal(t, statusNotReady, statusVerdict(scopes))
+}
+
+func TestStatusVerdictRejectsShortScopeCount(t *testing.T) {
+	scopes := readyScopes()[:len(readyScopes())-1]
+	require.Equal(t, statusNotReady, statusVerdict(scopes))
+}
+
 func TestStatusReadyJSONListsEveryScope(t *testing.T) {
 	stubCallAndServe(t, func(*application, request) (*response, error) {
 		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion, Scopes: readyScopes()}, nil
@@ -1164,6 +1181,58 @@ func TestStatusCurrentProtocolHealthy(t *testing.T) {
 	require.NoError(t, application.status())
 }
 
+// TestStatusTrustsNoReplyStatus pins the fail-closed CLI boundary: a reply
+// that claims OK and Status READY while a scope is failing must exit non-zero
+// and report NOT_READY, never trust the supervisor's verdict verbatim.
+func TestStatusTrustsNoReplyStatus(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{
+			OK:                        true,
+			Status:                    statusReady,
+			SupervisorProtocolVersion: supervisorProtocolVersion,
+			Scopes:                    failingScopes("bird", "bird process is not running"),
+		}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bird")
+	var decoded struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, false, decoded.OK)
+	require.Equal(t, statusNotReady, decoded.Status)
+}
+
+// TestStatusErrorMessageAlwaysIncludesFailingScopeNames pins the shared
+// NOT_READY message producer on the CLI fallback: an error-only-inconsistent
+// reply must carry the failing scope names, matching the handler's shape.
+func TestStatusErrorMessageAlwaysIncludesFailingScopeNames(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{
+			OK:                        false,
+			SupervisorProtocolVersion: supervisorProtocolVersion,
+			Scopes:                    failingScopes("route0-session", "route0 adapter session is not connected"),
+		}, nil
+	}, nil)
+	application := newApplication()
+	application.json = true
+	stdout, err := captureStdout(t, func() error {
+		return application.status()
+	})
+	require.EqualError(t, err, "operator profile is not ready: route0-session")
+	var decoded struct {
+		Error string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, "operator profile is not ready: route0-session", decoded.Error)
+}
+
 func TestStatusHandlerPopulatesScopes(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1247,6 +1316,20 @@ func TestUpCommandPassesPositionalToRunE(t *testing.T) {
 	command.SetArgs([]string{"my-session", "extra"})
 	err := command.Execute()
 	require.Error(t, err)
+}
+
+func TestStatusCommandAcceptsPositionalSession(t *testing.T) {
+	stubCallAndServe(t, func(app *application, value request) (*response, error) {
+		require.Equal(t, "my-session", app.session)
+		require.Equal(t, "status", value.Action)
+		return &response{OK: true, SupervisorProtocolVersion: supervisorProtocolVersion, Scopes: readyScopes()}, nil
+	}, nil)
+	command := newApplication().statusCommand()
+	require.Equal(t, "status [SESSION]", command.Use)
+	command.SetArgs([]string{"my-session"})
+	require.NoError(t, command.Execute())
+	command.SetArgs([]string{"my-session", "extra"})
+	require.Error(t, command.Execute())
 }
 
 func TestSelectSessionAssignsPositional(t *testing.T) {
