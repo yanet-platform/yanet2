@@ -74,8 +74,6 @@ pdump_ring_prepare(
 	// to free up space by discarding old messages.
 	while ((ring->write_idx - ring->readable_idx) >
 	       (ring->size - aligned_payload_size)) {
-		// Read the oldest message size to determine how much space to
-		// reclaim.
 		uint8_t *pos = ring_data + (ring->readable_idx & ring->mask);
 		uint32_t readable_slot_size;
 		memcpy(&readable_slot_size, pos, sizeof(readable_slot_size));
