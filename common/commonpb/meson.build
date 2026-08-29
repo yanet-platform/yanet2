@@ -4,6 +4,7 @@ root_dir = meson.project_source_root()
 common_proto_files = [
     join_paths(common_proto_dir, 'v1', 'target.proto'),
     join_paths(common_proto_dir, 'v1', 'metric.proto'),
+    join_paths(common_proto_dir, 'v1', 'extend.proto'),
     join_paths(common_proto_dir, 'v1', 'macaddr.proto'),
     join_paths(common_proto_dir, 'v1', 'ipaddr.proto'),
     join_paths(common_proto_dir, 'v1', 'ipv4addr.proto'),
@@ -25,6 +26,7 @@ common_protoc_gen = custom_target(
     output: [
         'target.pb.go',
         'metric.pb.go',
+        'extend.pb.go',
         'macaddr.pb.go',
         'ipaddr.pb.go',
         'ipv4addr.pb.go',

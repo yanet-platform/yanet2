@@ -24,12 +24,15 @@ const SERDE_MESSAGES: &[&str] = &[
     ".common.commonpb.v1.Label",
     ".common.commonpb.v1.Histogram",
     ".common.commonpb.v1.Bucket",
+    ".common.commonpb.v1.ExtendRequest",
+    ".common.commonpb.v1.ExtendResponse",
     ".common.commonpb.v1.IPRange",
 ];
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/commonpb/v1/target.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/metric.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/extend.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/macaddr.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipaddr.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4addr.proto");
@@ -62,6 +65,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         &[
             "common/commonpb/v1/target.proto",
             "common/commonpb/v1/metric.proto",
+            "common/commonpb/v1/extend.proto",
             "common/commonpb/v1/macaddr.proto",
             "common/commonpb/v1/ipaddr.proto",
             "common/commonpb/v1/ipv4addr.proto",

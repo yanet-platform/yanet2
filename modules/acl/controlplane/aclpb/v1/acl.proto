@@ -6,6 +6,7 @@ import "common/filterpb/v1/filter.proto";
 import "common/commonpb/v1/ipv4network.proto";
 import "common/commonpb/v1/ipv6network.proto";
 import "common/commonpb/v1/metric.proto";
+import "common/commonpb/v1/extend.proto";
 import "common/commonpb/v1/ipaddr.proto";
 import "common/commonpb/v1/macaddr.proto";
 
@@ -24,6 +25,14 @@ service ACLService {
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
   // Returns per-rule counters of ACL configurations
   rpc GetRulesCounters(GetRulesCountersRequest) returns (GetRulesCountersResponse);
+}
+
+// ExtendService grows the memory of the agent this module writes its
+// configurations into.
+service ExtendService {
+  // Extend grows the agent by the requested size and reports the limit
+  // it reached.
+  rpc Extend(common.commonpb.v1.ExtendRequest) returns (common.commonpb.v1.ExtendResponse);
 }
 
 // MetricsService exposes ACL module metrics.

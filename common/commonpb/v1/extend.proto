@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package common.commonpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
+
+// Request to grow the agent memory a module was started with, without
+// restarting it.
+message ExtendRequest {
+  // How much memory to add, in bytes.
+  uint64 size = 1;
+}
+
+message ExtendResponse {
+  // The memory the agent holds once the call returns, in bytes. At least
+  // the increment above what it held, since the allocator hands out whole
+  // blocks.
+  uint64 memory_limit = 1;
+}

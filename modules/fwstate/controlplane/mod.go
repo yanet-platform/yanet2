@@ -26,6 +26,7 @@ type FWStateModule struct {
 	agent                 *ffi.Agent
 	fwstateService        *FWStateService
 	fwstateMetricsService *MetricsService
+	fwstateExtendService  *ExtendService
 	mapService            *fwstatemap.FWStateMapService
 }
 
@@ -76,12 +77,17 @@ func NewFWStateModule(cfg *Config, options ...Option) (*FWStateModule, error) {
 	// reachable through the module's metrics RPC.
 	fwstateMetricsService := NewMetricsService(fwstateService, mapService)
 
+	// The extend endpoint grows the one agent all three services above
+	// write into.
+	fwstateExtendService := NewExtendService(agent, WithLog(log))
+
 	return &FWStateModule{
 		cfg:                   cfg,
 		shm:                   shm,
 		agent:                 agent,
 		fwstateService:        fwstateService,
 		fwstateMetricsService: fwstateMetricsService,
+		fwstateExtendService:  fwstateExtendService,
 		mapService:            mapService,
 	}, nil
 }
@@ -98,6 +104,7 @@ func (m *FWStateModule) ServicesNames() []string {
 	return []string{
 		FWStateServiceName,
 		FWStateMetricsServiceName,
+		FWStateExtendServiceName,
 		fwstatemap.ServiceName,
 	}
 }
@@ -105,6 +112,7 @@ func (m *FWStateModule) ServicesNames() []string {
 func (m *FWStateModule) RegisterService(server *grpc.Server) {
 	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
 	fwstatepb.RegisterMetricsServiceServer(server, m.fwstateMetricsService)
+	fwstatepb.RegisterExtendServiceServer(server, m.fwstateExtendService)
 	m.mapService.Register(server)
 }
 

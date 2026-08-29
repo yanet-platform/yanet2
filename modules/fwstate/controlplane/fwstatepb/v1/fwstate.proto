@@ -5,6 +5,7 @@ package modules.fwstate.controlplane.fwstatepb.v1;
 import "common/commonpb/v1/ipaddr.proto";
 import "common/commonpb/v1/macaddr.proto";
 import "common/commonpb/v1/metric.proto";
+import "common/commonpb/v1/extend.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1;fwstatepb";
 
@@ -18,6 +19,14 @@ service FWStateService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
   // List all FWState configurations across instances
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+}
+
+// ExtendService grows the memory of the agent this module writes its
+// configurations into.
+service ExtendService {
+  // Extend grows the agent by the requested size and reports the limit
+  // it reached.
+  rpc Extend(common.commonpb.v1.ExtendRequest) returns (common.commonpb.v1.ExtendResponse);
 }
 
 // MetricsService exposes FWState module metrics.

@@ -46,6 +46,7 @@ type ACLModule struct {
 	agent          *ffi.Agent
 	aclService     *ACLService
 	metricsService *MetricsService
+	extendService  *ExtendService
 }
 
 // NewACLModule creates a new ACL module instance.
@@ -85,12 +86,15 @@ func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
 
 	metricsService := NewMetricsService(aclService)
 
+	extendService := NewExtendService(agent, WithLog(log))
+
 	return &ACLModule{
 		cfg:            cfg,
 		shm:            shm,
 		agent:          agent,
 		aclService:     aclService,
 		metricsService: metricsService,
+		extendService:  extendService,
 	}, nil
 }
 
@@ -106,12 +110,14 @@ func (m *ACLModule) ServicesNames() []string {
 	return []string{
 		serviceName,
 		aclpb.MetricsService_ServiceDesc.ServiceName,
+		aclpb.ExtendService_ServiceDesc.ServiceName,
 	}
 }
 
 func (m *ACLModule) RegisterService(server *grpc.Server) {
 	aclpb.RegisterACLServiceServer(server, m.aclService)
 	aclpb.RegisterMetricsServiceServer(server, m.metricsService)
+	aclpb.RegisterExtendServiceServer(server, m.extendService)
 }
 
 // UnaryServerInterceptors returns the gRPC unary interceptors for this module.

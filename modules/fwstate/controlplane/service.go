@@ -83,7 +83,8 @@ func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
 	opts = append(opts, grpcmetrics.WithServiceFilter(
 		func(service string) bool {
 			return service == FWStateServiceName ||
-				service == FWStateMetricsServiceName
+				service == FWStateMetricsServiceName ||
+				service == FWStateExtendServiceName
 		},
 	))
 	opts = append(opts, extra...)
@@ -99,15 +100,16 @@ const (
 	maxSyncPort uint32 = 65535
 )
 
-// FWStateServiceName and MetricsServiceName are the fully-qualified gRPC
-// service names exposed by this module, derived from the generated service
-// descriptors so they cannot drift from the proto definitions.
+// The fully-qualified gRPC service names exposed by this module, derived
+// from the generated service descriptors so they cannot drift from the
+// proto definitions.
 //
 // They are used to scope the module's [grpcmetrics.ServerMetrics] to its own
 // services when several modules share a single [grpc.Server].
 var (
 	FWStateServiceName        = fwstatepb.FWStateService_ServiceDesc.ServiceName
 	FWStateMetricsServiceName = fwstatepb.MetricsService_ServiceDesc.ServiceName
+	FWStateExtendServiceName  = fwstatepb.ExtendService_ServiceDesc.ServiceName
 )
 
 // Mutation phases report a goroutine before Lock, after Lock succeeds, and
