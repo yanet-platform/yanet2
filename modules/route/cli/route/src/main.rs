@@ -1,9 +1,10 @@
 //! CLI for YANET "route" module.
 
-use core::error::Error;
+use core::error::Error as StdError;
 use std::{
     fs::File,
     path::{Path, PathBuf},
+    process,
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
@@ -17,10 +18,14 @@ use yanet_cli_route::{
     routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
 };
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     completion,
+    errors::Error,
     output::{self, CommonFormat},
 };
+
+/// Errors of the local YAML loader, reported to the user as invalid input.
+type LoadError = Box<dyn StdError>;
 
 /// The FIB rules file, deserialized straight into the wire's
 /// [`routepb::FibEntry`] -- `range` is range-native, matching the wire, so
@@ -46,13 +51,17 @@ struct FibConfig {
 }
 
 impl FibConfig {
-    fn load<P>(path: P) -> Result<Self, Box<dyn Error>>
+    /// Loads and validates the file, naming it in every failure.
+    fn load<P>(path: P) -> Result<Self, LoadError>
     where
         P: AsRef<Path>,
     {
-        let file = File::open(path)?;
-        let config: Self = serde_yaml::from_reader(file)?;
-        config.validate()?;
+        let path = path.as_ref();
+        let at_path = |err: LoadError| -> LoadError { format!("{}: {err}", path.display()).into() };
+
+        let file = File::open(path).map_err(|err| at_path(err.into()))?;
+        let config: Self = serde_yaml::from_reader(file).map_err(|err| at_path(err.into()))?;
+        config.validate().map_err(at_path)?;
         Ok(config)
     }
 
@@ -68,7 +77,7 @@ impl FibConfig {
     /// the server -- range presence, and nexthop MAC/device presence --
     /// and leaves the range semantics the server owns (address family
     /// match, `start <= end` ordering) to the server's own error.
-    fn validate(&self) -> Result<(), Box<dyn Error>> {
+    fn validate(&self) -> Result<(), LoadError> {
         for (idx, entry) in self.entries.iter().enumerate() {
             let range = entry
                 .range
@@ -158,6 +167,9 @@ pub struct FibShowCmd {
     pub config_name: String,
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.route.controlplane.routepb.v1.RouteService";
+
 fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     start();
@@ -169,8 +181,8 @@ async fn start() {
     ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        process::exit(err.exit_code());
     }
 }
 
@@ -190,7 +202,7 @@ fn config_candidates() -> Vec<CompletionCandidate> {
     )
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = RouteService::new(&cmd.connection).await?;
 
     match cmd.mode {
@@ -203,26 +215,33 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct RouteService {
-    client: RouteServiceClient<LayeredChannel>,
+    service: Service<RouteServiceClient<LayeredChannel>>,
 }
 
 impl RouteService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = RouteServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            RouteServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn update_fib(&mut self, cmd: FibUpdateCmd) -> Result<(), Box<dyn Error>> {
-        let config = FibConfig::load(&cmd.rules)?;
+    pub async fn update_fib(&mut self, cmd: FibUpdateCmd) -> Result<(), Error> {
+        let config = FibConfig::load(&cmd.rules).map_err(|err| self.service.invalid("update", err.to_string()))?;
         let entry_count = config.entries.len();
         let request = UpdateFibRequest {
             module_name: cmd.config_name.clone(),
             entries: config.entries,
         };
-        self.client.update_fib(request).await?;
+        self.service
+            .client()
+            .update_fib(request)
+            .await
+            .map_err(self.service.status("update"))?;
 
         output::success(
             "update",
@@ -231,8 +250,14 @@ impl RouteService {
         Ok(())
     }
 
-    pub async fn list_fibs(&mut self) -> Result<(), Box<dyn Error>> {
-        let response = self.client.list_configs(ListConfigsRequest {}).await?.into_inner();
+    pub async fn list_fibs(&mut self) -> Result<(), Error> {
+        let response = self
+            .service
+            .client()
+            .list_configs(ListConfigsRequest {})
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
 
         output::data(
             || &response.configs,
@@ -253,14 +278,20 @@ impl RouteService {
         Ok(())
     }
 
-    pub async fn show_fib(&mut self, cmd: FibShowCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_fib(&mut self, cmd: FibShowCmd) -> Result<(), Error> {
         let request = ShowFibRequest {
             name: cmd.config_name.clone(),
             ipv4_only: cmd.ipv4,
             ipv6_only: cmd.ipv6,
         };
 
-        let response = self.client.show_fib(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .show_fib(request)
+            .await
+            .map_err(self.service.status("show"))?
+            .into_inner();
         let entries = response.entries;
 
         output::data(
@@ -282,9 +313,14 @@ impl RouteService {
 #[cfg(test)]
 mod test {
     use core::net::IpAddr;
+    use std::{env, fs, net::TcpListener};
 
     use commonpb::pb::{IpRange, MacAddress};
     use netip::MacAddr;
+    use ync::{
+        auth::{AuthArgs, AuthMethod},
+        errors::ErrorKind,
+    };
 
     use super::*;
 
@@ -662,5 +698,43 @@ entries:
             }],
         };
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_fib_config_load_missing_file_names_the_path() {
+        let path = env::temp_dir().join(format!("yanet-cli-route-missing-fib-{}.yaml", process::id()));
+
+        let err = FibConfig::load(&path).unwrap_err();
+
+        assert!(err.to_string().starts_with(&path.display().to_string()), "{err}");
+    }
+
+    #[test]
+    fn test_fib_config_load_invalid_entry_names_the_path() {
+        let path = env::temp_dir().join(format!("yanet-cli-route-invalid-fib-{}.yaml", process::id()));
+        fs::write(&path, "entries:\n  - nexthops: []\n").unwrap();
+
+        let err = FibConfig::load(&path).unwrap_err();
+        fs::remove_file(&path).unwrap();
+
+        assert_eq!(format!("{}: entry 0: missing range", path.display()), err.to_string());
+    }
+
+    /// Verifies that a refused connection is reported through the shared
+    /// error contract as a connection failure, exit code 4.
+    #[tokio::test]
+    async fn test_route_service_new_connection_refused_reports_connection_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let connection = ConnectionArgs {
+            endpoint: format!("grpc://127.0.0.1:{port}"),
+            auth: AuthArgs { auth: AuthMethod::None },
+        };
+
+        let err = RouteService::new(&connection).await.err().unwrap();
+
+        assert_eq!(ErrorKind::Connection, err.kind());
+        assert_eq!(4, err.exit_code());
     }
 }
