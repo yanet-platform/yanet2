@@ -12,6 +12,48 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
+type functionActuatorOptions struct {
+	// Compare decides whether the gateway already holds the wanted function.
+	Compare functionCompare
+	// Log records successful skips and updates.
+	Log *zap.Logger
+}
+
+func newFunctionActuatorOptions() *functionActuatorOptions {
+	return &functionActuatorOptions{
+		Compare: (*ynpb.Function).Equal,
+		Log:     zap.NewNop(),
+	}
+}
+
+// FunctionActuatorOption configures NewFunctionActuator.
+type FunctionActuatorOption func(*functionActuatorOptions)
+
+// WithFunctionLog sets the logger for the function actuator.
+func WithFunctionLog(log *zap.Logger) FunctionActuatorOption {
+	return func(o *functionActuatorOptions) {
+		o.Log = log
+	}
+}
+
+// WithIgnorePDump leaves pdump modules on both sides out of the check
+// whether the gateway already holds the wanted function.
+func WithIgnorePDump() FunctionActuatorOption {
+	return func(o *functionActuatorOptions) {
+		o.Compare = compareFunctionsIgnorePdump
+	}
+}
+
+// functionCompare reports whether the function satisfies the wanted
+// definition.
+type functionCompare func(have, want *ynpb.Function) bool
+
+// compareFunctionsIgnorePdump leaves pdump modules on both sides out of the
+// comparison, so a definition carrying pdump itself does not drift forever.
+func compareFunctionsIgnorePdump(have, want *ynpb.Function) bool {
+	return have.WithoutModules("pdump").Equal(want.WithoutModules("pdump"))
+}
+
 // FunctionActuator publishes network functions to a gateway, leaving alone
 // the ones the gateway already holds.
 type FunctionActuator struct {

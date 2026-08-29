@@ -69,6 +69,80 @@ type ReconcilerMetricsObserver interface {
 	OnStateChanged(state ReconcilerState)
 }
 
+// NoopReconcilerMetricsObserver is the default observer wired into
+// reconciler options when no metrics sink is attached.
+type NoopReconcilerMetricsObserver struct{}
+
+// OnReconcileCompleted intentionally discards completion events.
+func (NoopReconcilerMetricsObserver) OnReconcileCompleted(error) {}
+
+// OnBackoffScheduled intentionally discards scheduled backoff events.
+func (NoopReconcilerMetricsObserver) OnBackoffScheduled(time.Duration) {}
+
+// OnBackoffReset intentionally discards backoff reset events.
+func (NoopReconcilerMetricsObserver) OnBackoffReset() {}
+
+// OnStateChanged intentionally discards state transition events.
+func (NoopReconcilerMetricsObserver) OnStateChanged(ReconcilerState) {}
+
+type reconcilerOptions struct {
+	// Interval separates successful reconciliation passes.
+	Interval time.Duration
+	// InitialBackoff is the first retry delay after a failed pass.
+	InitialBackoff time.Duration
+	// MaxBackoff caps the retry delay after repeated failures.
+	MaxBackoff time.Duration
+	// Metrics receives reconcile-loop lifecycle events.
+	Metrics ReconcilerMetricsObserver
+	// Log records reconcile-loop activity.
+	Log *zap.Logger
+}
+
+func newReconcilerOptions() *reconcilerOptions {
+	return &reconcilerOptions{
+		Interval:       DefaultReconcileInterval,
+		InitialBackoff: DefaultReconcileInitialBackoff,
+		MaxBackoff:     DefaultReconcileMaxBackoff,
+		Metrics:        NoopReconcilerMetricsObserver{},
+		Log:            zap.NewNop(),
+	}
+}
+
+// ReconcilerOption configures NewReconciler.
+type ReconcilerOption func(*reconcilerOptions)
+
+// WithReconcilerLog sets the logger used by the reconcile loop.
+func WithReconcilerLog(log *zap.Logger) ReconcilerOption {
+	return func(o *reconcilerOptions) {
+		o.Log = log
+	}
+}
+
+// WithReconcileInterval sets the steady-state period between
+// successful reconcile passes.
+func WithReconcileInterval(d time.Duration) ReconcilerOption {
+	return func(o *reconcilerOptions) {
+		o.Interval = d
+	}
+}
+
+// WithReconcileBackoff sets the initial and maximum sleep durations
+// for the exponential backoff applied after failed reconcile passes.
+func WithReconcileBackoff(initial, max time.Duration) ReconcilerOption {
+	return func(o *reconcilerOptions) {
+		o.InitialBackoff = initial
+		o.MaxBackoff = max
+	}
+}
+
+// WithReconcilerMetrics attaches the metrics observer for the
+// reconcile loop.
+func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
+	return func(o *reconcilerOptions) {
+		o.Metrics = metrics
+	}
+}
+
 // Reconciler drives an Actuator from a StateSource until its context
 // is cancelled.
 //
