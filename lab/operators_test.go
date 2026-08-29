@@ -1,6 +1,7 @@
 package lab_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -101,6 +102,7 @@ func Test_PrepareOperators_StagingFailureNamesCommand(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "mkdir -p /tmp/yanet/operators")
 	require.Contains(t, err.Error(), "QEMU VM is not running")
+	require.EqualError(t, errors.Unwrap(err), "QEMU VM is not running")
 }
 
 func TestScopeNamesAD11Membership(t *testing.T) {
