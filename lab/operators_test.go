@@ -83,6 +83,26 @@ func TestRequiredArtifacts(t *testing.T) {
 	require.Equal(t, expected, artifacts)
 }
 
+// Test_PrepareOperators_StagingFailureNamesCommand verifies that a failed
+// guest staging command remains identifiable without a running VM.
+func Test_PrepareOperators_StagingFailureNamesCommand(t *testing.T) {
+	root := t.TempDir()
+	instance, err := framework.New(&framework.Config{
+		Name:        "operator-staging-error",
+		QEMUImage:   filepath.Join(root, "image.qcow2"),
+		ProjectRoot: root,
+	})
+	require.NoError(t, err)
+	fw := instance.Global()
+	t.Cleanup(func() { _ = fw.Stop() })
+
+	err = lab.PrepareOperators(fw)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mkdir -p /tmp/yanet/operators")
+	require.Contains(t, err.Error(), "QEMU VM is not running")
+}
+
 func TestScopeNamesAD11Membership(t *testing.T) {
 	require.Equal(t, []string{
 		"dataplane",

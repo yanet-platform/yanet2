@@ -714,7 +714,7 @@ func (q *QEMUManager) discardSerialThrough(marker string) {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
 	data := q.serialBuffer.Bytes()
-	scanSize := (1 << 20) + len(marker)
+	scanSize := maxSerialBufferSize/2 + len(marker)
 	if len(data) > scanSize {
 		data = data[len(data)-scanSize:]
 	}
@@ -730,10 +730,9 @@ func (q *QEMUManager) serialBufferContains(marker string) bool {
 	q.serialMutex.Lock()
 	defer q.serialMutex.Unlock()
 	data := q.serialBuffer.Bytes()
-	// Markers are appended after command output, so they are near the tail.
-	// Scan the last 1 MiB plus marker length to avoid O(n) over the full
-	// buffer on every 100ms poll tick.
-	scanSize := (1 << 20) + len(marker)
+	// Scan the full tail retained after trimming so a still-retained marker
+	// remains visible until it is explicitly discarded.
+	scanSize := maxSerialBufferSize/2 + len(marker)
 	if len(data) > scanSize {
 		data = data[len(data)-scanSize:]
 	}

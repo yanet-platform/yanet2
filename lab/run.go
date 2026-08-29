@@ -181,6 +181,9 @@ func transferFile(runtime ManifestRuntime, source, destination string) error {
 	if info.Size() > maxManifestFileSize {
 		return fmt.Errorf("manifest file %s is too large: %d bytes, maximum %d", source, info.Size(), maxManifestFileSize)
 	}
+	if _, err := runtime.ExecuteCommand("mkdir -p " + shellQuote(filepath.Dir(destination))); err != nil {
+		return err
+	}
 	if _, err := runtime.ExecuteCommand(": > " + shellQuote(destination)); err != nil {
 		return err
 	}

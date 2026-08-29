@@ -1134,12 +1134,14 @@ var callSupervisor = func(m *application, value request) (*response, error) {
 	return &reply, nil
 }
 
+var executeSupervisorCommand = (*framework.TestFramework).ExecuteCommandWithTimeout
+
 func requestTimeout(action string) time.Duration {
 	switch action {
 	case "manifest":
 		return supervisorManifestTimeout + 30*time.Second
 	case "exec":
-		return supervisorExecTimeout
+		return supervisorExecTimeout + 30*time.Second
 	case "reset":
 		return supervisorResetTimeout
 	case "down":
@@ -1423,7 +1425,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			setError(&reply, errors.New(operatorProfileNotReadyError(results)))
 		}
 	case "exec":
-		output, err := fw.ExecuteCommand(lab.ShellJoin(value.Argv))
+		output, err := executeSupervisorCommand(fw, lab.ShellJoin(value.Argv), supervisorExecTimeout)
 		reply.Output = lab.TruncateOutput(output)
 		setError(&reply, err)
 	case "shell":

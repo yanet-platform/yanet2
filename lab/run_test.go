@@ -22,6 +22,8 @@ type manifestRuntime struct {
 	CaptureErr       error
 	Commands         []string
 	Unfiltered       bool
+	commandErrorAt   int
+	commandCount     int
 	failStep         int
 	stepCount        int
 	startYANETArgs   []string
@@ -35,6 +37,10 @@ type manifestRuntime struct {
 func (m *manifestRuntime) CommonConfigCommands() []string { return nil }
 func (m *manifestRuntime) ExecuteCommand(command string) (string, error) {
 	m.Commands = append(m.Commands, command)
+	m.commandCount++
+	if m.commandCount == m.commandErrorAt {
+		return "", errors.New("command failed")
+	}
 	return "", nil
 }
 func (m *manifestRuntime) ExecuteCommandWithTimeout(string, time.Duration) (string, error) {
@@ -143,16 +149,21 @@ func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 	if !report.Success {
 		t.Fatalf("report = %#v", report)
 	}
-	if len(runtime.Commands) < 2 {
-		t.Fatalf("expected at least 2 commands, got %d: %#v", len(runtime.Commands), runtime.Commands)
+	if len(runtime.Commands) < 3 {
+		t.Fatalf("expected at least 3 commands, got %d: %#v", len(runtime.Commands), runtime.Commands)
 	}
+	require.Equal(t, "mkdir -p '/tmp'", runtime.Commands[0])
+	require.Equal(t, ": > '/tmp/fixture'", runtime.Commands[1])
 	for _, command := range runtime.Commands {
 		if len(command) > 5600 {
 			t.Fatalf("command is too long: %d", len(command))
 		}
 	}
 	var transferred []byte
-	for _, command := range runtime.Commands[1:] {
+	for _, command := range runtime.Commands {
+		if !strings.HasPrefix(command, "echo '") {
+			continue
+		}
 		encoded := strings.TrimPrefix(command, "echo '")
 		encoded = strings.TrimSuffix(encoded, "' | base64 -d >> '/tmp/fixture'")
 		chunk, err := base64.StdEncoding.DecodeString(encoded)
@@ -160,6 +171,39 @@ func TestRunManifestTransfersFilesInBoundedCommands(t *testing.T) {
 		transferred = append(transferred, chunk...)
 	}
 	require.Equal(t, want, transferred)
+}
+
+// Test_RunManifest_NestedDestinationCreatesParentFirst verifies that file
+// transfer creates a missing guest parent before truncating the destination.
+func Test_RunManifest_NestedDestinationCreatesParentFirst(t *testing.T) {
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "fixture"), []byte("data"), 0o600))
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte("version: 1\nname: files\nfiles:\n  - source: fixture\n    destination: /tmp/nested/path/fixture\n"), 0o600))
+
+	runtime := &manifestRuntime{}
+	report := lab.RunManifest(runtime, manifestPath)
+
+	require.True(t, report.Success, "report = %#v", report)
+	require.GreaterOrEqual(t, len(runtime.Commands), 3)
+	require.Equal(t, "mkdir -p '/tmp/nested/path'", runtime.Commands[0])
+	require.Equal(t, ": > '/tmp/nested/path/fixture'", runtime.Commands[1])
+}
+
+// Test_RunManifest_ParentCreationFailureStopsTransfer verifies that a failed
+// parent creation returns its cause without truncating the guest destination.
+func Test_RunManifest_ParentCreationFailureStopsTransfer(t *testing.T) {
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "fixture"), []byte("data"), 0o600))
+	manifestPath := filepath.Join(directory, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte("version: 1\nname: files\nfiles:\n  - source: fixture\n    destination: /tmp/nested/fixture\n"), 0o600))
+
+	runtime := &manifestRuntime{commandErrorAt: 1}
+	report := lab.RunManifest(runtime, manifestPath)
+
+	require.False(t, report.Success)
+	require.Equal(t, "command failed", report.Results[0].Error)
+	require.Equal(t, []string{"mkdir -p '/tmp/nested'"}, runtime.Commands)
 }
 
 func TestRunManifestTransfersMultiChunkFiles(t *testing.T) {

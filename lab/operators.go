@@ -249,8 +249,9 @@ func RequiredArtifacts(root string) []string {
 
 // PrepareOperators stages the lab-only operator and BIRD artifacts in guest tmpfs.
 func PrepareOperators(fw *framework.TestFramework) error {
-	if _, err := fw.ExecuteCommand("mkdir -p /tmp/yanet/operators /tmp/yanet/config/operators /tmp/yanet/bird /tmp/yanet/logs /tmp/yanet/run"); err != nil {
-		return err
+	prepareDirectories := "mkdir -p /tmp/yanet/operators /tmp/yanet/config/operators /tmp/yanet/bird /tmp/yanet/logs /tmp/yanet/run"
+	if output, err := fw.ExecuteCommand(prepareDirectories); err != nil {
+		return operatorStagingError(prepareDirectories, output, err)
 	}
 	copyCommands := []string{
 		"cp /mnt/build/operators/route/yanet-route-operator /tmp/yanet/operators/",
@@ -264,8 +265,8 @@ func PrepareOperators(fw *framework.TestFramework) error {
 	}
 	copyCommands = append(copyCommands, "chmod +x /tmp/yanet/operators/* /tmp/yanet/cli/yanet-cli-operator-* /tmp/yanet/cli/yanet-cli-ready")
 	for _, command := range copyCommands {
-		if _, err := fw.ExecuteCommandWithTimeout(command, time.Minute); err != nil {
-			return fmt.Errorf("stage operator artifact: %w", err)
+		if output, err := fw.ExecuteCommandWithTimeout(command, time.Minute); err != nil {
+			return operatorStagingError(command, output, err)
 		}
 	}
 	for path, contents := range operatorFiles {
@@ -278,6 +279,14 @@ func PrepareOperators(fw *framework.TestFramework) error {
 		return fmt.Errorf("install pinned BIRD %s: %w\n%s", birdVersion, err, output)
 	}
 	return nil
+}
+
+func operatorStagingError(command, output string, err error) error {
+	output = strings.TrimSpace(TruncateOutput(output))
+	if output == "" {
+		return fmt.Errorf("stage operator artifact %q: %w", command, err)
+	}
+	return fmt.Errorf("stage operator artifact %q: %w\n%s", command, err, output)
 }
 
 // StartOperators launches the complete operator-owned lab configuration.

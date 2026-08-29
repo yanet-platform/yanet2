@@ -221,6 +221,18 @@ func TestSerialBufferContains(t *testing.T) {
 	}
 }
 
+// Test_SerialBufferScan_FindsAndDiscardsMarkerBeyondOneMiB verifies that the
+// marker scan covers the complete tail retained after buffer trimming.
+func Test_SerialBufferScan_FindsAndDiscardsMarkerBeyondOneMiB(t *testing.T) {
+	q := &QEMUManager{}
+	marker := "distant-marker"
+	q.serialBuffer.WriteString("prefix-" + marker + strings.Repeat("x", (2<<20)))
+
+	require.True(t, q.serialBufferContains(marker))
+	q.discardSerialThrough(marker)
+	require.Equal(t, strings.Repeat("x", 2<<20), q.serialBufferSnapshot())
+}
+
 func TestNewQEMUManagerUsesProvidedProjectRoot(t *testing.T) {
 	root := t.TempDir()
 	manager, err := newQEMUManager("root-test", "image.qcow2", zap.NewNop().Sugar(), root)

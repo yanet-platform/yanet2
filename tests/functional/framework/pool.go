@@ -345,8 +345,8 @@ func (p *VMPool) bootstrapTemplate() error {
 		return fmt.Errorf("failed to freeze filesystem before booted snapshot: %w", err)
 	}
 
-	// Save the booted snapshot and get the overlay path.
-	overlayPath, err := vm0.manager.SaveBootedOverlay()
+	// Save the booted snapshot before exporting the live overlay.
+	_, err := vm0.manager.SaveBootedOverlay()
 	thawErr := vm0.fw.thawRootFilesystem()
 	if err != nil {
 		_ = vm0.fw.Stop()
@@ -361,7 +361,7 @@ func (p *VMPool) bootstrapTemplate() error {
 	// (Stop() removes WorkDir which contains the overlay).
 	if err := os.MkdirAll(filepath.Dir(p.bootedTemplate), 0755); err != nil {
 		p.log.Warnf("Failed to create template cache dir: %v", err)
-	} else if err := copyFile(overlayPath, p.bootedTemplate); err != nil {
+	} else if err := vm0.fw.ExportCurrentOverlay(p.bootedTemplate); err != nil {
 		p.log.Warnf("Failed to cache booted template: %v", err)
 		if rerr := os.Remove(p.bootedTemplate); rerr != nil && !os.IsNotExist(rerr) {
 			p.log.Warnf("Failed to remove stale booted template %s: %v", p.bootedTemplate, rerr)

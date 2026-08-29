@@ -452,6 +452,9 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	}()
 
 	if err = pool.StartAll(); err != nil {
+		if invalidateErr := invalidateFingerprint(baselineTemplate); invalidateErr != nil {
+			return nil, nil, fmt.Errorf("failed to start VM pool: %w; invalidate baseline fingerprint: %v", err, invalidateErr)
+		}
 		return nil, nil, fmt.Errorf("failed to start VM pool: %w", err)
 	}
 	if err = pool.WaitAllReady(VMReadyTimeout()); err != nil {
@@ -753,6 +756,14 @@ func statFingerprint(hash io.Writer, path string) error {
 func fingerprintMatches(baselineTemplate, want string) bool {
 	data, err := os.ReadFile(baselineTemplate + ".sha256")
 	return err == nil && string(data) == want
+}
+
+func invalidateFingerprint(baselineTemplate string) error {
+	err := os.Remove(baselineTemplate + ".sha256")
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func writeFingerprint(baselineTemplate, value string) error {

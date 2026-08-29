@@ -127,6 +127,18 @@ func TestStatFingerprintDetectsChangedMtime(t *testing.T) {
 	}
 }
 
+// Test_InvalidateFingerprint_MakesCachedBaselineInvalid verifies that a failed
+// preferred-template startup forces the next run to rebuild the baseline.
+func Test_InvalidateFingerprint_MakesCachedBaselineInvalid(t *testing.T) {
+	baselineTemplate := filepath.Join(t.TempDir(), "baseline.qcow2")
+	require.NoError(t, writeFingerprint(baselineTemplate, "fingerprint"))
+	require.True(t, fingerprintMatches(baselineTemplate, "fingerprint"))
+
+	require.NoError(t, invalidateFingerprint(baselineTemplate))
+	require.False(t, fingerprintMatches(baselineTemplate, "fingerprint"))
+	require.NoError(t, invalidateFingerprint(baselineTemplate))
+}
+
 func TestRunProfileHooks(t *testing.T) {
 	startError := errors.New("start failed")
 	readyError := errors.New("not ready")

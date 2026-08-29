@@ -1632,18 +1632,34 @@ func (f *TestFramework) SaveSnapshotKeepUnmounted(name string) error {
 	return nil
 }
 
-// ExportCurrentOverlay copies the VM's current qcow2 overlay to dst. This is
-// used to cache prepared template overlays (for example a prebuilt baseline)
+// ExportCurrentOverlay copies the VM's current qcow2 overlay to dst.
+//
+// A successful export leaves the VM paused. Callers must stop it or explicitly
+// resume it before further use. This is used to cache prepared template overlays
 // and start future pool VMs from the same snapshot source.
 func (f *TestFramework) ExportCurrentOverlay(dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return fmt.Errorf("create overlay cache dir: %w", err)
 	}
 	src := filepath.Join(f.qemu.WorkDir, "overlay.qcow2")
-	if err := copyFile(src, dst); err != nil {
-		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
+	if err := exportOverlay(f.qemu.SendMonitorCommand, copyFile, src, dst); err != nil {
+		return err
 	}
 	f.log.Infof("Exported current overlay to %s", dst)
+	return nil
+}
+
+func exportOverlay(sendMonitorCommand func(string) (string, error), copyOverlay func(string, string) error, src, dst string) error {
+	response, err := sendMonitorCommand("stop")
+	if err != nil {
+		return fmt.Errorf("pause VM before overlay export: %w", err)
+	}
+	if response != "" {
+		return fmt.Errorf("pause VM before overlay export returned unexpected output: %s", response)
+	}
+	if err := copyOverlay(src, dst); err != nil {
+		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
+	}
 	return nil
 }
 

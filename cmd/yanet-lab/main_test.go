@@ -545,6 +545,7 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 }
 
 func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
+	assert.Equal(t, 5*time.Minute, supervisorExecTimeout)
 	fast := []string{"shell", "report", "serial"}
 	for _, action := range fast {
 		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "fast action %q", action)
@@ -552,9 +553,35 @@ func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
 	assert.Equal(t, supervisorStatusTimeout, requestTimeout("status"))
 	assert.Greater(t, requestTimeout("status"), 30*time.Second)
 	assert.Equal(t, supervisorManifestTimeout+30*time.Second, requestTimeout("manifest"))
-	assert.Equal(t, supervisorExecTimeout, requestTimeout("exec"))
+	assert.Equal(t, supervisorExecTimeout+30*time.Second, requestTimeout("exec"))
 	assert.Equal(t, supervisorResetTimeout, requestTimeout("reset"))
 	assert.Equal(t, supervisorShutdownTimeout, requestTimeout("down"))
+}
+
+// Test_HandleConnection_ExecUsesActionBudget verifies that exec requests pass
+// the full guest action budget while retaining time to return the reply.
+func Test_HandleConnection_ExecUsesActionBudget(t *testing.T) {
+	original := executeSupervisorCommand
+	t.Cleanup(func() { executeSupervisorCommand = original })
+
+	var command string
+	var timeout time.Duration
+	executeSupervisorCommand = func(_ *framework.TestFramework, value string, valueTimeout time.Duration) (string, error) {
+		command = value
+		timeout = valueTimeout
+		return "complete", nil
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	go handleConnection(server, nil, t.TempDir(), &supervisor{}, nil, nil, func() {})
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "exec", Argv: []string{"sleep", "31"}}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+
+	require.Equal(t, "'sleep' '31'", command)
+	require.Equal(t, supervisorExecTimeout, timeout)
+	require.Equal(t, "complete", reply.Output)
 }
 
 func TestWriteReportOverwritesLastReport(t *testing.T) {
