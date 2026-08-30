@@ -260,8 +260,10 @@ func PrepareOperators(fw *framework.TestFramework) error {
 		"cp /mnt/build/operators/pipeline/yanet-pipeline-operator /tmp/yanet/operators/",
 		"cp /mnt/build/operators/bird-adapter/yanet-bird-adapter /tmp/yanet/operators/",
 	}
+	// The bare source directory keeps mounted artifacts from being mistaken
+	// for already-staged CLI invocations.
 	for _, name := range operatorCLIs {
-		copyCommands = append(copyCommands, "cp /mnt/target/release/"+name+" /tmp/yanet/cli/")
+		copyCommands = append(copyCommands, "cd "+framework.CLIBasePath+" && cp "+name+" /tmp/yanet/cli/")
 	}
 	copyCommands = append(copyCommands, "chmod +x /tmp/yanet/operators/* /tmp/yanet/cli/yanet-cli-operator-* /tmp/yanet/cli/yanet-cli-ready")
 	for _, command := range copyCommands {
