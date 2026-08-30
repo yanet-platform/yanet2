@@ -415,7 +415,7 @@ reconcile: {interval: 1s, initial_backoff: 100ms, max_backoff: 1s}
 functions:
   - {name: "fn:decap", chain: default, weight: 1, module: decap0, prefixes_file: /tmp/yanet/config/operators/decap-prefixes.yaml}
 `,
-	"/tmp/yanet/config/operators/decap-prefixes.yaml": "prefixes: []\n",
+	"/tmp/yanet/config/operators/decap-prefixes.yaml": "prefixes4: []\nprefixes6: []\n",
 	"/tmp/yanet/config/operators/pipeline.yaml": `logging: {level: info}
 server: {endpoint: "[::1]:50001"}
 gateways: [{name: numa0, endpoint: "[::1]:8080"}]
