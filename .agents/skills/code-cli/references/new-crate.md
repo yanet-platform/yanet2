@@ -60,6 +60,9 @@ use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let root = "../../..";
+    // modules, devices and objects; an operator's protos live under
+    // operators/<x>/operatorpb/v1/ instead, with file names of their
+    // own (route.proto, operator.proto, …) — check the tree.
     let proto = "<owner>/<x>/controlplane/<x>pb/v1/<x>.proto";
     println!("cargo:rerun-if-changed={root}/{proto}");
 

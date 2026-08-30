@@ -11,8 +11,8 @@ description: >-
 
 # code-cli
 
-A CLI is a thin, typed front for one gRPC service: clap proves the form of
-every argument before a connection exists, the service owns every invariant,
+A CLI is a thin, typed front for one gRPC service: clap proves the argument
+form before a connection exists, the service owns every invariant,
 `ync` owns connection, output, errors and completion. `references/new-crate.md`
 has the manifest, `build.rs`, skeleton and registration steps for a new binary.
 
@@ -61,8 +61,8 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   range, a fixed prefix length) is fine. A new `FromStr` type anywhere, in the
   crate or in `common/rust`, is a decision for the owner: stop and ask before
   writing it.
-- Wire values are made when the request is built (`IpAddress::from(addr)`,
-  `MacAddress::from(mac)`), never parsed from text there.
+- Wire values are built with `From` when the request is made
+  (`IpAddress::from(addr)`), never parsed from text there.
 - Positional arguments carry the key of an element only (`insert <prefix>
   --via …`, `remove <next-hop>…`, `table create <name>`); everything else is a
   flag.
@@ -119,7 +119,7 @@ no `--yes`, no `--dry-run`.
 
 - Exit codes come only from `err.exit_code()`: 0 ok, 1 invalid argument, auth
   or RPC error, 2 usage (clap), 3 not found or service not registered, 4
-  connection or unavailable. No command invents a code (`ready` exiting 2 for
+  connection or unavailable. No command invents a code (`ready`'s 2 for
   "not ready" is legacy until #2354).
 - A local rejection is `self.service.invalid("<verb>", message)` or
   `Error::invalid_argument(verb, endpoint, message)`; a command addressing an
@@ -132,18 +132,17 @@ no `--yes`, no `--dry-run`.
 Test the crate's own logic only: its formatters, a request mapping that merges
 or branches, a file loader. Nothing that exercises clap (`debug_assert`,
 `try_parse_from` for required, typed or conflicting arguments), `std` or
-`netip` parsing, a JSON shape or human text; such tests already merged are
-not a precedent and go when their crate is next changed. `fn
+`netip` parsing, a JSON shape or human text; merged JSON-shape pins go when
+their crate is next changed. Canonical MAC/hex and ASCII-path rendering are
+contracts and a formatter is own logic — those tests stay. `fn
 test_<what>_<case>` in `mod test`.
 
 ## Never
 
 - Parse or validate after connecting.
-- `String`, `Option<String>` or `Vec<String>` for an address, MAC, prefix or
-  pipeline.
+- `String` in any wrapper for an address, MAC, prefix or pipeline.
 - A `Vec<T>` payload without `required = true`.
 - Accept `--format` and ignore it, or `println!` a JSON document.
 - `CompleteEnv` inside a tokio runtime.
 - Swallow a stream or writer error and exit 0.
-- Heuristics over a library error: take the root of the `source()` chain or
-  the library's own rendering.
+- Heuristics over a library error: take the root of the `source()` chain.
