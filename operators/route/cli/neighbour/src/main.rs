@@ -16,6 +16,7 @@ use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
 };
 use commonpb::pb::{IpAddress, MacAddress};
+use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -102,13 +103,13 @@ pub struct ShowCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddCmd {
     /// Next-hop IP address.
-    pub next_hop: String,
+    pub next_hop: IpAddr,
     /// MAC address of the next-hop device (neighbour MAC).
     #[arg(long)]
-    pub link_addr: String,
+    pub link_addr: MacAddr,
     /// MAC address of the local interface.
     #[arg(long)]
-    pub hardware_addr: String,
+    pub hardware_addr: MacAddr,
     /// Network interface name.
     #[arg(long)]
     pub device: Option<String>,
@@ -124,7 +125,8 @@ pub struct AddCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemoveCmd {
     /// Next-hop IP address(es) to remove.
-    pub next_hops: Vec<String>,
+    #[arg(required = true)]
+    pub next_hops: Vec<IpAddr>,
     /// Neighbour table name. Defaults to "static".
     #[arg(long, add = ArgValueCandidates::new(table_candidates))]
     pub table: Option<String>,
@@ -247,26 +249,14 @@ impl NeighbourService {
     }
 
     pub async fn update_neighbour(&mut self, cmd: AddCmd) -> Result<(), Error> {
-        let link_addr = cmd
-            .link_addr
-            .parse::<MacAddress>()
-            .map_err(|err| self.service.invalid("add", err.to_string()))?;
-        let hardware_addr = cmd
-            .hardware_addr
-            .parse::<MacAddress>()
-            .map_err(|err| self.service.invalid("add", err.to_string()))?;
-        let next_hop = cmd
-            .next_hop
-            .parse::<IpAddress>()
-            .map_err(|err| self.service.invalid("add", err.to_string()))?;
         let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
 
         let request = UpdateNeighboursRequest {
             table: cmd.table.clone().unwrap_or_default(),
             entries: vec![ProtoNeighbourEntry {
-                next_hop: Some(next_hop),
-                link_addr: Some(link_addr),
-                hardware_addr: Some(hardware_addr),
+                next_hop: Some(IpAddress::from(cmd.next_hop)),
+                link_addr: Some(MacAddress::from(cmd.link_addr)),
+                hardware_addr: Some(MacAddress::from(cmd.hardware_addr)),
                 priority: cmd.priority.unwrap_or_default(),
                 device: cmd.device.clone().unwrap_or_default(),
                 ..Default::default()
@@ -291,17 +281,11 @@ impl NeighbourService {
     }
 
     pub async fn remove_neighbours(&mut self, cmd: RemoveCmd) -> Result<(), Error> {
-        let next_hops = cmd
-            .next_hops
-            .iter()
-            .map(|next_hop| next_hop.parse::<IpAddress>().map_err(|err| err.to_string()))
-            .collect::<Result<Vec<_>, String>>()
-            .map_err(|err| self.service.invalid("remove", err))?;
         let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
 
         let request = RemoveNeighboursRequest {
             table: cmd.table.clone().unwrap_or_default(),
-            next_hops,
+            next_hops: cmd.next_hops.iter().copied().map(IpAddress::from).collect(),
         };
 
         self.service
@@ -310,10 +294,13 @@ impl NeighbourService {
             .await
             .map_err(self.service.status("remove"))?;
 
-        output::success(
-            "remove",
-            format_args!("Removed {} from table {}.", cmd.next_hops.join(", "), table),
-        );
+        let next_hops = cmd
+            .next_hops
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        output::success("remove", format_args!("Removed {next_hops} from table {table}."));
 
         Ok(())
     }
