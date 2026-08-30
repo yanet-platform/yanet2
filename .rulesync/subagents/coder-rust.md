@@ -33,7 +33,7 @@ Before running the gate, invoke `$better-comment` in Author mode for the complet
 
 ## Gate (run it, do not assume)
 
-`cargo +nightly fmt` · `cargo clippy` · `cargo build --workspace` · `cargo test --workspace`.
+`cargo +nightly-2026-08-28 fmt` · `cargo clippy` · `cargo build --workspace` · `cargo test --workspace`.
 
 ## Report (≤ 30 lines)
 

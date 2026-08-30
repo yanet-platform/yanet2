@@ -2,8 +2,8 @@
 
 Loaded on demand by the agent writing or reviewing Rust; this is the single source for these rules.
 
-- `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly fmt`.
-- Run `cargo +nightly fmt -- --check` and `cargo clippy` before committing.
+- `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly-2026-08-28 fmt` — the date `rust-check.yml` pins, installed once with `rustup toolchain install nightly-2026-08-28 --component rustfmt`; a newer nightly rewraps comments differently. Bump the date together with a workspace reformat.
+- Run `cargo +nightly-2026-08-28 fmt -- --check` and `cargo clippy` before committing.
 - **`cargo fmt --all` also formats local path dependencies**, so it reaches outside the crate you think you are formatting. Scope it deliberately when the workspace pulls in path deps from another tree.
 - Proto compilation needs `protobuf-compiler` in CI.
 - **Proto crates**: tonic-include crates expose `pub mod pb`, never `pub mod <crate>`; consume shared `common/rust/` crates through `extern_path`.
@@ -16,7 +16,7 @@ Loaded on demand by the agent writing or reviewing Rust; this is the single sour
 - **`clippy::std_instead_of_core`** is deny-level via `[workspace.lints.clippy]` + per-crate `[lints] workspace = true`; prefer `core::` for anything `core` provides (`error::Error`, `fmt`, `net`, `str::FromStr`, `time::Duration`, `mem`, `iter`, `ops`).
 - **Escape hatches** are `#[allow(clippy::std_instead_of_core)]` on an enclosing item (function or module), never the `use` itself — clippy's `useless_attribute` rejects that: tonic's client codegen emits `std::` paths we do not control, and `core_io`-gated items (`io::ErrorKind`, `io::Cursor`) are still unstable in `core`.
 - **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/ `Default`/`FromStr` impls — the trait name is the doc.
-- **Comments**: follow `.agents/conventions/comments.md` (brief + blank + detailed), for both `///`/`//!` doc comments and plain `//`. `.rustfmt.toml`'s `wrap_comments` reflows any line past `comment_width` (80 columns) on `cargo +nightly fmt`, so keep each line within that width and author the blank-line separator so a reflow never merges it away. Place a comment only where the item is not self-explanatory.
+- **Comments**: follow `.agents/conventions/comments.md` (brief + blank + detailed), for both `///`/`//!` doc comments and plain `//`. `.rustfmt.toml`'s `wrap_comments` reflows any line past `comment_width` (80 columns) on `cargo +nightly-2026-08-28 fmt`, so keep each line within that width and author the blank-line separator so a reflow never merges it away. Place a comment only where the item is not self-explanatory.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.
 - **`assert_eq!` order**: expected first, actual second: `assert_eq!(expected, actual)`.
 - **Style**: prefer shadowing to `_str`, destructure `self` rather than `self.0`, put bounds in `where`, and import types directly.

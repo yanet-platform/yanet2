@@ -38,9 +38,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # Pinned: a floating nightly rewraps comments differently from one
+      # day to the next and turns untouched files red.
+      #
+      # Bump the date together with a reformat of the workspace, so the
+      # toolchain and the checked-in formatting move in one change.
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-08-28
           components: rustfmt
       - run: cargo fmt --all -- --check
 
