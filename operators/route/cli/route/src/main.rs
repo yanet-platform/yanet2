@@ -75,7 +75,7 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteShowCmd {
     /// Show only IPv4 routes.
-    #[arg(long, short = '4')]
+    #[arg(long, short = '4', conflicts_with = "ipv6")]
     pub ipv4: bool,
     /// Show only IPv6 routes.
     #[arg(long, short = '6')]

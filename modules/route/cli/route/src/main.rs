@@ -157,7 +157,7 @@ pub struct FibUpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct FibShowCmd {
     /// Show only IPv4 FIB entries.
-    #[arg(long, short = '4')]
+    #[arg(long, short = '4', conflicts_with = "ipv6")]
     pub ipv4: bool,
     /// Show only IPv6 FIB entries.
     #[arg(long, short = '6')]
