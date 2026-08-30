@@ -1,6 +1,7 @@
 package acl_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -61,12 +62,12 @@ func (m *counterSpyBackend) CounterReads() []counterRead {
 	return append([]counterRead(nil), m.counterReads...)
 }
 
-func (m *spyMetricsSource) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+func (m *spyMetricsSource) Metrics(ctx context.Context, tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
 	m.receivedTags = tags
 	return m.metrics, nil
 }
 
-func (m *spyMetricsSource) RuleMetrics(req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error) {
+func (m *spyMetricsSource) RuleMetrics(ctx context.Context, req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error) {
 	m.receivedRule = req
 	return m.ruleMetrics, nil
 }
@@ -89,7 +90,7 @@ func Test_ACLMetrics_UntaggedScrapeUsesBoundedGenericCounters(t *testing.T) {
 	})
 	service := acl.NewACLService(backend)
 
-	collected, err := service.Metrics()
+	collected, err := service.Metrics(t.Context())
 	require.NoError(t, err)
 
 	expectedQuery := []string{

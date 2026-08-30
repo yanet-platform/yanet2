@@ -124,5 +124,8 @@ func (m *ACLModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 }
 
 func (m *ACLModule) Close() error {
+	// In-flight metric collections read the shared memory outside the
+	// drained request handlers; wait for them before releasing it.
+	m.aclService.DrainMetricsReads()
 	return errors.Join(m.agent.Close(), m.shm.Detach())
 }

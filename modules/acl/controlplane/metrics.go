@@ -3,6 +3,7 @@ package acl
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,12 +16,16 @@ import (
 
 // metricsSource provides the module's metrics, filtered by tags.
 type metricsSource interface {
-	Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
-	RuleMetrics(req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error)
+	Metrics(ctx context.Context, tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error)
+	RuleMetrics(ctx context.Context, req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error)
 }
 
 type moduleCounterReader interface {
 	ModuleCounters(dataplaneConfig *ffi.DPConfig, position ffi.ModuleReference, counterNames []string) []ffi.CounterInfo
+}
+
+type countersByTagsReader interface {
+	CountersByTags(dataplaneConfig *ffi.DPConfig, tags []ffi.CounterTag, query []string) ([]ffi.CounterGroup, error)
 }
 
 // MetricsService exposes ACL module metrics over its own gRPC service.
@@ -38,7 +43,7 @@ func NewMetricsService(source metricsSource) *MetricsService {
 // GetMetrics returns a snapshot of ACL module metrics matching the
 // request's tags.
 func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetricsRequest) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.Metrics(req.GetTags()...)
+	all, err := m.source.Metrics(ctx, req.GetTags()...)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +53,7 @@ func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetric
 
 // GetMetricsRules returns the per-rule counter metrics GetMetrics leaves out.
 func (m *MetricsService) GetMetricsRules(ctx context.Context, req *aclpb.GetMetricsRulesRequest) (*commonpb.GetMetricsResponse, error) {
-	all, err := m.source.RuleMetrics(req)
+	all, err := m.source.RuleMetrics(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +77,10 @@ var aclStructuralCounters = []string{
 // Metrics returns ACL module metrics matching tags: per-pipeline packet
 // counters, ACL compilation info, and gRPC call metrics.
 //
+// Concurrent scrapes are coalesced into one shared collection of the
+// per-position packet-counter reads, and every concurrent caller
+// receives the same values filtered by its own tags.
+//
 // Per-rule counters are served by RuleMetrics and GetRulesCounters, not
 // here. Counter metrics are omitted when all worker values are zero to
 // reduce output noise.
@@ -86,25 +95,34 @@ var aclStructuralCounters = []string{
 //   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:   RPC name (gRPC metrics)
 //   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
-func (m *ACLService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
-	all, err := m.collectDataplaneMetrics(tags)
+func (m *ACLService) Metrics(ctx context.Context, tags ...*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+	collected, err := m.moduleMetricsFlight.Do(ctx, m.collectDataplaneMetrics)
 	if err != nil {
 		return nil, err
 	}
+
+	var grpcMetrics []*commonpb.Metric
 	if m.metrics != nil {
-		all = append(all, m.metrics.Collect()...)
+		grpcMetrics = m.metrics.Collect()
 	}
+	all := slices.Concat(collected, grpcMetrics)
 	return metrics.Filter(all, tags), nil
 }
 
 // RuleMetrics returns ACL per-rule counter metrics for the selected
 // positions: one packets and one bytes counter for every rule counter.
 //
+// One merged shared-memory read serves every selector: concurrent
+// scrapes are coalesced into it, and selection of each caller's
+// positions happens on its shared result.
+//
 // These are the counters Metrics leaves out, read from the runtime-kind
 // storages it never touches. An empty request field matches every value.
 // One read serves every position, and each metric's position comes from
-// the tags its counter group carries. Counter metrics are omitted when
-// all worker values are zero to reduce output noise.
+// the tags its counter group carries. A selector value the counter-tag
+// fields cannot carry is rejected as an invalid argument. Counter
+// metrics are omitted when all worker values are zero to reduce output
+// noise.
 //
 // Labels:
 //   - config:    ACL config name
@@ -113,16 +131,20 @@ func (m *ACLService) Metrics(tags ...*commonpb.MetricTag) ([]*commonpb.Metric, e
 //   - function:  pipeline function name
 //   - chain:     pipeline chain name
 //   - counter:   rule counter name
-func (m *ACLService) RuleMetrics(req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error) {
+func (m *ACLService) RuleMetrics(ctx context.Context, req *aclpb.GetMetricsRulesRequest) ([]*commonpb.Metric, error) {
 	dpConfig := m.backend.DPConfig()
 	if dpConfig == nil {
 		return []*commonpb.Metric{}, nil
 	}
 
-	groups, err := dpConfig.CountersByTags(ruleQueryTags(req), nil)
+	if err := validateRuleSelectors(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	groups, err := m.readRuleCounterGroups(ctx, dpConfig)
 	if err != nil {
-		if errors.Is(err, ffi.ErrInvalidTag) {
-			return nil, status.Error(codes.InvalidArgument, err.Error())
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
 		}
 		return nil, status.Errorf(
 			codes.Internal, "failed to read rule counters: %v", err,
@@ -176,22 +198,56 @@ func (m *ACLService) RuleMetrics(req *aclpb.GetMetricsRulesRequest) ([]*commonpb
 	return result, nil
 }
 
-func ruleQueryTags(req *aclpb.GetMetricsRulesRequest) []ffi.CounterTag {
-	tags := []ffi.CounterTag{
-		{Key: "module_type", Value: moduleType},
-		{Key: "kind", Value: "runtime"},
-	}
+// DrainMetricsReads blocks until every in-flight metrics collection has
+// finished.
+//
+// A collection outlives the request handlers that joined it, so the
+// shared memory it reads may only be released after this returns.
+func (m *ACLService) DrainMetricsReads() {
+	m.moduleMetricsFlight.Drain()
+	m.ruleMetricsFlight.Drain()
+}
 
+// readRuleCounterGroups returns the per-rule counter groups both
+// rule-counter RPCs work on.
+//
+// The merged read carries no request selectors: every caller filters
+// the shared result on its own, so one shared-memory read of the family
+// is in flight at a time and releasing that memory is safe after the
+// drain.
+func (m *ACLService) readRuleCounterGroups(ctx context.Context, dpConfig *ffi.DPConfig) ([]ffi.CounterGroup, error) {
+	return m.ruleMetricsFlight.Do(ctx, func() ([]ffi.CounterGroup, error) {
+		if reader, ok := m.backend.(countersByTagsReader); ok {
+			return reader.CountersByTags(dpConfig, ruleCounterBaseTags(), nil)
+		}
+		return dpConfig.CountersByTags(ruleCounterBaseTags(), nil)
+	})
+}
+
+// validateRuleSelectors rejects request selectors the fixed-size
+// counter-tag fields cannot carry, before any shared-memory read.
+func validateRuleSelectors(req *aclpb.GetMetricsRulesRequest) error {
 	for _, selector := range requestSelectors(req) {
 		key, value := selector[0], selector[1]
 		if value == "" || value == "*" {
 			continue
 		}
 
-		tags = append(tags, ffi.CounterTag{Key: key, Value: value})
+		if err := ffi.ValidateTag(ffi.CounterTag{Key: key, Value: value}); err != nil {
+			return err
+		}
 	}
 
-	return tags
+	return nil
+}
+
+// ruleCounterBaseTags returns the fixed tag set every per-rule counter
+// read matches on: the module's own counters of the runtime kind.
+func ruleCounterBaseTags() []ffi.CounterTag {
+	return []ffi.CounterTag{
+		{Key: "module_type", Value: moduleType},
+		{Key: "kind", Value: "runtime"},
+	}
 }
 
 func locationSelected(location map[string]string, req *aclpb.GetMetricsRulesRequest) bool {
@@ -224,7 +280,7 @@ func groupLocation(tags []ffi.CounterTag) map[string]string {
 	return location
 }
 
-func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*commonpb.Metric, error) {
+func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 	snapshot := m.metricsState.load()
 
 	dpConfig := m.backend.DPConfig()
@@ -234,10 +290,7 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 
 	positions := dpConfig.AllModulePositions(moduleType)
 
-	names, read := metrics.Query(
-		tags,
-		metrics.WithStructuralCounters(aclStructuralCounters),
-	)
+	names := aclStructuralCounters
 
 	result := make([]*commonpb.Metric, 0)
 	gaugesEmitted := make(map[string]struct{})
@@ -253,20 +306,18 @@ func (m *ACLService) collectDataplaneMetrics(tags []*commonpb.MetricTag) ([]*com
 		}
 
 		var counters []ffi.CounterInfo
-		if read {
-			if counterReader, ok := m.backend.(moduleCounterReader); ok {
-				counters = counterReader.ModuleCounters(dpConfig, pos, names)
-			} else {
-				counters = dpConfig.ModuleCounters(
-					pos.Device,
-					pos.Pipeline,
-					pos.Function,
-					pos.Chain,
-					moduleType,
-					configName,
-					names,
-				)
-			}
+		if counterReader, ok := m.backend.(moduleCounterReader); ok {
+			counters = counterReader.ModuleCounters(dpConfig, pos, names)
+		} else {
+			counters = dpConfig.ModuleCounters(
+				pos.Device,
+				pos.Pipeline,
+				pos.Function,
+				pos.Chain,
+				moduleType,
+				configName,
+				names,
+			)
 		}
 
 		for _, counter := range counters {

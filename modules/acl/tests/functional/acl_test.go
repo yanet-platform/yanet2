@@ -1203,7 +1203,7 @@ func TestACL_Counters(t *testing.T) {
 		ruleCounters := dataplaneut.RuleCounters(t, h, path, []string{"svc_counter"})
 		require.Len(t, ruleCounters, 1)
 
-		collected, err := svc.Metrics()
+		collected, err := svc.Metrics(t.Context())
 		require.NoError(t, err)
 		metricNames := make(map[string]struct{}, len(collected))
 		for _, metric := range collected {
@@ -1213,7 +1213,7 @@ func TestACL_Counters(t *testing.T) {
 		require.NotContains(t, metricNames, "acl_rule_bytes")
 		require.Contains(t, metricNames, "acl_action_allow_packets")
 
-		ruleMetrics, err := svc.RuleMetrics(&aclpb.GetMetricsRulesRequest{})
+		ruleMetrics, err := svc.RuleMetrics(t.Context(), &aclpb.GetMetricsRulesRequest{})
 		require.NoError(t, err)
 
 		byName := make(map[string]*commonpb.Metric, len(ruleMetrics))
@@ -1241,7 +1241,7 @@ func TestACL_Counters(t *testing.T) {
 		ruleMetricNames := func(req *aclpb.GetMetricsRulesRequest) []string {
 			t.Helper()
 
-			got, err := svc.RuleMetrics(req)
+			got, err := svc.RuleMetrics(t.Context(), req)
 			require.NoError(t, err)
 
 			names := make([]string, 0, len(got))

@@ -1306,7 +1306,7 @@ func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
 	}
 	metricsDone := make(chan metricsResult, 1)
 	go func() {
-		collected, metricsErr := svc.Metrics()
+		collected, metricsErr := svc.Metrics(t.Context())
 		metricsDone <- metricsResult{count: len(collected), err: metricsErr}
 	}()
 
@@ -1347,7 +1347,7 @@ func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 	}
 	metricsDone := make(chan metricsResult, 1)
 	go func() {
-		collected, metricsErr := svc.Metrics()
+		collected, metricsErr := svc.Metrics(t.Context())
 		metricsDone <- metricsResult{metrics: collected, err: metricsErr}
 	}()
 
@@ -1387,7 +1387,7 @@ func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
 	require.NotNil(t, ruleCount)
 	assert.Equal(t, float64(7), ruleCount.GetGauge())
 
-	afterDelete, err := svc.Metrics()
+	afterDelete, err := svc.Metrics(t.Context())
 	require.NoError(t, err)
 	assert.Nil(t, findMetricWithLabels(
 		afterDelete,
@@ -1437,7 +1437,7 @@ func TestMetricsSnapshotOrderingSurvivesConcurrentBarrage(t *testing.T) {
 		wantNames[name] = struct{}{}
 	}
 
-	collected, err := svc.Metrics()
+	collected, err := svc.Metrics(t.Context())
 	require.NoError(t, err)
 	gotNames := map[string]struct{}{}
 	for _, metric := range collected {

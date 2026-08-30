@@ -222,6 +222,15 @@ type ACLService struct {
 
 	metricsState *aclMetricsState
 
+	// moduleMetricsFlight coalesces concurrent structural counter
+	// scrapes into one shared collection of per-position reads, run
+	// outside the service mutex like every shared-memory read.
+	moduleMetricsFlight metricsFlight[[]*commonpb.Metric]
+	// ruleMetricsFlight coalesces concurrent per-rule counter reads of
+	// both rule RPCs into one shared-memory read, equally outside the
+	// service mutex.
+	ruleMetricsFlight metricsFlight[[]ffi.CounterGroup]
+
 	// deferred holds superseded acl configs whose free was refused
 	// because a live configuration generation still referenced them.
 	// This service is their owner: it retries them on its next update,
@@ -239,10 +248,12 @@ func NewACLService(backend Backend, options ...Option) *ACLService {
 	}
 
 	m := &ACLService{
-		backend:      backend,
-		configs:      map[string]*configEntry{},
-		metricsState: newACLMetricsState(),
-		log:          opts.Log,
+		backend:             backend,
+		configs:             map[string]*configEntry{},
+		metricsState:        newACLMetricsState(),
+		moduleMetricsFlight: newMetricsFlight[[]*commonpb.Metric]("module_metrics"),
+		ruleMetricsFlight:   newMetricsFlight[[]ffi.CounterGroup]("rule_metrics"),
+		log:                 opts.Log,
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -805,6 +816,8 @@ func (m *ACLService) DeleteConfig(
 // GetRulesCounters returns the per-rule counters of the named config, or of
 // every config when the request names none.
 //
+// The counters come from the same merged read the rule metrics scrape
+// uses, so the two requests never read the family concurrently.
 // Counters whose packets and bytes are both zero across all workers are
 // omitted, matching the metrics read.
 func (m *ACLService) GetRulesCounters(
@@ -827,55 +840,48 @@ func (m *ACLService) GetRulesCounters(
 		return &aclpb.GetRulesCountersResponse{}, nil
 	}
 
+	groups, err := m.readRuleCounterGroups(ctx, dpConfig)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return nil, status.Errorf(
+			codes.Internal, "failed to read rule counters: %v", err,
+		)
+	}
+
 	result := make([]*aclpb.RuleCounter, 0)
-	for pos := range dpConfig.AllModulePositions(moduleType) {
-		if name != "" && pos.ModuleName != name {
+	for _, group := range groups {
+		location := groupLocation(group.Tags)
+		if name != "" && location["module_name"] != name {
 			continue
 		}
 
-		// Runtime-kind storages expand exactly the module's per-rule
-		// registries, so this read excludes the predefined module
-		// counters (rx, tx, acl_action_*, ...) by construction.
-		groups, err := dpConfig.CountersByTags([]ffi.CounterTag{
-			{Key: "device", Value: pos.Device},
-			{Key: "pipeline", Value: pos.Pipeline},
-			{Key: "function", Value: pos.Function},
-			{Key: "chain", Value: pos.Chain},
-			{Key: "module_type", Value: moduleType},
-			{Key: "module_name", Value: pos.ModuleName},
-			{Key: "kind", Value: "runtime"},
-		}, nil)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to read rule counters of config %q: %v", pos.ModuleName, err)
-		}
-
-		for _, group := range groups {
-			for _, counter := range group.Counters {
-				var packets, bytes uint64
-				for _, workerVals := range counter.Values {
-					if len(workerVals) > 0 {
-						packets += workerVals[0]
-					}
-					if len(workerVals) > 1 {
-						bytes += workerVals[1]
-					}
+		for _, counter := range group.Counters {
+			var packets, bytes uint64
+			for _, workerVals := range counter.Values {
+				if len(workerVals) > 0 {
+					packets += workerVals[0]
 				}
-
-				if packets == 0 && bytes == 0 {
-					continue
+				if len(workerVals) > 1 {
+					bytes += workerVals[1]
 				}
-
-				result = append(result, &aclpb.RuleCounter{
-					Config:   pos.ModuleName,
-					Device:   pos.Device,
-					Pipeline: pos.Pipeline,
-					Function: pos.Function,
-					Chain:    pos.Chain,
-					Counter:  counter.Name,
-					Packets:  packets,
-					Bytes:    bytes,
-				})
 			}
+
+			if packets == 0 && bytes == 0 {
+				continue
+			}
+
+			result = append(result, &aclpb.RuleCounter{
+				Config:   location["module_name"],
+				Device:   location["device"],
+				Pipeline: location["pipeline"],
+				Function: location["function"],
+				Chain:    location["chain"],
+				Counter:  counter.Name,
+				Packets:  packets,
+				Bytes:    bytes,
+			})
 		}
 	}
 
