@@ -1,4 +1,4 @@
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{ArgAction, CommandFactory, Parser, value_parser};
 use clap_complete::CompleteEnv;
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use commonpb::pb::Device;
@@ -49,8 +49,8 @@ pub struct UpdateCmd {
     /// Pipeline assignments in format "pipeline_name:weight"
     #[arg(short, long)]
     pub output: Vec<String>,
-    /// Vlan tag
-    #[arg(short, long)]
+    /// VLAN id in 0..=4094, where 0 makes the device emit untagged frames.
+    #[arg(long, value_parser = value_parser!(u16).range(0..=4094))]
     pub vlan: u16,
 }
 
@@ -122,5 +122,43 @@ pub async fn main() {
     if let Err(err) = run(cmd).await {
         output::failure(&err);
         std::process::exit(err.exit_code());
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use clap::error::ErrorKind;
+
+    use super::*;
+
+    #[test]
+    fn test_cmd_is_valid() {
+        Cmd::command().debug_assert();
+    }
+
+    /// Verifies that the verbosity flag still counts after the subcommand,
+    /// where a short form of the vlan flag used to shadow it.
+    #[test]
+    fn test_update_verbosity_after_subcommand_counts() {
+        let cmd = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", "5", "-vv"]).unwrap();
+
+        assert_eq!(2, cmd.verbose);
+    }
+
+    #[test]
+    fn test_update_vlan_accepts_range_boundaries() {
+        for (arg, expected) in [("0", 0), ("4094", 4094)] {
+            let cmd = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", arg]).unwrap();
+            let ModeCmd::Update(update) = cmd.mode;
+
+            assert_eq!(expected, update.vlan);
+        }
+    }
+
+    #[test]
+    fn test_update_vlan_rejects_id_above_range() {
+        let err = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", "4095"]).unwrap_err();
+
+        assert_eq!(ErrorKind::ValueValidation, err.kind());
     }
 }
