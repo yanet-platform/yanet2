@@ -21,6 +21,8 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
+use core::error::Error as StdError;
+
 use http::uri::PathAndQuery;
 use prost::Message;
 use tonic::{
@@ -58,12 +60,22 @@ pub struct ConnectionArgs {
 /// Error type for connection establishment.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
-    #[error("{0}")]
+    #[error("{}", root_cause(.0))]
     Transport(#[from] tonic::transport::Error),
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] http::uri::InvalidUri),
     #[error("auth error: {0}")]
     Auth(#[from] auth::AuthError),
+}
+
+/// Returns the innermost cause, the one text that explains a transport
+/// failure.
+fn root_cause(mut err: &dyn StdError) -> &dyn StdError {
+    while let Some(source) = err.source() {
+        err = source;
+    }
+
+    err
 }
 
 /// Connect to the endpoint with all interceptors pre-applied.
