@@ -274,7 +274,7 @@ fn default_hint(kind: ErrorKind) -> Option<String> {
     match kind {
         ErrorKind::ServiceUnregistered => Some(
             "the operator may be down or not yet registered with the gateway\n\
-             (check available services: yanet-cli inspect services)"
+             (check available services: yanet-cli gateway list)"
                 .to_owned(),
         ),
         ErrorKind::Connection => Some("verify the endpoint is reachable and the gateway is up".to_owned()),
