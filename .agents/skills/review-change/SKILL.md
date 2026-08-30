@@ -31,6 +31,7 @@ still a review finding; do not switch to Author mode in this gate.
 - **Missing integration**: three-place registrations (CLI, page, module), generated code (`*.pb.go`, charters), meson/Cargo/npm manifests, docs that now lie.
 - **Tests that cannot fail**: derived oracles, unset modes, assertions on the setup rather than the behaviour; a benchmark not exercising the claimed path.
 - **Non-code changes**: execute instructions and configs mentally against the cases they name and the default they leave unnamed; a rule's restatements elsewhere go stale.
+- **CLI surface**: a diff under `cli/`, `modules|devices|objects|operators/*/cli/` or `common/rust` is checked against the `code-cli` skill — binary shape, typed arguments, verb and flag dictionary, output, errors and test policy.
 
 ## Findings
 
