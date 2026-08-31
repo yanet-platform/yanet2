@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
@@ -59,24 +60,82 @@ func prefixStrings[T interface{ ToPrefix() (netip.Prefix, error) }](t *testing.T
 
 var errInjectedBackend = errors.New("injected backend failure")
 
-type mockModuleHandle struct{}
+// mockModuleHandle counts Free calls so tests can assert a release happened.
+type mockModuleHandle struct {
+	freed atomic.Int64
+}
 
 func (m *mockModuleHandle) Free() error {
+	m.freed.Add(1)
 	return nil
 }
 
-type mockBackend struct{}
+// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
+type refusingOnceHandle struct {
+	numCalls atomic.Int64
+	freed    atomic.Int64
+}
+
+func (m *refusingOnceHandle) Free() error {
+	if m.numCalls.Add(1) == 1 {
+		return ffi.ErrStillReferenced
+	}
+	m.freed.Add(1)
+	return nil
+}
+
+// mockBackend records the last handle it minted and the name it last saw in DeleteModule.
+type mockBackend struct {
+	lastHandle  atomic.Pointer[mockModuleHandle]
+	deletedName string
+}
 
 func (m *mockBackend) UpdateModule(
 	name string,
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
-	return &mockModuleHandle{}, nil
+	handle := &mockModuleHandle{}
+	m.lastHandle.Store(handle)
+	return handle, nil
+}
+
+func (m *mockBackend) DeleteModule(name string) error {
+	m.deletedName = name
+	return nil
 }
 
 func newTestService(t *testing.T) *DecapService {
 	t.Helper()
 	return NewDecapService(&mockBackend{})
+}
+
+// refusingDeleteBackend updates like mockBackend but refuses every delete,
+// modeling a config still referenced by a live generation.
+type refusingDeleteBackend struct {
+	mockBackend
+}
+
+func (m *refusingDeleteBackend) DeleteModule(name string) error {
+	m.deletedName = name
+	return errInjectedBackend
+}
+
+// parkingBackend refuses to release the first handle it mints, then releases
+// normally, so that handle must be parked before it can be reclaimed.
+type parkingBackend struct {
+	mockBackend
+	numCalls atomic.Int64
+	first    refusingOnceHandle
+}
+
+func (m *parkingBackend) UpdateModule(
+	name string,
+	prefixes []netip.Prefix,
+) (ModuleHandle, error) {
+	if m.numCalls.Add(1) == 1 {
+		return &m.first, nil
+	}
+	return &mockModuleHandle{}, nil
 }
 
 // flakyBackend succeeds on the first UpdateModule call and fails thereafter.
@@ -92,6 +151,10 @@ func (m *flakyBackend) UpdateModule(
 		return nil, errInjectedBackend
 	}
 	return &mockModuleHandle{}, nil
+}
+
+func (m *flakyBackend) DeleteModule(name string) error {
+	return nil
 }
 
 func Test_DecapService_UpdateAndShow(t *testing.T) {
@@ -177,6 +240,12 @@ func Test_DecapService_EmptyConfigName(t *testing.T) {
 		require.Nil(t, resp)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
+
+	t.Run("DeleteConfig", func(t *testing.T) {
+		resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{})
+		require.Nil(t, resp)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
 }
 
 func Test_DecapService_InvalidPrefix(t *testing.T) {
@@ -244,6 +313,103 @@ func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
 	require.NotNil(t, show)
 	require.NoError(t, err)
 	require.Empty(t, cmp.Diff([]string{"10.0.0.0/24"}, prefixStrings(t, show.Prefixes4)))
+}
+
+// Test_DecapService_DeleteConfig_MissingConfig verifies that deleting a
+// config that was never created returns NotFound.
+func Test_DecapService_DeleteConfig_MissingConfig(t *testing.T) {
+	svc := newTestService(t)
+
+	resp, err := svc.DeleteConfig(t.Context(), &decappb.DeleteConfigRequest{Name: "decap0"})
+	require.Nil(t, resp)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_DecapService_DeleteConfig_RemovesConfig verifies that deleting an
+// unreferenced config removes it from ListConfigs and from Show.
+func Test_DecapService_DeleteConfig_RemovesConfig(t *testing.T) {
+	backend := &mockBackend{}
+	svc := NewDecapService(backend)
+	ctx := t.Context()
+
+	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:      "decap0",
+		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+	})
+	require.NoError(t, err)
+
+	handle := backend.lastHandle.Load()
+	require.NotNil(t, handle)
+
+	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
+	assert.Equal(t, "decap0", backend.deletedName)
+	assert.Equal(t, int64(1), handle.freed.Load())
+
+	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, list.Configs)
+
+	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
+	require.Nil(t, show)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_DecapService_DeleteConfig_Referenced verifies that a backend refusal
+// surfaces as Internal and leaves the config in place.
+func Test_DecapService_DeleteConfig_Referenced(t *testing.T) {
+	backend := &refusingDeleteBackend{}
+	svc := NewDecapService(backend)
+	ctx := t.Context()
+
+	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:      "decap0",
+		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+	})
+	require.NoError(t, err)
+
+	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
+	require.Nil(t, resp)
+	require.Equal(t, codes.Internal, status.Code(err))
+	assert.Equal(t, "decap0", backend.deletedName)
+
+	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"decap0"}, list.Configs)
+
+	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
+	require.NotNil(t, show)
+	require.NoError(t, err)
+}
+
+// Test_DecapService_DeleteConfig_ParksThenReclaims verifies that a handle
+// refused on delete is parked and reclaimed by the next successful update.
+func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
+	backend := &parkingBackend{}
+	svc := NewDecapService(backend)
+	ctx := t.Context()
+
+	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:      "decap0",
+		Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+	})
+	require.NoError(t, err)
+
+	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
+	require.Len(t, svc.deferred, 1)
+	assert.Equal(t, int64(0), backend.first.freed.Load())
+
+	// A later successful update reclaims deferred handles first.
+	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:      "decap1",
+		Prefixes4: mustPrefixes4(t, "10.0.1.0/24"),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, svc.deferred)
+	assert.Equal(t, int64(1), backend.first.freed.Load())
 }
 
 func Test_DecapService_DeduplicatePrefixes(t *testing.T) {

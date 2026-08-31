@@ -18,6 +18,10 @@ service DecapService {
 
   // UpdateConfig atomically replaces the whole prefix set of the named config.
   rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse) {}
+
+  // DeleteConfig removes the named config when it is no longer referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
 }
 
 message ListConfigsRequest {}
@@ -43,3 +47,9 @@ message UpdateConfigRequest {
 
 // UpdateConfigResponse is the response to an UpdateConfig call.
 message UpdateConfigResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse {}

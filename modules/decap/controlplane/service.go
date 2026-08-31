@@ -32,6 +32,8 @@ type Backend interface {
 	// UpdateModule creates a module config, adds prefixes, and publishes
 	// it to the dataplane.
 	UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error)
+	// DeleteModule removes a module config.
+	DeleteModule(name string) error
 }
 
 type config struct {
@@ -154,6 +156,42 @@ func (m *DecapService) UpdateConfig(
 	}
 
 	return &decappb.UpdateConfigResponse{}, nil
+}
+
+// DeleteConfig removes the named config if it is not referenced by any
+// pipeline.
+func (m *DecapService) DeleteConfig(
+	ctx context.Context,
+	req *decappb.DeleteConfigRequest,
+) (*decappb.DeleteConfigResponse, error) {
+	name := req.GetName()
+	if name == "" {
+		return nil, errConfigNameRequired
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, ok := m.configs[name]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "no config found")
+	}
+
+	if err := m.backend.DeleteModule(name); err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			"failed to delete module config %q: %v", name, err,
+		)
+	}
+
+	// The delete retired the generation holding the published module.
+	// Retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	m.parkOrFree(entry.Module)
+
+	delete(m.configs, name)
+
+	return &decappb.DeleteConfigResponse{}, nil
 }
 
 func comparePrefixes(first, second netip.Prefix) int {

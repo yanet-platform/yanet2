@@ -5,7 +5,7 @@ use clap_complete::{
 };
 use commonpb::partition_prefixes;
 use decappb::{
-    ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
     decap_service_client::DecapServiceClient,
 };
 use netip::{Contiguous, IpNetwork};
@@ -14,7 +14,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::Error,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
 
@@ -47,6 +47,8 @@ pub enum ModeCmd {
     List,
     Show(ShowConfigCmd),
     Update(UpdateConfigCmd),
+    /// Delete a decap module config.
+    Delete(DeleteConfigCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -66,8 +68,18 @@ pub struct UpdateConfigCmd {
     pub prefixes: Vec<Contiguous<IpNetwork>>,
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteConfigCmd {
+    /// Decap module name to delete.
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
+    pub config_name: String,
+}
+
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.decap.controlplane.decappb.v1.DecapService";
+
+/// Maps a genuine "config not found" status into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
 fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
@@ -92,6 +104,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
     }
 }
 
@@ -193,6 +206,30 @@ impl DecapService {
         log::debug!("update config response: {response:?}");
 
         output::success("update", format_args!("Updated decap {}.", cmd.config_name));
+
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+        log::trace!("delete config request: {request:?}");
+        let response = self
+            .service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    "delete",
+                    self.service.endpoint(),
+                    Some(&format!("config '{}'", cmd.config_name)),
+                )
+            })?
+            .into_inner();
+        log::debug!("delete config response: {response:?}");
+
+        output::success("delete", format_args!("Deleted decap {}.", cmd.config_name));
 
         Ok(())
     }

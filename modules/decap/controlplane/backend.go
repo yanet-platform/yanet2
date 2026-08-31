@@ -8,6 +8,9 @@ import (
 	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
 )
 
+// moduleType identifies the decap module to the shared-memory agent.
+const moduleType = "decap"
+
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
 	agent *ffi.Agent
@@ -45,4 +48,8 @@ func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHand
 	}
 
 	return mod, nil
+}
+
+func (m *backend) DeleteModule(name string) error {
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }
