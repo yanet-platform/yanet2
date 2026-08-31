@@ -34,6 +34,29 @@ const checkKnownKeys = (value: Record<string, unknown>, where: string, known: st
     }
 };
 
+/**
+ * Tells a plain YAML mapping from every other loaded value, including the
+ * Date a bare timestamp scalar becomes and the array a sequence becomes.
+ */
+const isPlainMapping = (value: unknown): value is Record<string, unknown> => {
+    if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const proto: unknown = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+};
+
+/** Reads an integer field, a null as zero, any other spelling refused. */
+const uint32Field = (value: unknown, where: string): number => {
+    if (value == null) {
+        return 0;
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 4294967295) {
+        throw new Error(`Expected ${where} to be an unsigned integer.`);
+    }
+    return value;
+};
+
 /** Reads a string list field, a null as the empty list. */
 const stringList = (value: unknown, where: string): string[] => {
     if (value == null) {
@@ -46,14 +69,14 @@ const stringList = (value: unknown, where: string): string[] => {
 };
 
 /**
- * Accepts a network in CIDR or address/mask form of one family, the two
- * spellings the wire types parse — a mask covers the bi-contiguous IPv6
- * networks the filter compiler supports.
+ * Accepts a network in the forms the wire types parse: CIDR, explicit
+ * address/mask — covering the bi-contiguous IPv6 networks the filter
+ * compiler supports — or a bare host address.
  */
 const isValidNetwork = (net: string, isAddress: (addr: string) => boolean, maxLength: number): boolean => {
     const slash = net.indexOf('/');
     if (slash < 0) {
-        return false;
+        return isAddress(net);
     }
     const address = net.slice(0, slash);
     const suffix = net.slice(slash + 1);
@@ -106,11 +129,11 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
         throw new Error('The file holds more than one document.');
     }
     const parsed = documents[0];
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    if (!isPlainMapping(parsed)) {
         throw new Error('Expected a YAML object with a "rules" list.');
     }
 
-    const doc = parsed as Record<string, unknown>;
+    const doc = parsed;
     checkKnownKeys(doc, 'the document', ['name', 'rules']);
 
     if (doc['name'] != null && typeof doc['name'] !== 'string') {
@@ -123,19 +146,19 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
     const rows = (doc['rules'] ?? []) as unknown[];
 
     const rules: Rule[] = rows.map((row: unknown, idx: number): Rule => {
-        if (row == null || typeof row !== 'object') {
+        if (!isPlainMapping(row)) {
             throw new Error(`Rule ${idx} is not a mapping.`);
         }
-        const rule = row as Record<string, unknown>;
+        const rule = row;
         checkKnownKeys(rule, `rule ${idx}`, [
             'action', 'devices', 'vlan_ranges', 'sources4', 'sources6', 'destinations4', 'destinations6',
         ]);
 
         const actionRaw = rule['action'];
-        if (actionRaw == null || typeof actionRaw !== 'object') {
+        if (!isPlainMapping(actionRaw)) {
             throw new Error(`Rule ${idx}: "action" is required and must be a mapping.`);
         }
-        const action = actionRaw as Record<string, unknown>;
+        const action = actionRaw;
         checkKnownKeys(action, `rule ${idx} action`, ['target', 'mode', 'counter']);
 
         const modeRaw = action['mode'];
@@ -151,12 +174,11 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
             throw new Error(`Rule ${idx}: "devices" is not a list.`);
         }
         const devices = devicesRaw.map((d: unknown, deviceIdx: number) => {
-            if (d == null || typeof d !== 'object') {
+            if (!isPlainMapping(d)) {
                 throw new Error(`Rule ${idx}: device ${deviceIdx} is not a mapping with a "name".`);
             }
-            const device = d as Record<string, unknown>;
-            checkKnownKeys(device, `rule ${idx} device ${deviceIdx}`, ['name']);
-            return { name: typeof device['name'] === 'string' ? device['name'] : '' };
+            checkKnownKeys(d, `rule ${idx} device ${deviceIdx}`, ['name']);
+            return { name: typeof d['name'] === 'string' ? d['name'] : '' };
         });
 
         const vlanRaw = rule['vlan_ranges'] == null ? [] : rule['vlan_ranges'];
@@ -164,14 +186,13 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
             throw new Error(`Rule ${idx}: "vlan_ranges" is not a list.`);
         }
         const vlan_ranges = vlanRaw.map((vr: unknown, rangeIdx: number) => {
-            if (vr == null || typeof vr !== 'object') {
+            if (!isPlainMapping(vr)) {
                 throw new Error(`Rule ${idx}: vlan range ${rangeIdx} is not a mapping.`);
             }
-            const range = vr as Record<string, unknown>;
-            checkKnownKeys(range, `rule ${idx} vlan range ${rangeIdx}`, ['from', 'to']);
+            checkKnownKeys(vr, `rule ${idx} vlan range ${rangeIdx}`, ['from', 'to']);
             return {
-                from: typeof range['from'] === 'number' ? range['from'] : 0,
-                to: typeof range['to'] === 'number' ? range['to'] : 0,
+                from: uint32Field(vr['from'], `rule ${idx} vlan range ${rangeIdx} "from"`),
+                to: uint32Field(vr['to'], `rule ${idx} vlan range ${rangeIdx} "to"`),
             };
         });
 

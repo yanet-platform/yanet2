@@ -102,6 +102,35 @@ describe('parseYamlToRules', () => {
         expect(() => parseYamlToRules('rules:\n  - action: null\n')).toThrow(/"action" is required/);
     });
 
+    it('refuses a scalar document, a sequence action and a mistyped vlan bound', () => {
+        expect(() => parseYamlToRules('2026-08-31\n')).toThrow(/Expected a YAML object/);
+        expect(() => parseYamlToRules('rules:\n  - action: []\n')).toThrow(/"action" is required/);
+        expect(() =>
+            parseYamlToRules("rules:\n  - action:\n      target: t\n    vlan_ranges:\n      - from: '100'\n"),
+        ).toThrow(/unsigned integer/);
+    });
+
+    it('accepts bare host networks and null vlan bounds as zero', () => {
+        const text = [
+            'rules:',
+            '  - action:',
+            '      target: t',
+            '    vlan_ranges:',
+            '      - from: null',
+            '        to: 100',
+            '    sources4:',
+            '      - 192.0.2.1',
+            '    sources6:',
+            '      - 2001:db8::1',
+        ].join('\n');
+
+        const parsed = parseYamlToRules(text);
+
+        expect(parsed.rules[0].vlan_ranges).toEqual([{ from: 0, to: 100 }]);
+        expect(parsed.rules[0].sources4).toEqual(['192.0.2.1']);
+        expect(parsed.rules[0].sources6).toEqual(['2001:db8::1']);
+    });
+
     it('tolerates a bare trailing separator but not a second document', () => {
         const parsed = parseYamlToRules('name: forward0\nrules: []\n---\n');
         expect(parsed.name).toBe('forward0');
