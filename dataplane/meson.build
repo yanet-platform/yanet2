@@ -64,7 +64,6 @@ dependencies = lib_dependencies + [
 ]
 
 sources = files(
-  'drivers/sock_dev.c',
   'dpdk.c',
   'main.c',
 )
