@@ -1,8 +1,6 @@
 package functional
 
 import (
-	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,22 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
-	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
 )
 
-// TestTest_016_route - automatically generated test from yanet1
-// Original test: 016_route
-// Test type: route
+// TestTest_016_route verifies that TCP packets to distinct destinations are
+// forwarded via the default route with rewritten MACs and a decremented TTL.
+//
+// Migrated from yanet1 autotest 016_route.
 func TestTest_016_route(t *testing.T) {
 	t.Parallel()
 	withBootedVM(t, func(fw *framework.TestFramework) {
 		require.NotNil(t, fw, "Global framework should be initialized")
-		// Silence potentially unused imports PCAP vs AST parser
-		_ = cmp.Diff
-		_ = lib.CmpStdOpts
-		_ = lib.NewPacket
-		_ = net.ParseIP
-		_ = strings.Join
 
 		fw.Run("Step_001_Configure_Routes", func(fw *framework.TestFramework, t *testing.T) {
 			// IPv4 routes configuration
@@ -82,7 +74,7 @@ func TestTest_016_route(t *testing.T) {
 			for idx, expectedPkt := range expectedPackets {
 				actualPkt := receivedPackets[idx]
 
-				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), framework.CmpStdOpts...)
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
@@ -139,21 +131,21 @@ type create016_routeSendPacket1Params struct {
 
 // create016_routeSendPacket1Helper generates a single packet with varying parameters
 func create016_routeSendPacket1Helper(t *testing.T, params create016_routeSendPacket1Params) gopacket.Packet {
-	pkt, err := lib.NewPacket(nil,
-		lib.Ether(
-			lib.EtherDst("52:54:00:6b:ff:a5"),
-			lib.EtherSrc("52:54:00:6b:ff:a1"),
+	pkt, err := framework.NewPacket(nil,
+		framework.Ether(
+			framework.EtherDst("52:54:00:6b:ff:a5"),
+			framework.EtherSrc("52:54:00:6b:ff:a1"),
 		),
-		lib.IPv4(
-			lib.IPSrc("222.222.222.222"),
-			lib.IPDst(params.Ipv4Dst),
-			lib.IPTTL(64),
-			lib.IPId(1),
+		framework.IPv4(
+			framework.IPSrc("222.222.222.222"),
+			framework.IPDst(params.Ipv4Dst),
+			framework.IPTTL(64),
+			framework.IPId(1),
 		),
-		lib.TCP(
-			lib.TCPSport(20),
-			lib.TCPDport(80),
-			lib.TCPFlags("S"),
+		framework.TCP(
+			framework.TCPSport(20),
+			framework.TCPDport(80),
+			framework.TCPFlags("S"),
 		),
 	)
 	require.NoError(t, err)
@@ -235,21 +227,21 @@ type create016_routeExpectPacket1Params struct {
 
 // create016_routeExpectPacket1Helper generates a single packet with varying parameters
 func create016_routeExpectPacket1Helper(t *testing.T, params create016_routeExpectPacket1Params) gopacket.Packet {
-	pkt, err := lib.NewPacket(nil,
-		lib.Ether(
-			lib.EtherDst("52:54:00:6b:ff:a1"),
-			lib.EtherSrc("52:54:00:6b:ff:a5"),
+	pkt, err := framework.NewPacket(nil,
+		framework.Ether(
+			framework.EtherDst("52:54:00:6b:ff:a1"),
+			framework.EtherSrc("52:54:00:6b:ff:a5"),
 		),
-		lib.IPv4(
-			lib.IPSrc("222.222.222.222"),
-			lib.IPDst(params.Ipv4Dst),
-			lib.IPTTL(63),
-			lib.IPId(1),
+		framework.IPv4(
+			framework.IPSrc("222.222.222.222"),
+			framework.IPDst(params.Ipv4Dst),
+			framework.IPTTL(63),
+			framework.IPId(1),
 		),
-		lib.TCP(
-			lib.TCPSport(20),
-			lib.TCPDport(80),
-			lib.TCPFlags("S"),
+		framework.TCP(
+			framework.TCPSport(20),
+			framework.TCPDport(80),
+			framework.TCPFlags("S"),
 		),
 	)
 	require.NoError(t, err)

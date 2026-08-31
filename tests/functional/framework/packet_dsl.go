@@ -1,4 +1,4 @@
-package lib
+package framework
 
 import (
 	"fmt"
@@ -10,12 +10,10 @@ import (
 )
 
 // PacketBuilder implements a small, self-contained DSL on top of gopacket
-// that the converter uses at runtime in generated tests. The key goals are:
+// that functional tests use to construct packets. The key goals are:
 //   - avoid CGO and keep all packet construction logic in Go
 //   - mirror Scapy semantics closely enough to reproduce malformed packets
 //     (broken lengths, unusual options, non-standard GRE flags, etc.)
-//   - provide a stable surface for IR → Go code generation so that future
-//     changes to test templates do not leak low-level gopacket concerns.
 
 // NewPacket creates a new gopacket.Packet from the given LayerBuilder chain,
 // inferring protocol numbers and EtherType/VLAN types from layer order and
@@ -92,7 +90,7 @@ func NewPacket(opts *gopacket.SerializeOptions, layerBuilders ...LayerBuilder) (
 			// Look ahead to set next header
 			if i+1 < len(serialLayers) {
 				ip6 := layer.(*layers.IPv6)
-				// Only set NextHeader if it wasn't provided via IR
+				// Only set NextHeader if the caller left it unset
 				if ip6.NextHeader == 0 {
 					switch serialLayers[i+1].(type) {
 					case *layers.TCP, *customTCPLayer:
@@ -126,7 +124,7 @@ func NewPacket(opts *gopacket.SerializeOptions, layerBuilders ...LayerBuilder) (
 			// Look ahead to set next header in fragment
 			if i+1 < len(serialLayers) {
 				frag := layer.(*layers.IPv6Fragment)
-				// Only infer NextHeader if not explicitly provided via IR
+				// Only infer NextHeader if the caller left it unset
 				if frag.NextHeader == 0 {
 					switch serialLayers[i+1].(type) {
 					case *layers.TCP, *customTCPLayer:
@@ -218,8 +216,8 @@ func NewPacket(opts *gopacket.SerializeOptions, layerBuilders ...LayerBuilder) (
 	}
 
 	// Parse back to packet using the standard decoder so that layer stacks
-	// (including ICMPv6 control subtypes) match those produced when reading
-	// original PCAPs via NewPacketSource.
+	// (including ICMPv6 control subtypes) match those produced when tests
+	// decode frames received off the wire.
 	pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 	return pkt, nil
 }
@@ -330,7 +328,7 @@ func IPv4(opts ...IPv4Option) *IPv4Builder {
 		Version: 4,
 		IHL:     5,
 		TTL:     64, // default
-		// Protocol left unset (0) so it can come from IR or inference
+		// Protocol left unset (0) so an IPProto option or inference can set it
 		Id: 1, // Scapy default (auto-increments from 1)
 	}
 

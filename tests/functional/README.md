@@ -38,6 +38,8 @@ tests/functional/
 │   ├── socket_client.go   # Unix socket client for packet injection/capture
 │   ├── packet_parser.go   # Packet parsing with gopacket
 │   ├── packet_builder.go  # Shared packet creation helpers (CreateTCPIPv4Packet, etc.)
+│   ├── packet_dsl.go      # Scapy-like layer builder DSL (NewPacket, Ether, IPv4, ...)
+│   ├── cmp_options.go     # CmpStdOpts for cmp.Diff packet comparison
 │   ├── pool.go            # VM pool for parallel test execution
 │   └── utils.go           # Utility functions
 ├── main/                  # Primary functional test suite
@@ -52,7 +54,7 @@ tests/functional/
 │   ├── pipeline_test.go   # Empty pipeline (no-forward) tests
 │   ├── route_test.go      # Route module tests
 │   └── route_mpls_test.go # Route MPLS module tests
-│   └── 0*_test.go         # Auto-generated tests migrated from yanet1
+│   └── 0*_test.go         # Tests migrated from yanet1
 ├── testdata/              # YAML config files for tests
 ├── Makefile               # VM image creation and test targets
 ├── cloud-init-user-data.yaml  # Cloud-init configuration

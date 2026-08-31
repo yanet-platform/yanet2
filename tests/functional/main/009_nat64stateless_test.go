@@ -1,8 +1,6 @@
 package functional
 
 import (
-	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,22 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
-	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
 )
 
-// TestTest_009_nat64stateless - automatically generated test from yanet1
-// Original test: 009_nat64stateless
-// Test type: nat64
+// TestTest_009_nat64stateless verifies that stateless NAT64 translates TCP
+// and ICMP traffic in both directions for the configured prefix and mapping.
+//
+// Migrated from yanet1 autotest 009_nat64stateless.
 func TestTest_009_nat64stateless(t *testing.T) {
 	t.Parallel()
 	withBootedVM(t, func(fw *framework.TestFramework) {
 		require.NotNil(t, fw, "Global framework should be initialized")
-		// Silence potentially unused imports PCAP vs AST parser
-		_ = cmp.Diff
-		_ = lib.CmpStdOpts
-		_ = lib.NewPacket
-		_ = net.ParseIP
-		_ = strings.Join
 
 		fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.TestFramework, t *testing.T) {
 			// Configure NAT64 module
@@ -103,7 +95,7 @@ func TestTest_009_nat64stateless(t *testing.T) {
 			for idx, expectedPkt := range expectedPackets {
 				actualPkt := receivedPackets[idx]
 
-				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), framework.CmpStdOpts...)
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
@@ -152,7 +144,7 @@ func TestTest_009_nat64stateless(t *testing.T) {
 			for idx, expectedPkt := range expectedPackets {
 				actualPkt := receivedPackets[idx]
 
-				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), framework.CmpStdOpts...)
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
@@ -201,7 +193,7 @@ func TestTest_009_nat64stateless(t *testing.T) {
 			for idx, expectedPkt := range expectedPackets {
 				actualPkt := receivedPackets[idx]
 
-				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), framework.CmpStdOpts...)
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
@@ -250,7 +242,7 @@ func TestTest_009_nat64stateless(t *testing.T) {
 			for idx, expectedPkt := range expectedPackets {
 				actualPkt := receivedPackets[idx]
 
-				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), framework.CmpStdOpts...)
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
@@ -275,20 +267,20 @@ type create009_nat64statelessSendPacket1Params struct {
 
 // create009_nat64statelessSendPacket1Helper generates a single packet with varying parameters
 func create009_nat64statelessSendPacket1Helper(t *testing.T, params create009_nat64statelessSendPacket1Params) gopacket.Packet {
-	pkt, err := lib.NewPacket(nil,
-		lib.Ether(
-			lib.EtherDst("52:54:00:6b:ff:a5"),
-			lib.EtherSrc("52:54:00:6b:ff:a1"),
+	pkt, err := framework.NewPacket(nil,
+		framework.Ether(
+			framework.EtherDst("52:54:00:6b:ff:a5"),
+			framework.EtherSrc("52:54:00:6b:ff:a1"),
 		),
-		lib.IPv6(
-			lib.IPv6Src("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
-			lib.IPv6Dst(params.Ipv6Dst),
-			lib.IPv6HopLimit(64),
+		framework.IPv6(
+			framework.IPv6Src("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
+			framework.IPv6Dst(params.Ipv6Dst),
+			framework.IPv6HopLimit(64),
 		),
-		lib.TCP(
-			lib.TCPSport(2048),
-			lib.TCPDport(params.TcpDport),
-			lib.TCPFlags("S"),
+		framework.TCP(
+			framework.TCPSport(2048),
+			framework.TCPDport(params.TcpDport),
+			framework.TCPFlags("S"),
 		),
 	)
 	require.NoError(t, err)
@@ -361,21 +353,21 @@ type create009_nat64statelessExpectPacket1Params struct {
 
 // create009_nat64statelessExpectPacket1Helper generates a single packet with varying parameters
 func create009_nat64statelessExpectPacket1Helper(t *testing.T, params create009_nat64statelessExpectPacket1Params) gopacket.Packet {
-	pkt, err := lib.NewPacket(nil,
-		lib.Ether(
-			lib.EtherDst("52:54:00:6b:ff:a1"),
-			lib.EtherSrc("52:54:00:6b:ff:a5"),
+	pkt, err := framework.NewPacket(nil,
+		framework.Ether(
+			framework.EtherDst("52:54:00:6b:ff:a1"),
+			framework.EtherSrc("52:54:00:6b:ff:a5"),
 		),
-		lib.IPv4(
-			lib.IPSrc("153.153.153.153"),
-			lib.IPDst(params.Ipv4Dst),
-			lib.IPTTL(63),
-			lib.IPId(0),
+		framework.IPv4(
+			framework.IPSrc("153.153.153.153"),
+			framework.IPDst(params.Ipv4Dst),
+			framework.IPTTL(63),
+			framework.IPId(0),
 		),
-		lib.TCP(
-			lib.TCPSport(2048),
-			lib.TCPDport(params.TcpDport),
-			lib.TCPFlags("S"),
+		framework.TCP(
+			framework.TCPSport(2048),
+			framework.TCPDport(params.TcpDport),
+			framework.TCPFlags("S"),
 		),
 	)
 	require.NoError(t, err)
@@ -448,21 +440,21 @@ type create009_nat64statelessSendPacket2Params struct {
 
 // create009_nat64statelessSendPacket2Helper generates a single packet with varying parameters
 func create009_nat64statelessSendPacket2Helper(t *testing.T, params create009_nat64statelessSendPacket2Params) gopacket.Packet {
-	pkt, err := lib.NewPacket(nil,
-		lib.Ether(
-			lib.EtherDst("52:54:00:6b:ff:a5"),
-			lib.EtherSrc("52:54:00:6b:ff:a1"),
+	pkt, err := framework.NewPacket(nil,
+		framework.Ether(
+			framework.EtherDst("52:54:00:6b:ff:a5"),
+			framework.EtherSrc("52:54:00:6b:ff:a1"),
 		),
-		lib.IPv4(
-			lib.IPSrc(params.Ipv4Src),
-			lib.IPDst("153.153.153.153"),
-			lib.IPTTL(64),
-			lib.IPId(1),
+		framework.IPv4(
+			framework.IPSrc(params.Ipv4Src),
+			framework.IPDst("153.153.153.153"),
+			framework.IPTTL(64),
+			framework.IPId(1),
 		),
-		lib.TCP(
-			lib.TCPSport(params.TcpSport),
-			lib.TCPDport(2048),
-			lib.TCPFlags("S"),
+		framework.TCP(
+			framework.TCPSport(params.TcpSport),
+			framework.TCPDport(2048),
+			framework.TCPFlags("S"),
 		),
 	)
 	require.NoError(t, err)
@@ -510,20 +502,20 @@ type create009_nat64statelessExpectPacket2Params struct {
 
 // create009_nat64statelessExpectPacket2Helper generates a single packet with varying parameters
 func create009_nat64statelessExpectPacket2Helper(t *testing.T, params create009_nat64statelessExpectPacket2Params) gopacket.Packet {
-	pkt, err := lib.NewPacket(nil,
-		lib.Ether(
-			lib.EtherDst("52:54:00:6b:ff:a1"),
-			lib.EtherSrc("52:54:00:6b:ff:a5"),
+	pkt, err := framework.NewPacket(nil,
+		framework.Ether(
+			framework.EtherDst("52:54:00:6b:ff:a1"),
+			framework.EtherSrc("52:54:00:6b:ff:a5"),
 		),
-		lib.IPv6(
-			lib.IPv6Src(params.Ipv6Src),
-			lib.IPv6Dst("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
-			lib.IPv6HopLimit(63),
+		framework.IPv6(
+			framework.IPv6Src(params.Ipv6Src),
+			framework.IPv6Dst("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
+			framework.IPv6HopLimit(63),
 		),
-		lib.TCP(
-			lib.TCPSport(params.TcpSport),
-			lib.TCPDport(2048),
-			lib.TCPFlags("S"),
+		framework.TCP(
+			framework.TCPSport(params.TcpSport),
+			framework.TCPDport(2048),
+			framework.TCPFlags("S"),
 		),
 	)
 	require.NoError(t, err)
@@ -562,24 +554,24 @@ func create009_nat64statelessSendPacket3(t *testing.T) []gopacket.Packet {
 
 	// Packet 0
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a5"),
-				lib.EtherSrc("52:54:00:6b:ff:a1"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a5"),
+				framework.EtherSrc("52:54:00:6b:ff:a1"),
 			),
-			lib.IPv6(
-				lib.IPv6Src("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
-				lib.IPv6Dst("5555:5555:5555:5555:5555:5555:6666:6666"),
-				lib.IPv6HopLimit(64),
-				lib.IPv6NextHeader(layers.IPProtocol(58)),
-				lib.IPv6PayloadLength(29),
+			framework.IPv6(
+				framework.IPv6Src("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
+				framework.IPv6Dst("5555:5555:5555:5555:5555:5555:6666:6666"),
+				framework.IPv6HopLimit(64),
+				framework.IPv6NextHeader(layers.IPProtocol(58)),
+				framework.IPv6PayloadLength(29),
 			),
-			lib.ICMPv6EchoRequest(
-				lib.ICMPv6Id(4660),
-				lib.ICMPv6Seq(34661),
-				lib.ICMPv6Checksum(33522),
+			framework.ICMPv6EchoRequest(
+				framework.ICMPv6Id(4660),
+				framework.ICMPv6Seq(34661),
+				framework.ICMPv6Checksum(33522),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("du hast vyacheslavich"),
 			),
 		)
@@ -590,24 +582,24 @@ func create009_nat64statelessSendPacket3(t *testing.T) []gopacket.Packet {
 
 	// Packet 1
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a5"),
-				lib.EtherSrc("52:54:00:6b:ff:a1"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a5"),
+				framework.EtherSrc("52:54:00:6b:ff:a1"),
 			),
-			lib.IPv6(
-				lib.IPv6Src("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
-				lib.IPv6Dst("5555:5555:5555:5555:5555:5555:6666:6666"),
-				lib.IPv6HopLimit(64),
-				lib.IPv6NextHeader(layers.IPProtocol(58)),
-				lib.IPv6PayloadLength(17),
+			framework.IPv6(
+				framework.IPv6Src("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
+				framework.IPv6Dst("5555:5555:5555:5555:5555:5555:6666:6666"),
+				framework.IPv6HopLimit(64),
+				framework.IPv6NextHeader(layers.IPProtocol(58)),
+				framework.IPv6PayloadLength(17),
 			),
-			lib.ICMPv6EchoReply(
-				lib.ICMPv6Id(22136),
-				lib.ICMPv6Seq(17185),
-				lib.ICMPv6Checksum(55443),
+			framework.ICMPv6EchoReply(
+				framework.ICMPv6Id(22136),
+				framework.ICMPv6Seq(17185),
+				framework.ICMPv6Checksum(55443),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("vitalya 2"),
 			),
 		)
@@ -634,27 +626,27 @@ func create009_nat64statelessExpectPacket3(t *testing.T) []gopacket.Packet {
 
 	// Packet 0
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a1"),
-				lib.EtherSrc("52:54:00:6b:ff:a5"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a1"),
+				framework.EtherSrc("52:54:00:6b:ff:a5"),
 			),
-			lib.IPv4(
-				lib.IPSrc("153.153.153.153"),
-				lib.IPDst("102.102.102.102"),
-				lib.IPTTL(63),
-				lib.IPProto(layers.IPProtocol(1)),
-				lib.IPId(0),
-				lib.IPv4Length(49),
-				lib.IPv4ChecksumRaw(31693),
+			framework.IPv4(
+				framework.IPSrc("153.153.153.153"),
+				framework.IPDst("102.102.102.102"),
+				framework.IPTTL(63),
+				framework.IPProto(layers.IPProtocol(1)),
+				framework.IPId(0),
+				framework.IPv4Length(49),
+				framework.IPv4ChecksumRaw(31693),
 			),
-			lib.ICMP(
-				lib.ICMPTypeCode(8, 0),
-				lib.ICMPId(4660),
-				lib.ICMPSeq(34661),
-				lib.ICMPChecksum(7532),
+			framework.ICMP(
+				framework.ICMPTypeCode(8, 0),
+				framework.ICMPId(4660),
+				framework.ICMPSeq(34661),
+				framework.ICMPChecksum(7532),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("du hast vyacheslavich"),
 			),
 		)
@@ -665,27 +657,27 @@ func create009_nat64statelessExpectPacket3(t *testing.T) []gopacket.Packet {
 
 	// Packet 1
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a1"),
-				lib.EtherSrc("52:54:00:6b:ff:a5"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a1"),
+				framework.EtherSrc("52:54:00:6b:ff:a5"),
 			),
-			lib.IPv4(
-				lib.IPSrc("153.153.153.153"),
-				lib.IPDst("102.102.102.102"),
-				lib.IPTTL(63),
-				lib.IPProto(layers.IPProtocol(1)),
-				lib.IPId(0),
-				lib.IPv4Length(37),
-				lib.IPv4ChecksumRaw(31705),
+			framework.IPv4(
+				framework.IPSrc("153.153.153.153"),
+				framework.IPDst("102.102.102.102"),
+				framework.IPTTL(63),
+				framework.IPProto(layers.IPProtocol(1)),
+				framework.IPId(0),
+				framework.IPv4Length(37),
+				framework.IPv4ChecksumRaw(31705),
 			),
-			lib.ICMP(
-				lib.ICMPTypeCode(0, 0),
-				lib.ICMPId(22136),
-				lib.ICMPSeq(17185),
-				lib.ICMPChecksum(31745),
+			framework.ICMP(
+				framework.ICMPTypeCode(0, 0),
+				framework.ICMPId(22136),
+				framework.ICMPSeq(17185),
+				framework.ICMPChecksum(31745),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("vitalya 2"),
 			),
 		)
@@ -712,27 +704,27 @@ func create009_nat64statelessSendPacket4(t *testing.T) []gopacket.Packet {
 
 	// Packet 0
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a5"),
-				lib.EtherSrc("52:54:00:6b:ff:a1"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a5"),
+				framework.EtherSrc("52:54:00:6b:ff:a1"),
 			),
-			lib.IPv4(
-				lib.IPSrc("102.102.102.102"),
-				lib.IPDst("153.153.153.153"),
-				lib.IPTTL(64),
-				lib.IPProto(layers.IPProtocol(1)),
-				lib.IPId(1),
-				lib.IPv4Length(49),
-				lib.IPv4ChecksumRaw(31436),
+			framework.IPv4(
+				framework.IPSrc("102.102.102.102"),
+				framework.IPDst("153.153.153.153"),
+				framework.IPTTL(64),
+				framework.IPProto(layers.IPProtocol(1)),
+				framework.IPId(1),
+				framework.IPv4Length(49),
+				framework.IPv4ChecksumRaw(31436),
 			),
-			lib.ICMP(
-				lib.ICMPTypeCode(0, 0),
-				lib.ICMPId(4660),
-				lib.ICMPSeq(34661),
-				lib.ICMPChecksum(9580),
+			framework.ICMP(
+				framework.ICMPTypeCode(0, 0),
+				framework.ICMPId(4660),
+				framework.ICMPSeq(34661),
+				framework.ICMPChecksum(9580),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("du hast vyacheslavich"),
 			),
 		)
@@ -743,27 +735,27 @@ func create009_nat64statelessSendPacket4(t *testing.T) []gopacket.Packet {
 
 	// Packet 1
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a5"),
-				lib.EtherSrc("52:54:00:6b:ff:a1"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a5"),
+				framework.EtherSrc("52:54:00:6b:ff:a1"),
 			),
-			lib.IPv4(
-				lib.IPSrc("102.102.102.102"),
-				lib.IPDst("153.153.153.153"),
-				lib.IPTTL(64),
-				lib.IPProto(layers.IPProtocol(1)),
-				lib.IPId(1),
-				lib.IPv4Length(37),
-				lib.IPv4ChecksumRaw(31448),
+			framework.IPv4(
+				framework.IPSrc("102.102.102.102"),
+				framework.IPDst("153.153.153.153"),
+				framework.IPTTL(64),
+				framework.IPProto(layers.IPProtocol(1)),
+				framework.IPId(1),
+				framework.IPv4Length(37),
+				framework.IPv4ChecksumRaw(31448),
 			),
-			lib.ICMP(
-				lib.ICMPTypeCode(8, 0),
-				lib.ICMPId(22136),
-				lib.ICMPSeq(17185),
-				lib.ICMPChecksum(29697),
+			framework.ICMP(
+				framework.ICMPTypeCode(8, 0),
+				framework.ICMPId(22136),
+				framework.ICMPSeq(17185),
+				framework.ICMPChecksum(29697),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("vitalya 2"),
 			),
 		)
@@ -784,24 +776,24 @@ func create009_nat64statelessExpectPacket4(t *testing.T) []gopacket.Packet {
 
 	// Packet 0
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a1"),
-				lib.EtherSrc("52:54:00:6b:ff:a5"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a1"),
+				framework.EtherSrc("52:54:00:6b:ff:a5"),
 			),
-			lib.IPv6(
-				lib.IPv6Src("5555:5555:5555:5555:5555:5555:6666:6666"),
-				lib.IPv6Dst("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
-				lib.IPv6HopLimit(63),
-				lib.IPv6NextHeader(layers.IPProtocol(58)),
-				lib.IPv6PayloadLength(29),
+			framework.IPv6(
+				framework.IPv6Src("5555:5555:5555:5555:5555:5555:6666:6666"),
+				framework.IPv6Dst("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
+				framework.IPv6HopLimit(63),
+				framework.IPv6NextHeader(layers.IPProtocol(58)),
+				framework.IPv6PayloadLength(29),
 			),
-			lib.ICMPv6EchoReply(
-				lib.ICMPv6Id(4660),
-				lib.ICMPv6Seq(34661),
-				lib.ICMPv6Checksum(33266),
+			framework.ICMPv6EchoReply(
+				framework.ICMPv6Id(4660),
+				framework.ICMPv6Seq(34661),
+				framework.ICMPv6Checksum(33266),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("du hast vyacheslavich"),
 			),
 		)
@@ -812,24 +804,24 @@ func create009_nat64statelessExpectPacket4(t *testing.T) []gopacket.Packet {
 
 	// Packet 1
 	{
-		pkt, err := lib.NewPacket(nil,
-			lib.Ether(
-				lib.EtherDst("52:54:00:6b:ff:a1"),
-				lib.EtherSrc("52:54:00:6b:ff:a5"),
+		pkt, err := framework.NewPacket(nil,
+			framework.Ether(
+				framework.EtherDst("52:54:00:6b:ff:a1"),
+				framework.EtherSrc("52:54:00:6b:ff:a5"),
 			),
-			lib.IPv6(
-				lib.IPv6Src("5555:5555:5555:5555:5555:5555:6666:6666"),
-				lib.IPv6Dst("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
-				lib.IPv6HopLimit(63),
-				lib.IPv6NextHeader(layers.IPProtocol(58)),
-				lib.IPv6PayloadLength(17),
+			framework.IPv6(
+				framework.IPv6Src("5555:5555:5555:5555:5555:5555:6666:6666"),
+				framework.IPv6Dst("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"),
+				framework.IPv6HopLimit(63),
+				framework.IPv6NextHeader(layers.IPProtocol(58)),
+				framework.IPv6PayloadLength(17),
 			),
-			lib.ICMPv6EchoRequest(
-				lib.ICMPv6Id(22136),
-				lib.ICMPv6Seq(17185),
-				lib.ICMPv6Checksum(55699),
+			framework.ICMPv6EchoRequest(
+				framework.ICMPv6Id(22136),
+				framework.ICMPv6Seq(17185),
+				framework.ICMPv6Checksum(55699),
 			),
-			lib.Raw(
+			framework.Raw(
 				[]byte("vitalya 2"),
 			),
 		)

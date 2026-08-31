@@ -1,4 +1,4 @@
-package lib
+package framework
 
 import (
 	"github.com/google/go-cmp/cmp"
@@ -7,9 +7,8 @@ import (
 	"github.com/gopacket/gopacket/layers"
 )
 
-// CmpStdOpts provides standard cmp.Diff options for comparing gopacket layers.
-// This ensures consistent packet comparison across all tests (unit tests, PCAP equivalence tests,
-// and generated functional tests).
+// CmpStdOpts provides standard cmp.Diff options for comparing gopacket layers,
+// ensuring consistent packet comparison across functional tests.
 //
 // These options:
 //   - Ignore unexported fields in gopacket layer structs (internal state)
@@ -18,7 +17,7 @@ import (
 //
 // Usage:
 //
-//	diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+//	diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), framework.CmpStdOpts...)
 //	if diff != "" {
 //	    t.Errorf("Packet mismatch (-want +got):\n%s", diff)
 //	}
