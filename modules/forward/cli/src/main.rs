@@ -204,7 +204,8 @@ impl ForwardService {
             || &response,
             || {
                 // The document is printed even without rules, so a
-                // redirected show always yields a file update accepts.
+                // redirected show yields a file update accepts, an
+                // undeclared mode number excepted.
                 print!(
                     "{}",
                     serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
