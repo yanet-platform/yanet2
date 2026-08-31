@@ -19,17 +19,20 @@ import (
 )
 
 // StaticTarget is one module config pushed to every gateway on each
-// reconcile pass, with the function that references it.
+// reconcile pass, or one function published after every config, or both.
 type StaticTarget struct {
 	// Name labels the target in logs and errors, the module config's name
 	// for the module operators.
 	Name string
 	// Method is the unary gRPC method that replaces the module config,
 	// spelled as "package.Service/Method".
+	//
+	// Empty when the target only publishes a function.
 	Method string
 	// Request is the message the method receives, sent as is.
 	Request proto.Message
-	// Function is published after the config, nil when the target owns none.
+	// Function is published after the configs, nil when the target owns
+	// none.
 	Function *ynpb.Function
 	// IgnorePdump leaves pdump modules on both sides out of the function
 	// comparison.
@@ -140,7 +143,11 @@ func staticTargets(targets []StaticTarget) ([]StaticTarget, error) {
 	functions := map[string]bool{}
 	out := make([]StaticTarget, 0, len(targets))
 	for idx, target := range targets {
-		if _, err := resolveMethod(target.Method, target.Request); err != nil {
+		if target.Method == "" && target.Request == nil {
+			if target.Function == nil {
+				return nil, fmt.Errorf("target %d: neither a method nor a function", idx)
+			}
+		} else if _, err := resolveMethod(target.Method, target.Request); err != nil {
 			return nil, fmt.Errorf("target %d: %w", idx, err)
 		}
 		if target.Name == "" {
@@ -303,6 +310,9 @@ func dialGateway(cfg GatewayConfig) (*grpc.ClientConn, error) {
 func (m *staticGatewayActuator) Apply(ctx context.Context, targets []StaticTarget) error {
 	var err error
 	for _, target := range targets {
+		if target.Method == "" && target.Request == nil {
+			continue
+		}
 		method, e := resolveMethod(target.Method, target.Request)
 		if e != nil {
 			err = errors.Join(err, e)

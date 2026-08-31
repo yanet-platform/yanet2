@@ -1,4 +1,3 @@
-name: phy-vlan
 rules:
   - action:
       target: virtio_user_kni0

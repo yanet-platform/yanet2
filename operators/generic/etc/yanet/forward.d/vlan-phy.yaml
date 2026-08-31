@@ -1,4 +1,3 @@
-name: vlan-phy
 rules:
   - action:
       target: "0000:81:00.0"

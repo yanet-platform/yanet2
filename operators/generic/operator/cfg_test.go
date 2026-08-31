@@ -23,7 +23,7 @@ var shippedInstanceConfigs = []string{
 }
 
 // Test_ShippedInstanceConfigs_NoUnknownKeys guards the shipped instance
-// configs against unknown keys, including inside a target's function.
+// configs against unknown keys, including inside a function entry.
 func Test_ShippedInstanceConfigs_NoUnknownKeys(t *testing.T) {
 	for _, path := range shippedInstanceConfigs {
 		t.Run(path, func(t *testing.T) {
@@ -34,71 +34,76 @@ func Test_ShippedInstanceConfigs_NoUnknownKeys(t *testing.T) {
 	}
 }
 
-// Test_ShippedInstanceConfigs_LoadEndToEnd verifies that every shipped
-// instance config decodes end to end.
+// Test_ShippedInstanceConfigs_ConstructEndToEnd verifies that every
+// shipped instance config decodes and constructs an operator.
 //
-// Every target's function must decode into a chained ynpb.Function, and
-// every referenced module config file must decode against the target's
-// spelled method.
-func Test_ShippedInstanceConfigs_LoadEndToEnd(t *testing.T) {
+// Construction loads each payload file and decodes it against the
+// spelled method, so the shipped payloads are covered too.
+func Test_ShippedInstanceConfigs_ConstructEndToEnd(t *testing.T) {
 	for _, path := range shippedInstanceConfigs {
 		t.Run(path, func(t *testing.T) {
 			cfg, err := xcfg.LoadConfig[operator.Config](path)
 			require.NoError(t, err)
-			require.NotEmpty(t, cfg.Targets)
+			require.NotEmpty(t, cfg.Configs)
+			require.NotEmpty(t, cfg.Functions)
 
-			for _, target := range cfg.Targets {
-				function := target.Function.AsFunction()
-				require.NotNil(t, function)
-				require.NotEmpty(t, function.GetId().GetName())
-				require.NotEmpty(t, function.GetChains())
-
-				// The shipped file references install paths, which the
-				// repository keeps under etc/yanet.
-				file := strings.Replace(
-					target.File.Unwrap(), "/etc/yanet2/", "../etc/yanet/", 1,
-				)
-				request, err := operator.LoadRequest(target.Method.Unwrap(), file)
-				require.NoError(t, err)
-				require.NotNil(t, request)
+			// The shipped files reference install paths, which the
+			// repository keeps under etc/yanet.
+			for idx := range cfg.Configs {
+				cfg.Configs[idx].File = xcfg.MustNonEmptyString(strings.Replace(
+					cfg.Configs[idx].File.Unwrap(), "/etc/yanet2/", "../etc/yanet/", 1,
+				))
 			}
+
+			runnable, err := operator.NewOperator(cfg)
+			require.NoError(t, err)
+			require.NoError(t, runnable.Close())
 		})
 	}
 }
 
-// Test_TargetConfig_IgnorePdump_DefaultsTrue verifies that an omitted
+// Test_FunctionConfig_IgnorePdump_DefaultsTrue verifies that an omitted
 // ignore_pdump key defaults to true.
-func Test_TargetConfig_IgnorePdump_DefaultsTrue(t *testing.T) {
+func Test_FunctionConfig_IgnorePdump_DefaultsTrue(t *testing.T) {
 	raw := `
-name: decap0
-method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
-file: /etc/yanet2/decap.d/default.yaml
+name: fn:decap
+chains:
+  - chain:
+      name: default
+      modules:
+        - type: decap
+          name: decap0
+    weight: 1
 `
-	var target operator.TargetConfig
-	require.NoError(t, yaml.Unmarshal([]byte(raw), &target))
-	require.True(t, target.IgnorePdump)
+	var function operator.FunctionConfig
+	require.NoError(t, yaml.Unmarshal([]byte(raw), &function))
+	require.True(t, function.IgnorePdump)
 }
 
-// Test_TargetConfig_IgnorePdump_ExplicitFalse verifies that an explicit
+// Test_FunctionConfig_IgnorePdump_ExplicitFalse verifies that an explicit
 // ignore_pdump false is preserved.
-func Test_TargetConfig_IgnorePdump_ExplicitFalse(t *testing.T) {
+func Test_FunctionConfig_IgnorePdump_ExplicitFalse(t *testing.T) {
 	raw := `
-name: decap0
-method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
-file: /etc/yanet2/decap.d/default.yaml
+name: fn:decap
 ignore_pdump: false
+chains:
+  - chain:
+      name: default
+      modules:
+        - type: decap
+          name: decap0
+    weight: 1
 `
-	var target operator.TargetConfig
-	require.NoError(t, yaml.Unmarshal([]byte(raw), &target))
-	require.False(t, target.IgnorePdump)
+	var function operator.FunctionConfig
+	require.NoError(t, yaml.Unmarshal([]byte(raw), &function))
+	require.False(t, function.IgnorePdump)
 }
 
-// Test_FunctionConfig_DecodesWholeFunction verifies that a spelled
-// function converts into the whole ynpb.Function.
-func Test_FunctionConfig_DecodesWholeFunction(t *testing.T) {
+// Test_FunctionConfig_ConvertsToProto verifies that a spelled function
+// converts into the whole ynpb.Function.
+func Test_FunctionConfig_ConvertsToProto(t *testing.T) {
 	raw := `
-id:
-  name: fn:decap
+name: fn:decap
 chains:
   - chain:
       name: default
@@ -125,8 +130,7 @@ chains:
 // entry without an explicit weight is refused.
 func Test_FunctionConfig_RejectsOmittedChainWeight(t *testing.T) {
 	raw := `
-id:
-  name: fn:decap
+name: fn:decap
 chains:
   - chain:
       name: default
@@ -144,8 +148,7 @@ chains:
 // weight of zero still decodes, since zero deliberately disables a chain.
 func Test_FunctionConfig_AcceptsExplicitZeroWeight(t *testing.T) {
 	raw := `
-id:
-  name: fn:decap
+name: fn:decap
 chains:
   - chain:
       name: default
@@ -160,18 +163,17 @@ chains:
 }
 
 // Test_Config_UnknownFunctionKeyIsCaught verifies that the known-keys walk
-// sees inside a target's function, so a misspelled key there is reported.
+// sees inside a function entry, so a misspelled key there is reported.
 func Test_Config_UnknownFunctionKeyIsCaught(t *testing.T) {
 	raw := `
 name: decap
-targets:
+configs:
   - name: decap0
     method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
     file: /etc/yanet2/decap.d/default.yaml
-    function:
-      id:
-        name: fn:decap
-      chain: []
+functions:
+  - name: fn:decap
+    chain: []
 `
 	err := xcfg.CheckKnownKeys[operator.Config]([]byte(raw))
 	require.ErrorContains(t, err, "chain")
@@ -187,7 +189,7 @@ gateways:
     endpoint: "[::1]:8080"
   - name: numa0
     endpoint: "[::1]:8082"
-targets:
+configs:
   - name: decap0
     method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
     file: /etc/yanet2/decap.d/default.yaml
@@ -195,4 +197,60 @@ targets:
 	cfg := operator.DefaultConfig()
 	err := xcfg.Decode([]byte(raw), cfg)
 	require.ErrorContains(t, err, `duplicate gateway name "numa0"`)
+}
+
+// Test_Config_RejectsDuplicateConfigEntry verifies that pushing the same
+// config through the same method twice is refused.
+func Test_Config_RejectsDuplicateConfigEntry(t *testing.T) {
+	raw := `
+name: decap
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+configs:
+  - name: decap0
+    method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
+    file: /etc/yanet2/decap.d/default.yaml
+  - name: decap0
+    method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
+    file: /etc/yanet2/decap.d/other.yaml
+`
+	cfg := operator.DefaultConfig()
+	err := xcfg.Decode([]byte(raw), cfg)
+	require.ErrorContains(t, err, `config "decap0" is pushed twice`)
+}
+
+// Test_Config_RejectsDuplicateFunctions verifies that two functions
+// sharing a name are refused at decode time.
+func Test_Config_RejectsDuplicateFunctions(t *testing.T) {
+	raw := `
+name: decap
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+configs:
+  - name: decap0
+    method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
+    file: /etc/yanet2/decap.d/default.yaml
+functions:
+  - name: fn:decap
+    chains:
+      - chain:
+          name: default
+          modules:
+            - type: decap
+              name: decap0
+        weight: 1
+  - name: fn:decap
+    chains:
+      - chain:
+          name: other
+          modules:
+            - type: decap
+              name: decap0
+        weight: 1
+`
+	cfg := operator.DefaultConfig()
+	err := xcfg.Decode([]byte(raw), cfg)
+	require.ErrorContains(t, err, `function "fn:decap" is declared twice`)
 }

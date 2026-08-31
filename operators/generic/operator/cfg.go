@@ -16,6 +16,9 @@ import (
 
 // Config is the top-level YAML configuration for one yanet-generic-operator
 // instance.
+//
+// The configs section spells the module configs the instance pushes, the
+// functions section the gateway functions published after them.
 type Config struct {
 	// Name is the instance name. The operator reports readiness under it,
 	// so it must match the name the announcer addresses.
@@ -25,7 +28,10 @@ type Config struct {
 	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
 	Register  operator.RegisterConfig   `yaml:"register"`
 	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
-	Targets   []TargetConfig            `yaml:"targets"`
+	// Configs are the module configs this instance pushes.
+	Configs []ModuleConfig `yaml:"configs"`
+	// Functions are the gateway functions published after the configs.
+	Functions []FunctionConfig `yaml:"functions"`
 }
 
 // Default resets the config to built-in defaults.
@@ -44,8 +50,8 @@ func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
 	}
-	if len(m.Targets) == 0 {
-		return errors.New("at least one target must be configured")
+	if len(m.Configs) == 0 {
+		return errors.New("at least one module config must be configured")
 	}
 
 	gatewayNames := map[string]struct{}{}
@@ -54,6 +60,25 @@ func (m *Config) Validate() error {
 			return fmt.Errorf("duplicate gateway name %q at index %d", gw.Name, idx)
 		}
 		gatewayNames[gw.Name] = struct{}{}
+	}
+
+	configKeys := map[string]struct{}{}
+	for idx, config := range m.Configs {
+		name := config.Name.Unwrap()
+		key := config.Method.Unwrap() + " " + name
+		if _, dup := configKeys[key]; dup {
+			return fmt.Errorf("configs[%d]: config %q is pushed twice", idx, name)
+		}
+		configKeys[key] = struct{}{}
+	}
+
+	functionNames := map[string]struct{}{}
+	for idx, function := range m.Functions {
+		name := function.Name.Unwrap()
+		if _, dup := functionNames[name]; dup {
+			return fmt.Errorf("functions[%d]: function %q is declared twice", idx, name)
+		}
+		functionNames[name] = struct{}{}
 	}
 
 	return nil
@@ -76,27 +101,36 @@ func DefaultConfig() *Config {
 		Register: operator.RegisterConfig{
 			Interval: xcfg.MustNonZero(operator.DefaultRegisterInterval),
 		},
-		Targets: []TargetConfig{},
+		Configs:   []ModuleConfig{},
+		Functions: []FunctionConfig{},
 	}
 }
 
-// TargetConfig describes one module config this instance pushes and the
-// function that references it.
-type TargetConfig struct {
-	// Name labels the target in logs and errors.
-	Name string `yaml:"name"`
+// ModuleConfig describes one module config this instance pushes.
+type ModuleConfig struct {
+	// Name is the module config name.
+	//
+	// It is filled into the request when the file omits its own name, so a
+	// payload file does not have to repeat it.
+	Name xcfg.NonEmptyString `yaml:"name"`
 	// Method is the unary gRPC method that replaces the module config,
 	// spelled as "package.Service/Method".
 	//
 	// The reconcile loop repeats the call, so the method must replace
 	// whole state, not accumulate it.
 	Method xcfg.NonEmptyString `yaml:"method"`
-	// File is the path to the module config for this target: the method's
-	// request in YAML, sent as is.
+	// File is the path to the module config file, the method's request in
+	// YAML.
 	File xcfg.NonEmptyString `yaml:"file"`
-	// Function is published after the config. May be omitted when the
-	// target owns none.
-	Function *FunctionConfig `yaml:"function"`
+}
+
+// FunctionConfig is one gateway function this instance publishes after
+// the configs.
+type FunctionConfig struct {
+	// Name is the function identifier (e.g. "fn:decap").
+	Name xcfg.NonEmptyString `yaml:"name"`
+	// Chains are the function's weighted processing chains.
+	Chains []FunctionChainConfig `yaml:"chains"`
 	// IgnorePdump skips function updates when the existing chain already
 	// matches once every pdump:* module is filtered out.
 	//
@@ -106,29 +140,39 @@ type TargetConfig struct {
 
 // UnmarshalYAML implements yaml.Unmarshaler so that IgnorePdump defaults
 // to true when the field is absent from the YAML input.
-func (m *TargetConfig) UnmarshalYAML(value *yaml.Node) error {
-	type plain TargetConfig
+func (m *FunctionConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain FunctionConfig
 	p := plain{IgnorePdump: true}
 	if err := value.Decode(&p); err != nil {
 		return err
 	}
-	*m = TargetConfig(p)
+	*m = FunctionConfig(p)
 	return nil
 }
 
-// FunctionConfig is the whole gateway function a target publishes,
-// mirroring the ynpb.Function tree.
-type FunctionConfig struct {
-	// Id names the function (e.g. "fn:decap").
-	Id FunctionIdConfig `yaml:"id"`
-	// Chains are the function's weighted processing chains.
-	Chains []FunctionChainConfig `yaml:"chains"`
-}
-
-// FunctionIdConfig identifies a function by name.
-type FunctionIdConfig struct {
-	// Name is the function identifier (e.g. "fn:decap").
-	Name xcfg.NonEmptyString `yaml:"name"`
+// AsFunction converts the spelled function to its proto form.
+func (m *FunctionConfig) AsFunction() *ynpb.Function {
+	chains := make([]*ynpb.FunctionChain, 0, len(m.Chains))
+	for _, chain := range m.Chains {
+		modules := make([]*commonpb.ModuleId, 0, len(chain.Chain.Modules))
+		for _, module := range chain.Chain.Modules {
+			modules = append(modules, &commonpb.ModuleId{
+				Type: module.Type.Unwrap(),
+				Name: module.Name.Unwrap(),
+			})
+		}
+		chains = append(chains, &ynpb.FunctionChain{
+			Chain: &ynpb.Chain{
+				Name:    chain.Chain.Name.Unwrap(),
+				Modules: modules,
+			},
+			Weight: chain.Weight.Unwrap(),
+		})
+	}
+	return &ynpb.Function{
+		Id:     &commonpb.FunctionId{Name: m.Name.Unwrap()},
+		Chains: chains,
+	}
 }
 
 // FunctionChainConfig pairs a chain with its load-balancing weight.
@@ -153,33 +197,4 @@ type ModuleIdConfig struct {
 	Type xcfg.NonEmptyString `yaml:"type"`
 	// Name is the module config name (e.g. "decap0").
 	Name xcfg.NonEmptyString `yaml:"name"`
-}
-
-// AsFunction converts the spelled function to its proto form, nil when
-// the target spelled none.
-func (m *FunctionConfig) AsFunction() *ynpb.Function {
-	if m == nil {
-		return nil
-	}
-	chains := make([]*ynpb.FunctionChain, 0, len(m.Chains))
-	for _, chain := range m.Chains {
-		modules := make([]*commonpb.ModuleId, 0, len(chain.Chain.Modules))
-		for _, module := range chain.Chain.Modules {
-			modules = append(modules, &commonpb.ModuleId{
-				Type: module.Type.Unwrap(),
-				Name: module.Name.Unwrap(),
-			})
-		}
-		chains = append(chains, &ynpb.FunctionChain{
-			Chain: &ynpb.Chain{
-				Name:    chain.Chain.Name.Unwrap(),
-				Modules: modules,
-			},
-			Weight: chain.Weight.Unwrap(),
-		})
-	}
-	return &ynpb.Function{
-		Id:     &commonpb.FunctionId{Name: m.Id.Name.Unwrap()},
-		Chains: chains,
-	}
 }
