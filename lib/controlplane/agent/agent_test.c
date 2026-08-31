@@ -614,6 +614,31 @@ test_extend_rolls_back_on_exhausted_pool() {
 	return TEST_SUCCESS;
 }
 
+static int
+test_attach_name_too_long_is_refused() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct cp_config *cp_config = NULL;
+	int rc = extend_env_init(storage, TEST_CP_MEMORY, &cp_config);
+	TEST_ASSERT(rc == 0, "storage setup failed");
+
+	char name[AGENT_NAME_LEN + 1];
+	memset(name, 'a', AGENT_NAME_LEN);
+	name[AGENT_NAME_LEN] = '\0';
+
+	struct yanet_shm shm = {.base = storage, .size = TEST_STORAGE_SIZE};
+	yanet_error *err = NULL;
+	struct agent *agent = agent_attach(&shm, 0, name, 4096, &err);
+
+	TEST_ASSERT_NULL(agent, "a name that does not fit must be refused");
+	TEST_ASSERT_NOT_NULL(err, "a refused attach must set an error");
+
+	yanet_error_free(err);
+	free(storage);
+	return TEST_SUCCESS;
+}
+
 int
 main() {
 	log_enable_name("error");
@@ -657,6 +682,12 @@ main() {
 	if (test_attach_initialised_segment_succeeds() != TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR, "test_attach_initialised_segment_succeeds failed");
+	}
+
+	++tests_count;
+	if (test_attach_name_too_long_is_refused() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR, "test_attach_name_too_long_is_refused failed");
 	}
 
 	++tests_count;

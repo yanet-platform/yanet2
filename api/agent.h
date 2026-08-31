@@ -82,6 +82,7 @@ agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx);
 //
 // Creates a new agent for a specific module in the given dataplane instance.
 // The agent provides module-specific operations and memory management.
+// A name longer than 79 characters is rejected.
 //
 // @param shm Handle to shared memory segment
 // @param instance_idx Index of the dataplane instance where the agent should
