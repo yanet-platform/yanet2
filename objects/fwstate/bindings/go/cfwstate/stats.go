@@ -13,6 +13,7 @@ type MapStats struct {
 	TotalElements    uint64
 	MaxDeadline      uint64
 	MemoryUsed       uint64
+	StaleLayerCount  uint32
 }
 
 // MapsStats stores IPv4 and IPv6 fwmap statistics.

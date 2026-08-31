@@ -1583,6 +1583,7 @@ const FWStatePage: React.FC = () => {
             row('Overflow buckets', (s) => s?.extra_bucket_count ?? '-'),
             row('Max chain', (s) => s?.max_chain_length ?? '-'),
             row('Layers', (s) => s?.layer_count ?? '-'),
+            row('Parked layers', (s) => s?.stale_layer_count ?? '-'),
             row('State entries', (s) => s?.total_elements ?? '-'),
             row('Max deadline', (s) => formatNsUtc(s?.max_deadline)),
             row('Memory used', (s) => formatMemoryBytes(s?.memory_used)),

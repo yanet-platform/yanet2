@@ -68,6 +68,63 @@ fwtable_free_stale(fwtable_t *table, struct memory_context *ctx) {
 	SET_OFFSET_OF(&table->stale, NULL);
 }
 
+// The oldest layer past the head, or NULL when the chain has none.
+//
+// The head is never a reclamation candidate: it is the layer writes go
+// to, so only what sits behind it can drain and be released.
+static inline fwmap_t *
+fwtable_tail_layer(const fwtable_t *table, fwmap_t **prev_out) {
+	fwmap_t *head = ADDR_OF(&table->head);
+	if (!head || !head->next) {
+		return NULL;
+	}
+
+	fwmap_t *prev = head;
+	fwmap_t *tail = (fwmap_t *)ADDR_OF(&head->next);
+	while (tail->next) {
+		prev = tail;
+		tail = (fwmap_t *)ADDR_OF(&tail->next);
+	}
+
+	if (prev_out) {
+		*prev_out = prev;
+	}
+	return tail;
+}
+
+// How many layers are parked awaiting a release.
+//
+// Parked layers hold their whole key and value stores, so a chain that
+// stops draining is the difference between a bounded table and one that
+// grows without limit.
+static inline uint32_t
+fwtable_stale_count(const fwtable_t *table) {
+	uint32_t count = 0;
+	for (const fwmap_t *layer = ADDR_OF(&table->stale); layer != NULL;
+	     layer = (const fwmap_t *)ADDR_OF(&layer->next)) {
+		count += 1;
+	}
+	return count;
+}
+
+// Whether a reclamation round would do anything.
+//
+// Mirrors the conditions the unlink and the release steps act on, so a
+// caller can decline to pay the generation barriers those need when
+// neither has work. Reading it without a barrier is safe in
+// both directions: deadlines only move forward, so a round skipped on a
+// stale read is picked up by the next one, and a round started on one
+// simply finds nothing to unlink.
+static inline bool
+fwtable_has_reclaimable(const fwtable_t *table, uint64_t now) {
+	if (ADDR_OF(&table->stale) != NULL) {
+		return true;
+	}
+
+	const fwmap_t *tail = fwtable_tail_layer(table, NULL);
+	return tail != NULL && fwmap_max_deadline(tail) <= now;
+}
+
 // Unlink an expired tail layer from the active chain.
 //
 // If the oldest layer past the head is expired, atomically unlinks it
@@ -79,19 +136,9 @@ fwtable_free_stale(fwtable_t *table, struct memory_context *ctx) {
 // simply leaves them parked for a later round.  Returns 0.
 static inline int
 fwtable_unlink_stale_cp(fwtable_t *table, uint64_t now) {
-	fwmap_t *head = ADDR_OF(&table->head);
-	if (!head || !head->next) {
-		return 0;
-	}
-
-	fwmap_t *prev = head;
-	fwmap_t *tail = (fwmap_t *)ADDR_OF(&head->next);
-	while (tail->next) {
-		prev = tail;
-		tail = (fwmap_t *)ADDR_OF(&tail->next);
-	}
-
-	if (fwmap_max_deadline(tail) > now) {
+	fwmap_t *prev = NULL;
+	fwmap_t *tail = fwtable_tail_layer(table, &prev);
+	if (!tail || fwmap_max_deadline(tail) > now) {
 		return 0;
 	}
 

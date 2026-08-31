@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -110,3 +111,17 @@ fwstate_map_v4_object_unlink_stale_layers(
 // walking the parked chain.
 void
 fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self);
+
+// How many layers are parked awaiting a release.
+uint32_t
+fwstate_map_v4_object_stale_layer_count(const struct fwstate_map_v4_object *self
+);
+
+// Whether a reclamation round would do anything.
+//
+// Lets a caller skip the generation barriers reclamation needs when
+// there is nothing to unlink and nothing parked.
+bool
+fwstate_map_v4_object_has_reclaimable(
+	const struct fwstate_map_v4_object *self, uint64_t now
+);

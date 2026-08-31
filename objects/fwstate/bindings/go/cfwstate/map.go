@@ -256,7 +256,9 @@ func (m *MapObjectConfig) resolveMap(layerIndex uint32) *C.fwmap_t {
 
 // GetStats retrieves statistics for this map's fwtable.
 func (m *MapObjectConfig) GetStats() MapStats {
-	return mapStatsFromC(fwmapStatsOrZero(m.resolveMap(0)))
+	stats := mapStatsFromC(fwmapStatsOrZero(m.resolveMap(0)))
+	stats.StaleLayerCount = m.StaleLayerCount()
+	return stats
 }
 
 // ResolveMap resolves a specific layer's fwmap pointer.
@@ -292,6 +294,33 @@ func (m *MapObjectConfig) UnlinkStaleLayers(now uint64) error {
 		return fmt.Errorf("failed to unlink stale layers: error code=%d", rc)
 	}
 	return nil
+}
+
+// StaleLayerCount reports how many layers are parked awaiting a release.
+func (m *MapObjectConfig) StaleLayerCount() uint32 {
+	if m.kind == KindV6 {
+		return uint32(C.fwstate_map_v6_object_stale_layer_count(
+			C.fwstate_map_v6_from_cp_object(m.asRawPtr()),
+		))
+	}
+	return uint32(C.fwstate_map_v4_object_stale_layer_count(
+		C.fwstate_map_v4_from_cp_object(m.asRawPtr()),
+	))
+}
+
+// HasReclaimable reports whether a reclamation round would do anything,
+// so a caller can skip the generation barriers it otherwise costs.
+func (m *MapObjectConfig) HasReclaimable(now uint64) bool {
+	if m.kind == KindV6 {
+		return bool(C.fwstate_map_v6_object_has_reclaimable(
+			C.fwstate_map_v6_from_cp_object(m.asRawPtr()),
+			C.uint64_t(now),
+		))
+	}
+	return bool(C.fwstate_map_v4_object_has_reclaimable(
+		C.fwstate_map_v4_from_cp_object(m.asRawPtr()),
+		C.uint64_t(now),
+	))
 }
 
 // FreeStaleLayers releases the layers parked by UnlinkStaleLayers.

@@ -1,8 +1,12 @@
 package fwstate
 
 import (
+	"time"
+
 	"github.com/c2h5oh/datasize"
+
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 // Config represents FWState module configuration
@@ -20,6 +24,9 @@ type Config struct {
 
 	// Endpoint is the gRPC endpoint address
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
+
+	// StaleLayerSweepInterval is the period between stale-layer sweeps.
+	StaleLayerSweepInterval time.Duration `yaml:"stale_layer_sweep_interval"`
 }
 
 // DefaultConfig returns default configuration
@@ -32,8 +39,9 @@ func DefaultConfig() *Config {
 		// CreateMap picks a 1,048,576-entry index, and one such layer
 		// across both families needs well over 100 MB before module
 		// configs and allocator overhead.
-		MemoryRequirements: xcfg.MustNonZero(1024 * datasize.MB),
-		Endpoint:           xcfg.MustNonEmptyString("[::1]:0"),
+		MemoryRequirements:      xcfg.MustNonZero(1024 * datasize.MB),
+		Endpoint:                xcfg.MustNonEmptyString("[::1]:0"),
+		StaleLayerSweepInterval: fwstatemap.DefaultStaleLayerSweepInterval,
 	}
 }
 
