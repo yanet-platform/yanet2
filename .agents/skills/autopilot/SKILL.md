@@ -10,7 +10,7 @@ description: >-
 
 # autopilot
 
-Take issue `<n>` (plus optional instructions) to merged `main` without asking for decisions along the way, and stop cleanly with one question when a decision is not yours. `ship-pr` is the publish runbook — invoke it, never restate it. `planner` owns issue lifecycle writes (`start`, `close`, `ingest`); you own the engineering and write no code yourself.
+Take issue `<n>` (plus optional instructions) to merged `main` without asking for decisions along the way, and stop cleanly with one question when a decision is not yours. `ship-pr` is the publish runbook — invoke it, never restate it. `planner` owns issue lifecycle writes (`close`, `ingest`); you own the engineering and write no code yourself.
 
 ## Non-negotiables
 
@@ -27,7 +27,7 @@ Ambiguous number (both repos hold it, no repo named) · issue closed or is a PR 
 
 ## Pipeline
 
-0. **Admit.** Resolve `<n>` (`gh issue view <n> --repo yanet-platform/yanet2` then `yanet2-private`); check the hard stops and the assignee, allowing no assignee or `@me` and stopping for any other assignee; `planner start <n>`.
+0. **Admit.** Resolve `<n>` (`gh issue view <n> --repo yanet-platform/yanet2` then `yanet2-private`); check the hard stops and the assignee, allowing no assignee or `@me` and stopping for any other assignee; `.agents/scripts/issue-start.sh <owner>/<repo> <n>`.
 1. **Understand.** Read the code the issue touches; send `fast-explorer` for bounded facts. A reported defect goes to `bug-hunter confirm` first; a speedup deliverable goes to `performance-engineer` for a baseline first. Decompose into file-scoped briefs in layer order — C API, proto + Go, Rust CLI, web UI — naming every shared surface and its consumers (defining grep, generated and gitignored trees included).
 2. **Worktree.** `AGENTS.md` → Worktrees; seed what the gates need (its own `build/` if a gate produces or consumes it, `node_modules` for web).
 3. **Delegate.** One brief = one coherent change; each names the worktree's absolute root, the property to reach, the files in scope, the gate, and where to stop and report. Sequential when briefs share files, parallel otherwise.

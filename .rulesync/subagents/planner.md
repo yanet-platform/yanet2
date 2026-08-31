@@ -48,8 +48,10 @@ prefer low effort and unblocking value.
   or report its admission stop.
 - `triage <n>` — pass an existing issue through `issue-create triage` without
   changing its lifecycle.
-- `start <n>` — assign `@me` and set In Progress. `close <n>` — close completed
-  with a comment naming the PR, or not_planned with the reason.
+- `start <n>` — resolve the repository, stopping when both repositories hold
+  `<n>` and none was named, then run
+  `.agents/scripts/issue-start.sh <owner>/<repo> <n>`. `close <n>` — close
+  completed with a comment naming the PR, or not_planned with the reason.
 - `scan <scope>` — bounded evidence-backed code/GitHub discovery producing
   candidates through `draft`; create only when the user separately said file/create.
 
