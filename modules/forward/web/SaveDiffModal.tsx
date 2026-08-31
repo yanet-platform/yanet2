@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import type { ForwardMode, Rule } from '@yanet/core/api/forward';
-import { declaredForwardMode } from '@yanet/core/api/forward';
+import type { Rule } from '@yanet/core/api/forward';
+import { ForwardMode, declaredForwardMode } from '@yanet/core/api/forward';
 import { dumpYamlDoc } from '@yanet/core/utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '@yanet/core/components';
 import { effectiveCounterName } from './hooks';
@@ -8,9 +8,12 @@ import { effectiveCounterName } from './hooks';
 /**
  * Formats a mode as its declared name, an undeclared number as is, so one
  * rule from a newer module cannot hide the rest of a configuration.
+ *
+ * An absent mode is the zero value NONE, which the gateway omits from its
+ * JSON.
  */
 const formatForwardMode = (mode: ForwardMode | number | undefined): ForwardMode | number => {
-    return declaredForwardMode(mode) ?? (typeof mode === 'number' ? mode : 0);
+    return declaredForwardMode(mode) ?? (typeof mode === 'number' ? mode : ForwardMode.NONE);
 };
 
 /**

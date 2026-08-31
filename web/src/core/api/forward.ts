@@ -33,7 +33,12 @@ export const declaredForwardMode = (value: ForwardMode | number | string | undef
     if (typeof value === 'number') {
         return FORWARD_MODE_BY_NUMBER[value];
     }
-    return typeof value === 'string' && value in FORWARD_MODE_LABELS ? (value as ForwardMode) : undefined;
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    // An own-value check, so an inherited object key such as "toString"
+    // does not pass as a declared mode.
+    return (Object.values(ForwardMode) as string[]).includes(value) ? (value as ForwardMode) : undefined;
 };
 
 /**

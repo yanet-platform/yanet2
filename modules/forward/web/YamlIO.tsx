@@ -3,7 +3,7 @@ import yaml from 'js-yaml';
 import type { Rule } from '@yanet/core/api/forward';
 import { declaredForwardMode } from '@yanet/core/api/forward';
 import { toaster } from '@yanet/core/utils';
-import { isValidIPv4Prefix, isValidIPv6Prefix } from '@yanet/core/utils/netip';
+import { isValidIPv4Address, isValidIPv6Address } from '@yanet/core/utils/netip';
 import { rulesToDiffYaml } from './SaveDiffModal';
 import YamlIOModal from '@yanet/core/components/YamlIOModal';
 
@@ -45,6 +45,31 @@ const stringList = (value: unknown, where: string): string[] => {
     return value as string[];
 };
 
+/**
+ * Accepts a network in CIDR or address/mask form of one family, the two
+ * spellings the wire types parse — a mask covers the bi-contiguous IPv6
+ * networks the filter compiler supports.
+ */
+const isValidNetwork = (net: string, isAddress: (addr: string) => boolean, maxLength: number): boolean => {
+    const slash = net.indexOf('/');
+    if (slash < 0) {
+        return false;
+    }
+    const address = net.slice(0, slash);
+    const suffix = net.slice(slash + 1);
+    if (!isAddress(address)) {
+        return false;
+    }
+    if (/^\d+$/.test(suffix)) {
+        const length = Number(suffix);
+        return length >= 0 && length <= maxLength;
+    }
+    return isAddress(suffix);
+};
+
+const isValidIPv4Network = (net: string): boolean => isValidNetwork(net, isValidIPv4Address, 32);
+const isValidIPv6Network = (net: string): boolean => isValidNetwork(net, isValidIPv6Address, 128);
+
 /** Reads a family-typed network list, refusing an entry of the wrong family. */
 const networkList = (value: unknown, where: string, isValid: (net: string) => boolean): string[] => {
     const nets = stringList(value, where);
@@ -65,16 +90,22 @@ const networkList = (value: unknown, where: string, isValid: (net: string) => bo
  * message on failure.
  */
 export const parseYamlToRules = (text: string): ParsedRulesDoc => {
-    let parsed: unknown;
+    let documents: unknown[];
     try {
-        parsed = yaml.load(text);
+        // The stream is read whole, so a bare trailing separator is
+        // tolerated the way the operator and the CLI read it.
+        documents = (yaml.loadAll(text) as unknown[]).filter(doc => doc != null);
     } catch (e) {
         throw new Error(`YAML parse error: ${(e as Error).message}`);
     }
 
-    if (parsed == null) {
+    if (documents.length === 0) {
         return { rules: [] };
     }
+    if (documents.length > 1) {
+        throw new Error('The file holds more than one document.');
+    }
+    const parsed = documents[0];
     if (typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('Expected a YAML object with a "rules" list.');
     }
@@ -82,6 +113,9 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
     const doc = parsed as Record<string, unknown>;
     checkKnownKeys(doc, 'the document', ['name', 'rules']);
 
+    if (doc['name'] != null && typeof doc['name'] !== 'string') {
+        throw new Error('Expected "name" to be a string.');
+    }
     const name = typeof doc['name'] === 'string' && doc['name'] !== '' ? doc['name'] : undefined;
     if (doc['rules'] != null && !Array.isArray(doc['rules'])) {
         throw new Error('Expected a top-level "rules" list.');
@@ -98,10 +132,10 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
         ]);
 
         const actionRaw = rule['action'];
-        if (actionRaw != null && typeof actionRaw !== 'object') {
-            throw new Error(`Rule ${idx}: "action" is not a mapping.`);
+        if (actionRaw == null || typeof actionRaw !== 'object') {
+            throw new Error(`Rule ${idx}: "action" is required and must be a mapping.`);
         }
-        const action = (actionRaw ?? {}) as Record<string, unknown>;
+        const action = actionRaw as Record<string, unknown>;
         checkKnownKeys(action, `rule ${idx} action`, ['target', 'mode', 'counter']);
 
         const modeRaw = action['mode'];
@@ -151,10 +185,10 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
             },
             devices,
             vlan_ranges,
-            sources4: networkList(rule['sources4'], `rule ${idx} sources4`, isValidIPv4Prefix),
-            sources6: networkList(rule['sources6'], `rule ${idx} sources6`, isValidIPv6Prefix),
-            destinations4: networkList(rule['destinations4'], `rule ${idx} destinations4`, isValidIPv4Prefix),
-            destinations6: networkList(rule['destinations6'], `rule ${idx} destinations6`, isValidIPv6Prefix),
+            sources4: networkList(rule['sources4'], `rule ${idx} sources4`, isValidIPv4Network),
+            sources6: networkList(rule['sources6'], `rule ${idx} sources6`, isValidIPv6Network),
+            destinations4: networkList(rule['destinations4'], `rule ${idx} destinations4`, isValidIPv4Network),
+            destinations6: networkList(rule['destinations6'], `rule ${idx} destinations6`, isValidIPv6Network),
         };
     });
 

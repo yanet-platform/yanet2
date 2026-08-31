@@ -75,6 +75,38 @@ describe('parseYamlToRules', () => {
         expect(() => parseYamlToRules('rulez: []\n')).toThrow(/Unknown key "rulez"/);
         expect(() => parseYamlToRules('rules:\n  - action:\n      mode: BOGUS\n')).toThrow(/unknown forward mode/);
         expect(() => parseYamlToRules('rules:\n  - action:\n      mode: 99\n')).toThrow(/unknown forward mode/);
+        expect(() => parseYamlToRules('rules:\n  - action:\n      mode: toString\n')).toThrow(/unknown forward mode/);
+    });
+
+    it('accepts the bi-contiguous IPv6 mask form the filter compiler supports', () => {
+        const rules: Rule[] = [
+            {
+                action: { target: 't', mode: ForwardMode.OUT, counter: 'c' },
+                devices: [],
+                vlan_ranges: [],
+                sources4: [],
+                sources6: ['2001:db8::/ffff:ffff:ffff:0:ffff::'],
+                destinations4: [],
+                destinations6: [],
+            },
+        ];
+
+        const parsed = parseYamlToRules(rulesToDiffYaml(rules));
+
+        expect(parsed.rules).toEqual(rules);
+    });
+
+    it('refuses a non-string config name and a rule without an action', () => {
+        expect(() => parseYamlToRules('name: 123\nrules: []\n')).toThrow(/"name" to be a string/);
+        expect(() => parseYamlToRules('rules:\n  - devices: []\n')).toThrow(/"action" is required/);
+        expect(() => parseYamlToRules('rules:\n  - action: null\n')).toThrow(/"action" is required/);
+    });
+
+    it('tolerates a bare trailing separator but not a second document', () => {
+        const parsed = parseYamlToRules('name: forward0\nrules: []\n---\n');
+        expect(parsed.name).toBe('forward0');
+
+        expect(() => parseYamlToRules('rules: []\n---\nrules: []\n')).toThrow(/more than one document/);
     });
 
     it('accepts a declared numeric mode and null fields as zero values', () => {
@@ -109,9 +141,8 @@ describe('rulesToDiffYaml', () => {
         expect(text).not.toContain('srcs');
     });
 
-    it('emits an undeclared mode number as is', () => {
-        const text = rulesToDiffYaml([{ action: { target: 't', mode: 99 } }]);
-
-        expect(text).toContain('mode: 99');
+    it('emits an undeclared mode number as is and an absent mode as NONE', () => {
+        expect(rulesToDiffYaml([{ action: { target: 't', mode: 99 } }])).toContain('mode: 99');
+        expect(rulesToDiffYaml([{ action: { target: 't' } }])).toContain('mode: NONE');
     });
 });
