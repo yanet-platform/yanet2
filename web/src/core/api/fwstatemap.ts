@@ -9,6 +9,7 @@ export interface MapStats {
     max_deadline?: number;
     memory_used?: number;
     note?: string;
+    stale_layer_count?: number;
 }
 
 export enum Direction {

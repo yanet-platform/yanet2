@@ -1,6 +1,7 @@
 package fwstate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -118,6 +119,17 @@ func (m *FWStateModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor 
 		interceptors = append(interceptors, si)
 	}
 	return interceptors
+}
+
+// Run reclaims stale map layers until the context is cancelled.
+//
+// The sweep publishes config generations through the module's agent, so it
+// belongs to the phase that ends before anything is closed rather than to
+// the module's own construction: a module whose ownership never transfers
+// leaves nothing running behind it.
+func (m *FWStateModule) Run(ctx context.Context) error {
+	m.mapService.RunStaleLayerSweeper(ctx, m.cfg.StaleLayerSweepInterval)
+	return nil
 }
 
 // Close closes the module.

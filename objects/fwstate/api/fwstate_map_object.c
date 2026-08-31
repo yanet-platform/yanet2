@@ -274,6 +274,19 @@ fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
 	fwtable_free_stale(&self->table, &self->cp_object.memory_context);
 }
 
+uint32_t
+fwstate_map_v4_object_stale_layer_count(const struct fwstate_map_v4_object *self
+) {
+	return fwtable_stale_count(&self->table);
+}
+
+bool
+fwstate_map_v4_object_has_reclaimable(
+	const struct fwstate_map_v4_object *self, uint64_t now
+) {
+	return fwtable_has_reclaimable(&self->table, now);
+}
+
 // --- IPv6 object -------------------------------------------------------------
 
 // Typed destructor: tears the object down and returns its storage to the
@@ -427,6 +440,19 @@ fwstate_map_v6_object_unlink_stale_layers(
 void
 fwstate_map_v6_object_free_stale_layers(struct fwstate_map_v6_object *self) {
 	fwtable_free_stale(&self->table, &self->cp_object.memory_context);
+}
+
+uint32_t
+fwstate_map_v6_object_stale_layer_count(const struct fwstate_map_v6_object *self
+) {
+	return fwtable_stale_count(&self->table);
+}
+
+bool
+fwstate_map_v6_object_has_reclaimable(
+	const struct fwstate_map_v6_object *self, uint64_t now
+) {
+	return fwtable_has_reclaimable(&self->table, now);
 }
 
 // --- object factories --------------------------------------------------------

@@ -14,6 +14,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -239,7 +240,7 @@ func (m *FWStateMapService) collectMapStats() []*commonpb.Metric {
 
 	now, haveNow := m.dataplaneTime()
 
-	result := make([]*commonpb.Metric, 0, len(m.maps)*7)
+	result := make([]*commonpb.Metric, 0, len(m.maps)*8)
 	for name, fwMap := range m.maps {
 		af := "ipv4"
 		if fwMap.Config().Kind() == cfwstate.KindV6 {
@@ -274,6 +275,7 @@ func mapStatsGauges(
 		commonpb.NewMetricGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
 		commonpb.NewMetricGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
 		commonpb.NewMetricGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
+		commonpb.NewMetricGauge("fwstate_stale_layer_count", float64(stats.StaleLayerCount), labels...),
 		commonpb.NewMetricGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
 		commonpb.NewMetricGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
 	}
@@ -710,6 +712,127 @@ func (m *FWStateMapService) ReclaimStaleLayers(
 	}
 }
 
+// DefaultStaleLayerSweepInterval is the default period between stale-layer
+// sweeps.
+const DefaultStaleLayerSweepInterval = 30 * time.Second
+
+// SweepStaleLayers reclaims every map that has something to reclaim.
+//
+// A map with nothing parked and no drained layer behind its head is
+// skipped without publishing a generation, so a settled table costs a
+// pointer test rather than two barriers. The whole round is skipped while
+// the instance has published no time, since deciding a layer has drained
+// means deciding every deadline in it has passed.
+func (m *FWStateMapService) SweepStaleLayers(ctx context.Context) {
+	now, haveNow := m.dataplaneTime()
+	if !haveNow {
+		m.log.Debug("skipped stale-layer sweep without a dataplane time")
+		return
+	}
+
+	for _, name := range m.mapNames() {
+		if ctx.Err() != nil {
+			return
+		}
+
+		m.sweepNamedMap(name, now)
+	}
+}
+
+// mapNames snapshots the registry so a sweep can release the lock between
+// maps.
+func (m *FWStateMapService) mapNames() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	names := make([]string, 0, len(m.maps))
+	for name := range m.maps {
+		names = append(names, name)
+	}
+	return names
+}
+
+// sweepNamedMap reclaims one map, re-resolving it under the lock.
+//
+// A map named by the snapshot can be deleted before its turn, in which
+// case there is nothing left to reclaim and the handle must not be
+// touched.
+func (m *FWStateMapService) sweepNamedMap(name string, now uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	fwMap, ok := m.maps[name]
+	if !ok {
+		return
+	}
+
+	m.SweepMap(name, fwMap.Config(), *fwMap.Config(), now)
+}
+
+// StaleLayerSource is one map a sweep can consider: what it holds, and
+// whether reclaiming it is worth the barriers.
+type StaleLayerSource interface {
+	MapLayerReclaimer
+
+	HasReclaimable(now uint64) bool
+	StaleLayerCount() uint32
+}
+
+// Compile-time assertion that [cfwstate.MapObjectConfig] satisfies
+// [StaleLayerSource].
+var _ StaleLayerSource = (*cfwstate.MapObjectConfig)(nil)
+
+// SweepMap reclaims one map, or declines to.
+//
+// The precheck is what keeps a periodic sweep affordable: a settled table
+// answers it from its own pointers, where reclaiming would publish two
+// config generations and wait for every worker to pick them up.
+func (m *FWStateMapService) SweepMap(
+	name string,
+	source StaleLayerSource,
+	mapCP cfwstate.MapObjectConfig,
+	now uint64,
+) {
+	if !source.HasReclaimable(now) {
+		return
+	}
+
+	before := source.StaleLayerCount()
+	m.ReclaimStaleLayers(source, mapCP, now)
+
+	m.log.Debug("swept stale fwstate-map layers",
+		zap.String("map", name),
+		zap.Uint32("parked_before", before),
+		zap.Uint32("parked_after", source.StaleLayerCount()),
+	)
+}
+
+// RunStaleLayerSweeper reclaims stale layers until the context is
+// cancelled.
+func (m *FWStateMapService) RunStaleLayerSweeper(
+	ctx context.Context, interval time.Duration,
+) {
+	if interval <= 0 {
+		m.log.Warn("non-positive stale-layer sweep interval, falling back to default",
+			zap.Duration("configured", interval),
+			zap.Duration("default", DefaultStaleLayerSweepInterval),
+		)
+		interval = DefaultStaleLayerSweepInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.SweepStaleLayers(ctx)
+		}
+	}
+}
+
 // ValidateWorkerCount rejects zero and out-of-range worker_count values.
 func ValidateWorkerCount(workerCount uint32) error {
 	if workerCount == 0 {
@@ -791,9 +914,11 @@ func ResolveReadIndex(backward bool, index int64) (int64, error) {
 
 // MapStatsToProto converts bindings-level map stats into the proto form.
 //
-// The stats describe the active head layer only (fwmap_get_stats walks
-// one layer; only layer_count spans the chain), so the note says so —
-// the values must not be presented as map totals after a rotation.
+// The values here describe the active head layer only (one layer is
+// walked for them; only the layer count spans the chain), so the note
+// says so — they must not be presented as map totals after a rotation.
+// The count of layers parked awaiting a release belongs to neither, and
+// is carried through unchanged.
 func MapStatsToProto(stats mapStats) *fwstatemappb.MapStats {
 	return &fwstatemappb.MapStats{
 		IndexSize:        stats.IndexSize,
@@ -803,6 +928,7 @@ func MapStatsToProto(stats mapStats) *fwstatemappb.MapStats {
 		TotalElements:    stats.TotalElements,
 		MaxDeadline:      stats.MaxDeadline,
 		MemoryUsed:       stats.MemoryUsed,
+		StaleLayerCount:  stats.StaleLayerCount,
 		Note:             "Statistics are currently shown for the first layer only",
 	}
 }
