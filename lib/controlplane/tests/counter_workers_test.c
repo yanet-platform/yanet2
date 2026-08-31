@@ -3,8 +3,10 @@
  *
  * Every worker's config_gen_ectx owns its own counter storage registry,
  * and those registries may hold different storages. The per-worker read
- * returns each worker's matched set independently; the cross-worker
- * union lives in the Go bindings.
+ * returns each worker's matched set independently; the union across
+ * workers lives in the Go bindings. The worker-counter read follows the
+ * same shape: each call snapshots one worker's own storage of the
+ * shared worker-counter registry, selected by the worker index.
  *
  * Divergence is produced by writing distinct values into the two workers'
  * pipeline storages and by registering an extra tagged storage in only
@@ -38,6 +40,8 @@
 #define CW_W1_INPUT 0x20
 #define CW_W1_EXTRA_0 0xAA
 #define CW_W1_EXTRA_1 0xBB
+#define CW_W0_WORKER 0x30
+#define CW_W1_WORKER 0x40
 
 static int
 install_empty_pipeline(
@@ -131,6 +135,34 @@ write_pipeline_counter(
 	TEST_ASSERT(
 		idx != COUNTER_INVALID,
 		"counter '%s' not found in the pipeline registry",
+		counter_name
+	);
+
+	uint64_t *values =
+		counter_handle_get_value(counter_get_value_handle(idx, storage)
+		);
+	values[0] = value;
+	return TEST_SUCCESS;
+}
+
+// Write value into the first slot of a counter named name in a worker's
+// own storage of the shared worker-counter registry, so the two workers
+// report different snapshots through the worker-counter read.
+static int
+write_worker_counter(
+	struct dp_config *dp_config,
+	uint64_t worker_idx,
+	const char *counter_name,
+	uint64_t value
+) {
+	struct counter_storage **storages =
+		ADDR_OF(&dp_config->worker_counter_storages);
+	struct counter_storage *storage = ADDR_OF(storages + worker_idx);
+
+	uint64_t idx = counter_index_by_name(storage, counter_name);
+	TEST_ASSERT(
+		idx != COUNTER_INVALID,
+		"counter '%s' not found in the worker counter registry",
 		counter_name
 	);
 
@@ -293,7 +325,6 @@ test_per_worker_sets(struct dp_config *dp_config) {
 	TEST_ASSERT_NOT_NULL(set1, "worker 1 set is missing");
 	TEST_ASSERT_EQUAL(0, set0->counters->count, "worker 0 matched");
 	TEST_ASSERT_EQUAL(1, set1->counters->count, "worker 1 match count");
-	TEST_ASSERT_EQUAL(1, set1->counters->instance_count, "instance count");
 
 	struct counter_handle *handle = yanet_get_counter(set1->counters, 0);
 	TEST_ASSERT_NOT_NULL(handle, "worker 1 set has no handle");
@@ -305,12 +336,12 @@ test_per_worker_sets(struct dp_config *dp_config) {
 	TEST_ASSERT_EQUAL(2, handle->size, "counter size");
 	TEST_ASSERT_EQUAL(
 		CW_W1_EXTRA_0,
-		yanet_get_counter_value(handle->values, 0, 0),
+		yanet_get_counter_value(handle->values, 0),
 		"worker 1 extra counter slot 0"
 	);
 	TEST_ASSERT_EQUAL(
 		CW_W1_EXTRA_1,
-		yanet_get_counter_value(handle->values, 1, 0),
+		yanet_get_counter_value(handle->values, 1),
 		"worker 1 extra counter slot 1"
 	);
 
@@ -363,13 +394,86 @@ test_per_worker_shared_counter(struct dp_config *dp_config) {
 		);
 		TEST_ASSERT_EQUAL(
 			expected[w_idx],
-			yanet_get_counter_value(handle->values, 0, 0),
+			yanet_get_counter_value(handle->values, 0),
 			"worker %lu input value",
 			(unsigned long)w_idx
 		);
 	}
 
 	yanet_counter_worker_set_list_free(sets);
+	return TEST_SUCCESS;
+}
+
+// Verifies that the worker-counter read snapshots only the named
+// worker's storage: each worker reports its own written value, every
+// worker carries the shared registry's full counter set, and an
+// out-of-range worker index is refused.
+static int
+test_worker_counters_per_worker(struct dp_config *dp_config) {
+	const uint64_t expected[CW_WORKER_COUNT] = {CW_W0_WORKER, CW_W1_WORKER};
+	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
+		TEST_ASSERT_SUCCESS(
+			write_worker_counter(
+				dp_config, w_idx, "iterations", expected[w_idx]
+			),
+			"failed to write worker %lu iterations counter",
+			(unsigned long)w_idx
+		);
+	}
+
+	uint64_t registry_count = 0;
+	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
+		struct counter_handle_list *list =
+			yanet_get_worker_counters(dp_config, w_idx);
+		TEST_ASSERT_NOT_NULL(
+			list,
+			"worker %lu counter read returned NULL",
+			(unsigned long)w_idx
+		);
+		if (w_idx == 0) {
+			registry_count = list->count;
+			TEST_ASSERT(
+				registry_count > 0,
+				"worker counter registry is empty"
+			);
+		} else {
+			TEST_ASSERT_EQUAL(
+				registry_count,
+				list->count,
+				"worker %lu counter count differs from worker "
+				"0",
+				(unsigned long)w_idx
+			);
+		}
+
+		struct counter_handle *handle = NULL;
+		for (size_t idx = 0; idx < list->count; ++idx) {
+			struct counter_handle *cur =
+				yanet_get_counter(list, idx);
+			if (cur != NULL &&
+			    strcmp(cur->name, "iterations") == 0) {
+				handle = cur;
+				break;
+			}
+		}
+		TEST_ASSERT_NOT_NULL(
+			handle,
+			"worker %lu read lacks the iterations counter",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			expected[w_idx],
+			yanet_get_counter_value(handle->values, 0),
+			"worker %lu iterations value",
+			(unsigned long)w_idx
+		);
+		yanet_counter_handle_list_free(list);
+	}
+
+	TEST_ASSERT_NULL(
+		yanet_get_worker_counters(dp_config, CW_WORKER_COUNT),
+		"out-of-range worker counter read must return NULL"
+	);
 	return TEST_SUCCESS;
 }
 
@@ -423,6 +527,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_per_worker_shared_counter(dp_config);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_worker_counters_per_worker(dp_config);
 	}
 
 	agent_detach(agent);

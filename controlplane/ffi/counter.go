@@ -51,30 +51,22 @@ func (m CounterInfo) InstanceValues(instance int) []uint64 {
 	return m.Values[instance]
 }
 
-func decodeCounterHandle(
-	handle *C.struct_counter_handle,
-	instanceCount C.uint64_t,
-) CounterInfo {
+func decodeCounterHandle(handle *C.struct_counter_handle) CounterInfo {
 	size := int(handle.size)
-	instances := int(instanceCount)
 
-	values := make([][]uint64, instances)
-	if total := instances * size; total > 0 {
-		flat := make([]uint64, total)
+	var instance []uint64
+	if size > 0 {
+		instance = make([]uint64, size)
 		C.yanet_get_counter_values(
 			handle.values,
 			handle.size,
-			instanceCount,
-			(*C.uint64_t)(unsafe.Pointer(&flat[0])),
+			(*C.uint64_t)(unsafe.Pointer(&instance[0])),
 		)
-		for iidx := range instances {
-			values[iidx] = flat[iidx*size : (iidx+1)*size : (iidx+1)*size]
-		}
 	}
 
 	return CounterInfo{
 		Name:   C.GoString(&handle.name[0]),
-		Values: values,
+		Values: [][]uint64{instance},
 	}
 }
 
@@ -86,7 +78,7 @@ func (m *DPConfig) encodeCounters(
 	for cidx := C.uint64_t(0); cidx < counters.count; cidx++ {
 		handle := C.yanet_get_counter(counters, cidx)
 		if handle != nil {
-			res = append(res, decodeCounterHandle(handle, counters.instance_count))
+			res = append(res, decodeCounterHandle(handle))
 		}
 	}
 
@@ -240,15 +232,30 @@ func (m *DPConfig) ObjectCounters(
 }
 
 // RawWorkerCounters returns the worker counters, or nil when they cannot be read.
+//
+// The C API snapshots one worker at a time, so every worker is read
+// separately and the per-worker snapshots are merged into one list
+// spanning every worker: worker i's values land in instance slot i of
+// each counter.
 func (m *DPConfig) RawWorkerCounters() []CounterInfo {
-	counters := C.yanet_get_worker_counters(m.ptr)
-	defer C.yanet_counter_handle_list_free(counters)
-
-	if counters == nil {
-		return nil
+	workerCount := int(m.WorkerCount())
+	perWorker := make([][]CounterGroup, workerCount)
+	for idx := range workerCount {
+		counters := C.yanet_get_worker_counters(m.ptr, C.uint64_t(idx))
+		if counters == nil {
+			return nil
+		}
+		perWorker[idx] = []CounterGroup{{Counters: m.encodeCounters(counters)}}
+		C.yanet_counter_handle_list_free(counters)
 	}
 
-	return m.encodeCounters(counters)
+	// Every worker shares one untagged counter group, so the merge
+	// yields exactly one group carrying the worker-sharded counters.
+	groups := MergeWorkerCounterGroups(workerCount, perWorker)
+	if len(groups) == 0 {
+		return []CounterInfo{}
+	}
+	return groups[0].Counters
 }
 
 // CounterTag is a (key, value) predicate against a counter's tag set.
@@ -433,7 +440,8 @@ func decodeCounterGroups(counters *C.struct_counter_handle_list) []CounterGroup 
 		group := &groups[len(groups)-1]
 		group.Counters = append(
 			group.Counters,
-			decodeCounterHandle(handle, counters.instance_count))
+			decodeCounterHandle(handle),
+		)
 	}
 
 	return groups

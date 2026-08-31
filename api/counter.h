@@ -35,10 +35,10 @@ struct counter_handle {
 	struct counter_tag *tags;
 	size_t tag_count;
 
-	// Per-instance snapshot arrays: values[i] holds size values for
-	// instance i, copied when the list was acquired, remaining valid and
-	// unchanged across controlplane updates until the list is freed.
-	uint64_t **values;
+	// The counter's value snapshot: size values copied when the list
+	// was acquired, remaining valid and unchanged across controlplane
+	// updates until the list is freed.
+	uint64_t *values;
 };
 
 // A list of counter handles whose single allocation also owns every
@@ -46,7 +46,6 @@ struct counter_handle {
 // region placed right after the handle array, so freeing the list
 // reclaims all of it.
 struct counter_handle_list {
-	uint64_t instance_count;
 	uint64_t count;
 	struct counter_handle counters[];
 };
@@ -74,8 +73,15 @@ yanet_counter_query_compile(
 void
 yanet_counter_query_free(struct counter_query *query);
 
+// Snapshot the worker counters of one worker, identified by its index
+// among the dataplane's workers.
+//
+// The returned list must be released with
+// yanet_counter_handle_list_free. Returns NULL when the index is out of
+// range or the allocation fails; the union across workers is the
+// caller's to build.
 struct counter_handle_list *
-yanet_get_worker_counters(struct dp_config *dp_config);
+yanet_get_worker_counters(struct dp_config *dp_config, uint64_t worker_idx);
 
 // Counters of a single DPDK port.
 //
@@ -127,29 +133,23 @@ struct counter_handle *
 yanet_get_counter(struct counter_handle_list *counters, uint64_t idx);
 
 uint64_t
-yanet_get_counter_value(
-	uint64_t **values, uint64_t value_idx, uint64_t worker_idx
-);
+yanet_get_counter_value(const uint64_t *values, uint64_t value_idx);
 
-// Copy all values for every instance of a counter into a flat caller-supplied
-// buffer in a single call.
+// Copy all values of a counter into a flat caller-supplied buffer in a
+// single call.
 //
-// values_out must have room for instance_count * size uint64 elements and is
-// filled instance-major: instance i occupies values_out[i*size .. i*size +
-// size). Performs the same reads as yanet_get_counter_value but batched into
-// one call, avoiding per-value CGO overhead when reading counters from Go.
+// values_out must have room for size uint64 elements. Performs the same
+// reads as the single-value accessor but batched into one call, avoiding
+// per-value CGO overhead when reading counters from Go.
 void
 yanet_get_counter_values(
-	uint64_t **values,
-	uint64_t size,
-	uint64_t instance_count,
-	uint64_t *values_out
+	const uint64_t *values, uint64_t size, uint64_t *values_out
 );
 
 // One worker's independently matched counter set.
 //
-// counters holds only that worker's snapshot: its instance_count is 1
-// and every handle's values are copied from that worker's own storages.
+// counters holds only that worker's snapshot: every handle's values are
+// copied from that worker's own storages.
 struct counter_worker_set {
 	uint64_t worker_idx;
 	struct counter_handle_list *counters;

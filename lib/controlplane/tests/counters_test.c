@@ -152,7 +152,7 @@ test_value_snapshot_survives_removal(struct yanet_shm *shm) {
 	);
 
 	struct counter_handle *handle = yanet_get_counter(list, 0);
-	uint64_t before = yanet_get_counter_value(handle->values, 0, 0);
+	uint64_t before = yanet_get_counter_value(handle->values, 0);
 
 	// Re-install dev0 with no input pipeline: pipe0's counter storage is
 	// not respawned, so its value block's refcount drops to zero and the
@@ -162,17 +162,14 @@ test_value_snapshot_survives_removal(struct yanet_shm *shm) {
 		"failed to remove dev0's input pipeline"
 	);
 
-	uint64_t after = yanet_get_counter_value(handle->values, 0, 0);
+	uint64_t after = yanet_get_counter_value(handle->values, 0);
 	TEST_ASSERT_EQUAL(
 		after, before, "snapshot value changed after entity removal"
 	);
 
-	uint64_t *batched =
-		calloc(list->instance_count * handle->size, sizeof(uint64_t));
+	uint64_t *batched = calloc(handle->size, sizeof(uint64_t));
 	TEST_ASSERT_NOT_NULL(batched, "failed to allocate batched read buffer");
-	yanet_get_counter_values(
-		handle->values, handle->size, list->instance_count, batched
-	);
+	yanet_get_counter_values(handle->values, handle->size, batched);
 	TEST_ASSERT_EQUAL(
 		batched[0],
 		before,

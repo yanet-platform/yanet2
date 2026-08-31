@@ -99,81 +99,43 @@ counter_tags_carve(
 	return dup;
 }
 
-// Size of one counter's share of a list's value region: the
-// worker-pointer array plus every worker's value block.
+// Size of one counter's share of a list's value region: the counter's
+// single value block.
 static bool
-counter_value_region_size(
-	uint64_t worker_count, uint64_t counter_size, size_t *out
-) {
-	if (worker_count == 0) {
-		*out = 0;
-		return true;
-	}
-	if (worker_count > SIZE_MAX / sizeof(uint64_t *)) {
+counter_value_region_size(uint64_t counter_size, size_t *out) {
+	if (counter_size > SIZE_MAX / sizeof(uint64_t)) {
 		return false;
 	}
-	size_t ptr_array = (size_t)worker_count * sizeof(uint64_t *);
-	size_t per_worker = (size_t)worker_count * sizeof(uint64_t);
-	if (counter_size > (SIZE_MAX - ptr_array) / per_worker) {
-		return false;
-	}
-	*out = ptr_array + per_worker * (size_t)counter_size;
+	*out = (size_t)counter_size * sizeof(uint64_t);
 	return true;
 }
 
-// Carve a counter's worker-pointer array and value blocks from the
-// cursor, advance the cursor past them, and point the handle at them.
+// Snapshot one already-described counter's values into a block carved
+// from the cursor and point the handle at it.
 //
-// The blocks come from the list's own zeroed allocation, so a worker
-// without a snapshot keeps a zeroed instance and a zero-size counter
-// keeps a NULL-filled pointer array.
-static uint64_t **
-counter_values_carve(
-	struct counter_handle *dst, uint8_t **cursor, uint64_t worker_count
-) {
-	size_t ptr_array_size = worker_count * sizeof(uint64_t *);
-	uint8_t *base = *cursor;
-	*cursor = base + ptr_array_size +
-		  worker_count * dst->size * sizeof(uint64_t);
-
-	uint64_t **values = (uint64_t **)base;
-	uint64_t *value_blocks = (uint64_t *)(base + ptr_array_size);
-	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
-		values[w_idx] = dst->size == 0
-					? NULL
-					: value_blocks + w_idx * dst->size;
-	}
-	dst->values = values;
-	return values;
-}
-
-// Snapshot one already-described counter's per-worker values into
-// blocks carved from the cursor.
-//
-// Each worker has its own single-instance storage. The caller gathers
-// one storage per worker into worker_storages (a plain C-pointer
-// array). These storages are dataplane-owned and outlive every
-// configuration generation, so no lock or generation pin is required
-// around this call.
+// The values come from a single-instance storage. Worker storages are
+// dataplane-owned and outlive every configuration generation, so no
+// lock or generation pin is required around this call. A zero-size
+// counter keeps the NULL block the zeroed allocation left behind.
 static void
 counter_handle_fill_values(
 	struct counter_handle *dst,
 	uint8_t **cursor,
-	struct counter_storage **worker_storages,
-	uint64_t worker_count,
+	struct counter_storage *storage,
 	uint64_t idx
 ) {
-	uint64_t **values = counter_values_carve(dst, cursor, worker_count);
-	for (uint64_t w_idx = 0; w_idx < worker_count; ++w_idx) {
-		if (dst->size == 0) {
-			continue;
-		}
-		struct counter_value_handle *handle =
-			counter_get_value_handle(idx, worker_storages[w_idx]);
-		memcpy(values[w_idx],
-		       counter_handle_get_value(handle),
-		       dst->size * sizeof(uint64_t));
+	if (dst->size == 0) {
+		return;
 	}
+	uint64_t *values = (uint64_t *)*cursor;
+	*cursor += dst->size * sizeof(uint64_t);
+	dst->values = values;
+
+	struct counter_value_handle *handle =
+		counter_get_value_handle(idx, storage);
+	memcpy(values,
+	       counter_handle_get_value(handle),
+	       dst->size * sizeof(uint64_t));
 }
 
 // Per-worker counter storages matching one tag predicate.
@@ -242,16 +204,13 @@ worker_counter_matches_collect(
 // Allocate a handle list sized for match_count handles plus a
 // values_size-byte value region, and zero all of it.
 //
-// Sets instance_count and count on success. The value region sits right
-// after the handle array and is carved sequentially by the fill pass;
-// the zeroing leaves every not-yet-carved handle with NULL tags and
-// values, and a later pass only overwrites what it fills in.
+// Sets count on success. The value region sits right after the handle
+// array and is carved sequentially by the fill pass; the zeroing
+// leaves every not-yet-carved handle with NULL tags and values, and a
+// later pass only overwrites what it fills in.
 static struct counter_handle_list *
 counter_handle_list_alloc(
-	uint64_t instance_count,
-	size_t match_count,
-	size_t values_size,
-	yanet_error **err
+	size_t match_count, size_t values_size, yanet_error **err
 ) {
 	size_t list_size = sizeof(struct counter_handle_list) +
 			   sizeof(struct counter_handle) * match_count;
@@ -266,7 +225,6 @@ counter_handle_list_alloc(
 		return NULL;
 	}
 	memset(list, 0, list_size);
-	list->instance_count = instance_count;
 	list->count = match_count;
 	return list;
 }
@@ -282,9 +240,9 @@ counter_handle_list_region(const struct counter_handle_list *list) {
 //
 // matches is that worker's NULL-terminated storage match array, or NULL
 // for a worker without an execution context. The resulting list carries
-// instance_count == 1 and values snapshotted from that worker's own
-// storages only. Handles of one storage share a tags copy and sit next
-// to each other, matching the list free path's sharing convention.
+// values snapshotted from that worker's own storages only. Handles of
+// one storage share a tags copy and sit next to each other, matching
+// the list free path's sharing convention.
 //
 // A sizing pass walks the matches first so the list's single allocation
 // covers everything the fill pass carves: every matched counter's value
@@ -298,7 +256,7 @@ worker_counter_list_build(
 	yanet_error **err
 ) {
 	if (matches == NULL) {
-		return counter_handle_list_alloc(1, 0, 0, err);
+		return counter_handle_list_alloc(0, 0, err);
 	}
 
 	size_t match_count = 0;
@@ -319,7 +277,7 @@ worker_counter_list_build(
 			}
 			size_t counter_region;
 			if (!counter_value_region_size(
-				    1, counters[idx].size, &counter_region
+				    counters[idx].size, &counter_region
 			    ) ||
 			    !counter_region_add(&region, counter_region)) {
 				yanet_error_add(
@@ -346,7 +304,7 @@ worker_counter_list_build(
 	}
 
 	struct counter_handle_list *list =
-		counter_handle_list_alloc(1, match_count, values_size, err);
+		counter_handle_list_alloc(match_count, values_size, err);
 	if (list == NULL) {
 		return NULL;
 	}
@@ -379,12 +337,7 @@ worker_counter_list_build(
 			dst->gen = src->gen;
 			dst->tags = storage_tags;
 			dst->tag_count = cp_storage->tag_count;
-			struct counter_storage *worker_storages[1] = {
-				storage,
-			};
-			counter_handle_fill_values(
-				dst, &cursor, worker_storages, 1, idx
-			);
+			counter_handle_fill_values(dst, &cursor, storage, idx);
 			++next;
 		}
 	}
@@ -507,34 +460,24 @@ yanet_get_counter(struct counter_handle_list *counters, uint64_t idx) {
 }
 
 uint64_t
-yanet_get_counter_value(
-	uint64_t **values, uint64_t value_idx, uint64_t worker_idx
-) {
-	return values[worker_idx][value_idx];
+yanet_get_counter_value(const uint64_t *values, uint64_t value_idx) {
+	return values[value_idx];
 }
 
 void
 yanet_get_counter_values(
-	uint64_t **values,
-	uint64_t size,
-	uint64_t instance_count,
-	uint64_t *values_out
+	const uint64_t *values, uint64_t size, uint64_t *values_out
 ) {
 	if (size == 0) {
 		return;
 	}
-	for (uint64_t iidx = 0; iidx < instance_count; ++iidx) {
-		memcpy(values_out + iidx * size,
-		       values[iidx],
-		       size * sizeof(uint64_t));
-	}
+	memcpy(values_out, values, size * sizeof(uint64_t));
 }
 
 static struct counter_handle_list *
 counter_handle_list_build(
 	struct counter_registry *counter_registry,
-	struct counter_storage **storages,
-	uint64_t worker_count
+	struct counter_storage *storage
 ) {
 	uint64_t count = counter_registry->count;
 
@@ -544,7 +487,7 @@ counter_handle_list_build(
 		for (uint64_t idx = 0; idx < count; ++idx) {
 			size_t region;
 			if (!counter_value_region_size(
-				    worker_count, counters[idx].size, &region
+				    counters[idx].size, &region
 			    ) ||
 			    !counter_region_add(&values_size, region)) {
 				return NULL;
@@ -552,26 +495,12 @@ counter_handle_list_build(
 		}
 	}
 
-	struct counter_handle_list *list = counter_handle_list_alloc(
-		worker_count, count, values_size, NULL
-	);
+	struct counter_handle_list *list =
+		counter_handle_list_alloc(count, values_size, NULL);
 	if (list == NULL) {
 		return NULL;
 	}
 	struct counter_handle *handlers = list->counters;
-
-	// storages holds one offset-pointer cell per worker; materialize a
-	// plain storage pointer per worker before handing them to the
-	// value fill, which indexes the array directly.
-	struct counter_storage **worker_storages =
-		malloc(worker_count * sizeof(*worker_storages));
-	if (worker_storages == NULL) {
-		yanet_counter_handle_list_free(list);
-		return NULL;
-	}
-	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
-		worker_storages[worker_idx] = ADDR_OF(storages + worker_idx);
-	}
 
 	uint8_t *cursor = counter_handle_list_region(list);
 	for (uint64_t idx = 0; idx < count; ++idx) {
@@ -580,21 +509,21 @@ counter_handle_list_build(
 		strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
 		dst->size = counters[idx].size;
 		dst->gen = counters[idx].gen;
-		counter_handle_fill_values(
-			dst, &cursor, worker_storages, worker_count, idx
-		);
+		counter_handle_fill_values(dst, &cursor, storage, idx);
 	}
 
-	free(worker_storages);
 	return list;
 }
 
 struct counter_handle_list *
-yanet_get_worker_counters(struct dp_config *dp_config) {
+yanet_get_worker_counters(struct dp_config *dp_config, uint64_t worker_idx) {
+	if (worker_idx >= dp_config->worker_counter_storage_count) {
+		return NULL;
+	}
+	struct counter_storage **storages =
+		ADDR_OF(&dp_config->worker_counter_storages);
 	return counter_handle_list_build(
-		&dp_config->worker_counters,
-		ADDR_OF(&dp_config->worker_counter_storages),
-		dp_config->worker_counter_storage_count
+		&dp_config->worker_counters, ADDR_OF(storages + worker_idx)
 	);
 }
 
@@ -661,7 +590,7 @@ yanet_get_port_counters(struct dp_config *dp_config) {
 			pc->port_name,
 			sizeof(group->port_name));
 		group->counters = counter_handle_list_build(
-			&pc->registry, &pc->storage, 1
+			&pc->registry, ADDR_OF(&pc->storage)
 		);
 		if (group->counters == NULL) {
 			groups->port_count = idx;

@@ -49,7 +49,6 @@ func (m *DPConfig) PortCounters() ([]PortGroup, error) {
 					Value: uint64(C.yanet_get_counter_value(
 						handle.values,
 						0,
-						0,
 					)),
 				},
 			)
