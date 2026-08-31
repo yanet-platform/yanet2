@@ -31,14 +31,6 @@ func TestFunctionUpdateRejectsMissingMessages(t *testing.T) {
 			},
 		},
 		{
-			name: "empty function name",
-			request: &ynpb.UpdateFunctionRequest{
-				Function: &ynpb.Function{
-					Id: &commonpb.FunctionId{},
-				},
-			},
-		},
-		{
 			name: "missing chain",
 			request: &ynpb.UpdateFunctionRequest{
 				Function: &ynpb.Function{
@@ -76,6 +68,19 @@ func TestFunctionUpdateRejectsMissingMessages(t *testing.T) {
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
+}
+
+// Test_Function_Update_EmptyName verifies that Update rejects an id with
+// an empty name instead of creating a function named "".
+func Test_Function_Update_EmptyName(t *testing.T) {
+	svc := builtin.NewFunction(0, nil)
+
+	_, err := svc.Update(t.Context(), &ynpb.UpdateFunctionRequest{
+		Function: &ynpb.Function{
+			Id: &commonpb.FunctionId{},
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // TestFunctionDeleteRejectsMissingID verifies that Delete rejects a request

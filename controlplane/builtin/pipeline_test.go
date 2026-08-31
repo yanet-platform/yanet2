@@ -31,14 +31,6 @@ func TestPipelineUpdateRejectsMissingMessages(t *testing.T) {
 			},
 		},
 		{
-			name: "empty pipeline name",
-			request: &ynpb.UpdatePipelineRequest{
-				Pipeline: &ynpb.Pipeline{
-					Id: &commonpb.PipelineId{},
-				},
-			},
-		},
-		{
 			name: "nil function id in functions",
 			request: &ynpb.UpdatePipelineRequest{
 				Pipeline: &ynpb.Pipeline{
@@ -57,6 +49,19 @@ func TestPipelineUpdateRejectsMissingMessages(t *testing.T) {
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
+}
+
+// Test_Pipeline_Update_EmptyName verifies that Update rejects an id with
+// an empty name instead of creating a pipeline named "".
+func Test_Pipeline_Update_EmptyName(t *testing.T) {
+	svc := builtin.NewPipeline(0, nil)
+
+	_, err := svc.Update(t.Context(), &ynpb.UpdatePipelineRequest{
+		Pipeline: &ynpb.Pipeline{
+			Id: &commonpb.PipelineId{},
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // TestPipelineDeleteRejectsMissingID verifies that Delete rejects a request

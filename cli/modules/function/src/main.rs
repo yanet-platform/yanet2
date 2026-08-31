@@ -217,8 +217,8 @@ impl FunctionService {
             }),
         };
 
-        // Update is an upsert on the function itself, so a NotFound here names a
-        // referenced chain module, not the function. Keep the backend message verbatim.
+        // Update is an upsert, so a resource-level NotFound names a referenced
+        // chain module, not the function. Keep the backend message verbatim.
         self.service
             .client()
             .update(request)

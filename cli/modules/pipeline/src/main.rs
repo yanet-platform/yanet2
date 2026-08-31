@@ -236,8 +236,8 @@ impl PipelineService {
             }),
         };
 
-        // Update is an upsert on the pipeline itself, so a NotFound here names a
-        // referenced function, not the pipeline. Keep the backend message verbatim.
+        // Update is an upsert, so a resource-level NotFound names a referenced
+        // function, not the pipeline. Keep the backend message verbatim.
         self.service
             .client()
             .update(request)
