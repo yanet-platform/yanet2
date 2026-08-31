@@ -4,11 +4,14 @@
 
 #include <rte_ether.h>
 
+#include <lib/filter/query.h>
+
 #include "common/container_of.h"
-#include "controlplane/config/econtext.h"
-#include "dataplane/module/module.h"
+#include "lib/controlplane/config/econtext.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/pipeline.h"
 
 #include "config.h"
 #include "dataplane.h"

@@ -9,11 +9,14 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/xnetip"
+
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
@@ -58,7 +61,7 @@ func setupL3bHarness(
 
 	mod, err := cl3b.NewModuleConfig(agent, configName)
 	require.NoError(t, err)
-	t.Cleanup(mod.Free)
+	t.Cleanup(func() { _ = mod.Free() })
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{mod.AsFFIModule()}))
 
@@ -73,15 +76,15 @@ func catchAllForwardRules(device string) []cforward.ForwardRule {
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink4",
-			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
-			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		},
 		{
 			Target:  device,
 			Mode:    cforward.ModeOut,
 			Counter: "sink6",
-			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
-			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
 }
@@ -100,7 +103,7 @@ func wirePipeline(
 	sinkBackend := forward.NewBackend(agent)
 	sinkHandle, err := sinkBackend.UpdateModule(sinkName, catchAllForwardRules(deviceName))
 	require.NoError(t, err)
-	t.Cleanup(sinkHandle.Free)
+	t.Cleanup(func() { _ = sinkHandle.Free() })
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -122,11 +125,12 @@ func wirePipeline(
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
-	}}))
+	}})
+	require.NoError(t, err)
 }
 
 // TestL3b_ForwardsNonTcpUdpPackets verifies that packets which are neither

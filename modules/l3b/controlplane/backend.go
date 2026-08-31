@@ -5,6 +5,9 @@ import (
 	"net/netip"
 	"sync"
 
+	"github.com/yanet-platform/xnetip"
+
+	"github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
@@ -193,15 +196,15 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 			return fmt.Errorf("destination rule references unknown service %q", serviceName)
 		}
 
-		net6s, err := filterpb.ToNet6s(rule.GetNet6S())
+		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
 		if err != nil {
 			return fmt.Errorf("invalid net6s: %w", err)
 		}
-		net4s, err := filterpb.ToNet4s(rule.GetNet4S())
+		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
 		if err != nil {
 			return fmt.Errorf("invalid net4s: %w", err)
 		}
-		protoRanges, err := filterpb.ToProtoRanges(rule.GetProtoRanges())
+		protoRanges, err := filterpbconv.ToProtoRanges(rule.GetProtoRanges())
 		if err != nil {
 			return fmt.Errorf("invalid proto ranges: %w", err)
 		}
@@ -332,6 +335,23 @@ func ringFromWeights(weights []uint32) []uint32 {
 	return ring
 }
 
+// sourceNetworkFromIPNet decodes a legacy filter IPNet message into a
+// family-agnostic network; the mask may be non-contiguous.
+func sourceNetworkFromIPNet(pb *filterpb.IPNet) (xnetip.Network, error) {
+	addr, ok := netip.AddrFromSlice(pb.GetAddr())
+	if !ok {
+		return xnetip.Network{}, fmt.Errorf("invalid address")
+	}
+	mask, ok := netip.AddrFromSlice(pb.GetMask())
+	if !ok {
+		return xnetip.Network{}, fmt.Errorf("invalid mask")
+	}
+	if addr.Is4() != mask.Is4() {
+		return xnetip.Network{}, fmt.Errorf("address and mask must be the same IP family")
+	}
+	return xnetip.NetworkFrom(addr, mask)
+}
+
 func buildVirtualServiceConfig(
 	service *l3bpb.VirtualService,
 ) (cl3b.VirtualServiceConfig, error) {
@@ -342,7 +362,7 @@ func buildVirtualServiceConfig(
 			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid real server destination address")
 		}
 
-		sourceNet, err := filterpb.ToIPNet(server.GetSourceNetwork())
+		sourceNet, err := sourceNetworkFromIPNet(server.GetSourceNetwork())
 		if err != nil {
 			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid real server source network: %w", err)
 		}
@@ -361,15 +381,15 @@ func buildVirtualServiceConfig(
 
 	sourceFilterRules := make([]cl3b.SourceFilterRule, 0, len(service.GetSourceFilterRules()))
 	for _, rule := range service.GetSourceFilterRules() {
-		net6s, err := filterpb.ToNet6s(rule.GetNet6S())
+		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
 		if err != nil {
 			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid source net6s: %w", err)
 		}
-		net4s, err := filterpb.ToNet4s(rule.GetNet4S())
+		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
 		if err != nil {
 			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid source net4s: %w", err)
 		}
-		portRanges, err := filterpb.ToPortRanges(rule.GetPortRanges())
+		portRanges, err := filterpbconv.ToPortRanges(rule.GetPortRanges())
 		if err != nil {
 			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid source port ranges: %w", err)
 		}

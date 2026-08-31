@@ -1,9 +1,10 @@
 #pragma once
 
+#include <lib/filter/filter.h>
+#include <lib/filter/rule.h>
+
 #include "common/network.h"
-#include "controlplane/config/cp_module.h"
-#include "filter/filter.h"
-#include "filter/rule.h"
+#include "lib/controlplane/config/cp_module.h"
 
 enum real_state {
 	real_state_disabled = 0,

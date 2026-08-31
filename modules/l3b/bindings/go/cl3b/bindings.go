@@ -11,10 +11,14 @@ package cl3b
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"runtime"
+	"syscall"
 	"unsafe"
+
+	"github.com/yanet-platform/xnetip"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
@@ -55,14 +59,33 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-// Free releases the underlying C memory.
-//
-// Safe to call multiple times: subsequent calls are no-ops.
-func (m *ModuleConfig) Free() {
-	if ptr := m.asRawPtr(); ptr != nil {
-		C.l3b_module_config_free(ptr)
-		m.ptr = ffi.ModuleConfig{}
+// Free destroys the module config when it is dangling — referenced by no
+// live configuration generation — and reports nil. While a live generation
+// still references it the free is refused with ffi.ErrStillReferenced
+// and the handle stays usable: the caller must remember it and free it
+// again once the generations holding it drain. Safe to call multiple
+// times: subsequent calls are no-ops reporting nil.
+func (m *ModuleConfig) Free() error {
+	ptr := m.asRawPtr()
+	if ptr == nil {
+		return nil
 	}
+	var cErr *C.yanet_error
+	rc, errno := C.l3b_module_config_free(ptr, &cErr)
+	if rc == 0 {
+		m.ptr = ffi.ModuleConfig{}
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		// The refused attempt allocated an error chain; release it
+		// rather than leaking one per attempt. The object is intact.
+		C.yanet_error_free(cErr)
+		return ffi.ErrStillReferenced
+	}
+	return fmt.Errorf(
+		"failed to free module config: %w",
+		cerrors.FromC(unsafe.Pointer(cErr)),
+	)
 }
 
 // Update installs the destination filter rules and virtual service handles
@@ -125,20 +148,20 @@ const (
 type RealServer struct {
 	Type               IPFamily
 	DestinationAddress netip.Addr
-	SourceNet          filter.IPNet
+	SourceNet          xnetip.Network
 }
 
 // SourceFilterRule describes the source-side match criteria of a service.
 type SourceFilterRule struct {
-	Net6s      filter.IPNets
-	Net4s      filter.IPNets
+	Net6s      []xnetip.BiContiguous
+	Net4s      []xnetip.Contiguous[xnetip.Network4]
 	PortRanges filter.PortRanges
 }
 
 // DestinationFilterRule describes a destination-side classification rule.
 type DestinationFilterRule struct {
-	Net6s               filter.IPNets
-	Net4s               filter.IPNets
+	Net6s               []xnetip.BiContiguous
+	Net4s               []xnetip.Contiguous[xnetip.Network4]
 	ProtoRanges         filter.ProtoRanges
 	VirtualServiceIndex uint32
 }
@@ -283,10 +306,12 @@ func (r *RealServer) cBuild() C.struct_l3b_real_server {
 	// The 'type' field is a Go keyword; write it through its offset.
 	*(*uint32)(unsafe.Pointer(&c)) = uint32(r.Type)
 
-	if r.SourceNet.Addr.Is4() {
+	sourceNetAddr := r.SourceNet.Addr()
+	sourceNetMask := r.SourceNet.Mask()
+	if sourceNetAddr.Is4() {
 		sourceNet := (*C.struct_net4)(unsafe.Pointer(&c.source_net))
-		addr := r.SourceNet.Addr.As4()
-		mask := r.SourceNet.Mask.As4()
+		addr := sourceNetAddr.As4()
+		mask := sourceNetMask.As4()
 		for idx := 0; idx < 4; idx++ {
 			sourceNet.addr[idx] = C.uint8_t(addr[idx])
 			sourceNet.mask[idx] = C.uint8_t(mask[idx])
@@ -299,8 +324,8 @@ func (r *RealServer) cBuild() C.struct_l3b_real_server {
 		}
 	} else {
 		sourceNet := (*C.struct_net6)(unsafe.Pointer(&c.source_net))
-		addr := r.SourceNet.Addr.As16()
-		mask := r.SourceNet.Mask.As16()
+		addr := sourceNetAddr.As16()
+		mask := sourceNetMask.As16()
 		for idx := 0; idx < 16; idx++ {
 			sourceNet.addr[idx] = C.uint8_t(addr[idx])
 			sourceNet.mask[idx] = C.uint8_t(mask[idx])

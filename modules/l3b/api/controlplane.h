@@ -1,7 +1,8 @@
 #pragma once
 
+#include <lib/filter/rule.h>
+
 #include "common/network.h"
-#include "filter/rule.h"
 #include "lib/errors/errors.h"
 
 #include <stdbool.h>
@@ -76,8 +77,11 @@ l3b_module_config_new(
 	struct agent *agent, const char *name, yanet_error **error
 );
 
-void
-l3b_module_config_free(struct cp_module *config);
+// Destroy the module configuration unless a live configuration generation
+// still references it; a refused destroy is reported through err and the
+// caller must retry later.
+int
+l3b_module_config_free(struct cp_module *config, yanet_error **err);
 
 // Allocate a virtual service in the agent's shared memory from its
 // control-plane descriptor. The service is agent-scoped so it can be created

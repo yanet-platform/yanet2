@@ -224,10 +224,9 @@ impl L3BService {
         log::debug!("list services response: {response:?}");
 
         output::data(
-            &response.services,
-            response.services.is_empty(),
-            format_args!("no services"),
+            || &response.services,
             || {
+                output::empty(format_args!("no services"));
                 for name in &response.services {
                     println!("{name}");
                 }
@@ -269,10 +268,9 @@ impl L3BService {
         log::debug!("list module configs response: {response:?}");
 
         output::data(
-            &response.configs,
-            response.configs.is_empty(),
-            format_args!("no module configs"),
+            || &response.configs,
             || {
+                output::empty(format_args!("no module configs"));
                 for name in &response.configs {
                     println!("{name}");
                 }

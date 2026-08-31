@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <filter/compiler.h>
+#include <lib/filter/compiler.h>
 
 #include "common/container_of.h"
 #include "common/memory.h"
@@ -55,10 +55,35 @@ l3b_module_config_new(
 	return &config->cp_module;
 }
 
-void
-l3b_module_config_free(struct cp_module *cp_module) {
+static void
+l3b_module_config_destroy(struct cp_module *cp_module) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
+
+	filter_free(&config->filter_ip4, L3B_DESTINATION_FILTER_IP4_TAG);
+	filter_free(&config->filter_ip6, L3B_DESTINATION_FILTER_IP6_TAG);
+
+	struct memory_context *memory_context = &cp_module->memory_context;
+	struct virtual_service_handle **virtual_services =
+		ADDR_OF(&config->virtual_services);
+	if (virtual_services != NULL) {
+		memory_bfree(
+			memory_context,
+			virtual_services,
+			sizeof(struct virtual_service_handle *) *
+				config->virtual_service_count
+		);
+	}
+
+	uint32_t *virtual_service_indexes =
+		ADDR_OF(&config->virtual_service_indexes);
+	if (virtual_service_indexes != NULL) {
+		memory_bfree(
+			memory_context,
+			virtual_service_indexes,
+			sizeof(uint32_t) * config->virtual_service_index_count
+		);
+	}
 
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&config->cp_module.agent);
@@ -67,6 +92,16 @@ l3b_module_config_free(struct cp_module *cp_module) {
 	memory_bfree(
 		&agent->memory_context, config, sizeof(struct module_config)
 	);
+}
+
+int
+l3b_module_config_free(struct cp_module *cp_module, yanet_error **err) {
+	if (cp_module_try_destroy(cp_module, err)) {
+		return -1;
+	}
+
+	l3b_module_config_destroy(cp_module);
+	return 0;
 }
 
 // Translate the source filter rules into classifier filter_rule descriptors.
@@ -173,6 +208,7 @@ build_source_filters(
 		    filter_rule_ptrs,
 		    source_filter_rule_count,
 		    memory_context,
+		    "source_filter_ip4",
 		    err
 	    )) {
 		yanet_error_add(err, "failed to init source filter_ip4");
@@ -185,6 +221,7 @@ build_source_filters(
 		    filter_rule_ptrs,
 		    source_filter_rule_count,
 		    memory_context,
+		    "source_filter_ip6",
 		    err
 	    )) {
 		yanet_error_add(err, "failed to init source filter_ip6");
@@ -426,6 +463,7 @@ build_destination_filters(
 		    filter_rule_ptrs,
 		    destination_filter_rule_count,
 		    memory_context,
+		    "destination_filter_ip4",
 		    err
 	    )) {
 		yanet_error_add(err, "failed to init destination filter_ip4");
@@ -438,6 +476,7 @@ build_destination_filters(
 		    filter_rule_ptrs,
 		    destination_filter_rule_count,
 		    memory_context,
+		    "destination_filter_ip6",
 		    err
 	    )) {
 		yanet_error_add(err, "failed to init destination filter_ip6");

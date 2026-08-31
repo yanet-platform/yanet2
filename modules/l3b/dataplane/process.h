@@ -9,10 +9,11 @@
 
 #include "common/network.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/dscp.h"
 #include "lib/dataplane/packet/encap.h"
 #include "lib/dataplane/packet/packet.h"
 
-#include <filter/query.h>
+#include <lib/filter/query.h>
 
 // Per-service source filter: classifies incoming packets by source network and
 // destination (service) port.
@@ -93,9 +94,11 @@ l3b_real_server_process(
 	}
 
 	if (real_server->type == ip_family_ip4) {
-		return packet_ip4_encap(packet, real_dst, outer_src);
+		return packet_ip4_encap(
+			packet, real_dst, outer_src, DSCP_MARK_ALWAYS
+		);
 	}
-	return packet_ip6_encap(packet, real_dst, outer_src);
+	return packet_ip6_encap(packet, real_dst, outer_src, DSCP_MARK_ALWAYS);
 }
 
 /*
