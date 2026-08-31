@@ -23,10 +23,7 @@ var shippedInstanceConfigs = []string{
 }
 
 // Test_ShippedInstanceConfigs_NoUnknownKeys guards the shipped instance
-// configs against a key that matches no field in Config.
-//
-// Keys inside a target's function are opaque to this walk and are
-// guarded by the end-to-end load test instead.
+// configs against unknown keys, including inside a target's function.
 func Test_ShippedInstanceConfigs_NoUnknownKeys(t *testing.T) {
 	for _, path := range shippedInstanceConfigs {
 		t.Run(path, func(t *testing.T) {
@@ -51,7 +48,7 @@ func Test_ShippedInstanceConfigs_LoadEndToEnd(t *testing.T) {
 			require.NotEmpty(t, cfg.Targets)
 
 			for _, target := range cfg.Targets {
-				function := target.Function.Unwrap()
+				function := target.Function.AsFunction()
 				require.NotNil(t, function)
 				require.NotEmpty(t, function.GetId().GetName())
 				require.NotEmpty(t, function.GetChains())
@@ -96,8 +93,8 @@ ignore_pdump: false
 	require.False(t, target.IgnorePdump)
 }
 
-// Test_FunctionConfig_DecodesWholeFunction verifies that a function node
-// decodes through xproto into the whole ynpb.Function.
+// Test_FunctionConfig_DecodesWholeFunction verifies that a spelled
+// function converts into the whole ynpb.Function.
 func Test_FunctionConfig_DecodesWholeFunction(t *testing.T) {
 	raw := `
 id:
@@ -111,9 +108,9 @@ chains:
     weight: 2
 `
 	var function operator.FunctionConfig
-	require.NoError(t, yaml.Unmarshal([]byte(raw), &function))
+	require.NoError(t, xcfg.Decode([]byte(raw), &function))
 
-	decoded := function.Unwrap()
+	decoded := function.AsFunction()
 	require.Equal(t, "fn:decap", decoded.GetId().GetName())
 	require.Len(t, decoded.GetChains(), 1)
 	require.Equal(t, uint64(2), decoded.GetChains()[0].GetWeight())
@@ -124,17 +121,60 @@ chains:
 	require.Equal(t, "decap0", chain.GetModules()[0].GetName())
 }
 
-// Test_FunctionConfig_RejectsUnknownKey verifies that a key outside
-// ynpb.Function is rejected, not ignored.
-func Test_FunctionConfig_RejectsUnknownKey(t *testing.T) {
+// Test_FunctionConfig_RejectsOmittedChainWeight verifies that a chains
+// entry without an explicit weight is refused.
+func Test_FunctionConfig_RejectsOmittedChainWeight(t *testing.T) {
 	raw := `
 id:
   name: fn:decap
-chainz: []
+chains:
+  - chain:
+      name: default
+      modules:
+        - type: decap
+          name: decap0
 `
 	var function operator.FunctionConfig
-	err := yaml.Unmarshal([]byte(raw), &function)
-	require.ErrorContains(t, err, "chainz")
+	err := xcfg.Decode([]byte(raw), &function)
+	require.ErrorContains(t, err, "value must be set explicitly")
+	require.ErrorContains(t, err, "weight")
+}
+
+// Test_FunctionConfig_AcceptsExplicitZeroWeight verifies that a spelled
+// weight of zero still decodes, since zero deliberately disables a chain.
+func Test_FunctionConfig_AcceptsExplicitZeroWeight(t *testing.T) {
+	raw := `
+id:
+  name: fn:decap
+chains:
+  - chain:
+      name: default
+      modules:
+        - type: decap
+          name: decap0
+    weight: 0
+`
+	var function operator.FunctionConfig
+	require.NoError(t, xcfg.Decode([]byte(raw), &function))
+	require.Equal(t, uint64(0), function.AsFunction().GetChains()[0].GetWeight())
+}
+
+// Test_Config_UnknownFunctionKeyIsCaught verifies that the known-keys walk
+// sees inside a target's function, so a misspelled key there is reported.
+func Test_Config_UnknownFunctionKeyIsCaught(t *testing.T) {
+	raw := `
+name: decap
+targets:
+  - name: decap0
+    method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
+    file: /etc/yanet2/decap.d/default.yaml
+    function:
+      id:
+        name: fn:decap
+      chain: []
+`
+	err := xcfg.CheckKnownKeys[operator.Config]([]byte(raw))
+	require.ErrorContains(t, err, "chain")
 }
 
 // Test_Config_RejectsDuplicateGateways verifies that two gateways sharing

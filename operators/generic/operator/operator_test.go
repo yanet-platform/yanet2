@@ -10,6 +10,8 @@ import (
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/operators/generic/operator"
+
+	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
 // decapTarget decodes a target pushing the module config at path with a
@@ -81,4 +83,69 @@ func Test_NewOperator_RejectsNamelessModuleConfig(t *testing.T) {
 	_, err := operator.NewOperator(cfg)
 
 	require.ErrorContains(t, err, "names no config")
+}
+
+// Test_NewOperator_RejectsModuleTypeMismatch verifies that referencing the
+// pushed config's name under another module type is refused.
+func Test_NewOperator_RejectsModuleTypeMismatch(t *testing.T) {
+	path := writeModuleConfig(t, "name: decap0\nprefixes6: [2001:db8::/32]\n")
+	raw := fmt.Sprintf(`
+name: decap0
+method: %s
+file: %s
+function:
+  id:
+    name: fn:decap
+  chains:
+    - chain:
+        name: default
+        modules:
+          - type: forward
+            name: decap0
+      weight: 1
+`, decapUpdateMethod, path)
+	var target operator.TargetConfig
+	require.NoError(t, yaml.Unmarshal([]byte(raw), &target))
+	cfg := testConfig()
+	cfg.Targets = []operator.TargetConfig{target}
+
+	_, err := operator.NewOperator(cfg)
+
+	require.ErrorContains(t, err, `function "fn:decap" does not reference config "decap0"`)
+}
+
+// Test_NewOperator_ReadsModuleNameField verifies that a request naming its
+// config through module_name, the route FIB spelling, is checked too.
+func Test_NewOperator_ReadsModuleNameField(t *testing.T) {
+	path := writeModuleConfig(t, "module_name: route0\n")
+	raw := fmt.Sprintf(`
+name: route0
+method: modules.route.controlplane.routepb.v1.RouteService/UpdateFIB
+file: %s
+function:
+  id:
+    name: fn:route
+  chains:
+    - chain:
+        name: default
+        modules:
+          - type: route
+            name: %%s
+      weight: 1
+`, path)
+
+	var mismatched operator.TargetConfig
+	require.NoError(t, yaml.Unmarshal([]byte(fmt.Sprintf(raw, "route1")), &mismatched))
+	cfg := testConfig()
+	cfg.Targets = []operator.TargetConfig{mismatched}
+	_, err := operator.NewOperator(cfg)
+	require.ErrorContains(t, err, `does not reference config "route0"`)
+
+	var matched operator.TargetConfig
+	require.NoError(t, yaml.Unmarshal([]byte(fmt.Sprintf(raw, "route0")), &matched))
+	cfg = testConfig()
+	cfg.Targets = []operator.TargetConfig{matched}
+	runnable, err := operator.NewOperator(cfg)
+	require.NoError(t, err)
+	require.NoError(t, runnable.Close())
 }

@@ -7,10 +7,10 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
-	"github.com/yanet-platform/yanet2/common/go/xproto"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -87,13 +87,16 @@ type TargetConfig struct {
 	Name string `yaml:"name"`
 	// Method is the unary gRPC method that replaces the module config,
 	// spelled as "package.Service/Method".
+	//
+	// The reconcile loop repeats the call, so the method must replace
+	// whole state, not accumulate it.
 	Method xcfg.NonEmptyString `yaml:"method"`
 	// File is the path to the module config for this target: the method's
 	// request in YAML, sent as is.
 	File xcfg.NonEmptyString `yaml:"file"`
-	// Function is published after the config, a whole ynpb.Function in the
-	// message's YAML form. May be omitted when the target owns none.
-	Function FunctionConfig `yaml:"function"`
+	// Function is published after the config. May be omitted when the
+	// target owns none.
+	Function *FunctionConfig `yaml:"function"`
 	// IgnorePdump skips function updates when the existing chain already
 	// matches once every pdump:* module is filtered out.
 	//
@@ -113,28 +116,70 @@ func (m *TargetConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// FunctionConfig carries a whole ynpb.Function spelled in the message's
-// YAML form.
+// FunctionConfig is the whole gateway function a target publishes,
+// mirroring the ynpb.Function tree.
 type FunctionConfig struct {
-	function *ynpb.Function
+	// Id names the function (e.g. "fn:decap").
+	Id FunctionIdConfig `yaml:"id"`
+	// Chains are the function's weighted processing chains.
+	Chains []FunctionChainConfig `yaml:"chains"`
 }
 
-// Unwrap returns the decoded function, nil when the config spelled none.
-func (m *FunctionConfig) Unwrap() *ynpb.Function {
-	return m.function
+// FunctionIdConfig identifies a function by name.
+type FunctionIdConfig struct {
+	// Name is the function identifier (e.g. "fn:decap").
+	Name xcfg.NonEmptyString `yaml:"name"`
 }
 
-// UnmarshalYAML decodes the node through xproto, so unknown keys are
-// rejected and enums accept their declared names.
-func (m *FunctionConfig) UnmarshalYAML(value *yaml.Node) error {
-	data, err := yaml.Marshal(value)
-	if err != nil {
-		return err
+// FunctionChainConfig pairs a chain with its load-balancing weight.
+type FunctionChainConfig struct {
+	// Chain is the module sequence the weight applies to.
+	Chain ChainConfig `yaml:"chain"`
+	// Weight must be spelled explicitly, an explicit 0 disables the chain.
+	Weight xcfg.Required[uint64] `yaml:"weight"`
+}
+
+// ChainConfig is an ordered module sequence.
+type ChainConfig struct {
+	// Name is the chain name (e.g. "default").
+	Name xcfg.NonEmptyString `yaml:"name"`
+	// Modules are the module configs packets traverse, in order.
+	Modules []ModuleIdConfig `yaml:"modules"`
+}
+
+// ModuleIdConfig references one module config by type and name.
+type ModuleIdConfig struct {
+	// Type is the module type (e.g. "decap").
+	Type xcfg.NonEmptyString `yaml:"type"`
+	// Name is the module config name (e.g. "decap0").
+	Name xcfg.NonEmptyString `yaml:"name"`
+}
+
+// AsFunction converts the spelled function to its proto form, nil when
+// the target spelled none.
+func (m *FunctionConfig) AsFunction() *ynpb.Function {
+	if m == nil {
+		return nil
 	}
-	function := &ynpb.Function{}
-	if err := xproto.Unmarshal(data, function); err != nil {
-		return err
+	chains := make([]*ynpb.FunctionChain, 0, len(m.Chains))
+	for _, chain := range m.Chains {
+		modules := make([]*commonpb.ModuleId, 0, len(chain.Chain.Modules))
+		for _, module := range chain.Chain.Modules {
+			modules = append(modules, &commonpb.ModuleId{
+				Type: module.Type.Unwrap(),
+				Name: module.Name.Unwrap(),
+			})
+		}
+		chains = append(chains, &ynpb.FunctionChain{
+			Chain: &ynpb.Chain{
+				Name:    chain.Chain.Name.Unwrap(),
+				Modules: modules,
+			},
+			Weight: chain.Weight.Unwrap(),
+		})
 	}
-	m.function = function
-	return nil
+	return &ynpb.Function{
+		Id:     &commonpb.FunctionId{Name: m.Id.Name.Unwrap()},
+		Chains: chains,
+	}
 }

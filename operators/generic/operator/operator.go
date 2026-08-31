@@ -4,11 +4,13 @@ package operator
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // NewOperator builds one static operator instance: every target's module
@@ -25,14 +27,15 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 		if err != nil {
 			return nil, fmt.Errorf("target %d: %w", idx, err)
 		}
-		if err := checkFunctionReference(target, request); err != nil {
+		function := target.Function.AsFunction()
+		if err := checkFunctionReference(target, function, request); err != nil {
 			return nil, fmt.Errorf("target %d: %w", idx, err)
 		}
 		targets = append(targets, operator.StaticTarget{
 			Name:        target.Name,
 			Method:      target.Method.Unwrap(),
 			Request:     request,
-			Function:    target.Function.Unwrap(),
+			Function:    function,
 			IgnorePdump: target.IgnorePdump,
 		})
 	}
@@ -54,9 +57,9 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 // the module config its file names.
 //
 // The file and the function are independent documents, so a typo in either
-// would otherwise surface only as an endless reconcile retry.
-func checkFunctionReference(target TargetConfig, request proto.Message) error {
-	function := target.Function.Unwrap()
+// would otherwise surface only as an endless reconcile retry, or silently
+// wire a same-named config of another module.
+func checkFunctionReference(target TargetConfig, function *ynpb.Function, request proto.Message) error {
 	if function == nil {
 		return nil
 	}
@@ -70,11 +73,16 @@ func checkFunctionReference(target TargetConfig, request proto.Message) error {
 			target.File.Unwrap(),
 		)
 	}
+	moduleType, typed := methodModuleType(target.Method.Unwrap())
 	for _, chain := range function.GetChains() {
 		for _, module := range chain.GetChain().GetModules() {
-			if module.GetName() == name {
-				return nil
+			if module.GetName() != name {
+				continue
 			}
+			if typed && normalizeModuleType(module.GetType()) != moduleType {
+				continue
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf(
@@ -83,13 +91,40 @@ func checkFunctionReference(target TargetConfig, request proto.Message) error {
 	)
 }
 
-// requestConfigName returns the request's name field, ok=false when the
-// message declares none.
+// requestConfigName returns the request's config-naming field, ok=false
+// when the message declares none.
+//
+// The tree spells it as name in module update requests and as module_name
+// in the route FIB request.
 func requestConfigName(request proto.Message) (string, bool) {
-	descriptor := request.ProtoReflect().Descriptor().Fields().ByName("name")
-	if descriptor == nil || descriptor.Kind() != protoreflect.StringKind ||
-		descriptor.IsList() || descriptor.IsMap() {
+	message := request.ProtoReflect()
+	for _, field := range []protoreflect.Name{"name", "module_name"} {
+		descriptor := message.Descriptor().Fields().ByName(field)
+		if descriptor == nil || descriptor.Kind() != protoreflect.StringKind ||
+			descriptor.IsList() || descriptor.IsMap() {
+			continue
+		}
+		return message.Get(descriptor).String(), true
+	}
+	return "", false
+}
+
+// methodModuleType returns the module type a modules.* method serves,
+// ok=false for any other package.
+func methodModuleType(method string) (string, bool) {
+	service, _, ok := strings.Cut(strings.TrimPrefix(method, "/"), "/")
+	if !ok {
 		return "", false
 	}
-	return request.ProtoReflect().Get(descriptor).String(), true
+	segments := strings.SplitN(service, ".", 3)
+	if len(segments) < 3 || segments[0] != "modules" {
+		return "", false
+	}
+	return normalizeModuleType(segments[1]), true
+}
+
+// normalizeModuleType folds a proto package segment and a dataplane
+// module type into one spelling, such as route_mpls versus route-mpls.
+func normalizeModuleType(moduleType string) string {
+	return strings.ReplaceAll(moduleType, "-", "_")
 }
