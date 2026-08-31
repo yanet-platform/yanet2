@@ -92,7 +92,8 @@ fn serialize_forward_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S:
     }
 }
 
-/// Deserializes a forward mode from its declared name or number.
+/// Deserializes a forward mode from its declared name or number, a null
+/// as NONE.
 ///
 /// An undeclared value is refused here, because the service would
 /// silently coerce it to NONE rather than reject it.
@@ -104,14 +105,25 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
         Name(String),
     }
 
-    match NameOrNumber::deserialize(deserializer)? {
-        NameOrNumber::Number(mode) => forwardpb::ForwardMode::try_from(mode)
+    match Option::<NameOrNumber>::deserialize(deserializer)? {
+        None => Ok(forwardpb::ForwardMode::None as i32),
+        Some(NameOrNumber::Number(mode)) => forwardpb::ForwardMode::try_from(mode)
             .map(|mode| mode as i32)
             .map_err(|_| serde::de::Error::custom(format!("unknown forward mode {mode}"))),
-        NameOrNumber::Name(name) => forwardpb::ForwardMode::from_str_name(&name)
+        Some(NameOrNumber::Name(name)) => forwardpb::ForwardMode::from_str_name(&name)
             .map(|mode| mode as i32)
             .ok_or_else(|| serde::de::Error::custom(format!("unknown forward mode {name:?}"))),
     }
+}
+
+/// Deserializes a null as the field's zero value, as the operator's YAML
+/// decoder reads it.
+fn null_as_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Loads the update request from its YAML file.
@@ -140,27 +152,7 @@ where
         Some(value) => value,
     };
     value.apply_merge()?;
-    strip_null_fields(&mut value);
     Ok(serde_yaml::from_value(value)?)
-}
-
-/// Removes null-valued mapping entries, so a spelled null reads as the
-/// field's zero value, as the operator reads it.
-fn strip_null_fields(value: &mut serde_yaml::Value) {
-    match value {
-        serde_yaml::Value::Mapping(mapping) => {
-            mapping.retain(|_, entry| !entry.is_null());
-            for (_, entry) in mapping.iter_mut() {
-                strip_null_fields(entry);
-            }
-        }
-        serde_yaml::Value::Sequence(sequence) => {
-            for entry in sequence.iter_mut() {
-                strip_null_fields(entry);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// Binds the config name into a loaded request, refusing a file that names
@@ -273,9 +265,7 @@ impl ForwardService {
         Ok(())
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let mut request = load_request(&cmd.file).map_err(|e| self.service.invalid("update", e.to_string()))?;
-        bind_request_name(&mut request, &cmd.config).map_err(|e| self.service.invalid("update", e))?;
+    pub async fn update_config(&mut self, cmd: UpdateCmd, request: UpdateConfigRequest) -> Result<(), Error> {
         self.service
             .client()
             .update_config(request)
@@ -289,11 +279,29 @@ impl ForwardService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
+    // The update file is read and bound before the connection, so bad
+    // local input fails deterministically with or without a reachable
+    // gateway.
+    let update = match &cmd.mode {
+        ModeCmd::Update(update) => {
+            let endpoint = cmd.connection.endpoint.as_str();
+            let mut request =
+                load_request(&update.file).map_err(|e| Error::invalid_argument("update", endpoint, e.to_string()))?;
+            bind_request_name(&mut request, &update.config)
+                .map_err(|e| Error::invalid_argument("update", endpoint, e))?;
+            Some(request)
+        }
+        _ => None,
+    };
+
     let mut service = ForwardService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Update(cmd) => {
+            let request = update.expect("prepared for the update mode");
+            service.update_config(cmd, request).await
+        }
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::List => service.list_configs().await,
     }
@@ -507,6 +515,18 @@ rules:
                 .to_string()
                 .contains("mtu")
         );
+    }
+
+    #[test]
+    fn test_unknown_null_valued_keys_are_still_refused() {
+        let yaml = "rulez: null\n";
+        let path = std::env::temp_dir().join(format!("fwd-nullkey-{}.yaml", std::process::id()));
+        std::fs::write(&path, yaml).expect("the fixture must be written");
+
+        let refused = load_request(&path).expect_err("a misspelled null-valued key must be refused");
+        std::fs::remove_file(&path).ok();
+
+        assert!(refused.to_string().contains("rulez"));
     }
 
     #[test]
