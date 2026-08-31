@@ -13,7 +13,7 @@ import (
 	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
-// decodeConfig decodes raw over the built-in defaults.
+// decodeConfig decodes the document over the built-in defaults.
 func decodeConfig(t *testing.T, raw string) *operator.Config {
 	t.Helper()
 	cfg := operator.DefaultConfig()
@@ -21,8 +21,8 @@ func decodeConfig(t *testing.T, raw string) *operator.Config {
 	return cfg
 }
 
-// decapInstance spells a one-gateway decap instance pushing the module
-// config at path, with a one-chain function referencing it.
+// decapInstance spells a one-gateway decap instance pushing one module
+// config, with a one-chain function referencing it.
 func decapInstance(path string) string {
 	return fmt.Sprintf(`
 name: decap

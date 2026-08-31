@@ -13,8 +13,8 @@ import (
 
 const decapUpdateMethod = "modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig"
 
-// writeModuleConfig stores data as a module config file in a fresh
-// directory and returns its path.
+// writeModuleConfig stores a module config file in a fresh directory and
+// returns its path.
 func writeModuleConfig(t *testing.T, data string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
