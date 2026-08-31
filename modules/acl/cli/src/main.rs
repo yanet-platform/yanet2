@@ -5,8 +5,8 @@ use aclpb::{
     DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest,
     UpdateConfigRequest, acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
-use args::{DeleteCmd, MetricsCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
+use args::{DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
+use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
@@ -14,16 +14,14 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion,
-    display::print_table_from_entries,
     errors::Error,
-    metrics::{self, GaugeRow, Kind, Metric},
+    metrics,
     output::{self, CommonFormat},
 };
 
 mod args;
 
 use ::commonpb::pb as commonpb;
-use commonpb::{GetMetricsRequest, MetricTag};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod aclpb {
@@ -191,134 +189,6 @@ fn print_rule_metrics_table(metrics: &[commonpb::Metric]) {
         print_counter_table(pending);
         println!();
     }
-}
-
-fn print_metrics_table(metrics: &[Metric]) {
-    struct CounterPair {
-        display: String,
-        packets: Option<u64>,
-        bytes: Option<u64>,
-    }
-
-    let mut location_keys: Vec<String> = Vec::new();
-    let mut location_map: HashMap<String, Vec<&Metric>> = HashMap::new();
-    let mut gauge_keys: Vec<String> = Vec::new();
-    let mut gauge_map: HashMap<String, Vec<&Metric>> = HashMap::new();
-    let mut grpc_counters: Vec<&Metric> = Vec::new();
-    let mut grpc_histograms: Vec<&Metric> = Vec::new();
-
-    for m in metrics {
-        if m.name.starts_with("grpc_") {
-            match m.kind {
-                Kind::Counter => grpc_counters.push(m),
-                Kind::Histogram => grpc_histograms.push(m),
-                _ => {}
-            }
-            continue;
-        }
-
-        match m.kind {
-            Kind::Histogram => {}
-            Kind::Gauge => {
-                let cfg = m.label_value("config").unwrap_or("global").to_string();
-                if !gauge_map.contains_key(&cfg) {
-                    gauge_keys.push(cfg.clone());
-                }
-                gauge_map.entry(cfg).or_default().push(m);
-            }
-            Kind::Counter => {
-                let key = format!(
-                    "{}\0{}\0{}\0{}\0{}",
-                    m.label_value("config").unwrap_or(""),
-                    m.label_value("device").unwrap_or(""),
-                    m.label_value("pipeline").unwrap_or(""),
-                    m.label_value("function").unwrap_or(""),
-                    m.label_value("chain").unwrap_or(""),
-                );
-                if !location_map.contains_key(&key) {
-                    location_keys.push(key.clone());
-                }
-                location_map.entry(key).or_default().push(m);
-            }
-            Kind::Unknown => {}
-        }
-    }
-
-    for (loc_idx, key) in location_keys.iter().enumerate() {
-        if loc_idx > 0 {
-            println!();
-        }
-        let counters = &location_map[key];
-        let parts: Vec<&str> = key.split('\0').collect();
-        let (cfg, device, pipeline, function, chain) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
-        println!("ACL COUNTERS  config={cfg} device={device} pipeline={pipeline} function={function} chain={chain}");
-        println!();
-
-        let std_counters: Vec<&&Metric> = counters.iter().filter(|m| m.label_value("counter").is_none()).collect();
-
-        let mut pair_order: Vec<String> = Vec::new();
-        let mut pair_map: HashMap<String, CounterPair> = HashMap::new();
-
-        for m in &std_counters {
-            let val = m.value.unwrap_or(0.0) as u64;
-            let stripped = m.name.strip_prefix("acl_").unwrap_or(&m.name);
-            if let Some(base) = stripped.strip_suffix("_packets") {
-                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
-                    pair_order.push(base.to_string());
-                    CounterPair {
-                        display: metrics::metric_display_name(base, "acl_"),
-                        packets: None,
-                        bytes: None,
-                    }
-                });
-                pair.packets = Some(val);
-            } else if let Some(base) = stripped.strip_suffix("_bytes") {
-                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
-                    pair_order.push(base.to_string());
-                    CounterPair {
-                        display: metrics::metric_display_name(base, "acl_"),
-                        packets: None,
-                        bytes: None,
-                    }
-                });
-                pair.bytes = Some(val);
-            }
-        }
-
-        if !pair_order.is_empty() {
-            let rows: Vec<CounterRow> = pair_order
-                .iter()
-                .map(|k| {
-                    let p = &pair_map[k];
-                    CounterRow {
-                        counter: p.display.clone(),
-                        packets: p.packets.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                        bytes: p.bytes.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                    }
-                })
-                .collect();
-            print_counter_table(rows);
-        }
-
-        println!();
-    }
-
-    for cfg in &gauge_keys {
-        let gauges = &gauge_map[cfg];
-        println!("ACL CONFIG INFO  config={cfg}");
-        println!();
-        let rows: Vec<GaugeRow> = gauges
-            .iter()
-            .map(|m| GaugeRow {
-                metric: metrics::metric_display_name(&m.name, "acl_"),
-                value: metrics::format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
-            })
-            .collect();
-        print_table_from_entries(rows);
-        println!();
-    }
-
-    metrics::print_grpc_metrics(&grpc_counters, &grpc_histograms);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -645,47 +515,6 @@ impl ACLService {
         Ok(())
     }
 
-    pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
-        let tags = cmd
-            .tags
-            .iter()
-            .map(|entry| parse_tag(entry))
-            .collect::<Result<Vec<_>, String>>()
-            .map_err(|message| Error::invalid_argument("metrics", self.metrics.endpoint(), message))?;
-
-        let response = self
-            .metrics
-            .client()
-            .get_metrics(GetMetricsRequest { tags })
-            .await
-            .map_err(self.metrics.status("metrics"))?
-            .into_inner();
-
-        let metrics: Vec<commonpb::Metric> = response
-            .metrics
-            .into_iter()
-            .filter(|m| cmd.name.as_ref().is_none_or(|f| m.name.contains(f.as_filter())))
-            .collect();
-
-        output::data(
-            || &metrics,
-            || {
-                if metrics.is_empty() {
-                    match cmd.name.as_ref().and_then(ValueEnum::to_possible_value) {
-                        Some(name) => output::empty(format_args!("No ACL metrics found for '{}'.", name.get_name())),
-                        None => output::empty(format_args!("No ACL metrics found.")),
-                    }
-                    return;
-                }
-
-                let metrics: Vec<Metric> = metrics.iter().cloned().map(Metric::from_proto).collect();
-                print_metrics_table(&metrics)
-            },
-        );
-
-        Ok(())
-    }
-
     pub async fn metrics_rules(&mut self, cmd: MetricsRulesCmd) -> Result<(), Error> {
         let request = GetMetricsRulesRequest {
             config: cmd.config.clone().unwrap_or_default(),
@@ -724,21 +553,6 @@ impl ACLService {
     }
 }
 
-/// Parses a `NAME=VALUE` tag entry into a [`MetricTag`].
-///
-/// An entry without `=` is bad input — the message is turned into an
-/// invalid-argument [`Error`] once at the call site.
-fn parse_tag(entry: &str) -> Result<MetricTag, String> {
-    let Some((name, value)) = entry.split_once('=') else {
-        return Err(format!("invalid --tag \"{entry}\": expected NAME=VALUE"));
-    };
-
-    Ok(MetricTag {
-        name: name.to_string(),
-        value: value.to_string(),
-    })
-}
-
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = ACLService::new(&cmd.connection).await?;
     match cmd.mode {
@@ -746,7 +560,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
         ModeCmd::MetricsRules(cmd) => service.metrics_rules(cmd).await,
         ModeCmd::RuleCounters(cmd) => service.rule_counters(cmd).await,
     }
@@ -892,28 +705,5 @@ rules:
         assert_eq!(2, rule.sources6.len());
         assert_eq!(1, rule.destinations4.len());
         assert_eq!(1, rule.destinations6.len());
-    }
-
-    #[test]
-    fn a_tag_entry_splits_on_the_first_equals() {
-        let tag = parse_tag("config=my-acl").expect("a well-formed tag must parse");
-
-        assert_eq!("config", tag.name);
-        assert_eq!("my-acl", tag.value);
-    }
-
-    #[test]
-    fn an_empty_tag_value_requires_the_label_absent() {
-        let tag = parse_tag("config=").expect("an empty value must parse");
-
-        assert_eq!("config", tag.name);
-        assert_eq!("", tag.value);
-    }
-
-    #[test]
-    fn a_tag_entry_without_equals_is_rejected() {
-        let err = parse_tag("config").expect_err("a bare tag name must be rejected");
-
-        assert!(err.contains("NAME=VALUE"));
     }
 }

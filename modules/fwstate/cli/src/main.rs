@@ -1,22 +1,18 @@
 use core::net::IpAddr;
-use std::collections::HashMap;
 
-use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
+use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
+use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::{CompleteEnv, engine::CompletionCandidate};
-use commonpb::pb::{GetMetricsRequest, IpAddress, Metric as ProtoMetric};
+use commonpb::pb::IpAddress;
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
-    fw_state_service_client::FwStateServiceClient, metrics_service_client::MetricsServiceClient,
+    fw_state_service_client::FwStateServiceClient,
 };
-use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion,
-    display::print_table_from_entries,
     errors::Error,
-    metrics::{self, Kind, Metric},
     output::{self, CommonFormat},
 };
 
@@ -31,9 +27,6 @@ pub mod fwstatepb {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
-
-/// The fully-qualified gRPC service name for the metrics service.
-const METRICS_SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.MetricsService";
 
 /// FWState module CLI.
 #[derive(Debug, Clone, Parser)]
@@ -75,7 +68,6 @@ fn merged_map_names(current: &ShowConfigResponse, cmd: &UpdateCmd) -> Result<(St
 
 pub struct FWStateService {
     service: Service<FwStateServiceClient<LayeredChannel>>,
-    metrics: Service<MetricsServiceClient<LayeredChannel>>,
 }
 
 impl FWStateService {
@@ -86,12 +78,7 @@ impl FWStateService {
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         });
-        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, |channel| {
-            MetricsServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
-        Ok(Self { service, metrics })
+        Ok(Self { service })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -247,279 +234,6 @@ impl FWStateService {
 
         Ok(())
     }
-
-    pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
-        let response = self
-            .metrics
-            .client()
-            .get_metrics(GetMetricsRequest::default())
-            .await
-            .map_err(self.metrics.status("metrics"))?
-            .into_inner();
-        let mut label_filters: Vec<(&str, &str)> = Vec::with_capacity(cmd.labels.len());
-        for s in &cmd.labels {
-            match s.split_once('=') {
-                Some(kv) => label_filters.push(kv),
-                None => {
-                    return Err(self
-                        .metrics
-                        .invalid("metrics", format!("invalid label filter {s:?}, expected KEY=VALUE")));
-                }
-            }
-        }
-
-        let metrics: Vec<ProtoMetric> = response
-            .metrics
-            .into_iter()
-            .filter(|m| {
-                if let Some(ref f) = cmd.name
-                    && !f.matches(m)
-                {
-                    return false;
-                }
-                label_filters
-                    .iter()
-                    .all(|(k, v)| metrics::proto_label_value(m, k) == Some(v))
-            })
-            .collect();
-
-        output::data(
-            || &metrics,
-            || {
-                if metrics.is_empty() {
-                    match cmd.name.as_ref().and_then(ValueEnum::to_possible_value) {
-                        Some(name) => {
-                            output::empty(format_args!("No FWState metrics found for '{}'.", name.get_name()))
-                        }
-                        None => output::empty(format_args!("No FWState metrics found.")),
-                    }
-                    return;
-                }
-
-                let metrics: Vec<Metric> = metrics.iter().cloned().map(Metric::from_proto).collect();
-                print_metrics_table(&metrics)
-            },
-        );
-
-        Ok(())
-    }
-}
-
-#[derive(Tabled)]
-struct CounterRow {
-    #[tabled(rename = "Counter")]
-    counter: String,
-    #[tabled(rename = "Packets")]
-    packets: String,
-    #[tabled(rename = "Bytes")]
-    bytes: String,
-    #[tabled(rename = "Entries")]
-    entries: String,
-}
-
-#[derive(Tabled)]
-struct GaugeRow {
-    #[tabled(rename = "Map")]
-    map: String,
-    #[tabled(rename = "AF")]
-    af: String,
-    #[tabled(rename = "Index size")]
-    index_size: String,
-    #[tabled(rename = "Extra buckets")]
-    extra_buckets: String,
-    #[tabled(rename = "Max chain")]
-    max_chain: String,
-    #[tabled(rename = "Layers")]
-    layers: String,
-    #[tabled(rename = "Elements")]
-    elements: String,
-    #[tabled(rename = "Max deadline TTL")]
-    max_deadline_ttl: String,
-    #[tabled(rename = "Memory")]
-    memory: String,
-}
-
-fn print_metrics_table(metrics: &[Metric]) {
-    struct CounterPair {
-        display: String,
-        packets: Option<u64>,
-        bytes: Option<u64>,
-        entries: Option<u64>,
-    }
-
-    let mut counter_keys: Vec<String> = Vec::new();
-    let mut counter_map: HashMap<String, Vec<&Metric>> = HashMap::new();
-    let mut map_gauges: HashMap<(String, String), HashMap<String, u64>> = HashMap::new();
-    let mut map_gauge_order: Vec<(String, String)> = Vec::new();
-    let mut grpc_counters: Vec<&Metric> = Vec::new();
-    let mut grpc_histograms: Vec<&Metric> = Vec::new();
-
-    for m in metrics {
-        if m.name.starts_with("grpc_") {
-            match m.kind {
-                Kind::Counter => grpc_counters.push(m),
-                Kind::Histogram => grpc_histograms.push(m),
-                _ => {}
-            }
-            continue;
-        }
-
-        // State-map gauges (fwstate_total_elements and siblings) carry a
-        // map name and an address family; collect them per map for the
-        // gauge section below.
-        if m.kind == Kind::Gauge && m.label_value("map").is_some() {
-            let key = (
-                m.label_value("map").unwrap_or_default().to_string(),
-                m.label_value("af").unwrap_or_default().to_string(),
-            );
-            let entry = map_gauges.entry(key.clone()).or_insert_with(|| {
-                map_gauge_order.push(key);
-                HashMap::new()
-            });
-            entry.insert(m.name.clone(), m.value.unwrap_or(0.0) as u64);
-            continue;
-        }
-
-        if m.kind == Kind::Counter {
-            let key = format!(
-                "{}\0{}\0{}\0{}\0{}",
-                m.label_value("config").unwrap_or(""),
-                m.label_value("device").unwrap_or(""),
-                m.label_value("pipeline").unwrap_or(""),
-                m.label_value("function").unwrap_or(""),
-                m.label_value("chain").unwrap_or(""),
-            );
-            if !counter_map.contains_key(&key) {
-                counter_keys.push(key.clone());
-            }
-            counter_map.entry(key).or_default().push(m);
-        }
-    }
-
-    for key in &counter_keys {
-        let counters = &counter_map[key];
-        let parts: Vec<&str> = key.split('\0').collect();
-        let (config, device, pipeline, function, chain) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
-        println!(
-            "FWSTATE COUNTERS  config={config} device={device} pipeline={pipeline} function={function} chain={chain}"
-        );
-        println!();
-
-        let mut pair_order: Vec<String> = Vec::new();
-        let mut pair_map: HashMap<String, CounterPair> = HashMap::new();
-
-        // Generic counters (the default arm of emitCounterMetrics) are all
-        // exported under the shared names fwstate_counter_packets /
-        // fwstate_counter_bytes and distinguished only by the "counter" label.
-        // After stripping the fwstate_ prefix and the _packets/_bytes suffix
-        // they all collapse to the same base "counter", so the pair key must
-        // include the "counter" label value to keep them as separate rows
-        // instead of overwriting each other (last write wins). Dedicated
-        // counters carry no "counter" label, so the suffix is empty and their
-        // base is unaffected.
-        for m in counters {
-            let val = m.value.unwrap_or(0.0) as u64;
-            let stripped = m.name.strip_prefix("fwstate_").unwrap_or(&m.name);
-            let counter_label = m.label_value("counter").unwrap_or("");
-
-            // Determine the semantic suffix and the base name shared by the
-            // packets/bytes series of the same counter. The pair key and the
-            // display name must be built from the base (suffix stripped),
-            // otherwise fwstate_rx_packets and fwstate_rx_bytes get different
-            // keys and end up on two separate rows instead of one.
-            let (base, is_packets, is_bytes) = if let Some(b) = stripped.strip_suffix("_packets") {
-                (b, true, false)
-            } else if let Some(b) = stripped.strip_suffix("_bytes") {
-                (b, false, true)
-            } else {
-                (stripped, false, false)
-            };
-
-            let display = if counter_label.is_empty() {
-                metrics::metric_display_name(base, "fwstate_")
-            } else {
-                metrics::metric_display_name(counter_label, "fwstate_")
-            };
-            let pair_key = format!("{base}\0{counter_label}");
-
-            let pair = pair_map.entry(pair_key.clone()).or_insert_with(|| {
-                pair_order.push(pair_key.clone());
-                CounterPair {
-                    display,
-                    packets: None,
-                    bytes: None,
-                    entries: None,
-                }
-            });
-
-            if is_packets {
-                pair.packets = Some(val);
-            } else if is_bytes {
-                pair.bytes = Some(val);
-            } else {
-                // State-table entry counters (e.g. sync insert counters) and
-                // any unsuffixed counter count frames/items, not
-                // packets/bytes; render under Entries.
-                pair.entries = Some(val);
-            }
-        }
-
-        let rows: Vec<CounterRow> = pair_order
-            .iter()
-            .map(|pair_key| {
-                let p = &pair_map[pair_key];
-                CounterRow {
-                    counter: p.display.clone(),
-                    packets: p.packets.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                    bytes: p.bytes.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                    entries: p.entries.map(metrics::format_number).unwrap_or_else(|| "-".into()),
-                }
-            })
-            .collect();
-        print_table_from_entries(rows);
-        println!();
-    }
-
-    if !map_gauge_order.is_empty() {
-        let rows: Vec<GaugeRow> = map_gauge_order
-            .into_iter()
-            .map(|(map, af)| {
-                let gauges = &map_gauges[&(map.clone(), af.clone())];
-                let get = |name: &str| gauges.get(name).copied();
-                GaugeRow {
-                    map,
-                    af,
-                    index_size: get("fwstate_index_size")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                    extra_buckets: get("fwstate_extra_bucket_count")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                    max_chain: get("fwstate_max_chain_length")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                    layers: get("fwstate_layer_count")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                    elements: get("fwstate_total_elements")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                    max_deadline_ttl: get("fwstate_max_deadline_ns")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                    memory: get("fwstate_memory_bytes")
-                        .map(metrics::format_number)
-                        .unwrap_or_else(|| "-".into()),
-                }
-            })
-            .collect();
-        println!("FWSTATE STATE MAPS");
-        println!();
-        print_table_from_entries(rows);
-        println!();
-    }
-
-    metrics::print_grpc_metrics(&grpc_counters, &grpc_histograms);
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -530,7 +244,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
     }
 }
 

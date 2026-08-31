@@ -1,19 +1,10 @@
-//! Shared metrics rendering for module CLIs.
+//! Shared metrics domain types for module CLIs.
 //!
-//! Free functions read a wire `Metric`'s kind and label values without
-//! converting it, so a caller can filter protobuf messages and keep them on
-//! the machine-readable output path. The domain `Metric` type serves human
-//! display, with helpers that format gauge and histogram values and render
-//! the `GRPC CALLS` / `GRPC HANDLING LATENCIES` sections. Per-module counter
-//! grouping stays in each CLI, since label sets and grouping keys differ.
-
-use std::collections::HashMap;
+//! The domain `Metric` mirrors the wire message for display code. Grouping
+//! and rendering stay in each CLI, since label sets and grouping keys differ.
 
 use commonpb::pb::metric::Value;
 use serde::Serialize;
-use tabled::Tabled;
-
-use crate::display::print_table_from_entries;
 
 #[derive(Serialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -119,38 +110,6 @@ pub fn proto_kind(m: &commonpb::pb::Metric) -> Kind {
     }
 }
 
-/// Returns the first label value matching `key` on a wire metric.
-pub fn proto_label_value<'a>(m: &'a commonpb::pb::Metric, key: &str) -> Option<&'a str> {
-    m.labels.iter().find(|l| l.name == key).map(|l| l.value.as_str())
-}
-
-/// Computes the p-th percentile bucket label for a histogram whose upper
-/// bounds are in seconds.
-pub fn histogram_percentile(buckets: &[Bucket], total: u64, p: f64) -> String {
-    if total == 0 || buckets.is_empty() {
-        return "-".to_string();
-    }
-    let target = ((total as f64 * p / 100.0).ceil() as u64).max(1);
-    let mut cumulative: u64 = 0;
-    for (i, b) in buckets.iter().enumerate() {
-        cumulative = cumulative.saturating_add(b.count);
-        if cumulative >= target {
-            return if b.upper_bound.is_infinite() {
-                // Report the last finite bound as the lower edge of the
-                // overflow bucket. When the +Inf bucket is the very first one
-                // there is no finite predecessor to reference.
-                match buckets[..i].iter().rev().find(|bucket| bucket.upper_bound.is_finite()) {
-                    Some(prev) => format!(">{:.3}s", prev.upper_bound),
-                    None => "+Inf".to_string(),
-                }
-            } else {
-                format!("≤{:.3}s", b.upper_bound)
-            };
-        }
-    }
-    "-".to_string()
-}
-
 /// Formats `n` with thousands separators, e.g. `1234567` -> `1,234,567`.
 pub fn format_number(n: u64) -> String {
     let s = n.to_string();
@@ -164,181 +123,9 @@ pub fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
-/// Formats a gauge `value` for `name`, picking a unit from the metric name's
-/// suffix.
-///
-/// `_ns` names scale through ns/µs/ms/s, `_bytes` names scale through
-/// B/KiB/MiB/GiB, anything else falls back to `format_number`.
-pub fn format_gauge_value(name: &str, value: f64) -> String {
-    if name.ends_with("_ns") {
-        if value < 1_000.0 {
-            format!("{:.0}ns", value)
-        } else if value < 1_000_000.0 {
-            format!("{:.2}µs", value / 1_000.0)
-        } else if value < 1_000_000_000.0 {
-            format!("{:.2}ms", value / 1_000_000.0)
-        } else {
-            format!("{:.2}s", value / 1_000_000_000.0)
-        }
-    } else if name.ends_with("_bytes") {
-        if value < 1024.0 {
-            format!("{:.0} B", value)
-        } else if value < 1024.0 * 1024.0 {
-            format!("{:.2} KiB", value / 1024.0)
-        } else if value < 1024.0 * 1024.0 * 1024.0 {
-            format!("{:.2} MiB", value / (1024.0 * 1024.0))
-        } else {
-            format!("{:.2} GiB", value / (1024.0 * 1024.0 * 1024.0))
-        }
-    } else {
-        format_number(value as u64)
-    }
-}
-
-/// Turns a `snake_case` metric name into a `Title Case` display name, after
-/// stripping `prefix` (e.g. `"acl_"` or `"fwstate_"`) if present.
-pub fn metric_display_name(name: &str, prefix: &str) -> String {
-    let stripped = name.strip_prefix(prefix).unwrap_or(name);
-    stripped
-        .split('_')
-        .map(|word| {
-            let mut c = word.chars();
-            match c.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-#[derive(Tabled)]
-pub struct GaugeRow {
-    #[tabled(rename = "Metric")]
-    pub metric: String,
-    #[tabled(rename = "Value")]
-    pub value: String,
-}
-
-#[derive(Tabled)]
-struct GrpcCallRow {
-    #[tabled(rename = "Method")]
-    method: String,
-    #[tabled(rename = "Code")]
-    code: String,
-    #[tabled(rename = "Handled")]
-    handled: String,
-}
-
-#[derive(Tabled)]
-struct GrpcLatRow {
-    #[tabled(rename = "Method")]
-    method: String,
-    #[tabled(rename = "Total Calls")]
-    total: String,
-    #[tabled(rename = "P50")]
-    p50: String,
-    #[tabled(rename = "P95")]
-    p95: String,
-    #[tabled(rename = "P99")]
-    p99: String,
-}
-
-/// Prints the `GRPC CALLS` and `GRPC HANDLING LATENCIES` sections shared by
-/// every module's `metrics` subcommand.
-///
-/// `grpc_counters` are the `grpc_*` metrics of `Kind::Counter` and
-/// `grpc_histograms` the `grpc_*` metrics of `Kind::Histogram`; callers
-/// collect these while walking their full metric list, since the split
-/// between gRPC metrics and module-specific metrics differs per module.
-pub fn print_grpc_metrics(grpc_counters: &[&Metric], grpc_histograms: &[&Metric]) {
-    if !grpc_counters.is_empty() {
-        // Collect started counts keyed by grpc_method.
-        let mut started: HashMap<String, u64> = HashMap::new();
-        // Collect handled counts keyed by (grpc_method, grpc_code), preserving order.
-        let mut handled_keys: Vec<(String, String)> = Vec::new();
-        let mut handled: HashMap<(String, String), u64> = HashMap::new();
-
-        for m in grpc_counters {
-            let method = m.label_value("grpc_method").unwrap_or("").to_string();
-            if m.name == "grpc_server_started_total" {
-                let count = m.value.unwrap_or(0.0) as u64;
-                *started.entry(method).or_default() += count;
-            } else if m.name == "grpc_server_handled_total" {
-                let code = m.label_value("grpc_code").unwrap_or("").to_string();
-                let key = (method, code);
-                if !handled.contains_key(&key) {
-                    handled_keys.push(key.clone());
-                }
-                *handled.entry(key).or_default() += m.value.unwrap_or(0.0) as u64;
-            }
-        }
-
-        if !handled_keys.is_empty() || !started.is_empty() {
-            println!();
-            println!("GRPC CALLS");
-            println!();
-        }
-
-        if !handled_keys.is_empty() {
-            let rows: Vec<GrpcCallRow> = handled_keys
-                .iter()
-                .map(|(method, code)| GrpcCallRow {
-                    method: method.clone(),
-                    code: code.clone(),
-                    handled: format_number(handled[&(method.clone(), code.clone())]),
-                })
-                .collect();
-            print_table_from_entries(rows);
-        }
-
-        if !started.is_empty() {
-            println!();
-            let mut started_methods: Vec<&String> = started.keys().collect();
-            started_methods.sort();
-            for method in started_methods {
-                println!("  started  {method}: {}", format_number(started[method]));
-            }
-        }
-    }
-
-    if !grpc_histograms.is_empty() {
-        println!();
-        println!("GRPC HANDLING LATENCIES");
-        println!();
-        let rows: Vec<GrpcLatRow> = grpc_histograms
-            .iter()
-            .map(|m| {
-                let method = m.label_value("grpc_method").unwrap_or("unknown").to_string();
-                match &m.histogram {
-                    Some(h) => GrpcLatRow {
-                        method,
-                        total: format_number(h.total_count),
-                        p50: histogram_percentile(&h.buckets, h.total_count, 50.0),
-                        p95: histogram_percentile(&h.buckets, h.total_count, 95.0),
-                        p99: histogram_percentile(&h.buckets, h.total_count, 99.0),
-                    },
-                    None => GrpcLatRow {
-                        method,
-                        total: "-".into(),
-                        p50: "-".into(),
-                        p95: "-".into(),
-                        p99: "-".into(),
-                    },
-                }
-            })
-            .collect();
-        print_table_from_entries(rows);
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-
-    fn bucket(upper_bound: f64, count: u64) -> Bucket {
-        Bucket { upper_bound, count }
-    }
 
     #[test]
     fn proto_kind_matches_from_proto_mapping() {
@@ -364,35 +151,5 @@ mod test {
             assert!(proto_kind(&m) == expected);
             assert!(Metric::from_proto(m).kind == expected);
         }
-    }
-
-    #[test]
-    fn percentile_empty_or_zero_total() {
-        assert_eq!("-", histogram_percentile(&[], 0, 50.0));
-        assert_eq!("-", histogram_percentile(&[bucket(1.0, 0)], 0, 50.0));
-    }
-
-    #[test]
-    fn percentile_finite_bucket() {
-        let buckets = [bucket(0.001, 5), bucket(0.01, 5), bucket(f64::INFINITY, 0)];
-        // total=10, p50 => target=5, cumulative reaches 5 in the first bucket.
-        assert_eq!("≤0.001s", histogram_percentile(&buckets, 10, 50.0));
-        // p95 => target=ceil(9.5)=10, reached in the second bucket.
-        assert_eq!("≤0.010s", histogram_percentile(&buckets, 10, 95.0));
-    }
-
-    #[test]
-    fn percentile_overflow_reports_last_finite_bound() {
-        let buckets = [bucket(0.001, 1), bucket(0.01, 1), bucket(f64::INFINITY, 8)];
-        // p99 => target=ceil(9.9)=10, only reached in the +Inf bucket.
-        assert_eq!(">0.010s", histogram_percentile(&buckets, 10, 99.0));
-    }
-
-    #[test]
-    fn percentile_single_infinite_bucket() {
-        // A histogram with only the +Inf bucket has no finite predecessor;
-        // it must not panic and should fall back to "+Inf".
-        let buckets = [bucket(f64::INFINITY, 4)];
-        assert_eq!("+Inf", histogram_percentile(&buckets, 4, 50.0));
     }
 }
