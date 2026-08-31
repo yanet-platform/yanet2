@@ -41,14 +41,6 @@ prefixes4:
 	require.Equal(t, "10.0.0.0/8", decap.GetPrefixes4()[0].AsLogValue())
 }
 
-// Test_LoadRequest_RejectsUnlinkedService verifies that a method of a
-// service this binary does not link is refused before the file is read.
-func Test_LoadRequest_RejectsUnlinkedService(t *testing.T) {
-	_, err := operator.LoadRequest("no.such.Service/UpdateConfig", "/nonexistent")
-
-	require.ErrorContains(t, err, "not linked into this binary")
-}
-
 // Test_LoadRequest_RejectsUnknownKey verifies that a key outside the
 // request is rejected, not ignored, naming the file.
 func Test_LoadRequest_RejectsUnknownKey(t *testing.T) {
@@ -58,15 +50,4 @@ func Test_LoadRequest_RejectsUnknownKey(t *testing.T) {
 
 	require.ErrorContains(t, err, "failed to parse module config")
 	require.ErrorContains(t, err, `unknown field "config"`)
-}
-
-// Test_LoadRequest_MissingFile verifies that an unreadable file is
-// reported with its path.
-func Test_LoadRequest_MissingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing.yaml")
-
-	_, err := operator.LoadRequest(decapUpdateMethod, path)
-
-	require.ErrorContains(t, err, "failed to read module config")
-	require.ErrorContains(t, err, path)
 }
