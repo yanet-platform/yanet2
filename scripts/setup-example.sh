@@ -11,7 +11,7 @@ cd -P -- "$script_dir"
 script_dir=$PWD
 repo_root=${script_dir%/scripts}
 
-yanet-cli-forward update --name=forward0 --rules "$repo_root/forward.yaml"
+yanet-cli-forward update --name=forward0 --file "$repo_root/forward.yaml"
 
 yanet-cli-pipeline update --name=dummy --functions
 

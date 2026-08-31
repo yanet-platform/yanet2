@@ -13,13 +13,9 @@ workspace = true
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli"}
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
-netip = "0.3"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-colored = "3"
 prost = "0.13"
-prost-types = "0.13"
-ptree = "0.5"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }

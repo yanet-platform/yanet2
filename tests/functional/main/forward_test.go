@@ -307,24 +307,25 @@ func Test_PacketRecircLimit_FromDataplaneConfig(t *testing.T) {
 		const device = "01:00.0"
 		require.NoError(t, testFramework.CreateConfigFile("recirc-forward.yaml", `
 rules:
-  - target: "01:00.0"
-    mode: OUT
-    counter: recirc
+  - action:
+      target: "01:00.0"
+      mode: OUT
+      counter: recirc
     devices:
-      - "01:00.0"
+      - name: "01:00.0"
     vlan_ranges:
       - from: 0
         to: 4095
-    srcs:
+    sources4:
       - "0.0.0.0/0"
-    dsts:
+    destinations4:
       - "0.0.0.0/0"
 `))
 
 		paths := testFramework.Paths
 		_, err := testFramework.ExecuteCommands(
 			paths.CLI("yanet-cli-forward")+
-				" update --name=recirc --rules "+
+				" update --name=recirc --file "+
 				"/mnt/config/recirc-forward.yaml",
 			paths.CLI("yanet-cli-function")+
 				" update --name=recirc --chains recirc:1=forward:recirc",

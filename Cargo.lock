@@ -3306,11 +3306,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
- "netip",
  "prost",
- "prost-types",
- "ptree",
  "serde",
  "serde_yaml",
  "tokio",
