@@ -41,14 +41,22 @@ func (m *mockBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle,
 	return handle, nil
 }
 
+func mustIPv6Prefix(t *testing.T, value string) *commonpb.IPv6Prefix {
+	t.Helper()
+
+	prefix, err := commonpb.NewIPv6PrefixFromPrefix(netip.MustParsePrefix(value))
+	require.NoError(t, err)
+	return prefix
+}
+
 // Test_NAT64Service_AddShowRemove verifies basic config lifecycle operations.
 func Test_NAT64Service_AddShowRemove(t *testing.T) {
 	backend := &mockBackend{}
 	service := NewNAT64Service(backend)
 	ctx := t.Context()
 
-	prefix0 := []byte{0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-	prefix1 := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0}
+	prefix0 := mustIPv6Prefix(t, "64:ff9b::/96")
+	prefix1 := mustIPv6Prefix(t, "2001:db8::/96")
 	ipv4 := netip.MustParseAddr("192.0.2.1")
 	ipv6 := netip.MustParseAddr("2001:db8::1")
 
@@ -79,7 +87,7 @@ func Test_NAT64Service_AddShowRemove(t *testing.T) {
 	show, err = service.ShowConfig(ctx, &nat64pb.ShowConfigRequest{Name: "nat64-0"})
 	require.NoError(t, err)
 	require.Len(t, show.GetConfig().GetPrefixes(), 1)
-	require.Equal(t, prefix1, show.GetConfig().GetPrefixes()[0].GetPrefix())
+	require.Equal(t, prefix1, show.GetConfig().GetPrefixes()[0])
 	require.Len(t, show.GetConfig().GetMappings(), 1)
 	require.Equal(t, uint32(0), show.GetConfig().GetMappings()[0].GetPrefixIndex())
 
@@ -118,11 +126,53 @@ func Test_NAT64Service_AddPrefixDefaultMTU(t *testing.T) {
 
 	_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
 		Name:   "nat64-0",
-		Prefix: []byte{0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
 	})
 	require.NoError(t, err)
 	require.Len(t, backend.configs, 1)
 	require.Equal(t, MTUConfig{IPv4MTU: 1450, IPv6MTU: 1280}, backend.configs[0].MTU)
+}
+
+// Test_NAT64Service_PrefixMutation_Invalid verifies that both mutations reject
+// missing, malformed, and non-/96 prefixes.
+func Test_NAT64Service_PrefixMutation_Invalid(t *testing.T) {
+	testCases := []struct {
+		name   string
+		prefix *commonpb.IPv6Prefix
+	}{
+		{name: "missing prefix"},
+		{name: "missing address", prefix: &commonpb.IPv6Prefix{PrefixLen: 96}},
+		{name: "non-96 prefix", prefix: mustIPv6Prefix(t, "2001:db8::/64")},
+		{
+			name: "overlong prefix",
+			prefix: &commonpb.IPv6Prefix{
+				Addr:      commonpb.NewIPv6Address([16]byte{}),
+				PrefixLen: 129,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			service := NewNAT64Service(&mockBackend{})
+
+			t.Run("add", func(t *testing.T) {
+				_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+					Name:   "nat64-0",
+					Prefix: testCase.prefix,
+				})
+				require.Equal(t, codes.InvalidArgument, status.Code(err))
+			})
+
+			t.Run("remove", func(t *testing.T) {
+				_, err := service.RemovePrefix(t.Context(), &nat64pb.RemovePrefixRequest{
+					Name:   "nat64-0",
+					Prefix: testCase.prefix,
+				})
+				require.Equal(t, codes.InvalidArgument, status.Code(err))
+			})
+		})
+	}
 }
 
 // Test_NAT64Service_SetDropUnknownDefaultMTU verifies default MTU is preserved.
@@ -163,8 +213,8 @@ func Test_NAT64Service_UpdateFailureAtomic(t *testing.T) {
 	service := NewNAT64Service(backend)
 	ctx := t.Context()
 
-	prefix0 := []byte{0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-	prefix1 := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0}
+	prefix0 := mustIPv6Prefix(t, "64:ff9b::/96")
+	prefix1 := mustIPv6Prefix(t, "2001:db8::/96")
 
 	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{Name: "nat64-0", Prefix: prefix0})
 	require.NoError(t, err)
@@ -174,7 +224,7 @@ func Test_NAT64Service_UpdateFailureAtomic(t *testing.T) {
 	show, err := service.ShowConfig(ctx, &nat64pb.ShowConfigRequest{Name: "nat64-0"})
 	require.NoError(t, err)
 	require.Len(t, show.GetConfig().GetPrefixes(), 1)
-	require.Equal(t, prefix0, show.GetConfig().GetPrefixes()[0].GetPrefix())
+	require.Equal(t, prefix0, show.GetConfig().GetPrefixes()[0])
 	require.False(t, backend.handles[0].freed)
 }
 
@@ -201,7 +251,7 @@ func Test_NAT64Service_MappingAddressInvalid(t *testing.T) {
 	// InvalidArgument below can come only from the address checks.
 	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
 		Name:   "nat64-0",
-		Prefix: []byte{0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
 	})
 	require.NoError(t, err)
 

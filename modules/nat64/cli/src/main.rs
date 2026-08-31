@@ -99,7 +99,7 @@ pub struct AddPrefixCmd {
     /// The name of the config to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// IPv6 `/96` prefix (12 bytes) to be added.
+    /// IPv6 /96 prefix to add.
     #[arg(long, value_parser = parse_prefix)]
     pub prefix: Contiguous<Ipv6Network>,
 }
@@ -109,7 +109,7 @@ pub struct RemovePrefixCmd {
     /// The name of the config to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// IPv6 `/96` prefix (12 bytes) to be removed.
+    /// IPv6 /96 prefix to remove.
     #[arg(long, value_parser = parse_prefix)]
     pub prefix: Contiguous<Ipv6Network>,
 }
@@ -292,7 +292,7 @@ impl NAT64Service {
     pub async fn add_prefix(&mut self, cmd: AddPrefixCmd) -> Result<(), Error> {
         let request = AddPrefixRequest {
             name: cmd.config_name.clone(),
-            prefix: cmd.prefix.addr().octets()[..12].to_vec(),
+            prefix: Some(cmd.prefix.into()),
         };
         log::debug!("AddPrefixRequest: {request:?}");
         self.service
@@ -312,7 +312,7 @@ impl NAT64Service {
     pub async fn remove_prefix(&mut self, cmd: RemovePrefixCmd) -> Result<(), Error> {
         let request = RemovePrefixRequest {
             name: cmd.config_name.clone(),
-            prefix: cmd.prefix.addr().octets()[..12].to_vec(),
+            prefix: Some(cmd.prefix.into()),
         };
         log::debug!("RemovePrefixRequest: {request:?}");
         self.service
@@ -435,7 +435,7 @@ fn print_tree(resp: &ShowConfigResponse) {
         }
 
         for (idx, prefix) in config.prefixes.iter().enumerate() {
-            tree.add_empty_child(format!("{}: {}", idx, format_prefix(&prefix.prefix)));
+            tree.add_empty_child(format!("{}: {}", idx, prefix));
         }
         tree.end_child();
 
@@ -481,23 +481,6 @@ fn parse_prefix(value: &str) -> Result<Contiguous<Ipv6Network>, String> {
     Ok(prefix)
 }
 
-fn format_prefix(prefix: &[u8]) -> String {
-    if prefix.len() != 12 {
-        return "invalid".to_owned();
-    }
-
-    let mut octets = [0; 16];
-    octets[..12].copy_from_slice(prefix);
-    format!("{}/96", Ipv6Addr::from(octets))
-}
-
-fn serialize_prefix<S>(prefix: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.collect_str(&format_prefix(prefix))
-}
-
 /// Completion candidates for a `--name` argument: the nat64 configs the
 /// module currently knows.
 ///
@@ -530,22 +513,5 @@ mod test {
         let error = parse_prefix("2001:db8:1234:5678::/64").expect_err("/64 prefix rejected");
 
         assert!(error.contains("/96"));
-    }
-
-    #[test]
-    fn test_format_prefix_expands_wire_prefix_to_ipv6_96() {
-        let prefix = [0x20, 0x01, 0x0d, 0xb8, 0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0];
-
-        assert_eq!("2001:db8:1234:5678::/96", format_prefix(&prefix));
-    }
-
-    #[test]
-    fn test_format_prefix_marks_short_wire_prefix_invalid() {
-        assert_eq!("invalid", format_prefix(&[0; 11]));
-    }
-
-    #[test]
-    fn test_format_prefix_marks_long_wire_prefix_invalid() {
-        assert_eq!("invalid", format_prefix(&[0; 13]));
     }
 }

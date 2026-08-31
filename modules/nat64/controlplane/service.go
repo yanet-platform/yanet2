@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"net/netip"
@@ -114,6 +115,9 @@ type MTUConfig struct {
 }
 
 const (
+	nat64PrefixBits  = 96
+	nat64PrefixBytes = nat64PrefixBits / 8
+
 	defaultIPv4MTU uint32 = 1450
 	defaultIPv6MTU uint32 = 1280
 )
@@ -167,7 +171,7 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 	cfg := inst.Config
 	response.Config = &nat64pb.Config{
-		Prefixes: make([]*nat64pb.Prefix, 0, len(cfg.Prefixes)),
+		Prefixes: make([]*commonpb.IPv6Prefix, 0, len(cfg.Prefixes)),
 		Mappings: make([]*nat64pb.Mapping, 0, len(cfg.Mappings)),
 		Mtu: &nat64pb.MTUConfig{
 			Ipv4Mtu: cfg.MTU.IPv4MTU,
@@ -178,9 +182,11 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 	}
 
 	for _, prefix := range cfg.Prefixes {
-		response.Config.Prefixes = append(response.Config.Prefixes, &nat64pb.Prefix{
-			Prefix: slices.Clone(prefix),
-		})
+		wirePrefix, err := encodeNAT64Prefix(prefix)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to encode prefix: %v", err)
+		}
+		response.Config.Prefixes = append(response.Config.Prefixes, wirePrefix)
 	}
 
 	for _, mapping := range cfg.Mappings {
@@ -193,9 +199,11 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 	return response, nil
 }
+
 func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequest) (*nat64pb.AddPrefixResponse, error) {
-	if len(req.Prefix) != 12 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix length: got %d, want 12", len(req.Prefix))
+	prefix, err := decodeNAT64Prefix(req.GetPrefix())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	name := req.GetName()
@@ -207,7 +215,7 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
-	inst.Config.Prefixes = append(inst.Config.Prefixes, slices.Clone(req.Prefix))
+	inst.Config.Prefixes = append(inst.Config.Prefixes, prefix)
 
 	if err := m.updateModuleConfig(name, inst); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
@@ -217,8 +225,9 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 }
 
 func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePrefixRequest) (*nat64pb.RemovePrefixResponse, error) {
-	if len(req.Prefix) != 12 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix length: got %d, want 12", len(req.Prefix))
+	prefix, err := decodeNAT64Prefix(req.GetPrefix())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	name := req.GetName()
@@ -236,8 +245,8 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 	next := inst.Clone()
 
 	removeIdx := -1
-	for idx, prefix := range next.Config.Prefixes {
-		if bytes.Equal(prefix, req.Prefix) {
+	for idx, storedPrefix := range next.Config.Prefixes {
+		if bytes.Equal(storedPrefix, prefix) {
 			removeIdx = idx
 			break
 		}
@@ -383,6 +392,44 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 	}
 
 	return &nat64pb.SetDropUnknownResponse{}, nil
+}
+
+func decodeNAT64Prefix(prefix *commonpb.IPv6Prefix) ([]byte, error) {
+	if prefix == nil {
+		return nil, fmt.Errorf("prefix is required")
+	}
+
+	network, err := prefix.ToPrefix()
+	if err != nil {
+		return nil, fmt.Errorf("invalid prefix: %w", err)
+	}
+	if network.Bits() != nat64PrefixBits {
+		return nil, fmt.Errorf(
+			"invalid prefix length: got %d, want %d",
+			network.Bits(),
+			nat64PrefixBits,
+		)
+	}
+
+	address := network.Addr().As16()
+	return slices.Clone(address[:nat64PrefixBytes]), nil
+}
+
+func encodeNAT64Prefix(prefix []byte) (*commonpb.IPv6Prefix, error) {
+	if len(prefix) != nat64PrefixBytes {
+		return nil, fmt.Errorf(
+			"invalid stored prefix length: got %d, want %d",
+			len(prefix),
+			nat64PrefixBytes,
+		)
+	}
+
+	var address [16]byte
+	copy(address[:], prefix)
+	return &commonpb.IPv6Prefix{
+		Addr:      commonpb.NewIPv6Address(address),
+		PrefixLen: nat64PrefixBits,
+	}, nil
 }
 
 func (m *NAT64Service) instanceFor(name string) config {

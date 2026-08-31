@@ -31,7 +31,7 @@ const (
 	nat64MemSize = 8 * datasize.MB
 )
 
-var nat64Prefix96 = [12]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0}
+var nat64Prefix96 = netip.MustParsePrefix("2001:db8::/96")
 
 func setupNAT64Harness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service) {
 	t.Helper()
@@ -104,9 +104,16 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	require.NoError(t, err)
 }
 
-func mustAddPrefix(t *testing.T, svc *nat64.NAT64Service, name string, prefix [12]byte) {
+func mustAddPrefix(t *testing.T, svc *nat64.NAT64Service, name string, prefix netip.Prefix) {
 	t.Helper()
-	_, err := svc.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{Name: name, Prefix: prefix[:]})
+
+	wirePrefix, err := commonpb.NewIPv6PrefixFromPrefix(prefix)
+	require.NoError(t, err)
+
+	_, err = svc.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+		Name:   name,
+		Prefix: wirePrefix,
+	})
 	require.NoError(t, err)
 }
 
@@ -138,12 +145,11 @@ func parseOneOutput(t *testing.T, result *dataplaneut.Result) gopacket.Packet {
 	return xpacket.ParseEtherPacket(result.Output[0].RawData)
 }
 
-func mappedV6(prefix [12]byte, ip4 netip.Addr) net.IP {
+func mappedV6(prefix netip.Prefix, ip4 netip.Addr) net.IP {
+	out := prefix.Masked().Addr().As16()
 	ip4b := ip4.As4()
-	out := make([]byte, 16)
-	copy(out[:12], prefix[:])
 	copy(out[12:], ip4b[:])
-	return out
+	return out[:]
 }
 
 func packetWithIPv6RawExt(

@@ -33,6 +33,8 @@ breaking:
     # resolve state tables through named map objects).
     - modules/acl/controlplane/aclpb/v1/acl.proto
     - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto
+    # TODO: drop after the NAT64 prefix wire cutover in #2197 reaches main.
+    - modules/nat64/controlplane/nat64pb/v1/nat64.proto
     # ListEntries changes from a bidi stream to cursor-paginated unary calls
     # in the same cutover.
     - objects/fwstate/controlplane/fwstatemappb/v1/fwstatemap.proto

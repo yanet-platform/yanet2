@@ -4,6 +4,7 @@ package modules.nat64.controlplane.nat64pb.v1;
 
 import "common/commonpb/v1/ipv4addr.proto";
 import "common/commonpb/v1/ipv6addr.proto";
+import "common/commonpb/v1/ipv6prefix.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1;nat64pb";
 
@@ -48,11 +49,6 @@ message MTUConfig {
   uint32 ipv6_mtu = 2; // MTU value for IPv6
 }
 
-// Prefix represents a NAT64 prefix
-message Prefix {
-  bytes prefix = 1; // 12-byte IPv6 prefix
-}
-
 // Mapping represents an IPv4-IPv6 address mapping
 message Mapping {
   common.commonpb.v1.IPv4Address ipv4 = 1; // IPv4 host address
@@ -62,7 +58,8 @@ message Mapping {
 
 // Config represents configuration for a single dataplane instance
 message Config {
-  repeated Prefix prefixes = 1;
+  // NAT64 networks, which MUST use a /96 prefix length.
+  repeated common.commonpb.v1.IPv6Prefix prefixes = 1;
   repeated Mapping mappings = 2;
   MTUConfig mtu = 3;
   bool drop_unknown_prefix = 4;  // Drop packets with unknown prefix
@@ -75,7 +72,8 @@ message ShowConfigResponse { Config config = 1; }
 // AddPrefixRequest specifies a prefix to add
 message AddPrefixRequest {
   string name = 1;
-  bytes prefix = 2; // 12-byte IPv6 prefix
+  // NAT64 network, which MUST use a /96 prefix length.
+  common.commonpb.v1.IPv6Prefix prefix = 2;
 }
 
 message AddPrefixResponse {}
@@ -83,7 +81,8 @@ message AddPrefixResponse {}
 // RemovePrefixRequest specifies a prefix to remove
 message RemovePrefixRequest {
   string name = 1;
-  bytes prefix = 2; // 12-byte IPv6 prefix
+  // NAT64 network, which MUST use a /96 prefix length.
+  common.commonpb.v1.IPv6Prefix prefix = 2;
 }
 
 message RemovePrefixResponse {}
