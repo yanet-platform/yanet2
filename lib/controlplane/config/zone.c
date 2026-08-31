@@ -524,6 +524,12 @@ cp_config_delete_function(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
+	uint64_t index;
+	if (cp_config_gen_lookup_function_index(old_config_gen, name, &index)) {
+		yanet_error_add(err, "function '%s' not found", name);
+		goto error_unlock;
+	}
+
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {

@@ -2,7 +2,6 @@ package builtin
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
@@ -12,6 +11,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/agenterr"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -169,6 +169,9 @@ func (m *Function) Update(
 	if reqFunctionId == nil {
 		return nil, status.Error(codes.InvalidArgument, "function id is required")
 	}
+	if reqFunctionId.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "function name is required")
+	}
 
 	function := ffi.FunctionConfig{
 		Name: reqFunctionId.Name,
@@ -181,6 +184,9 @@ func (m *Function) Update(
 
 		modules := make([]ffi.ChainModuleConfig, 0, len(reqChain.Modules))
 		for _, reqChainModule := range reqChain.Modules {
+			if reqChainModule == nil {
+				return nil, status.Error(codes.InvalidArgument, "module id is required")
+			}
 			modules = append(modules, ffi.ChainModuleConfig{
 				Type: reqChainModule.Type,
 				Name: reqChainModule.Name,
@@ -200,12 +206,12 @@ func (m *Function) Update(
 
 	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	defer agent.Close()
 
 	if err := agent.UpdateFunction(function); err != nil {
-		return nil, fmt.Errorf("failed to update function: %w", err)
+		return nil, agenterr.ClassifyUpdate(err)
 	}
 
 	return &ynpb.UpdateFunctionResponse{}, nil
@@ -220,16 +226,19 @@ func (m *Function) Delete(
 	if reqId == nil {
 		return nil, status.Error(codes.InvalidArgument, "function id is required")
 	}
+	if reqId.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "function name is required")
+	}
 	functionName := reqId.Name
 
 	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	defer agent.Close()
 
 	if err := agent.DeleteFunction(functionName); err != nil {
-		return nil, fmt.Errorf("failed to delete function: %w", err)
+		return nil, agenterr.ClassifyDelete(err)
 	}
 
 	return &ynpb.DeleteFunctionResponse{}, nil

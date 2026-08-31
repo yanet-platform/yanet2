@@ -334,6 +334,11 @@ cp_config_gen_lookup_pipeline(
 );
 
 int
+cp_config_gen_lookup_function_index(
+	struct cp_config_gen *config_gen, const char *name, uint64_t *index
+);
+
+int
 cp_config_gen_lookup_pipeline_index(
 	struct cp_config_gen *config_gen, const char *name, uint64_t *index
 );

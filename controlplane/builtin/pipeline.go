@@ -2,7 +2,6 @@ package builtin
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
@@ -12,6 +11,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/agenterr"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -155,6 +155,9 @@ func (m *Pipeline) Update(
 	if reqPipelineId == nil {
 		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
 	}
+	if reqPipelineId.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "pipeline name is required")
+	}
 
 	pipeline := ffi.PipelineConfig{
 		Name:      reqPipelineId.Name,
@@ -162,17 +165,20 @@ func (m *Pipeline) Update(
 	}
 
 	for idx, reqFunctionId := range reqPipeline.Functions {
+		if reqFunctionId == nil {
+			return nil, status.Error(codes.InvalidArgument, "function id is required")
+		}
 		pipeline.Functions[idx] = reqFunctionId.Name
 	}
 
 	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	defer agent.Close()
 
 	if err := agent.UpdatePipeline(pipeline); err != nil {
-		return nil, fmt.Errorf("failed to update function: %w", err)
+		return nil, agenterr.ClassifyUpdate(err)
 	}
 
 	return &ynpb.UpdatePipelineResponse{}, nil
@@ -187,16 +193,19 @@ func (m *Pipeline) Delete(
 	if reqId == nil {
 		return nil, status.Error(codes.InvalidArgument, "pipeline id is required")
 	}
+	if reqId.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "pipeline name is required")
+	}
 	pipelineName := reqId.Name
 
 	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	defer agent.Close()
 
 	if err := agent.DeletePipeline(pipelineName); err != nil {
-		return nil, fmt.Errorf("failed to delete pipeline: %w", err)
+		return nil, agenterr.ClassifyDelete(err)
 	}
 
 	return &ynpb.DeletePipelineResponse{}, nil

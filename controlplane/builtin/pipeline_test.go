@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/builtin"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -29,6 +30,23 @@ func TestPipelineUpdateRejectsMissingMessages(t *testing.T) {
 				Pipeline: &ynpb.Pipeline{},
 			},
 		},
+		{
+			name: "empty pipeline name",
+			request: &ynpb.UpdatePipelineRequest{
+				Pipeline: &ynpb.Pipeline{
+					Id: &commonpb.PipelineId{},
+				},
+			},
+		},
+		{
+			name: "nil function id in functions",
+			request: &ynpb.UpdatePipelineRequest{
+				Pipeline: &ynpb.Pipeline{
+					Id:        &commonpb.PipelineId{Name: "p"},
+					Functions: []*commonpb.FunctionId{nil},
+				},
+			},
+		},
 	}
 
 	svc := builtin.NewPipeline(0, nil)
@@ -47,6 +65,17 @@ func TestPipelineDeleteRejectsMissingID(t *testing.T) {
 	svc := builtin.NewPipeline(0, nil)
 
 	_, err := svc.Delete(t.Context(), &ynpb.DeletePipelineRequest{})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_Pipeline_Delete_EmptyName verifies that Delete rejects an id with
+// an empty name instead of deleting a pipeline named "".
+func Test_Pipeline_Delete_EmptyName(t *testing.T) {
+	svc := builtin.NewPipeline(0, nil)
+
+	_, err := svc.Delete(t.Context(), &ynpb.DeletePipelineRequest{
+		Id: &commonpb.PipelineId{},
+	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
