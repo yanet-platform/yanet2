@@ -1,4 +1,4 @@
-package l3b
+package l3b_test
 
 import (
 	"testing"
@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
 
@@ -91,10 +92,10 @@ func (m *mockBackend) UpdateRealServerWeight(service string, realServerIndex uin
 
 var errNotFound = status.Error(codes.NotFound, "not found")
 
-func newTestService(t *testing.T) (*L3BService, *mockBackend) {
+func newTestService(t *testing.T) (*controlplane.L3BService, *mockBackend) {
 	t.Helper()
 	backend := newMockBackend()
-	return NewL3BService(backend), backend
+	return controlplane.NewL3BService(backend), backend
 }
 
 func sampleService(name string) *l3bpb.VirtualService {
@@ -186,7 +187,7 @@ func Test_L3BService_UpdateAndListModuleConfig(t *testing.T) {
 
 func Test_RingFromWeights_WeightedRoundRobin(t *testing.T) {
 	// Each server index must appear exactly as many times as its weight.
-	ring := ringFromWeights([]uint32{3, 1})
+	ring := controlplane.RingFromWeights([]uint32{3, 1})
 	require.Len(t, ring, 4)
 
 	counts := map[uint32]int{}
@@ -202,10 +203,10 @@ func Test_RingFromWeights_WeightedRoundRobin(t *testing.T) {
 }
 
 func Test_RingFromWeights_EqualWeightsRoundRobin(t *testing.T) {
-	ring := ringFromWeights([]uint32{1, 1, 1})
+	ring := controlplane.RingFromWeights([]uint32{1, 1, 1})
 	require.Equal(t, []uint32{0, 1, 2}, ring)
 }
 
 func Test_RingFromWeights_AllZeroIsEmpty(t *testing.T) {
-	require.Nil(t, ringFromWeights([]uint32{0, 0}))
+	require.Nil(t, controlplane.RingFromWeights([]uint32{0, 0}))
 }

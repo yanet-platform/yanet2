@@ -52,8 +52,59 @@ type managedService struct {
 	weights []uint32
 }
 
+// Replace swaps in the object and weights of an updated service.
+func (m *managedService) Replace(
+	object *cl3bobject.VirtualServiceObject,
+	weights []uint32,
+) {
+	m.object = object
+	m.weights = weights
+}
+
+// Retire returns the currently published object for deferred destruction.
+func (m *managedService) Retire() freeable {
+	return m.object
+}
+
+// SetRealServerState enables or disables a single real server of the
+// published object.
+func (m *managedService) SetRealServerState(
+	realServerIndex uint32,
+	enabled bool,
+) error {
+	return m.object.SetRealServerState(realServerIndex, enabled)
+}
+
+// SetRealServerWeight clamps the weight into range, applies it and rebuilds
+// the scheduler ring of the published object.
+func (m *managedService) SetRealServerWeight(
+	realServerIndex uint32,
+	weight uint32,
+) error {
+	if int(realServerIndex) >= len(m.weights) {
+		return fmt.Errorf("real server index %d out of range", realServerIndex)
+	}
+
+	if weight > maxRealServerWeight {
+		weight = maxRealServerWeight
+	}
+
+	m.weights[realServerIndex] = weight
+	return m.object.UpdateRing(RingFromWeights(m.weights))
+}
+
 type managedConfig struct {
 	module *cl3b.ModuleConfig
+}
+
+// FFIModule returns the shared-memory handle of the module configuration.
+func (m *managedConfig) FFIModule() ffi.ModuleConfig {
+	return m.module.AsFFIModule()
+}
+
+// Retire returns the module configuration for deferred destruction.
+func (m *managedConfig) Retire() freeable {
+	return m.module
 }
 
 // backend is the real Backend backed by shared memory.
@@ -147,10 +198,9 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 
 	// The upsert swapped the registry slot atomically; the superseded
 	// object stays alive until its generations drain.
-	m.deferOrFree(existing.object)
+	m.deferOrFree(existing.Retire())
 
-	existing.object = object
-	existing.weights = weights
+	existing.Replace(object, weights)
 	return nil
 }
 
@@ -172,7 +222,7 @@ func (m *backend) publishService(
 	}
 
 	weights := defaultWeights(len(config.RealServers))
-	if err := object.UpdateRing(ringFromWeights(weights)); err != nil {
+	if err := object.UpdateRing(RingFromWeights(weights)); err != nil {
 		_ = object.Free()
 		return nil, nil, fmt.Errorf("failed to populate real server ring: %w", err)
 	}
@@ -201,7 +251,7 @@ func (m *backend) DeleteService(name string) error {
 	// The delete retired the generation holding the published object;
 	// retry the deferred ones, then retire this one.
 	m.reclaimDeferred()
-	m.deferOrFree(existing.object)
+	m.deferOrFree(existing.Retire())
 
 	delete(m.services, name)
 	return nil
@@ -281,7 +331,7 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 
 	modules := make([]ffi.ModuleConfig, 0, len(m.configs))
 	for _, cfg := range m.configs {
-		modules = append(modules, cfg.module.AsFFIModule())
+		modules = append(modules, cfg.FFIModule())
 	}
 	if err := m.agent.UpdateModules(modules); err != nil {
 		// Roll back to the previous module so the map keeps the live one.
@@ -295,7 +345,7 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 	}
 
 	if ok {
-		m.deferOrFree(previous.module)
+		m.deferOrFree(previous.Retire())
 	}
 	return nil
 }
@@ -324,7 +374,7 @@ func (m *backend) UpdateRealServerState(
 		return fmt.Errorf("virtual service %q not found", service)
 	}
 
-	if err := existing.object.SetRealServerState(realServerIndex, enabled); err != nil {
+	if err := existing.SetRealServerState(realServerIndex, enabled); err != nil {
 		return fmt.Errorf("failed to set real server state: %w", err)
 	}
 	return nil
@@ -343,16 +393,7 @@ func (m *backend) UpdateRealServerWeight(
 		return fmt.Errorf("virtual service %q not found", service)
 	}
 
-	if int(realServerIndex) >= len(existing.weights) {
-		return fmt.Errorf("real server index %d out of range", realServerIndex)
-	}
-
-	if weight > maxRealServerWeight {
-		weight = maxRealServerWeight
-	}
-
-	existing.weights[realServerIndex] = weight
-	if err := existing.object.UpdateRing(ringFromWeights(existing.weights)); err != nil {
+	if err := existing.SetRealServerWeight(realServerIndex, weight); err != nil {
 		return fmt.Errorf("failed to rebuild real server ring: %w", err)
 	}
 	return nil
@@ -371,11 +412,11 @@ func defaultWeights(realServerCount int) []uint32 {
 	return weights
 }
 
-// ringFromWeights expands per-server weights into a weighted-round-robin
+// RingFromWeights expands per-server weights into a weighted-round-robin
 // scheduler ring: each server index appears as many times as its weight, but
 // the occurrences are interleaved so a heavy server is spread evenly across
 // the ring rather than clustered.
-func ringFromWeights(weights []uint32) []uint32 {
+func RingFromWeights(weights []uint32) []uint32 {
 	var total uint32
 	for _, weight := range weights {
 		total += weight

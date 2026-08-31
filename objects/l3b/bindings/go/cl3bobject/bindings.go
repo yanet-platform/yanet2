@@ -240,50 +240,50 @@ func (m *VirtualServiceObject) SetRealServerState(index uint32, enabled bool) er
 	return nil
 }
 
-func (r *SourceFilterRule) cBuild(
+func (m *SourceFilterRule) cBuild(
 	pinner *runtime.Pinner,
 ) C.struct_l3b_source_filter_rule {
 	c := C.struct_l3b_source_filter_rule{}
-	filter.CBuildNet6s(&c.net6s, r.Net6s, pinner)
-	filter.CBuildNet4s(&c.net4s, r.Net4s, pinner)
-	filter.CBuildPortRanges(&c.port_ranges, r.PortRanges, pinner)
+	filter.CBuildNet6s(&c.net6s, m.Net6s, pinner)
+	filter.CBuildNet4s(&c.net4s, m.Net4s, pinner)
+	filter.CBuildPortRanges(&c.port_ranges, m.PortRanges, pinner)
 	return c
 }
 
-func (r *RealServer) cBuild() C.struct_l3b_real_server {
+func (m *RealServer) cBuild() C.struct_l3b_real_server {
 	c := C.struct_l3b_real_server{}
 
 	// The 'type' field is a Go keyword; write it through its offset.
-	*(*uint32)(unsafe.Pointer(&c)) = uint32(r.Type)
+	*(*uint32)(unsafe.Pointer(&c)) = uint32(m.Type)
 
-	sourceNetAddr := r.SourceNet.Addr()
-	sourceNetMask := r.SourceNet.Mask()
+	sourceNetAddr := m.SourceNet.Addr()
+	sourceNetMask := m.SourceNet.Mask()
 	if sourceNetAddr.Is4() {
 		sourceNet := (*C.struct_net4)(unsafe.Pointer(&c.source_net))
 		addr := sourceNetAddr.As4()
 		mask := sourceNetMask.As4()
-		for idx := 0; idx < 4; idx++ {
+		for idx := range 4 {
 			sourceNet.addr[idx] = C.uint8_t(addr[idx])
 			sourceNet.mask[idx] = C.uint8_t(mask[idx])
 		}
 
 		destinationAddr := (*C.struct_net4_addr)(unsafe.Pointer(&c.destination_addr))
-		dst := r.DestinationAddress.As4()
-		for idx := 0; idx < 4; idx++ {
+		dst := m.DestinationAddress.As4()
+		for idx := range 4 {
 			destinationAddr.bytes[idx] = C.uint8_t(dst[idx])
 		}
 	} else {
 		sourceNet := (*C.struct_net6)(unsafe.Pointer(&c.source_net))
 		addr := sourceNetAddr.As16()
 		mask := sourceNetMask.As16()
-		for idx := 0; idx < 16; idx++ {
+		for idx := range 16 {
 			sourceNet.addr[idx] = C.uint8_t(addr[idx])
 			sourceNet.mask[idx] = C.uint8_t(mask[idx])
 		}
 
 		destinationAddr := (*C.struct_net6_addr)(unsafe.Pointer(&c.destination_addr))
-		dst := r.DestinationAddress.As16()
-		for idx := 0; idx < 16; idx++ {
+		dst := m.DestinationAddress.As16()
+		for idx := range 16 {
 			destinationAddr.bytes[idx] = C.uint8_t(dst[idx])
 		}
 	}
@@ -291,29 +291,29 @@ func (r *RealServer) cBuild() C.struct_l3b_real_server {
 	return c
 }
 
-func (config *VirtualServiceConfig) cBuild(
+func (m *VirtualServiceConfig) cBuild(
 	pinner *runtime.Pinner,
 ) C.struct_l3b_virtual_service {
 	c := C.struct_l3b_virtual_service{
-		hash_mask:     C.uint32_t(config.HashMask),
-		index_mask:    C.uint32_t(config.IndexMask),
-		ring_capacity: C.uint32_t(config.RingCapacity),
+		hash_mask:     C.uint32_t(m.HashMask),
+		index_mask:    C.uint32_t(m.IndexMask),
+		ring_capacity: C.uint32_t(m.RingCapacity),
 	}
 
-	if len(config.SourceFilterRules) > 0 {
-		cRules := make([]C.struct_l3b_source_filter_rule, len(config.SourceFilterRules))
-		for idx := range config.SourceFilterRules {
-			cRules[idx] = config.SourceFilterRules[idx].cBuild(pinner)
+	if len(m.SourceFilterRules) > 0 {
+		cRules := make([]C.struct_l3b_source_filter_rule, len(m.SourceFilterRules))
+		for idx := range m.SourceFilterRules {
+			cRules[idx] = m.SourceFilterRules[idx].cBuild(pinner)
 		}
 		pinner.Pin(&cRules[0])
 		c.source_filter_rules = &cRules[0]
 		c.source_filter_rule_count = C.uint32_t(len(cRules))
 	}
 
-	if len(config.RealServers) > 0 {
-		cServers := make([]C.struct_l3b_real_server, len(config.RealServers))
-		for idx := range config.RealServers {
-			cServers[idx] = config.RealServers[idx].cBuild()
+	if len(m.RealServers) > 0 {
+		cServers := make([]C.struct_l3b_real_server, len(m.RealServers))
+		for idx := range m.RealServers {
+			cServers[idx] = m.RealServers[idx].cBuild()
 		}
 		pinner.Pin(&cServers[0])
 		c.real_servers = &cServers[0]

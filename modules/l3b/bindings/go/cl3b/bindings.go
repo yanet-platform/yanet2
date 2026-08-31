@@ -146,13 +146,13 @@ type DestinationFilterRule struct {
 	VirtualServiceIndex uint32
 }
 
-func (r *DestinationFilterRule) cBuild(
+func (m *DestinationFilterRule) cBuild(
 	pinner *runtime.Pinner,
 ) C.struct_l3b_destination_filter_rule {
 	c := C.struct_l3b_destination_filter_rule{}
-	filter.CBuildNet6s(&c.net6s, r.Net6s, pinner)
-	filter.CBuildNet4s(&c.net4s, r.Net4s, pinner)
-	filter.CBuildProtoRanges(&c.proto_ranges, r.ProtoRanges, pinner)
-	c.virtual_service_index = C.uint32_t(r.VirtualServiceIndex)
+	filter.CBuildNet6s(&c.net6s, m.Net6s, pinner)
+	filter.CBuildNet4s(&c.net4s, m.Net4s, pinner)
+	filter.CBuildProtoRanges(&c.proto_ranges, m.ProtoRanges, pinner)
+	c.virtual_service_index = C.uint32_t(m.VirtualServiceIndex)
 	return c
 }
