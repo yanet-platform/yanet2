@@ -21,6 +21,8 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
+use core::time::Duration;
+
 use http::uri::PathAndQuery;
 use prost::Message;
 use tonic::{
@@ -34,13 +36,14 @@ use tower::Layer;
 use crate::{
     auth::{self, interceptor::AuthService, AuthArgs},
     errors::{root_cause, Error},
+    timeout::{TimeoutLayer, TimeoutService},
 };
 
 /// Channel type with all interceptors applied.
 ///
 /// Use this as the type parameter for tonic-generated clients, e.g.
 /// `MyServiceClient<LayeredChannel>`.
-pub type LayeredChannel = AuthService<Channel>;
+pub type LayeredChannel = TimeoutService<AuthService<Channel>>;
 
 /// Common CLI arguments for gRPC connection.
 ///
@@ -53,6 +56,24 @@ pub struct ConnectionArgs {
     /// Authentication options.
     #[command(flatten)]
     pub auth: AuthArgs,
+    /// Time budget in seconds for connecting and for each request.
+    ///
+    /// Long-lived streams are bounded only while being established.
+    #[arg(long, global = true, env = "YANET_TIMEOUT", value_name = "SECONDS", value_parser = parse_timeout)]
+    pub timeout: Option<Duration>,
+}
+
+/// Parses a positive, possibly fractional, number of seconds.
+fn parse_timeout(value: &str) -> Result<Duration, String> {
+    let seconds: f64 = value
+        .parse()
+        .map_err(|_| "expected a positive number of seconds".to_owned())?;
+
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return Err("expected a positive number of seconds".to_owned());
+    }
+
+    Duration::try_from_secs_f64(seconds).map_err(|err| err.to_string())
 }
 
 /// Error type for connection establishment.
@@ -64,14 +85,31 @@ pub enum ConnectionError {
     InvalidUri(#[from] http::uri::InvalidUri),
     #[error("auth error: {0}")]
     Auth(#[from] auth::AuthError),
+    #[error("connect timed out after {}s", .0.as_secs_f64())]
+    Timeout(Duration),
 }
 
 /// Connect to the endpoint with all interceptors pre-applied.
+///
+/// When `args.timeout` is set, it bounds channel establishment and auth
+/// setup together, then rides along as the per-request budget of the
+/// returned channel.
 pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
-    let channel = Channel::from_shared(args.endpoint.clone())?.connect().await?;
-    let auth = auth::create_layer(&args.auth).await?;
+    let establish = async {
+        let channel = Channel::from_shared(args.endpoint.clone())?.connect().await?;
+        let auth = auth::create_layer(&args.auth).await?;
 
-    Ok(auth.layer(channel))
+        Ok::<_, ConnectionError>(auth.layer(channel))
+    };
+
+    let auth_service = match args.timeout {
+        Some(budget) => tokio::time::timeout(budget, establish)
+            .await
+            .map_err(|_| ConnectionError::Timeout(budget))??,
+        None => establish.await?,
+    };
+
+    Ok(TimeoutLayer::new(args.timeout).layer(auth_service))
 }
 
 /// An established, authenticated channel to one endpoint.
@@ -356,10 +394,58 @@ where
 
 #[cfg(test)]
 mod test {
+    use core::{net::SocketAddr, time::Duration};
+    use std::net::{TcpListener, TcpStream};
+
+    use socket2::{Domain, Socket, Type};
     use tonic::Status;
 
-    use super::Service;
-    use crate::errors::ErrorKind;
+    use super::{parse_timeout, Connection, ConnectionArgs, Service};
+    use crate::{
+        auth::{AuthArgs, AuthMethod},
+        errors::ErrorKind,
+    };
+
+    #[test]
+    fn test_parse_timeout_accepts_whole_and_fractional_seconds() {
+        assert_eq!(Duration::from_secs(3), parse_timeout("3").unwrap());
+        assert_eq!(Duration::from_millis(500), parse_timeout("0.5").unwrap());
+    }
+
+    #[test]
+    fn test_parse_timeout_rejects_non_positive_and_non_numeric() {
+        for input in ["0", "-1", "nan", "inf", "abc"] {
+            assert!(parse_timeout(input).is_err(), "expected {input} to be rejected");
+        }
+    }
+
+    /// Verifies that a connect wedged before the TCP handshake completes
+    /// fails within the budget as a connection error naming it.
+    #[tokio::test]
+    async fn test_connect_tcp_handshake_never_completing_times_out() {
+        // A backlog of 0 holds exactly one pending connection on Linux.
+        // With that slot taken, further SYNs are silently dropped.
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+        socket
+            .bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into())
+            .unwrap();
+        socket.listen(0).unwrap();
+        let listener: TcpListener = socket.into();
+        let port = listener.local_addr().unwrap().port();
+        let _plugged = TcpStream::connect(("127.0.0.1", port)).unwrap();
+
+        let args = ConnectionArgs {
+            endpoint: format!("grpc://127.0.0.1:{port}"),
+            auth: AuthArgs { auth: AuthMethod::None },
+            timeout: Some(Duration::from_millis(200)),
+        };
+
+        let err = Connection::connect(&args).await.err().unwrap();
+
+        assert_eq!(ErrorKind::Connection, err.kind());
+        assert_eq!(4, err.exit_code());
+        assert_eq!("connect timed out after 0.2s", err.message());
+    }
 
     #[test]
     fn status_maps_grpc_code() {

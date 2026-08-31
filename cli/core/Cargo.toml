@@ -37,3 +37,8 @@ humantime = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["macros", "test-util"] }
+socket2 = "0.5"

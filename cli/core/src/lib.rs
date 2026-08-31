@@ -11,6 +11,7 @@ pub mod humanfmt;
 pub mod logging;
 pub mod metrics;
 pub mod output;
+pub mod timeout;
 
 mod signal;
 

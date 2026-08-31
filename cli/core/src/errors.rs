@@ -136,6 +136,10 @@ impl Error {
                 Some("check the --endpoint URL format (expected: grpc://host:port or unix:///path)".to_owned()),
             ),
             ConnectionError::Auth(..) => (ErrorKind::Auth, None),
+            ConnectionError::Timeout(..) => (
+                ErrorKind::Connection,
+                Some("verify the endpoint is reachable and the gateway is up".to_owned()),
+            ),
         };
 
         Self {

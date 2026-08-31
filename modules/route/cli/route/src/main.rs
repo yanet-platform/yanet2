@@ -730,6 +730,7 @@ entries:
         let connection = ConnectionArgs {
             endpoint: format!("grpc://127.0.0.1:{port}"),
             auth: AuthArgs { auth: AuthMethod::None },
+            timeout: None,
         };
 
         let err = RouteService::new(&connection).await.err().unwrap();
