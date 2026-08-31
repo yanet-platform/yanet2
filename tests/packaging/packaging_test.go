@@ -35,11 +35,11 @@ var shippedConfigPaths = []string{
 	"operators/bird-adapter/etc/yanet/bird-adapter-default.yaml",
 	"operators/pipeline/etc/yanet/yanet-pipeline-operator-default.yaml",
 	"operators/route/etc/yanet/yanet-route-operator-default.yaml",
-	"operators/decap/etc/yanet/yanet-decap-operator-default.yaml",
-	"operators/decap/etc/yanet/decap.d/default.yaml",
-	"operators/forward/etc/yanet/yanet-forward-operator-default.yaml",
-	"operators/forward/etc/yanet/forward.d/vlan-phy-default.yaml",
-	"operators/forward/etc/yanet/forward.d/phy-vlan-default.yaml",
+	"operators/generic/etc/yanet/generic-operator.d/forward.yaml",
+	"operators/generic/etc/yanet/generic-operator.d/decap.yaml",
+	"operators/generic/etc/yanet/forward.d/vlan-phy.yaml",
+	"operators/generic/etc/yanet/forward.d/phy-vlan.yaml",
+	"operators/generic/etc/yanet/decap.d/default.yaml",
 }
 
 // collectEtcYanet2Values walks node's mapping and sequence structure and
@@ -153,6 +153,23 @@ func Test_ControlplaneTemplateConfigIsInstalled(t *testing.T) {
 	configPath := strings.ReplaceAll(match[1], "%i", "default")
 	require.True(t, isInstalled(loadInstalledPatterns(t), strings.TrimPrefix(configPath, "/")),
 		"%q is not listed in any debian/*.install manifest", configPath)
+}
+
+// Test_GenericOperatorTemplateConfigsAreInstalled verifies that the config
+// the template unit executes is installed for each shipped instance.
+func Test_GenericOperatorTemplateConfigsAreInstalled(t *testing.T) {
+	data, err := os.ReadFile("../../debian/yanet2-generic-operator@.service")
+	require.NoError(t, err)
+
+	match := regexp.MustCompile(`(?m)^ExecStart=.* -c (\S+)$`).FindStringSubmatch(string(data))
+	require.Len(t, match, 2, "no ExecStart config path in the generic operator template unit")
+
+	installed := loadInstalledPatterns(t)
+	for _, instance := range []string{"forward", "decap"} {
+		configPath := strings.ReplaceAll(match[1], "%i", instance)
+		require.True(t, isInstalled(installed, strings.TrimPrefix(configPath, "/")),
+			"%q is not listed in any debian/*.install manifest", configPath)
+	}
 }
 
 // Test_CommentedOutPathsAreNotFlagged pins the distinction between walking

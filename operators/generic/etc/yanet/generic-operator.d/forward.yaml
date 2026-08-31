@@ -1,0 +1,44 @@
+name: forward
+
+logging:
+  level: info
+
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+register:
+  interval: 30s
+
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+targets:
+  - name: vlan-phy
+    method: modules.forward.controlplane.forwardpb.v1.ForwardService/UpdateConfig
+    file: /etc/yanet2/forward.d/vlan-phy.yaml
+    function:
+      id:
+        name: fn:forward-vlan-phy
+      chains:
+        - chain:
+            name: default
+            modules:
+              - type: forward
+                name: vlan-phy
+          weight: 1
+  - name: phy-vlan
+    method: modules.forward.controlplane.forwardpb.v1.ForwardService/UpdateConfig
+    file: /etc/yanet2/forward.d/phy-vlan.yaml
+    function:
+      id:
+        name: fn:forward-phy-vlan
+      chains:
+        - chain:
+            name: default
+            modules:
+              - type: forward
+                name: phy-vlan
+          weight: 1

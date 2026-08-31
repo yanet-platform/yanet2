@@ -358,3 +358,22 @@ func Test_StaticModuleOperator_ReadinessUnderInstanceName(t *testing.T) {
 	require.True(t, err == nil || errors.Is(err, context.Canceled), "got %v", err)
 	require.NoError(t, op.Close())
 }
+
+// Test_NewMethodRequest_BuildsTypedRequest verifies that the spelled
+// method yields an empty request of the method's own input type.
+func Test_NewMethodRequest_BuildsTypedRequest(t *testing.T) {
+	request, err := operator.NewMethodRequest(ynpb.PipelineService_Update_FullMethodName)
+	require.NoError(t, err)
+
+	typed, ok := request.(*ynpb.UpdatePipelineRequest)
+	require.True(t, ok, "got %T", request)
+	require.True(t, proto.Equal(typed, &ynpb.UpdatePipelineRequest{}))
+}
+
+// Test_NewMethodRequest_RejectsUnlinkedService verifies that a method of a
+// service this binary does not link is refused.
+func Test_NewMethodRequest_RejectsUnlinkedService(t *testing.T) {
+	_, err := operator.NewMethodRequest("modules.lldp.controlplane.lldppb.v1.LLDPService/UpdateConfig")
+
+	require.ErrorContains(t, err, "not linked into this binary")
+}

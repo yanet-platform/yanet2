@@ -1,0 +1,23 @@
+[Unit]
+Description=yanet2 generic operator (%i)
+After=yanet2-controlplane.target
+Wants=yanet2-controlplane.target
+# Without this a typo'd instance name respawns once a second forever, since
+# Restart=always is paired with rate limiting disabled below.
+ConditionPathExists=/etc/yanet2/generic-operator.d/%i.yaml
+StartLimitBurst=3600000
+StartLimitIntervalSec=0
+
+[Service]
+User=root
+Group=yanet
+
+ExecStart=/usr/bin/yanet-generic-operator -c /etc/yanet2/generic-operator.d/%i.yaml
+TimeoutSec=1200
+TimeoutStopSec=30
+Restart=always
+RestartSec=1
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target

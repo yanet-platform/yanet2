@@ -1,0 +1,9 @@
+name: vlan-phy
+rules:
+  - action:
+      target: "0000:81:00.0"
+      mode: OUT
+      counter: "to_0000:81:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095

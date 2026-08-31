@@ -1,0 +1,6 @@
+usr/bin/yanet-generic-operator
+etc/yanet2/generic-operator.d/forward.yaml
+etc/yanet2/generic-operator.d/decap.yaml
+etc/yanet2/forward.d/vlan-phy.yaml
+etc/yanet2/forward.d/phy-vlan.yaml
+etc/yanet2/decap.d/default.yaml

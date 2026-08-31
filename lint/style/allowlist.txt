@@ -221,8 +221,6 @@ testpkg:modules/nat64/controlplane/service_test.go:nat64:1  # legacy: migrate to
 testpkg:modules/pdump/controlplane/ring_test.go:pdump:1  # white-box unit test of the lock-free ring buffer's internal read/write index state machine and cgo message-header layout; an external test cannot reach the shared-memory position pointers or the C struct fields it must drive
 testpkg:modules/route-mpls/controlplane/service_test.go:route_mpls:1  # legacy: migrate to the external test package
 testpkg:operators/bird-adapter/internal/bird/layout_test.go:bird:1  # white-box guard on unsafe struct layout; an external test cannot observe Sizeof of the private union types
-testpkg:operators/decap/internal/operator/cfg_test.go:operator:1  # legacy: migrate to the external test package
-testpkg:operators/forward/internal/operator/cfg_test.go:operator:1  # legacy: migrate to the external test package
 testpkg:operators/pipeline/internal/operator/stage_source_test.go:operator:1  # legacy: migrate to the external test package
 testpkg:operators/route/internal/discovery/neigh/table_test.go:neigh:1  # legacy: migrate to the external test package
 testpkg:operators/route/internal/operator/fib_build_test.go:operator:1  # legacy: migrate to the external test package

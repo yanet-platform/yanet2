@@ -1,0 +1,20 @@
+name: phy-vlan
+rules:
+  - action:
+      target: virtio_user_kni0
+      mode: OUT
+      counter: to_virtio_user_kni0
+    devices:
+      - name: "0000:81:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+  - action:
+      target: "0000:81:00.0"
+      mode: OUT
+      counter: "to_0000:81:00.0"
+    devices:
+      - name: virtio_user_kni0
+    vlan_ranges:
+      - from: 0
+        to: 4095

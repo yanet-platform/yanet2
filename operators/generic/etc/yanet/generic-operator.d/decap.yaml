@@ -1,0 +1,31 @@
+name: decap
+
+logging:
+  level: info
+
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+register:
+  interval: 30s
+
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+targets:
+  - name: decap0
+    method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
+    file: /etc/yanet2/decap.d/default.yaml
+    function:
+      id:
+        name: fn:decap
+      chains:
+        - chain:
+            name: default
+            modules:
+              - type: decap
+                name: decap0
+          weight: 1
