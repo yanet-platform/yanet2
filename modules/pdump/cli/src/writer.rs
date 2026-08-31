@@ -18,7 +18,8 @@ use pcap_file::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tonic::codec::Streaming;
+use tonic::{Status, codec::Streaming};
+use ync::errors::root_cause;
 
 use crate::{args::DumpOutputFormat, pdumppb, printer};
 
@@ -52,29 +53,29 @@ impl io::Write for PdumpOutput {
     }
 }
 
-struct Text {
+pub struct Text {
     inner: PdumpOutput,
     pretty: bool,
     base_ts: Option<u64>,
 }
 
-struct Pcap {
+pub struct Pcap {
     inner: PcapWriter<PdumpOutput>,
 }
 
-struct PcapNg {
+pub struct PcapNg {
     inner: PcapNgWriter<PdumpOutput>,
     interface_id: u32,
 }
 
-enum PdumpWriter {
+pub enum PdumpWriter {
     Text(Text),
     Pcap(Pcap),
     PcapNg(PcapNg),
 }
 
 impl PdumpWriter {
-    fn new(fmt: DumpOutputFormat, dst: &str, snaplen: u32) -> Result<Self, Box<dyn Error>> {
+    pub fn new(fmt: DumpOutputFormat, dst: &str, snaplen: u32) -> Result<Self, Box<dyn Error>> {
         let output = PdumpOutput::new(dst)?;
 
         let writer = match fmt {
@@ -191,73 +192,139 @@ impl PdumpWriter {
     }
 }
 
+/// Failure of the capture's writing side, carried out of the blocking task.
+pub type WriteError = Box<dyn Error + Send + Sync>;
+
+/// Writes captured records until a limit, the stream or a failure ends the
+/// capture, always flushing. An output that goes away is not a failure.
 pub fn pdump_write(
-    config: Vec<pdumppb::Config>,
+    mut writer: PdumpWriter,
     mut rx: mpsc::Receiver<pdumppb::Record>,
     packet_limit: Option<u64>,
-    fmt: DumpOutputFormat,
-    dst: &str,
-) {
-    let max_snaplen = config.iter().fold(0, |sl, e| sl.max(e.snaplen));
-    let mut writer = match PdumpWriter::new(fmt, dst, max_snaplen) {
-        Ok(w) => w,
-        Err(e) => {
-            log::error!("failed to create pdump writer at '{dst}': {e}");
-            return;
-        }
-    };
+) -> Result<(), WriteError> {
     let mut count = 0;
-    loop {
+    let captured = loop {
         if let Some(limit) = packet_limit
             && count >= limit
         {
             log::debug!("stopping writer because the packet capture limit has been reached: {limit}");
 
-            break;
+            break Ok(());
         }
 
         let Some(rec) = rx.blocking_recv() else {
-            break;
+            break Ok(());
         };
 
-        if let Err(e) = writer.write(rec) {
-            log::error!("failed to write record: {e}");
-            break;
+        if let Err(err) = writer.write(rec) {
+            if is_broken_pipe(err.as_ref()) {
+                log::debug!("the output is closed, stopping the capture");
+
+                break Ok(());
+            }
+
+            break Err(WriteError::from(format!(
+                "failed to write record: {}",
+                root_cause(err.as_ref())
+            )));
         };
 
         count += 1;
-    }
-    _ = writer.flush().map_err(|e| {
-        log::error!("failed to flush writer: {e}");
-    });
+    };
+
+    let flushed = match writer.flush() {
+        Ok(()) => Ok(()),
+        Err(err) if is_broken_pipe(err.as_ref()) => Ok(()),
+        Err(err) => Err(WriteError::from(format!(
+            "failed to flush the output: {}",
+            root_cause(err.as_ref())
+        ))),
+    };
+
+    captured.and(flushed)
 }
 
+/// Reports whether the output went away, which ends a capture piped into a
+/// consumer that stopped reading.
+///
+/// The pcap writers render every failure as one fixed text, so the cause
+/// chain decides.
+fn is_broken_pipe(err: &(dyn Error + 'static)) -> bool {
+    root_cause(err)
+        .downcast_ref::<io::Error>()
+        .is_some_and(|err| err.kind() == io::ErrorKind::BrokenPipe)
+}
+
+/// Forwards records to the writer until the stream ends or the capture is
+/// cancelled. A closed channel is a finished writer, not a failure.
 pub async fn pdump_stream_reader(
     mut stream: Streaming<pdumppb::Record>,
     tx: mpsc::Sender<pdumppb::Record>,
     done: CancellationToken,
-) {
+) -> Result<(), Status> {
     loop {
         tokio::select! {
             biased;
             _ = done.cancelled() => {
-                return;
+                return Ok(());
             }
             message = stream.message() => {
                 match message {
-                    Err(e) => {
-                        log::warn!("error on gRPC stream: {e}");
-                        return;
-                    }
-                    Ok(None) => return,
+                    Err(status) => return Err(status),
+                    Ok(None) => return Ok(()),
                     Ok(Some(rec)) => {
-                        if let Err(e) = tx.send(rec).await {
-                            log::warn!("failed to send Record to pdump writer via mpsc channel: {e}");
-                            return;
+                        if let Err(err) = tx.send(rec).await {
+                            log::debug!("pdump writer is gone, stopping the reader: {err}");
+                            return Ok(());
                         };
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_pdump_write_reports_an_output_that_cannot_take_records() {
+        let writer = PdumpWriter::new(DumpOutputFormat::Text, "/dev/full", 65535).expect("must open");
+        let (tx, rx) = mpsc::channel(1);
+        tx.try_send(pdumppb::Record {
+            meta: Some(pdumppb::RecordMeta::default()),
+            data: Vec::new(),
+        })
+        .expect("must accept the record");
+        drop(tx);
+
+        let err = pdump_write(writer, rx, None).expect_err("a full output must fail the capture");
+
+        assert!(err.to_string().starts_with("failed to write record: "), "{err}");
+    }
+
+    #[test]
+    fn test_broken_pipe_is_recognised_through_a_wrapper() {
+        let piped = pcap_file::PcapError::IoError(io::Error::from(io::ErrorKind::BrokenPipe));
+        let full = pcap_file::PcapError::IoError(io::Error::from(io::ErrorKind::StorageFull));
+
+        assert!(is_broken_pipe(&piped));
+        assert!(!is_broken_pipe(&full));
+    }
+
+    /// Verifies that a record the writer cannot encode ends the capture with
+    /// an error instead of a log line.
+    #[test]
+    fn test_pdump_write_reports_a_failed_record() {
+        let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null", 65535).expect("must open");
+        let (tx, rx) = mpsc::channel(1);
+        tx.try_send(pdumppb::Record { meta: None, data: Vec::new() })
+            .expect("must accept the record");
+        drop(tx);
+
+        let err = pdump_write(writer, rx, None).expect_err("a record without metadata must fail the capture");
+
+        assert_eq!("failed to write record: pdump record missing metadata", err.to_string());
     }
 }

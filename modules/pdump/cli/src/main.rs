@@ -15,11 +15,11 @@ use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::Error,
+    errors::{Error, ErrorKind},
     output::{self, CommonFormat},
 };
 
-use crate::pdumppb::SetConfigRequest;
+use crate::{pdumppb::SetConfigRequest, writer::PdumpWriter};
 
 mod args;
 mod dump_mode;
@@ -235,44 +235,75 @@ impl PdumpService {
             .into_inner();
         log::debug!("read_data successfully acquired data stream for {}", cmd.config_name,);
 
+        // Register before the first byte is written, so that a closed output
+        // reaches the writer instead of the default SIGPIPE disposition.
+        let mut sig_pipe = unix::signal(SignalKind::pipe()).expect("failed to register SIGPIPE handler");
+
+        // Opened once the capture is granted, so that a rejected request
+        // leaves an existing file alone.
+        let output = cmd.output.clone().unwrap_or_else(|| "-".to_owned());
+        let dump_writer = PdumpWriter::new(cmd.dump_format, &output, config.snaplen).map_err(|err| {
+            self.service
+                .invalid("read", format!("cannot write to '{output}': {err}"))
+        })?;
+
         reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
         drop(tx);
 
         // Spawn outside the reader_set to get unpinable join handler.
-        let mut write_jh = tokio::task::spawn_blocking(move || {
-            let output = cmd.output.unwrap_or("-".to_string());
-            writer::pdump_write(vec![config], rx, cmd.num, cmd.dump_format, &output)
-        });
+        let mut write_jh = tokio::task::spawn_blocking(move || writer::pdump_write(dump_writer, rx, cmd.num));
 
-        let mut sig_pipe = unix::signal(SignalKind::pipe()).expect("failed to register SIGPIPE handler");
-
+        let mut finished = None;
         tokio::select! {
             _ = sig_pipe.recv() => {
-                log::warn!("writer pipe closed; initiating shutdown...");
+                log::debug!("the output pipe is closed, stopping the capture");
                 cancellation_token.cancel();
             }
             _ = tokio::signal::ctrl_c() => {
-                log::warn!("interrupted...");
+                log::debug!("interrupted, stopping the capture");
                 cancellation_token.cancel();
             }
             res = &mut write_jh => {
-                log::warn!("writer task finished, initiating shutdown...");
-                match res {
-                    Ok(()) => log::debug!("writer task completed successfully."),
-                    Err(e) => log::warn!("writer task failed: {e}"),
-                }
+                log::debug!("the writer finished, stopping the capture");
                 cancellation_token.cancel();
+                finished = Some(res);
             }
         }
 
-        // Wait for all reader tasks to gracefully finish.
+        // A capture stopped by a signal leaves the writer running, so wait for
+        // it to drain the channel and flush before reporting anything.
+        let written = match finished {
+            Some(res) => res,
+            None => (&mut write_jh).await,
+        };
+
+        let mut result = match written {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(self.write_failed(err.to_string())),
+            Err(err) => Err(self.write_failed(format!("the writer task failed: {err}"))),
+        };
+
         while let Some(res) = reader_set.join_next().await {
-            if let Err(e) = res {
-                log::warn!("reader task failed during shutdown: {e}");
+            let failure = match res {
+                Ok(Ok(())) => continue,
+                Ok(Err(status)) => (self.service.status("read"))(status),
+                Err(err) => self.write_failed(format!("the reader task failed: {err}")),
+            };
+
+            if result.is_ok() {
+                result = Err(failure);
+            } else {
+                log::debug!("the capture also failed to read the stream: {}", failure.message());
             }
         }
 
-        Ok(())
+        result
+    }
+
+    /// Reports a failure of the local capture pipeline, which has no gRPC
+    /// status of its own.
+    fn write_failed(&self, message: String) -> Error {
+        Error::new(ErrorKind::Rpc, "read", self.service.endpoint(), message)
     }
 }
 

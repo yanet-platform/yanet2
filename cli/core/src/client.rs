@@ -21,8 +21,6 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
-use core::error::Error as StdError;
-
 use http::uri::PathAndQuery;
 use prost::Message;
 use tonic::{
@@ -35,7 +33,7 @@ use tower::Layer;
 
 use crate::{
     auth::{self, interceptor::AuthService, AuthArgs},
-    errors::Error,
+    errors::{root_cause, Error},
 };
 
 /// Channel type with all interceptors applied.
@@ -66,16 +64,6 @@ pub enum ConnectionError {
     InvalidUri(#[from] http::uri::InvalidUri),
     #[error("auth error: {0}")]
     Auth(#[from] auth::AuthError),
-}
-
-/// Returns the innermost cause, the one text that explains a transport
-/// failure.
-fn root_cause(mut err: &dyn StdError) -> &dyn StdError {
-    while let Some(source) = err.source() {
-        err = source;
-    }
-
-    err
 }
 
 /// Connect to the endpoint with all interceptors pre-applied.

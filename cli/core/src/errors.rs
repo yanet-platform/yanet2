@@ -269,6 +269,18 @@ fn map_code(status: &Status) -> ErrorKind {
     }
 }
 
+/// Returns the innermost cause, the one text that explains a failure whose
+/// wrappers only label the layer they come from.
+pub fn root_cause<'a>(err: &'a (dyn core::error::Error + 'static)) -> &'a (dyn core::error::Error + 'static) {
+    let mut err = err;
+
+    while let Some(source) = err.source() {
+        err = source;
+    }
+
+    err
+}
+
 /// Build a default hint for the given error kind.
 fn default_hint(kind: ErrorKind) -> Option<String> {
     match kind {
