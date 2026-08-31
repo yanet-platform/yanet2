@@ -3188,7 +3188,10 @@ dependencies = [
 name = "yanet-cli-common"
 version = "0.1.0"
 dependencies = [
+ "bytesize",
  "clap",
+ "clap_complete",
+ "tabled",
  "tonic",
  "yanet-cli",
  "yanet-ynpb",
