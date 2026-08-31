@@ -74,8 +74,9 @@ pub struct UpdateCmd {
     /// The file spells the wire request, exactly what the generic operator
     /// pushes and what `show` prints: rules with an `action`, `devices` as
     /// named objects, family-typed `sources4/6` and `destinations4/6`
-    /// networks, a mode by its declared name or a raw number. The `name`
-    /// may be omitted, it is then taken from `--name`, and a file naming
+    /// networks, a mode by its declared name or number. An undeclared mode
+    /// number, which `show` still prints raw, is refused. The `name` may
+    /// be omitted, it is then taken from `--name`, and a file naming
     /// another config is refused.
     #[arg(long = "file", short = 'f', alias = "rules", value_name = "PATH")]
     pub file: PathBuf,
@@ -115,23 +116,51 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
 
 /// Loads the update request from its YAML file.
 ///
-/// Merge keys are expanded first, so a document shared with the generic
-/// operator may reuse a rule through an anchor and `<<`, and an empty
-/// document is the zero request, as the operator reads it.
+/// The reading matches the generic operator's: merge keys expand, a null
+/// field takes its zero value, an empty document is the zero request and
+/// a bare document separator is tolerated.
 fn load_request<P>(path: P) -> Result<UpdateConfigRequest, Box<dyn core::error::Error>>
 where
     P: AsRef<Path>,
 {
     let content = std::fs::read_to_string(path)?;
-    if content.trim().is_empty() {
-        return Ok(UpdateConfigRequest::default());
+    let mut documents = Vec::new();
+    for document in serde_yaml::Deserializer::from_str(&content) {
+        let value = serde_yaml::Value::deserialize(document)?;
+        if !value.is_null() {
+            documents.push(value);
+        }
     }
-    let mut value: serde_yaml::Value = serde_yaml::from_str(&content)?;
-    if value.is_null() {
-        return Ok(UpdateConfigRequest::default());
-    }
+
+    let mut value = match documents.pop() {
+        None => return Ok(UpdateConfigRequest::default()),
+        Some(_) if !documents.is_empty() => {
+            return Err("the file holds more than one document".into());
+        }
+        Some(value) => value,
+    };
     value.apply_merge()?;
+    strip_null_fields(&mut value);
     Ok(serde_yaml::from_value(value)?)
+}
+
+/// Removes null-valued mapping entries, so a spelled null reads as the
+/// field's zero value, as the operator reads it.
+fn strip_null_fields(value: &mut serde_yaml::Value) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            mapping.retain(|_, entry| !entry.is_null());
+            for (_, entry) in mapping.iter_mut() {
+                strip_null_fields(entry);
+            }
+        }
+        serde_yaml::Value::Sequence(sequence) => {
+            for entry in sequence.iter_mut() {
+                strip_null_fields(entry);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Binds the config name into a loaded request, refusing a file that names
@@ -478,6 +507,38 @@ rules:
                 .to_string()
                 .contains("mtu")
         );
+    }
+
+    #[test]
+    fn test_null_fields_read_as_zero_values() {
+        let yaml = "name: forward0\nrules:\n  - action:\n      target: t\n      mode: OUT\n      counter: c\n    devices: null\n    sources4: null\n";
+        let path = std::env::temp_dir().join(format!("fwd-null-{}.yaml", std::process::id()));
+        std::fs::write(&path, yaml).expect("the fixture must be written");
+
+        let request = load_request(&path).expect("null fields must load");
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!("forward0", request.name);
+        assert!(request.rules[0].devices.is_empty());
+    }
+
+    #[test]
+    fn test_trailing_separator_is_tolerated_but_a_second_document_is_not() {
+        let trailing = "name: forward0\n---\n";
+        let second = "name: forward0\n---\nname: forward1\n";
+        let dir = std::env::temp_dir();
+        let trailing_path = dir.join(format!("fwd-sep-{}.yaml", std::process::id()));
+        let second_path = dir.join(format!("fwd-two-{}.yaml", std::process::id()));
+        std::fs::write(&trailing_path, trailing).expect("the fixture must be written");
+        std::fs::write(&second_path, second).expect("the fixture must be written");
+
+        let tolerated = load_request(&trailing_path).expect("a bare separator must be tolerated");
+        let refused = load_request(&second_path).expect_err("a second document must be refused");
+        std::fs::remove_file(&trailing_path).ok();
+        std::fs::remove_file(&second_path).ok();
+
+        assert_eq!("forward0", tolerated.name);
+        assert!(refused.to_string().contains("more than one document"));
     }
 
     #[test]
