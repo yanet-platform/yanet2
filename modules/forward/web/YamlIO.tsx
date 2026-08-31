@@ -46,6 +46,17 @@ const isPlainMapping = (value: unknown): value is Record<string, unknown> => {
     return proto === Object.prototype || proto === null;
 };
 
+/** Reads a string field, a null as the empty string, other types refused. */
+const stringField = (value: unknown, where: string): string => {
+    if (value == null) {
+        return '';
+    }
+    if (typeof value !== 'string') {
+        throw new Error(`Expected ${where} to be a string.`);
+    }
+    return value;
+};
+
 /** Reads an integer field, a null as zero, any other spelling refused. */
 const uint32Field = (value: unknown, where: string): number => {
     if (value == null) {
@@ -83,9 +94,11 @@ const isValidNetwork = (net: string, isAddress: (addr: string) => boolean, maxLe
     if (!isAddress(address)) {
         return false;
     }
-    if (/^\d+$/.test(suffix)) {
+    // The strict form refuses a padded length such as /024, which the
+    // wire parser rejects too.
+    if (/^(0|[1-9][0-9]*)$/.test(suffix)) {
         const length = Number(suffix);
-        return length >= 0 && length <= maxLength;
+        return length <= maxLength;
     }
     return isAddress(suffix);
 };
@@ -178,7 +191,7 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
                 throw new Error(`Rule ${idx}: device ${deviceIdx} is not a mapping with a "name".`);
             }
             checkKnownKeys(d, `rule ${idx} device ${deviceIdx}`, ['name']);
-            return { name: typeof d['name'] === 'string' ? d['name'] : '' };
+            return { name: stringField(d['name'], `rule ${idx} device ${deviceIdx} "name"`) };
         });
 
         const vlanRaw = rule['vlan_ranges'] == null ? [] : rule['vlan_ranges'];
@@ -196,13 +209,12 @@ export const parseYamlToRules = (text: string): ParsedRulesDoc => {
             };
         });
 
+        const counter = stringField(action['counter'], `rule ${idx} action "counter"`);
         return {
             action: {
-                target: typeof action['target'] === 'string' ? action['target'] : '',
+                target: stringField(action['target'], `rule ${idx} action "target"`),
                 mode,
-                counter: typeof action['counter'] === 'string' && action['counter'] !== ''
-                    ? action['counter']
-                    : undefined,
+                counter: counter !== '' ? counter : undefined,
             },
             devices,
             vlan_ranges,

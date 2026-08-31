@@ -24,8 +24,8 @@ const sampleRules = (): Rule[] => [
     },
 ];
 
-describe('parseYamlToRules', () => {
-    it('parses the wire document the operator and the CLI speak', () => {
+describe('importing a wire rules document', () => {
+    it('parses the document the operator and the CLI speak', () => {
         const text = [
             'name: forward0',
             'rules:',
@@ -71,8 +71,11 @@ describe('parseYamlToRules', () => {
         expect(() => parseYamlToRules(text)).toThrow(/retired flat schema/);
     });
 
-    it('refuses an unknown key and an undeclared mode', () => {
+    it('refuses an unknown top-level key', () => {
         expect(() => parseYamlToRules('rulez: []\n')).toThrow(/Unknown key "rulez"/);
+    });
+
+    it('refuses an undeclared mode name, number and inherited object key', () => {
         expect(() => parseYamlToRules('rules:\n  - action:\n      mode: BOGUS\n')).toThrow(/unknown forward mode/);
         expect(() => parseYamlToRules('rules:\n  - action:\n      mode: 99\n')).toThrow(/unknown forward mode/);
         expect(() => parseYamlToRules('rules:\n  - action:\n      mode: toString\n')).toThrow(/unknown forward mode/);
@@ -96,46 +99,60 @@ describe('parseYamlToRules', () => {
         expect(parsed.rules).toEqual(rules);
     });
 
-    it('refuses a non-string config name and a rule without an action', () => {
+    it('accepts bare host networks as the wire decoders do', () => {
+        const text = 'rules:\n  - action:\n      target: t\n    sources4:\n      - 192.0.2.1\n    sources6:\n      - 2001:db8::1\n';
+
+        const parsed = parseYamlToRules(text);
+
+        expect(parsed.rules[0].sources4).toEqual(['192.0.2.1']);
+        expect(parsed.rules[0].sources6).toEqual(['2001:db8::1']);
+    });
+
+    it('refuses a network of the wrong family', () => {
+        const text = 'rules:\n  - action:\n      target: t\n    sources4:\n      - fe80::/10\n';
+
+        expect(() => parseYamlToRules(text)).toThrow(/sources4 entry "fe80::\/10"/);
+    });
+
+    it('refuses a padded prefix length the wire parser rejects', () => {
+        const text = 'rules:\n  - action:\n      target: t\n    sources4:\n      - 10.0.0.0/024\n';
+
+        expect(() => parseYamlToRules(text)).toThrow(/sources4 entry "10.0.0.0\/024"/);
+    });
+
+    it('refuses a non-string config name', () => {
         expect(() => parseYamlToRules('name: 123\nrules: []\n')).toThrow(/"name" to be a string/);
+    });
+
+    it('refuses a rule without an action', () => {
         expect(() => parseYamlToRules('rules:\n  - devices: []\n')).toThrow(/"action" is required/);
         expect(() => parseYamlToRules('rules:\n  - action: null\n')).toThrow(/"action" is required/);
     });
 
-    it('refuses a scalar document, a sequence action and a mistyped vlan bound', () => {
-        expect(() => parseYamlToRules('2026-08-31\n')).toThrow(/Expected a YAML object/);
+    it('refuses a sequence where the action mapping is required', () => {
         expect(() => parseYamlToRules('rules:\n  - action: []\n')).toThrow(/"action" is required/);
+    });
+
+    it('refuses a scalar document, such as a bare timestamp', () => {
+        expect(() => parseYamlToRules('2026-08-31\n')).toThrow(/Expected a YAML object/);
+    });
+
+    it('refuses a non-string action target', () => {
+        expect(() => parseYamlToRules('rules:\n  - action:\n      target: 123\n')).toThrow(/"target" to be a string/);
+    });
+
+    it('refuses a vlan bound that is not an unsigned integer', () => {
         expect(() =>
             parseYamlToRules("rules:\n  - action:\n      target: t\n    vlan_ranges:\n      - from: '100'\n"),
         ).toThrow(/unsigned integer/);
     });
 
-    it('accepts bare host networks and null vlan bounds as zero', () => {
-        const text = [
-            'rules:',
-            '  - action:',
-            '      target: t',
-            '    vlan_ranges:',
-            '      - from: null',
-            '        to: 100',
-            '    sources4:',
-            '      - 192.0.2.1',
-            '    sources6:',
-            '      - 2001:db8::1',
-        ].join('\n');
+    it('reads null vlan bounds as zero', () => {
+        const text = 'rules:\n  - action:\n      target: t\n    vlan_ranges:\n      - from: null\n        to: 100\n';
 
         const parsed = parseYamlToRules(text);
 
         expect(parsed.rules[0].vlan_ranges).toEqual([{ from: 0, to: 100 }]);
-        expect(parsed.rules[0].sources4).toEqual(['192.0.2.1']);
-        expect(parsed.rules[0].sources6).toEqual(['2001:db8::1']);
-    });
-
-    it('tolerates a bare trailing separator but not a second document', () => {
-        const parsed = parseYamlToRules('name: forward0\nrules: []\n---\n');
-        expect(parsed.name).toBe('forward0');
-
-        expect(() => parseYamlToRules('rules: []\n---\nrules: []\n')).toThrow(/more than one document/);
     });
 
     it('accepts a declared numeric mode and null fields as zero values', () => {
@@ -148,30 +165,37 @@ describe('parseYamlToRules', () => {
         expect(parsed.rules[0].sources4).toEqual([]);
     });
 
-    it('refuses a network of the wrong family', () => {
-        const text = 'rules:\n  - action:\n      target: eth0\n      mode: OUT\n    sources4:\n      - fe80::/10\n';
-
-        expect(() => parseYamlToRules(text)).toThrow(/sources4 entry "fe80::\/10"/);
-    });
-
     it('reads an empty document as no rules', () => {
         expect(parseYamlToRules('')).toEqual({ rules: [] });
         expect(parseYamlToRules('# nothing yet\n')).toEqual({ rules: [] });
     });
+
+    it('tolerates a bare trailing separator', () => {
+        const parsed = parseYamlToRules('name: forward0\nrules: []\n---\n');
+
+        expect(parsed.name).toBe('forward0');
+    });
+
+    it('refuses a second non-empty document', () => {
+        expect(() => parseYamlToRules('rules: []\n---\nrules: []\n')).toThrow(/more than one document/);
+    });
 });
 
-describe('rulesToDiffYaml', () => {
+describe('exporting rules to the wire document', () => {
     it('emits the action form with declared mode names', () => {
         const text = rulesToDiffYaml(sampleRules());
 
         expect(text).toContain('action:');
         expect(text).toContain('mode: OUT');
-        expect(text).toContain('- name: \'01:00.0\'');
+        expect(text).toContain("- name: '01:00.0'");
         expect(text).not.toContain('srcs');
     });
 
-    it('emits an undeclared mode number as is and an absent mode as NONE', () => {
+    it('emits an undeclared mode number as is', () => {
         expect(rulesToDiffYaml([{ action: { target: 't', mode: 99 } }])).toContain('mode: 99');
+    });
+
+    it('emits an absent mode as its zero value NONE', () => {
         expect(rulesToDiffYaml([{ action: { target: 't' } }])).toContain('mode: NONE');
     });
 });
