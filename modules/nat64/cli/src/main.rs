@@ -6,9 +6,9 @@ use clap_complete::{
     CompleteEnv,
 };
 use nat64pb::{
-    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
-    RemoveMappingRequest, RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest,
-    ShowConfigResponse,
+    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, DeleteConfigRequest,
+    ListConfigsRequest, RemoveMappingRequest, RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest,
+    ShowConfigRequest, ShowConfigResponse,
 };
 use netip::{Contiguous, Ipv6Network};
 use ptree::TreeBuilder;
@@ -55,6 +55,8 @@ pub enum ModeCmd {
     List,
     /// Show current configuration
     Show(ShowConfigCmd),
+    /// Delete a nat64 module config.
+    Delete(DeleteConfigCmd),
     /// Manage NAT64 prefixes
     Prefix {
         #[clap(subcommand)]
@@ -90,6 +92,13 @@ pub enum MappingCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// The name of the config to operate on.
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
+    pub config_name: String,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteConfigCmd {
+    /// The name of the config to delete.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
@@ -189,6 +198,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Prefix { cmd } => match cmd {
             PrefixCmd::Add(cmd) => service.add_prefix(cmd).await,
             PrefixCmd::Remove(cmd) => service.remove_prefix(cmd).await,
@@ -285,6 +295,30 @@ impl NAT64Service {
                 print_tree(&response);
             },
         );
+
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+        log::trace!("delete config request: {request:?}");
+        let response = self
+            .service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    "delete",
+                    self.service.endpoint(),
+                    Some(&format!("config '{}'", cmd.config_name)),
+                )
+            })?
+            .into_inner();
+        log::debug!("delete config response: {response:?}");
+
+        output::success("delete", format_args!("Deleted nat64 {}.", cmd.config_name));
 
         Ok(())
     }

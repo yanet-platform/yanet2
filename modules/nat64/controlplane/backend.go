@@ -15,7 +15,12 @@ var _ ModuleHandle = (*cnat64.ModuleConfig)(nil)
 
 type Backend interface {
 	UpdateModule(name string, config *NAT64Config) (ModuleHandle, error)
+	// DeleteModule removes a module config.
+	DeleteModule(name string) error
 }
+
+// moduleType identifies the nat64 module to the shared-memory agent.
+const moduleType = "nat64"
 
 type backend struct {
 	agent *ffi.Agent
@@ -73,4 +78,8 @@ func (m *backend) UpdateModule(name string, config *NAT64Config) (ModuleHandle, 
 	}
 
 	return module, nil
+}
+
+func (m *backend) DeleteModule(name string) error {
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }

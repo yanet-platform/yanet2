@@ -432,6 +432,36 @@ func encodeNAT64Prefix(prefix []byte) (*commonpb.IPv6Prefix, error) {
 	}, nil
 }
 
+// DeleteConfig removes the named config when it is no longer referenced
+// by any pipeline.
+func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConfigRequest) (*nat64pb.DeleteConfigResponse, error) {
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	inst, ok := m.configs[name]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "config not found")
+	}
+
+	if err := m.backend.DeleteModule(name); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete module config: %v", err)
+	}
+
+	// The delete retired the generation holding the published module.
+	// Retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	m.parkOrFree(inst.Module)
+
+	delete(m.configs, name)
+
+	return &nat64pb.DeleteConfigResponse{}, nil
+}
+
 func (m *NAT64Service) instanceFor(name string) config {
 	inst, ok := m.configs[name]
 	if !ok {

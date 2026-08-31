@@ -3,6 +3,7 @@ package nat64
 import (
 	"errors"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,24 +11,42 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
 var errInjectedBackend = errors.New("injected backend failure")
 
 type mockHandle struct {
-	freed bool
+	freed      bool
+	freedCount atomic.Int64
 }
 
 func (m *mockHandle) Free() error {
 	m.freed = true
+	m.freedCount.Add(1)
+	return nil
+}
+
+// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
+type refusingOnceHandle struct {
+	numCalls atomic.Int64
+	freed    atomic.Int64
+}
+
+func (m *refusingOnceHandle) Free() error {
+	if m.numCalls.Add(1) == 1 {
+		return ffi.ErrStillReferenced
+	}
+	m.freed.Add(1)
 	return nil
 }
 
 type mockBackend struct {
-	configs []NAT64Config
-	handles []*mockHandle
-	failAt  int
+	configs     []NAT64Config
+	handles     []*mockHandle
+	failAt      int
+	deletedName string
 }
 
 func (m *mockBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
@@ -47,6 +66,37 @@ func mustIPv6Prefix(t *testing.T, value string) *commonpb.IPv6Prefix {
 	prefix, err := commonpb.NewIPv6PrefixFromPrefix(netip.MustParsePrefix(value))
 	require.NoError(t, err)
 	return prefix
+}
+
+func (m *mockBackend) DeleteModule(name string) error {
+	m.deletedName = name
+	return nil
+}
+
+// refusingDeleteBackend updates like mockBackend but refuses every delete,
+// modeling a config still referenced by a live generation.
+type refusingDeleteBackend struct {
+	mockBackend
+}
+
+func (m *refusingDeleteBackend) DeleteModule(name string) error {
+	m.deletedName = name
+	return errInjectedBackend
+}
+
+// parkingBackend updates like mockBackend but refuses to release the first
+// handle it mints, so that handle must be parked before it can be reclaimed.
+type parkingBackend struct {
+	mockBackend
+	numCalls atomic.Int64
+	first    refusingOnceHandle
+}
+
+func (m *parkingBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
+	if m.numCalls.Add(1) == 1 {
+		return &m.first, nil
+	}
+	return m.mockBackend.UpdateModule(name, cfg)
 }
 
 // Test_NAT64Service_AddShowRemove verifies basic config lifecycle operations.
@@ -271,4 +321,111 @@ func Test_NAT64Service_MappingAddressInvalid(t *testing.T) {
 	// Only the prefix update reached the backend: no mapping landed.
 	require.Len(t, backend.configs, 1)
 	require.Empty(t, backend.configs[0].Mappings)
+}
+
+// Test_NAT64Service_DeleteConfig_InvalidName verifies that deleting a
+// config with an empty name is rejected.
+func Test_NAT64Service_DeleteConfig_InvalidName(t *testing.T) {
+	service := NewNAT64Service(&mockBackend{})
+	ctx := t.Context()
+
+	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_NAT64Service_DeleteConfig_MissingConfig verifies that deleting a
+// config that was never created returns NotFound.
+func Test_NAT64Service_DeleteConfig_MissingConfig(t *testing.T) {
+	service := NewNAT64Service(&mockBackend{})
+	ctx := t.Context()
+
+	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
+	require.Nil(t, resp)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_NAT64Service_DeleteConfig_RemovesConfig verifies that deleting an
+// unreferenced config removes it from ListConfigs and from Show.
+func Test_NAT64Service_DeleteConfig_RemovesConfig(t *testing.T) {
+	backend := &mockBackend{}
+	service := NewNAT64Service(backend)
+	ctx := t.Context()
+
+	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+	})
+	require.NoError(t, err)
+	handle := backend.handles[0]
+
+	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
+	require.Equal(t, "nat64-0", backend.deletedName)
+	require.Equal(t, int64(1), handle.freedCount.Load())
+
+	list, err := service.ListConfigs(ctx, &nat64pb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Empty(t, list.Configs)
+
+	show, err := service.ShowConfig(ctx, &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+	require.Nil(t, show)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_NAT64Service_DeleteConfig_Referenced verifies that a backend refusal
+// surfaces as Internal and leaves the config in place.
+func Test_NAT64Service_DeleteConfig_Referenced(t *testing.T) {
+	backend := &refusingDeleteBackend{}
+	service := NewNAT64Service(backend)
+	ctx := t.Context()
+
+	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+	})
+	require.NoError(t, err)
+
+	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
+	require.Nil(t, resp)
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Equal(t, "nat64-0", backend.deletedName)
+
+	list, err := service.ListConfigs(ctx, &nat64pb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"nat64-0"}, list.Configs)
+
+	show, err := service.ShowConfig(ctx, &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+	require.NotNil(t, show)
+	require.NoError(t, err)
+}
+
+// Test_NAT64Service_DeleteConfig_ParksThenReclaims verifies a handle whose
+// release is refused at delete time is parked, then reclaimed on the next update.
+func Test_NAT64Service_DeleteConfig_ParksThenReclaims(t *testing.T) {
+	backend := &parkingBackend{}
+	service := NewNAT64Service(backend)
+	ctx := t.Context()
+
+	_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+	})
+	require.NoError(t, err)
+
+	resp, err := service.DeleteConfig(ctx, &nat64pb.DeleteConfigRequest{Name: "nat64-0"})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
+	require.Len(t, service.deferred, 1)
+	require.Equal(t, int64(0), backend.first.freed.Load())
+
+	// A later successful update reclaims deferred handles first.
+	_, err = service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+		Name:   "nat64-1",
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+	})
+	require.NoError(t, err)
+	require.Empty(t, service.deferred)
+	require.Equal(t, int64(1), backend.first.freed.Load())
 }

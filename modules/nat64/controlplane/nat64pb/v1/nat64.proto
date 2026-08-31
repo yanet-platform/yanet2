@@ -33,6 +33,10 @@ service NAT64Service {
   // SetDropUnknown sets drop_unknown_prefix and drop_unknown_mapping
   // flags
   rpc SetDropUnknown(SetDropUnknownRequest) returns (SetDropUnknownResponse) {}
+
+  // DeleteConfig removes the named config when it is no longer referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
 }
 
 message ListConfigsRequest {}
@@ -121,3 +125,9 @@ message SetDropUnknownRequest {
 }
 
 message SetDropUnknownResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse {}
