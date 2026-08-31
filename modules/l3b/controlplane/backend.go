@@ -1,6 +1,7 @@
 package l3b
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"sync"
@@ -37,9 +38,14 @@ type Backend interface {
 	UpdateRealServerWeight(service string, realServerIndex uint32, weight uint32) error
 }
 
+// freeable is anything this backend owns whose destruction a live
+// configuration generation can refuse.
+type freeable interface {
+	Free() error
+}
+
 type managedService struct {
-	virtualService *cl3b.VirtualService
-	handle         *cl3b.VirtualServiceHandle
+	object *cl3b.VirtualServiceObject
 	// weights[i] is the current weight of real server i; the scheduler ring
 	// is rebuilt whenever a weight changes.
 	weights []uint32
@@ -56,6 +62,12 @@ type backend struct {
 	mu       sync.Mutex
 	services map[string]*managedService
 	configs  map[string]*managedConfig
+
+	// deferred holds superseded objects and module configs whose free was
+	// refused because a live configuration generation still referenced
+	// them. This backend is their owner: it retries them on its next
+	// mutating call.
+	deferred []freeable
 }
 
 // NewBackend creates a Backend that operates on real shared memory.
@@ -67,27 +79,35 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
+// reclaimDeferred retries every deferred handle, dropping the ones whose
+// generations have drained and keeping the rest deferred. The caller must hold
+// the backend mutex.
+func (m *backend) reclaimDeferred() {
+	kept := m.deferred[:0]
+	for _, handle := range m.deferred {
+		if err := handle.Free(); isStillReferenced(err) {
+			kept = append(kept, handle)
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
+}
+
+func isStillReferenced(err error) bool {
+	return errors.Is(err, ffi.ErrStillReferenced)
+}
+
+// deferOrFree retires a superseded handle immediately when its generations
+// have drained, and otherwise parks it for a later retry. The caller must hold
+// the backend mutex.
+func (m *backend) deferOrFree(handle freeable) {
+	if isStillReferenced(handle.Free()) {
+		m.deferred = append(m.deferred, handle)
+	}
+}
+
 func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 	name := service.GetName()
-	config, err := buildVirtualServiceConfig(service)
-	if err != nil {
-		return err
-	}
-
-	virtualService, err := cl3b.CreateVirtualService(m.agent, config)
-	if err != nil {
-		return fmt.Errorf("failed to create virtual service %q: %w", name, err)
-	}
-
-	weights := defaultWeights(len(config.RealServers))
-	if err := virtualService.UpdateRing(ringFromWeights(weights)); err != nil {
-		return fmt.Errorf("failed to populate real server ring: %w", err)
-	}
-
-	handle, err := cl3b.CreateVirtualServiceHandle(m.agent, virtualService)
-	if err != nil {
-		return fmt.Errorf("failed to create virtual service handle %q: %w", name, err)
-	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,30 +116,20 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 		return fmt.Errorf("virtual service %q already exists", name)
 	}
 
+	object, weights, err := m.publishService(service, name)
+	if err != nil {
+		return err
+	}
+
 	m.services[name] = &managedService{
-		virtualService: virtualService,
-		handle:         handle,
-		weights:        weights,
+		object:  object,
+		weights: weights,
 	}
 	return nil
 }
 
 func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 	name := service.GetName()
-	config, err := buildVirtualServiceConfig(service)
-	if err != nil {
-		return err
-	}
-
-	virtualService, err := cl3b.CreateVirtualService(m.agent, config)
-	if err != nil {
-		return fmt.Errorf("failed to create virtual service %q: %w", name, err)
-	}
-
-	weights := defaultWeights(len(config.RealServers))
-	if err := virtualService.UpdateRing(ringFromWeights(weights)); err != nil {
-		return fmt.Errorf("failed to populate real server ring: %w", err)
-	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,21 +139,68 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 		return fmt.Errorf("virtual service %q not found", name)
 	}
 
-	// Swap the handle to the new service so the dataplane picks it up without
-	// rebuilding the module configuration.
-	existing.handle.Update(virtualService)
-	existing.virtualService = virtualService
+	object, weights, err := m.publishService(service, name)
+	if err != nil {
+		return err
+	}
+
+	// The upsert swapped the registry slot atomically; the superseded
+	// object stays alive until its generations drain.
+	m.deferOrFree(existing.object)
+
+	existing.object = object
 	existing.weights = weights
 	return nil
+}
+
+// publishService builds a fresh virtual service object under the given name,
+// installs its default scheduler ring and upserts it into the dataplane. The
+// caller must hold the backend mutex.
+func (m *backend) publishService(
+	service *l3bpb.VirtualService,
+	name string,
+) (*cl3b.VirtualServiceObject, []uint32, error) {
+	config, err := buildVirtualServiceConfig(service)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	object, err := cl3b.CreateVirtualService(m.agent, name, config)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
+	}
+
+	weights := defaultWeights(len(config.RealServers))
+	if err := object.UpdateRing(ringFromWeights(weights)); err != nil {
+		_ = object.Free()
+		return nil, nil, fmt.Errorf("failed to populate real server ring: %w", err)
+	}
+
+	if err := object.Publish(m.agent); err != nil {
+		_ = object.Free()
+		return nil, nil, fmt.Errorf("failed to publish virtual service %q: %w", name, err)
+	}
+
+	return object, weights, nil
 }
 
 func (m *backend) DeleteService(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.services[name]; !ok {
+	existing, ok := m.services[name]
+	if !ok {
 		return fmt.Errorf("virtual service %q not found", name)
 	}
+
+	if err := cl3b.DeleteVirtualService(m.agent, name); err != nil {
+		return fmt.Errorf("failed to delete virtual service %q: %w", name, err)
+	}
+
+	// The delete retired the generation holding the published object;
+	// retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	m.deferOrFree(existing.object)
 
 	delete(m.services, name)
 	return nil
@@ -166,25 +223,14 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	managed, ok := m.configs[name]
-	if !ok {
-		module, err := cl3b.NewModuleConfig(m.agent, name)
-		if err != nil {
-			return fmt.Errorf("failed to create module config %q: %w", name, err)
-		}
-		managed = &managedConfig{module: module}
-		m.configs[name] = managed
-	}
-
-	// Resolve service names into handles in index order.
-	handles := make([]*cl3b.VirtualServiceHandle, 0, len(config.GetServices()))
+	// Resolve service names in module order before building anything.
+	serviceNames := make([]string, 0, len(config.GetServices()))
 	serviceIndex := make(map[string]uint32, len(config.GetServices()))
 	for idx, serviceName := range config.GetServices() {
-		service, ok := m.services[serviceName]
-		if !ok {
+		if _, ok := m.services[serviceName]; !ok {
 			return fmt.Errorf("unknown virtual service %q", serviceName)
 		}
-		handles = append(handles, service.handle)
+		serviceNames = append(serviceNames, serviceName)
 		serviceIndex[serviceName] = uint32(idx)
 	}
 
@@ -217,15 +263,40 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 		})
 	}
 
-	if err := managed.module.Update(rules, handles); err != nil {
+	// A module configuration is immutable once published: build a fresh one
+	// per update and retire the module it replaces.
+	module, err := cl3b.NewModuleConfig(m.agent, name)
+	if err != nil {
+		return fmt.Errorf("failed to create module config %q: %w", name, err)
+	}
+	if err := module.Update(rules, serviceNames); err != nil {
+		_ = module.Free()
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
+
+	managed := &managedConfig{module: module}
+	previous, ok := m.configs[name]
+	m.configs[name] = managed
 
 	modules := make([]ffi.ModuleConfig, 0, len(m.configs))
 	for _, cfg := range m.configs {
 		modules = append(modules, cfg.module.AsFFIModule())
 	}
-	return m.agent.UpdateModules(modules)
+	if err := m.agent.UpdateModules(modules); err != nil {
+		// Roll back to the previous module so the map keeps the live one.
+		if ok {
+			m.configs[name] = previous
+		} else {
+			delete(m.configs, name)
+		}
+		_ = module.Free()
+		return fmt.Errorf("failed to update module config %q: %w", name, err)
+	}
+
+	if ok {
+		m.deferOrFree(previous.module)
+	}
+	return nil
 }
 
 func (m *backend) ListModuleConfigs() []string {
@@ -252,7 +323,7 @@ func (m *backend) UpdateRealServerState(
 		return fmt.Errorf("virtual service %q not found", service)
 	}
 
-	if err := existing.virtualService.SetRealServerState(realServerIndex, enabled); err != nil {
+	if err := existing.object.SetRealServerState(realServerIndex, enabled); err != nil {
 		return fmt.Errorf("failed to set real server state: %w", err)
 	}
 	return nil
@@ -280,7 +351,7 @@ func (m *backend) UpdateRealServerWeight(
 	}
 
 	existing.weights[realServerIndex] = weight
-	if err := existing.virtualService.UpdateRing(ringFromWeights(existing.weights)); err != nil {
+	if err := existing.object.UpdateRing(ringFromWeights(existing.weights)); err != nil {
 		return fmt.Errorf("failed to rebuild real server ring: %w", err)
 	}
 	return nil

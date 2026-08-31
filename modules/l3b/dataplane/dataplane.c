@@ -124,13 +124,21 @@ l3b_handle_packets(
 
 		if (virtual_service_index != FILTER_RULE_INVALID &&
 		    virtual_service_index < config->virtual_service_count) {
-			struct virtual_service_handle **virtual_services =
-				ADDR_OF(&config->virtual_services);
-			struct virtual_service_handle *handle =
-				ADDR_OF(&virtual_services[virtual_service_index]
+			uint64_t *virtual_service_links =
+				ADDR_OF(&config->virtual_service_links);
+			struct virtual_service *virtual_service =
+				l3b_module_ectx_virtual_service(
+					module_ectx,
+					virtual_service_links
+						[virtual_service_index]
 				);
+			if (virtual_service == NULL) {
+				packet_front_drop(packet_front, packet);
+				continue;
+			}
+
 			int result = l3b_virtual_service_process(
-				ADDR_OF(&handle->virtual_service), packet
+				virtual_service, packet
 			);
 			if (result == 0) {
 				packet_front_output(packet_front, packet);

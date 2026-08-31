@@ -12,6 +12,7 @@
 #include "lib/dataplane/packet/dscp.h"
 #include "lib/dataplane/packet/encap.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/econtext.h"
 
 #include <lib/filter/query.h>
 
@@ -24,6 +25,39 @@ FILTER_QUERY_DECLARE(l3b_source_filter_ip6, net6_src, port_dst);
 // network and protocol into a virtual service index.
 FILTER_QUERY_DECLARE(l3b_destination_filter_ip4, net4_dst, proto_range);
 FILTER_QUERY_DECLARE(l3b_destination_filter_ip6, net6_dst, proto_range);
+
+/*
+ * Resolve a module's object link to the virtual service it names.
+ *
+ * Walks the per-worker object link at link_idx to the linked object's
+ * execution context and returns the service embedded in the l3b_virtual_service
+ * object, or NULL when the link is missing or unresolved.
+ */
+static inline struct virtual_service *
+l3b_module_ectx_virtual_service(
+	struct module_ectx *module_ectx, uint64_t link_idx
+) {
+	struct module_object_link_ectx *link =
+		object_link_get_address(module_ectx, link_idx);
+	if (link == NULL) {
+		return NULL;
+	}
+
+	struct object_ectx *object_ectx = ADDR_OF(&link->object_ectx);
+	if (object_ectx == NULL) {
+		return NULL;
+	}
+
+	struct cp_object *cp_object = ADDR_OF(&object_ectx->cp_object);
+	if (cp_object == NULL) {
+		return NULL;
+	}
+
+	struct l3b_virtual_service_object *object = container_of(
+		cp_object, struct l3b_virtual_service_object, cp_object
+	);
+	return &object->virtual_service;
+}
 
 /*
  * Encapsulate packet into an IP-in-IP tunnel towards real_server.

@@ -1,7 +1,9 @@
 package l3b_test
 
 import (
+	"bytes"
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -20,6 +22,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 const (
@@ -49,6 +52,7 @@ func setupL3bHarness(
 		Devices:       []string{deviceName},
 		Modules:       []string{"l3b", "forward"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"l3b_virtual_service"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)
@@ -207,4 +211,127 @@ func TestL3b_DropsTcpWithoutVirtualService(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Output, "TCP packets must not be forwarded without a virtual service")
 	require.Len(t, result.Drop, packetCount, "TCP packets must be dropped without a virtual service")
+}
+
+// ethHeaderLen is the Ethernet header length stripped when comparing the
+// encapsulated inner packet with the original frame.
+const ethHeaderLen = 14
+
+// publishVirtualService creates a named virtual service object with a single
+// IPv4 real server, installs a one-slot scheduler ring and publishes it into
+// the dataplane. The real server tunnels towards realDst deriving the outer
+// source from sourceNet.
+func publishVirtualService(
+	t *testing.T,
+	agent *ffi.Agent,
+	name string,
+	sourceNet string,
+	realDst string,
+) *cl3b.VirtualServiceObject {
+	t.Helper()
+
+	serviceConfig := cl3b.VirtualServiceConfig{
+		SourceFilterRules: []cl3b.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
+		}},
+		RealServers: []cl3b.RealServer{{
+			Type:               cl3b.IPv4,
+			DestinationAddress: xerror.Unwrap(netip.ParseAddr(realDst)),
+			SourceNet:          xnetip.MustParseNetwork(sourceNet),
+		}},
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 1 * 1000,
+	}
+
+	object, err := cl3b.CreateVirtualService(agent, name, serviceConfig)
+	require.NoError(t, err)
+
+	require.NoError(t, object.UpdateRing([]uint32{0}))
+	require.NoError(t, object.Publish(agent))
+	return object
+}
+
+// publishModuleConfig installs a module configuration whose destination filter
+// routes TCP traffic to 192.168.1.0/24 to the named virtual service object.
+func publishModuleConfig(
+	t *testing.T,
+	agent *ffi.Agent,
+	configName string,
+	serviceName string,
+) *cl3b.ModuleConfig {
+	t.Helper()
+
+	module, err := cl3b.NewModuleConfig(agent, configName)
+	require.NoError(t, err)
+
+	rules := []cl3b.DestinationFilterRule{{
+		Net4s:               []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
+		ProtoRanges:         filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+		VirtualServiceIndex: 0,
+	}}
+	require.NoError(t, module.Update(rules, []string{serviceName}))
+
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
+	return module
+}
+
+// TestL3b_EncapsulatesTcpIntoIpip verifies the full object-linked path: a TCP
+// packet matched by the module destination filter reaches the linked virtual
+// service object and is encapsulated towards the real server with the derived
+// outer source address.
+func TestL3b_EncapsulatesTcpIntoIpip(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	service := publishVirtualService(t, agent, "svc", "192.0.2.0/24", "172.16.0.10")
+	t.Cleanup(func() { _ = service.Free() })
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	innerIP4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolTCP,
+		SrcIP:    net.ParseIP("10.0.0.1"),
+		DstIP:    net.ParseIP("192.168.1.1"),
+	}
+	tcp := layers.TCP{
+		SrcPort: 12345,
+		DstPort: 80,
+		Seq:     1,
+		Window:  1024,
+	}
+	tcp.SetNetworkLayerForChecksum(&innerIP4)
+
+	pkt := xpacket.LayersToPacket(t, &eth, &innerIP4, &tcp)
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Drop, "matched TCP packets must not be dropped")
+	require.Len(t, result.Output, 1, "matched TCP packets must be forwarded")
+
+	info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
+	require.NoError(t, err)
+
+	require.True(t, info.IsTunneled, "the output must be an IP-in-IP encapsulation")
+	require.Equal(t, "ip4in4", info.TunnelType)
+	require.Equal(t, layers.IPProtocolIPv4, info.Protocol,
+		"the outer protocol must be IPPROTO_IPIP")
+	require.Equal(t, "172.16.0.10", info.DstIP.String(),
+		"the outer destination is the real server address")
+	require.Equal(t, "192.0.2.1", info.SrcIP.String(),
+		"the outer source must be source_net XOR (inner source AND ~mask)")
+
+	require.NotNil(t, info.InnerPacket)
+	require.Equal(t, layers.IPProtocolTCP, info.InnerPacket.Protocol)
+	require.Equal(t, "10.0.0.1", info.InnerPacket.SrcIP.String())
+	require.Equal(t, "192.168.1.1", info.InnerPacket.DstIP.String())
+	require.True(t, bytes.HasSuffix(result.Output[0].RawData, pkt.Data()[ethHeaderLen:]),
+		"the inner packet must be carried byte-identical")
 }

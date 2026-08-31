@@ -595,7 +595,9 @@ dataplane_init(
 		}
 
 		static const char *objects[] = {
-			"fwstate_map_v4", "fwstate_map_v6"
+			"fwstate_map_v4",
+			"fwstate_map_v6",
+			"l3b_virtual_service",
 		};
 		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
 		     ++i) {

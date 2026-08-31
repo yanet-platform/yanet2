@@ -7,6 +7,7 @@ dp_dependencies = [
 
 dp_sources = files(
   'dataplane.c',
+  'object.c',
 )
 
 lib_l3b_dp = static_library(
@@ -24,5 +25,8 @@ lib_l3b_dp_dep = declare_dependency(
     '-Wl,--defsym',
     '-Wl,new_module_l3b=new_module_l3b',
     '-Wl,--export-dynamic-symbol=new_module_l3b',
+    '-Wl,--defsym',
+    '-Wl,new_object_l3b_virtual_service=new_object_l3b_virtual_service',
+    '-Wl,--export-dynamic-symbol=new_object_l3b_virtual_service',
   ],
 )

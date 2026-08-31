@@ -44,7 +44,7 @@ l3b_module_config_new(
 	}
 
 	config->virtual_service_count = 0;
-	SET_OFFSET_OF(&config->virtual_services, NULL);
+	SET_OFFSET_OF(&config->virtual_service_links, NULL);
 
 	config->virtual_service_index_count = 0;
 	SET_OFFSET_OF(&config->virtual_service_indexes, NULL);
@@ -64,14 +64,13 @@ l3b_module_config_destroy(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip6, L3B_DESTINATION_FILTER_IP6_TAG);
 
 	struct memory_context *memory_context = &cp_module->memory_context;
-	struct virtual_service_handle **virtual_services =
-		ADDR_OF(&config->virtual_services);
-	if (virtual_services != NULL) {
+	uint64_t *virtual_service_links =
+		ADDR_OF(&config->virtual_service_links);
+	if (virtual_service_links != NULL) {
 		memory_bfree(
 			memory_context,
-			virtual_services,
-			sizeof(struct virtual_service_handle *) *
-				config->virtual_service_count
+			virtual_service_links,
+			sizeof(uint64_t) * config->virtual_service_count
 		);
 	}
 
@@ -239,21 +238,46 @@ out:
 	return rc;
 }
 
-struct virtual_service *
+struct cp_object *
 l3b_virtual_service_create(
 	struct agent *agent,
+	const char *name,
 	const struct l3b_virtual_service *virtual_service,
 	yanet_error **err
 ) {
-	struct memory_context *memory_context = &agent->memory_context;
-
-	struct virtual_service *vs = (struct virtual_service *)memory_balloc(
-		memory_context, sizeof(struct virtual_service)
-	);
-	if (vs == NULL) {
-		yanet_error_add(err, "failed to allocate virtual service");
+	struct l3b_virtual_service_object *object =
+		(struct l3b_virtual_service_object *)memory_balloc(
+			&agent->memory_context,
+			sizeof(struct l3b_virtual_service_object)
+		);
+	if (object == NULL) {
+		yanet_error_add(
+			err, "failed to allocate virtual service object"
+		);
 		return NULL;
 	}
+
+	if (cp_object_init(
+		    &object->cp_object,
+		    agent,
+		    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
+		    name,
+		    err
+	    )) {
+		yanet_error_add(err, "failed to init virtual service object");
+		memory_bfree(
+			&agent->memory_context,
+			object,
+			sizeof(struct l3b_virtual_service_object)
+		);
+		return NULL;
+	}
+
+	// Every allocation below is attributed to the object's own memory
+	// context so the accounting travels with the object.
+	struct memory_context *memory_context =
+		&object->cp_object.memory_context;
+	struct virtual_service *vs = &object->virtual_service;
 
 	vs->scheduler_hash_mask = virtual_service->hash_mask;
 	vs->scheduler_index_mask = virtual_service->index_mask;
@@ -315,7 +339,7 @@ l3b_virtual_service_create(
 		goto error_ring;
 	}
 
-	return vs;
+	return &object->cp_object;
 
 error_ring:
 	if (vs->real_ring.capacity > 0) {
@@ -336,42 +360,80 @@ error_real_servers:
 	}
 
 error_vs:
-	memory_bfree(memory_context, vs, sizeof(struct virtual_service));
+	cp_object_fini(&object->cp_object);
+	memory_bfree(
+		&agent->memory_context,
+		object,
+		sizeof(struct l3b_virtual_service_object)
+	);
 	return NULL;
 }
 
-struct virtual_service_handle *
-l3b_virtual_service_handle_create(
-	struct agent *agent, struct virtual_service *virtual_service
-) {
-	struct virtual_service_handle *handle =
-		(struct virtual_service_handle *)memory_balloc(
-			&agent->memory_context,
-			sizeof(struct virtual_service_handle)
+static void
+l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
+	struct l3b_virtual_service_object *object = container_of(
+		cp_object, struct l3b_virtual_service_object, cp_object
+	);
+	struct virtual_service *vs = &object->virtual_service;
+	struct memory_context *memory_context = &cp_object->memory_context;
+
+	filter_free(&vs->filter_ip4, L3B_SOURCE_FILTER_IP4_TAG);
+	filter_free(&vs->filter_ip6, L3B_SOURCE_FILTER_IP6_TAG);
+
+	if (vs->real_ring.capacity > 0) {
+		memory_bfree(
+			memory_context,
+			ADDR_OF(&vs->real_ring.server_indexes),
+			sizeof(uint32_t) * vs->real_ring.capacity
 		);
-	if (handle == NULL) {
-		return NULL;
 	}
 
-	SET_OFFSET_OF(&handle->virtual_service, virtual_service);
-	return handle;
+	if (vs->real_server_count > 0) {
+		memory_bfree(
+			memory_context,
+			ADDR_OF(&vs->real_servers),
+			sizeof(struct real_server) * vs->real_server_count
+		);
+	}
+
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_object->agent);
+
+	cp_object_fini(cp_object);
+	memory_bfree(
+		&agent->memory_context,
+		object,
+		sizeof(struct l3b_virtual_service_object)
+	);
 }
 
-void
-l3b_virtual_service_handle_update(
-	struct virtual_service_handle *handle,
-	struct virtual_service *virtual_service
-) {
-	SET_OFFSET_OF(&handle->virtual_service, virtual_service);
+int
+l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
+	if (cp_object_try_destroy(cp_object, err)) {
+		return -1;
+	}
+
+	l3b_virtual_service_object_destroy(cp_object);
+	return 0;
+}
+
+static struct virtual_service *
+l3b_virtual_service_of(struct cp_object *cp_object) {
+	return &container_of(
+			cp_object, struct l3b_virtual_service_object, cp_object
+	)
+			->virtual_service;
 }
 
 int
 l3b_virtual_service_update_ring(
-	struct virtual_service *virtual_service,
+	struct cp_object *cp_object,
 	const uint32_t *server_indexes,
 	uint32_t server_index_count,
 	yanet_error **err
 ) {
+	struct virtual_service *virtual_service =
+		l3b_virtual_service_of(cp_object);
 	if (server_index_count > virtual_service->real_ring.capacity) {
 		yanet_error_add(err, "ring count exceeds capacity");
 		return -1;
@@ -402,11 +464,13 @@ l3b_virtual_service_update_ring(
 
 int
 l3b_virtual_service_set_real_server_state(
-	struct virtual_service *virtual_service,
+	struct cp_object *cp_object,
 	uint32_t real_server_index,
 	bool enabled,
 	yanet_error **err
 ) {
+	struct virtual_service *virtual_service =
+		l3b_virtual_service_of(cp_object);
 	if (real_server_index >= virtual_service->real_server_count) {
 		yanet_error_add(err, "invalid real server index");
 		return -1;
@@ -499,37 +563,51 @@ l3b_module_config_update(
 	struct cp_module *cp_module,
 	const struct l3b_destination_filter_rule *destination_filter_rules,
 	uint32_t destination_filter_rule_count,
-	struct virtual_service_handle **virtual_services,
-	uint32_t virtual_service_count,
+	const char *const *service_names,
+	uint32_t service_count,
 	yanet_error **err
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 	struct memory_context *memory_context = &cp_module->memory_context;
 
-	// Install the virtual service handles, one relative-pointer slot each.
-	if (virtual_service_count > 0) {
-		struct virtual_service_handle **vs_array =
-			(struct virtual_service_handle **)memory_balloc(
-				memory_context,
-				sizeof(struct virtual_service_handle *) *
-					virtual_service_count
-			);
-		if (vs_array == NULL) {
+	// Link each named virtual service object and record the link index in
+	// service-slot order; the dataplane resolves the link at execution
+	// time to reach the object.
+	//
+	// The module is freshly constructed, so no earlier links exist.
+	if (service_count > 0) {
+		uint64_t *link_array = (uint64_t *)memory_balloc(
+			memory_context, sizeof(uint64_t) * service_count
+		);
+		if (link_array == NULL) {
 			yanet_error_add(
-				err, "failed to allocate virtual service array"
+				err, "failed to allocate virtual service links"
 			);
 			return -1;
 		}
 
-		for (uint32_t idx = 0; idx < virtual_service_count; ++idx) {
-			SET_OFFSET_OF(&vs_array[idx], virtual_services[idx]);
+		for (uint32_t idx = 0; idx < service_count; ++idx) {
+			if (cp_module_link_object(
+				    cp_module,
+				    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
+				    service_names[idx],
+				    &link_array[idx],
+				    err
+			    )) {
+				memory_bfree(
+					memory_context,
+					link_array,
+					sizeof(uint64_t) * service_count
+				);
+				return -1;
+			}
 		}
-		SET_OFFSET_OF(&config->virtual_services, vs_array);
+		SET_OFFSET_OF(&config->virtual_service_links, link_array);
 	} else {
-		SET_OFFSET_OF(&config->virtual_services, NULL);
+		SET_OFFSET_OF(&config->virtual_service_links, NULL);
 	}
-	config->virtual_service_count = virtual_service_count;
+	config->virtual_service_count = service_count;
 
 	// Map each destination filter rule index to its virtual service index;
 	// the filter query returns the rule index, the dataplane looks the

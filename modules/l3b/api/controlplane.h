@@ -9,8 +9,7 @@
 
 struct cp_module;
 struct agent;
-struct virtual_service;
-struct virtual_service_handle;
+struct cp_object;
 
 /*
  * Control-plane descriptors used to build the shared-memory configuration.
@@ -83,61 +82,56 @@ l3b_module_config_new(
 int
 l3b_module_config_free(struct cp_module *config, yanet_error **err);
 
-// Allocate a virtual service in the agent's shared memory from its
-// control-plane descriptor. The service is agent-scoped so it can be created
-// independently and later installed into a module config via a handle.
-struct virtual_service *
+// Allocate a named virtual service object in the agent's shared memory from
+// its control-plane descriptor. The object is registered under
+// (L3B_VIRTUAL_SERVICE_OBJECT_TYPE, name) and is published to the dataplane
+// through agent_update_objects; module configurations reference it by name
+// via cp_module_link_object.
+struct cp_object *
 l3b_virtual_service_create(
 	struct agent *agent,
+	const char *name,
 	const struct l3b_virtual_service *virtual_service,
 	yanet_error **err
 );
 
-// Allocate a handle in the agent's shared memory wrapping a virtual service
-// pointer. The handle is the indirection installed into a module config so the
-// service can be swapped later.
-struct virtual_service_handle *
-l3b_virtual_service_handle_create(
-	struct agent *agent, struct virtual_service *virtual_service
-);
+// Destroy the virtual service object when it is dangling — referenced by no
+// live configuration generation. A refused destroy is reported through err
+// and the caller must retry later.
+int
+l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err);
 
-// Point an existing handle at a different virtual service.
-void
-l3b_virtual_service_handle_update(
-	struct virtual_service_handle *handle,
-	struct virtual_service *virtual_service
-);
-
-// Populate the real server ring of a virtual service. The count must not
-// exceed the configured capacity and every index must reference a valid real
-// server; indexes are written before the count is updated.
+// Populate the real server ring of a virtual service object. The count must
+// not exceed the configured capacity and every index must reference a valid
+// real server; indexes are written before the count is updated.
 int
 l3b_virtual_service_update_ring(
-	struct virtual_service *virtual_service,
+	struct cp_object *cp_object,
 	const uint32_t *server_indexes,
 	uint32_t server_index_count,
 	yanet_error **err
 );
 
-// Enable or disable a single real server within a virtual service, addressed
-// by its index.
+// Enable or disable a single real server within a virtual service object,
+// addressed by its index.
 int
 l3b_virtual_service_set_real_server_state(
-	struct virtual_service *virtual_service,
+	struct cp_object *cp_object,
 	uint32_t real_server_index,
 	bool enabled,
 	yanet_error **err
 );
 
-// Publish the virtual services referenced by handles and compile the
-// destination filters that route packets to them. Each destination filter
-// rule's virtual_service_index selects a slot in the handles array.
+// Publish the virtual services named by service_names and compile the
+// destination filters that route packets to them. Each name is linked through
+// cp_module_link_object in array order; each destination filter rule's
+// virtual_service_index selects a slot in that array.
 int
 l3b_module_config_update(
 	struct cp_module *cp_module,
 	const struct l3b_destination_filter_rule *destination_filter_rules,
 	uint32_t destination_filter_rule_count,
-	struct virtual_service_handle **virtual_services,
-	uint32_t virtual_service_count,
+	const char *const *service_names,
+	uint32_t service_count,
 	yanet_error **err
 );

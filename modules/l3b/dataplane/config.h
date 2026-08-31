@@ -5,6 +5,7 @@
 
 #include "common/network.h"
 #include "lib/controlplane/config/cp_module.h"
+#include "lib/controlplane/config/cp_object.h"
 
 enum real_state {
 	real_state_disabled = 0,
@@ -90,24 +91,32 @@ struct virtual_service {
 };
 
 /*
- * Indirection layer between the module config and a virtual service.
+ * A named virtual service published as a standalone shared-memory object.
  *
- * The handle wraps a relative pointer to a virtual service so the service can
- * be swapped (via the handle) without rebuilding the module config's service
- * array; the dataplane dereferences the handle on every lookup.
+ * The cp_object header carries the (type, name) identity, the reference
+ * accounting across configuration generations and the object's own memory
+ * context backing every allocation below; module configurations reference
+ * the service by name through cp_module_link_object and resolve it to the
+ * embedded struct at execution-context build time.
  */
-struct virtual_service_handle {
-	struct virtual_service *virtual_service;
+struct l3b_virtual_service_object {
+	struct cp_object cp_object;
+	struct virtual_service virtual_service;
 };
+
+// Shared-memory object type under which virtual services are registered.
+#define L3B_VIRTUAL_SERVICE_OBJECT_TYPE "l3b_virtual_service"
 
 /*
  * Top-level l3b module configuration published into shared memory.
  *
  * The module-level filters classify an incoming packet into a virtual service
- * index; virtual_services holds the handles of the services themselves.
+ * index; virtual_service_links holds, per service slot, the cp_module object
+ * link index through which the per-worker execution context resolves the
+ * service object.
  *
  * The filter query returns the index of the matched destination filter rule;
- * virtual_service_indexes maps that rule index to a virtual service index.
+ * virtual_service_indexes maps that rule index to a virtual service slot.
  *
  * Contract: as long as virtual_service_count is greater than zero, the
  * controlplane must filter_init both filter_ip6 and filter_ip4 — the
@@ -117,11 +126,10 @@ struct module_config {
 	struct cp_module cp_module;
 
 	uint32_t virtual_service_count;
-	// Array of relative pointers to virtual_service_handle, one per
-	// service.
-	struct virtual_service_handle **virtual_services;
+	// Object link index per service slot, into cp_module.objects.
+	uint64_t *virtual_service_links;
 
-	// One virtual service index per destination filter rule.
+	// One virtual service slot per destination filter rule.
 	uint32_t virtual_service_index_count;
 	uint32_t *virtual_service_indexes;
 

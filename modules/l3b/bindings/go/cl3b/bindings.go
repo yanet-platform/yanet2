@@ -8,6 +8,7 @@ package cl3b
 //
 //#include "api/agent.h"
 //#include "modules/l3b/api/controlplane.h"
+//#include "modules/l3b/dataplane/config.h"
 import "C"
 
 import (
@@ -88,11 +89,13 @@ func (m *ModuleConfig) Free() error {
 	)
 }
 
-// Update installs the destination filter rules and virtual service handles
-// into the module configuration.
+// Update installs the destination filter rules and links the named virtual
+// service objects into the module configuration. The services must already be
+// published through agent_update_objects; the update links them in array
+// order.
 func (m *ModuleConfig) Update(
 	rules []DestinationFilterRule,
-	handles []*VirtualServiceHandle,
+	serviceNames []string,
 ) error {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
@@ -106,14 +109,16 @@ func (m *ModuleConfig) Update(
 		cRulesPtr = &cRules[0]
 	}
 
-	var cHandlesPtr **C.struct_virtual_service_handle
-	if len(handles) > 0 {
-		cHandles := make([]*C.struct_virtual_service_handle, len(handles))
-		for idx, handle := range handles {
-			cHandles[idx] = handle.ptr
+	var cNamesPtr **C.char
+	if len(serviceNames) > 0 {
+		cNames := make([]*C.char, len(serviceNames))
+		for idx, name := range serviceNames {
+			cName := C.CString(name)
+			pinner.Pin(cName)
+			cNames[idx] = cName
 		}
-		pinner.Pin(&cHandles[0])
-		cHandlesPtr = &cHandles[0]
+		pinner.Pin(&cNames[0])
+		cNamesPtr = &cNames[0]
 	}
 
 	var cErr *C.yanet_error
@@ -121,8 +126,8 @@ func (m *ModuleConfig) Update(
 		m.asRawPtr(),
 		cRulesPtr,
 		C.uint32_t(len(rules)),
-		cHandlesPtr,
-		C.uint32_t(len(handles)),
+		cNamesPtr,
+		C.uint32_t(len(serviceNames)),
 		&cErr,
 	)
 	if rc != 0 {
@@ -176,32 +181,48 @@ type VirtualServiceConfig struct {
 	RingCapacity      uint32
 }
 
-// VirtualService is an opaque handle to a created virtual service in shared
-// memory.
-type VirtualService struct {
-	ptr *C.struct_virtual_service
+// VirtualServiceObjectType is the registered shared-memory object type of a
+// virtual service.
+const VirtualServiceObjectType = C.L3B_VIRTUAL_SERVICE_OBJECT_TYPE
+
+// VirtualServiceObject is an opaque handle to a named virtual service
+// published as a standalone cp_object in shared memory.
+type VirtualServiceObject struct {
+	name string
+	ptr  *C.struct_cp_object
 }
 
-// VirtualServiceHandle is an opaque handle wrapping a virtual service pointer;
-// it is the indirection installed into a module configuration.
-type VirtualServiceHandle struct {
-	ptr *C.struct_virtual_service_handle
+func (m *VirtualServiceObject) asRawPtr() *C.struct_cp_object {
+	return m.ptr
 }
 
-// CreateVirtualService allocates a virtual service in the agent's shared
-// memory from its descriptor.
+// Name returns the service name the object is registered under.
+func (m *VirtualServiceObject) Name() string {
+	return m.name
+}
+
+// CreateVirtualService allocates a named virtual service object in the agent's
+// shared memory from its descriptor.
+//
+// The returned object is not yet visible to the dataplane; call Publish to
+// install it into a configuration generation.
 func CreateVirtualService(
 	agent *ffi.Agent,
+	name string,
 	config VirtualServiceConfig,
-) (*VirtualService, error) {
+) (*VirtualServiceObject, error) {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
+
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
 
 	cConfig := config.cBuild(pinner)
 
 	var cErr *C.yanet_error
 	ptr := C.l3b_virtual_service_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
 		&cConfig,
 		&cErr,
 	)
@@ -211,31 +232,92 @@ func CreateVirtualService(
 			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}
-	return &VirtualService{ptr: ptr}, nil
+	return &VirtualServiceObject{name: name, ptr: ptr}, nil
 }
 
-// CreateVirtualServiceHandle allocates a handle wrapping a virtual service.
-func CreateVirtualServiceHandle(
-	agent *ffi.Agent,
-	virtualService *VirtualService,
-) (*VirtualServiceHandle, error) {
-	ptr := C.l3b_virtual_service_handle_create(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		virtualService.ptr,
-	)
-	if ptr == nil {
-		return nil, fmt.Errorf("failed to create virtual service handle")
+// Publish upserts the object into a new dataplane configuration generation
+// through agent_update_objects and blocks until every worker has advanced to
+// it. Re-upserting a replacement object under the same name swaps the service
+// atomically.
+func (m *VirtualServiceObject) Publish(agent *ffi.Agent) error {
+	if m.ptr == nil {
+		return fmt.Errorf("virtual service object is nil")
 	}
-	return &VirtualServiceHandle{ptr: ptr}, nil
+
+	objects := []*C.struct_cp_object{m.ptr}
+	var cErr *C.yanet_error
+	rc := C.agent_update_objects(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		C.size_t(1),
+		&objects[0],
+		&cErr,
+	)
+	if rc != 0 {
+		return fmt.Errorf(
+			"failed to publish virtual service object: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
+	}
+	return nil
 }
 
-// Update repoints the handle at a different virtual service.
-func (h *VirtualServiceHandle) Update(virtualService *VirtualService) {
-	C.l3b_virtual_service_handle_update(h.ptr, virtualService.ptr)
+// Free destroys the virtual service object when it is dangling — referenced
+// by no live configuration generation — and reports nil. While a live
+// generation still references it the free is refused with
+// ffi.ErrStillReferenced and the handle stays usable: the caller must
+// remember it and free it again once the generations holding it drain.
+// Safe to call multiple times: subsequent calls are no-ops reporting nil.
+func (m *VirtualServiceObject) Free() error {
+	ptr := m.asRawPtr()
+	if ptr == nil {
+		return nil
+	}
+	var cErr *C.yanet_error
+	rc, errno := C.l3b_virtual_service_free(ptr, &cErr)
+	if rc == 0 {
+		m.ptr = nil
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		// The refused attempt allocated an error chain; release it
+		// rather than leaking one per attempt. The object is intact.
+		C.yanet_error_free(cErr)
+		return ffi.ErrStillReferenced
+	}
+	return fmt.Errorf(
+		"failed to free virtual service object: %w",
+		cerrors.FromC(unsafe.Pointer(cErr)),
+	)
 }
 
-// UpdateRing populates the real server ring of a virtual service.
-func (vs *VirtualService) UpdateRing(serverIndexes []uint32) error {
+// DeleteVirtualService removes the named service object from the agent's
+// registry; a replacement generation published afterwards drops it from the
+// dataplane. The caller remains the object's owner and must still free its
+// handle separately.
+func DeleteVirtualService(agent *ffi.Agent, name string) error {
+	cType := C.CString(VirtualServiceObjectType)
+	defer C.free(unsafe.Pointer(cType))
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	rc := C.agent_delete_object(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cType,
+		cName,
+		&cErr,
+	)
+	if rc != 0 {
+		return fmt.Errorf(
+			"failed to delete virtual service object: %w",
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
+	}
+	return nil
+}
+
+// UpdateRing populates the real server ring of the virtual service.
+func (m *VirtualServiceObject) UpdateRing(serverIndexes []uint32) error {
 	var cIndexesPtr *C.uint32_t
 	if len(serverIndexes) > 0 {
 		cIndexes := make([]C.uint32_t, len(serverIndexes))
@@ -247,7 +329,7 @@ func (vs *VirtualService) UpdateRing(serverIndexes []uint32) error {
 
 	var cErr *C.yanet_error
 	rc := C.l3b_virtual_service_update_ring(
-		vs.ptr,
+		m.asRawPtr(),
 		cIndexesPtr,
 		C.uint32_t(len(serverIndexes)),
 		&cErr,
@@ -262,10 +344,10 @@ func (vs *VirtualService) UpdateRing(serverIndexes []uint32) error {
 }
 
 // SetRealServerState enables or disables a single real server by its index.
-func (vs *VirtualService) SetRealServerState(index uint32, enabled bool) error {
+func (m *VirtualServiceObject) SetRealServerState(index uint32, enabled bool) error {
 	var cErr *C.yanet_error
 	rc := C.l3b_virtual_service_set_real_server_state(
-		vs.ptr,
+		m.asRawPtr(),
 		C.uint32_t(index),
 		C._Bool(enabled),
 		&cErr,
