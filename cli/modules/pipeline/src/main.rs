@@ -236,14 +236,13 @@ impl PipelineService {
             }),
         };
 
-        self.service.client().update(request).await.map_err(|status| {
-            NOT_FOUND.map(
-                status,
-                self.action,
-                self.service.endpoint(),
-                Some(&format!("pipeline '{pipeline_name}'")),
-            )
-        })?;
+        // Update is an upsert on the pipeline itself, so a NotFound here names a
+        // referenced function, not the pipeline. Keep the backend message verbatim.
+        self.service
+            .client()
+            .update(request)
+            .await
+            .map_err(self.service.status(self.action))?;
 
         Ok(())
     }

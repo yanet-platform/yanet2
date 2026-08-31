@@ -217,14 +217,13 @@ impl FunctionService {
             }),
         };
 
-        self.service.client().update(request).await.map_err(|status| {
-            NOT_FOUND.map(
-                status,
-                "update function",
-                self.service.endpoint(),
-                Some(&format!("function '{name}'", name = cmd.name)),
-            )
-        })?;
+        // Update is an upsert on the function itself, so a NotFound here names a
+        // referenced chain module, not the function. Keep the backend message verbatim.
+        self.service
+            .client()
+            .update(request)
+            .await
+            .map_err(self.service.status("update function"))?;
 
         Ok(())
     }
