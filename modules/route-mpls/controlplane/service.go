@@ -415,7 +415,7 @@ func (m *RouteMPLSService) UpdateConfig(
 				return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 			}
 
-			nextHop, err := makeNextHop(w.Nexthop)
+			nextHop, err := makeWithdrawNextHop(w.Nexthop)
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop: %v", err)
 			}
@@ -462,6 +462,20 @@ func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 		MPLSLabel:   nexthop.Label,
 		Weight:      nexthop.Weight,
 		Counter:     nexthop.Counter,
+	}, nil
+}
+
+// makeWithdrawNextHop parses only the destination and label, the sole
+// fields a withdraw is matched by. Other nexthop fields are ignored.
+func makeWithdrawNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
+	destination, err := nexthop.GetDestinationIp().ToAddr()
+	if err != nil {
+		return NextHop{}, fmt.Errorf("invalid destination_ip (bytes=%x): %w", nexthop.GetDestinationIp().GetAddr(), err)
+	}
+
+	return NextHop{
+		Destination: destination,
+		MPLSLabel:   nexthop.GetLabel(),
 	}, nil
 }
 

@@ -36,6 +36,8 @@ message UpdateConfigRequest {
 message UpdateEvent {
   oneof event {
     Rule update = 1;
+    // Matches by prefix, destination_ip, and label only. Every other
+    // nexthop field is ignored.
     Rule withdraw = 2;
   }
 }

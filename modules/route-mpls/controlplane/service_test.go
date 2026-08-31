@@ -176,6 +176,124 @@ func Test_RouteMPLSService_UpdateConfig_UpdateAndWithdraw(t *testing.T) {
 	assert.Len(t, show.Rules, 1)
 }
 
+// Test_RouteMPLSService_UpdateConfig_WithdrawWithoutSourceIP verifies that a
+// withdraw with source, weight, and counter unset still removes the nexthop.
+func Test_RouteMPLSService_UpdateConfig_WithdrawWithoutSourceIP(t *testing.T) {
+	service := newTestService(t)
+	ctx := t.Context()
+
+	_, err := service.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
+		Name:  "mpls0",
+		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
+	})
+	require.NoError(t, err)
+
+	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.0.0.0/24"))
+	require.NoError(t, err)
+
+	_, err = service.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
+		Name: "mpls0",
+		Updates: []*routemplspb.UpdateEvent{
+			{Event: &routemplspb.UpdateEvent_Withdraw{
+				Withdraw: &routemplspb.Rule{
+					Prefix: prefix,
+					Nexthop: &routemplspb.NextHop{
+						Kind:          routemplspb.ActionKind_ACTION_KIND_TUNNEL,
+						Label:         100,
+						SourceIp:      nil,
+						DestinationIp: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("203.0.113.1")),
+						Weight:        0,
+						Counter:       "",
+					},
+				},
+			}},
+		},
+	})
+	require.NoError(t, err)
+
+	show, err := service.ShowConfig(ctx, &routemplspb.ShowConfigRequest{Name: "mpls0"})
+	require.NoError(t, err)
+	assert.Empty(t, show.Rules)
+}
+
+// Test_RouteMPLSService_UpdateConfig_WithdrawWithDifferentSourceIP verifies
+// that a withdraw matches by destination and label alone, ignoring source IP.
+func Test_RouteMPLSService_UpdateConfig_WithdrawWithDifferentSourceIP(t *testing.T) {
+	service := newTestService(t)
+	ctx := t.Context()
+
+	_, err := service.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
+		Name:  "mpls0",
+		Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
+	})
+	require.NoError(t, err)
+
+	withdraw := makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)
+	withdraw.Nexthop.SourceIp = commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.9"))
+
+	_, err = service.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
+		Name: "mpls0",
+		Updates: []*routemplspb.UpdateEvent{
+			{Event: &routemplspb.UpdateEvent_Withdraw{Withdraw: withdraw}},
+		},
+	})
+	require.NoError(t, err)
+
+	show, err := service.ShowConfig(ctx, &routemplspb.ShowConfigRequest{Name: "mpls0"})
+	require.NoError(t, err)
+	assert.Empty(t, show.Rules)
+}
+
+// Test_RouteMPLSService_UpdateConfig_WithdrawInvalidDestination verifies
+// that a withdraw with no usable destination is rejected, not ignored.
+func Test_RouteMPLSService_UpdateConfig_WithdrawInvalidDestination(t *testing.T) {
+	cases := []struct {
+		name    string
+		nexthop *routemplspb.NextHop
+	}{
+		{
+			name:    "nil nexthop",
+			nexthop: nil,
+		},
+		{
+			name: "missing destination_ip",
+			nexthop: &routemplspb.NextHop{
+				Label: 100,
+			},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			service := newTestService(t)
+			ctx := t.Context()
+
+			_, err := service.CreateConfig(ctx, &routemplspb.CreateConfigRequest{
+				Name:  "mpls0",
+				Rules: []*routemplspb.Rule{makeRule(t, "10.0.0.0/24", "203.0.113.1", 100)},
+			})
+			require.NoError(t, err)
+
+			prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.0.0.0/24"))
+			require.NoError(t, err)
+
+			response, err := service.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
+				Name: "mpls0",
+				Updates: []*routemplspb.UpdateEvent{
+					{Event: &routemplspb.UpdateEvent_Withdraw{
+						Withdraw: &routemplspb.Rule{
+							Prefix:  prefix,
+							Nexthop: testCase.nexthop,
+						},
+					}},
+				},
+			})
+			require.Nil(t, response)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
 func Test_RouteMPLSService_ShowConfig_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
