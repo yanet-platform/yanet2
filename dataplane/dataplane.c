@@ -541,6 +541,7 @@ dataplane_init(
 			"fwstate",
 			"route_mpls",
 			"blackhole",
+			"l3b",
 			"mirror",
 			"unrdup",
 		};

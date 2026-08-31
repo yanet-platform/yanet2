@@ -7,6 +7,7 @@ package dataplaneut
 
 // Library search paths — modules, devices, and support libs.
 #cgo LDFLAGS: -L../../../build/modules/blackhole/dataplane
+#cgo LDFLAGS: -L../../../build/modules/l3b/dataplane
 #cgo LDFLAGS: -L../../../build/modules/decap/dataplane
 #cgo LDFLAGS: -L../../../build/modules/dscp/dataplane
 #cgo LDFLAGS: -L../../../build/modules/acl/dataplane
@@ -40,7 +41,7 @@ package dataplaneut
 // references between them (fwstate->acl, worker->pipeline, etc.).
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
+#cgo LDFLAGS: -lblackhole_dp -ll3b_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
@@ -116,6 +117,7 @@ free_worker_spec_array(struct dataplane_ut_worker_spec *arr) {
 void
 keep_refs(void **ptrs) {
 	extern struct module *new_module_blackhole(void);
+	extern struct module *new_module_l3b(void);
 	extern struct module *new_module_decap(void);
 	extern struct module *new_module_dscp(void);
 	extern struct module *new_module_acl(void);
@@ -133,6 +135,7 @@ keep_refs(void **ptrs) {
 
 	static void *funcs[] = {
 		new_module_blackhole,
+		new_module_l3b,
 		new_module_decap,
 		new_module_dscp,
 		new_module_acl,

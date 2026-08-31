@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package modules.l3b.controlplane.l3bpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1;l3bpb";
+
+// L3bService is a controlplane service for the l3b module.
+service L3bService {
+  // ListConfigs returns all l3b module configurations of all
+  // dataplane instances.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  // ShowConfig returns the current configuration for the l3b module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+  // UpdateConfig creates or replaces the named l3b config and publishes
+  // it to the dataplane.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  // DeleteConfig removes the named l3b config when it is no longer
+  // referenced by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowConfigRequest retrieves the runtime configuration for the l3b
+// module.
+message ShowConfigRequest { string name = 1; }
+
+// ShowConfigResponse contains the configuration details of the l3b module.
+message ShowConfigResponse { string name = 1; }
+
+// UpdateConfigRequest names the config to create or replace.
+//
+// The l3b config carries no payload yet, since the module is a skeleton.
+message UpdateConfigRequest { string name = 1; }
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse { bool deleted = 1; }
