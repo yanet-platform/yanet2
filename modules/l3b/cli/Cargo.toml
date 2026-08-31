@@ -8,6 +8,7 @@ rust-version = "1.85"
 
 [dependencies]
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
@@ -18,6 +19,7 @@ prost-types = "0.13"
 tonic = { version = "0.13", features = ["gzip"] }
 colored = "3"
 serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9.34"
 
 [build-dependencies]
 tonic-build = "0.13"

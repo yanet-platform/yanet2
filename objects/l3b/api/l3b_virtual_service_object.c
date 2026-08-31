@@ -217,6 +217,7 @@ l3b_virtual_service_create(
 	}
 	vs->real_ring.capacity = ring_capacity;
 	vs->real_ring.count = 0;
+	vs->real_ring.sequence = 0;
 
 	// Per-service source filters.
 	if (build_source_filters(
@@ -337,19 +338,20 @@ l3b_virtual_service_update_ring(
 		}
 	}
 
-	uint32_t *ring_indexes =
-		ADDR_OF(&virtual_service->real_ring.server_indexes);
+	// Mark the ring unstable, rewrite the entries, publish the new count
+	// and mark it stable again: a reader that acquired the old count
+	// retries instead of acting on a mixture of the old and new rings.
+	struct real_ring *ring = &virtual_service->real_ring;
+	uint32_t sequence = __atomic_load_n(&ring->sequence, __ATOMIC_RELAXED);
+	__atomic_store_n(&ring->sequence, sequence + 1, __ATOMIC_RELEASE);
+
+	uint32_t *ring_indexes = ADDR_OF(&ring->server_indexes);
 	for (uint32_t idx = 0; idx < server_index_count; ++idx) {
 		ring_indexes[idx] = server_indexes[idx];
 	}
 
-	// Release the count after the index writes so the dataplane, on
-	// acquiring it, observes the populated indexes.
-	__atomic_store_n(
-		&virtual_service->real_ring.count,
-		server_index_count,
-		__ATOMIC_RELEASE
-	);
+	__atomic_store_n(&ring->count, server_index_count, __ATOMIC_RELEASE);
+	__atomic_store_n(&ring->sequence, sequence + 2, __ATOMIC_RELEASE);
 	return 0;
 }
 

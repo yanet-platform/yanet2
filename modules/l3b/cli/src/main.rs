@@ -1,3 +1,6 @@
+use std::net::IpAddr;
+use std::path::PathBuf;
+
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use l3bpb::{
@@ -5,6 +8,7 @@ use l3bpb::{
     UpdateModuleConfigRequest, UpdateRealServerStateRequest, UpdateRealServerWeightRequest, UpdateServiceRequest,
     VirtualService, l3b_service_client::L3bServiceClient,
 };
+use serde::Deserialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
@@ -66,6 +70,9 @@ pub struct ServiceCmd {
     /// Scheduler index mask.
     #[arg(long, default_value_t = 0)]
     pub index_mask: u32,
+    /// YAML document with the real servers and source filter rules.
+    #[arg(long = "file", value_name = "PATH")]
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -83,6 +90,9 @@ pub struct ModuleConfigCmd {
     /// Names of the virtual services to install, in index order.
     #[arg(long = "service", value_name = "SERVICE")]
     pub services: Vec<String>,
+    /// YAML document with the destination filter rules.
+    #[arg(long = "file", value_name = "PATH")]
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -109,6 +119,171 @@ pub struct WeightCmd {
     /// New weight of the real server.
     #[arg(long)]
     pub weight: u32,
+}
+
+/// YAML document populating a virtual service: its real servers and the
+/// source filter rules gating its traffic.
+///
+/// `hash-mask`/`index-mask` stay command flags; the document carries only
+/// what has no natural flag form.
+#[derive(Debug, Deserialize)]
+struct ServiceDocument {
+    /// Real servers the service dispatches to.
+    real_servers: Vec<RealServerDoc>,
+    /// Source-side match rules for incoming traffic.
+    source_filter_rules: Vec<SourceFilterRuleDoc>,
+}
+
+/// One real server tunnel endpoint.
+#[derive(Debug, Deserialize)]
+struct RealServerDoc {
+    /// Tunnel destination address of the real server.
+    destination_address: IpAddr,
+    /// Source network the outer source address is derived from.
+    source_network: filterpb::pb::IpNet,
+}
+
+/// One source-side match rule.
+#[derive(Debug, Deserialize)]
+struct SourceFilterRuleDoc {
+    /// IPv6 source networks the rule accepts.
+    net6s: Vec<filterpb::pb::IpNet>,
+    /// IPv4 source networks the rule accepts.
+    net4s: Vec<filterpb::pb::IpNet>,
+    /// Destination port ranges the rule accepts.
+    port_ranges: Vec<RangeDoc>,
+}
+
+/// An inclusive numeric range.
+#[derive(Debug, Deserialize)]
+struct RangeDoc {
+    from: u16,
+    to: u16,
+}
+
+/// YAML document populating a module configuration: the destination filter
+/// rules routing traffic to services.
+#[derive(Debug, Deserialize)]
+struct ModuleConfigDocument {
+    /// Destination rules, in rule order.
+    destination_filter_rules: Vec<DestinationRuleDoc>,
+}
+
+/// One destination-side classification rule.
+#[derive(Debug, Deserialize)]
+struct DestinationRuleDoc {
+    /// IPv6 destination networks the rule matches.
+    net6s: Vec<filterpb::pb::IpNet>,
+    /// IPv4 destination networks the rule matches.
+    net4s: Vec<filterpb::pb::IpNet>,
+    /// Transport protocol ranges the rule matches.
+    proto_ranges: Vec<ProtoRangeDoc>,
+    /// Name of the virtual service matched traffic is routed to.
+    service: String,
+}
+
+/// A transport protocol plus an optional subtype byte range.
+///
+/// `tcp` with the default subtypes selects every TCP packet regardless of
+/// flags; a number selects that protocol directly.
+#[derive(Debug, Deserialize)]
+struct ProtoRangeDoc {
+    /// The transport protocol.
+    proto: ProtocolDoc,
+    /// First matched subtype byte; defaults to 0.
+    #[serde(default)]
+    subtype_from: Option<u8>,
+    /// Last matched subtype byte; defaults to 255.
+    #[serde(default)]
+    subtype_to: Option<u8>,
+}
+
+/// A transport protocol by name or number.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ProtocolDoc {
+    /// A well-known protocol name.
+    Named(NamedProtocol),
+    /// A protocol number.
+    Number(u8),
+}
+
+/// A well-known transport protocol name.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum NamedProtocol {
+    /// Transmission Control Protocol.
+    Tcp,
+    /// User Datagram Protocol.
+    Udp,
+}
+
+impl From<&RangeDoc> for filterpb::pb::PortRange {
+    fn from(range: &RangeDoc) -> Self {
+        Self {
+            from: u32::from(range.from),
+            to: u32::from(range.to),
+        }
+    }
+}
+
+impl From<&ProtoRangeDoc> for filterpb::pb::ProtoRange {
+    fn from(range: &ProtoRangeDoc) -> Self {
+        let proto = match range.proto {
+            ProtocolDoc::Named(NamedProtocol::Tcp) => 6,
+            ProtocolDoc::Named(NamedProtocol::Udp) => 17,
+            ProtocolDoc::Number(number) => number,
+        };
+        let subtype_from = u32::from(range.subtype_from.unwrap_or(0));
+        let subtype_to = u32::from(range.subtype_to.unwrap_or(u8::MAX));
+        Self {
+            from: (u32::from(proto) << 8) | subtype_from,
+            to: (u32::from(proto) << 8) | subtype_to,
+        }
+    }
+}
+
+impl From<&RealServerDoc> for l3bpb::RealServer {
+    fn from(server: &RealServerDoc) -> Self {
+        let address = match server.destination_address {
+            IpAddr::V4(address) => address.octets().to_vec(),
+            IpAddr::V6(address) => address.octets().to_vec(),
+        };
+        Self {
+            destination_address: address,
+            source_network: Some(server.source_network.clone()),
+        }
+    }
+}
+
+impl From<&SourceFilterRuleDoc> for l3bpb::SourceFilterRule {
+    fn from(rule: &SourceFilterRuleDoc) -> Self {
+        Self {
+            net6s: rule.net6s.clone(),
+            net4s: rule.net4s.clone(),
+            port_ranges: rule.port_ranges.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
+    fn from(rule: &DestinationRuleDoc) -> Self {
+        Self {
+            net6s: rule.net6s.clone(),
+            net4s: rule.net4s.clone(),
+            proto_ranges: rule.proto_ranges.iter().map(Into::into).collect(),
+            service: rule.service.clone(),
+        }
+    }
+}
+
+/// Reads and parses a YAML document from a file, attributing failures to the
+/// given verb as invalid input.
+fn load_document<T: for<'de> Deserialize<'de>>(path: &PathBuf, verb: &str, endpoint: &str) -> Result<T, Error> {
+    let file = std::fs::File::open(path)
+        .map_err(|err| Error::invalid_argument(verb, endpoint, format!("failed to open {}: {err}", path.display())))?;
+    serde_yaml::from_reader(file)
+        .map_err(|err| Error::invalid_argument(verb, endpoint, format!("invalid document {}: {err}", path.display())))
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -166,14 +341,8 @@ impl L3BService {
     }
 
     pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let request = CreateServiceRequest {
-            service: Some(VirtualService {
-                name: cmd.name.clone(),
-                hash_mask: cmd.hash_mask,
-                index_mask: cmd.index_mask,
-                ..Default::default()
-            }),
-        };
+        let service = self.virtual_service(&cmd).await?;
+        let request = CreateServiceRequest { service: Some(service) };
         log::trace!("create service request: {request:?}");
         self.client
             .create_service(request)
@@ -184,14 +353,8 @@ impl L3BService {
     }
 
     pub async fn update_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let request = UpdateServiceRequest {
-            service: Some(VirtualService {
-                name: cmd.name.clone(),
-                hash_mask: cmd.hash_mask,
-                index_mask: cmd.index_mask,
-                ..Default::default()
-            }),
-        };
+        let service = self.virtual_service(&cmd).await?;
+        let request = UpdateServiceRequest { service: Some(service) };
         log::trace!("update service request: {request:?}");
         self.client
             .update_service(request)
@@ -199,6 +362,25 @@ impl L3BService {
             .map_err(self.map_err("update-service"))?;
         output::success("update-service", format_args!("Updated service {}.", cmd.name));
         Ok(())
+    }
+
+    /// Builds a virtual service request from the flags, populating the real
+    /// servers and source filter rules from the document when one is given.
+    async fn virtual_service(&mut self, cmd: &ServiceCmd) -> Result<VirtualService, Error> {
+        let mut service = VirtualService {
+            name: cmd.name.clone(),
+            hash_mask: cmd.hash_mask,
+            index_mask: cmd.index_mask,
+            ..Default::default()
+        };
+
+        if let Some(path) = &cmd.file {
+            let document: ServiceDocument = load_document(path, "create-service", &self.endpoint)?;
+            service.real_servers = document.real_servers.iter().map(Into::into).collect();
+            service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
+        }
+
+        Ok(service)
     }
 
     pub async fn delete_service(&mut self, cmd: NameCmd) -> Result<(), Error> {
@@ -226,7 +408,10 @@ impl L3BService {
         output::data(
             || &response.services,
             || {
-                output::empty(format_args!("no services"));
+                if response.services.is_empty() {
+                    output::empty(format_args!("no services"));
+                    return;
+                }
                 for name in &response.services {
                     println!("{name}");
                 }
@@ -237,13 +422,18 @@ impl L3BService {
     }
 
     pub async fn update_module_config(&mut self, cmd: ModuleConfigCmd) -> Result<(), Error> {
-        let request = UpdateModuleConfigRequest {
-            config: Some(ModuleConfig {
-                name: cmd.name.clone(),
-                services: cmd.services.clone(),
-                ..Default::default()
-            }),
+        let mut config = ModuleConfig {
+            name: cmd.name.clone(),
+            services: cmd.services.clone(),
+            ..Default::default()
         };
+
+        if let Some(path) = &cmd.file {
+            let document: ModuleConfigDocument = load_document(path, "update-module-config", &self.endpoint)?;
+            config.destination_filter_rules = document.destination_filter_rules.iter().map(Into::into).collect();
+        }
+
+        let request = UpdateModuleConfigRequest { config: Some(config) };
         log::trace!("update module config request: {request:?}");
         self.client
             .update_module_config(request)
@@ -270,7 +460,10 @@ impl L3BService {
         output::data(
             || &response.configs,
             || {
-                output::empty(format_args!("no module configs"));
+                if response.configs.is_empty() {
+                    output::empty(format_args!("no module configs"));
+                    return;
+                }
                 for name in &response.configs {
                     println!("{name}");
                 }

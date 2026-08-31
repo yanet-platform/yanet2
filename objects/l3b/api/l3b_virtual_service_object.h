@@ -60,6 +60,13 @@ struct source_filter {
  *
  * server_indexes is a relative pointer to an array of real_server array
  * indexes; the dataplane selects among the first count entries.
+ *
+ * Replacement protocol: the control plane flips sequence to odd (unstable),
+ * rewrites the entries, publishes the new count and flips sequence back to
+ * even (stable). The dataplane reads sequence, count and the selected entry,
+ * then re-reads sequence, retrying while the value changes — a reader that
+ * acquired the old count can therefore never act on a mixture of the old and
+ * new rings.
  */
 struct real_ring {
 	uint32_t *server_indexes;
@@ -69,6 +76,9 @@ struct real_ring {
 	// Maximum number of indexes the array can hold; set at configuration
 	// time.
 	uint32_t capacity;
+	// Seqlock version: even while the ring is stable, odd while the
+	// control plane is replacing it.
+	uint32_t sequence;
 };
 
 /*

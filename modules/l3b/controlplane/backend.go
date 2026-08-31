@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/yanet-platform/xnetip"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filterpbconv/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
@@ -165,8 +167,10 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 	defer m.mu.Unlock()
 
 	if _, ok := m.services[name]; ok {
-		return fmt.Errorf("virtual service %q already exists", name)
+		return status.Errorf(codes.AlreadyExists, "virtual service %q already exists", name)
 	}
+
+	m.reclaimDeferred()
 
 	object, weights, err := m.publishService(service, name)
 	if err != nil {
@@ -188,8 +192,10 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 
 	existing, ok := m.services[name]
 	if !ok {
-		return fmt.Errorf("virtual service %q not found", name)
+		return status.Errorf(codes.NotFound, "virtual service %q not found", name)
 	}
+
+	m.reclaimDeferred()
 
 	object, weights, err := m.publishService(service, name)
 	if err != nil {
@@ -241,7 +247,7 @@ func (m *backend) DeleteService(name string) error {
 
 	existing, ok := m.services[name]
 	if !ok {
-		return fmt.Errorf("virtual service %q not found", name)
+		return status.Errorf(codes.NotFound, "virtual service %q not found", name)
 	}
 
 	if err := cl3bobject.DeleteVirtualService(m.agent, name); err != nil {
@@ -314,6 +320,8 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 		})
 	}
 
+	m.reclaimDeferred()
+
 	// A module configuration is immutable once published: build a fresh one
 	// per update and retire the module it replaces.
 	module, err := cl3b.NewModuleConfig(m.agent, name)
@@ -371,8 +379,10 @@ func (m *backend) UpdateRealServerState(
 
 	existing, ok := m.services[service]
 	if !ok {
-		return fmt.Errorf("virtual service %q not found", service)
+		return status.Errorf(codes.NotFound, "virtual service %q not found", service)
 	}
+
+	m.reclaimDeferred()
 
 	if err := existing.SetRealServerState(realServerIndex, enabled); err != nil {
 		return fmt.Errorf("failed to set real server state: %w", err)
@@ -390,13 +400,23 @@ func (m *backend) UpdateRealServerWeight(
 
 	existing, ok := m.services[service]
 	if !ok {
-		return fmt.Errorf("virtual service %q not found", service)
+		return status.Errorf(codes.NotFound, "virtual service %q not found", service)
 	}
+
+	m.reclaimDeferred()
 
 	if err := existing.SetRealServerWeight(realServerIndex, weight); err != nil {
 		return fmt.Errorf("failed to rebuild real server ring: %w", err)
 	}
 	return nil
+}
+
+// familyLabel names the address family of an address for error messages.
+func familyLabel(address netip.Addr) string {
+	if address.Is4() {
+		return "IPv4"
+	}
+	return "IPv6"
 }
 
 // maxRealServerWeight is the upper bound on a real server weight; the per-ring
@@ -483,6 +503,17 @@ func buildVirtualServiceConfig(
 		family := cl3bobject.IPv4
 		if destinationAddress.Is6() {
 			family = cl3bobject.IPv6
+		}
+
+		// The tunnel family selects which union members the dataplane
+		// serializes; a mixed pair would read the wrong bytes or panic
+		// on the address conversion below.
+		sourceNetAddr := sourceNet.Addr()
+		if sourceNetAddr.Is4() != destinationAddress.Is4() {
+			return cl3bobject.VirtualServiceConfig{}, fmt.Errorf(
+				"real server %d pairs a %s destination with a %s source network",
+				len(realServers), familyLabel(destinationAddress), familyLabel(sourceNetAddr),
+			)
 		}
 
 		realServers = append(realServers, cl3bobject.RealServer{

@@ -17,6 +17,17 @@
 #include "dataplane.h"
 #include "process.h"
 
+// Whether the packet carries a usable transport header for the source and
+// destination classifiers. Non-initial fragments keep the TCP/UDP protocol
+// number of their flow but hold arbitrary payload where the ports should be,
+// so they are forwarded untouched instead of being classified.
+static bool
+l3b_packet_has_transport(const struct packet *packet) {
+	return packet->fragment_offset == 0 &&
+	       (packet->transport_header.type == IPPROTO_TCP ||
+		packet->transport_header.type == IPPROTO_UDP);
+}
+
 static void
 l3b_handle_packets(
 	struct dp_worker *dp_worker,
@@ -31,7 +42,15 @@ l3b_handle_packets(
 		cp_module
 	);
 
+	// A force-polled tick can hand this module an empty front, and sizing
+	// the arrays below directly by that count would then declare them with
+	// zero length, which is undefined behavior. The early return is only
+	// safe because nothing runs after this handler's final packet loop —
+	// any code added after that loop must run before the return.
 	uint32_t input_count = packet_front_input_count(packet_front);
+	if (input_count == 0) {
+		return;
+	}
 
 	struct packet *ip4_packets[input_count];
 	uint32_t ip4_result[input_count];
@@ -44,17 +63,17 @@ l3b_handle_packets(
 	for (struct packet *packet = packet_list_first(&packet_front->input);
 	     packet != NULL;
 	     packet = packet->next) {
+		if (!l3b_packet_has_transport(packet)) {
+			continue;
+		}
+
 		if (packet->network_header.type ==
-			    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4) &&
-		    (packet->transport_header.type == IPPROTO_TCP ||
-		     packet->transport_header.type == IPPROTO_UDP)) {
+		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			ip4_packets[ip4_idx++] = packet;
 		}
 
 		if (packet->network_header.type ==
-			    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6) &&
-		    (packet->transport_header.type == IPPROTO_TCP ||
-		     packet->transport_header.type == IPPROTO_UDP)) {
+		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			ip6_packets[ip6_idx++] = packet;
 		}
 	}
@@ -88,12 +107,12 @@ l3b_handle_packets(
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		uint16_t type = packet->network_header.type;
-		bool tcp_udp = packet->transport_header.type == IPPROTO_TCP ||
-			       packet->transport_header.type == IPPROTO_UDP;
+		bool classified =
+			(type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4) ||
+			 type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) &&
+			l3b_packet_has_transport(packet);
 
-		if (!((type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4) ||
-		       type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) &&
-		      tcp_udp)) {
+		if (!classified) {
 			packet_front_output(packet_front, packet);
 			continue;
 		}

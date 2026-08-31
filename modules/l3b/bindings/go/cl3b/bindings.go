@@ -96,6 +96,17 @@ func (m *ModuleConfig) Update(
 	rules []DestinationFilterRule,
 	serviceNames []string,
 ) error {
+	// A rule indexing beyond the service array would publish a
+	// configuration the dataplane can only honor by dropping traffic.
+	for idx := range rules {
+		if int(rules[idx].VirtualServiceIndex) >= len(serviceNames) {
+			return fmt.Errorf(
+				"rule %d references virtual service index %d beyond the %d linked services",
+				idx, rules[idx].VirtualServiceIndex, len(serviceNames),
+			)
+		}
+	}
+
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
@@ -108,14 +119,19 @@ func (m *ModuleConfig) Update(
 		cRulesPtr = &cRules[0]
 	}
 
+	// The C update copies each name into its module link record, so the
+	// strings are freed as soon as the call returns.
 	var cNamesPtr **C.char
 	if len(serviceNames) > 0 {
 		cNames := make([]*C.char, len(serviceNames))
 		for idx, name := range serviceNames {
-			cName := C.CString(name)
-			pinner.Pin(cName)
-			cNames[idx] = cName
+			cNames[idx] = C.CString(name)
 		}
+		defer func() {
+			for _, cName := range cNames {
+				C.free(unsafe.Pointer(cName))
+			}
+		}()
 		pinner.Pin(&cNames[0])
 		cNamesPtr = &cNames[0]
 	}

@@ -336,3 +336,44 @@ func TestL3b_EncapsulatesTcpIntoIpip(t *testing.T) {
 	require.True(t, bytes.HasSuffix(result.Output[0].RawData, pkt.Data()[ethHeaderLen:]),
 		"the inner packet must be carried byte-identical")
 }
+
+// TestL3b_ForwardsNonInitialFragments verifies that a non-initial TCP
+// fragment — which carries the flow's protocol number but no transport
+// header — passes through the module untouched instead of being classified
+// from payload bytes.
+func TestL3b_ForwardsNonInitialFragments(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	service := publishVirtualService(t, agent, "svc", "192.0.2.0/24", "172.16.0.10")
+	t.Cleanup(func() { _ = service.Free() })
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:    4,
+		TTL:        64,
+		Protocol:   layers.IPProtocolTCP,
+		SrcIP:      net.ParseIP("10.0.0.1"),
+		DstIP:      net.ParseIP("192.168.1.1"),
+		FragOffset: 1,
+		Flags:      layers.IPv4MoreFragments,
+	}
+
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4)
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Drop, "non-initial fragments must not be dropped")
+	require.Len(t, result.Output, 1, "non-initial fragments must pass through")
+
+	info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
+	require.NoError(t, err)
+	require.False(t, info.IsTunneled, "the fragment must not be encapsulated")
+	require.Equal(t, "10.0.0.1", info.SrcIP.String())
+	require.Equal(t, "192.168.1.1", info.DstIP.String())
+}

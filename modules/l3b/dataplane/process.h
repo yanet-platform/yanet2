@@ -140,22 +140,39 @@ l3b_real_server_process(
 /*
  * Map a scheduler value onto a real server array index through the ring.
  *
- * Returns 0 and stores the index on success, or -1 when the ring is empty.
+ * Reads the ring under its seqlock: the selection is retried while the
+ * control plane is replacing the entries, so a reader never acts on a mixture
+ * of the old and new rings. An empty or permanently unstable ring fails with
+ * -1 and the packet is dropped.
  */
 static inline int
 l3b_real_ring_select(
 	struct real_ring *ring, uint32_t value, uint32_t *real_index
 ) {
-	// Acquire the count so the index reads below observe the values
-	// published by the control plane's release store.
-	uint32_t count = __atomic_load_n(&ring->count, __ATOMIC_ACQUIRE);
-	if (count == 0) {
-		return -1;
+	for (uint32_t attempt = 0; attempt < 4; ++attempt) {
+		uint32_t sequence =
+			__atomic_load_n(&ring->sequence, __ATOMIC_ACQUIRE);
+		if (sequence & 1) {
+			continue;
+		}
+
+		uint32_t count =
+			__atomic_load_n(&ring->count, __ATOMIC_ACQUIRE);
+		if (count == 0) {
+			return -1;
+		}
+
+		uint32_t *server_indexes = ADDR_OF(&ring->server_indexes);
+		uint32_t candidate = server_indexes[value % count];
+
+		if (__atomic_load_n(&ring->sequence, __ATOMIC_ACQUIRE) ==
+		    sequence) {
+			*real_index = candidate;
+			return 0;
+		}
 	}
 
-	uint32_t *server_indexes = ADDR_OF(&ring->server_indexes);
-	*real_index = server_indexes[value % count];
-	return 0;
+	return -1;
 }
 
 /*

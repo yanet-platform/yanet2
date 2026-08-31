@@ -3402,10 +3402,12 @@ dependencies = [
  "prost",
  "prost-types",
  "serde",
+ "serde_yaml",
  "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
  "yanet-filterpb",
 ]
 
