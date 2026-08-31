@@ -7,6 +7,8 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
+#include "objects/l3b/api/l3b_virtual_service_object.h"
+
 #include "common/network.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/dscp.h"

@@ -57,6 +57,7 @@ dependencies = lib_dependencies + [
   # objects
   # Startup resolves these constructors by dlsym on this executable, so they must be linked in and exported.
   lib_fwstate_objects_dep,
+  lib_l3b_objects_dep,
 
   #devices
   lib_dev_plain_dp_dep,

@@ -13,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
+	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
 // Backend abstracts the shared-memory operations behind the l3b service.
@@ -45,7 +46,7 @@ type freeable interface {
 }
 
 type managedService struct {
-	object *cl3b.VirtualServiceObject
+	object *cl3bobject.VirtualServiceObject
 	// weights[i] is the current weight of real server i; the scheduler ring
 	// is rebuilt whenever a weight changes.
 	weights []uint32
@@ -159,13 +160,13 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 func (m *backend) publishService(
 	service *l3bpb.VirtualService,
 	name string,
-) (*cl3b.VirtualServiceObject, []uint32, error) {
+) (*cl3bobject.VirtualServiceObject, []uint32, error) {
 	config, err := buildVirtualServiceConfig(service)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	object, err := cl3b.CreateVirtualService(m.agent, name, config)
+	object, err := cl3bobject.CreateVirtualService(m.agent, name, config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
@@ -193,7 +194,7 @@ func (m *backend) DeleteService(name string) error {
 		return fmt.Errorf("virtual service %q not found", name)
 	}
 
-	if err := cl3b.DeleteVirtualService(m.agent, name); err != nil {
+	if err := cl3bobject.DeleteVirtualService(m.agent, name); err != nil {
 		return fmt.Errorf("failed to delete virtual service %q: %w", name, err)
 	}
 
@@ -425,54 +426,54 @@ func sourceNetworkFromIPNet(pb *filterpb.IPNet) (xnetip.Network, error) {
 
 func buildVirtualServiceConfig(
 	service *l3bpb.VirtualService,
-) (cl3b.VirtualServiceConfig, error) {
-	realServers := make([]cl3b.RealServer, 0, len(service.GetRealServers()))
+) (cl3bobject.VirtualServiceConfig, error) {
+	realServers := make([]cl3bobject.RealServer, 0, len(service.GetRealServers()))
 	for _, server := range service.GetRealServers() {
 		destinationAddress, ok := netip.AddrFromSlice(server.GetDestinationAddress())
 		if !ok {
-			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid real server destination address")
+			return cl3bobject.VirtualServiceConfig{}, fmt.Errorf("invalid real server destination address")
 		}
 
 		sourceNet, err := sourceNetworkFromIPNet(server.GetSourceNetwork())
 		if err != nil {
-			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid real server source network: %w", err)
+			return cl3bobject.VirtualServiceConfig{}, fmt.Errorf("invalid real server source network: %w", err)
 		}
 
-		family := cl3b.IPv4
+		family := cl3bobject.IPv4
 		if destinationAddress.Is6() {
-			family = cl3b.IPv6
+			family = cl3bobject.IPv6
 		}
 
-		realServers = append(realServers, cl3b.RealServer{
+		realServers = append(realServers, cl3bobject.RealServer{
 			Type:               family,
 			DestinationAddress: destinationAddress,
 			SourceNet:          sourceNet,
 		})
 	}
 
-	sourceFilterRules := make([]cl3b.SourceFilterRule, 0, len(service.GetSourceFilterRules()))
+	sourceFilterRules := make([]cl3bobject.SourceFilterRule, 0, len(service.GetSourceFilterRules()))
 	for _, rule := range service.GetSourceFilterRules() {
 		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
 		if err != nil {
-			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid source net6s: %w", err)
+			return cl3bobject.VirtualServiceConfig{}, fmt.Errorf("invalid source net6s: %w", err)
 		}
 		net4s, err := filterpbconv.ToNet4s(rule.GetNet4S())
 		if err != nil {
-			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid source net4s: %w", err)
+			return cl3bobject.VirtualServiceConfig{}, fmt.Errorf("invalid source net4s: %w", err)
 		}
 		portRanges, err := filterpbconv.ToPortRanges(rule.GetPortRanges())
 		if err != nil {
-			return cl3b.VirtualServiceConfig{}, fmt.Errorf("invalid source port ranges: %w", err)
+			return cl3bobject.VirtualServiceConfig{}, fmt.Errorf("invalid source port ranges: %w", err)
 		}
 
-		sourceFilterRules = append(sourceFilterRules, cl3b.SourceFilterRule{
+		sourceFilterRules = append(sourceFilterRules, cl3bobject.SourceFilterRule{
 			Net6s:      net6s,
 			Net4s:      net4s,
 			PortRanges: portRanges,
 		})
 	}
 
-	return cl3b.VirtualServiceConfig{
+	return cl3bobject.VirtualServiceConfig{
 		SourceFilterRules: sourceFilterRules,
 		RealServers:       realServers,
 		HashMask:          service.GetHashMask(),

@@ -22,6 +22,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
+	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
@@ -227,16 +228,16 @@ func publishVirtualService(
 	name string,
 	sourceNet string,
 	realDst string,
-) *cl3b.VirtualServiceObject {
+) *cl3bobject.VirtualServiceObject {
 	t.Helper()
 
-	serviceConfig := cl3b.VirtualServiceConfig{
-		SourceFilterRules: []cl3b.SourceFilterRule{{
+	serviceConfig := cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
 			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
 		}},
-		RealServers: []cl3b.RealServer{{
-			Type:               cl3b.IPv4,
+		RealServers: []cl3bobject.RealServer{{
+			Type:               cl3bobject.IPv4,
 			DestinationAddress: xerror.Unwrap(netip.ParseAddr(realDst)),
 			SourceNet:          xnetip.MustParseNetwork(sourceNet),
 		}},
@@ -245,7 +246,7 @@ func publishVirtualService(
 		RingCapacity: 1 * 1000,
 	}
 
-	object, err := cl3b.CreateVirtualService(agent, name, serviceConfig)
+	object, err := cl3bobject.CreateVirtualService(agent, name, serviceConfig)
 	require.NoError(t, err)
 
 	require.NoError(t, object.UpdateRing([]uint32{0}))
