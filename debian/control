@@ -103,6 +103,8 @@ Package: yanet2-generic-operator
 Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
+Conflicts: yanet2-forward-operator, yanet2-decap-operator
+Replaces: yanet2-forward-operator, yanet2-decap-operator
 Description: YANET2 generic operator
  Periodic reconciler that pushes file-defined module configs and
  functions to one or more YANET2 gateways.
