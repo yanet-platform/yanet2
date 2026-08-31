@@ -12,6 +12,13 @@
 #include "lib/dataplane/packet/encap.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include <filter/query.h>
+
+// Classification signature shared by the module-level and per-service
+// filters: a packet is matched on its source network and L4 ports.
+FILTER_QUERY_DECLARE(l3b_filter_ip4, net4_src, port_src, port_dst);
+FILTER_QUERY_DECLARE(l3b_filter_ip6, net6_src, port_src, port_dst);
+
 /*
  * Encapsulate packet into an IP-in-IP tunnel towards real_server.
  *
@@ -82,4 +89,75 @@ l3b_real_server_process(
 		return packet_ip4_encap(packet, real_dst, outer_src);
 	}
 	return packet_ip6_encap(packet, real_dst, outer_src);
+}
+
+/*
+ * Map a scheduler value onto a real server array index through the ring.
+ *
+ * Returns 0 and stores the index on success, or -1 when the ring is empty.
+ */
+static inline int
+l3b_real_ring_select(
+	struct l3b_real_ring *ring, uint32_t value, uint32_t *real_index
+) {
+	if (ring->size == 0) {
+		return -1;
+	}
+
+	uint32_t *server_indexes = ADDR_OF(&ring->server_indexes);
+	*real_index = server_indexes[value % ring->size];
+	return 0;
+}
+
+/*
+ * Process a single packet through a virtual service.
+ *
+ * The per-family filter is queried first; a non-match aborts with -1. The
+ * packet hash is then reduced by the scheduler masks to pick a real server
+ * from the ring, which performs the encapsulation.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+static inline int
+l3b_virtual_service_process(
+	struct l3b_virtual_service *virtual_service, struct packet *packet
+) {
+	uint16_t type = packet->network_header.type;
+	const struct filter_query *query;
+	struct filter *filter;
+
+	if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		filter = &virtual_service->filter_ip4;
+		query = l3b_filter_ip4;
+	} else if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		filter = &virtual_service->filter_ip6;
+		query = l3b_filter_ip6;
+	} else {
+		return -1;
+	}
+
+	struct packet *packets[1] = {packet};
+	uint32_t result[1];
+	filter_query(filter, query, packets, result, 1);
+	if (result[0] == FILTER_RULE_INVALID) {
+		return -1;
+	}
+
+	uint32_t value = packet->hash & virtual_service->scheduler_hash_mask;
+	value &= virtual_service->scheduler_index_mask;
+
+	uint32_t real_index;
+	if (l3b_real_ring_select(
+		    &virtual_service->real_ring, value, &real_index
+	    ) < 0) {
+		return -1;
+	}
+
+	if (real_index >= virtual_service->real_server_count) {
+		return -1;
+	}
+
+	struct l3b_real_server *real_servers =
+		ADDR_OF(&virtual_service->real_servers);
+	return l3b_real_server_process(&real_servers[real_index], packet);
 }
