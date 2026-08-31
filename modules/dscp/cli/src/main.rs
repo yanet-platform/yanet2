@@ -5,8 +5,8 @@ use clap_complete::{
 };
 use commonpb::partition_prefixes;
 use dscppb::{
-    AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
-    ShowConfigResponse, dscp_service_client::DscpServiceClient,
+    AddPrefixesRequest, DeleteConfigRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
+    ShowConfigRequest, ShowConfigResponse, dscp_service_client::DscpServiceClient,
 };
 use netip::{Contiguous, IpNetwork};
 use ptree::TreeBuilder;
@@ -14,7 +14,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::Error,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
 
@@ -51,6 +51,8 @@ pub enum ModeCmd {
     PrefixAdd(AddPrefixesCmd),
     PrefixRemove(RemovePrefixesCmd),
     SetMarking(SetDscpMarkingCmd),
+    /// Delete a dscp module config.
+    Delete(DeleteConfigCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -94,8 +96,18 @@ pub struct SetDscpMarkingCmd {
     pub mark: u32,
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteConfigCmd {
+    /// DSCP module name to delete.
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
+    pub config_name: String,
+}
+
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.dscp.controlplane.dscppb.v1.DscpService";
+
+/// Maps a genuine "config not found" status into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
 fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
@@ -122,6 +134,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::PrefixAdd(cmd) => service.add_prefixes(cmd).await,
         ModeCmd::PrefixRemove(cmd) => service.remove_prefixes(cmd).await,
         ModeCmd::SetMarking(cmd) => service.set_dscp_marking(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
     }
 }
 
@@ -283,6 +296,30 @@ impl DscpService {
         log::debug!("SetDscpMarkingResponse: {response:?}");
 
         output::success("set-marking", format_args!("Set DSCP marking on {}.", cmd.config_name));
+
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+        log::trace!("DeleteConfigRequest: {request:?}");
+        let response = self
+            .service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    "delete",
+                    self.service.endpoint(),
+                    Some(&format!("config '{}'", cmd.config_name)),
+                )
+            })?
+            .into_inner();
+        log::debug!("DeleteConfigResponse: {response:?}");
+
+        output::success("delete", format_args!("Deleted dscp {}.", cmd.config_name));
 
         Ok(())
     }

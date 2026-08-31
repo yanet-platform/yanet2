@@ -36,6 +36,15 @@ func (m *RemovePrefixesRequest) Validate() error {
 	return nil
 }
 
+// Validate checks that the request names the config to delete.
+func (m *DeleteConfigRequest) Validate() error {
+	if m.Name == "" {
+		return errConfigNameRequired
+	}
+
+	return nil
+}
+
 func (m *SetDscpMarkingRequest) Validate() error {
 	if m.Name == "" {
 		return errConfigNameRequired

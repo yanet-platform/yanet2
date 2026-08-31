@@ -8,6 +8,9 @@ import (
 	"github.com/yanet-platform/yanet2/modules/dscp/bindings/go/cdscp"
 )
 
+// moduleType identifies the dscp module to the shared-memory agent.
+const moduleType = "dscp"
+
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
 	agent *ffi.Agent
@@ -55,4 +58,8 @@ func (m *backend) UpdateModule(
 	}
 
 	return module, nil
+}
+
+func (m *backend) DeleteModule(name string) error {
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }

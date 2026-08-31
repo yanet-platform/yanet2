@@ -26,6 +26,8 @@ type Backend interface {
 	// UpdateModule creates a module config, applies mutations, and publishes it
 	// to the dataplane.
 	UpdateModule(name string, prefixes []netip.Prefix, flag uint8, mark uint8) (ModuleHandle, error)
+	// DeleteModule removes a module config.
+	DeleteModule(name string) error
 }
 
 type DscpService struct {
@@ -273,6 +275,43 @@ func (m *DscpService) SetDscpMarking(
 	}
 
 	return &dscppb.SetDscpMarkingResponse{}, nil
+}
+
+// DeleteConfig removes the named config if it is not referenced by any
+// pipeline.
+func (m *DscpService) DeleteConfig(
+	ctx context.Context,
+	request *dscppb.DeleteConfigRequest,
+) (*dscppb.DeleteConfigResponse, error) {
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+
+	name := request.GetName()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, ok := m.configs[name]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "config not found")
+	}
+
+	if err := m.backend.DeleteModule(name); err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			"failed to delete module config %q: %v", name, err,
+		)
+	}
+
+	// The delete retired the generation holding the published module.
+	// Retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	m.parkOrFree(entry.Module)
+
+	delete(m.configs, name)
+
+	return &dscppb.DeleteConfigResponse{}, nil
 }
 
 func (m *DscpService) updateModuleConfig(name string, cfg *config) error {

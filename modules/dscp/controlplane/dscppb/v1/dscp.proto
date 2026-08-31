@@ -22,6 +22,9 @@ service DscpService {
   rpc RemovePrefixes(RemovePrefixesRequest) returns (RemovePrefixesResponse);
   // SetDscpMarking sets the DSCP marking configuration.
   rpc SetDscpMarking(SetDscpMarkingRequest) returns (SetDscpMarkingResponse);
+  // DeleteConfig removes the named config when it is no longer referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
 }
 
 message Config {
@@ -73,3 +76,9 @@ message SetDscpMarkingRequest {
   DscpConfig dscp_config = 2;
 }
 message SetDscpMarkingResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse {}
