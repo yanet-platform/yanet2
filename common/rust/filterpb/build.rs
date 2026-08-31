@@ -1,7 +1,9 @@
 use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    let serialize_deserialize = "#[derive(serde::Serialize, serde::Deserialize)]";
+    // Decoding mirrors the Go xproto contract: an omitted field takes its
+    // zero value and an unknown key is refused.
+    let serialize_deserialize = "#[derive(serde::Serialize, serde::Deserialize)]#[serde(default, deny_unknown_fields)]";
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)

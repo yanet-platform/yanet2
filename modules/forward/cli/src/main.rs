@@ -1,7 +1,4 @@
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::{
@@ -119,13 +116,20 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
 /// Loads the update request from its YAML file.
 ///
 /// Merge keys are expanded first, so a document shared with the generic
-/// operator may reuse a rule through an anchor and `<<`.
+/// operator may reuse a rule through an anchor and `<<`, and an empty
+/// document is the zero request, as the operator reads it.
 fn load_request<P>(path: P) -> Result<UpdateConfigRequest, Box<dyn core::error::Error>>
 where
     P: AsRef<Path>,
 {
-    let file = File::open(path)?;
-    let mut value: serde_yaml::Value = serde_yaml::from_reader(file)?;
+    let content = std::fs::read_to_string(path)?;
+    if content.trim().is_empty() {
+        return Ok(UpdateConfigRequest::default());
+    }
+    let mut value: serde_yaml::Value = serde_yaml::from_str(&content)?;
+    if value.is_null() {
+        return Ok(UpdateConfigRequest::default());
+    }
     value.apply_merge()?;
     Ok(serde_yaml::from_value(value)?)
 }
@@ -445,6 +449,48 @@ rules:
                 .expect_err("an undeclared number must be refused")
                 .to_string()
                 .contains("99")
+        );
+    }
+
+    #[test]
+    fn test_empty_and_comment_only_files_are_the_zero_request() {
+        for content in ["", "# nothing yet\n"] {
+            let path = std::env::temp_dir().join(format!("fwd-empty-{}-{}.yaml", std::process::id(), content.len()));
+            std::fs::write(&path, content).expect("the fixture must be written");
+
+            let request = load_request(&path).expect("an empty document must load");
+            std::fs::remove_file(&path).ok();
+
+            assert_eq!(UpdateConfigRequest::default(), request);
+        }
+    }
+
+    #[test]
+    fn test_extern_messages_default_and_refuse_unknown_keys() {
+        let sparse: forwardpb::Rule =
+            serde_yaml::from_str("vlan_ranges:\n  - {}\n").expect("an empty vlan range must default");
+        let unknown: Result<forwardpb::Rule, _> = serde_yaml::from_str("devices:\n  - name: eth0\n    mtu: 9000\n");
+
+        assert_eq!(vec![filterpb::pb::VlanRange { from: 0, to: 0 }], sparse.vlan_ranges);
+        assert!(
+            unknown
+                .expect_err("an unknown device key must be refused")
+                .to_string()
+                .contains("mtu")
+        );
+    }
+
+    #[test]
+    fn test_file_rejects_duplicate_keys() {
+        let yaml = "rules:\n  - action:\n      target: t\n      mode: OUT\n      mode: NONE\n";
+
+        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(yaml);
+
+        assert!(
+            parsed
+                .expect_err("a duplicate mapping key must be refused")
+                .to_string()
+                .contains("duplicate")
         );
     }
 
