@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -15,6 +16,7 @@
 #include "lib/counters/counters.h"
 
 struct cp_config;
+struct cp_config_gen;
 struct rte_mempool;
 
 struct dp_module {
@@ -99,6 +101,16 @@ struct dp_worker {
 	uint32_t device_id;
 	uint32_t queue_id;
 	uint32_t rx_burst_size;
+
+	// Offset pointer to the execution context this worker runs,
+	// taken from the generation most recently assigned to it.
+	//
+	// Written by the instance's config assigner with release ordering
+	// whenever a new generation is published; read by the worker at
+	// the start of every round with acquire ordering. NULL until the
+	// first generation carrying execution contexts is assigned, which
+	// keeps the worker on the pre-configuration drop path.
+	struct config_gen_ectx *config_gen_ectx;
 };
 
 // Value written to dp_config.ready_magic by dp_config_mark_ready once the
@@ -157,6 +169,23 @@ struct dp_config {
 	uint64_t port_count;
 	struct dp_port_counters *port_counters;
 
+	// Selects the synchronous generation hand-off used by in-process
+	// harnesses; production leaves it clear.
+	//
+	// Set once before the instance is marked ready, when no worker
+	// threads exist and rounds run on caller threads: the generation
+	// waiter then delivers contexts to the workers itself,
+	// synchronously, under the round lock below.
+	bool external_worker_rounds;
+
+	// Storage of the harness round lock.
+	//
+	// pthread_mutex_t sizing differs between architectures, so the
+	// lock lives in fixed-size storage to keep the shared-memory
+	// layout architecture-independent. Only a harness that set
+	// external_worker_rounds initializes and locks it.
+	uint64_t external_round_lock_storage[6];
+
 	// Written by dp_config_mark_ready with release ordering after the
 	// dataplane releases cp_config and finishes initialising the instance.
 	//
@@ -165,6 +194,18 @@ struct dp_config {
 	// cp_config is not held, so an attacher will not block on the lock.
 	uint64_t ready_magic;
 };
+
+// The harness round lock, reached through its fixed-size storage.
+static inline pthread_mutex_t *
+dp_config_external_round_lock(struct dp_config *dp_config) {
+	return (pthread_mutex_t *)dp_config->external_round_lock_storage;
+}
+
+_Static_assert(
+	sizeof(((struct dp_config *)NULL)->external_round_lock_storage) >=
+		sizeof(pthread_mutex_t),
+	"external_round_lock_storage no longer fits pthread_mutex_t"
+);
 
 /*
  * Returns dp_config of k-th instance from current.
@@ -204,11 +245,24 @@ dp_config_lookup_object(
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
 
-// Waits for every worker of dp_config to acknowledge generation gen.
+// Deliver each worker of dp_config the execution context built for it in
+// config_gen.
 //
-// This is the grace period cp_config_gen_install needs before it may
-// reclaim the generation gen superseded. Blocks with no timeout, by
-// design: an early return would let an owner reclaim memory an
-// unacknowledged worker may still dereference.
+// A context of NULL is valid and returns the worker to the pre-configuration
+// drop path; it is what generations without per-worker contexts assign.
 void
-dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen);
+dp_config_assign_worker_ectxs(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+);
+
+// Waits for every worker of dp_config to hold the execution context of
+// config_gen and to have acknowledged that generation.
+//
+// This is the grace period the publisher needs before it may reclaim the
+// generation config_gen superseded. Blocks with no timeout, by design: an
+// early return would let an owner reclaim memory an unacknowledged worker
+// may still dereference.
+void
+dp_config_wait_for_gen(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+);

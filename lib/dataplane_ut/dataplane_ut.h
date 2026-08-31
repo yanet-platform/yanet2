@@ -159,3 +159,31 @@ dataplane_ut_run_rounds(
 	uint64_t rounds,
 	int reset_payload
 );
+
+// Install one named empty pipeline, forcing a generation switch.
+//
+// Returns 0 on success. This is the same update the in-process install
+// helpers drive, so the switch completes synchronously and the workers'
+// contexts and acknowledgements are already settled on return.
+int
+dataplane_ut_install_empty_pipeline(struct dataplane_ut *ut, const char *name);
+
+// Resolved value of the worker's assigned context field, 0 when the
+// worker index is out of range or no context is assigned.
+uintptr_t
+dataplane_ut_worker_ectx(struct dataplane_ut *ut, size_t worker_idx);
+
+// Resolved per-worker context of the currently published generation,
+// with the same conventions as the worker field reader above.
+uintptr_t
+dataplane_ut_published_ectx(struct dataplane_ut *ut, size_t worker_idx);
+
+// The generation number the worker last acknowledged, 0 when the worker
+// index is out of range.
+uint64_t
+dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx);
+
+// Generation number of the currently published generation, 0 when no
+// generation is published.
+uint64_t
+dataplane_ut_published_gen(struct dataplane_ut *ut);

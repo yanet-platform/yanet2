@@ -4,6 +4,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "lib/controlplane/config/zone.h"
+
 struct dp_config *
 dp_config_nextk(struct dp_config *current, uint32_t k) {
 	for (uint32_t i = 0; i < k; ++i) {
@@ -19,15 +21,32 @@ dp_config_nextk(struct dp_config *current, uint32_t k) {
 // Fixed nanosleep interval used once the yield phase is exhausted.
 #define DP_CONFIG_GEN_ACK_SLEEP_NS UINT64_C(1000000)
 
-// Waits for a single worker to acknowledge gen.
+// Observes both the worker's context assignment and its acknowledged
+// generation.
+//
+// The waiter needs the pair, not either alone: the assignment proves the
+// worker switched away from the superseded context, the acknowledgement
+// orders the round that last used it before this observation.
+static bool
+dp_worker_ectx_and_gen_observed(
+	struct dp_worker *worker, struct config_gen_ectx *expected, uint64_t gen
+) {
+	return ATOMIC_ADDR_OF(&worker->config_gen_ectx) == expected &&
+	       __atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE) >= gen;
+}
+
+// Waits for a single worker to take the expected context and acknowledge
+// gen.
 //
 // Backs off from sched_yield to a fixed-interval nanosleep, without ever
 // giving up.
 static void
-dp_config_wait_for_worker_gen(struct dp_worker *worker, uint64_t gen) {
+dp_config_wait_for_worker_ectx(
+	struct dp_worker *worker, struct config_gen_ectx *expected, uint64_t gen
+) {
 	for (unsigned iters = 0; iters < DP_CONFIG_GEN_ACK_YIELD_ITERS;
 	     ++iters) {
-		if (__atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE) >= gen) {
+		if (dp_worker_ectx_and_gen_observed(worker, expected, gen)) {
 			return;
 		}
 		sched_yield();
@@ -38,7 +57,7 @@ dp_config_wait_for_worker_gen(struct dp_worker *worker, uint64_t gen) {
 		.tv_nsec = (long)(DP_CONFIG_GEN_ACK_SLEEP_NS % 1000000000ULL),
 	};
 	for (;;) {
-		if (__atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE) >= gen) {
+		if (dp_worker_ectx_and_gen_observed(worker, expected, gen)) {
 			return;
 		}
 		nanosleep(&sleep_ts, NULL);
@@ -46,14 +65,61 @@ dp_config_wait_for_worker_gen(struct dp_worker *worker, uint64_t gen) {
 }
 
 void
-dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
+dp_config_assign_worker_ectxs(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+) {
 	// The loop bound and the array it indexes come from one observation.
 	struct dp_worker *const *workers = ADDR_OF(&dp_config->workers);
 	const uint64_t worker_count = dp_config->worker_count;
 
 	for (uint64_t idx = 0; idx < worker_count; ++idx) {
 		struct dp_worker *worker = ADDR_OF(workers + idx);
-		dp_config_wait_for_worker_gen(worker, gen);
+		struct config_gen_ectx *expected =
+			cp_config_gen_worker_ectx(config_gen, idx);
+		// Skip workers already holding the expected context: the
+		// release store exists for the switch, and re-issuing it on
+		// every assignment pass would make the field flap for
+		// readers that are content.
+		if (ADDR_OF(&worker->config_gen_ectx) != expected) {
+			ATOMIC_SET_OFFSET_OF(
+				&worker->config_gen_ectx, expected
+			);
+		}
+	}
+}
+
+void
+dp_config_wait_for_gen(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+) {
+	// The harness round driver holds external_round_lock across every
+	// dereference of a worker context, and rounds are the only users
+	// of the contexts in this mode.
+	//
+	// Waiting for the lock therefore spans any in-flight round: once
+	// it is held, no round can still be dereferencing the retired
+	// contexts, so delivering the new ones in place completes the
+	// switch with no further acknowledgement to wait for.
+	if (dp_config->external_worker_rounds) {
+		pthread_mutex_t *round_lock =
+			dp_config_external_round_lock(dp_config);
+		pthread_mutex_lock(round_lock);
+		dp_config_assign_worker_ectxs(dp_config, config_gen);
+		pthread_mutex_unlock(round_lock);
+		return;
+	}
+
+	// The loop bound and the array it indexes come from one observation.
+	struct dp_worker *const *workers = ADDR_OF(&dp_config->workers);
+	const uint64_t worker_count = dp_config->worker_count;
+
+	for (uint64_t idx = 0; idx < worker_count; ++idx) {
+		struct dp_worker *worker = ADDR_OF(workers + idx);
+		struct config_gen_ectx *expected =
+			cp_config_gen_worker_ectx(config_gen, idx);
+		dp_config_wait_for_worker_ectx(
+			worker, expected, config_gen->gen
+		);
 	}
 }
 

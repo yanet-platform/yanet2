@@ -286,7 +286,7 @@ cp_config_gen_install(
 	// Release-publish the new generation so workers never observe this
 	// pointer before its contents are fully written.
 	ATOMIC_SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
-	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
+	dp_config_wait_for_gen(dp_config, new_config_gen);
 
 	// The new generation already carries the pin it was created with, so
 	// publishing it as current spends that pin rather than adding one.

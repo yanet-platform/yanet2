@@ -17,6 +17,7 @@ lib_sources = files(
   'config.c',
   'dataplane.c',
   'device.c',
+  'instance.c',
   'worker.c',
   'numa.c',
 )

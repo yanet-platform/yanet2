@@ -1,10 +1,5 @@
 #include "dataplane_ut.h"
 
-// dp_worker->gen is initialized to a value far above any plausible
-// production cp_config_gen->gen so that harness workers never
-// observe a "wait for newer generation" state.
-#define DATAPLANE_UT_HIGH_GEN 1000000000000000ULL
-
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdint.h>
@@ -119,6 +114,12 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	ut->dp_config->packet_recirc_limit =
 		cfg->packet_recirc_limit == 0 ? PACKET_RECIRC_LIMIT_DEFAULT
 					      : cfg->packet_recirc_limit;
+
+	// The harness runs no worker threads of its own: rounds and
+	// installs run on arbitrary caller threads, and the lock
+	// serializes the synchronous deliveries against in-flight rounds.
+	ut->dp_config->external_worker_rounds = true;
+	pthread_mutex_init(dp_config_external_round_lock(ut->dp_config), NULL);
 
 	// Open the current binary so dlsym can resolve module/device symbols.
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
@@ -332,9 +333,6 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 		memset(dp_worker, 0, sizeof(struct dp_worker));
 		dp_worker->idx = idx;
-		// A high generation value ensures the pipeline never waits for
-		// a newer config snapshot — same trick used by mock.
-		dp_worker->gen = DATAPLANE_UT_HIGH_GEN;
 		dp_worker->rx_mempool = ut->mempool;
 		dp_worker->core_id = (uint32_t)idx;
 		if (cfg->workers != NULL) {
@@ -498,9 +496,13 @@ dataplane_ut_run(
 	struct dp_worker **workers = ADDR_OF(&ut->dp_config->workers);
 	struct dp_worker *dp_worker = ADDR_OF(&workers[worker_idx]);
 
-	struct worker_round round = worker_round_prepare(
-		dp_worker, ut->cp_config, ut->mock_time_ns
-	);
+	// Held across the whole round: the synchronous delivery inside a
+	// generation install waits on this lock, so a context the round
+	// snapshotted cannot be retired underneath it.
+	pthread_mutex_lock(dp_config_external_round_lock(ut->dp_config));
+
+	struct worker_round round =
+		worker_round_prepare(dp_worker, ut->mock_time_ns);
 	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
 	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 
@@ -516,6 +518,8 @@ dataplane_ut_run(
 		while ((packet = packet_list_pop(input)) != NULL) {
 			packet_list_add(&result->drop, packet);
 		}
+		pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config
+		));
 		return;
 	}
 
@@ -543,6 +547,8 @@ dataplane_ut_run(
 
 	packet_list_concat(&result->output, &packet_front.output);
 	packet_list_concat(&result->drop, &packet_front.drop);
+
+	pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config));
 }
 
 // Saved per-packet state used by dataplane_ut_run_rounds.
@@ -733,4 +739,78 @@ cleanup:
 int
 dataplane_ut_build_optimized(void) {
 	return build_is_optimized();
+}
+
+int
+dataplane_ut_install_empty_pipeline(struct dataplane_ut *ut, const char *name) {
+	struct cp_pipeline_config *config = cp_pipeline_config_create(name, 0);
+	if (config == NULL) {
+		LOG(ERROR,
+		    "dataplane_ut_install_empty_pipeline: failed to allocate "
+		    "pipeline config");
+		return -1;
+	}
+
+	yanet_error *err = NULL;
+	struct cp_pipeline_config *configs[] = {config};
+	int rc = cp_config_update_pipelines(
+		ut->dp_config, ut->cp_config, 1, configs, &err
+	);
+	if (rc != 0) {
+		LOG(ERROR,
+		    "dataplane_ut_install_empty_pipeline: update failed: %s",
+		    yanet_error_message(err) ? yanet_error_message(err) : "?");
+	}
+	yanet_error_free(err);
+	cp_pipeline_config_free(config);
+	return rc;
+}
+
+static struct dp_worker *
+dataplane_ut_worker(struct dataplane_ut *ut, size_t worker_idx) {
+	if (worker_idx >= ut->dp_config->worker_count) {
+		return NULL;
+	}
+	// An observation read: a caller inspecting while rounds or
+	// installs run on other threads must order the read itself.
+	struct dp_worker **workers = ADDR_OF(&ut->dp_config->workers);
+	return ADDR_OF(workers + worker_idx);
+}
+
+uintptr_t
+dataplane_ut_worker_ectx(struct dataplane_ut *ut, size_t worker_idx) {
+	struct dp_worker *worker = dataplane_ut_worker(ut, worker_idx);
+	if (worker == NULL) {
+		return 0;
+	}
+	return (uintptr_t)ADDR_OF(&worker->config_gen_ectx);
+}
+
+uintptr_t
+dataplane_ut_published_ectx(struct dataplane_ut *ut, size_t worker_idx) {
+	struct cp_config_gen *config_gen =
+		ADDR_OF(&ut->cp_config->cp_config_gen);
+	if (config_gen == NULL) {
+		return 0;
+	}
+	return (uintptr_t)cp_config_gen_worker_ectx(config_gen, worker_idx);
+}
+
+uint64_t
+dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx) {
+	struct dp_worker *worker = dataplane_ut_worker(ut, worker_idx);
+	if (worker == NULL) {
+		return 0;
+	}
+	return worker->gen;
+}
+
+uint64_t
+dataplane_ut_published_gen(struct dataplane_ut *ut) {
+	struct cp_config_gen *config_gen =
+		ADDR_OF(&ut->cp_config->cp_config_gen);
+	if (config_gen == NULL) {
+		return 0;
+	}
+	return config_gen->gen;
 }

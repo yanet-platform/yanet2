@@ -257,10 +257,8 @@ worker_write(
 
 static void
 worker_loop_round(struct dataplane_worker *worker) {
-	struct cp_config *cp_config = worker->instance->cp_config;
 	struct worker_round round = worker_round_prepare(
 		worker->dp_worker,
-		cp_config,
 		tsc_clock_get_time_ns(&worker->dp_worker->clock)
 	);
 	struct cp_config_gen *cp_config_gen = round.cp_config_gen;

@@ -370,6 +370,43 @@ func (m *Harness) SharedMemory() *ffi.SharedMemory {
 	return ffi.NewSharedMemoryFromRaw(unsafe.Pointer(shm))
 }
 
+// InstallEmptyPipeline installs one named empty pipeline, forcing a
+// generation switch that completes synchronously: on return every worker
+// holds the newly published generation's execution context.
+func (m *Harness) InstallEmptyPipeline(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	rc := C.dataplane_ut_install_empty_pipeline(m.ptr, cName)
+	if rc != 0 {
+		return fmt.Errorf("failed to install empty pipeline %q: rc=%d", name, int(rc))
+	}
+	return nil
+}
+
+// WorkerEctx returns the execution context currently assigned to the given
+// worker, zero when none is assigned.
+func (m *Harness) WorkerEctx(workerIdx int) uintptr {
+	return uintptr(C.dataplane_ut_worker_ectx(m.ptr, C.size_t(workerIdx)))
+}
+
+// PublishedEctx returns the per-worker execution context of the currently
+// published generation, zero when none is published.
+func (m *Harness) PublishedEctx(workerIdx int) uintptr {
+	return uintptr(C.dataplane_ut_published_ectx(m.ptr, C.size_t(workerIdx)))
+}
+
+// WorkerGen returns the generation the given worker last acknowledged.
+func (m *Harness) WorkerGen(workerIdx int) uint64 {
+	return uint64(C.dataplane_ut_worker_gen(m.ptr, C.size_t(workerIdx)))
+}
+
+// PublishedGen returns the generation number of the currently published
+// generation, zero when no generation was published.
+func (m *Harness) PublishedGen() uint64 {
+	return uint64(C.dataplane_ut_published_gen(m.ptr))
+}
+
 // SetCurrentTime installs a deterministic wall-clock value used by the next
 // HandlePackets call.
 func (m *Harness) SetCurrentTime(t time.Time) {
