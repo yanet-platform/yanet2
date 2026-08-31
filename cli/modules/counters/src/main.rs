@@ -36,21 +36,27 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-#[derive(Debug, Clone, Parser, Default)]
+#[derive(Debug, Clone, clap::Args, Default)]
 pub struct ByTagsCmd {
     /// Counter name to show, as an exact name or a Rust regex pattern.
     #[arg(short, long = "name", value_name = "PATTERN")]
     pub names: Vec<String>,
+    /// Device name to filter by.
     #[arg(short, long)]
     pub device: Option<String>,
+    /// Pipeline name to filter by.
     #[arg(short, long)]
     pub pipeline: Option<String>,
+    /// Function name to filter by.
     #[arg(short, long)]
     pub function: Option<String>,
+    /// Chain name to filter by.
     #[arg(short, long)]
     pub chain: Option<String>,
+    /// Module type to filter by.
     #[arg(short = 't', long)]
     pub module_type: Option<String>,
+    /// Module name to filter by.
     #[arg(short = 'm', long)]
     pub module_name: Option<String>,
     /// Owner level to filter by (device, pipeline, function, chain, module,
@@ -95,18 +101,8 @@ impl From<ByTagsCmd> for CountersByTagsRequest {
     }
 }
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Debug, Clone, clap::Subcommand)]
 pub enum ModeCmd {
-    /// Show device counters.
-    Device(DeviceCmd),
-    /// Show pipeline counters.
-    Pipeline(PipelineCmd),
-    /// Show function counters.
-    Function(FunctionCmd),
-    /// Show chain counters.
-    Chain(ChainCmd),
-    /// Show counters of module assigned to a pipeline.
-    Module(ModuleCmd),
     /// Show worker counters.
     Workers,
     /// Show port counters.
@@ -116,67 +112,10 @@ pub enum ModeCmd {
 impl ModeCmd {
     pub fn action(&self) -> &'static str {
         match self {
-            ModeCmd::Device(..) => "show device counters",
-            ModeCmd::Pipeline(..) => "show pipeline counters",
-            ModeCmd::Function(..) => "show function counters",
-            ModeCmd::Chain(..) => "show chain counters",
-            ModeCmd::Module(..) => "show module counters",
             ModeCmd::Workers => "show worker counters",
             ModeCmd::Ports => "show port counters",
         }
     }
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct DeviceCmd {
-    #[arg(short = 'd', long)]
-    pub device_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct PipelineCmd {
-    #[arg(short = 'd', long)]
-    pub device_name: String,
-    #[arg(short = 'p', long)]
-    pub pipeline_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct FunctionCmd {
-    #[arg(short = 'd', long)]
-    pub device_name: String,
-    #[arg(short = 'p', long)]
-    pub pipeline_name: String,
-    #[arg(short = 'f', long)]
-    pub function_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct ChainCmd {
-    #[arg(short = 'd', long)]
-    pub device_name: String,
-    #[arg(short = 'p', long)]
-    pub pipeline_name: String,
-    #[arg(short = 'f', long)]
-    pub function_name: String,
-    #[arg(short = 'c', long)]
-    pub chain_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct ModuleCmd {
-    #[arg(short = 'd', long)]
-    pub device_name: String,
-    #[arg(short = 'p', long)]
-    pub pipeline_name: String,
-    #[arg(short = 'f', long)]
-    pub function_name: String,
-    #[arg(short = 'c', long)]
-    pub chain_name: String,
-    #[arg(short = 't', long)]
-    pub module_type: String,
-    #[arg(short = 'm', long)]
-    pub module_name: String,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -223,9 +162,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 },
             );
         }
-        mode => {
-            let request = tags_request(mode, cmd.by_tags);
-            let response = service.by_tags(request).await?;
+        None => {
+            let response = service.by_tags(cmd.by_tags.into()).await?;
             output::data(
                 || &response,
                 || {
@@ -243,53 +181,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 
     Ok(())
-}
-
-fn by_tags_request(tags: Vec<(&'static str, String)>) -> CountersByTagsRequest {
-    CountersByTagsRequest {
-        tags: tags
-            .into_iter()
-            .map(|(key, value)| CounterTag { key: key.to_string(), value })
-            .collect(),
-        query: Vec::new(),
-    }
-}
-
-fn tags_request(mode: Option<ModeCmd>, by_tags: ByTagsCmd) -> CountersByTagsRequest {
-    match mode {
-        None => by_tags.into(),
-        Some(ModeCmd::Device(cmd)) => {
-            by_tags_request(vec![("device", cmd.device_name), ("kind", "device".to_string())])
-        }
-        Some(ModeCmd::Pipeline(cmd)) => by_tags_request(vec![
-            ("device", cmd.device_name),
-            ("pipeline", cmd.pipeline_name),
-            ("kind", "pipeline".to_string()),
-        ]),
-        Some(ModeCmd::Function(cmd)) => by_tags_request(vec![
-            ("device", cmd.device_name),
-            ("pipeline", cmd.pipeline_name),
-            ("function", cmd.function_name),
-            ("kind", "function".to_string()),
-        ]),
-        Some(ModeCmd::Chain(cmd)) => by_tags_request(vec![
-            ("device", cmd.device_name),
-            ("pipeline", cmd.pipeline_name),
-            ("function", cmd.function_name),
-            ("chain", cmd.chain_name),
-            ("kind", "chain".to_string()),
-        ]),
-        Some(ModeCmd::Module(cmd)) => by_tags_request(vec![
-            ("device", cmd.device_name),
-            ("pipeline", cmd.pipeline_name),
-            ("function", cmd.function_name),
-            ("chain", cmd.chain_name),
-            ("module_type", cmd.module_type),
-            ("module_name", cmd.module_name),
-            ("kind", "module".to_string()),
-        ]),
-        Some(ModeCmd::Workers) | Some(ModeCmd::Ports) => unreachable!(),
-    }
 }
 
 pub struct CountersService {

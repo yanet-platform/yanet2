@@ -274,7 +274,7 @@ func testDecap(t *testing.T, fw *framework.TestFramework) {
 	})
 
 	fw.Run("Check_Yanet_State", func(fw *framework.TestFramework, t *testing.T) {
-		cmd := "/mnt/target/release/yanet-cli-counters pipeline --device-name kni0 --pipeline-name test"
+		cmd := "/mnt/target/release/yanet-cli-counters --device kni0 --pipeline test --kind pipeline"
 		output, err := fw.ExecuteCommand(cmd)
 		require.NoError(t, err, "Failed to execute command %s with output %s", cmd, output)
 	})

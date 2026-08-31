@@ -20,13 +20,14 @@ def run_yanet_command(args):
     Constructs and runs the shell command, returning the parsed JSON.
     """
     cmd = [
-        "yanet-cli-counters", "module",
-        "--device-name", args.device,
-        "--pipeline-name", args.pipeline,
-        "--function-name", args.function,
-        "--chain-name", args.chain,
+        "yanet-cli-counters",
+        "--device", args.device,
+        "--pipeline", args.pipeline,
+        "--function", args.function,
+        "--chain", args.chain,
         "--module-type", args.module_type,
         "--module-name", args.module_name,
+        "--kind", "module",
         "--format", "json"
     ]
 
@@ -48,7 +49,7 @@ def run_yanet_command(args):
 def extract_stats(data):
     """
     Sums the tx/rx packet and byte values of the module's counters across
-    every instance (worker) reported by `yanet-cli-counters module --format json`.
+    every instance (worker) reported by `yanet-cli-counters --format json`.
     """
     stats = {'tx': 0, 'rx': 0, 'tx_bytes': 0, 'rx_bytes': 0}
     packets_bytes = {'tx': ('tx', 'tx_bytes'), 'rx': ('rx', 'rx_bytes')}

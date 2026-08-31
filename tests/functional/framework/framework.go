@@ -2,7 +2,6 @@ package framework
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -1303,47 +1302,6 @@ func (f *TestFramework) WaitForReady(timeout time.Duration) error {
 
 func (f *TestFramework) GetSocketPaths() []string {
 	return f.qemu.SocketPaths
-}
-
-// ValidateCounter queries a named counter via yanet-cli-counters and
-// compares its value against expect. Sums all instances for counters
-// with multiple instances. Returns an error if the counter is not found
-// or the value does not match.
-func (f *TestFramework) ValidateCounter(name string, expect uint64) error {
-	cmd := f.Paths.CLI("yanet-cli-counters") +
-		" pipeline --device-name kni0 --pipeline-name test"
-	output, err := f.ExecuteCommand(cmd)
-	if err != nil {
-		return fmt.Errorf("counters query failed: %w", err)
-	}
-
-	var resp struct {
-		Counters []struct {
-			Name      string `json:"name"`
-			Instances []struct {
-				Values []uint64 `json:"values"`
-			} `json:"instances"`
-		} `json:"counters"`
-	}
-	if err := json.Unmarshal([]byte(output), &resp); err != nil {
-		return fmt.Errorf("parse counters response: %w", err)
-	}
-
-	for _, c := range resp.Counters {
-		if c.Name == name {
-			var total uint64
-			for _, inst := range c.Instances {
-				for _, v := range inst.Values {
-					total += v
-				}
-			}
-			if total != expect {
-				return fmt.Errorf("counter %s: expected %d, got %d", name, expect, total)
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("counter %q not found", name)
 }
 
 // Run executes a subtest with the given name and function. This method wraps
