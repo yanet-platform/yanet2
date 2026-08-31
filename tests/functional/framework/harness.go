@@ -168,55 +168,59 @@ devices:
 func DefaultForwardConfig() string {
 	return `
 rules:
-  - target: virtio_user_kni0
-    counter: to_virtio_user_kni0
+  - action:
+      target: virtio_user_kni0
+      mode: OUT
+      counter: to_virtio_user_kni0
+    devices:
+      - name: 01:00.0
     vlan_ranges:
       - from: 0
         to: 4095
-    srcs:
+    sources4:
       - "0.0.0.0/0"
+    sources6:
       - "::/0"
-    dsts:
+    destinations4:
       - ` + VMIPv4Host + `/32
+    destinations6:
       - ` + VMIPv6Host + `/64
       - "ff02::0/16"
-    mode: Out
+  - action:
+      target: 01:00.0
+      mode: NONE
+      counter: to_pass
     devices:
-      - 01:00.0
-  - target: 01:00.0
-    counter: to_pass
+      - name: 01:00.0
     vlan_ranges:
       - from: 0
         to: 4095
-    srcs:
+    sources4:
       - "0.0.0.0/0"
+    sources6:
       - "::/0"
-    dsts:
+    destinations4:
       - "0.0.0.0/0"
+    destinations6:
       - "::/0"
-    mode: None
+  - action:
+      target: virtio_user_kni0
+      mode: OUT
+      counter: to_virtio_user_kni0
     devices:
-      - 01:00.0
-  - target: virtio_user_kni0
-    counter: to_virtio_user_kni0
+      - name: 01:00.0
     vlan_ranges:
       - from: 0
         to: 4095
-    srcs:
-    dsts:
-    mode: Out
+  - action:
+      target: 01:00.0
+      mode: OUT
+      counter: to_01:00.0
     devices:
-      - 01:00.0
-  - target: 01:00.0
-    counter: to_01:00.0
+      - name: virtio_user_kni0
     vlan_ranges:
       - from: 0
         to: 4095
-    srcs:
-    dsts:
-    mode: Out
-    devices:
-      - virtio_user_kni0
 `
 }
 

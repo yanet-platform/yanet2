@@ -94,10 +94,10 @@ fn serialize_forward_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S:
     }
 }
 
-/// Deserializes a forward mode from its declared name or a raw number.
+/// Deserializes a forward mode from its declared name or number.
 ///
-/// An undeclared number passes through for the service to judge, an
-/// undeclared name is refused.
+/// An undeclared value is refused here, because the service would
+/// silently coerce it to NONE rather than reject it.
 fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -107,7 +107,9 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
     }
 
     match NameOrNumber::deserialize(deserializer)? {
-        NameOrNumber::Number(mode) => Ok(mode),
+        NameOrNumber::Number(mode) => forwardpb::ForwardMode::try_from(mode)
+            .map(|mode| mode as i32)
+            .map_err(|_| serde::de::Error::custom(format!("unknown forward mode {mode}"))),
         NameOrNumber::Name(name) => forwardpb::ForwardMode::from_str_name(&name)
             .map(|mode| mode as i32)
             .ok_or_else(|| serde::de::Error::custom(format!("unknown forward mode {name:?}"))),
@@ -115,12 +117,17 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
 }
 
 /// Loads the update request from its YAML file.
+///
+/// Merge keys are expanded first, so a document shared with the generic
+/// operator may reuse a rule through an anchor and `<<`.
 fn load_request<P>(path: P) -> Result<UpdateConfigRequest, Box<dyn core::error::Error>>
 where
     P: AsRef<Path>,
 {
     let file = File::open(path)?;
-    Ok(serde_yaml::from_reader(file)?)
+    let mut value: serde_yaml::Value = serde_yaml::from_reader(file)?;
+    value.apply_merge()?;
+    Ok(serde_yaml::from_value(value)?)
 }
 
 /// Binds the config name into a loaded request, refusing a file that names
@@ -171,18 +178,19 @@ impl ForwardService {
         output::data(
             || &response,
             || {
+                // The document is printed even without rules, so a
+                // redirected show always yields a file update accepts.
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
+                );
+
                 if response.rules.is_empty() {
                     output::empty_with_hint(
                         format_args!("No forward rules found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-forward update --name <name> --file <path>'"),
                     );
-                    return;
                 }
-
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
-                );
             },
         );
 
@@ -418,19 +426,57 @@ rules:
     }
 
     #[test]
-    fn test_mode_parses_a_name_or_a_number_and_refuses_an_unknown_name() {
+    fn test_mode_parses_a_declared_name_or_number_and_refuses_the_rest() {
         let by_name: forwardpb::Action = serde_yaml::from_str("mode: IN\n").expect("a declared name must parse");
-        let by_number: forwardpb::Action = serde_yaml::from_str("mode: 99\n").expect("a raw number must parse");
-        let unknown: Result<forwardpb::Action, _> = serde_yaml::from_str("mode: BOGUS\n");
+        let by_number: forwardpb::Action = serde_yaml::from_str("mode: 2\n").expect("a declared number must parse");
+        let unknown_name: Result<forwardpb::Action, _> = serde_yaml::from_str("mode: BOGUS\n");
+        let unknown_number: Result<forwardpb::Action, _> = serde_yaml::from_str("mode: 99\n");
 
         assert_eq!(forwardpb::ForwardMode::In as i32, by_name.mode);
-        assert_eq!(99, by_number.mode);
+        assert_eq!(forwardpb::ForwardMode::Out as i32, by_number.mode);
         assert!(
-            unknown
+            unknown_name
                 .expect_err("an undeclared name must be refused")
                 .to_string()
                 .contains("BOGUS")
         );
+        assert!(
+            unknown_number
+                .expect_err("an undeclared number must be refused")
+                .to_string()
+                .contains("99")
+        );
+    }
+
+    #[test]
+    fn test_file_expands_merge_keys() {
+        let yaml = r#"
+rules:
+  - &base
+    action:
+      target: base
+      mode: OUT
+      counter: base
+    vlan_ranges:
+      - from: 0
+        to: 100
+  - <<: *base
+    devices:
+      - name: eth0
+"#;
+        let path = std::env::temp_dir().join(format!("fwd-merge-{}.yaml", std::process::id()));
+        std::fs::write(&path, yaml).expect("the fixture must be written");
+
+        let request = load_request(&path).expect("a merged document must load");
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(2, request.rules.len());
+        assert_eq!("base", request.rules[1].action.as_ref().expect("merged action").target);
+        assert_eq!(
+            vec![filterpb::pb::Device { name: "eth0".to_string() }],
+            request.rules[1].devices
+        );
+        assert_eq!(request.rules[0].vlan_ranges, request.rules[1].vlan_ranges);
     }
 
     #[test]
