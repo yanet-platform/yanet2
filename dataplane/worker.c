@@ -287,15 +287,13 @@ worker_write(
 
 static void
 worker_loop_round(struct dataplane_worker *worker) {
-	struct cp_config *cp_config = worker->instance->cp_config;
 	uint64_t current_time_ns =
 		tsc_clock_get_time_ns(&worker->dp_worker->clock);
 	worker_rx_pool_sampler_sample(
 		&worker->rx_pool_sampler, worker->rx_mempool, current_time_ns
 	);
-	struct worker_round round = worker_round_prepare(
-		worker->dp_worker, cp_config, current_time_ns
-	);
+	struct worker_round round =
+		worker_round_prepare(worker->dp_worker, current_time_ns);
 	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
 	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 

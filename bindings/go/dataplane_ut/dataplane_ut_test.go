@@ -21,6 +21,252 @@ import (
 
 // TestHarnessLifecycle exercises construction, shared-memory access, and
 // teardown of the Harness without running any packets.
+// executionContextWorkers is the worker population every test below
+// uses: two workers are the minimum that separates the worker that ran
+// a round from a worker that never ran.
+const executionContextWorkers = 2
+
+// newExecutionContextHarness builds a two-worker harness with an
+// otherwise empty topology. The generation-assignment protocol under
+// test needs only generation switches, not packet-routing modules or
+// device wiring.
+func newExecutionContextHarness(t *testing.T) *Harness {
+	t.Helper()
+
+	harness, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: executionContextWorkers,
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	return harness
+}
+
+// Test_WorkerExecutionContext_Bootstrap_FieldIsNullAndNothingAcked
+// verifies that a fresh harness with no installs reports a zero
+// published generation, no per-worker context in any worker's field,
+// and no acknowledged generation on any worker.
+func Test_WorkerExecutionContext_Bootstrap_FieldIsNullAndNothingAcked(t *testing.T) {
+	harness := newExecutionContextHarness(t)
+
+	require.Zero(t, harness.PublishedGeneration(), "no install ran, so no generation is published")
+	for workerIdx := range executionContextWorkers {
+		published, err := harness.PublishedExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.Zero(
+			t,
+			published,
+			"worker %d must have no published context before any install",
+			workerIdx,
+		)
+		assigned, err := harness.WorkerExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.Zero(
+			t,
+			assigned,
+			"worker %d must hold no context before any install",
+			workerIdx,
+		)
+		generation, err := harness.WorkerGeneration(workerIdx)
+		require.NoError(t, err)
+		require.Zero(
+			t,
+			generation,
+			"worker %d must acknowledge nothing before any install",
+			workerIdx,
+		)
+	}
+}
+
+// Test_WorkerExecutionContext_Install_AssignsPublishedContextToEveryWorker
+// verifies that one empty-pipeline install assigns every worker,
+// synchronously on return, the per-worker execution context of the
+// newly published generation.
+//
+// Every acknowledgement must stay zero: an install switches contexts
+// but only a round acknowledges, and no round has run.
+func Test_WorkerExecutionContext_Install_AssignsPublishedContextToEveryWorker(t *testing.T) {
+	harness := newExecutionContextHarness(t)
+
+	require.NoError(t, harness.InstallEmptyPipeline("assigned"))
+
+	require.NotZero(t, harness.PublishedGeneration(), "an install must publish a new generation")
+	for workerIdx := range executionContextWorkers {
+		published, err := harness.PublishedExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.NotZero(
+			t,
+			published,
+			"worker %d must have a published context after an install",
+			workerIdx,
+		)
+		assigned, err := harness.WorkerExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			published,
+			assigned,
+			"worker %d's field must already hold the published context on return from the install",
+			workerIdx,
+		)
+		generation, err := harness.WorkerGeneration(workerIdx)
+		require.NoError(t, err)
+		require.Zero(
+			t,
+			generation,
+			"worker %d must not acknowledge a generation without a round",
+			workerIdx,
+		)
+	}
+}
+
+// Test_WorkerExecutionContext_Reinstall_ReassignsNewContextToEveryWorker
+// verifies that a second install publishes a fresh per-worker context
+// and every worker's field follows it, pinning re-assignment on every
+// generation switch rather than a one-time bootstrap stamp.
+func Test_WorkerExecutionContext_Reinstall_ReassignsNewContextToEveryWorker(t *testing.T) {
+	harness := newExecutionContextHarness(t)
+
+	require.NoError(t, harness.InstallEmptyPipeline("first"))
+	firstGeneration := harness.PublishedGeneration()
+	firstContexts := [executionContextWorkers]uintptr{}
+	for workerIdx := range executionContextWorkers {
+		published, err := harness.PublishedExecutionContext(workerIdx)
+		require.NoError(t, err)
+		firstContexts[workerIdx] = published
+	}
+
+	require.NoError(t, harness.InstallEmptyPipeline("second"))
+	require.Greater(
+		t,
+		harness.PublishedGeneration(),
+		firstGeneration,
+		"a reinstall must advance the published generation",
+	)
+
+	for workerIdx := range executionContextWorkers {
+		second, err := harness.PublishedExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.NotZero(
+			t,
+			second,
+			"worker %d must have a published context after the second install",
+			workerIdx,
+		)
+		require.NotEqual(
+			t,
+			firstContexts[workerIdx],
+			second,
+			"worker %d's second generation must publish a fresh context",
+			workerIdx,
+		)
+		assigned, err := harness.WorkerExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			second,
+			assigned,
+			"worker %d's field must follow the second generation",
+			workerIdx,
+		)
+	}
+}
+
+// Test_WorkerExecutionContext_Round_AcksAssignedGenerationOnThatWorkerOnly
+// verifies that one round run on a single worker acknowledges exactly
+// the published generation on that worker, while a worker that never
+// ran keeps acknowledging zero.
+func Test_WorkerExecutionContext_Round_AcksAssignedGenerationOnThatWorkerOnly(t *testing.T) {
+	harness := newExecutionContextHarness(t)
+
+	require.NoError(t, harness.InstallEmptyPipeline("round"))
+
+	ethernet := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ipv4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("1.2.3.4"),
+		DstIP:    net.ParseIP("10.0.0.5"),
+	}
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+	}
+	packet := xpacket.LayersToPacket(t, &ethernet, &ipv4, &icmp)
+
+	// The topology wires no device, so the round drops the packet; the
+	// dropped packet proves the round processed input on worker 0.
+	result, err := harness.HandlePacketsOnWorker(0, packet)
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+
+	acknowledged, err := harness.WorkerGeneration(0)
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		harness.PublishedGeneration(),
+		acknowledged,
+		"worker 0 must acknowledge the published generation after its round",
+	)
+	idleAcknowledged, err := harness.WorkerGeneration(1)
+	require.NoError(t, err)
+	require.Zero(
+		t,
+		idleAcknowledged,
+		"worker 1 never ran a round and must keep acknowledging zero",
+	)
+}
+
+// Test_WorkerExecutionContext_ConcurrentPublish_WaitsForInFlightRound
+// verifies that a publish running while a round holds the round lock
+// blocks until the round releases it, so no round can still touch the
+// retired context when the old generation is freed.
+func Test_WorkerExecutionContext_ConcurrentPublish_WaitsForInFlightRound(t *testing.T) {
+	harness := newExecutionContextHarness(t)
+
+	require.NoError(t, harness.InstallEmptyPipeline("before"))
+
+	// Hold the round lock across the publish, exactly as a round holds
+	// it across every context dereference: the install may retire the
+	// old contexts only after this release.
+	harness.holdRoundLock()
+
+	publishDone := make(chan error, 1)
+	go func() {
+		publishDone <- harness.InstallEmptyPipeline("during")
+	}()
+
+	select {
+	case err := <-publishDone:
+		t.Fatalf("install completed while the round lock is held: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	harness.releaseRoundLock()
+	require.NoError(t, <-publishDone)
+
+	for workerIdx := range executionContextWorkers {
+		published, err := harness.PublishedExecutionContext(workerIdx)
+		require.NoError(t, err)
+		assigned, err := harness.WorkerExecutionContext(workerIdx)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			published,
+			assigned,
+			"worker %d's field must hold the context published after the round lock was released",
+			workerIdx,
+		)
+	}
+}
+
 func TestHarnessLifecycle(t *testing.T) {
 	cfg := Config{
 		CPMemory:    uint64(datasize.MB * 32),

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pthread.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,7 +14,19 @@ struct dataplane_instance {
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
 	uint32_t **device_xstat_map;
+
+	// Assigner of published generations to this instance's workers.
+	pthread_t config_assigner_thread;
+	// Gates the join: false unless a thread was created and not yet
+	// reaped.
+	bool config_assigner_started;
 };
+
+int
+dataplane_instance_config_assigner_start(struct dataplane_instance *instance);
+
+void
+dataplane_instance_config_assigner_stop(struct dataplane_instance *instance);
 
 #define DATAPLANE_MAX_INSTANCES 8
 
