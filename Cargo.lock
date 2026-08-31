@@ -3406,6 +3406,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-filterpb",
 ]
 
 [[package]]
