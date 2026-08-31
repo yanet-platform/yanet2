@@ -413,38 +413,42 @@ func (m *DPConfig) CountersByTags(
 		if set == nil {
 			return nil, fmt.Errorf("counter set for worker %d is missing", idx)
 		}
-		perWorker[idx] = decodeCounterGroups(set.counters)
+		perWorker[idx] = decodeCounterGroups(set.groups)
 	}
 
 	return MergeWorkerCounterGroups(workerCount, perWorker), nil
 }
 
-// decodeCounterGroups splits one handle list into groups of counters
-// sharing the same tag set. Consecutive handles of one storage share the
-// tags pointer, which marks the group boundary. A nil list decodes to no
-// groups.
-func decodeCounterGroups(counters *C.struct_counter_handle_list) []CounterGroup {
-	groups := make([]CounterGroup, 0)
-	if counters == nil {
-		return groups
+// decodeCounterGroups decodes one worker's group list. The C read
+// already folds every storage's counters into a group stating that
+// storage's tags once, so decoding is a direct walk. A nil list decodes
+// to no groups.
+func decodeCounterGroups(groups *C.struct_counter_group_list) []CounterGroup {
+	out := make([]CounterGroup, 0)
+	if groups == nil {
+		return out
 	}
 
-	for idx := C.uint64_t(0); idx < counters.count; idx++ {
-		handle := C.yanet_get_counter(counters, idx)
-
-		if idx == 0 || C.yanet_get_counter(counters, idx-1).tags != handle.tags {
-			tags := decodeCounterTags(handle.tags, handle.tag_count)
-			groups = append(groups, CounterGroup{Tags: tags})
+	for gidx := C.uint64_t(0); gidx < groups.group_count; gidx++ {
+		group := C.yanet_get_counter_group(groups, gidx)
+		if group == nil {
+			break
 		}
 
-		group := &groups[len(groups)-1]
-		group.Counters = append(
-			group.Counters,
-			decodeCounterHandle(handle),
-		)
+		counters := make([]CounterInfo, 0, group.count)
+		for cidx := C.uint64_t(0); cidx < group.count; cidx++ {
+			if handle := C.yanet_get_group_counter(group, cidx); handle != nil {
+				counters = append(counters, decodeCounterHandle(handle))
+			}
+		}
+
+		out = append(out, CounterGroup{
+			Tags:     decodeCounterTags(group.tags, group.tag_count),
+			Counters: counters,
+		})
 	}
 
-	return groups
+	return out
 }
 
 // counterGroupKey builds a canonical identity of a tag set, independent

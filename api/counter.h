@@ -32,8 +32,6 @@ struct counter_handle {
 	char name[COUNTER_NAME_LEN];
 	uint64_t size;
 	uint64_t gen;
-	struct counter_tag *tags;
-	size_t tag_count;
 
 	// The counter's value snapshot: size values copied when the list
 	// was acquired, remaining valid and unchanged across controlplane
@@ -42,12 +40,34 @@ struct counter_handle {
 };
 
 // A list of counter handles whose single allocation also owns every
-// handle's tag array and value blocks: they are carved out of a value
-// region placed right after the handle array, so freeing the list
-// reclaims all of it.
+// handle's value block: it is carved out of a region placed right
+// after the handle array, so freeing the list reclaims all of it.
 struct counter_handle_list {
 	uint64_t count;
 	struct counter_handle counters[];
+};
+
+// The matched counters of one counter storage, folded into one block.
+//
+// Every counter of a storage carries the same tags, so the block
+// states the storage's tag names and values once instead of repeating
+// them per counter; its counters sit in registry order.
+struct counter_group {
+	uint64_t count;
+	struct counter_tag *tags;
+	size_t tag_count;
+	struct counter_handle *counters;
+};
+
+// One worker's matched storages, one group per storage in match order.
+//
+// The list's single allocation also owns every group's handle array,
+// tag-array copy and value block: they are carved out of a region
+// placed right after the group array, so freeing the list reclaims
+// all of it.
+struct counter_group_list {
+	uint64_t group_count;
+	struct counter_group groups[];
 };
 
 // A counter-name filter, applied to every counter a read walks.
@@ -148,11 +168,12 @@ yanet_get_counter_values(
 
 // One worker's independently matched counter set.
 //
-// counters holds only that worker's snapshot: every handle's values are
-// copied from that worker's own storages.
+// The set holds only that worker's snapshot: one group per matched
+// storage, every counter value copied from that worker's own storages.
+// The set list owns every group list; releasing it releases them all.
 struct counter_worker_set {
 	uint64_t worker_idx;
-	struct counter_handle_list *counters;
+	struct counter_group_list *groups;
 };
 
 // Per-worker counter sets, one entry per dataplane worker in index
@@ -172,6 +193,11 @@ struct counter_worker_set_list {
 // Each worker's counter storage registry is matched independently, so
 // the sets may differ from worker to worker; the union across workers
 // is the caller's to build.
+//
+// The counters of one storage are folded into a single counter_group
+// carrying that storage's tag names and values once, not once per
+// counter; a storage whose counters all fail the name query yields no
+// group at all.
 //
 // Each counter_tag is a predicate against the counter's tags, with the
 // check encoded in value: an empty string requires the tag to be
@@ -214,7 +240,17 @@ yanet_get_counter_worker_set(
 	struct counter_worker_set_list *sets, uint64_t worker_idx
 );
 
-// Release a per-worker set list. No-op on NULL.
+// Return the group at idx of a worker's group list, or NULL when out
+// of range.
+struct counter_group *
+yanet_get_counter_group(struct counter_group_list *groups, uint64_t idx);
+
+// Return the counter at idx of a group, or NULL when out of range.
+struct counter_handle *
+yanet_get_group_counter(struct counter_group *group, uint64_t idx);
+
+// Release a per-worker set list, and with it every group list it
+// holds. No-op on NULL.
 void
 yanet_counter_worker_set_list_free(struct counter_worker_set_list *sets);
 

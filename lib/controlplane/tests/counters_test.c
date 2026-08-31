@@ -145,13 +145,16 @@ test_value_snapshot_survives_removal(struct yanet_shm *shm) {
 	struct counter_worker_set *pipeline_set =
 		yanet_get_counter_worker_set(pipeline_sets, 0);
 	TEST_ASSERT_NOT_NULL(pipeline_set, "worker 0 set is missing");
-	struct counter_handle_list *list = pipeline_set->counters;
+	struct counter_group_list *groups = pipeline_set->groups;
 	TEST_ASSERT(
-		list->count > 0,
+		groups->group_count > 0,
 		"no pipeline counter storage matched dev0/pipe0"
 	);
 
-	struct counter_handle *handle = yanet_get_counter(list, 0);
+	struct counter_group *group = yanet_get_counter_group(groups, 0);
+	TEST_ASSERT_NOT_NULL(group, "worker 0 has no counter group");
+	struct counter_handle *handle = yanet_get_group_counter(group, 0);
+	TEST_ASSERT_NOT_NULL(handle, "worker 0 group has no handle");
 	uint64_t before = yanet_get_counter_value(handle->values, 0);
 
 	// Re-install dev0 with no input pipeline: pipe0's counter storage is
@@ -182,7 +185,7 @@ test_value_snapshot_survives_removal(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that a counter_handle's tag strings stay readable and correct
+// Verifies that a counter group's tag strings stay readable and correct
 // after a controlplane generation swap frees the arena they were
 // originally borrowed from.
 static int
@@ -215,15 +218,17 @@ test_tag_strings_survive_generation_swap(struct yanet_shm *shm) {
 	struct counter_worker_set *device_set =
 		yanet_get_counter_worker_set(device_sets, 0);
 	TEST_ASSERT_NOT_NULL(device_set, "worker 0 set is missing");
-	struct counter_handle_list *list = device_set->counters;
-	TEST_ASSERT(list->count > 0, "no counter storage matched dev0");
+	struct counter_group_list *groups = device_set->groups;
+	TEST_ASSERT(groups->group_count > 0, "no counter storage matched dev0");
 
-	struct counter_handle *handle = yanet_get_counter(list, 0);
-	TEST_ASSERT(handle->tag_count > 0, "handle has no tags to verify");
+	struct counter_group *group = yanet_get_counter_group(groups, 0);
+	TEST_ASSERT_NOT_NULL(group, "worker 0 has no counter group");
+	TEST_ASSERT(group->count > 0, "group carries no matched counters");
+	TEST_ASSERT(group->tag_count > 0, "group has no tags to verify");
 
 	// Trigger: any controlplane update installs a new generation and
-	// synchronously frees the old one, which pre-fix left handle->tags
-	// pointing into freed shm.
+	// synchronously frees the old one, which pre-fix left the group's
+	// tags pointing into freed shm.
 	int rc = cp_config_update_modules(dp_config, cp_config, 0, NULL, &err);
 	TEST_ASSERT_SUCCESS(
 		rc,
@@ -232,12 +237,12 @@ test_tag_strings_survive_generation_swap(struct yanet_shm *shm) {
 	);
 
 	int found = 0;
-	for (size_t i = 0; i < handle->tag_count; ++i) {
-		if (strcmp(handle->tags[i].key, "device") == 0) {
+	for (size_t i = 0; i < group->tag_count; ++i) {
+		if (strcmp(group->tags[i].key, "device") == 0) {
 			TEST_ASSERT(
-				strcmp(handle->tags[i].value, "dev0") == 0,
+				strcmp(group->tags[i].value, "dev0") == 0,
 				"device tag value mismatch after swap: got %s",
-				handle->tags[i].value
+				group->tags[i].value
 			);
 			found = 1;
 		}

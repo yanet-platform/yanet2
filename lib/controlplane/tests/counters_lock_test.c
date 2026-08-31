@@ -108,6 +108,17 @@ now_ns(void) {
 	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+// Total matched counters across a worker set's groups, one storage per
+// group.
+static uint64_t
+worker_set_counter_count(const struct counter_worker_set *set) {
+	uint64_t total = 0;
+	for (uint64_t idx = 0; idx < set->groups->group_count; ++idx) {
+		total += set->groups->groups[idx].count;
+	}
+	return total;
+}
+
 // Verifies that a large tagged counter read releases the config lock long
 // before it returns, instead of holding it across matching, allocation
 // and the whole per-counter value-copy pass.
@@ -220,7 +231,7 @@ test_lock_released_during_value_copy(struct yanet_shm *shm) {
 		yanet_get_counter_worker_set(args.sets, 0);
 	TEST_ASSERT_NOT_NULL(final_set, "worker 0 set is missing");
 	TEST_ASSERT_EQUAL(
-		final_set->counters->count,
+		worker_set_counter_count(final_set),
 		(uint64_t)LOCK_TEST_PIPELINE_COUNT *
 			LOCK_TEST_COUNTERS_PER_PIPELINE,
 		"unexpected matched counter count"
@@ -268,7 +279,8 @@ race_reader_thread(void *arg) {
 		struct counter_worker_set *set0 =
 			sets != NULL ? yanet_get_counter_worker_set(sets, 0)
 				     : NULL;
-		if (set0 == NULL || set0->counters->count != expected_matches) {
+		if (set0 == NULL ||
+		    worker_set_counter_count(set0) != expected_matches) {
 			yanet_counter_worker_set_list_free(sets);
 			atomic_store_explicit(
 				&state->reader_failed,

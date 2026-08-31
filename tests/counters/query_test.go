@@ -162,6 +162,54 @@ func TestCountersByTagsAcceptsLongExactNameList(t *testing.T) {
 	)
 }
 
+// Test_CountersByTags_FoldsStoragesIntoGroups verifies that every
+// matched storage's counters come back folded into one group stating
+// that storage's tags once, so the surface's storage count fixes the
+// group count and no two groups share a storage.
+func Test_CountersByTags_FoldsStoragesIntoGroups(t *testing.T) {
+	dp := installQuerySurface(t)
+
+	groups, err := dp.CountersByTags(nil, nil)
+	require.NoError(t, err)
+
+	require.Len(t, groups, queryPipelineCount+1,
+		"every storage must fold into exactly one group",
+	)
+
+	pipelines := map[string]struct{}{}
+	devices := 0
+	for _, group := range groups {
+		require.NotEmpty(t, group.Tags,
+			"a group must state its storage's tags",
+		)
+		require.NotEmpty(t, group.Counters)
+
+		switch tagValue(group.Tags, "kind") {
+		case "pipeline":
+			pipelines[tagValue(group.Tags, "pipeline")] = struct{}{}
+		case "device":
+			devices++
+		}
+	}
+	require.Len(t, pipelines, queryPipelineCount,
+		"each pipeline storage must appear as its own group",
+	)
+	require.Equal(t, 1, devices,
+		"the device storage must appear as its own group",
+	)
+}
+
+// tagValue returns the value a tag set carries for key, or an empty
+// string when the key is absent.
+func tagValue(tags []ffi.CounterTag, key string) string {
+	for _, tag := range tags {
+		if tag.Key == key {
+			return tag.Value
+		}
+	}
+	return ""
+}
+
 // A query the matcher refuses fails the call rather than returning nothing.
 func TestCountersByTagsRejectsBadQuery(t *testing.T) {
 	dp := installQuerySurface(t)

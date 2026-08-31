@@ -323,11 +323,33 @@ test_per_worker_sets(struct dp_config *dp_config) {
 	struct counter_worker_set *set1 = yanet_get_counter_worker_set(sets, 1);
 	TEST_ASSERT_NOT_NULL(set0, "worker 0 set is missing");
 	TEST_ASSERT_NOT_NULL(set1, "worker 1 set is missing");
-	TEST_ASSERT_EQUAL(0, set0->counters->count, "worker 0 matched");
-	TEST_ASSERT_EQUAL(1, set1->counters->count, "worker 1 match count");
+	TEST_ASSERT_EQUAL(0, set0->groups->group_count, "worker 0 matched");
+	TEST_ASSERT_EQUAL(
+		1, set1->groups->group_count, "worker 1 matched group count"
+	);
 
-	struct counter_handle *handle = yanet_get_counter(set1->counters, 0);
-	TEST_ASSERT_NOT_NULL(handle, "worker 1 set has no handle");
+	struct counter_group *group = yanet_get_counter_group(set1->groups, 0);
+	TEST_ASSERT_NOT_NULL(group, "worker 1 set has no group");
+	TEST_ASSERT_EQUAL(1, group->count, "worker 1 match count");
+
+	// The whole storage folds into one block stating its tags once:
+	// every registered tag is there, in the group and not per handle.
+	TEST_ASSERT_EQUAL(3, group->tag_count, "worker 1 group tag count");
+	int seen_object_name = 0;
+	for (size_t i = 0; i < group->tag_count; ++i) {
+		if (strcmp(group->tags[i].key, "object_name") == 0) {
+			TEST_ASSERT(
+				strcmp(group->tags[i].value, "w1") == 0,
+				"object_name tag value is '%s', expected 'w1'",
+				group->tags[i].value
+			);
+			seen_object_name = 1;
+		}
+	}
+	TEST_ASSERT(seen_object_name, "object_name tag missing from group");
+
+	struct counter_handle *handle = yanet_get_group_counter(group, 0);
+	TEST_ASSERT_NOT_NULL(handle, "worker 1 group has no handle");
 	TEST_ASSERT(
 		strcmp(handle->name, "w1_only") == 0,
 		"counter name is '%s', expected 'w1_only'",
@@ -378,13 +400,44 @@ test_per_worker_shared_counter(struct dp_config *dp_config) {
 			yanet_get_counter_worker_set(sets, w_idx);
 		TEST_ASSERT_NOT_NULL(set, "worker set is missing");
 
+		// The pipeline storage carries several counters, and they
+		// all fold into one block stating the storage's tags once.
+		TEST_ASSERT_EQUAL(
+			1,
+			set->groups->group_count,
+			"worker %lu pipeline storage group count",
+			(unsigned long)w_idx
+		);
+		struct counter_group *only_group =
+			yanet_get_counter_group(set->groups, 0);
+		TEST_ASSERT_NOT_NULL(
+			only_group,
+			"worker %lu has no group",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT(
+			only_group->count > 1,
+			"the pipeline storage must fold several counters "
+			"into one group"
+		);
+
 		struct counter_handle *handle = NULL;
-		for (size_t idx = 0; idx < set->counters->count; ++idx) {
-			struct counter_handle *cur =
-				yanet_get_counter(set->counters, idx);
-			if (cur != NULL && strcmp(cur->name, "input") == 0) {
-				handle = cur;
+		for (uint64_t g_idx = 0;
+		     g_idx < set->groups->group_count && handle == NULL;
+		     ++g_idx) {
+			struct counter_group *group =
+				yanet_get_counter_group(set->groups, g_idx);
+			if (group == NULL) {
 				break;
+			}
+			for (uint64_t idx = 0; idx < group->count; ++idx) {
+				struct counter_handle *cur =
+					yanet_get_group_counter(group, idx);
+				if (cur != NULL &&
+				    strcmp(cur->name, "input") == 0) {
+					handle = cur;
+					break;
+				}
 			}
 		}
 		TEST_ASSERT_NOT_NULL(

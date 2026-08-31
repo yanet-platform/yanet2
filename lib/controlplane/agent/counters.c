@@ -87,6 +87,16 @@ counter_tag_region_size(size_t tag_count, size_t *out) {
 	return true;
 }
 
+// Size of one group's handle array.
+static bool
+counter_handle_region_size(size_t handle_count, size_t *out) {
+	if (handle_count > SIZE_MAX / sizeof(struct counter_handle)) {
+		return false;
+	}
+	*out = handle_count * sizeof(struct counter_handle);
+	return true;
+}
+
 // Carve a tag-array copy from the cursor and fill it in, advancing the
 // cursor past it.
 static struct counter_tag *
@@ -206,8 +216,8 @@ worker_counter_matches_collect(
 //
 // Sets count on success. The value region sits right after the handle
 // array and is carved sequentially by the fill pass; the zeroing
-// leaves every not-yet-carved handle with NULL tags and values, and a
-// later pass only overwrites what it fills in.
+// leaves every not-yet-carved handle with NULL values, and a later
+// pass only overwrites what it fills in.
 static struct counter_handle_list *
 counter_handle_list_alloc(
 	size_t match_count, size_t values_size, yanet_error **err
@@ -236,31 +246,82 @@ counter_handle_list_region(const struct counter_handle_list *list) {
 	return (uint8_t *)(list->counters + list->count);
 }
 
-// Build one worker's handle list from its matching storages.
+// Allocate a group list sized for group_count groups plus a
+// region_size-byte carve region, and zero all of it.
 //
-// matches is that worker's NULL-terminated storage match array, or NULL
-// for a worker without an execution context. The resulting list carries
-// values snapshotted from that worker's own storages only. Handles of
-// one storage share a tags copy and sit next to each other, matching
-// the list free path's sharing convention.
+// Sets group_count on success. The region sits right after the group
+// array and is carved sequentially by the fill pass; the zeroing
+// leaves every not-yet-carved handle with NULL values, and a later
+// pass only overwrites what it fills in.
+static struct counter_group_list *
+counter_group_list_alloc(
+	size_t group_count, size_t region_size, yanet_error **err
+) {
+	size_t list_size = sizeof(struct counter_group_list) +
+			   sizeof(struct counter_group) * group_count;
+	if (!counter_region_add(&list_size, region_size)) {
+		yanet_error_add(err, "counter list size overflow");
+		return NULL;
+	}
+	struct counter_group_list *list =
+		(struct counter_group_list *)malloc(list_size);
+	if (list == NULL) {
+		yanet_error_add(err, "malloc failed");
+		return NULL;
+	}
+	memset(list, 0, list_size);
+	list->group_count = group_count;
+	return list;
+}
+
+// The first byte of a group list's carve region: right past the group
+// array. The carve cursor starts here.
+static uint8_t *
+counter_group_list_region(const struct counter_group_list *list) {
+	return (uint8_t *)(list->groups + list->group_count);
+}
+
+// Build one worker's group list from its matching storages.
 //
-// A sizing pass walks the matches first so the list's single allocation
-// covers everything the fill pass carves: every matched counter's value
-// block and one tag copy per storage with a match. The generation pin
-// held by the caller keeps the registries from changing between the two
-// walks.
-static struct counter_handle_list *
-worker_counter_list_build(
+// matches is that worker's NULL-terminated storage match array, or
+// NULL for a worker without an execution context. Every matched
+// storage with at least one name-matching counter becomes one group
+// stating the storage's tags once, holding its matched handles with
+// values snapshotted from that worker's own storage only.
+//
+// The sizing pass records each storage's match count so the fill pass
+// never re-runs the name matcher to reconstruct it; the generation pin
+// held by the caller keeps the registries from changing between walks.
+static struct counter_group_list *
+worker_counter_group_list_build(
 	struct cp_counter_storage **matches,
 	const struct counter_pattern_set *names,
 	yanet_error **err
 ) {
 	if (matches == NULL) {
-		return counter_handle_list_alloc(0, 0, err);
+		return counter_group_list_alloc(0, 0, err);
 	}
 
-	size_t match_count = 0;
-	size_t values_size = 0;
+	size_t storage_count = 0;
+	for (size_t i = 0; matches[i] != NULL; ++i) {
+		++storage_count;
+	}
+
+	size_t *match_counts = NULL;
+	if (storage_count != 0) {
+		if (storage_count > SIZE_MAX / sizeof(*match_counts)) {
+			yanet_error_add(err, "counter list size overflow");
+			return NULL;
+		}
+		match_counts = malloc(storage_count * sizeof(*match_counts));
+		if (match_counts == NULL) {
+			yanet_error_add(err, "malloc failed");
+			return NULL;
+		}
+	}
+
+	size_t group_count = 0;
+	size_t region_size = 0;
 	for (size_t i = 0; matches[i] != NULL; ++i) {
 		struct cp_counter_storage *cp_storage = matches[i];
 		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
@@ -283,64 +344,86 @@ worker_counter_list_build(
 				yanet_error_add(
 					err, "counter list size overflow"
 				);
+				free(match_counts);
 				return NULL;
 			}
 			++storage_matches;
 		}
+
+		match_counts[i] = storage_matches;
 		if (storage_matches == 0) {
 			continue;
 		}
-		match_count += storage_matches;
 
+		size_t handles_region;
 		size_t tags_region;
-		if (!counter_tag_region_size(
+		if (!counter_handle_region_size(
+			    storage_matches, &handles_region
+		    ) ||
+		    !counter_tag_region_size(
 			    cp_storage->tag_count, &tags_region
 		    ) ||
-		    !counter_region_add(&values_size, region) ||
-		    !counter_region_add(&values_size, tags_region)) {
+		    !counter_region_add(&region, handles_region) ||
+		    !counter_region_add(&region, tags_region) ||
+		    !counter_region_add(&region_size, region)) {
 			yanet_error_add(err, "counter list size overflow");
+			free(match_counts);
 			return NULL;
 		}
+		++group_count;
 	}
 
-	struct counter_handle_list *list =
-		counter_handle_list_alloc(match_count, values_size, err);
-	if (list == NULL) {
-		return NULL;
-	}
-
-	uint8_t *cursor = counter_handle_list_region(list);
-	size_t next = 0;
-	for (size_t i = 0; matches[i] != NULL; ++i) {
-		struct cp_counter_storage *cp_storage = matches[i];
-		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
-		struct counter_registry *registry = ADDR_OF(&storage->registry);
-		struct counter *counters = ADDR_OF(&registry->names);
-		struct counter_tag *storage_tags = NULL;
-		for (uint64_t idx = 0; idx < registry->count; ++idx) {
-			if (!counter_pattern_set_match(
-				    names, counters[idx].name
-			    )) {
+	struct counter_group_list *list =
+		counter_group_list_alloc(group_count, region_size, err);
+	if (list != NULL) {
+		uint8_t *cursor = counter_group_list_region(list);
+		size_t next_group = 0;
+		for (size_t i = 0; matches[i] != NULL; ++i) {
+			size_t storage_matches = match_counts[i];
+			if (storage_matches == 0) {
 				continue;
 			}
-			if (storage_tags == NULL) {
-				storage_tags = counter_tags_carve(
-					&cursor,
-					cp_storage->tags,
-					cp_storage->tag_count
+
+			struct cp_counter_storage *cp_storage = matches[i];
+			struct counter_storage *storage =
+				ADDR_OF(&cp_storage->storage);
+			struct counter_registry *registry =
+				ADDR_OF(&storage->registry);
+			struct counter *counters = ADDR_OF(&registry->names);
+
+			struct counter_group *group = &list->groups[next_group];
+			group->count = storage_matches;
+			group->tags = counter_tags_carve(
+				&cursor, cp_storage->tags, cp_storage->tag_count
+			);
+			group->tag_count = cp_storage->tag_count;
+			group->counters = (struct counter_handle *)cursor;
+			cursor += storage_matches * sizeof(*group->counters);
+
+			size_t next = 0;
+			for (uint64_t idx = 0; idx < registry->count; ++idx) {
+				if (!counter_pattern_set_match(
+					    names, counters[idx].name
+				    )) {
+					continue;
+				}
+				struct counter_handle *dst =
+					&group->counters[next];
+				const struct counter *src = &counters[idx];
+				strtcpy(dst->name, src->name, sizeof(dst->name)
 				);
+				dst->size = src->size;
+				dst->gen = src->gen;
+				counter_handle_fill_values(
+					dst, &cursor, storage, idx
+				);
+				++next;
 			}
-			struct counter_handle *dst = &list->counters[next];
-			const struct counter *src = &counters[idx];
-			strtcpy(dst->name, src->name, sizeof(dst->name));
-			dst->size = src->size;
-			dst->gen = src->gen;
-			dst->tags = storage_tags;
-			dst->tag_count = cp_storage->tag_count;
-			counter_handle_fill_values(dst, &cursor, storage, idx);
-			++next;
+			++next_group;
 		}
 	}
+
+	free(match_counts);
 	return list;
 }
 
@@ -367,10 +450,10 @@ counter_worker_set_list_build(
 
 	for (uint64_t w_idx = 0; w_idx < matches->worker_count; ++w_idx) {
 		sets->sets[w_idx].worker_idx = w_idx;
-		sets->sets[w_idx].counters = worker_counter_list_build(
+		sets->sets[w_idx].groups = worker_counter_group_list_build(
 			matches->by_worker[w_idx], names, err
 		);
-		if (sets->sets[w_idx].counters == NULL) {
+		if (sets->sets[w_idx].groups == NULL) {
 			yanet_counter_worker_set_list_free(sets);
 			return NULL;
 		}
@@ -440,15 +523,44 @@ yanet_get_counter_worker_set(
 	return sets->sets + worker_idx;
 }
 
+// Release a group list owned by a worker set. No-op on NULL.
+//
+// The list's single allocation owns every group's handle array,
+// tag-array copy and value block: they are carved out of its region,
+// so one free reclaims all of it.
+static void
+counter_group_list_free(struct counter_group_list *groups) {
+	if (groups == NULL) {
+		return;
+	}
+	free(groups);
+}
+
 void
 yanet_counter_worker_set_list_free(struct counter_worker_set_list *sets) {
 	if (sets == NULL) {
 		return;
 	}
 	for (uint64_t w_idx = 0; w_idx < sets->worker_count; ++w_idx) {
-		yanet_counter_handle_list_free(sets->sets[w_idx].counters);
+		counter_group_list_free(sets->sets[w_idx].groups);
 	}
 	free(sets);
+}
+
+struct counter_group *
+yanet_get_counter_group(struct counter_group_list *groups, uint64_t idx) {
+	if (groups == NULL || idx >= groups->group_count) {
+		return NULL;
+	}
+	return groups->groups + idx;
+}
+
+struct counter_handle *
+yanet_get_group_counter(struct counter_group *group, uint64_t idx) {
+	if (group == NULL || idx >= group->count) {
+		return NULL;
+	}
+	return group->counters + idx;
 }
 
 struct counter_handle *
@@ -628,8 +740,8 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	if (counters == NULL) {
 		return;
 	}
-	// The list's single allocation owns every handle's tag array and
-	// value block: they are carved out of its value region, so one
-	// free reclaims all of it.
+	// The list's single allocation owns every handle's value block:
+	// it is carved out of its value region, so one free reclaims all
+	// of it.
 	free(counters);
 }
