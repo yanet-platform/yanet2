@@ -3,6 +3,7 @@ package operator
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
@@ -65,7 +66,9 @@ func (m *Config) Validate() error {
 	configKeys := map[string]struct{}{}
 	for idx, config := range m.Configs {
 		name := config.Name.Unwrap()
-		key := config.Method.Unwrap() + " " + name
+		// The transport accepts the method with and without a leading
+		// slash, so the duplicate key must not tell the spellings apart.
+		key := strings.TrimPrefix(config.Method.Unwrap(), "/") + " " + name
 		if _, dup := configKeys[key]; dup {
 			return fmt.Errorf("configs[%d]: config %q is pushed twice", idx, name)
 		}

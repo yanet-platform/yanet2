@@ -201,6 +201,9 @@ configs:
 
 // Test_Config_RejectsDuplicateConfigEntry verifies that pushing the same
 // config through the same method twice is refused.
+//
+// The two entries spell the method with and without the leading slash,
+// which the transport treats as one RPC.
 func Test_Config_RejectsDuplicateConfigEntry(t *testing.T) {
 	raw := `
 name: decap
@@ -212,7 +215,7 @@ configs:
     method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
     file: /etc/yanet2/decap.d/default.yaml
   - name: decap0
-    method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
+    method: /modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig
     file: /etc/yanet2/decap.d/other.yaml
 `
 	cfg := operator.DefaultConfig()

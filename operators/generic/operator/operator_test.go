@@ -9,6 +9,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/operators/generic/operator"
 
+	_ "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
@@ -142,4 +143,25 @@ functions:
 	runnable, err := operator.NewOperator(cfg)
 	require.NoError(t, err)
 	require.NoError(t, runnable.Close())
+}
+
+// Test_NewOperator_ReadsConfigNameField verifies that a request naming its
+// config through config_name, the balancer spelling, binds and checks too.
+func Test_NewOperator_ReadsConfigNameField(t *testing.T) {
+	path := writeModuleConfig(t, "config_name: balancer1\n")
+	raw := `
+name: balancer
+gateways:
+  - name: gw0
+    endpoint: "[::1]:0"
+configs:
+  - name: balancer0
+    method: modules.balancer2.controlplane.balancerpb.v1.Balancer/UpdateConfig
+    file: ` + path + `
+`
+	cfg := decodeConfig(t, raw)
+
+	_, err := operator.NewOperator(cfg)
+
+	require.ErrorContains(t, err, `names config "balancer1", but the entry is named "balancer0"`)
 }

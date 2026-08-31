@@ -126,10 +126,10 @@ func bindRequestName(request proto.Message, config ModuleConfig) error {
 // configNameField finds the request's config-naming field, ok=false when
 // the message declares none.
 //
-// The tree spells it as name in module update requests and as module_name
-// in the route FIB request.
+// The tree spells it as name in module update requests, module_name in
+// the route FIB request and config_name in the balancer one.
 func configNameField(descriptor protoreflect.MessageDescriptor) (protoreflect.FieldDescriptor, bool) {
-	for _, field := range []protoreflect.Name{"name", "module_name"} {
+	for _, field := range []protoreflect.Name{"name", "module_name", "config_name"} {
 		found := descriptor.Fields().ByName(field)
 		if found == nil || found.Kind() != protoreflect.StringKind ||
 			found.IsList() || found.IsMap() {
