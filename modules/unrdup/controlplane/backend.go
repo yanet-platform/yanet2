@@ -8,6 +8,9 @@ import (
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 )
 
+// moduleType identifies the unrdup module to the shared-memory agent.
+const moduleType = "unrdup"
+
 type backend struct {
 	agent *ffi.Agent
 }
@@ -46,4 +49,8 @@ func (m *backend) UpdateModule(
 	}
 
 	return module, nil
+}
+
+func (m *backend) DeleteModule(name string) error {
+	return m.agent.DeleteModuleConfig(moduleType, name)
 }

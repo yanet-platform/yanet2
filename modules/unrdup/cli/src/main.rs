@@ -14,13 +14,13 @@ use filterpb::pb::IpNet;
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use unrduppb::{
-    Config, Endpoint, ListConfigsRequest, Protocol, Service, ShowConfigRequest, UpdateConfigRequest,
-    unrdup_service_client::UnrdupServiceClient,
+    Config, DeleteConfigRequest, Endpoint, ListConfigsRequest, Protocol, Service, ShowConfigRequest,
+    UpdateConfigRequest, unrdup_service_client::UnrdupServiceClient,
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     completion,
-    errors::Error,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
 
@@ -52,6 +52,8 @@ pub enum ModeCmd {
     List,
     Show(ShowConfigCmd),
     Update(UpdateConfigCmd),
+    /// Delete an unrdup module config.
+    Delete(DeleteConfigCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -69,6 +71,13 @@ pub struct UpdateConfigCmd {
     /// Path to the YAML file describing the whole configuration.
     #[arg(long = "config", short = 'c')]
     pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteConfigCmd {
+    /// Unrdup module name to delete.
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
+    pub config_name: String,
 }
 
 /// Transport a virtual service serves.
@@ -218,6 +227,9 @@ fn addr_to_proto(addr: IpAddr) -> IpAddress {
 
 const SERVICE_NAME: &str = "modules.unrdup.controlplane.unrduppb.v1.UnrdupService";
 
+/// Maps a genuine "config not found" status into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
+
 fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     start();
@@ -241,6 +253,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
     }
 }
 
@@ -352,6 +365,29 @@ impl UnrdupService {
         log::debug!("update config response: {response:?}");
 
         output::success("update", format_args!("Updated {}.", cmd.config_name));
+
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+        log::trace!("delete config request: {request:?}");
+        let response = self
+            .client
+            .delete_config(request)
+            .await
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    "delete",
+                    self.endpoint.clone(),
+                    Some(&format!("config '{}'", cmd.config_name)),
+                )
+            })?
+            .into_inner();
+        log::debug!("delete config response: {response:?}");
+
+        output::success("delete", format_args!("Deleted unrdup {}.", cmd.config_name));
 
         Ok(())
     }

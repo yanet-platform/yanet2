@@ -17,6 +17,10 @@ service UnrdupService {
 
   // UpdateConfig replaces the whole configuration.
   rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  // DeleteConfig removes the named config when it is no longer referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
 }
 
 // Protocol of a served transport endpoint.
@@ -65,3 +69,9 @@ message UpdateConfigRequest {
 }
 
 message UpdateConfigResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse {}

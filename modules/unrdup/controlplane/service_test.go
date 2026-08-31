@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 	unrdup "github.com/yanet-platform/yanet2/modules/unrdup/controlplane"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
@@ -22,11 +23,28 @@ import (
 var errBackendFailure = errors.New("backend failure")
 
 type fakeHandle struct {
-	freed bool
+	freed     bool
+	freeCalls int
 }
 
 func (m *fakeHandle) Free() error {
 	m.freed = true
+	m.freeCalls++
+	return nil
+}
+
+// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
+type refusingOnceHandle struct {
+	numCalls int
+	freed    int
+}
+
+func (m *refusingOnceHandle) Free() error {
+	m.numCalls++
+	if m.numCalls == 1 {
+		return ffi.ErrStillReferenced
+	}
+	m.freed++
 	return nil
 }
 
@@ -36,6 +54,15 @@ type fakeBackend struct {
 	handles  []*fakeHandle
 	sources  []xnetip.Network
 	services []cunrdup.Service
+
+	// nextHandle, when set, is returned by the next successful update
+	// instead of a fresh handle, and is cleared once used.
+	nextHandle unrdup.ModuleHandle
+
+	// deleteErr, when set, is returned by every delete until cleared,
+	// modeling a config still referenced by a live generation.
+	deleteErr   error
+	deletedName string
 }
 
 func (m *fakeBackend) UpdateModule(
@@ -51,10 +78,21 @@ func (m *fakeBackend) UpdateModule(
 	m.sources = sources
 	m.services = services
 
+	if m.nextHandle != nil {
+		handle := m.nextHandle
+		m.nextHandle = nil
+		return handle, nil
+	}
+
 	handle := &fakeHandle{}
 	m.handles = append(m.handles, handle)
 
 	return handle, nil
+}
+
+func (m *fakeBackend) DeleteModule(name string) error {
+	m.deletedName = name
+	return m.deleteErr
 }
 
 func ipAddr(addr string) *commonpb.IPAddress {
@@ -510,4 +548,113 @@ func TestListConfigsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Empty(t, response.GetConfigs())
+}
+
+// Test_UnrdupService_DeleteConfig_RequiresName verifies that deleting
+// without a name returns InvalidArgument.
+func Test_UnrdupService_DeleteConfig_RequiresName(t *testing.T) {
+	service := unrdup.NewUnrdupService(&fakeBackend{})
+
+	resp, err := service.DeleteConfig(t.Context(), &unrduppb.DeleteConfigRequest{})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_UnrdupService_DeleteConfig_MissingConfig verifies that deleting a
+// config that was never created returns NotFound.
+func Test_UnrdupService_DeleteConfig_MissingConfig(t *testing.T) {
+	service := unrdup.NewUnrdupService(&fakeBackend{})
+
+	resp, err := service.DeleteConfig(t.Context(), &unrduppb.DeleteConfigRequest{
+		Name: "unrdup0",
+	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_UnrdupService_DeleteConfig_RemovesConfig verifies that deleting an
+// unreferenced config removes it from ListConfigs and from ShowConfig.
+func Test_UnrdupService_DeleteConfig_RemovesConfig(t *testing.T) {
+	backend := &fakeBackend{}
+	service := unrdup.NewUnrdupService(backend)
+	ctx := t.Context()
+
+	_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
+		Name:   "unrdup0",
+		Config: validConfig(),
+	})
+	require.NoError(t, err)
+	require.Len(t, backend.handles, 1)
+	handle := backend.handles[0]
+
+	resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
+	require.Equal(t, "unrdup0", backend.deletedName)
+	require.Equal(t, 1, handle.freeCalls)
+
+	list, err := service.ListConfigs(ctx, &unrduppb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Empty(t, list.GetConfigs())
+
+	show, err := service.ShowConfig(ctx, &unrduppb.ShowConfigRequest{Name: "unrdup0"})
+	require.Nil(t, show)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_UnrdupService_DeleteConfig_Referenced verifies that a backend
+// refusal surfaces as Internal and leaves the config in place.
+func Test_UnrdupService_DeleteConfig_Referenced(t *testing.T) {
+	backend := &fakeBackend{deleteErr: errBackendFailure}
+	service := unrdup.NewUnrdupService(backend)
+	ctx := t.Context()
+
+	_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
+		Name:   "unrdup0",
+		Config: validConfig(),
+	})
+	require.NoError(t, err)
+
+	resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
+	require.Nil(t, resp)
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Equal(t, "unrdup0", backend.deletedName)
+
+	list, err := service.ListConfigs(ctx, &unrduppb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"unrdup0"}, list.GetConfigs())
+
+	show, err := service.ShowConfig(ctx, &unrduppb.ShowConfigRequest{Name: "unrdup0"})
+	require.NoError(t, err)
+	require.NotNil(t, show)
+}
+
+// Test_UnrdupService_DeleteConfig_ParksThenReclaims verifies that a handle
+// refused on delete is parked and reclaimed by the next successful update.
+func Test_UnrdupService_DeleteConfig_ParksThenReclaims(t *testing.T) {
+	backend := &fakeBackend{}
+	service := unrdup.NewUnrdupService(backend)
+	ctx := t.Context()
+
+	parked := &refusingOnceHandle{}
+	backend.nextHandle = parked
+
+	_, err := service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
+		Name:   "unrdup0",
+		Config: validConfig(),
+	})
+	require.NoError(t, err)
+
+	resp, err := service.DeleteConfig(ctx, &unrduppb.DeleteConfigRequest{Name: "unrdup0"})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
+	require.Equal(t, 0, parked.freed)
+
+	// A later successful update reclaims deferred handles first.
+	_, err = service.UpdateConfig(ctx, &unrduppb.UpdateConfigRequest{
+		Name:   "unrdup1",
+		Config: validConfig(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, parked.freed)
 }

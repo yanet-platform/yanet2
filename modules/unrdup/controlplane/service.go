@@ -55,6 +55,8 @@ type Backend interface {
 		sources []xnetip.Network,
 		services []cunrdup.Service,
 	) (ModuleHandle, error)
+	// DeleteModule removes a module config.
+	DeleteModule(name string) error
 }
 
 type UnrdupService struct {
@@ -197,4 +199,39 @@ func (m *UnrdupService) UpdateConfig(
 	m.configs[name] = updated
 
 	return &unrduppb.UpdateConfigResponse{}, nil
+}
+
+// DeleteConfig removes the named config if it is not referenced by any
+// pipeline.
+func (m *UnrdupService) DeleteConfig(
+	ctx context.Context,
+	request *unrduppb.DeleteConfigRequest,
+) (*unrduppb.DeleteConfigResponse, error) {
+	name := request.GetName()
+	if name == "" {
+		return nil, errConfigNameRequired
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	current, ok := m.configs[name]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q is not found", name)
+	}
+
+	if err := m.backend.DeleteModule(name); err != nil {
+		return nil, status.Errorf(
+			codes.Internal, "failed to delete config %q: %s", name, err,
+		)
+	}
+
+	// The delete retired the generation holding the published module.
+	// Retry the deferred ones, then retire this one.
+	m.reclaimDeferred()
+	m.parkOrFree(current.Module)
+
+	delete(m.configs, name)
+
+	return &unrduppb.DeleteConfigResponse{}, nil
 }
