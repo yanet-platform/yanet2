@@ -15,12 +15,15 @@ use clap_complete::{
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
     fib::render::print_fib,
-    routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
+    routepb::{
+        self, route_service_client::RouteServiceClient, DeleteConfigRequest, ListConfigsRequest, ShowFibRequest,
+        UpdateFibRequest,
+    },
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::Error,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
 
@@ -142,6 +145,8 @@ pub enum FibAction {
     Show(FibShowCmd),
     /// Replace the FIB atomically with entries from a YAML file.
     Update(FibUpdateCmd),
+    /// Delete a route module config.
+    Delete(FibDeleteCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -152,6 +157,13 @@ pub struct FibUpdateCmd {
     /// Path to the FIB YAML file.
     #[arg(required = true, long = "rules", value_name = "PATH")]
     pub rules: PathBuf,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct FibDeleteCmd {
+    /// Route module config name.
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
+    pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -169,6 +181,9 @@ pub struct FibShowCmd {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.route.controlplane.routepb.v1.RouteService";
+
+/// Rewrites a genuine missing-config `NotFound` into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
 fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
@@ -210,6 +225,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
             FibAction::List => service.list_fibs().await,
             FibAction::Show(cmd) => service.show_fib(cmd).await,
             FibAction::Update(cmd) => service.update_fib(cmd).await,
+            FibAction::Delete(cmd) => service.delete_fib(cmd).await,
         },
     }
 }
@@ -247,6 +263,22 @@ impl RouteService {
             "update",
             format_args!("Updated FIB '{}' ({} entries).", cmd.config_name, entry_count),
         );
+        Ok(())
+    }
+
+    pub async fn delete_fib(&mut self, cmd: FibDeleteCmd) -> Result<(), Error> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+
+        self.service.client().delete_config(request).await.map_err(|status| {
+            NOT_FOUND.map(
+                status,
+                "delete",
+                self.service.endpoint(),
+                Some(&format!("config '{}'", cmd.config_name)),
+            )
+        })?;
+
+        output::success("delete", format_args!("Deleted FIB '{}'.", cmd.config_name));
         Ok(())
     }
 

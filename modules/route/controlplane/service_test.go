@@ -456,6 +456,16 @@ func TestShowFIBUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
+// TestDeleteConfigUnknownConfig verifies that DeleteConfig reports NotFound
+// for a config name that was never registered.
+func TestDeleteConfigUnknownConfig(t *testing.T) {
+	backend := newFakeBackend()
+	service := route.NewRouteService(backend)
+
+	_, err := service.DeleteConfig(t.Context(), &routepb.DeleteConfigRequest{Name: "missing"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
 // TestShowFIBEmptyConfig verifies that a registered config with no FIB
 // entries still returns a normal empty success.
 func TestShowFIBEmptyConfig(t *testing.T) {

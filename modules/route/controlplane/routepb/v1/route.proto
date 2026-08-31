@@ -13,7 +13,7 @@ service RouteService {
   // module.
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-  // DeleteConfig deletes a route configuration.
+  // DeleteConfig deletes a route configuration if it is not referenced by any pipeline.
   rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 
   // ShowFIB returns the current Forwarding Information Base entries

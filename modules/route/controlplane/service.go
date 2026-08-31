@@ -270,7 +270,7 @@ func (m *RouteService) DeleteConfig(
 
 	entry, ok := m.configs[name]
 	if !ok {
-		return &routepb.DeleteConfigResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	if err := m.backend.DeleteModule(name); err != nil {
