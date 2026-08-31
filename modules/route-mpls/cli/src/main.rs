@@ -93,7 +93,7 @@ pub struct RouteUpdateCmd {
     #[arg(long = "dst")]
     pub dst_addr: IpAddr,
     /// The MPLS Label to encapsulate packets into.
-    #[arg(long = "label")]
+    #[arg(long = "label", value_parser = clap::value_parser!(u32).range(0..=1_048_575))]
     pub mpls_label: u32,
     /// The IP address of the tunnel source.
     #[arg(long = "src")]
@@ -118,7 +118,7 @@ pub struct RouteWithdrawCmd {
     #[arg(long = "dst")]
     pub dst_addr: IpAddr,
     /// The MPLS Label to encapsulate packets into.
-    #[arg(long = "label")]
+    #[arg(long = "label", value_parser = clap::value_parser!(u32).range(0..=1_048_575))]
     pub mpls_label: u32,
 }
 

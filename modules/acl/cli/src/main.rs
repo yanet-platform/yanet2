@@ -1,4 +1,4 @@
-use core::net::Ipv6Addr;
+use core::net::IpAddr;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
@@ -359,12 +359,6 @@ struct ShowConfig {
     sync_config: Option<aclpb::SyncConfig>,
 }
 
-/// Parse an IPv6 address string into the proto message.
-fn parse_ipv6(s: &str) -> Result<commonpb::IpAddress, String> {
-    let addr: Ipv6Addr = s.parse().map_err(|err: core::net::AddrParseError| err.to_string())?;
-    Ok(commonpb::IpAddress { addr: addr.octets().to_vec() })
-}
-
 /// ACL module CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -501,11 +495,7 @@ impl ACLService {
     ///
     /// The YAML section is the base; every flag that was passed overrides
     /// its field. A config with neither source carries no sync config.
-    fn merge_sync_config(
-        &self,
-        base: Option<aclpb::SyncConfig>,
-        cmd: &UpdateCmd,
-    ) -> Result<Option<aclpb::SyncConfig>, String> {
+    fn merge_sync_config(&self, base: Option<aclpb::SyncConfig>, cmd: &UpdateCmd) -> Option<aclpb::SyncConfig> {
         let mut sync = match base {
             Some(base) => base,
             None => {
@@ -515,33 +505,29 @@ impl ACLService {
                     && cmd.dst_addr_unicast.is_none()
                     && cmd.port_unicast.is_none();
                 if no_flags {
-                    return Ok(None);
+                    return None;
                 }
                 aclpb::SyncConfig::default()
             }
         };
 
-        if let Some(ref dst_ether) = cmd.dst_ether {
-            sync.dst_ether = Some(
-                dst_ether
-                    .parse()
-                    .map_err(|err: Box<dyn core::error::Error>| err.to_string())?,
-            );
+        if let Some(dst_ether) = cmd.dst_ether {
+            sync.dst_ether = Some(commonpb::MacAddress::from(dst_ether));
         }
-        if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync.dst_addr_multicast = Some(parse_ipv6(dst_addr_multicast)?);
+        if let Some(dst_addr_multicast) = cmd.dst_addr_multicast {
+            sync.dst_addr_multicast = Some(commonpb::IpAddress::from(IpAddr::V6(dst_addr_multicast)));
         }
         if let Some(port_multicast) = cmd.port_multicast {
-            sync.port_multicast = port_multicast;
+            sync.port_multicast = u32::from(port_multicast);
         }
-        if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync.dst_addr_unicast = Some(parse_ipv6(dst_addr_unicast)?);
+        if let Some(dst_addr_unicast) = cmd.dst_addr_unicast {
+            sync.dst_addr_unicast = Some(commonpb::IpAddress::from(IpAddr::V6(dst_addr_unicast)));
         }
         if let Some(port_unicast) = cmd.port_unicast {
-            sync.port_unicast = port_unicast;
+            sync.port_unicast = u32::from(port_unicast);
         }
 
-        Ok(Some(sync))
+        Some(sync)
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
@@ -567,9 +553,7 @@ impl ACLService {
             .clone()
             .or(config.fwtable_name_v6.clone())
             .unwrap_or_default();
-        let sync_config = self
-            .merge_sync_config(config.sync_config, &cmd)
-            .map_err(|err| self.service.invalid("update", err))?;
+        let sync_config = self.merge_sync_config(config.sync_config, &cmd);
 
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),

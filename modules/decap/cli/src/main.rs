@@ -62,7 +62,7 @@ pub struct UpdateConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefixes in the full desired set, replacing the current one entirely.
-    #[arg(long, short)]
+    #[arg(long, short, required = true, num_args = 0..)]
     pub prefixes: Vec<Contiguous<IpNetwork>>,
 }
 

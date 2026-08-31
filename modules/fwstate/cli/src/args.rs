@@ -1,4 +1,4 @@
-use core::time::Duration;
+use core::{net::Ipv6Addr, time::Duration};
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;
@@ -55,15 +55,15 @@ pub struct UpdateCmd {
 
     /// Source IPv6 address (e.g., "2001:db8::1")
     #[arg(long)]
-    pub src_addr: Option<String>,
+    pub src_addr: Option<Ipv6Addr>,
 
     /// Multicast IPv6 address (e.g., "ff02::1")
     #[arg(long)]
-    pub dst_addr_multicast: Option<String>,
+    pub dst_addr_multicast: Option<Ipv6Addr>,
 
     /// Multicast port
     #[arg(long)]
-    pub port_multicast: Option<u32>,
+    pub port_multicast: Option<u16>,
 
     /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h")
     #[arg(long, value_parser = parse_duration)]

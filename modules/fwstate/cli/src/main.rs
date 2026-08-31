@@ -1,4 +1,4 @@
-use core::net::Ipv6Addr;
+use core::net::IpAddr;
 use std::collections::HashMap;
 
 use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
@@ -50,12 +50,6 @@ pub struct Cmd {
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
-}
-
-/// Parse IPv6 address string into an `IpAddress` proto message.
-fn parse_ipv6(s: &str) -> Result<IpAddress, String> {
-    let addr = s.parse::<Ipv6Addr>().map_err(|err| err.to_string())?;
-    Ok(IpAddress { addr: addr.octets().to_vec() })
 }
 
 /// Merges the linked map object names an update should carry.
@@ -195,17 +189,16 @@ impl FWStateService {
         };
 
         // Update only the fields that were provided
-        if let Some(ref src_addr) = cmd.src_addr {
-            sync_config.src_addr = Some(parse_ipv6(src_addr).map_err(|err| self.service.invalid("update", err))?);
+        if let Some(src_addr) = cmd.src_addr {
+            sync_config.src_addr = Some(IpAddress::from(IpAddr::V6(src_addr)));
         }
 
-        if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync_config.dst_addr_multicast =
-                Some(parse_ipv6(dst_addr_multicast).map_err(|err| self.service.invalid("update", err))?);
+        if let Some(dst_addr_multicast) = cmd.dst_addr_multicast {
+            sync_config.dst_addr_multicast = Some(IpAddress::from(IpAddr::V6(dst_addr_multicast)));
         }
 
         if let Some(port_multicast) = cmd.port_multicast {
-            sync_config.port_multicast = port_multicast;
+            sync_config.port_multicast = u32::from(port_multicast);
         }
 
         // Convert timeouts from Duration to nanoseconds if provided

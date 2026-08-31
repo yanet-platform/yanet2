@@ -16,7 +16,7 @@ func restoreBaselinePipelineCommands(fw *framework.TestFramework) []string {
 		p.CLI("yanet-cli-function") + " update --name=test --chains chain2:1=forward:forward0,route:route0",
 		p.CLI("yanet-cli-pipeline") + " update --name=bootstrap --functions virt",
 		p.CLI("yanet-cli-pipeline") + " update --name=test --functions test",
-		p.CLI("yanet-cli-pipeline") + " update --name=dummy",
+		p.CLI("yanet-cli-pipeline") + " update --name=dummy --functions",
 		p.CLI("yanet-cli-device-plain") + " update --name=01:00.0 --input test:1 --output dummy:1",
 		p.CLI("yanet-cli-device-plain") + " update --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}

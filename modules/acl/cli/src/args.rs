@@ -1,7 +1,9 @@
+use core::net::Ipv6Addr;
 use std::path::PathBuf;
 
 use clap::Parser;
 use clap_complete::engine::ArgValueCandidates;
+use netip::MacAddr;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Parser)]
@@ -48,21 +50,21 @@ pub struct UpdateCmd {
     /// Destination MAC address of emitted state-sync frames
     /// (e.g., "00:11:22:33:44:55")
     #[arg(long)]
-    pub dst_ether: Option<String>,
+    pub dst_ether: Option<MacAddr>,
     /// Multicast IPv6 destination of emitted state-sync frames
     /// (e.g., "ff02::1")
     #[arg(long)]
-    pub dst_addr_multicast: Option<String>,
+    pub dst_addr_multicast: Option<Ipv6Addr>,
     /// Multicast port of emitted state-sync frames
     #[arg(long)]
-    pub port_multicast: Option<u32>,
+    pub port_multicast: Option<u16>,
     /// Unicast IPv6 destination of emitted state-sync frames
     /// (e.g., "2001:db8::2")
     #[arg(long)]
-    pub dst_addr_unicast: Option<String>,
+    pub dst_addr_unicast: Option<Ipv6Addr>,
     /// Unicast port of emitted state-sync frames
     #[arg(long)]
-    pub port_unicast: Option<u32>,
+    pub port_unicast: Option<u16>,
 }
 
 #[derive(Debug, Clone, Parser)]

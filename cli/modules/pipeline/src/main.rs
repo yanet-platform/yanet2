@@ -78,7 +78,7 @@ pub struct UpdateCmd {
     #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
     /// Pipeline functions.
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, required = true, num_args = 0.., value_delimiter = ',')]
     pub functions: Vec<String>,
 }
 

@@ -13,7 +13,7 @@ repo_root=${script_dir%/scripts}
 
 yanet-cli-forward update --name=forward0 --rules "$repo_root/forward.yaml"
 
-yanet-cli-pipeline update --name=dummy
+yanet-cli-pipeline update --name=dummy --functions
 
 yanet-cli-function update --name=virt --chains chain0:10=forward:forward0
 yanet-cli-pipeline update --name=virt --functions virt

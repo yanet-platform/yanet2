@@ -3115,6 +3115,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "ptree",
