@@ -1,34 +1,70 @@
 import React, { useState } from 'react';
 import yaml from 'js-yaml';
 import type { Rule } from '@yanet/core/api/forward';
-import { ForwardMode } from '@yanet/core/api/forward';
+import { declaredForwardMode } from '@yanet/core/api/forward';
 import { toaster } from '@yanet/core/utils';
-import { partitionCidrsToTyped } from '@yanet/core/utils';
+import { isValidIPv4Prefix, isValidIPv6Prefix } from '@yanet/core/utils/netip';
 import { rulesToDiffYaml } from './SaveDiffModal';
 import YamlIOModal from '@yanet/core/components/YamlIOModal';
 
-/** Raw shape of a rule entry in the new YAML schema. */
-interface YamlVlanRange {
-    from: number;
-    to: number;
+/** A parsed wire update document: the optional config name and the rules. */
+export interface ParsedRulesDoc {
+    name?: string;
+    rules: Rule[];
 }
 
-interface YamlRule {
-    target: string;
-    counter?: string;
-    vlan_ranges?: YamlVlanRange[];
-    srcs?: string[] | null;
-    dsts?: string[] | null;
-    devices?: string[] | null;
-    mode?: string;
-}
-
-/** Parse a YAML string into rules using the canonical schema.
- *
- * Top-level key is `rules`. Config name comes from outside the YAML (the import UI).
- * Returns the parsed rules array on success, throws with a descriptive message on failure.
+/**
+ * Refuses a mapping key outside the known set, naming the legacy schema
+ * when the key belongs to it, so an old flat-format file fails loudly
+ * instead of importing empty rules.
  */
-export const parseYamlToRules = (text: string): Rule[] => {
+const checkKnownKeys = (value: Record<string, unknown>, where: string, known: string[]): void => {
+    const legacy = ['target', 'mode', 'counter', 'srcs', 'dsts'];
+    for (const key of Object.keys(value)) {
+        if (known.includes(key)) {
+            continue;
+        }
+        if (legacy.includes(key)) {
+            throw new Error(
+                `Unknown key "${key}" in ${where}: this is the retired flat schema. ` +
+                'Export the wire form with "yanet-cli-forward show" or the page Export.',
+            );
+        }
+        throw new Error(`Unknown key "${key}" in ${where}, expected ${known.map(k => `"${k}"`).join(', ')}.`);
+    }
+};
+
+/** Reads a string list field, a null as the empty list. */
+const stringList = (value: unknown, where: string): string[] => {
+    if (value == null) {
+        return [];
+    }
+    if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) {
+        throw new Error(`Expected ${where} to be a list of strings.`);
+    }
+    return value as string[];
+};
+
+/** Reads a family-typed network list, refusing an entry of the wrong family. */
+const networkList = (value: unknown, where: string, isValid: (net: string) => boolean): string[] => {
+    const nets = stringList(value, where);
+    for (const net of nets) {
+        if (!isValid(net)) {
+            throw new Error(`${where} entry "${net}" is not a valid network for that family.`);
+        }
+    }
+    return nets;
+};
+
+/**
+ * Parse a YAML string as the wire update request: the document the
+ * generic operator pushes and `yanet-cli-forward` prints and accepts.
+ *
+ * A null field reads as its zero value and an unknown key is refused,
+ * as the other readers of the format do. Throws with a descriptive
+ * message on failure.
+ */
+export const parseYamlToRules = (text: string): ParsedRulesDoc => {
     let parsed: unknown;
     try {
         parsed = yaml.load(text);
@@ -36,73 +72,93 @@ export const parseYamlToRules = (text: string): Rule[] => {
         throw new Error(`YAML parse error: ${(e as Error).message}`);
     }
 
-    if (!parsed || typeof parsed !== 'object') {
+    if (parsed == null) {
+        return { rules: [] };
+    }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('Expected a YAML object with a "rules" list.');
     }
 
     const doc = parsed as Record<string, unknown>;
+    checkKnownKeys(doc, 'the document', ['name', 'rules']);
 
-    if (!Array.isArray(doc['rules'])) {
+    const name = typeof doc['name'] === 'string' && doc['name'] !== '' ? doc['name'] : undefined;
+    if (doc['rules'] != null && !Array.isArray(doc['rules'])) {
         throw new Error('Expected a top-level "rules" list.');
     }
+    const rows = (doc['rules'] ?? []) as unknown[];
 
-    const modeMap: Record<string, ForwardMode> = {
-        IN: ForwardMode.IN,
-        OUT: ForwardMode.OUT,
-        NONE: ForwardMode.NONE,
-        In: ForwardMode.IN,
-        Out: ForwardMode.OUT,
-        None: ForwardMode.NONE,
-    };
-
-    const rules: Rule[] = (doc['rules'] as unknown[]).map((r: unknown): Rule => {
-        if (!r || typeof r !== 'object') {
-            return { action: { target: '', mode: ForwardMode.NONE } };
+    const rules: Rule[] = rows.map((row: unknown, idx: number): Rule => {
+        if (row == null || typeof row !== 'object') {
+            throw new Error(`Rule ${idx} is not a mapping.`);
         }
-        const row = r as YamlRule;
+        const rule = row as Record<string, unknown>;
+        checkKnownKeys(rule, `rule ${idx}`, [
+            'action', 'devices', 'vlan_ranges', 'sources4', 'sources6', 'destinations4', 'destinations6',
+        ]);
 
-        const target = typeof row.target === 'string' ? row.target : '';
-        const counter = typeof row.counter === 'string' ? row.counter : undefined;
-        const modeRaw = typeof row.mode === 'string' ? row.mode : 'None';
-        const mode = modeMap[modeRaw] ?? ForwardMode.NONE;
+        const actionRaw = rule['action'];
+        if (actionRaw != null && typeof actionRaw !== 'object') {
+            throw new Error(`Rule ${idx}: "action" is not a mapping.`);
+        }
+        const action = (actionRaw ?? {}) as Record<string, unknown>;
+        checkKnownKeys(action, `rule ${idx} action`, ['target', 'mode', 'counter']);
 
-        const devicesRaw = Array.isArray(row.devices) ? row.devices : [];
-        const devices = (devicesRaw as unknown[])
-            .filter((d): d is string => typeof d === 'string')
-            .map(name => ({ name }));
+        const modeRaw = action['mode'];
+        const mode = modeRaw == null
+            ? declaredForwardMode(0)
+            : declaredForwardMode(modeRaw as string | number);
+        if (mode === undefined) {
+            throw new Error(`Rule ${idx}: unknown forward mode ${JSON.stringify(modeRaw)}.`);
+        }
 
-        const vlanRangesRaw = Array.isArray(row.vlan_ranges) ? row.vlan_ranges : [];
-        const vlan_ranges = (vlanRangesRaw as unknown[]).map((vr: unknown) => {
-            if (!vr || typeof vr !== 'object') return { from: 0, to: 0 };
-            const v = vr as Record<string, unknown>;
+        const devicesRaw = rule['devices'] == null ? [] : rule['devices'];
+        if (!Array.isArray(devicesRaw)) {
+            throw new Error(`Rule ${idx}: "devices" is not a list.`);
+        }
+        const devices = devicesRaw.map((d: unknown, deviceIdx: number) => {
+            if (d == null || typeof d !== 'object') {
+                throw new Error(`Rule ${idx}: device ${deviceIdx} is not a mapping with a "name".`);
+            }
+            const device = d as Record<string, unknown>;
+            checkKnownKeys(device, `rule ${idx} device ${deviceIdx}`, ['name']);
+            return { name: typeof device['name'] === 'string' ? device['name'] : '' };
+        });
+
+        const vlanRaw = rule['vlan_ranges'] == null ? [] : rule['vlan_ranges'];
+        if (!Array.isArray(vlanRaw)) {
+            throw new Error(`Rule ${idx}: "vlan_ranges" is not a list.`);
+        }
+        const vlan_ranges = vlanRaw.map((vr: unknown, rangeIdx: number) => {
+            if (vr == null || typeof vr !== 'object') {
+                throw new Error(`Rule ${idx}: vlan range ${rangeIdx} is not a mapping.`);
+            }
+            const range = vr as Record<string, unknown>;
+            checkKnownKeys(range, `rule ${idx} vlan range ${rangeIdx}`, ['from', 'to']);
             return {
-                from: typeof v['from'] === 'number' ? v['from'] : 0,
-                to: typeof v['to'] === 'number' ? v['to'] : 0,
+                from: typeof range['from'] === 'number' ? range['from'] : 0,
+                to: typeof range['to'] === 'number' ? range['to'] : 0,
             };
         });
 
-        const srcsRaw = Array.isArray(row.srcs) ? row.srcs : [];
-        const sources = partitionCidrsToTyped(
-            (srcsRaw as unknown[]).filter((s): s is string => typeof s === 'string'),
-        );
-
-        const dstsRaw = Array.isArray(row.dsts) ? row.dsts : [];
-        const destinations = partitionCidrsToTyped(
-            (dstsRaw as unknown[]).filter((s): s is string => typeof s === 'string'),
-        );
-
         return {
-            action: { target, mode, counter },
+            action: {
+                target: typeof action['target'] === 'string' ? action['target'] : '',
+                mode,
+                counter: typeof action['counter'] === 'string' && action['counter'] !== ''
+                    ? action['counter']
+                    : undefined,
+            },
             devices,
             vlan_ranges,
-            sources4: sources.v4,
-            sources6: sources.v6,
-            destinations4: destinations.v4,
-            destinations6: destinations.v6,
+            sources4: networkList(rule['sources4'], `rule ${idx} sources4`, isValidIPv4Prefix),
+            sources6: networkList(rule['sources6'], `rule ${idx} sources6`, isValidIPv6Prefix),
+            destinations4: networkList(rule['destinations4'], `rule ${idx} destinations4`, isValidIPv4Prefix),
+            destinations6: networkList(rule['destinations6'], `rule ${idx} destinations6`, isValidIPv6Prefix),
         };
     });
 
-    return rules;
+    return { name, rules };
 };
 
 interface YamlIOProps {
@@ -121,9 +177,12 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport, disabled }
 
     const handleImport = (text: string): void => {
         const parsed = parseYamlToRules(text);
-        const targetConfig = importConfigName.trim() || configName;
-        onImport(targetConfig, parsed);
-        toaster.success('yn-yaml-import', `Imported ${parsed.length} rules into "${targetConfig}".`);
+        const targetConfig = importConfigName.trim() || parsed.name || configName;
+        if (parsed.name && parsed.name !== targetConfig) {
+            throw new Error(`The file names config "${parsed.name}", but "${targetConfig}" is chosen.`);
+        }
+        onImport(targetConfig, parsed.rules);
+        toaster.success('yn-yaml-import', `Imported ${parsed.rules.length} rules into "${targetConfig}".`);
     };
 
     const importExtraControls = (
@@ -153,7 +212,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport, disabled }
             exportYaml={() => rulesToDiffYaml(rules)}
             onImport={handleImport}
             toastPrefix="yn-yaml"
-            importPlaceholder={'rules:\n  - target: eth0\n    mode: OUT\n    srcs:\n      - 10.0.0.0/8'}
+            importPlaceholder={'rules:\n  - action:\n      target: eth0\n      mode: OUT\n    sources4:\n      - 10.0.0.0/8'}
             exportFooterHint="Exports current draft rules (unsaved changes included)."
             importFooterHint="Importing replaces all rules in the target config locally. Use Save to push to the server."
             importButtonLabel="Import"

@@ -26,6 +26,17 @@ const FORWARD_MODE_BY_NUMBER: Record<number, ForwardMode> = {
 };
 
 /**
+ * Maps a declared mode name or number to the mode, undefined for anything
+ * this build does not declare.
+ */
+export const declaredForwardMode = (value: ForwardMode | number | string | undefined): ForwardMode | undefined => {
+    if (typeof value === 'number') {
+        return FORWARD_MODE_BY_NUMBER[value];
+    }
+    return typeof value === 'string' && value in FORWARD_MODE_LABELS ? (value as ForwardMode) : undefined;
+};
+
+/**
  * Reads a mode off the wire in either spelling.
  *
  * A name or a declared number maps to the mode. Anything else, including a
@@ -33,10 +44,7 @@ const FORWARD_MODE_BY_NUMBER: Record<number, ForwardMode> = {
  * used before names existed.
  */
 export const parseForwardMode = (value: ForwardMode | number | undefined): ForwardMode => {
-    if (typeof value === 'number') {
-        return FORWARD_MODE_BY_NUMBER[value] ?? ForwardMode.NONE;
-    }
-    return value !== undefined && value in FORWARD_MODE_LABELS ? value : ForwardMode.NONE;
+    return declaredForwardMode(value) ?? ForwardMode.NONE;
 };
 
 export interface Action {
