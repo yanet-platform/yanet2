@@ -529,6 +529,7 @@ dataplane_init(
 
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
+		instance->config_assigner_started = false;
 
 		static const char *default_modules[] = {
 			"forward",
@@ -965,6 +966,19 @@ dataplane_start(struct dataplane *dataplane) {
 		}
 	}
 
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		if (dataplane_instance_config_assigner_start(
+			    dataplane->instances + instance_idx
+		    )) {
+			LOG(ERROR,
+			    "failed to start config assigner for instance %u",
+			    instance_idx);
+			return -1;
+		}
+	}
+
 	pthread_t thread_id;
 	int rc = pthread_create(&thread_id, NULL, stat_thread, dataplane);
 	if (rc != 0) {
@@ -980,6 +994,20 @@ int
 dataplane_stop(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
 		dataplane_device_stop(dataplane->devices + dev_idx);
+	}
+
+	// The workers are joined above while the assigners still run:
+	// this call parks the process (the worker loops never return on
+	// their own), and a join only ends once the worker's loop has
+	// ended, so the assigners must keep publishing generations for
+	// as long as workers acknowledge them. The assigners are stopped
+	// only after every worker loop has ended.
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		dataplane_instance_config_assigner_stop(
+			dataplane->instances + instance_idx
+		);
 	}
 
 	return 0;
