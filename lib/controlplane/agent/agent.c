@@ -216,6 +216,15 @@ agent_attach(
 	size_t memory_limit,
 	yanet_error **err
 ) {
+	if (strnlen(agent_name, AGENT_NAME_LEN) == AGENT_NAME_LEN) {
+		yanet_error_add(
+			err,
+			"agent name is longer than %d characters",
+			AGENT_NAME_LEN - 1
+		);
+		return NULL;
+	}
+
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
 
 	// Guard against attaching before the dataplane finishes initialising
@@ -315,7 +324,7 @@ agent_attach(
 	     ++agent_idx) {
 		struct agent *old_agent =
 			ADDR_OF(&old_registry->agents[agent_idx]);
-		if (!strncmp(old_agent->name, agent_name, 80)) {
+		if (!strncmp(old_agent->name, agent_name, AGENT_NAME_LEN)) {
 			found = true;
 			SET_OFFSET_OF(
 				&old_registry->agents[agent_idx], new_agent

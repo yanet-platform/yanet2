@@ -17,6 +17,9 @@ struct cp_object;
 
 struct agent;
 
+// Longest agent name the registry can hold, terminator included.
+#define AGENT_NAME_LEN 80
+
 // Process-local handle to a mapped shared-memory segment.
 //
 // Carries the mapping length next to its base address so that releasing
@@ -72,7 +75,7 @@ struct agent {
 	// individually first.
 	uint64_t loaded_object_count;
 	struct agent *prev;
-	char name[80];
+	char name[AGENT_NAME_LEN];
 
 	uint64_t arena_count;
 	struct agent_arena *arenas;
