@@ -78,7 +78,7 @@ pub struct UpdateCmd {
     /// number, which `show` still prints raw, is refused. The `name` may
     /// be omitted, it is then taken from `--name`, and a file naming
     /// another config is refused.
-    #[arg(long = "file", short = 'f', alias = "rules", value_name = "PATH")]
+    #[arg(value_name = "PATH")]
     pub file: PathBuf,
 }
 

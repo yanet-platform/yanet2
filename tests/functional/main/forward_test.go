@@ -325,7 +325,7 @@ rules:
 		paths := testFramework.Paths
 		_, err := testFramework.ExecuteCommands(
 			paths.CLI("yanet-cli-forward")+
-				" update --name=recirc --file "+
+				" update --name=recirc "+
 				"/mnt/config/recirc-forward.yaml",
 			paths.CLI("yanet-cli-function")+
 				" update --name=recirc --chains recirc:1=forward:recirc",

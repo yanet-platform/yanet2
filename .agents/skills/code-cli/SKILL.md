@@ -63,15 +63,16 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   writing it.
 - Wire values are built with `From` when the request is made
   (`IpAddress::from(addr)`), never parsed from text there.
-- Positional arguments carry the key of an element only (`insert <prefix>
-  --via …`, `remove <next-hop>…`, `table create <name>`); everything else is a
-  flag.
-- Flags: `--name/-n` is the config name and nothing else; `--file/-f` an input
-  document; `--category` a metric category (`--rules`/`--name` migrate under
-  #2373); `-4/-6` family filters, mutually exclusive (nat64's address pair
-  excepted); `--endpoint` and `--auth` exist only through `ConnectionArgs`. A
-  short flag has one meaning across all binaries and never shadows the global
-  `-v`, so no auto `short` on a subcommand flag.
+- Positional arguments carry the key of an element (`insert <prefix>
+  --via …`, `remove <next-hop>…`, `table create <name>`) or the input
+  document of an `update` (`update -n <name> <path>`); everything else is
+  a flag.
+- Flags: `--name/-n` is the config name and nothing else; `--category` a
+  metric category (`--rules` retires into the positional update document
+  under #2373); `-4/-6` family filters, mutually exclusive (nat64's
+  address pair excepted); `--endpoint` and `--auth` exist only through
+  `ConnectionArgs`. A short flag has one meaning across all binaries and
+  never shadows the global `-v`, so no auto `short` on a subcommand flag.
 - Verbs: configs `list / show / update` (upsert) `/ delete`; elements inside a
   config `insert` (upsert by key), `add` (strict or idempotent add to a set),
   `remove`; scalars `set-<x>`; the whole object `flush`. A rename keeps the old

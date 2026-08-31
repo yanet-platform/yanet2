@@ -252,7 +252,7 @@ func Test_SetupExampleUsesSourceTreeForwardFlow(t *testing.T) {
 	recorded, err := os.ReadFile(logPath)
 	require.NoError(t, err)
 	expected := strings.Join([]string{
-		"yanet-cli-forward\tupdate\t--name=forward0\t--file\t" + resolvedForwardPath,
+		"yanet-cli-forward\tupdate\t--name=forward0\t" + resolvedForwardPath,
 		"yanet-cli-pipeline\tupdate\t--name=dummy\t--functions",
 		"yanet-cli-function\tupdate\t--name=virt\t--chains\tchain0:10=forward:forward0",
 		"yanet-cli-pipeline\tupdate\t--name=virt\t--functions\tvirt",

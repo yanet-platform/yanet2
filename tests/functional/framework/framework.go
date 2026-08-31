@@ -156,7 +156,7 @@ func (f *TestFramework) CommonConfigCommands() []string {
 		"ip addr replace " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		p.CLI("yanet-cli-forward") + " update --name=forward0 --file " + p.ForwardYAML,
+		p.CLI("yanet-cli-forward") + " update --name=forward0 " + p.ForwardYAML,
 
 		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
 		p.CLI("yanet-cli-route") + " fib update --name=route0 --rules " + p.ConfigDir + "/route0.yaml",

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 #[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
 pub mod pb {
@@ -12,7 +12,7 @@ pub mod network;
 pub fn null_as_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
     T: Default + Deserialize<'de>,
-    D: serde::Deserializer<'de>,
+    D: Deserializer<'de>,
 {
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
