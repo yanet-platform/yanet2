@@ -24,23 +24,19 @@ service L3bService {
 
   // UpdateModuleConfig installs destination filter rules and the named
   // virtual services they route to into a module configuration.
-  rpc UpdateModuleConfig(UpdateModuleConfigRequest)
-      returns (UpdateModuleConfigResponse);
+  rpc UpdateModuleConfig(UpdateModuleConfigRequest) returns (UpdateModuleConfigResponse);
 
   // ListModuleConfigs returns the names of all module configurations.
-  rpc ListModuleConfigs(ListModuleConfigsRequest)
-      returns (ListModuleConfigsResponse);
+  rpc ListModuleConfigs(ListModuleConfigsRequest) returns (ListModuleConfigsResponse);
 
   // UpdateRealServerState enables or disables a single real server within a
   // named virtual service.
-  rpc UpdateRealServerState(UpdateRealServerStateRequest)
-      returns (UpdateRealServerStateResponse);
+  rpc UpdateRealServerState(UpdateRealServerStateRequest) returns (UpdateRealServerStateResponse);
 
   // UpdateRealServerWeight sets the weight of a single real server within a
   // named virtual service; the scheduler rebuilds the ring so that a server
   // appears as many times as its weight.
-  rpc UpdateRealServerWeight(UpdateRealServerWeightRequest)
-      returns (UpdateRealServerWeightResponse);
+  rpc UpdateRealServerWeight(UpdateRealServerWeightRequest) returns (UpdateRealServerWeightResponse);
 }
 
 // RealServer is a backend reached through an IP-in-IP tunnel. The address
@@ -86,43 +82,29 @@ message ModuleConfig {
   repeated string services = 3;
 }
 
-message CreateServiceRequest {
-  VirtualService service = 1;
-}
+message CreateServiceRequest { VirtualService service = 1; }
 
 message CreateServiceResponse {}
 
-message UpdateServiceRequest {
-  VirtualService service = 1;
-}
+message UpdateServiceRequest { VirtualService service = 1; }
 
 message UpdateServiceResponse {}
 
-message DeleteServiceRequest {
-  string name = 1;
-}
+message DeleteServiceRequest { string name = 1; }
 
-message DeleteServiceResponse {
-  bool deleted = 1;
-}
+message DeleteServiceResponse { bool deleted = 1; }
 
 message ListServicesRequest {}
 
-message ListServicesResponse {
-  repeated string services = 1;
-}
+message ListServicesResponse { repeated string services = 1; }
 
-message UpdateModuleConfigRequest {
-  ModuleConfig config = 1;
-}
+message UpdateModuleConfigRequest { ModuleConfig config = 1; }
 
 message UpdateModuleConfigResponse {}
 
 message ListModuleConfigsRequest {}
 
-message ListModuleConfigsResponse {
-  repeated string configs = 1;
-}
+message ListModuleConfigsResponse { repeated string configs = 1; }
 
 message UpdateRealServerStateRequest {
   string service = 1;

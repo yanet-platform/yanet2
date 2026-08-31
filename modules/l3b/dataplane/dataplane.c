@@ -123,9 +123,9 @@ l3b_handle_packets(
 		    virtual_service_index < config->virtual_service_count) {
 			struct virtual_service_handle **virtual_services =
 				ADDR_OF(&config->virtual_services);
-			struct virtual_service_handle *handle = ADDR_OF(
-				&virtual_services[virtual_service_index]
-			);
+			struct virtual_service_handle *handle =
+				ADDR_OF(&virtual_services[virtual_service_index]
+				);
 			int result = l3b_virtual_service_process(
 				ADDR_OF(&handle->virtual_service), packet
 			);
