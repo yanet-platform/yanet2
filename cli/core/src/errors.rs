@@ -29,7 +29,7 @@ pub enum ErrorKind {
     Unavailable,
     /// A gRPC-level error not covered by other variants.
     Rpc,
-    /// TCP / TLS connection could not be established.
+    /// A transport connection to the endpoint could not be established.
     Connection,
 }
 

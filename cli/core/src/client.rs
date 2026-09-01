@@ -28,7 +28,7 @@ use prost::Message;
 use tonic::{
     client::Grpc,
     codec::{CompressionEncoding, ProstCodec},
-    transport::Channel,
+    transport::{Channel, Endpoint},
     Request, Status,
 };
 use tower::Layer;
@@ -96,7 +96,11 @@ pub enum ConnectionError {
 /// returned channel.
 pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
     let establish = async {
-        let channel = Channel::from_shared(args.endpoint.clone())?.connect().await?;
+        let channel = if args.endpoint.starts_with("unix://") {
+            Endpoint::from_shared(args.endpoint.clone())?.connect().await?
+        } else {
+            Channel::from_shared(args.endpoint.clone())?.connect().await?
+        };
         let auth = auth::create_layer(&args.auth).await?;
 
         Ok::<_, ConnectionError>(auth.layer(channel))
