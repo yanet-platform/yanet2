@@ -68,7 +68,8 @@ message Config {
   // Mode specifies a bitmap of queues that should be dumped.
   // For now available queues are INPUT, OUTPUT, DROP.
   uint32 mode = 2;
-  // Snaplen specifies maximum packet length to capture.
+  // Snaplen specifies maximum packet length to capture. Must be greater
+  // than zero.
   uint32 snaplen = 3;
   // Ring_size specifies per worker ring buffer size.
   uint32 ring_size = 4;

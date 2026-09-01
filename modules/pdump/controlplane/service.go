@@ -468,8 +468,7 @@ func (m *PdumpService) prepareConfig(name string, request *pdumppb.SetConfigRequ
 			case "snaplen":
 				snaplen := request.Config.GetSnaplen()
 				if snaplen == 0 {
-					m.log.Info("snaplen is zero, resetting to default value", zap.Uint32("default_snaplen", defaultSnaplen))
-					snaplen = defaultSnaplen
+					return nil, status.Error(codes.InvalidArgument, "snaplen must be greater than zero")
 				}
 				newConfig.Snaplen = snaplen
 			case "ring_size":

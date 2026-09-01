@@ -405,9 +405,9 @@ func decodeNAT64Prefix(prefix *commonpb.IPv6Prefix) ([]byte, error) {
 	}
 	if network.Bits() != nat64PrefixBits {
 		return nil, fmt.Errorf(
-			"invalid prefix length: got %d, want %d",
-			network.Bits(),
+			"prefix must be a /%d, got /%d",
 			nat64PrefixBits,
+			network.Bits(),
 		)
 	}
 

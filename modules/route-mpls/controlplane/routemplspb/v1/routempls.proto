@@ -58,6 +58,7 @@ message Rule {
 
 message NextHop {
   ActionKind kind = 1;
+  // Accepted range: 0..1048575 (20 bits).
   uint32 label = 2;
   common.commonpb.v1.IPAddress source_ip = 3;      // host address
   common.commonpb.v1.IPAddress destination_ip = 4; // host address

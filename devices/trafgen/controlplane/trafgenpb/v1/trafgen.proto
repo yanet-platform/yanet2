@@ -42,6 +42,7 @@ service TrafgenService {
 
 // UpdateDeviceRequest binds the input/output pipelines of a generator.
 message UpdateDeviceRequest {
+  // Accepted range: at most 79 bytes.
   string name = 1;
   common.commonpb.v1.Device device = 2;
 }

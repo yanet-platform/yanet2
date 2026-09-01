@@ -131,9 +131,9 @@ message ListConfigsResponse { repeated string configs = 1; }
 message SyncConfig {
   common.commonpb.v1.MACAddress dst_ether = 1;         // Destination MAC address;
   common.commonpb.v1.IPAddress dst_addr_multicast = 2; // Multicast IPv6 address;
-  uint32 port_multicast = 3;                           // Multicast port;
+  uint32 port_multicast = 3;                           // Multicast port. Required. Accepted range: 1..65535.
   common.commonpb.v1.IPAddress dst_addr_unicast = 4;   // Unicast IPv6 address;
-  uint32 port_unicast = 5;                             // Unicast port;
+  uint32 port_unicast = 5;                             // Unicast port. Accepted range: 0..65535.
 }
 
 // Request for per-rule counters. An empty name returns the rule counters

@@ -13,6 +13,13 @@ import (
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
 
+// maxVlanID is the highest VLAN id the dataplane accepts.
+//
+// 802.1Q reserves VID 4095. The dataplane also writes the id straight
+// into the tag's 16-bit TCI unmasked, so anything above 4095 would spill
+// into the adjacent PCP/DEI bits too.
+const maxVlanID = 4094
+
 // DeviceVlanService implements the DeviceVlan gRPC service.
 type DeviceVlanService struct {
 	vlanpb.UnimplementedDeviceVlanServiceServer
@@ -45,8 +52,16 @@ func (m *DeviceVlanService) UpdateDevice(
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
+	if err := ffi.ValidateDeviceName(name); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
-	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), uint16(request.GetVlan()))
+	vlan := request.GetVlan()
+	if vlan > maxVlanID {
+		return nil, status.Errorf(codes.InvalidArgument, "vlan %d exceeds maximum allowed value %d", vlan, maxVlanID)
+	}
+
+	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), uint16(vlan))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create device config: %w", err)
 	}

@@ -9,8 +9,10 @@ option go_package = "github.com/yanet-platform/yanet2/devices/vlan/controlplane/
 service DeviceVlanService { rpc UpdateDevice(UpdateDeviceVlanRequest) returns (UpdateDeviceVlanResponse); }
 
 message UpdateDeviceVlanRequest {
+  // Accepted range: at most 79 bytes.
   string name = 1;
   common.commonpb.v1.Device device = 2;
+  // Accepted range: 0..4094.
   uint32 vlan = 3;
 }
 

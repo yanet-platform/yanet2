@@ -2,6 +2,7 @@ package trafgen
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
@@ -274,6 +276,61 @@ func Test_TrafgenService_EmptyConfigName(t *testing.T) {
 		require.Nil(t, resp)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
+}
+
+// Test_TrafgenService_UpdateDevice_RejectsOverlongName verifies that a name
+// the C-side fixed-size buffer cannot hold is rejected before the backend.
+func Test_TrafgenService_UpdateDevice_RejectsOverlongName(t *testing.T) {
+	svc, backend := newTestService()
+
+	resp, err := svc.UpdateDevice(t.Context(), &trafgenpb.UpdateDeviceRequest{
+		Name:   strings.Repeat("a", ffi.MaxDeviceNameLen),
+		Device: &commonpb.Device{},
+	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Zero(t, backend.calls)
+}
+
+// Test_TrafgenService_UpdateDevice_AcceptsNameAtLimit verifies that a name
+// exactly at the C-side buffer's usable length reaches the backend.
+func Test_TrafgenService_UpdateDevice_AcceptsNameAtLimit(t *testing.T) {
+	svc, backend := newTestService()
+
+	_, err := svc.UpdateDevice(t.Context(), &trafgenpb.UpdateDeviceRequest{
+		Name:   strings.Repeat("a", ffi.MaxDeviceNameLen-1),
+		Device: &commonpb.Device{},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, backend.calls)
+}
+
+// Test_TrafgenService_UploadPcap_RejectsOverlongName verifies that an overlong
+// name is rejected before the backend even when no config exists yet.
+func Test_TrafgenService_UploadPcap_RejectsOverlongName(t *testing.T) {
+	svc, backend := newTestService()
+
+	resp, err := svc.UploadPcap(t.Context(), &trafgenpb.UploadPcapRequest{
+		Name: strings.Repeat("a", ffi.MaxDeviceNameLen),
+		Pcap: buildPcap(t, [][]byte{bytes.Repeat([]byte{0x01}, 64)}),
+	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Zero(t, backend.calls)
+}
+
+// Test_TrafgenService_SetRate_RejectsOverlongName verifies that an overlong
+// name is rejected before the backend even when no config exists yet.
+func Test_TrafgenService_SetRate_RejectsOverlongName(t *testing.T) {
+	svc, backend := newTestService()
+
+	resp, err := svc.SetRate(t.Context(), &trafgenpb.SetRateRequest{
+		Name:    strings.Repeat("a", ffi.MaxDeviceNameLen),
+		RatePps: 1,
+	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Zero(t, backend.calls)
 }
 
 func Test_TrafgenService_InvalidPcap(t *testing.T) {

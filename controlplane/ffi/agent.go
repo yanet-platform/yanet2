@@ -79,6 +79,21 @@ func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
+// MaxDeviceNameLen is the size of the C-side device name buffer, including
+// the terminating NUL.
+//
+// The largest usable name is one byte shorter than this bound.
+const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
+
+// ValidateDeviceName rejects a name the C-side fixed-size device name
+// buffer cannot round-trip without silent truncation.
+func ValidateDeviceName(name string) error {
+	if len(name) > MaxDeviceNameLen-1 {
+		return fmt.Errorf("name is %d bytes, exceeds the %d-byte limit", len(name), MaxDeviceNameLen-1)
+	}
+	return nil
+}
+
 type Agent struct {
 	name string
 	ptr  *C.struct_agent

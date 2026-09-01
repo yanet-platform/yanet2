@@ -19,3 +19,16 @@ func TestShowConfigUnknownConfig(t *testing.T) {
 	_, err := service.ShowConfig(t.Context(), &pdumppb.ShowConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
+
+// Test_PdumpService_SetConfig_RejectsExplicitZeroSnaplen verifies that an
+// explicit snaplen=0 in the update mask is rejected, not defaulted.
+func Test_PdumpService_SetConfig_RejectsExplicitZeroSnaplen(t *testing.T) {
+	service := pdump.NewPdumpService(nil)
+
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name:       "pdump0",
+		Config:     &pdumppb.Config{Snaplen: 0},
+		UpdateMask: &pdumppb.FieldMask{Paths: []string{"snaplen"}},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}

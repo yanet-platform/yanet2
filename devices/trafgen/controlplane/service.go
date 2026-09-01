@@ -87,6 +87,9 @@ func (m *TrafgenService) UpdateDevice(
 	if name == "" {
 		return nil, errConfigNameRequired
 	}
+	if err := ffi.ValidateDeviceName(name); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	input := pipelinesFromProto(req.GetDevice().GetInput())
 	output := pipelinesFromProto(req.GetDevice().GetOutput())
@@ -186,6 +189,9 @@ func (m *TrafgenService) UploadPcap(
 	if name == "" {
 		return nil, errConfigNameRequired
 	}
+	if err := ffi.ValidateDeviceName(name); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	packets, err := parsePcap(req.GetPcap())
 	if err != nil {
@@ -225,6 +231,9 @@ func (m *TrafgenService) SetRate(
 	name := req.GetName()
 	if name == "" {
 		return nil, errConfigNameRequired
+	}
+	if err := ffi.ValidateDeviceName(name); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	m.mu.Lock()

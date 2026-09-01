@@ -45,6 +45,9 @@ func (m *DevicePlainService) UpdateDevice(
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
+	if err := ffi.ValidateDeviceName(name); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice())
 	if err != nil {

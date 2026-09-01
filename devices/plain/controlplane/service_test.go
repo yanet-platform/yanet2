@@ -1,10 +1,13 @@
 package plain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -116,6 +119,45 @@ func TestUpdateDevice_ReclaimsAcrossMultipleNames(t *testing.T) {
 		}
 		previousFreeBytes = freeBytes
 	}
+}
+
+// Test_DevicePlainService_UpdateDevice_RejectsOverlongName verifies that a name
+// the C-side fixed-size buffer cannot hold is rejected before the agent.
+func Test_DevicePlainService_UpdateDevice_RejectsOverlongName(t *testing.T) {
+	service := NewDevicePlainService(nil)
+
+	resp, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+		Name:   strings.Repeat("a", ffi.MaxDeviceNameLen),
+		Device: &commonpb.Device{},
+	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// Test_DevicePlainService_UpdateDevice_AcceptsNameAtLimit verifies that a name
+// exactly at the C-side buffer's usable length is published end to end.
+func Test_DevicePlainService_UpdateDevice_AcceptsNameAtLimit(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		DevicesToLoad: []string{"plain"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	shm := harness.SharedMemory()
+	agent, err := shm.AgentAttach("plain", 0, datasize.MB*2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	service := NewDevicePlainService(agent)
+
+	_, err = service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+		Name:   strings.Repeat("a", ffi.MaxDeviceNameLen-1),
+		Device: &commonpb.Device{},
+	})
+	require.NoError(t, err)
 }
 
 // freeBytesForAgent returns the free byte count reported for the named
