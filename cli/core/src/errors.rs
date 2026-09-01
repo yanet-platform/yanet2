@@ -102,7 +102,11 @@ impl Error {
         let action = action.into();
         let endpoint = endpoint.into();
         let service = service.into();
-        let message = status.message().to_owned();
+        let raw_message = status.message().to_owned();
+        let message = match (raw_message.as_str(), core::error::Error::source(&status)) {
+            ("transport error", Some(source)) => root_cause(source).to_string(),
+            (..) => raw_message.clone(),
+        };
         let code = status.code();
 
         let kind = map_code(&status);
@@ -116,7 +120,7 @@ impl Error {
             service: Some(service),
             hint,
             raw_code: Some(format!("{code:?}")),
-            raw_message: Some(message),
+            raw_message: Some(raw_message),
         }
     }
 
@@ -131,10 +135,17 @@ impl Error {
                 ErrorKind::Connection,
                 Some("verify the endpoint is reachable and the gateway is up".to_owned()),
             ),
-            ConnectionError::InvalidUri(..) => (
+            ConnectionError::InvalidUri(..) | ConnectionError::InvalidEndpointScheme(..) => (
                 ErrorKind::InvalidArgument,
-                Some("check the --endpoint URL format (expected: grpc://host:port or unix:///path)".to_owned()),
+                Some(
+                    "check the --endpoint URL format (expected: grpc://host:port, grpcs://host:port, or unix:///path)"
+                        .to_owned(),
+                ),
             ),
+            ConnectionError::TlsOptionsWithoutTls
+            | ConnectionError::IncompleteClientIdentity
+            | ConnectionError::TlsFile { .. }
+            | ConnectionError::TlsConfig(..) => (ErrorKind::InvalidArgument, None),
             ConnectionError::Auth(..) => (ErrorKind::Auth, None),
             ConnectionError::Timeout(..) => (
                 ErrorKind::Connection,
@@ -338,6 +349,8 @@ impl NotFoundMapper {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use tonic::{metadata::MetadataMap, Code, Status};
 
     use super::{Error, ErrorKind, NotFoundMapper};
@@ -440,5 +453,29 @@ mod test {
         let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
 
         assert_eq!(ErrorKind::Unavailable, err.kind);
+    }
+
+    #[test]
+    fn test_from_status_exposes_root_source_and_preserves_raw_message() {
+        let mut status = Status::unknown("transport error");
+        status.set_source(Arc::new(std::io::Error::other(
+            "received fatal alert: CertificateRequired",
+        )));
+
+        let err = Error::from_status(status, "check", "grpcs://gateway.test", "test.Service");
+
+        assert_eq!("received fatal alert: CertificateRequired", err.message);
+        assert_eq!(Some("transport error".to_owned()), err.raw_message);
+    }
+
+    #[test]
+    fn test_from_status_preserves_specific_message_with_source() {
+        let mut status = Status::internal("h2 protocol error");
+        status.set_source(Arc::new(std::io::Error::other("connection reset")));
+
+        let err = Error::from_status(status, "check", "grpcs://gateway.test", "test.Service");
+
+        assert_eq!("h2 protocol error", err.message);
+        assert_eq!(Some("h2 protocol error".to_owned()), err.raw_message);
     }
 }

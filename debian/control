@@ -6,6 +6,7 @@ Standards-Version: 4.6.2
 Build-Depends: debhelper (>= 12)
  , meson (>= 0.61)
  , ninja-build
+ , cmake
  , pkg-config
  , libnuma-dev
  , libpcap-dev
@@ -47,6 +48,7 @@ Package: yanet2-cli
 Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
+ , ca-certificates
 Recommends: bash-completion
 Description: Yanet2 CLI utilities
  Command-line tools for Yanet2: yanet-cli-nat64, yanet-cli-route,

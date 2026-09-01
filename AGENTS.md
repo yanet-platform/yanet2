@@ -86,4 +86,4 @@ Every writing task runs in a linked worktree on a task branch from confirmed `or
 
 ## Dependencies
 
-DPDK v23+ (submodule) · Go 1.24.13+ · Rust 1.88+ (rustfmt nightly-2026-08-28) · Meson 0.61+ · Protobuf 3.0+ (protoc-gen-go ≥ 1.36.5, protoc-gen-go-grpc ≥ 1.5.1).
+DPDK v23+ (submodule) · Go 1.24.13+ · Rust 1.88+ (rustfmt nightly-2026-08-28) · Meson 0.61+ · CMake 3.5+ · Protobuf 3.0+ (protoc-gen-go ≥ 1.36.5, protoc-gen-go-grpc ≥ 1.5.1).

@@ -349,6 +349,7 @@ mod test {
     use netip::MacAddr;
     use ync::{
         auth::{AuthArgs, AuthMethod},
+        client::TlsArgs,
         errors::ErrorKind,
     };
 
@@ -760,6 +761,7 @@ entries:
         let connection = ConnectionArgs {
             endpoint: format!("grpc://127.0.0.1:{port}"),
             auth: AuthArgs { auth: AuthMethod::None },
+            tls: TlsArgs::default(),
             timeout: None,
         };
 

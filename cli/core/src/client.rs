@@ -22,13 +22,17 @@
 //! ```
 
 use core::time::Duration;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use http::uri::PathAndQuery;
 use prost::Message;
 use tonic::{
     client::Grpc,
     codec::{CompressionEncoding, ProstCodec},
-    transport::{Channel, Endpoint},
+    transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
     Request, Status,
 };
 use tower::Layer;
@@ -45,17 +49,53 @@ use crate::{
 /// `MyServiceClient<LayeredChannel>`.
 pub type LayeredChannel = TimeoutService<AuthService<Channel>>;
 
+/// TLS material supplied explicitly by the user.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct TlsArgs {
+    /// PEM CA bundle that replaces native system roots for server verification.
+    ///
+    /// Native system roots are used when this option is omitted.
+    #[arg(long, global = true, env = "YANET_CA", value_name = "PATH")]
+    pub ca: Option<PathBuf>,
+    /// PEM client certificate chain for mutual TLS.
+    #[arg(
+        long,
+        global = true,
+        env = "YANET_CLIENT_CERT",
+        value_name = "PATH",
+        requires = "client_key"
+    )]
+    pub client_cert: Option<PathBuf>,
+    /// PEM client private key for mutual TLS.
+    #[arg(
+        long,
+        global = true,
+        env = "YANET_CLIENT_KEY",
+        value_name = "PATH",
+        requires = "client_cert"
+    )]
+    pub client_key: Option<PathBuf>,
+}
+
+impl TlsArgs {
+    fn is_configured(&self) -> bool {
+        self.ca.is_some() || self.client_cert.is_some() || self.client_key.is_some()
+    }
+}
+
 /// Common CLI arguments for gRPC connection.
 ///
 /// Embed this in your module's `Cmd` struct with `#[command(flatten)]`.
 #[derive(Debug, Clone, clap::Args)]
 pub struct ConnectionArgs {
-    /// Gateway endpoint.
+    /// Gateway endpoint using grpc://, grpcs://, or unix://.
     #[arg(long, default_value = "grpc://[::1]:8080", global = true, env = "YANET_ENDPOINT")]
     pub endpoint: String,
     /// Authentication options.
     #[command(flatten)]
     pub auth: AuthArgs,
+    #[command(flatten)]
+    pub tls: TlsArgs,
     /// Time budget in seconds for connecting and for each request.
     ///
     /// Long-lived streams are bounded only while being established.
@@ -83,10 +123,72 @@ pub enum ConnectionError {
     Transport(#[from] tonic::transport::Error),
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] http::uri::InvalidUri),
+    #[error("unsupported endpoint scheme: {0}")]
+    InvalidEndpointScheme(String),
+    #[error("TLS options require a grpcs:// endpoint")]
+    TlsOptionsWithoutTls,
+    #[error("client certificate and key must be provided together")]
+    IncompleteClientIdentity,
+    #[error("failed to read {kind} from {}: {source}", path.display())]
+    TlsFile {
+        kind: &'static str,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("invalid TLS configuration: {}", root_cause(.0))]
+    TlsConfig(tonic::transport::Error),
     #[error("auth error: {0}")]
     Auth(#[from] auth::AuthError),
     #[error("connect timed out after {}s", .0.as_secs_f64())]
     Timeout(Duration),
+}
+
+/// Rejects TLS material before any plaintext transport can use it.
+fn build_endpoint(args: &ConnectionArgs) -> Result<Endpoint, ConnectionError> {
+    match args.endpoint.split_once("://") {
+        Some(("grpcs", address)) => {
+            let endpoint = Channel::from_shared(format!("https://{address}"))?;
+            let tls = build_tls_config(&args.tls)?;
+
+            endpoint.tls_config(tls).map_err(ConnectionError::TlsConfig)
+        }
+        Some(("grpc" | "unix", ..)) if args.tls.is_configured() => Err(ConnectionError::TlsOptionsWithoutTls),
+        Some(("grpc", ..)) => Channel::from_shared(args.endpoint.clone()).map_err(ConnectionError::InvalidUri),
+        Some(("unix", ..)) => Endpoint::from_shared(args.endpoint.clone()).map_err(ConnectionError::Transport),
+        Some((scheme, ..)) => Err(ConnectionError::InvalidEndpointScheme(scheme.to_owned())),
+        None => Err(ConnectionError::InvalidEndpointScheme("<missing>".to_owned())),
+    }
+}
+
+/// Uses native roots unless an explicit CA bundle replaces them.
+fn build_tls_config(args: &TlsArgs) -> Result<ClientTlsConfig, ConnectionError> {
+    let identity = match (&args.client_cert, &args.client_key) {
+        (Some(cert), Some(key)) => Some(Identity::from_pem(
+            read_tls_file(cert, "client certificate")?,
+            read_tls_file(key, "client key")?,
+        )),
+        (None, None) => None,
+        (..) => return Err(ConnectionError::IncompleteClientIdentity),
+    };
+
+    let mut tls = match &args.ca {
+        Some(path) => {
+            ClientTlsConfig::new().ca_certificate(Certificate::from_pem(read_tls_file(path, "CA certificate bundle")?))
+        }
+        None => ClientTlsConfig::new().with_native_roots(),
+    };
+
+    if let Some(identity) = identity {
+        tls = tls.identity(identity);
+    }
+
+    Ok(tls)
+}
+
+/// Reads one PEM input while preserving its role and path in the error.
+fn read_tls_file(path: &Path, kind: &'static str) -> Result<Vec<u8>, ConnectionError> {
+    fs::read(path).map_err(|source| ConnectionError::TlsFile { kind, path: path.to_owned(), source })
 }
 
 /// Connect to the endpoint with all interceptors pre-applied.
@@ -96,11 +198,7 @@ pub enum ConnectionError {
 /// returned channel.
 pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
     let establish = async {
-        let channel = if args.endpoint.starts_with("unix://") {
-            Endpoint::from_shared(args.endpoint.clone())?.connect().await?
-        } else {
-            Channel::from_shared(args.endpoint.clone())?.connect().await?
-        };
+        let channel = build_endpoint(args)?.connect().await?;
         let auth = auth::create_layer(&args.auth).await?;
 
         Ok::<_, ConnectionError>(auth.layer(channel))
@@ -419,16 +517,102 @@ where
 #[cfg(test)]
 mod test {
     use core::{net::SocketAddr, time::Duration};
-    use std::net::{TcpListener, TcpStream};
+    use std::{
+        net::{TcpListener, TcpStream},
+        path::PathBuf,
+    };
 
     use socket2::{Domain, Socket, Type};
-    use tonic::Status;
+    use tokio::task::JoinHandle;
+    use tokio_stream::wrappers::TcpListenerStream;
+    use tonic::{
+        transport::{Certificate, Identity, Server, ServerTlsConfig},
+        Status,
+    };
+    use tonic_health::pb::{health_client::HealthClient, HealthCheckRequest};
 
-    use super::{parse_timeout, ConnectionArgs, Service};
+    use super::{connect, parse_timeout, ConnectionArgs, ConnectionError, Service, TlsArgs};
     use crate::{
         auth::{AuthArgs, AuthMethod},
-        errors::ErrorKind,
+        errors::{Error, ErrorKind},
     };
+
+    const TLS_CA: &[u8] = include_bytes!("../tests/fixtures/tls/ca.pem");
+    const TLS_SERVER_CERT: &[u8] = include_bytes!("../tests/fixtures/tls/server-cert.pem");
+    const TLS_SERVER_KEY: &[u8] = include_bytes!("../tests/fixtures/tls/server-key.pem");
+
+    /// A TLS health server that stops with its owning test.
+    struct TestTlsServer {
+        endpoint: String,
+        task: JoinHandle<()>,
+    }
+
+    impl Drop for TestTlsServer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    /// Returns a bound health endpoint whose task is owned by the guard.
+    async fn start_tls_server(require_client_identity: bool) -> TestTlsServer {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let incoming = TcpListenerStream::new(listener);
+        let (.., health) = tonic_health::server::health_reporter();
+        let identity = Identity::from_pem(TLS_SERVER_CERT, TLS_SERVER_KEY);
+        let mut tls = ServerTlsConfig::new().identity(identity);
+
+        if require_client_identity {
+            tls = tls.client_ca_root(Certificate::from_pem(TLS_CA));
+        }
+
+        let task = tokio::spawn(async move {
+            Server::builder()
+                .tls_config(tls)
+                .unwrap()
+                .add_service(health)
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+
+        TestTlsServer {
+            endpoint: format!("grpcs://127.0.0.1:{port}"),
+            task,
+        }
+    }
+
+    /// All identities share the checked-in root and remain valid through 4096.
+    fn tls_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/tls")
+            .join(name)
+    }
+
+    /// Test connections omit application auth and share a two-second deadline.
+    fn tls_connection_args(endpoint: String, tls: TlsArgs) -> ConnectionArgs {
+        ConnectionArgs {
+            endpoint,
+            auth: AuthArgs { auth: AuthMethod::None },
+            tls,
+            timeout: Some(Duration::from_secs(2)),
+        }
+    }
+
+    /// A successful probe proves the transport reached an authenticated RPC.
+    async fn check_tls_health(args: &ConnectionArgs) -> Result<(), Error> {
+        let channel = connect(args)
+            .await
+            .map_err(|err| Error::from_connection(err, "check", &args.endpoint))?;
+        let mut client = HealthClient::new(channel);
+
+        client
+            .check(HealthCheckRequest::default())
+            .await
+            .map_err(|status| Error::from_status(status, "check", &args.endpoint, "grpc.health.v1.Health"))?;
+
+        Ok(())
+    }
 
     #[test]
     fn test_parse_timeout_accepts_whole_and_fractional_seconds() {
@@ -461,6 +645,7 @@ mod test {
         let args = ConnectionArgs {
             endpoint: format!("grpc://127.0.0.1:{port}"),
             auth: AuthArgs { auth: AuthMethod::None },
+            tls: TlsArgs::default(),
             timeout: Some(Duration::from_millis(200)),
         };
 
@@ -473,6 +658,82 @@ mod test {
         assert_eq!(4, err.exit_code());
         assert_eq!("show", err.action);
         assert_eq!("connect timed out after 0.2s", err.message());
+    }
+
+    #[tokio::test]
+    async fn test_connect_rejects_unknown_endpoint_scheme_before_io() {
+        let args = ConnectionArgs {
+            endpoint: "https://127.0.0.1:9".to_owned(),
+            auth: AuthArgs { auth: AuthMethod::None },
+            tls: TlsArgs {
+                ca: Some("missing.pem".into()),
+                ..TlsArgs::default()
+            },
+            timeout: None,
+        };
+
+        let err = connect(&args).await.err().unwrap();
+
+        assert!(matches!(err, ConnectionError::InvalidEndpointScheme(scheme) if scheme == "https"));
+    }
+
+    #[tokio::test]
+    async fn test_connect_rejects_tls_options_for_plaintext_endpoint_before_io() {
+        let args = ConnectionArgs {
+            endpoint: "grpc://127.0.0.1:9".to_owned(),
+            auth: AuthArgs { auth: AuthMethod::None },
+            tls: TlsArgs {
+                ca: Some("missing.pem".into()),
+                ..TlsArgs::default()
+            },
+            timeout: None,
+        };
+
+        let err = connect(&args).await.err().unwrap();
+
+        assert!(matches!(err, ConnectionError::TlsOptionsWithoutTls));
+    }
+
+    #[tokio::test]
+    async fn test_connect_rejects_incomplete_client_identity_before_io() {
+        let args = ConnectionArgs {
+            endpoint: "grpcs://127.0.0.1:9".to_owned(),
+            auth: AuthArgs { auth: AuthMethod::None },
+            tls: TlsArgs {
+                client_cert: Some("missing.pem".into()),
+                ..TlsArgs::default()
+            },
+            timeout: None,
+        };
+
+        let err = connect(&args).await.err().unwrap();
+
+        assert!(matches!(err, ConnectionError::IncompleteClientIdentity));
+    }
+
+    #[tokio::test]
+    async fn test_connect_custom_ca_and_client_identity_completes_mtls_rpc() {
+        let server = start_tls_server(true).await;
+        let args = tls_connection_args(
+            server.endpoint.clone(),
+            TlsArgs {
+                ca: Some(tls_fixture("ca.pem")),
+                client_cert: Some(tls_fixture("client-cert.pem")),
+                client_key: Some(tls_fixture("client-key.pem")),
+            },
+        );
+
+        check_tls_health(&args).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connect_native_roots_reject_untrusted_certificate() {
+        let server = start_tls_server(false).await;
+        let args = tls_connection_args(server.endpoint.clone(), TlsArgs::default());
+
+        let err = check_tls_health(&args).await.unwrap_err();
+
+        assert!(err.message().to_lowercase().contains("certificate"), "{err:?}");
     }
 
     #[test]

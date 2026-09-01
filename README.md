@@ -70,6 +70,7 @@ YANET employs a multi-language approach to leverage the strengths of different p
 - Protobuf compiler 3.0+.
 - Meson 0.61+.
 - Ninja build system.
+- CMake 3.5+.
 - GCC/Clang.
 
 ### Build Instructions

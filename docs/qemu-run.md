@@ -198,6 +198,7 @@ apt-get update -y
 # Install build tools
 apt-get install -y \
     meson \
+    cmake \
     clang \
     clang-format-19 \
     clang-tidy-19 \

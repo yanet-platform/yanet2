@@ -14,6 +14,7 @@ on:
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
       - ".github/actions/apt-packages/**"
       - ".github/actions/apt-failover/**"
@@ -24,6 +25,7 @@ on:
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
       - ".github/actions/apt-packages/**"
       - ".github/actions/apt-failover/**"
@@ -63,7 +65,7 @@ jobs:
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: protobuf-compiler
+          packages: cmake protobuf-compiler
       - run: cargo test --workspace
 
   # Clippy runs the full compiler front end over the workspace, so a type
@@ -85,5 +87,5 @@ jobs:
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: protobuf-compiler
+          packages: cmake protobuf-compiler
       - run: cargo clippy --workspace -- -D warnings
