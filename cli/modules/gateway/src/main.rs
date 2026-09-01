@@ -18,7 +18,7 @@ const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
 
 /// Gateway - inspects the gateway service registry.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::LazyLock};
 
-use clap::{crate_name, crate_version, ArgMatches, Command};
+use clap::{crate_name, ArgMatches, Command};
 use colored::{ColoredString, Colorize};
 use yanet_cli::dispatcher::{self, Dispatch, Namespace};
 
@@ -26,7 +26,7 @@ struct Dispatcher;
 impl Dispatch for Dispatcher {
     fn cmd(&self, modules: &HashSet<String>) -> Command {
         let cmd = Command::new(crate_name!())
-            .version(crate_version!())
+            .version(yanet_cli::version())
             .allow_external_subcommands(true);
         dispatcher::add_subcommands(cmd, modules)
     }

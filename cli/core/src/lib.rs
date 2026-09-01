@@ -23,3 +23,10 @@ pub fn init<F: Format>(verbosity: u8, format: F) {
     self::signal::init();
     self::output::init(verbosity, format);
 }
+
+pub fn version() -> &'static str {
+    match option_env!("YANET_VERSION") {
+        Some("") | None => concat!(env!("CARGO_PKG_VERSION"), "-unknown"),
+        Some(version) => version,
+    }
+}

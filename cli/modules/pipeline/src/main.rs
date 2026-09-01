@@ -23,7 +23,7 @@ const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(PIPELINE_SERVICE, "request
 
 /// Pipeline module.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

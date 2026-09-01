@@ -14,7 +14,7 @@ const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
 
 /// Common functionality.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 struct Cmd {
     #[command(subcommand)]

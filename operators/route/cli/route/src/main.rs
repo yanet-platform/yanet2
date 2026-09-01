@@ -42,7 +42,7 @@ const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
 
 /// Route operator CLI (RIB management).
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

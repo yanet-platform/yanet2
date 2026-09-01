@@ -11,7 +11,7 @@ use ync::{client::ConnectionArgs, output::CommonFormat};
 
 /// Pipeline operator CLI.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true, subcommand_required = true, arg_required_else_help = true)]
 pub struct Cmd {
     #[command(flatten)]

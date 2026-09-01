@@ -231,7 +231,7 @@ struct ShowConfig {
 
 /// ACL module CLI.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,

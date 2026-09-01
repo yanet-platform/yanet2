@@ -28,7 +28,7 @@ use crate::service::Balancer2Service;
 
 /// Balancer2 module CLI.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

@@ -10,6 +10,8 @@ export DEB_LDFLAGS_MAINT_APPEND = -fno-lto
 
 # Enable all hardening options
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+YANET_VERSION ?= $(DEB_VERSION)
+export YANET_VERSION
 
 # Pin the DWARF source path so it does not carry the package version.
 #

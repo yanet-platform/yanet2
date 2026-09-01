@@ -32,7 +32,7 @@ const SERVICE_NAME: &str = "objects.fwstate.controlplane.fwstatemappb.v1.FWState
 /// FWState-map CLI: manages the standalone fwstate-map objects module
 /// configs (fwstate sync, ACL) link by name.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

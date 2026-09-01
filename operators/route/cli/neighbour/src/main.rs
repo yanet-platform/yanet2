@@ -47,7 +47,7 @@ const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested t
 
 /// Neighbour operator CLI (neighbour table management).
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

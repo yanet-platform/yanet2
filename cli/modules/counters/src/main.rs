@@ -19,7 +19,7 @@ const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
 
 /// Counters module - displays counters information.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

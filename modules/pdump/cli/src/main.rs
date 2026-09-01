@@ -35,7 +35,7 @@ pub mod pdumppb {
 
 /// Pdump - packet dump module
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

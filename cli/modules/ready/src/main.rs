@@ -41,7 +41,7 @@ const READINESS_SERVICE: &str = "ReadinessService";
 /// discovered from the gateway registry, so neither the user nor the CLI has
 /// to keep a list of them.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     /// Readiness service to probe: either a fully-qualified gRPC service name

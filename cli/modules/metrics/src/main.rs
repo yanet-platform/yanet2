@@ -33,7 +33,7 @@ const NO_SERVICES: &str = "no metrics services are registered with the gateway";
 /// large payload, so naming none is a usage error whose hint lists the
 /// available services rather than dumping them all.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     /// Metrics service to probe: either a fully-qualified gRPC service name

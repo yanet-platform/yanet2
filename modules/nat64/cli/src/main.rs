@@ -34,7 +34,7 @@ const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested c
 
 /// NAT64 module CLI.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]

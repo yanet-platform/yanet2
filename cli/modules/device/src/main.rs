@@ -20,7 +20,7 @@ const DEVICE_SERVICE: &str = "controlplane.ynpb.v1.DeviceService";
 /// Device list module - displays all configured devices with their registry
 /// indices.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[command(flatten)]
