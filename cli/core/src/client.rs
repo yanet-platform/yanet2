@@ -39,6 +39,7 @@ use tower::Layer;
 
 use crate::{
     auth::{self, interceptor::AuthService, AuthArgs},
+    config::{self, Settings},
     errors::{root_cause, Error},
     timeout::{TimeoutLayer, TimeoutService},
 };
@@ -58,28 +59,18 @@ pub struct TlsArgs {
     #[arg(long, global = true, env = "YANET_CA", value_name = "PATH")]
     pub ca: Option<PathBuf>,
     /// PEM client certificate chain for mutual TLS.
-    #[arg(
-        long,
-        global = true,
-        env = "YANET_CLIENT_CERT",
-        value_name = "PATH",
-        requires = "client_key"
-    )]
+    ///
+    /// The configuration file may supply the matching key.
+    #[arg(long, global = true, env = "YANET_CLIENT_CERT", value_name = "PATH")]
     pub client_cert: Option<PathBuf>,
     /// PEM client private key for mutual TLS.
-    #[arg(
-        long,
-        global = true,
-        env = "YANET_CLIENT_KEY",
-        value_name = "PATH",
-        requires = "client_cert"
-    )]
+    #[arg(long, global = true, env = "YANET_CLIENT_KEY", value_name = "PATH")]
     pub client_key: Option<PathBuf>,
 }
 
-impl TlsArgs {
-    fn is_configured(&self) -> bool {
-        self.ca.is_some() || self.client_cert.is_some() || self.client_key.is_some()
+impl Settings {
+    fn tls_configured(&self) -> bool {
+        self.ca.value.is_some() || self.client_cert.value.is_some() || self.client_key.value.is_some()
     }
 }
 
@@ -88,9 +79,16 @@ impl TlsArgs {
 /// Embed this in your module's `Cmd` struct with `#[command(flatten)]`.
 #[derive(Debug, Clone, clap::Args)]
 pub struct ConnectionArgs {
-    /// Gateway endpoint using grpc://, grpcs://, or unix://.
-    #[arg(long, default_value = "grpc://[::1]:8080", global = true, env = "YANET_ENDPOINT")]
-    pub endpoint: String,
+    /// Gateway endpoint (grpc://, grpcs://, or unix://) or an alias from the
+    /// configuration file.
+    ///
+    /// Falls back to the `endpoint` key of the configuration file,
+    /// /etc/yanet2/cli.yaml merged with $XDG_CONFIG_HOME/yanet2/cli.yaml
+    /// (~/.config by default) or the single file named by YANET_CONFIG,
+    /// then to grpc://[::1]:8080. A value without :// is an alias from
+    /// the file's `endpoints:` map.
+    #[arg(long, global = true, env = "YANET_ENDPOINT")]
+    pub endpoint: Option<String>,
     /// Authentication options.
     #[command(flatten)]
     pub auth: AuthArgs,
@@ -98,7 +96,8 @@ pub struct ConnectionArgs {
     pub tls: TlsArgs,
     /// Time budget in seconds for connecting and for each request.
     ///
-    /// Long-lived streams are bounded only while being established.
+    /// Long-lived streams are bounded only while being established. Falls
+    /// back to the `timeout` key of the configuration file.
     #[arg(long, global = true, env = "YANET_TIMEOUT", value_name = "SECONDS", value_parser = parse_timeout)]
     pub timeout: Option<Duration>,
 }
@@ -109,6 +108,13 @@ fn parse_timeout(value: &str) -> Result<Duration, String> {
         .parse()
         .map_err(|_| "expected a positive number of seconds".to_owned())?;
 
+    timeout_from_seconds(seconds)
+}
+
+/// Converts a positive, possibly fractional, number of seconds into a
+/// [`Duration`], the shared rule behind [`parse_timeout`] and the file's
+/// `timeout` key.
+pub(crate) fn timeout_from_seconds(seconds: f64) -> Result<Duration, String> {
     if !seconds.is_finite() || seconds <= 0.0 {
         return Err("expected a positive number of seconds".to_owned());
     }
@@ -142,28 +148,32 @@ pub enum ConnectionError {
     Auth(#[from] auth::AuthError),
     #[error("connect timed out after {}s", .0.as_secs_f64())]
     Timeout(Duration),
+    #[error("{0}")]
+    Config(#[from] config::Error),
 }
 
 /// Rejects TLS material before any plaintext transport can use it.
-fn build_endpoint(args: &ConnectionArgs) -> Result<Endpoint, ConnectionError> {
-    match args.endpoint.split_once("://") {
-        Some(("grpcs", address)) => {
-            let endpoint = Channel::from_shared(format!("https://{address}"))?;
-            let tls = build_tls_config(&args.tls)?;
+fn build_endpoint(settings: &Settings) -> Result<Endpoint, ConnectionError> {
+    let endpoint = &settings.endpoint.value;
 
-            endpoint.tls_config(tls).map_err(ConnectionError::TlsConfig)
+    match endpoint.split_once("://") {
+        Some(("grpcs", address)) => {
+            let channel = Channel::from_shared(format!("https://{address}"))?;
+            let tls = build_tls_config(settings)?;
+
+            channel.tls_config(tls).map_err(ConnectionError::TlsConfig)
         }
-        Some(("grpc" | "unix", ..)) if args.tls.is_configured() => Err(ConnectionError::TlsOptionsWithoutTls),
-        Some(("grpc", ..)) => Channel::from_shared(args.endpoint.clone()).map_err(ConnectionError::InvalidUri),
-        Some(("unix", ..)) => Endpoint::from_shared(args.endpoint.clone()).map_err(ConnectionError::Transport),
+        Some(("grpc" | "unix", ..)) if settings.tls_configured() => Err(ConnectionError::TlsOptionsWithoutTls),
+        Some(("grpc", ..)) => Channel::from_shared(endpoint.clone()).map_err(ConnectionError::InvalidUri),
+        Some(("unix", ..)) => Endpoint::from_shared(endpoint.clone()).map_err(ConnectionError::Transport),
         Some((scheme, ..)) => Err(ConnectionError::InvalidEndpointScheme(scheme.to_owned())),
         None => Err(ConnectionError::InvalidEndpointScheme("<missing>".to_owned())),
     }
 }
 
 /// Uses native roots unless an explicit CA bundle replaces them.
-fn build_tls_config(args: &TlsArgs) -> Result<ClientTlsConfig, ConnectionError> {
-    let identity = match (&args.client_cert, &args.client_key) {
+fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionError> {
+    let identity = match (&settings.client_cert.value, &settings.client_key.value) {
         (Some(cert), Some(key)) => Some(Identity::from_pem(
             read_tls_file(cert, "client certificate")?,
             read_tls_file(key, "client key")?,
@@ -172,7 +182,7 @@ fn build_tls_config(args: &TlsArgs) -> Result<ClientTlsConfig, ConnectionError> 
         (..) => return Err(ConnectionError::IncompleteClientIdentity),
     };
 
-    let mut tls = match &args.ca {
+    let mut tls = match &settings.ca.value {
         Some(path) => {
             ClientTlsConfig::new().ca_certificate(Certificate::from_pem(read_tls_file(path, "CA certificate bundle")?))
         }
@@ -191,27 +201,60 @@ fn read_tls_file(path: &Path, kind: &'static str) -> Result<Vec<u8>, ConnectionE
     fs::read(path).map_err(|source| ConnectionError::TlsFile { kind, path: path.to_owned(), source })
 }
 
-/// Connect to the endpoint with all interceptors pre-applied.
+/// Connects with all interceptors pre-applied, given an already-resolved
+/// [`Settings`].
 ///
-/// When `args.timeout` is set, it bounds channel establishment and auth
-/// setup together, then rides along as the per-request budget of the
-/// returned channel.
-pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
-    let establish = async {
-        let channel = build_endpoint(args)?.connect().await?;
-        let auth = auth::create_layer(&args.auth).await?;
+/// When the resolved timeout is set, it bounds channel establishment and
+/// auth setup together, then rides along as the per-request budget of the
+/// returned channel. Resolution stays the caller's job so that a transport
+/// failure can still be blamed on the alias and URI that were actually
+/// resolved, rather than losing that context to a fresh, potentially
+/// different resolution.
+async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionError> {
+    // Checked before any I/O, like the TLS/identity checks in
+    // `build_endpoint`: a missing cert tag must not cost a round trip or
+    // get masked by an unrelated transport failure.
+    let resolved_auth = settings.resolved_auth()?;
+
+    let attempt = async {
+        let channel = build_endpoint(settings)?.connect().await?;
+        let auth = auth::create_layer(resolved_auth).await?;
 
         Ok::<_, ConnectionError>(auth.layer(channel))
     };
 
-    let auth_service = match args.timeout {
-        Some(budget) => tokio::time::timeout(budget, establish)
+    let auth_service = match settings.timeout.value {
+        Some(budget) => tokio::time::timeout(budget, attempt)
             .await
             .map_err(|_| ConnectionError::Timeout(budget))??,
-        None => establish.await?,
+        None => attempt.await?,
     };
 
-    Ok(TimeoutLayer::new(args.timeout).layer(auth_service))
+    Ok(TimeoutLayer::new(settings.timeout.value).layer(auth_service))
+}
+
+/// Resolves the label for an error raised before any RPC is attempted.
+///
+/// Runs the same resolution [`connect`] runs, without opening a connection:
+/// a bad file or an unknown alias becomes the same [`Error`] here as it
+/// would from [`Connection::connect_for`], so a configuration mistake exits
+/// the same way regardless of where the command first needs an endpoint to
+/// reject something.
+// The siblings returning the same `Error` are all `async fn`, whose
+// desugared `Future` output hides the `Result` from this lint.
+#[allow(clippy::result_large_err)]
+pub fn resolve_label(args: &ConnectionArgs, action: &str) -> Result<String, Error> {
+    config::resolve(args, &config::Sources::from_process_env())
+        .map(|settings| settings.label())
+        .map_err(|err| Error::from_config(err, action, args.endpoint.clone()))
+}
+
+/// Resolves the configuration, then connects with all interceptors
+/// pre-applied.
+pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
+    let settings = config::resolve(args, &config::Sources::from_process_env())?;
+
+    establish(&settings).await
 }
 
 /// An established, authenticated channel to one endpoint.
@@ -225,7 +268,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Establish the authenticated channel to `args.endpoint`.
+    /// Resolve the target and establish an authenticated channel to it.
     pub async fn connect(args: &ConnectionArgs) -> Result<Self, Error> {
         Self::connect_for(args, "connect").await
     }
@@ -239,14 +282,31 @@ impl Connection {
     /// that one connection: a connect failure must read the same as an RPC
     /// failure of the same command.
     pub async fn connect_for(args: &ConnectionArgs, action: &str) -> Result<Self, Error> {
-        let channel = connect(args)
-            .await
-            .map_err(|err| Error::from_connection(err, action, &args.endpoint))?;
+        let settings = config::resolve(args, &config::Sources::from_process_env())
+            .map_err(|err| Error::from_config(err, action, args.endpoint.clone()))?;
 
-        Ok(Self {
-            channel,
-            endpoint: args.endpoint.clone(),
-        })
+        Self::connect_settings(&settings, action).await
+    }
+
+    /// Establish the channel from an already-resolved [`Settings`], blaming
+    /// a failure on `action`.
+    ///
+    /// For a caller that has its own reason to resolve first (to reuse the
+    /// resolved label, say) rather than resolving twice via
+    /// [`Connection::connect_for`].
+    pub async fn connect_settings(settings: &Settings, action: &str) -> Result<Self, Error> {
+        let endpoint = settings.label();
+
+        establish(settings)
+            .await
+            .map(|channel| Self { channel, endpoint: endpoint.clone() })
+            .map_err(|err| Error::from_connection(err, action, endpoint))
+    }
+
+    /// The resolved endpoint this connection reached: `<alias> (<uri>)`
+    /// when an alias was used, the bare URI otherwise.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
     }
 
     /// Invoke a unary RPC on an arbitrary gRPC service over this connection.
@@ -531,9 +591,10 @@ mod test {
     };
     use tonic_health::pb::{health_client::HealthClient, HealthCheckRequest};
 
-    use super::{connect, parse_timeout, ConnectionArgs, ConnectionError, Service, TlsArgs};
+    use super::{connect, establish, parse_timeout, ConnectionArgs, ConnectionError, Service, TlsArgs};
     use crate::{
         auth::{AuthArgs, AuthMethod},
+        config,
         errors::{Error, ErrorKind},
     };
 
@@ -592,8 +653,11 @@ mod test {
     /// Test connections omit application auth and share a two-second deadline.
     fn tls_connection_args(endpoint: String, tls: TlsArgs) -> ConnectionArgs {
         ConnectionArgs {
-            endpoint,
-            auth: AuthArgs { auth: AuthMethod::None },
+            endpoint: Some(endpoint),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::None),
+                cert_tag: None,
+            },
             tls,
             timeout: Some(Duration::from_secs(2)),
         }
@@ -601,15 +665,16 @@ mod test {
 
     /// A successful probe proves the transport reached an authenticated RPC.
     async fn check_tls_health(args: &ConnectionArgs) -> Result<(), Error> {
+        let endpoint = args.endpoint.clone().unwrap_or_default();
         let channel = connect(args)
             .await
-            .map_err(|err| Error::from_connection(err, "check", &args.endpoint))?;
+            .map_err(|err| Error::from_connection(err, "check", &endpoint))?;
         let mut client = HealthClient::new(channel);
 
         client
             .check(HealthCheckRequest::default())
             .await
-            .map_err(|status| Error::from_status(status, "check", &args.endpoint, "grpc.health.v1.Health"))?;
+            .map_err(|status| Error::from_status(status, "check", &endpoint, "grpc.health.v1.Health"))?;
 
         Ok(())
     }
@@ -643,8 +708,11 @@ mod test {
         let _plugged = TcpStream::connect(("127.0.0.1", port)).unwrap();
 
         let args = ConnectionArgs {
-            endpoint: format!("grpc://127.0.0.1:{port}"),
-            auth: AuthArgs { auth: AuthMethod::None },
+            endpoint: Some(format!("grpc://127.0.0.1:{port}")),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::None),
+                cert_tag: None,
+            },
             tls: TlsArgs::default(),
             timeout: Some(Duration::from_millis(200)),
         };
@@ -663,8 +731,11 @@ mod test {
     #[tokio::test]
     async fn test_connect_rejects_unknown_endpoint_scheme_before_io() {
         let args = ConnectionArgs {
-            endpoint: "https://127.0.0.1:9".to_owned(),
-            auth: AuthArgs { auth: AuthMethod::None },
+            endpoint: Some("https://127.0.0.1:9".to_owned()),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::None),
+                cert_tag: None,
+            },
             tls: TlsArgs {
                 ca: Some("missing.pem".into()),
                 ..TlsArgs::default()
@@ -680,8 +751,11 @@ mod test {
     #[tokio::test]
     async fn test_connect_rejects_tls_options_for_plaintext_endpoint_before_io() {
         let args = ConnectionArgs {
-            endpoint: "grpc://127.0.0.1:9".to_owned(),
-            auth: AuthArgs { auth: AuthMethod::None },
+            endpoint: Some("grpc://127.0.0.1:9".to_owned()),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::None),
+                cert_tag: None,
+            },
             tls: TlsArgs {
                 ca: Some("missing.pem".into()),
                 ..TlsArgs::default()
@@ -697,8 +771,11 @@ mod test {
     #[tokio::test]
     async fn test_connect_rejects_incomplete_client_identity_before_io() {
         let args = ConnectionArgs {
-            endpoint: "grpcs://127.0.0.1:9".to_owned(),
-            auth: AuthArgs { auth: AuthMethod::None },
+            endpoint: Some("grpcs://127.0.0.1:9".to_owned()),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::None),
+                cert_tag: None,
+            },
             tls: TlsArgs {
                 client_cert: Some("missing.pem".into()),
                 ..TlsArgs::default()
@@ -709,6 +786,33 @@ mod test {
         let err = connect(&args).await.err().unwrap();
 
         assert!(matches!(err, ConnectionError::IncompleteClientIdentity));
+    }
+
+    #[tokio::test]
+    async fn test_connect_rejects_sshcert_without_tag_before_io() {
+        let args = ConnectionArgs {
+            endpoint: Some("grpc://127.0.0.1:9".to_owned()),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::Sshcert),
+                cert_tag: None,
+            },
+            tls: TlsArgs::default(),
+            timeout: None,
+        };
+        // A real `~/.config/yanet2/cli.yaml` or `/etc/yanet2/cli.yaml`
+        // could supply `cert_tag` and mask this on a developer machine, so
+        // resolve against locations guaranteed not to exist instead of the
+        // real ones `connect` would consult.
+        let sources = config::Sources {
+            system_path: PathBuf::from("/nonexistent/yanet-cli-test/system.yaml"),
+            user_path: None,
+            config_override: None,
+        };
+        let settings = config::resolve(&args, &sources).unwrap();
+
+        let err = establish(&settings).await.err().unwrap();
+
+        assert!(matches!(err, ConnectionError::Config(config::Error::MissingCertTag)));
     }
 
     #[tokio::test]

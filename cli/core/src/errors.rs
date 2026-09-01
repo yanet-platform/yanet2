@@ -11,7 +11,7 @@ use core::fmt::{self, Display, Formatter};
 
 use tonic::{Code, Status};
 
-use crate::client::ConnectionError;
+use crate::{client::ConnectionError, config};
 
 /// Category of a CLI-level error, derived from the underlying `tonic::Code`
 /// or transport failure.
@@ -151,6 +151,7 @@ impl Error {
                 ErrorKind::Connection,
                 Some("verify the endpoint is reachable and the gateway is up".to_owned()),
             ),
+            ConnectionError::Config(ref config_err) => (ErrorKind::InvalidArgument, config_error_hint(config_err)),
         };
 
         Self {
@@ -158,6 +159,29 @@ impl Error {
             kind,
             message,
             endpoint: Some(endpoint),
+            service: None,
+            hint,
+            raw_code: None,
+            raw_message: None,
+        }
+    }
+
+    /// Build an [`Error`] straight from a [`config::Error`], without the
+    /// endpoint a call site has no real value for.
+    ///
+    /// Pass `None` when nothing was ever typed for the endpoint, such as an
+    /// unreadable or malformed file. Pass `args.endpoint.clone()` otherwise,
+    /// since even an alias that turned out unknown is worth showing.
+    pub fn from_config(err: config::Error, action: impl Into<String>, endpoint: Option<String>) -> Self {
+        let action = action.into();
+        let message = err.to_string();
+        let hint = config_error_hint(&err);
+
+        Self {
+            action,
+            kind: ErrorKind::InvalidArgument,
+            message,
+            endpoint,
             service: None,
             hint,
             raw_code: None,
@@ -294,6 +318,25 @@ pub fn root_cause<'a>(err: &'a (dyn core::error::Error + 'static)) -> &'a (dyn c
     }
 
     err
+}
+
+/// Builds the hint for a [`ConnectionError::Config`] failure.
+///
+/// The message of [`config::Error::UnknownAlias`] already lists the known
+/// aliases, so no separate hint is needed there. A file-reading or -parsing
+/// failure adds one naming the offending path.
+fn config_error_hint(err: &config::Error) -> Option<String> {
+    match err {
+        config::Error::Read { path, .. }
+        | config::Error::Parse { path, .. }
+        | config::Error::InvalidTimeout { path, .. } => {
+            Some(format!("check the configuration file at {}", path.display()))
+        }
+        config::Error::SectionMissingEndpoint { path, .. } => {
+            Some(format!("add an \"endpoint\" key to that alias in {}", path.display()))
+        }
+        config::Error::UnknownAlias { .. } | config::Error::AliasChain { .. } | config::Error::MissingCertTag => None,
+    }
 }
 
 /// Build a default hint for the given error kind.

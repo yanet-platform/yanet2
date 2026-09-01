@@ -47,6 +47,14 @@ pub trait Dispatch {
     fn on_empty_namespace(&self, _namespace: &str, modules: &HashSet<String>) -> i32 {
         self.on_empty_subcommand(modules)
     }
+    /// Names `cmd` registers as its own built-in subcommands.
+    ///
+    /// Removed from the discovered module set everywhere it is used, so a
+    /// stray binary of that name on `PATH` cannot collide with, or receive
+    /// completion requests meant for, the built-in subcommand.
+    fn reserved(&self) -> &[&'static str] {
+        &[]
+    }
 }
 
 fn search_paths() -> Vec<PathBuf> {
@@ -186,6 +194,16 @@ fn filter_namespaced(modules: &HashSet<String>, namespaces: &[Namespace]) -> Has
         .collect()
 }
 
+/// Removes names reserved by the dispatcher's own built-in subcommands
+/// (see [`Dispatch::reserved`]) from the discovered set.
+fn filter_reserved(modules: &HashSet<String>, reserved: &[&str]) -> HashSet<String> {
+    modules
+        .iter()
+        .filter(|name| !reserved.contains(&name.as_str()))
+        .cloned()
+        .collect()
+}
+
 pub fn try_complete(name: &str, prefix: &str, behavior: &impl Dispatch) {
     if env::var_os("COMPLETE").is_none() {
         return;
@@ -193,7 +211,7 @@ pub fn try_complete(name: &str, prefix: &str, behavior: &impl Dispatch) {
 
     let raw = locate_modules(prefix).unwrap_or_default();
     let namespaces = behavior.namespaces();
-    let submodules = filter_namespaced(&raw, namespaces);
+    let submodules = filter_reserved(&filter_namespaced(&raw, namespaces), behavior.reserved());
     let args = env::args().collect::<Vec<_>>();
 
     // If args are ["<self>", "--", "<self>", "<module>", ..], forward the
@@ -278,7 +296,7 @@ pub fn dispatch(name: &str, prefix: &str, behavior: &impl Dispatch) -> ! {
 
     let namespaces = behavior.namespaces();
     let raw = locate_modules(prefix).unwrap_or_default();
-    let modules = filter_namespaced(&raw, namespaces);
+    let modules = filter_reserved(&filter_namespaced(&raw, namespaces), behavior.reserved());
 
     let matches = build_command(behavior, &modules, namespaces, prefix).get_matches();
 
@@ -360,4 +378,21 @@ fn collect_args(matches: &ArgMatches) -> Vec<std::ffi::OsString> {
         .get_raw("")
         .map(|v| v.map(|s| s.to_os_string()).collect::<Vec<_>>())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_filter_reserved_removes_a_reserved_name() {
+        let modules: HashSet<String> = ["config", "route", "ready"].into_iter().map(String::from).collect();
+
+        let filtered = filter_reserved(&modules, &["config"]);
+
+        assert_eq!(
+            ["route", "ready"].into_iter().map(String::from).collect::<HashSet<_>>(),
+            filtered
+        );
+    }
 }

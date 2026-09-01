@@ -187,7 +187,7 @@ mod test {
         name: String,
     }
 
-    fn recovered_endpoint(argv: &[&str]) -> String {
+    fn recovered_endpoint(argv: &[&str]) -> Option<String> {
         recover_connection_args(TestCmd::command, words(argv)).endpoint
     }
 
@@ -204,7 +204,7 @@ mod test {
             "",
         ]);
 
-        assert_eq!("grpc://example:1", endpoint);
+        assert_eq!(Some("grpc://example:1".to_owned()), endpoint);
     }
 
     #[test]
@@ -220,13 +220,19 @@ mod test {
             "",
         ]);
 
-        assert_eq!("grpc://example:1", endpoint);
+        assert_eq!(Some("grpc://example:1".to_owned()), endpoint);
     }
 
     #[test]
     fn falls_back_to_defaults_without_a_separator() {
-        let fallback = default_connection_args().endpoint;
+        // No `--` escape means there is no real argv to recover flags
+        // from, so a typed `--endpoint` here is simply never seen — unlike
+        // the same words placed after a separator, covered above. The
+        // fallback is `default_connection_args()`, not `None`, since it
+        // honours `YANET_ENDPOINT` when the process happens to export one.
+        let recovered = recovered_endpoint(&["completer", "--endpoint", "grpc://typed:1", "show", "--name", ""]);
 
-        assert_eq!(fallback, recovered_endpoint(&["completer", "show", "--name", ""]));
+        assert_eq!(default_connection_args().endpoint, recovered);
+        assert_ne!(Some("grpc://typed:1".to_owned()), recovered);
     }
 }

@@ -41,6 +41,11 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `Connection::connect_for(&cmd.connection, action).await?` once, then
   `Service::new(&connection, NAME, build)` per client. The action is the same
   user-facing verb passed to the command's RPC error mapping.
+- Connection settings resolve inside `ync`, from flags, environment and the
+  configuration file (`ync::config`). A CLI never reads
+  `cmd.connection.endpoint` itself. A pre-connect error label comes from
+  `client::resolve_label`, a post-connect one from `Service::endpoint()` /
+  `Connection::endpoint()`.
 - Every RPC: `self.service.client().<rpc>(request).await
   .map_err(self.service.status("<verb>"))?.into_inner()`.
 - Generated code: `#[allow(clippy::all, clippy::std_instead_of_core,

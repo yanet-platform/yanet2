@@ -130,7 +130,7 @@ async fn run(cmd: Cmd) -> Result<ExitCode, Error> {
         if is_blank(&name) {
             return Err(Error::invalid_argument(
                 "ready",
-                &cmd.connection.endpoint,
+                client::resolve_label(&cmd.connection, "ready")?,
                 "service name must not be empty",
             ));
         }
@@ -140,7 +140,7 @@ async fn run(cmd: Cmd) -> Result<ExitCode, Error> {
         let name = if name.contains('.') {
             name
         } else {
-            resolve_alias(&cmd, &connection, &name).await?
+            resolve_alias(&connection, &name).await?
         };
 
         run_service(&cmd, &connection, &name).await?
@@ -169,7 +169,7 @@ fn is_blank(name: &str) -> bool {
 /// do exist when the probe finds none under that name.
 async fn run_service(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool, Error> {
     let result = if cmd.watch {
-        run_watch(cmd, name).await.map(|()| true)
+        run_watch(cmd, connection, name).await.map(|()| true)
     } else {
         run_once(cmd, connection, name).await
     };
@@ -229,66 +229,66 @@ async fn run_once(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool
 /// the status block; each subsequent message carries only the scopes that
 /// changed and renders one append-only log line per scope. Returns `Ok(())`
 /// on clean stream close.
-async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
+async fn run_watch(cmd: &Cmd, connection: &Connection, name: &str) -> Result<(), Error> {
     let mut snapshot: BTreeMap<(String, String), Scope> = BTreeMap::new();
     let mut name_width: Option<usize> = None;
 
-    client::invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
-        &cmd.connection,
-        "ready",
-        name,
-        "Watch",
-        ReadyRequest { scopes: cmd.scopes.clone() },
-        |resp| {
-            output::data(
-                || &resp.scopes,
-                || {
-                    if resp.scopes.is_empty() {
-                        output::empty(format_args!("No scopes found for {name}."));
-                        return;
-                    }
-
-                    let mut scopes = resp.scopes.clone();
-                    scopes.sort_by(|a, b| a.name.cmp(&b.name));
-
-                    match name_width {
-                        None => {
-                            let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
-                            name_width = Some(width);
-
-                            for scope in &scopes {
-                                snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
-                            }
-
-                            render::print_status_block(
-                                name,
-                                &scopes,
-                                width,
-                                cmd.stale_multiple,
-                                SystemTime::now(),
-                                true,
-                            );
+    connection
+        .invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
+            "ready",
+            name,
+            "Watch",
+            ReadyRequest { scopes: cmd.scopes.clone() },
+            |resp| {
+                output::data(
+                    || &resp.scopes,
+                    || {
+                        if resp.scopes.is_empty() {
+                            output::empty(format_args!("No scopes found for {name}."));
+                            return;
                         }
-                        Some(width) => {
-                            for scope in &scopes {
-                                let transition = render::record_transition(&mut snapshot, name, scope);
 
-                                if transition != render::Transition::Unchanged {
-                                    render::print_transition_line(
-                                        render::ServiceColumn::None,
-                                        scope,
-                                        width,
-                                        transition,
-                                    );
+                        let mut scopes = resp.scopes.clone();
+                        scopes.sort_by(|a, b| a.name.cmp(&b.name));
+
+                        match name_width {
+                            None => {
+                                let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
+                                name_width = Some(width);
+
+                                for scope in &scopes {
+                                    snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
+                                }
+
+                                render::print_status_block(
+                                    name,
+                                    &scopes,
+                                    width,
+                                    cmd.stale_multiple,
+                                    SystemTime::now(),
+                                    true,
+                                );
+                            }
+                            Some(width) => {
+                                for scope in &scopes {
+                                    let transition = render::record_transition(&mut snapshot, name, scope);
+
+                                    if transition != render::Transition::Unchanged {
+                                        render::print_transition_line(
+                                            render::ServiceColumn::None,
+                                            scope,
+                                            width,
+                                            transition,
+                                        );
+                                    }
                                 }
                             }
                         }
-                    }
-                },
-            );
-        },
-    )
-    .await
+                    },
+                );
+            },
+        )
+        .await
 }
 
 /// Probes every discovered readiness service over one shared connection.
@@ -423,9 +423,9 @@ fn print_missing(missing: &[&str]) {
 /// gateway's own answer would map to, so that a monitoring script gets one exit
 /// code for both spellings of the condition. An ambiguous alias, in contrast,
 /// really is bad input.
-async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Result<String, Error> {
+async fn resolve_alias(connection: &Connection, alias: &str) -> Result<String, Error> {
     let services = discovery::list_services(connection, READINESS_SERVICE).await?;
-    let endpoint = &cmd.connection.endpoint;
+    let endpoint = connection.endpoint();
 
     match discovery::resolve_alias(alias, &services) {
         Resolution::Resolved(name) => Ok(name),

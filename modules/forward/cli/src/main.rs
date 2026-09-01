@@ -9,7 +9,7 @@ use forwardpb::{
 use serde::{Deserialize, Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{self, ConnectionArgs, LayeredChannel, Service},
     completion,
     errors::Error,
     output::{self, CommonFormat},
@@ -295,9 +295,9 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     // gateway.
     let update = match &cmd.mode {
         ModeCmd::Update(update) => {
-            let endpoint = cmd.connection.endpoint.as_str();
-            let mut request =
-                load_request(&update.file).map_err(|e| Error::invalid_argument("update", endpoint, e.to_string()))?;
+            let endpoint = client::resolve_label(&cmd.connection, action)?;
+            let mut request = load_request(&update.file)
+                .map_err(|e| Error::invalid_argument("update", endpoint.clone(), e.to_string()))?;
             bind_request_name(&mut request, &update.config)
                 .map_err(|e| Error::invalid_argument("update", endpoint, e))?;
             Some(request)

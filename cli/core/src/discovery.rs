@@ -16,6 +16,7 @@ use ynpb::pb::{gateway_client::GatewayClient, ListServicesRequest};
 
 use crate::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    config,
     errors::{Error, ErrorKind},
 };
 
@@ -178,8 +179,16 @@ pub fn alias_map(services: &[String]) -> BTreeMap<String, String> {
 /// Discovery the user asked for runs over the [`Connection`] the probe
 /// already established and is deliberately unbounded.
 pub async fn discover_within(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Result<Vec<String>, Error> {
+    // Resolved once, up front, and reused by both the connect attempt and
+    // the timeout arm: a bad file or an unknown alias is a config error
+    // reported as such, and the label must not shift, or the file be read
+    // twice, between the attempt and a timeout.
+    let settings = config::resolve(args, &config::Sources::from_process_env())
+        .map_err(|err| Error::from_config(err, "discover", args.endpoint.clone()))?;
+    let endpoint = settings.label();
+
     let lookup = async {
-        let connection = Connection::connect(args).await?;
+        let connection = Connection::connect_settings(&settings, "discover").await?;
 
         list_services(&connection, suffix).await
     };
@@ -190,7 +199,7 @@ pub async fn discover_within(args: &ConnectionArgs, suffix: &str, budget: Durati
             let formatted_budget = humantime::format_duration(budget);
             let message = format!("gateway did not answer within {formatted_budget}");
 
-            Err(Error::new(ErrorKind::Unavailable, "discover", &args.endpoint, message))
+            Err(Error::new(ErrorKind::Unavailable, "discover", endpoint, message))
         }
     }
 }

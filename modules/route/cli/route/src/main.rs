@@ -759,8 +759,11 @@ entries:
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         let connection = ConnectionArgs {
-            endpoint: format!("grpc://127.0.0.1:{port}"),
-            auth: AuthArgs { auth: AuthMethod::None },
+            endpoint: Some(format!("grpc://127.0.0.1:{port}")),
+            auth: AuthArgs {
+                auth: Some(AuthMethod::None),
+                cert_tag: None,
+            },
             tls: TlsArgs::default(),
             timeout: None,
         };

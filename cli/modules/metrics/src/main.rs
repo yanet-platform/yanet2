@@ -5,7 +5,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, MetricTag, metric::Value};
 use tabled::Tabled;
 use ync::{
-    client::{Connection, ConnectionArgs},
+    client::{self, Connection, ConnectionArgs},
     completion,
     discovery::{self, Resolution},
     errors::{Error, ErrorKind},
@@ -26,7 +26,7 @@ const NO_SERVICES: &str = "no metrics services are registered with the gateway";
 /// Connects to the gateway and invokes `/<FQN>/GetMetrics` using tonic's
 /// low-level dynamic dispatcher with the shared `commonpb` message types. No
 /// per-service generated client is needed. The service to probe is resolved
-/// against the gateway registry; a single service's metrics can already be a
+/// against the gateway registry. A single service's metrics can already be a
 /// large payload, so naming none is a usage error whose hint lists the
 /// available services rather than dumping them all.
 #[derive(Debug, Clone, Parser)]
@@ -74,10 +74,12 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         return Err(require_service(&cmd).await);
     };
 
+    let endpoint = client::resolve_label(&cmd.connection, "metrics")?;
+
     if is_blank(&name) {
         return Err(Error::invalid_argument(
             "metrics",
-            &cmd.connection.endpoint,
+            endpoint.clone(),
             "service name must not be empty",
         ));
     }
@@ -87,14 +89,14 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         .iter()
         .map(|entry| parse_tag(entry))
         .collect::<Result<Vec<_>, String>>()
-        .map_err(|message| Error::invalid_argument("metrics", &cmd.connection.endpoint, message))?;
+        .map_err(|message| Error::invalid_argument("metrics", endpoint, message))?;
 
     let connection = Connection::connect_for(&cmd.connection, "metrics").await?;
 
     let name = if name.contains('.') {
         name
     } else {
-        resolve_alias(&cmd, &connection, &name).await?
+        resolve_alias(&connection, &name).await?
     };
 
     run_probe(&connection, &name, tags).await
@@ -135,7 +137,11 @@ fn is_blank(name: &str) -> bool {
 /// or slower than the budget simply leaves the error hintless, since the
 /// usage mistake stands on its own.
 async fn require_service(cmd: &Cmd) -> Error {
-    let err = Error::invalid_argument("metrics", &cmd.connection.endpoint, "no metrics service specified");
+    let endpoint = match client::resolve_label(&cmd.connection, "metrics") {
+        Ok(endpoint) => endpoint,
+        Err(err) => return err,
+    };
+    let err = Error::invalid_argument("metrics", endpoint, "no metrics service specified");
 
     match discovery::discover_within(&cmd.connection, METRICS_SERVICE, discovery::DISCOVERY_TIMEOUT).await {
         Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
@@ -213,9 +219,9 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
 /// gateway's own answer would map to, so that a monitoring script gets one
 /// exit code for both spellings of the condition. An ambiguous alias, in
 /// contrast, really is bad input.
-async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Result<String, Error> {
+async fn resolve_alias(connection: &Connection, alias: &str) -> Result<String, Error> {
     let services = discovery::list_services(connection, METRICS_SERVICE).await?;
-    let endpoint = &cmd.connection.endpoint;
+    let endpoint = connection.endpoint();
 
     match discovery::resolve_alias(alias, &services) {
         Resolution::Resolved(name) => Ok(name),

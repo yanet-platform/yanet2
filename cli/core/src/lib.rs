@@ -9,6 +9,7 @@ use crate::{errors::Error, output::Format};
 pub mod auth;
 pub mod client;
 pub mod completion;
+pub mod config;
 pub mod discovery;
 pub mod dispatcher;
 pub mod display;

@@ -14,16 +14,13 @@ pub mod interceptor;
 pub mod token;
 
 use clap::ValueEnum;
+use serde::Deserialize;
 
 pub use self::interceptor::AuthLayer;
 
-/// Default certificate tag to match in the SSH agent.
-///
-/// TODO: from config.
-const DEFAULT_CERT_TAG: &str = ":insecure:";
-
 /// Supported authentication methods.
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
     None,
     /// SSH certificate authentication via ssh-agent.
@@ -36,8 +33,17 @@ pub enum AuthMethod {
 #[derive(Debug, Clone, clap::Args)]
 pub struct AuthArgs {
     /// Authentication method.
-    #[arg(long, default_value = "none", global = true)]
-    pub auth: AuthMethod,
+    ///
+    /// Falls back to the `auth` key of the configuration file, then to
+    /// `none`.
+    #[arg(long, global = true, env = "YANET_AUTH")]
+    pub auth: Option<AuthMethod>,
+    /// Substring matched against a certificate's key id to select it from
+    /// the SSH agent, required when `--auth sshcert` is in effect.
+    ///
+    /// Falls back to the `cert_tag` key of the configuration file.
+    #[arg(long, global = true, env = "YANET_CERT_TAG")]
+    pub cert_tag: Option<String>,
 }
 
 /// Error type for layer creation.
@@ -47,13 +53,21 @@ pub enum AuthError {
     Agent(#[from] agent::AgentError),
 }
 
-/// Create a tower layer based on the CLI auth arguments.
-pub async fn create_layer(args: &AuthArgs) -> Result<AuthLayer, AuthError> {
-    match args.auth {
-        AuthMethod::None => Ok(AuthLayer::nop()),
-        AuthMethod::Sshcert => {
-            let layer = AuthLayer::from_agent(DEFAULT_CERT_TAG).await?;
-            Ok(layer)
-        }
+/// A method together with the identity it authenticates as.
+///
+/// Unlike [`AuthMethod`] alone, an `Sshcert` value here always carries its
+/// tag. [`crate::config::Settings::resolved_auth`] checks for a missing one
+/// at connect time, so [`create_layer`] never sees an `Sshcert` without one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedAuth {
+    None,
+    Sshcert { tag: String },
+}
+
+/// Create a tower layer for a resolved authentication method.
+pub async fn create_layer(auth: ResolvedAuth) -> Result<AuthLayer, AuthError> {
+    match auth {
+        ResolvedAuth::None => Ok(AuthLayer::nop()),
+        ResolvedAuth::Sshcert { tag } => Ok(AuthLayer::from_agent(&tag).await?),
     }
 }
