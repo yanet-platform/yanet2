@@ -21,6 +21,7 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -86,8 +87,11 @@ func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
 
 // ValidateDeviceName rejects a name the C-side fixed-size device name
-// buffer cannot round-trip without silent truncation.
+// buffer cannot round-trip: one with a NUL byte, or one that does not fit.
 func ValidateDeviceName(name string) error {
+	if strings.ContainsRune(name, 0) {
+		return fmt.Errorf("name contains a NUL byte")
+	}
 	if len(name) > MaxDeviceNameLen-1 {
 		return fmt.Errorf("name is %d bytes, exceeds the %d-byte limit", len(name), MaxDeviceNameLen-1)
 	}

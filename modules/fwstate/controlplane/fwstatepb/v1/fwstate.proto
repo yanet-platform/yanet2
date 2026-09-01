@@ -69,7 +69,7 @@ message SyncConfig {
   // module's SyncConfig; fwstate ignores this field.
   common.commonpb.v1.MACAddress dst_ether = 2 [ deprecated = true ];
   common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address matched on incoming sync packets;
-  uint32 port_multicast = 4;                           // Multicast port. Required. Accepted range: 1..65535.
+  uint32 port_multicast = 4;                           // Multicast port. The applied config requires 1..65535. Zero keeps the current port on update.
   // Deprecated: the emission-side unicast destination moved to the ACL
   // module's SyncConfig; fwstate ignores this field.
   common.commonpb.v1.IPAddress dst_addr_unicast = 5 [ deprecated = true ];
