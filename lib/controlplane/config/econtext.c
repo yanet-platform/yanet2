@@ -475,7 +475,6 @@ chain_ectx_free(
 
 		module_ectx_free(cp_config_gen, module_ectx);
 	}
-
 	struct counter_storage *counter_storage =
 		ADDR_OF(&chain_ectx->counter_storage);
 	if (counter_storage != NULL) {
@@ -572,19 +571,6 @@ chain_ectx_create(
 		);
 		goto error;
 	}
-
-	SET_OFFSET_OF(
-		&chain_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_chain->counter_packet_pending_input, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&chain_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_chain->counter_packet_pending_output, counter_storage
-		)
-	);
 
 	for (uint64_t idx = 0; idx < cp_chain->length; ++idx) {
 		struct cp_module *cp_module = cp_config_gen_lookup_module(
@@ -783,39 +769,6 @@ function_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_in,
-		counter_get_value_handle(
-			cp_function->counter_packet_in, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_out,
-		counter_get_value_handle(
-			cp_function->counter_packet_out, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_drop,
-		counter_get_value_handle(
-			cp_function->counter_packet_drop, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_function->counter_packet_pending_input,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_function->counter_packet_pending_output,
-			counter_storage
-		)
-	);
-
 	uint64_t pos = 0;
 	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
 		struct cp_chain *cp_chain =
@@ -958,39 +911,6 @@ pipeline_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_in,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_in, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_out,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_out, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_drop,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_drop, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_pending_input,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_pending_output,
-			counter_storage
-		)
-	);
-
 	for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
 		struct cp_function *cp_function = cp_config_gen_lookup_function(
 			cp_config_gen, cp_pipeline->functions[idx].name
@@ -1103,54 +1023,6 @@ device_entry_ectx_create(
 
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
-
-	struct counter_storage *counter_storage =
-		ADDR_OF(&device_ectx->counter_storage);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_rx,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_rx, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_entry,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_entry, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_tx,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_tx, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_drop,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_drop, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_recirc_drop,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_recirc_drop,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_pending_input,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_pending_output,
-			counter_storage
-		)
-	);
 
 	struct pipeline_ectx **pipelines =
 		(struct pipeline_ectx **)memory_balloc(

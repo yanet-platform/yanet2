@@ -6,7 +6,11 @@ struct dp_config;
 struct dp_worker;
 struct packet_front;
 
+struct config_gen_ectx;
 struct device_ectx;
+
+void
+config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx);
 
 void
 device_ectx_process_input(

@@ -109,8 +109,14 @@ struct chain_module_ectx {
 struct chain_ectx {
 	struct cp_chain *cp_chain;
 	struct counter_storage *counter_storage;
-	struct counter_value_handle *counter_packet_pending_input;
-	struct counter_value_handle *counter_packet_pending_output;
+	// Absolute counterparts of the chain's counters, for the packet
+	// hot path.
+	//
+	// The publishing process derives them from the counter registry
+	// ids of the cp_chain and the chain's counter storage before the
+	// context is released to workers; they are zero until then.
+	struct counter_value_handle *abs_counter_packet_pending_input;
+	struct counter_value_handle *abs_counter_packet_pending_output;
 	uint64_t length;
 	struct packet_front schedule;
 	struct chain_module_ectx modules[];
@@ -118,11 +124,18 @@ struct chain_ectx {
 
 struct function_ectx {
 	struct cp_function *cp_function;
-	struct counter_value_handle *counter_packet_in;
-	struct counter_value_handle *counter_packet_out;
-	struct counter_value_handle *counter_packet_drop;
-	struct counter_value_handle *counter_packet_pending_input;
-	struct counter_value_handle *counter_packet_pending_output;
+	// Absolute counterparts of the function's counters, for the packet
+	// hot path.
+	//
+	// The publishing process derives them from the counter registry
+	// ids of the cp_function and the function's counter storage
+	// before the context is released to workers; they are zero until
+	// then.
+	struct counter_value_handle *abs_counter_packet_in;
+	struct counter_value_handle *abs_counter_packet_out;
+	struct counter_value_handle *abs_counter_packet_drop;
+	struct counter_value_handle *abs_counter_packet_pending_input;
+	struct counter_value_handle *abs_counter_packet_pending_output;
 	struct counter_storage *counter_storage;
 	uint64_t chain_count;
 	struct chain_ectx **chains;
@@ -132,11 +145,18 @@ struct function_ectx {
 
 struct pipeline_ectx {
 	struct cp_pipeline *cp_pipeline;
-	struct counter_value_handle *counter_packet_in;
-	struct counter_value_handle *counter_packet_out;
-	struct counter_value_handle *counter_packet_drop;
-	struct counter_value_handle *counter_packet_pending_input;
-	struct counter_value_handle *counter_packet_pending_output;
+	// Absolute counterparts of the pipeline's counters, for the packet
+	// hot path.
+	//
+	// The publishing process derives them from the counter registry
+	// ids of the cp_pipeline and the pipeline's counter storage
+	// before the context is released to workers; they are zero until
+	// then.
+	struct counter_value_handle *abs_counter_packet_in;
+	struct counter_value_handle *abs_counter_packet_out;
+	struct counter_value_handle *abs_counter_packet_drop;
+	struct counter_value_handle *abs_counter_packet_pending_input;
+	struct counter_value_handle *abs_counter_packet_pending_output;
 	struct counter_storage *counter_storage;
 	uint64_t length;
 	struct packet_front schedule;
@@ -163,6 +183,13 @@ struct device_entry_ectx {
 	uint8_t direction;
 	struct device_ectx *device_ectx;
 
+	// The entry's counters, as absolute addresses for the packet hot
+	// path.
+	//
+	// The publishing process derives them from the counter registry
+	// ids of the entry's controlplane counterpart and the device's
+	// counter storage before the context is released to workers; they
+	// are zero until then.
 	struct counter_value_handle *counter_packet_rx;
 	struct counter_value_handle *counter_packet_entry;
 	struct counter_value_handle *counter_packet_tx;

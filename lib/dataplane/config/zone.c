@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/pipeline/pipeline.h"
 
 struct dp_config *
 dp_config_nextk(struct dp_config *current, uint32_t k) {
@@ -76,6 +77,16 @@ dp_config_assign_worker_ectxs(
 		struct dp_worker *worker = ADDR_OF(workers + idx);
 		struct config_gen_ectx *expected =
 			cp_config_gen_worker_ectx(config_gen, idx);
+		// Derive the absolute counter pointers before the release
+		// store.
+		//
+		// The store pairs with the acquire load at the worker's
+		// round start, so the derived pointers are complete before
+		// any stage runs. The derivation is idempotent, so a worker
+		// already holding this context is unaffected.
+		if (expected != NULL) {
+			config_gen_ectx_resolve_counters(expected);
+		}
 		// Skip workers already holding the expected context: the
 		// release store exists for the switch, and re-issuing it on
 		// every assignment pass would make the field flap for

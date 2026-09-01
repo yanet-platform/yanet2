@@ -101,6 +101,162 @@ module_ectx_dp_config(struct module_ectx *module_ectx) {
 	return ADDR_OF(&cp_config_gen->dp_config);
 }
 
+static void
+chain_ectx_resolve_absolutes(struct chain_ectx *chain_ectx) {
+	struct cp_chain *cp_chain = ADDR_OF(&chain_ectx->cp_chain);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&chain_ectx->counter_storage);
+
+	chain_ectx->abs_counter_packet_pending_input = counter_get_value_handle(
+		cp_chain->counter_packet_pending_input, counter_storage
+	);
+	chain_ectx->abs_counter_packet_pending_output =
+		counter_get_value_handle(
+			cp_chain->counter_packet_pending_output, counter_storage
+		);
+}
+
+static void
+function_ectx_resolve_absolutes(struct function_ectx *function_ectx) {
+	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&function_ectx->counter_storage);
+
+	function_ectx->abs_counter_packet_in = counter_get_value_handle(
+		cp_function->counter_packet_in, counter_storage
+	);
+	function_ectx->abs_counter_packet_out = counter_get_value_handle(
+		cp_function->counter_packet_out, counter_storage
+	);
+	function_ectx->abs_counter_packet_drop = counter_get_value_handle(
+		cp_function->counter_packet_drop, counter_storage
+	);
+	function_ectx->abs_counter_packet_pending_input =
+		counter_get_value_handle(
+			cp_function->counter_packet_pending_input,
+			counter_storage
+		);
+	function_ectx->abs_counter_packet_pending_output =
+		counter_get_value_handle(
+			cp_function->counter_packet_pending_output,
+			counter_storage
+		);
+
+	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
+		chain_ectx_resolve_absolutes(ADDR_OF(chains + idx));
+	}
+}
+
+static void
+pipeline_ectx_resolve_absolutes(struct pipeline_ectx *pipeline_ectx) {
+	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&pipeline_ectx->counter_storage);
+
+	pipeline_ectx->abs_counter_packet_in = counter_get_value_handle(
+		cp_pipeline->counter_packet_in, counter_storage
+	);
+	pipeline_ectx->abs_counter_packet_out = counter_get_value_handle(
+		cp_pipeline->counter_packet_out, counter_storage
+	);
+	pipeline_ectx->abs_counter_packet_drop = counter_get_value_handle(
+		cp_pipeline->counter_packet_drop, counter_storage
+	);
+	pipeline_ectx->abs_counter_packet_pending_input =
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_pending_input,
+			counter_storage
+		);
+	pipeline_ectx->abs_counter_packet_pending_output =
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_pending_output,
+			counter_storage
+		);
+
+	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
+		function_ectx_resolve_absolutes(
+			ADDR_OF(pipeline_ectx->functions + idx)
+		);
+	}
+}
+
+static void
+device_entry_ectx_resolve_absolutes(
+	struct device_entry_ectx *entry_ectx,
+	struct cp_device_entry *cp_device_entry,
+	struct counter_storage *counter_storage
+) {
+	entry_ectx->counter_packet_rx = counter_get_value_handle(
+		cp_device_entry->counter_packet_rx, counter_storage
+	);
+	entry_ectx->counter_packet_entry = counter_get_value_handle(
+		cp_device_entry->counter_packet_entry, counter_storage
+	);
+	entry_ectx->counter_packet_tx = counter_get_value_handle(
+		cp_device_entry->counter_packet_tx, counter_storage
+	);
+	entry_ectx->counter_packet_drop = counter_get_value_handle(
+		cp_device_entry->counter_packet_drop, counter_storage
+	);
+	entry_ectx->counter_packet_recirc_drop = counter_get_value_handle(
+		cp_device_entry->counter_packet_recirc_drop, counter_storage
+	);
+	entry_ectx->counter_packet_pending_input = counter_get_value_handle(
+		cp_device_entry->counter_packet_pending_input, counter_storage
+	);
+	entry_ectx->counter_packet_pending_output = counter_get_value_handle(
+		cp_device_entry->counter_packet_pending_output, counter_storage
+	);
+
+	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
+	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
+		pipeline_ectx_resolve_absolutes(ADDR_OF(pipelines + idx));
+	}
+}
+
+// Derive the absolute counter pointers of every pipeline stage of the
+// execution context, resolved from the counter registry ids and the
+// stage counter storages.
+//
+// Runs in the dataplane process before the context is released to the
+// worker, and recomputes everything from controlplane-owned data, so a
+// re-run never corrupts a previous derivation.
+void
+config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
+	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
+		struct device_ectx *device_ectx =
+			ADDR_OF(&config_gen_ectx->devices[idx]);
+		if (device_ectx == NULL) {
+			continue;
+		}
+
+		struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+		struct counter_storage *counter_storage =
+			ADDR_OF(&device_ectx->counter_storage);
+
+		struct device_entry_ectx *input =
+			ADDR_OF(&device_ectx->input_pipelines);
+		if (input != NULL) {
+			device_entry_ectx_resolve_absolutes(
+				input,
+				ADDR_OF(&cp_device->input_pipelines),
+				counter_storage
+			);
+		}
+
+		struct device_entry_ectx *output =
+			ADDR_OF(&device_ectx->output_pipelines);
+		if (output != NULL) {
+			device_entry_ectx_resolve_absolutes(
+				output,
+				ADDR_OF(&cp_device->output_pipelines),
+				counter_storage
+			);
+		}
+	}
+}
+
 static inline void
 chain_ectx_process(
 	struct dp_worker *dp_worker,
@@ -126,12 +282,12 @@ chain_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&chain_ectx->counter_packet_pending_input),
+		chain_ectx->abs_counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front),
 		packet_front_pending_input_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&chain_ectx->counter_packet_pending_output),
+		chain_ectx->abs_counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front),
 		packet_front_pending_output_bytes(packet_front)
 	);
@@ -234,7 +390,7 @@ function_ectx_process(
 		packet_front_pending_output_bytes(packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_in),
+		function_ectx->abs_counter_packet_in,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -252,24 +408,24 @@ function_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_out),
+		function_ectx->abs_counter_packet_out,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_drop),
+		function_ectx->abs_counter_packet_drop,
 		packet_front_drop_count(packet_front) - drop_count,
 		packet_front_drop_bytes(packet_front) - drop_bytes
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_input),
+		function_ectx->abs_counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front) -
 			pending_input_count,
 		packet_front_pending_input_bytes(packet_front) -
 			pending_input_bytes
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_output),
+		function_ectx->abs_counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front) -
 			pending_output_count,
 		packet_front_pending_output_bytes(packet_front) -
@@ -285,7 +441,7 @@ pipeline_ectx_process(
 ) {
 	// Packets arrive in output list, count them before processing
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_in),
+		pipeline_ectx->abs_counter_packet_in,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -298,22 +454,22 @@ pipeline_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_out),
+		pipeline_ectx->abs_counter_packet_out,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_drop),
+		pipeline_ectx->abs_counter_packet_drop,
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_pending_input),
+		pipeline_ectx->abs_counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front),
 		packet_front_pending_input_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_pending_output),
+		pipeline_ectx->abs_counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front),
 		packet_front_pending_output_bytes(packet_front)
 	);
@@ -433,7 +589,7 @@ device_ectx_process_entry(
 	struct packet_front *packet_front
 ) {
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_rx),
+		entry_ectx->counter_packet_rx,
 		packet_front_input_count(packet_front),
 		packet_front_input_bytes(packet_front)
 	);
@@ -441,7 +597,7 @@ device_ectx_process_entry(
 	entry_ectx->handler(dp_worker, device_ectx, packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_entry),
+		entry_ectx->counter_packet_entry,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -449,22 +605,22 @@ device_ectx_process_entry(
 	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_tx),
+		entry_ectx->counter_packet_tx,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_drop),
+		entry_ectx->counter_packet_drop,
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_pending_input),
+		entry_ectx->counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front),
 		packet_front_pending_input_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_pending_output),
+		entry_ectx->counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front),
 		packet_front_pending_output_bytes(packet_front)
 	);

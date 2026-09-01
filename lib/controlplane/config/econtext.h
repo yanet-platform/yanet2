@@ -38,9 +38,9 @@ static inline void
 device_entry_ectx_count_recirc_drop(
 	struct device_entry_ectx *entry_ectx, const struct packet *packet
 ) {
-	uint64_t *counter = counter_handle_get_value(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_recirc_drop)
-	);
+	uint64_t *counter =
+		counter_handle_get_value(entry_ectx->counter_packet_recirc_drop
+		);
 	counter[0] += 1;
 	counter[1] += rte_pktmbuf_pkt_len(packet_to_mbuf(packet));
 }
