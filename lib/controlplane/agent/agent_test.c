@@ -23,6 +23,195 @@
 #define TEST_CP_MEMORY (1 << 20)
 #define TEST_STORAGE_SIZE (TEST_DP_MEMORY + TEST_CP_MEMORY)
 
+// Publish a worker array on the instance, mirroring the registration the
+// dataplane performs at startup.
+//
+// The array and the workers are allocated from the instance's own memory so
+// the relative pointers a reader follows resolve the same way they do in a
+// live segment.
+static int
+publish_workers(
+	struct dp_config *dp_config, const uint64_t *times, uint64_t count
+) {
+	struct dp_worker **workers = (struct dp_worker **)memory_balloc(
+		&dp_config->memory_context, sizeof(struct dp_worker *) * count
+	);
+	if (workers == NULL) {
+		return -1;
+	}
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		struct dp_worker *worker = (struct dp_worker *)memory_balloc(
+			&dp_config->memory_context, sizeof(struct dp_worker)
+		);
+		if (worker == NULL) {
+			return -1;
+		}
+
+		memset(worker, 0, sizeof(struct dp_worker));
+		worker->idx = idx;
+		worker->current_time = times[idx];
+		SET_OFFSET_OF(workers + idx, worker);
+	}
+
+	SET_OFFSET_OF(&dp_config->workers, workers);
+	dp_config->worker_count = count;
+	return 0;
+}
+
+// Initialise a storage segment and hand back its instance configuration.
+static int
+init_instance(void *storage, struct dp_config **dp_config) {
+	struct cp_config *cp_config = NULL;
+	int rc = dp_storage_init(
+		0,
+		0,
+		storage,
+		TEST_DP_MEMORY,
+		TEST_CP_MEMORY,
+		dp_config,
+		&cp_config
+	);
+	if (rc != 0) {
+		return -1;
+	}
+
+	(void)cp_config;
+	return 0;
+}
+
+// Verify that an instance whose workers have not run yet reports no time
+// rather than a value a caller could mistake for one.
+//
+// A caller that cannot tell "no time" from a time has no way to avoid
+// falling back to the host clock, which is the comparison this accessor
+// exists to remove.
+static int
+test_current_time_without_workers_reports_none() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	TEST_ASSERT(
+		init_instance(storage, &dp_config) == 0,
+		"dp_storage_init failed"
+	);
+
+	uint64_t time_ns = 0;
+	int rc = dataplane_instance_current_time(dp_config, &time_ns);
+	TEST_ASSERT(rc == -1, "an instance with no workers must report none");
+
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that an instance whose workers are registered but have published
+// nothing reports no time.
+static int
+test_current_time_before_first_round_reports_none() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	TEST_ASSERT(
+		init_instance(storage, &dp_config) == 0,
+		"dp_storage_init failed"
+	);
+
+	const uint64_t times[] = {0, 0};
+	TEST_ASSERT(
+		publish_workers(dp_config, times, 2) == 0,
+		"failed to publish workers"
+	);
+
+	uint64_t time_ns = 0;
+	int rc = dataplane_instance_current_time(dp_config, &time_ns);
+	TEST_ASSERT(rc == -1, "workers that have not run must report none");
+
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that the instance time is the latest one its workers published, and
+// that a worker left behind does not hold it back.
+//
+// A worker stopped inside a driver call keeps publishing its last time
+// forever; taking anything but the latest would freeze the instance's clock
+// on that worker for as long as the process lives.
+static int
+test_current_time_reports_latest_worker() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	TEST_ASSERT(
+		init_instance(storage, &dp_config) == 0,
+		"dp_storage_init failed"
+	);
+
+	const uint64_t times[] = {700, 900, 100};
+	TEST_ASSERT(
+		publish_workers(dp_config, times, 3) == 0,
+		"failed to publish workers"
+	);
+
+	uint64_t time_ns = 0;
+	int rc = dataplane_instance_current_time(dp_config, &time_ns);
+	TEST_ASSERT_SUCCESS(rc, "an instance with a running worker has a time");
+	TEST_ASSERT_EQUAL(
+		time_ns,
+		900,
+		"the instance time must be the latest a worker published"
+	);
+
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that the instance time does not move backwards when the worker that
+// last advanced it stops.
+static int
+test_current_time_does_not_regress_when_a_worker_stops() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	TEST_ASSERT(
+		init_instance(storage, &dp_config) == 0,
+		"dp_storage_init failed"
+	);
+
+	const uint64_t times[] = {900, 100};
+	TEST_ASSERT(
+		publish_workers(dp_config, times, 2) == 0,
+		"failed to publish workers"
+	);
+
+	uint64_t before = 0;
+	TEST_ASSERT_SUCCESS(
+		dataplane_instance_current_time(dp_config, &before),
+		"the instance must report a time"
+	);
+
+	// The lagging worker keeps running while the leader stays put.
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	struct dp_worker *lagging = ADDR_OF(workers + 1);
+	lagging->current_time = 800;
+
+	uint64_t after = 0;
+	TEST_ASSERT_SUCCESS(
+		dataplane_instance_current_time(dp_config, &after),
+		"the instance must still report a time"
+	);
+	TEST_ASSERT(
+		after >= before, "the instance time must not move backwards"
+	);
+	TEST_ASSERT_EQUAL(after, 900, "the stopped worker still bounds it");
+
+	free(storage);
+	return TEST_SUCCESS;
+}
+
 // Verify that agent_attach returns NULL with a non-NULL error when the
 // shared memory segment is zeroed (simulating the pre-init startup race).
 static int
@@ -719,6 +908,36 @@ main() {
 	if (test_extend_rolls_back_on_exhausted_pool() != TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR, "test_extend_rolls_back_on_exhausted_pool failed");
+	}
+
+	++tests_count;
+	if (test_current_time_without_workers_reports_none() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR,
+		    "test_current_time_without_workers_reports_none failed");
+	}
+
+	++tests_count;
+	if (test_current_time_before_first_round_reports_none() !=
+	    TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR,
+		    "test_current_time_before_first_round_reports_none failed");
+	}
+
+	++tests_count;
+	if (test_current_time_reports_latest_worker() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR, "test_current_time_reports_latest_worker failed");
+	}
+
+	++tests_count;
+	if (test_current_time_does_not_regress_when_a_worker_stops() !=
+	    TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR,
+		    "test_current_time_does_not_regress_when_a_worker_stops "
+		    "failed");
 	}
 
 	if (tests_failed != 0) {

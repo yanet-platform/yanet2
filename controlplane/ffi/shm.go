@@ -131,6 +131,15 @@ func (m *DPConfig) WorkerCount() uint32 {
 	return uint32(C.dataplane_instance_worker_count(m.ptr))
 }
 
+func (m *DPConfig) CurrentTime() (uint64, bool) {
+	var timeNS C.uint64_t
+	if C.dataplane_instance_current_time(m.ptr, &timeNS) != 0 {
+		return 0, false
+	}
+
+	return uint64(timeNS), true
+}
+
 // Modules returns a list of dataplane modules available.
 func (m *DPConfig) Modules() []DPModule {
 	ptr := C.yanet_get_dp_module_list_info(m.ptr)

@@ -21,7 +21,9 @@ worker_round_prepare(
 	struct cp_config *cp_config,
 	uint64_t current_time_ns
 ) {
-	dp_worker->current_time = current_time_ns;
+	__atomic_store_n(
+		&dp_worker->current_time, current_time_ns, __ATOMIC_RELAXED
+	);
 
 	struct worker_round round = {
 		.cp_config_gen = ATOMIC_ADDR_OF(&cp_config->cp_config_gen),

@@ -142,6 +142,15 @@ dataplane_instance_numa_idx(struct dp_config *dp_config);
 uint32_t
 dataplane_instance_worker_count(struct dp_config *dp_config);
 
+// Returns the current time of the dataplane instance, in nanoseconds.
+//
+// @param dp_config Handle to the dataplane instance.
+// @param time_ns Set to the current time in nanoseconds on success.
+//
+// @return 0 on success, -1 when the instance has published no time yet.
+int
+dataplane_instance_current_time(struct dp_config *dp_config, uint64_t *time_ns);
+
 // Detaches a module agent from shared memory, releasing associated resources.
 //
 // @param agent Handle to the module agent to detach

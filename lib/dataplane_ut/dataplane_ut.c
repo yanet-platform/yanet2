@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "common/buildinfo.h"
 #include "common/memory.h"
@@ -349,6 +350,21 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		SET_OFFSET_OF(dp_workers + idx, dp_worker);
 	}
 
+	// The harness instance starts with its clock already running.
+	//
+	// A test that never drives a packet still exercises control-plane
+	// code that has to judge the deadlines in this instance, and an
+	// instance whose workers have never published cannot be judged at
+	// all. Real time is the same reading a started worker would take.
+	struct timespec startup_ts;
+	if (clock_gettime(CLOCK_REALTIME, &startup_ts) == 0) {
+		dataplane_ut_set_time_ns(
+			ut,
+			(uint64_t)startup_ts.tv_sec * 1000000000ULL +
+				(uint64_t)startup_ts.tv_nsec
+		);
+	}
+
 	worker_counters_bind(ut->dp_config, &counter_ids);
 
 	// Skipped when device_count == 0: the implicit device 0 (see above)
@@ -426,9 +442,34 @@ dataplane_ut_shm(struct dataplane_ut *ut) {
 	return &ut->shm;
 }
 
+// Publish a time on every worker of the harness instance.
+//
+// In a live instance each worker publishes the time at the head of its
+// round, which is what tells an attached process what time the instance
+// thinks it is. A harness runs a round only when a test drives packets
+// through it, so without this an instance with idle workers would answer
+// that it has no time at all.
+static void
+dataplane_ut_publish_time(struct dataplane_ut *ut, uint64_t ns) {
+	struct dp_worker **workers = ADDR_OF(&ut->dp_config->workers);
+	if (workers == NULL) {
+		return;
+	}
+
+	for (uint64_t idx = 0; idx < ut->dp_config->worker_count; ++idx) {
+		struct dp_worker *worker = ADDR_OF(workers + idx);
+		if (worker == NULL) {
+			continue;
+		}
+
+		__atomic_store_n(&worker->current_time, ns, __ATOMIC_RELAXED);
+	}
+}
+
 void
 dataplane_ut_set_time_ns(struct dataplane_ut *ut, uint64_t ns) {
 	ut->mock_time_ns = ns;
+	dataplane_ut_publish_time(ut, ns);
 }
 
 uint64_t

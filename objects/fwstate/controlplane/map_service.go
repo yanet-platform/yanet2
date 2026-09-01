@@ -14,7 +14,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -238,7 +237,7 @@ func (m *FWStateMapService) collectMapStats() []*commonpb.Metric {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	now := time.Now()
+	now, haveNow := m.dataplaneTime()
 
 	result := make([]*commonpb.Metric, 0, len(m.maps)*7)
 	for name, fwMap := range m.maps {
@@ -247,7 +246,10 @@ func (m *FWStateMapService) collectMapStats() []*commonpb.Metric {
 			af = "ipv6"
 		}
 		result = append(
-			result, mapStatsGauges(name, af, now, fwMap.Config().GetStats())...,
+			result,
+			mapStatsGauges(
+				name, af, now, haveNow, fwMap.Config().GetStats(),
+			)...,
 		)
 	}
 
@@ -259,29 +261,34 @@ func (m *FWStateMapService) collectMapStats() []*commonpb.Metric {
 // The names match the series the fwstate service exported per config
 // before the maps became standalone objects, so existing dashboards keep
 // working with the map and af labels in place of the config label.
-func mapStatsGauges(mapName, af string, now time.Time, stats mapStats) []*commonpb.Metric {
+func mapStatsGauges(
+	mapName, af string, now uint64, haveNow bool, stats mapStats,
+) []*commonpb.Metric {
 	labels := []*commonpb.Label{
 		{Name: "map", Value: mapName},
 		{Name: "af", Value: af},
 	}
 
-	// MaxDeadline is an absolute timestamp on the dataplane's monotonic
-	// clock. Export the remaining time-to-live (clamped at zero once the
-	// deadline has passed).
-	deadlineTTL := uint64(0)
-	if nowNS := uint64(now.UnixNano()); stats.MaxDeadline > nowNS {
-		deadlineTTL = stats.MaxDeadline - nowNS
-	}
-
-	return []*commonpb.Metric{
+	gauges := []*commonpb.Metric{
 		commonpb.NewMetricGauge("fwstate_index_size", float64(stats.IndexSize), labels...),
 		commonpb.NewMetricGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
 		commonpb.NewMetricGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
 		commonpb.NewMetricGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
 		commonpb.NewMetricGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
-		commonpb.NewMetricGauge("fwstate_max_deadline_ns", float64(deadlineTTL), labels...),
 		commonpb.NewMetricGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
 	}
+
+	if haveNow {
+		deadlineTTL := uint64(0)
+		if stats.MaxDeadline > now {
+			deadlineTTL = stats.MaxDeadline - now
+		}
+		gauges = append(gauges, commonpb.NewMetricGauge(
+			"fwstate_max_deadline_ns", float64(deadlineTTL), labels...,
+		))
+	}
+
+	return gauges
 }
 
 func (m *FWStateMapService) mapRetention() func(metrics.MetricID) bool {
@@ -528,7 +535,13 @@ func (m *FWStateMapService) InsertLayer(
 	}
 
 	mapCP := *fwMap.Config()
-	m.ReclaimStaleLayers(fwMap.Config(), mapCP, uint64(time.Now().UnixNano()))
+	if now, ok := m.dataplaneTime(); ok {
+		m.ReclaimStaleLayers(fwMap.Config(), mapCP, now)
+	} else {
+		m.log.Warn("skipped stale-layer reclamation without a dataplane time",
+			zap.String("map", name),
+		)
+	}
 
 	m.log.Info("successfully inserted fwstate-map layer", zap.String("map", name))
 	return &fwstatemappb.InsertLayerResponse{}, nil
@@ -562,7 +575,15 @@ func (m *FWStateMapService) ListEntries(
 		return nil, err
 	}
 
-	now := uint64(time.Now().UnixNano())
+	// Every entry the walk returns carries whether it has expired, so the
+	// read needs the clock those deadlines are on.
+	now, haveNow := m.dataplaneTime()
+	if !haveNow {
+		return nil, status.Error(
+			codes.Unavailable,
+			"dataplane instance has published no time yet",
+		)
+	}
 
 	m.mu.Lock()
 	fwMap, ok := m.maps[mapName]
@@ -698,6 +719,16 @@ func ValidateWorkerCount(workerCount uint32) error {
 		return status.Errorf(codes.InvalidArgument, "worker_count %d exceeds maximum %d", workerCount, maxWorkerCount)
 	}
 	return nil
+}
+
+// dataplaneTime reports the instance's current time, and whether the
+// instance has one to report.
+func (m *FWStateMapService) dataplaneTime() (uint64, bool) {
+	if m.agent == nil {
+		return 0, false
+	}
+
+	return m.agent.DPConfig().CurrentTime()
 }
 
 func (m *FWStateMapService) dpWorkerCountOf() func() uint32 {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -616,6 +617,96 @@ func Test_FWStateMapService_MetricsExposesGRPCSeries(t *testing.T) {
 		}
 	}
 	require.Equal(t, fwstatemap.ServiceName, serviceLabel)
+}
+
+// Test_FWStateMapService_ListEntriesWithoutInstanceTime verifies that a
+// listing is refused while the instance has published no time.
+//
+// Every entry a listing returns is labelled with whether it has expired,
+// and that label is derived from the instance's clock. Answering without
+// one would report every entry as live, expired ones included.
+func Test_FWStateMapService_ListEntriesWithoutInstanceTime(t *testing.T) {
+	h, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	// Wind the instance back to where a worker that has never run leaves
+	// it, which is how it reports having no time at all.
+	h.SetCurrentTime(time.Unix(0, 0))
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("fwstatemap-test", 0, 16*datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	svc := fwstatemap.NewFWStateMapService(agent)
+	_, err = svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+		Name:             "no-time-list-v4",
+		Kind:             fwstatemappb.Kind_V4,
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ListEntries(t.Context(), &fwstatemappb.ListEntriesRequest{
+		MapName:   "no-time-list-v4",
+		Direction: fwstatemappb.Direction_FORWARD,
+		BatchSize: 10,
+	})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+// Test_FWStateMapService_MetricsOmitLifetimeWithoutInstanceTime verifies
+// that the remaining-lifetime gauge is left out while the instance has
+// published no time, and that the rest of the set is still exported.
+//
+// The furthest deadline in a map is on the instance's clock. With no time
+// from that clock there is nothing to measure it against, and a zero would
+// read on a dashboard as an expiry that has already happened.
+func Test_FWStateMapService_MetricsOmitLifetimeWithoutInstanceTime(t *testing.T) {
+	h, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{"fwstate_map_v4", "fwstate_map_v6"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	// Wind the instance back to where a worker that has never run leaves
+	// it, which is how it reports having no time at all.
+	h.SetCurrentTime(time.Unix(0, 0))
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("fwstatemap-test", 0, 16*datasize.MB)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	svc := fwstatemap.NewFWStateMapService(agent)
+	_, err = svc.CreateMap(t.Context(), &fwstatemappb.CreateMapRequest{
+		Name:             "no-time-v4",
+		Kind:             fwstatemappb.Kind_V4,
+		IndexSize:        1024,
+		ExtraBucketCount: 64,
+	})
+	require.NoError(t, err)
+
+	collected, err := svc.Metrics()
+	require.NoError(t, err)
+
+	gauges := map[string]*commonpb.Metric{}
+	for _, metric := range collected {
+		gauges[metric.Name] = metric
+	}
+	require.NotContains(t, gauges, "fwstate_max_deadline_ns",
+		"a lifetime must not be reported without a clock to measure it")
+	require.Contains(t, gauges, "fwstate_total_elements",
+		"the rest of the gauge set must still be exported")
 }
 
 // Test_FWStateMapService_MetricsEmitPerMapGauges verifies that the map

@@ -71,6 +71,8 @@ struct dp_worker {
 	// Current worker time in nanoseconds,
 	// initialized on the start of the current
 	// loop round.
+	//
+	// Also read by processes attached to this zone.
 	uint64_t current_time;
 
 	uint64_t *iterations;

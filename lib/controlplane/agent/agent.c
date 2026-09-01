@@ -109,6 +109,43 @@ dataplane_instance_worker_count(struct dp_config *dp_config) {
 	return (uint32_t)dp_config->worker_count;
 }
 
+int
+dataplane_instance_current_time(
+	struct dp_config *dp_config, uint64_t *time_ns
+) {
+	if (dp_config == NULL || time_ns == NULL) {
+		return -1;
+	}
+
+	uint64_t worker_count = dp_config->worker_count;
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	if (workers == NULL) {
+		return -1;
+	}
+
+	uint64_t latest = 0;
+	for (uint64_t idx = 0; idx < worker_count; ++idx) {
+		struct dp_worker *worker = ADDR_OF(&workers[idx]);
+		if (worker == NULL) {
+			continue;
+		}
+
+		uint64_t published = __atomic_load_n(
+			&worker->current_time, __ATOMIC_RELAXED
+		);
+		if (published > latest) {
+			latest = published;
+		}
+	}
+
+	if (latest == 0) {
+		return -1;
+	}
+
+	*time_ns = latest;
+	return 0;
+}
+
 // Body of agent_free_unused_agents for a caller that already holds
 // cp_config_lock. See the definition further down for details.
 static void
