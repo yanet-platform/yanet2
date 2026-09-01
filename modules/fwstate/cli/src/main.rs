@@ -156,24 +156,23 @@ impl FWStateService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         // First, fetch the current config to merge with new values
+        //
+        // A failed read aborts the update: only an empty reply proves the
+        // config is missing and may take the create path.
         let current_request = ShowConfigRequest {
             name: cmd.config_name.clone(),
             ok_if_not_found: true,
         };
-        let current_response = self.service.client().show_config(current_request).await;
-        let (map_name_v4, map_name_v6, mut sync_config) = match current_response {
-            Ok(resp) => {
-                let msg = resp.into_inner();
-                let (map_name_v4, map_name_v6) =
-                    merged_map_names(&msg, &cmd).map_err(|err| self.service.invalid("update", err))?;
-                (map_name_v4, map_name_v6, msg.sync_config.unwrap_or_default())
-            }
-            _ => (
-                cmd.map_name_v4.clone().unwrap_or_default(),
-                cmd.map_name_v6.clone().unwrap_or_default(),
-                Default::default(),
-            ),
-        };
+        let current = self
+            .service
+            .client()
+            .show_config(current_request)
+            .await
+            .map_err(self.service.status("update"))?
+            .into_inner();
+        let (map_name_v4, map_name_v6) =
+            merged_map_names(&current, &cmd).map_err(|err| self.service.invalid("update", err))?;
+        let mut sync_config = current.sync_config.unwrap_or_default();
 
         // Update only the fields that were provided
         if let Some(src_addr) = cmd.src_addr {
