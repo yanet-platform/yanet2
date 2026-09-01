@@ -90,38 +90,14 @@ pub fn connection_args(command: impl FnOnce() -> Command) -> ConnectionArgs {
 
 /// Best-effort completion candidates for a config-name argument.
 ///
-/// `command` is the caller's own `Cmd::command`, exactly the factory passed
-/// to `CompleteEnv::with_factory` in `main` — it recovers the connection
-/// flags (`--endpoint`, `--auth`, …) the user has actually typed so far, so
-/// completion talks to the gateway the user is targeting rather than
-/// silently falling back to the default one. `build` receives the layered
-/// channel and returns the caller's tonic-generated client, exactly like
-/// the `build` parameter of [`Service::new`](crate::client::Service::new) —
-/// compression is configured there, since it is an inherent client method.
-/// `lookup` issues the RPC on that client and returns the config names.
-///
-/// Strictly best-effort: a gateway that is down, slow, or refusing auth
-/// yields an empty list, never an error or a hang. Connect and lookup share
-/// one [`DISCOVERY_TIMEOUT`] budget, and the whole call runs on its own
-/// single-threaded runtime built and torn down here — nothing may reach
-/// stdout, since `clap_complete` owns it.
-///
-/// The caller must invoke `CompleteEnv::complete` from a sync `main`, before
-/// any runtime is entered, because the runtime built here is blocked on
-/// directly, which panics if it is reached from inside another runtime's
-/// context.
-///
-/// `lookup` must be a genuine async closure, `async move |client| …`, not a
-/// plain closure returning an `async move` block — the latter cannot infer
-/// `client`'s type and fails to compile.
-///
-/// Do not attach these candidates to an argument that uses clap's
-/// `value_delimiter`, such as a comma-separated list like pipeline's
-/// `--functions acl,route`. `ArgValueCandidates` completes the whole raw
-/// token before delimiter splitting, so a candidate would try to replace the
-/// entire typed token rather than just its trailing element, producing a
-/// wrong insertion — completing a delimited list needs delimiter-aware
-/// candidates, which this helper does not provide.
+/// The parser factory recovers connection flags from the partially typed
+/// command line, including its target endpoint. A slow or unavailable gateway
+/// yields an empty list within one fixed budget and writes nothing to stdout.
+/// Lookup runs on a temporary single-threaded runtime, so completion must
+/// execute before any command runtime. [`crate::entrypoint`] guarantees that
+/// ordering; direct lifecycle callers must preserve it. The lookup callback
+/// must be a direct async closure for type inference. Delimited arguments are
+/// unsupported because completion replaces the entire raw token.
 pub fn candidates<C, B, F>(command: impl FnOnce() -> Command, build: B, lookup: F) -> Vec<CompletionCandidate>
 where
     B: FnOnce(LayeredChannel) -> C,

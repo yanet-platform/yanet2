@@ -1,10 +1,7 @@
 //! CLI for YANET "pipeline" module.
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    engine::{ArgValueCandidates, CompletionCandidate},
-    CompleteEnv,
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{FunctionId, PipelineId};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -89,20 +86,8 @@ pub struct DeleteCmd {
     pub name: String,
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -170,7 +155,7 @@ pub struct PipelineService {
 
 impl PipelineService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect(connection, PIPELINE_SERVICE, |channel| {
+        let service = Service::connect_for(connection, action, PIPELINE_SERVICE, |channel| {
             PipelineServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

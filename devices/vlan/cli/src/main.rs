@@ -1,5 +1,4 @@
-use clap::{ArgAction, CommandFactory, Parser, value_parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser, value_parser};
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
@@ -63,7 +62,7 @@ pub struct DeviceVlanService {
 
 impl DeviceVlanService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+        let service = Service::connect_for(connection, "update", SERVICE_NAME, |channel| {
             DeviceVlanServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -113,21 +112,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 #[cfg(test)]
 mod test {
-    use clap::error::ErrorKind;
+    use clap::{CommandFactory, error::ErrorKind};
 
     use super::*;
 

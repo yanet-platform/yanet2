@@ -4,14 +4,10 @@ use core::error::Error as StdError;
 use std::{
     fs::File,
     path::{Path, PathBuf},
-    process,
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    engine::{ArgValueCandidates, CompletionCandidate},
-    CompleteEnv,
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
     fib::render::print_fib,
@@ -131,6 +127,19 @@ pub enum ModeCmd {
     Fib(FibCmd),
 }
 
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Fib(cmd) => match &cmd.action {
+                FibAction::List => "list",
+                FibAction::Show(..) => "show",
+                FibAction::Update(..) => "update",
+                FibAction::Delete(..) => "delete",
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct FibCmd {
     #[clap(subcommand)]
@@ -185,20 +194,8 @@ const SERVICE_NAME: &str = "modules.route.controlplane.routepb.v1.RouteService";
 /// Rewrites a genuine missing-config `NotFound` into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the route configs the
@@ -218,7 +215,8 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = RouteService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = RouteService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Fib(cmd) => match cmd.action {
@@ -235,8 +233,8 @@ pub struct RouteService {
 }
 
 impl RouteService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             RouteServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -734,7 +732,7 @@ entries:
 
     #[test]
     fn test_fib_config_load_missing_file_names_the_path() {
-        let path = env::temp_dir().join(format!("yanet-cli-route-missing-fib-{}.yaml", process::id()));
+        let path = env::temp_dir().join(format!("yanet-cli-route-missing-fib-{}.yaml", std::process::id()));
 
         let err = FibConfig::load(&path).unwrap_err();
 
@@ -743,7 +741,7 @@ entries:
 
     #[test]
     fn test_fib_config_load_invalid_entry_names_the_path() {
-        let path = env::temp_dir().join(format!("yanet-cli-route-invalid-fib-{}.yaml", process::id()));
+        let path = env::temp_dir().join(format!("yanet-cli-route-invalid-fib-{}.yaml", std::process::id()));
         fs::write(&path, "entries:\n  - nexthops: []\n").unwrap();
 
         let err = FibConfig::load(&path).unwrap_err();
@@ -765,7 +763,7 @@ entries:
             timeout: None,
         };
 
-        let err = RouteService::new(&connection).await.err().unwrap();
+        let err = RouteService::new(&connection, "list").await.err().unwrap();
 
         assert_eq!(ErrorKind::Connection, err.kind());
         assert_eq!(4, err.exit_code());

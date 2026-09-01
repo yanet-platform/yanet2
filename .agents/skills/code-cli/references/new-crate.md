@@ -43,7 +43,6 @@ netip = "0.3"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 tabled = { version = "0.18", features = ["ansi"] }
-tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }
 
 [build-dependencies]
@@ -91,7 +90,6 @@ use std::borrow::Cow;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::{
-    CompleteEnv,
     engine::{ArgValueCandidates, CompletionCandidate},
 };
 use tabled::Tabled;
@@ -149,6 +147,17 @@ pub enum ModeCmd {
     Delete(DeleteCmd),
 }
 
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Update(..) => "update",
+            Self::Delete(..) => "delete",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Name of the <x> config to operate on.
@@ -173,24 +182,13 @@ pub struct DeleteCmd {
     pub config_name: String,
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = <X>Service::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = <X>Service::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -205,8 +203,8 @@ pub struct <X>Service {
 }
 
 impl <X>Service {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             <X>ServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -340,9 +338,10 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 }
 ```
 
-Several services behind one binary: `Connection::connect(connection).await?`
-once, then `Service::new(&connection, NAME, build)` for each client, all
-kept in the service struct.
+Several services behind one binary:
+`Connection::connect_for(connection, action).await?` once, then
+`Service::new(&connection, NAME, build)` for each client, all kept in the
+service struct.
 
 ## Registration
 
@@ -368,5 +367,5 @@ cargo test -p yanet-cli-<suffix>
 
 Then run the binary against a closed port (`--endpoint grpc://127.0.0.1:1`):
 a malformed argument must exit 2 with clap's message, a valid one must reach
-`connect failed` and exit 4; `--help` must describe every flag; `--format json`
+`<action> failed` and exit 4; `--help` must describe every flag; `--format json`
 must print the wire message.

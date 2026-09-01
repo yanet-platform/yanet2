@@ -2,7 +2,7 @@ use core::{fmt, net::IpAddr};
 
 use args::{CreateCmd, DeleteCmd, DirectionArg, EntriesCmd, InsertLayerCmd, ListCmd, ModeCmd, StatsCmd};
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{CompleteEnv, engine::CompletionCandidate};
+use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::IpAddress;
 use fwstatemappb::{
     CreateMapRequest, DeleteMapRequest, Direction, GetMapStatsRequest, InsertLayerRequest, Kind, ListEntriesRequest,
@@ -90,8 +90,8 @@ impl DumpState {
 }
 
 impl FWStateMapService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let conn = Connection::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let conn = Connection::connect_for(connection, action).await?;
         let service = Service::new(&conn, SERVICE_NAME, |channel| {
             FwStateMapServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
@@ -433,7 +433,8 @@ fn print_entry(entry: &fwstatemappb::FwStateEntry) {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = FWStateMapService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = FWStateMapService::new(&cmd.connection, action).await?;
     let format = cmd.format;
 
     match cmd.mode {
@@ -446,20 +447,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the fwstate-map objects

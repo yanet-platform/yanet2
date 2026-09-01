@@ -5,10 +5,7 @@ use std::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{IPv4Network, IPv6Network};
 use mirrorpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
@@ -53,6 +50,17 @@ pub enum ModeCmd {
     Update(UpdateCmd),
     Show(ShowCmd),
     List,
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Delete(..) => "delete",
+            Self::Update(..) => "update",
+            Self::Show(..) => "show",
+            Self::List => "list",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -247,8 +255,8 @@ pub struct MirrorService {
 }
 
 impl MirrorService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             MirrorServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -353,7 +361,8 @@ impl MirrorService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = MirrorService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = MirrorService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
@@ -363,20 +372,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the mirror configs the

@@ -5,10 +5,7 @@ use std::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::IpAddress;
 use filterpb::pb::IpNet;
 use serde::{Deserialize, Serialize};
@@ -18,7 +15,7 @@ use unrduppb::{
     UpdateConfigRequest, unrdup_service_client::UnrdupServiceClient,
 };
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service as GrpcService},
     completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
@@ -54,6 +51,17 @@ pub enum ModeCmd {
     Update(UpdateConfigCmd),
     /// Delete an unrdup module config.
     Delete(DeleteConfigCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Update(..) => "update",
+            Self::Delete(..) => "delete",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -230,24 +238,13 @@ const SERVICE_NAME: &str = "modules.unrdup.controlplane.unrduppb.v1.UnrdupServic
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = UnrdupService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = UnrdupService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -258,42 +255,30 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct UnrdupService {
-    client: UnrdupServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: GrpcService<UnrdupServiceClient<LayeredChannel>>,
 }
 
 impl UnrdupService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = UnrdupServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = GrpcService::connect_for(connection, action, SERVICE_NAME, |channel| {
+            UnrdupServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
-    }
+        .await?;
 
-    fn invalid(&self, action: &str, message: impl Into<String>) -> Error {
-        Error::invalid_argument(action, self.endpoint.clone(), message)
-    }
-
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+        Ok(Self { service })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .list_configs(request)
             .await
-            .map_err(self.map_err("list"))?
+            .map_err(self.service.status("list"))?
             .into_inner();
         log::debug!("list configs response: {response:?}");
 
@@ -321,18 +306,20 @@ impl UnrdupService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         log::trace!("show config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .show_config(request)
             .await
-            .map_err(self.map_err("show"))?
+            .map_err(self.service.status("show"))?
             .into_inner();
         log::debug!("show config response: {response:?}");
 
         let config = response
             .config
-            .ok_or_else(|| self.invalid("show", "response carries no config"))?;
+            .ok_or_else(|| self.service.invalid("show", "response carries no config"))?;
 
-        let rendered = UnrdupConfig::try_from(config.clone()).map_err(|err| self.invalid("show", err.to_string()))?;
+        let rendered =
+            UnrdupConfig::try_from(config.clone()).map_err(|err| self.service.invalid("show", err.to_string()))?;
 
         output::data(
             || &config,
@@ -348,8 +335,8 @@ impl UnrdupService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
-        let config = UnrdupConfig::load(&cmd.config_path)
-            .map_err(|err| Error::invalid_argument("update", self.endpoint.clone(), err.to_string()))?;
+        let config =
+            UnrdupConfig::load(&cmd.config_path).map_err(|err| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
@@ -357,10 +344,11 @@ impl UnrdupService {
         };
         log::trace!("update config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .update_config(request)
             .await
-            .map_err(self.map_err("update"))?
+            .map_err(self.service.status("update"))?
             .into_inner();
         log::debug!("update config response: {response:?}");
 
@@ -373,14 +361,15 @@ impl UnrdupService {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         log::trace!("delete config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .delete_config(request)
             .await
             .map_err(|status| {
                 NOT_FOUND.map(
                     status,
                     "delete",
-                    self.endpoint.clone(),
+                    self.service.endpoint(),
                     Some(&format!("config '{}'", cmd.config_name)),
                 )
             })?

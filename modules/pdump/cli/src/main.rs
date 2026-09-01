@@ -1,6 +1,6 @@
 use args::{DeleteCmd, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{CompleteEnv, engine::CompletionCandidate};
+use clap_complete::engine::CompletionCandidate;
 use pdumppb::{
     DeleteConfigRequest, ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
     pdump_service_client::PdumpServiceClient,
@@ -51,7 +51,8 @@ pub struct Cmd {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = PdumpService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = PdumpService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -70,8 +71,8 @@ pub struct PdumpService {
 }
 
 impl PdumpService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             PdumpServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -81,7 +82,7 @@ impl PdumpService {
         Ok(Self { service })
     }
 
-    async fn get_config(&mut self, name: &str) -> Result<ShowConfigResponse, Error> {
+    async fn get_config(&mut self, name: &str, action: &'static str) -> Result<ShowConfigResponse, Error> {
         let request = ShowConfigRequest { name: name.to_owned() };
         log::trace!("show config request: {request:?}");
         let response = self
@@ -89,7 +90,7 @@ impl PdumpService {
             .client()
             .show_config(request)
             .await
-            .map_err(self.service.status("show"))?
+            .map_err(self.service.status(action))?
             .into_inner();
         log::debug!("show config response: {response:?}");
         Ok(response)
@@ -130,7 +131,7 @@ impl PdumpService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
-        let response = self.get_config(&cmd.config_name).await?;
+        let response = self.get_config(&cmd.config_name, "show").await?;
 
         output::data(
             || &response,
@@ -214,7 +215,7 @@ impl PdumpService {
         let (tx, rx) = tokio::sync::mpsc::channel::<pdumppb::Record>(16);
 
         log::debug!("request current pdump configuration");
-        let config = self.get_config(&cmd.config_name).await?;
+        let config = self.get_config(&cmd.config_name, "read").await?;
         let Some(config) = config.config else {
             return Err(Error::from_status(
                 Status::not_found(format!("config '{}' not found", cmd.config_name)),
@@ -320,20 +321,8 @@ fn print_tree(resp: &ShowConfigResponse) {
     let _ = ptree::print_tree(&tree.build());
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the pdump configs the

@@ -1,10 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use forwardpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     forward_service_client::ForwardServiceClient,
@@ -48,6 +45,17 @@ pub enum ModeCmd {
     Update(UpdateCmd),
     Show(ShowCmd),
     List,
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Delete(..) => "delete",
+            Self::Update(..) => "update",
+            Self::Show(..) => "show",
+            Self::List => "list",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -179,8 +187,8 @@ pub struct ForwardService {
 }
 
 impl ForwardService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             ForwardServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -280,6 +288,8 @@ impl ForwardService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
+    let action = cmd.mode.action();
+
     // The update file is read and bound before the connection, so bad
     // local input fails deterministically with or without a reachable
     // gateway.
@@ -295,7 +305,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         _ => None,
     };
 
-    let mut service = ForwardService::new(&cmd.connection).await?;
+    let mut service = ForwardService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
@@ -308,20 +318,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the forward configs the

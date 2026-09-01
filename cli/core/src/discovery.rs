@@ -226,10 +226,11 @@ pub fn candidates(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Vec<
     let args = args.clone();
     let suffix = suffix.to_owned();
 
-    // The completer is called from within the binary's `#[tokio::main]`
-    // runtime, which forbids a nested `block_on`, so the lookup gets a thread
-    // and a runtime of its own. A panic in it joins as an error and, like
-    // every other failure here, yields no candidates.
+    // Isolate discovery from any runtime the caller may already own.
+    //
+    // Direct lifecycle callers may request completion from Tokio. Blocking
+    // another runtime there would panic; a worker thread also turns such a
+    // panic into an empty candidate list like every other failure.
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()

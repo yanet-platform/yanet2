@@ -13,6 +13,18 @@ pub enum ModeCmd {
     Read(ReadCmd),
 }
 
+impl ModeCmd {
+    pub(crate) fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Set(..) => "set",
+            Self::Delete(..) => "delete",
+            Self::Read(..) => "read",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Pdump config name to delete.

@@ -11,18 +11,10 @@ use core::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use yanet_cli_balancer2::balancerpb;
-use ync::{
-    client::ConnectionArgs,
-    completion,
-    errors::Error,
-    output::{self, CommonFormat},
-};
+use ync::{client::ConnectionArgs, completion, errors::Error, output::CommonFormat};
 
 use crate::service::Balancer2Service;
 
@@ -59,6 +51,27 @@ pub enum ModeCmd {
     Metrics(MetricsCmd),
     /// Manage real servers.
     Reals(reals::RealsCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Update(..) => "update",
+            Self::List => "list",
+            Self::Config(..) => "config",
+            Self::Show(..) => "show",
+            Self::Sessions(cmd) => match &cmd.mode {
+                sessions::SessionsMode::List => "sessions list",
+                sessions::SessionsMode::Show(..) => "sessions show",
+                sessions::SessionsMode::Update(..) => "sessions update",
+            },
+            Self::Metrics(..) => "metrics",
+            Self::Reals(cmd) => match &cmd.mode {
+                reals::RealsMode::Enable(..) => "enable",
+                reals::RealsMode::Disable(..) => "disable",
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -304,24 +317,13 @@ impl FilterFlags {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = Balancer2Service::connect(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = Balancer2Service::connect(&cmd.connection, action).await?;
     service.handle(cmd.mode, cmd.format).await
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the balancer configs the

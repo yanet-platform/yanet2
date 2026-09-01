@@ -1,12 +1,9 @@
 //! Generic readiness probe CLI.
 
-use std::{collections::BTreeMap, time::SystemTime};
+use std::{collections::BTreeMap, process::ExitCode, time::SystemTime};
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
 use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use serde::Serialize;
@@ -22,7 +19,7 @@ mod render;
 mod watch;
 
 /// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
-const EXIT_NOT_READY: i32 = 2;
+const EXIT_NOT_READY: u8 = 2;
 
 /// Caption of the hint that lists every discovered readiness service.
 const AVAILABLE_SERVICES: &str = "available readiness services:";
@@ -114,22 +111,8 @@ struct ServiceReport {
     error: Option<String>,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-    colored::control::set_override(output::is_colored());
-
-    match run(cmd).await {
-        Ok(true) => {}
-        Ok(false) => std::process::exit(EXIT_NOT_READY),
-        Err(err) => {
-            output::failure(&err);
-            std::process::exit(err.exit_code());
-        }
-    }
+pub fn main() -> ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Run the readiness probe, dispatching to aggregate or single-service mode.
@@ -138,30 +121,36 @@ pub async fn main() {
 /// needs over it: resolving the alias, probing the service and enriching the
 /// error hint. A failure to establish it is reported as a failure of the verb
 /// the user asked for, `ready`, exactly like a failing probe.
-async fn run(cmd: Cmd) -> Result<bool, Error> {
-    if cmd.is_aggregate() {
-        return run_aggregate(cmd).await;
-    }
-
-    let name = cmd.name.clone().expect("a non-aggregate command names a service");
-
-    if is_blank(&name) {
-        return Err(Error::invalid_argument(
-            "ready",
-            &cmd.connection.endpoint,
-            "service name must not be empty",
-        ));
-    }
-
-    let connection = Connection::connect_for(&cmd.connection, "ready").await?;
-
-    let name = if name.contains('.') {
-        name
+async fn run(cmd: Cmd) -> Result<ExitCode, Error> {
+    let ready = if cmd.is_aggregate() {
+        run_aggregate(cmd).await?
     } else {
-        resolve_alias(&cmd, &connection, &name).await?
+        let name = cmd.name.clone().expect("a non-aggregate command names a service");
+
+        if is_blank(&name) {
+            return Err(Error::invalid_argument(
+                "ready",
+                &cmd.connection.endpoint,
+                "service name must not be empty",
+            ));
+        }
+
+        let connection = Connection::connect_for(&cmd.connection, "ready").await?;
+
+        let name = if name.contains('.') {
+            name
+        } else {
+            resolve_alias(&cmd, &connection, &name).await?
+        };
+
+        run_service(&cmd, &connection, &name).await?
     };
 
-    run_service(&cmd, &connection, &name).await
+    Ok(if ready {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_NOT_READY)
+    })
 }
 
 /// Whether a service name is empty or whitespace only.

@@ -1,8 +1,7 @@
 //! CLI for YANET "counters" module.
 
 use bytesize::ByteSize;
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -118,18 +117,8 @@ impl ModeCmd {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-    colored::control::set_override(output::is_colored());
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -190,7 +179,7 @@ pub struct CountersService {
 
 impl CountersService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect(connection, COUNTERS_SERVICE, |channel| {
+        let service = Service::connect_for(connection, action, COUNTERS_SERVICE, |channel| {
             CountersServiceClient::new(channel)
                 .max_decoding_message_size(256 * 1024 * 1024)
                 .max_encoding_message_size(256 * 1024 * 1024)

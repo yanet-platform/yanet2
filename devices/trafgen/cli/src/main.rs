@@ -1,10 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
 use trafgenpb::{
@@ -56,6 +53,18 @@ pub enum ModeCmd {
     Rate(SetRateCmd),
 }
 
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Update(..) => "update",
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Upload(..) => "upload",
+            Self::Rate(..) => "rate",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// Generator device name to operate on.
@@ -104,8 +113,8 @@ pub struct TrafgenService {
 }
 
 impl TrafgenService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             TrafgenServiceClient::new(channel)
                 .max_decoding_message_size(256 * 1024 * 1024)
                 .max_encoding_message_size(256 * 1024 * 1024)
@@ -239,7 +248,8 @@ impl TrafgenService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = TrafgenService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = TrafgenService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Update(cmd) => service.update_device(cmd).await,
@@ -250,20 +260,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the generator device

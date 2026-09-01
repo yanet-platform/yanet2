@@ -22,6 +22,19 @@ pub enum ModeCmd {
     RuleCounters(RuleCountersCmd),
 }
 
+impl ModeCmd {
+    pub(crate) fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Delete(..) => "delete",
+            Self::Update(..) => "update",
+            Self::Show(..) => "show",
+            Self::MetricsRules(..) => "metrics-rules",
+            Self::RuleCounters(..) => "rule-counters",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// ACL config name

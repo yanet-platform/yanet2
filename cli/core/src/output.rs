@@ -1,14 +1,9 @@
-//! Process-global output context and free-function API.
+//! Process-global output context and reporting facade.
 //!
-//! Call [`init`] once from `main` after parsing CLI flags. Every helper
-//! (`success`, `failure`, `data`) reads the global state set by that
-//! call — callers never need to thread an `Output` reference through
-//! their signatures.
-//!
-//! The extension point is the [`Format`] trait: each CLI declares its own
-//! enum of supported formats and implements [`Format`] once. [`init`] accepts
-//! any `F: Format`. [`CommonFormat`] is a ready-made `{ Human, Json }` enum
-//! for CLIs that do not need additional formats.
+//! The shared lifecycle installs one backend after parsing CLI flags. Reports
+//! read that state, so callers never thread an output reference through their
+//! signatures. Each CLI implements [`Format`] for its supported choices;
+//! [`CommonFormat`] provides the usual human and JSON pair.
 
 use core::fmt::Arguments;
 use std::{io::IsTerminal, sync::OnceLock};
@@ -218,13 +213,14 @@ impl Format for CommonFormat {
 
 static OUTPUT: OnceLock<Box<dyn Output>> = OnceLock::new();
 
-/// Initialise the logger and output backend from a `Format` choice.
+/// Initialise the logger and selected output backend.
 ///
-/// Must be called exactly once from `main` before any `output::*` helper.
-/// Panics if called twice or if the logger fails to install.
+/// Call exactly once before any output helper. Panics if called twice or if
+/// the logger fails to install.
 pub fn init<F: Format>(verbosity: u8, format: F) {
     logging::init(verbosity as usize).expect("logger init failed");
     OUTPUT.set(format.build()).ok().expect("output already initialised");
+    colored::control::set_override(is_colored());
 }
 
 fn current() -> &'static dyn Output {

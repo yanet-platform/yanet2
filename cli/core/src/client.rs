@@ -120,7 +120,7 @@ pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, Connection
 ///
 /// Connect once, then build one [`Service`] per gRPC service over it with
 /// [`Service::new`]. Single-service CLIs skip this and use
-/// [`Service::connect`], which establishes the connection for them.
+/// [`Service::connect_for`], which establishes the connection for them.
 pub struct Connection {
     channel: LayeredChannel,
     endpoint: String,
@@ -305,6 +305,26 @@ impl<C> Service<C> {
         Ok(Self::new(&Connection::connect(connection).await?, name, build))
     }
 
+    /// Connect to one service with operation-aware failures.
+    ///
+    /// Transport and service failures carry the same user-facing operation
+    /// as the command's RPC failures.
+    pub async fn connect_for<F>(
+        connection: &ConnectionArgs,
+        action: &str,
+        name: &'static str,
+        build: F,
+    ) -> Result<Self, Error>
+    where
+        F: FnOnce(LayeredChannel) -> C,
+    {
+        Ok(Self::new(
+            &Connection::connect_for(connection, action).await?,
+            name,
+            build,
+        ))
+    }
+
     /// Mutable access to the inner client for issuing RPCs.
     pub fn client(&mut self) -> &mut C {
         &mut self.client
@@ -404,7 +424,7 @@ mod test {
     use socket2::{Domain, Socket, Type};
     use tonic::Status;
 
-    use super::{parse_timeout, Connection, ConnectionArgs, Service};
+    use super::{parse_timeout, ConnectionArgs, Service};
     use crate::{
         auth::{AuthArgs, AuthMethod},
         errors::ErrorKind,
@@ -424,9 +444,9 @@ mod test {
     }
 
     /// Verifies that a connect wedged before the TCP handshake completes
-    /// fails within the budget as a connection error naming it.
+    /// fails within the budget and retains the requested operation.
     #[tokio::test]
-    async fn test_connect_tcp_handshake_never_completing_times_out() {
+    async fn test_service_connect_for_tcp_handshake_never_completing_times_out() {
         // A backlog of 0 holds exactly one pending connection on Linux.
         // With that slot taken, further SYNs are silently dropped.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
@@ -444,10 +464,14 @@ mod test {
             timeout: Some(Duration::from_millis(200)),
         };
 
-        let err = Connection::connect(&args).await.err().unwrap();
+        let err = Service::<()>::connect_for(&args, "show", "test.Service", |_| ())
+            .await
+            .err()
+            .unwrap();
 
         assert_eq!(ErrorKind::Connection, err.kind());
         assert_eq!(4, err.exit_code());
+        assert_eq!("show", err.action);
         assert_eq!("connect timed out after 0.2s", err.message());
     }
 

@@ -7,7 +7,7 @@ use aclpb::{
 };
 use args::{DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{CompleteEnv, engine::CompletionCandidate};
+use clap_complete::engine::CompletionCandidate;
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -254,8 +254,8 @@ pub struct ACLService {
 }
 
 impl ACLService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let conn = Connection::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let conn = Connection::connect_for(connection, action).await?;
         let service = Service::new(&conn, SERVICE_NAME, |channel| {
             AclServiceClient::new(channel)
                 .max_decoding_message_size(256 * 1024 * 1024)
@@ -554,7 +554,8 @@ impl ACLService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = ACLService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = ACLService::new(&cmd.connection, action).await?;
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
@@ -565,20 +566,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the ACL configs the

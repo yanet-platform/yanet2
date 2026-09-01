@@ -2,8 +2,7 @@
 
 use std::time::SystemTime;
 
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -39,18 +38,8 @@ pub enum ModeCmd {
     List,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-    colored::control::set_override(output::is_colored());
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -67,7 +56,7 @@ pub struct GatewayService {
 
 impl GatewayService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, GATEWAY_SERVICE, |channel| {
+        let service = Service::connect_for(connection, "gateway", GATEWAY_SERVICE, |channel| {
             GatewayClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

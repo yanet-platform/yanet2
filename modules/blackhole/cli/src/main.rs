@@ -3,13 +3,10 @@ use blackholepb::{
     blackhole_service_client::BlackholeServiceClient,
 };
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     completion,
     errors::Error,
     output::{self, CommonFormat},
@@ -46,6 +43,17 @@ pub enum ModeCmd {
     Delete(DeleteConfigCmd),
 }
 
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Update(..) => "update",
+            Self::Delete(..) => "delete",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Blackhole module name to operate on.
@@ -70,24 +78,13 @@ pub struct DeleteConfigCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService";
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = BlackholeService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = BlackholeService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -98,37 +95,30 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct BlackholeService {
-    client: BlackholeServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<BlackholeServiceClient<LayeredChannel>>,
 }
 
 impl BlackholeService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = BlackholeServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
+            BlackholeServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
-    }
+        .await?;
 
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+        Ok(Self { service })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .list_configs(request)
             .await
-            .map_err(self.map_err("list"))?
+            .map_err(self.service.status("list"))?
             .into_inner();
         log::debug!("list configs response: {response:?}");
 
@@ -156,10 +146,11 @@ impl BlackholeService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         log::trace!("show config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .show_config(request)
             .await
-            .map_err(self.map_err("show"))?
+            .map_err(self.service.status("show"))?
             .into_inner();
         log::debug!("show config response: {response:?}");
 
@@ -177,10 +168,11 @@ impl BlackholeService {
         let request = UpdateConfigRequest { name: cmd.config_name.clone() };
         log::trace!("update config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .update_config(request)
             .await
-            .map_err(self.map_err("update"))?
+            .map_err(self.service.status("update"))?
             .into_inner();
         log::debug!("update config response: {response:?}");
 
@@ -193,10 +185,11 @@ impl BlackholeService {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         log::trace!("delete config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .delete_config(request)
             .await
-            .map_err(self.map_err("delete"))?
+            .map_err(self.service.status("delete"))?
             .into_inner();
         log::debug!("delete config response: {response:?}");
 

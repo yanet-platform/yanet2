@@ -11,10 +11,7 @@ use std::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{IpAddress, MacAddress};
 use netip::MacAddr;
 use tabled::Tabled;
@@ -72,6 +69,22 @@ pub enum ModeCmd {
     Remove(RemoveCmd),
     /// Neighbour table operations.
     Table(TableCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Show(..) => "show",
+            Self::Add(..) => "add",
+            Self::Remove(..) => "remove",
+            Self::Table(cmd) => match &cmd.action {
+                TableAction::Show => "list tables",
+                TableAction::Create(..) => "create table",
+                TableAction::Update(..) => "update table",
+                TableAction::Remove(..) => "remove table",
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -159,24 +172,13 @@ pub struct RemoveTableCmd {
     pub name: String,
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = NeighbourService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = NeighbourService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Show(args) => service.show_neighbours(args).await,
@@ -196,8 +198,8 @@ pub struct NeighbourService {
 }
 
 impl NeighbourService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             NeighbourServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

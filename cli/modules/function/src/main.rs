@@ -1,10 +1,7 @@
 //! CLI for YANET "function" module.
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    engine::{ArgValueCandidates, CompletionCandidate},
-    CompleteEnv,
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::FunctionId;
 use tonic::{codec::CompressionEncoding, Status};
 use ync::{
@@ -50,6 +47,17 @@ pub enum ModeCmd {
     Delete(DeleteCmd),
 }
 
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list functions",
+            Self::Show(..) => "show function",
+            Self::Update(..) => "update function",
+            Self::Delete(..) => "delete function",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Function name.
@@ -78,24 +86,13 @@ pub struct DeleteCmd {
     pub name: String,
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = FunctionService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = FunctionService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => {
@@ -154,8 +151,8 @@ pub struct FunctionService {
 }
 
 impl FunctionService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, FUNCTION_SERVICE, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, FUNCTION_SERVICE, |channel| {
             FunctionServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

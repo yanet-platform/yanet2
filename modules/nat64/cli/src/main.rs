@@ -1,10 +1,7 @@
 use core::net::{Ipv4Addr, Ipv6Addr};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
-use clap_complete::{
-    engine::{ArgValueCandidates, CompletionCandidate},
-    CompleteEnv,
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, DeleteConfigRequest,
     ListConfigsRequest, RemoveMappingRequest, RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest,
@@ -71,6 +68,22 @@ pub enum ModeCmd {
     Mtu(MtuCmd),
     /// Set drop_unknown flags
     Drop(DropCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Delete(..) => "delete",
+            Self::Prefix { cmd: PrefixCmd::Add(..) } => "add prefix",
+            Self::Prefix { cmd: PrefixCmd::Remove(..) } => "remove prefix",
+            Self::Mapping { cmd: MappingCmd::Add(..) } => "add mapping",
+            Self::Mapping { cmd: MappingCmd::Remove(..) } => "remove mapping",
+            Self::Mtu(..) => "set mtu",
+            Self::Drop(..) => "set drop",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -176,24 +189,13 @@ pub struct DropCmd {
     pub drop_unknown_mapping: bool,
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = NAT64Service::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = NAT64Service::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -217,8 +219,8 @@ pub struct NAT64Service {
 }
 
 impl NAT64Service {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             Nat64ServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

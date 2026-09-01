@@ -4,8 +4,7 @@ use core::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use bytesize::ByteSize;
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -32,17 +31,8 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -60,7 +50,7 @@ pub struct InspectService {
 
 impl InspectService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, INSPECT_SERVICE, |channel| {
+        let service = Service::connect_for(connection, "inspect", INSPECT_SERVICE, |channel| {
             InspectServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

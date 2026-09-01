@@ -1,10 +1,9 @@
 //! CLI for YANET "logging" core module.
 
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::ConnectionArgs,
+    client::{ConnectionArgs, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -68,17 +67,8 @@ impl From<LogLevel> for ynpb::pb::LogLevel {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 impl ModeCmd {
@@ -91,25 +81,23 @@ impl ModeCmd {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let endpoint = cmd.connection.endpoint.clone();
-
-    let channel = ync::client::connect(&cmd.connection)
-        .await
-        .map_err(|err| Error::from_connection(err, action, endpoint.clone()))?;
-
-    let mut client = LoggingClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
-        .accept_compressed(CompressionEncoding::Gzip);
+    let mut service = Service::connect_for(&cmd.connection, action, LOGGING_SERVICE, |channel| {
+        LoggingClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
 
     match cmd.mode {
         ModeCmd::Logging(LoggingCmd::SetLevel(cmd)) => {
             let request = UpdateLevelRequest {
                 level: ynpb::pb::LogLevel::from(cmd.level.clone()).into(),
             };
-            client
+            service
+                .client()
                 .update_level(request)
                 .await
-                .map_err(|status| Error::from_status(status, action, endpoint.clone(), LOGGING_SERVICE))?;
+                .map_err(service.status(action))?;
 
             output::success(action, format_args!("Set log level to {:?}.", cmd.level));
         }

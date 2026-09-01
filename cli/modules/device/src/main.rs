@@ -4,12 +4,11 @@
 //! consumers to resolve numeric device_id values (e.g. from pdump
 //! RecordMeta.rx_device_id) to human-readable names.
 
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use colored::Colorize;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -33,17 +32,8 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -56,31 +46,28 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct DeviceService {
-    client: DeviceServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<DeviceServiceClient<LayeredChannel>>,
 }
 
 impl DeviceService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, "device-list", connection.endpoint.clone()))?;
-        let client = DeviceServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect_for(connection, "device-list", DEVICE_SERVICE, |channel| {
+            DeviceServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service })
     }
 
     pub async fn list(&mut self) -> Result<ListDevicesResponse, Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list(ListDevicesRequest {})
             .await
-            .map_err(|status| Error::from_status(status, "device-list", self.endpoint.clone(), DEVICE_SERVICE))?
+            .map_err(self.service.status("device-list"))?
             .into_inner();
 
         Ok(response)

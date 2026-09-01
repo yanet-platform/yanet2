@@ -17,6 +17,19 @@ pub enum ModeCmd {
     InsertLayer(InsertLayerCmd),
 }
 
+impl ModeCmd {
+    pub(crate) fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Create(..) => "create",
+            Self::Delete(..) => "delete",
+            Self::Stats(..) => "stats",
+            Self::Entries(..) => "entries",
+            Self::InsertLayer(..) => "insert-layer",
+        }
+    }
+}
+
 /// Address family of a fwstate-map object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum MapKind {

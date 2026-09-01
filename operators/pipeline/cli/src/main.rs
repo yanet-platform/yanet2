@@ -5,9 +5,8 @@
 //! invocation ends in help or a usage error. Operator metrics are read
 //! with `yanet-cli metrics`.
 
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
-use ync::{client::ConnectionArgs, output::CommonFormat};
+use clap::{ArgAction, Parser};
+use ync::{client::ConnectionArgs, errors::Error, output::CommonFormat};
 
 /// Pipeline operator CLI.
 #[derive(Debug, Clone, Parser)]
@@ -24,8 +23,10 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+}
 
-    Cmd::parse();
+async fn run(_: Cmd) -> Result<(), Error> {
+    Ok(())
 }

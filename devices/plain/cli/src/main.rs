@@ -1,5 +1,4 @@
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use code::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
@@ -60,7 +59,7 @@ pub struct DevicePlainService {
 
 impl DevicePlainService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+        let service = Service::connect_for(connection, "update", SERVICE_NAME, |channel| {
             DevicePlainServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -109,14 +108,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }

@@ -11,10 +11,7 @@ use core::{
 use std::collections::HashMap;
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
 use commonpb::pb::IpPrefix;
 use netip::{Contiguous, IpNetwork};
@@ -70,6 +67,19 @@ pub enum ModeCmd {
     Remove(RouteRemoveCmd),
     /// Flush RIB to FIB for a configuration.
     Flush(RouteFlushCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Lookup(..) => "lookup",
+            Self::Insert(..) => "insert",
+            Self::Remove(..) => "remove",
+            Self::Flush(..) => "flush",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -155,24 +165,8 @@ impl RouteSource {
     }
 }
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-
-    ync::init(cmd.verbose, cmd.format);
-
-    match run(cmd).await {
-        Ok(()) => {}
-        Err(err) => {
-            output::failure(&err);
-            std::process::exit(err.exit_code());
-        }
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the route operator
@@ -196,7 +190,8 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 /// Returns `Ok(())` when the RPC succeeded, `Err(_)` on transport or RPC
 /// failure.
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = RouteService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = RouteService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -213,8 +208,8 @@ pub struct RouteService {
 }
 
 impl RouteService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let conn = Connection::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let conn = Connection::connect_for(connection, action).await?;
         let service = Service::new(&conn, SERVICE_NAME, |channel| {
             RouteServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)

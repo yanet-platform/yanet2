@@ -21,6 +21,17 @@ pub enum ModeCmd {
     Show(ShowCmd),
 }
 
+impl ModeCmd {
+    pub(crate) fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Delete(..) => "delete",
+            Self::Update(..) => "update",
+            Self::Show(..) => "show",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// The name of the fwstate config to delete

@@ -1,8 +1,5 @@
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use dscppb::{
     AddPrefixesRequest, DeleteConfigRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
@@ -53,6 +50,19 @@ pub enum ModeCmd {
     SetMarking(SetDscpMarkingCmd),
     /// Delete a dscp module config.
     Delete(DeleteConfigCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::PrefixAdd(..) => "prefix-add",
+            Self::PrefixRemove(..) => "prefix-remove",
+            Self::SetMarking(..) => "set-marking",
+            Self::Delete(..) => "delete",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -109,24 +119,13 @@ const SERVICE_NAME: &str = "modules.dscp.controlplane.dscppb.v1.DscpService";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = DscpService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = DscpService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -143,8 +142,8 @@ pub struct DscpService {
 }
 
 impl DscpService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             DscpServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

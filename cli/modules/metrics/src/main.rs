@@ -1,10 +1,7 @@
 //! Generic metrics probe CLI.
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, MetricTag, metric::Value};
 use tabled::Tabled;
 use ync::{
@@ -62,20 +59,8 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    match run(cmd).await {
-        Ok(()) => {}
-        Err(err) => {
-            output::failure(&err);
-            std::process::exit(err.exit_code());
-        }
-    }
+pub fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Run the metrics probe against the named service.

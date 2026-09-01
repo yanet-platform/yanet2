@@ -1,8 +1,5 @@
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    CompleteEnv,
-    engine::{ArgValueCandidates, CompletionCandidate},
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use decappb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
@@ -51,6 +48,17 @@ pub enum ModeCmd {
     Delete(DeleteConfigCmd),
 }
 
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Update(..) => "update",
+            Self::Delete(..) => "delete",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Decap module name to operate on.
@@ -81,24 +89,13 @@ const SERVICE_NAME: &str = "modules.decap.controlplane.decappb.v1.DecapService";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = DecapService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = DecapService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -113,8 +110,8 @@ pub struct DecapService {
 }
 
 impl DecapService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             DecapServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

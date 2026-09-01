@@ -10,10 +10,7 @@ pub mod routemplspb {
 }
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::{
-    engine::{ArgValueCandidates, CompletionCandidate},
-    CompleteEnv,
-};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use netip::{Contiguous, IpNetwork};
 use routemplspb::{
     route_mpls_service_client::RouteMplsServiceClient, update_event::Event, CreateConfigRequest, DeleteConfigRequest,
@@ -58,6 +55,19 @@ pub enum ModeCmd {
     Update(RouteUpdateCmd),
     /// Withdraw route
     Withdraw(RouteWithdrawCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Show(..) => "show",
+            Self::Create(..) => "create",
+            Self::Delete(..) => "delete",
+            Self::Update(..) => "update",
+            Self::Withdraw(..) => "withdraw",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -125,20 +135,8 @@ pub struct RouteWithdrawCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService";
 
-fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    start();
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn start() {
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 
 /// Completion candidates for a `--name` argument: the route-mpls configs
@@ -158,7 +156,8 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = RouteMplsService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = RouteMplsService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -175,8 +174,8 @@ pub struct RouteMplsService {
 }
 
 impl RouteMplsService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             RouteMplsServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)

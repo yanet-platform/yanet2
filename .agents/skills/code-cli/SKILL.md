@@ -27,20 +27,20 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   (`CommonFormat`, `default_value = "human"`, `global = true`, doc
   `Output format.`) and `-v` (`ArgAction::Count`, `global = true`, doc
   `Be verbose: shows debug log lines and raw gRPC error details.`).
-- `fn main()` is synchronous: `CompleteEnv::with_factory(Cmd::command).complete();
-  start();`. `#[tokio::main(flavor = "current_thread")] async fn start()` parses,
-  calls `ync::init(cmd.verbose, cmd.format)` and ends with
-  `if let Err(err) = run(cmd).await { output::failure(&err);
-  std::process::exit(err.exit_code()); }`. Completion never runs inside the
-  runtime.
-- `run(cmd)` builds the service object once and matches `cmd.mode`; every
-  handler returns `Result<(), Error>`.
+- `fn main() -> std::process::ExitCode` delegates the lifecycle to
+  `ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)`. The scaffold
+  owns completion before Tokio, parsing, output initialisation, the
+  current-thread runtime, error rendering and the process status.
+- `run(cmd)` determines the action, builds the service object once and matches
+  `cmd.mode`; every handler returns `Result<(), Error>`.
 - `const SERVICE_NAME: &str = "<proto package>.<Service>";` with the doc
   `/// The fully-qualified gRPC service name used in error messages.`. One
-  service: `Service::connect(&cmd.connection, SERVICE_NAME, |channel|
-  Client::new(channel).send_compressed(Gzip).accept_compressed(Gzip)).await?`.
-  Several: `Connection::connect(&cmd.connection).await?` once, then
-  `Service::new(&connection, NAME, build)` per client.
+  service: `Service::connect_for(&cmd.connection, action, SERVICE_NAME,
+  |channel| Client::new(channel).send_compressed(Gzip)
+  .accept_compressed(Gzip)).await?`. Several:
+  `Connection::connect_for(&cmd.connection, action).await?` once, then
+  `Service::new(&connection, NAME, build)` per client. The action is the same
+  user-facing verb passed to the command's RPC error mapping.
 - Every RPC: `self.service.client().<rpc>(request).await
   .map_err(self.service.status("<verb>"))?.into_inner()`.
 - Generated code: `#[allow(clippy::all, clippy::std_instead_of_core,
