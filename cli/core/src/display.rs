@@ -1,11 +1,11 @@
 use tabled::{
+    Table, Tabled,
     settings::{
+        Color, Style, Width,
         object::{Columns, Rows},
         peaker::Priority,
         style::{BorderColor, HorizontalLine},
-        Color, Style, Width,
     },
-    Table, Tabled,
 };
 use terminal_size::terminal_size_of;
 

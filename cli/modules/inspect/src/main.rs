@@ -12,7 +12,7 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse, MemoryNode};
+use ynpb::pb::{InspectRequest, InspectResponse, MemoryNode, inspect_service_client::InspectServiceClient};
 
 const INSPECT_SERVICE: &str = "controlplane.ynpb.v1.InspectService";
 
@@ -31,7 +31,7 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-pub fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 

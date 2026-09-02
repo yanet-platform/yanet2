@@ -87,7 +87,7 @@ mod test {
     use core::{convert::Infallible, time::Duration};
 
     use tonic::{Code, Status};
-    use tower::{service_fn, Layer, Service, ServiceExt};
+    use tower::{Layer, Service, ServiceExt, service_fn};
 
     use super::TimeoutLayer;
 

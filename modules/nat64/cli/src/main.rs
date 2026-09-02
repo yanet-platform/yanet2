@@ -3,9 +3,9 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use nat64pb::{
-    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, DeleteConfigRequest,
-    ListConfigsRequest, RemoveMappingRequest, RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest,
-    ShowConfigRequest, ShowConfigResponse,
+    AddMappingRequest, AddPrefixRequest, DeleteConfigRequest, ListConfigsRequest, RemoveMappingRequest,
+    RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
+    nat64_service_client::Nat64ServiceClient,
 };
 use netip::{Contiguous, Ipv6Network};
 use ptree::TreeBuilder;

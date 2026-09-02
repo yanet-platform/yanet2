@@ -119,13 +119,13 @@ impl SshAgent {
         let identities = self.identities().await?;
 
         for identity in identities {
-            if let Some(cert) = identity.certificate() {
-                if cert.key_id().contains(tag) {
-                    let blob = identity.to_bytes()?;
+            if let Some(cert) = identity.certificate()
+                && cert.key_id().contains(tag)
+            {
+                let blob = identity.to_bytes()?;
 
-                    if let SshIdentity::Certificate(cert) = identity {
-                        return Ok((*cert, blob));
-                    }
+                if let SshIdentity::Certificate(cert) = identity {
+                    return Ok((*cert, blob));
                 }
             }
         }

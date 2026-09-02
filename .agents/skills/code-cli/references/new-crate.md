@@ -30,10 +30,6 @@ rust-version = "1.88"
 [lints]
 workspace = true
 
-[[bin]]
-name = "yanet-cli-<suffix>"
-path = "src/main.rs"
-
 [dependencies]
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
@@ -107,7 +103,7 @@ use crate::<x>pb::{
     <x>_service_client::<X>ServiceClient,
 };
 
-#[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod <x>pb {
     tonic::include_proto!("<proto package>");
 }

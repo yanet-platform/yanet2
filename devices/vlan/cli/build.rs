@@ -1,6 +1,6 @@
 use core::error::Error;
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../controlplane/vlanpb/v1/vlan.proto");
 
     tonic_build::configure()

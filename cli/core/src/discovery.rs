@@ -12,7 +12,7 @@ use core::time::Duration;
 use std::collections::BTreeMap;
 
 use tonic::codec::CompressionEncoding;
-use ynpb::pb::{gateway_client::GatewayClient, ListServicesRequest};
+use ynpb::pb::{ListServicesRequest, gateway_client::GatewayClient};
 
 use crate::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},

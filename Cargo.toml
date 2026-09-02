@@ -45,6 +45,9 @@ members = [
     "operators/route/cli/neighbour",
 ]
 
+[workspace.lints.rust]
+unused_crate_dependencies = "deny"
+
 [workspace.lints.clippy]
 std_instead_of_core = "deny"
 

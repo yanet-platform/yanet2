@@ -7,7 +7,7 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{logging_client::LoggingClient, UpdateLevelRequest};
+use ynpb::pb::{UpdateLevelRequest, logging_client::LoggingClient};
 
 const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
 
@@ -67,7 +67,7 @@ impl From<LogLevel> for ynpb::pb::LogLevel {
     }
 }
 
-pub fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 

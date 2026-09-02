@@ -1,6 +1,6 @@
 use core::error::Error;
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/balancer.proto");
     println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/config.proto");
     println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/state.proto");

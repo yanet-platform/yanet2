@@ -394,7 +394,7 @@ impl NotFoundMapper {
 mod test {
     use std::sync::Arc;
 
-    use tonic::{metadata::MetadataMap, Code, Status};
+    use tonic::{Code, Status, metadata::MetadataMap};
 
     use super::{Error, ErrorKind, NotFoundMapper};
 

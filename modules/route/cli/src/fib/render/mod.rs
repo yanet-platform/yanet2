@@ -8,8 +8,8 @@
 //! table pre-wrapping it.
 
 use tabled::{
-    settings::{object::Rows, Color, Padding, Style},
     Table, Tabled,
+    settings::{Color, Padding, Style, object::Rows},
 };
 use ync::output;
 

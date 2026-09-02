@@ -48,9 +48,9 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `Connection::endpoint()`.
 - Every RPC: `self.service.client().<rpc>(request).await
   .map_err(self.service.status("<verb>"))?.into_inner()`.
-- Generated code: `#[allow(clippy::all, clippy::std_instead_of_core,
-  non_snake_case)] pub mod <x>pb { tonic::include_proto!("…"); }`; shared
-  protos come through `extern_path` to `::commonpb::pb`.
+- Generated code: `#[allow(clippy::std_instead_of_core, non_snake_case)]
+  pub mod <x>pb { tonic::include_proto!("…"); }`; shared protos come
+  through `extern_path` to `::commonpb::pb`.
 
 ## Arguments
 

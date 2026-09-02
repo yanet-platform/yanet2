@@ -9,6 +9,7 @@ option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonp
 // The byte length of addr is the family discriminant by design:
 //   - 4 bytes is IPv4 in network byte order.
 //   - 16 bytes is IPv6 in network byte order.
+//
 // Any other length is invalid.
 //
 // A scope or zone is host-local. It belongs as a sibling field on the

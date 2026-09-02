@@ -111,7 +111,7 @@ struct ServiceReport {
     error: Option<String>,
 }
 
-pub fn main() -> ExitCode {
+fn main() -> ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 

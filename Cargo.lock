@@ -274,10 +274,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bitmap"
-version = "0.1.0"
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3324,13 +3320,9 @@ dependencies = [
  "log",
  "netip",
  "prost",
- "prost-types",
- "ptree",
  "serde",
- "serde_json",
  "serde_yaml",
  "tabled",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3354,7 +3346,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tabled",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3368,12 +3359,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "prost",
- "prost-types",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3384,9 +3372,6 @@ name = "yanet-cli-common"
 version = "0.1.0"
 dependencies = [
  "clap",
- "clap_complete",
- "log",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-ynpb",
@@ -3398,10 +3383,8 @@ version = "0.1.0"
 dependencies = [
  "bytesize",
  "clap",
- "clap_complete",
  "serde_yaml",
  "tabled",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-ynpb",
@@ -3411,17 +3394,13 @@ dependencies = [
 name = "yanet-cli-decap"
 version = "0.1.0"
 dependencies = [
- "bitmap",
  "clap",
  "clap_complete",
- "colored",
  "log",
  "netip",
  "prost",
- "prost-types",
  "ptree",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3433,9 +3412,7 @@ name = "yanet-cli-device-list"
 version = "0.1.0"
 dependencies = [
  "clap",
- "clap_complete",
  "colored",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-ynpb",
@@ -3446,10 +3423,8 @@ name = "yanet-cli-device-plain"
 version = "0.1.0"
 dependencies = [
  "clap",
- "clap_complete",
  "prost",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3464,7 +3439,6 @@ dependencies = [
  "clap_complete",
  "prost",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3476,10 +3450,8 @@ name = "yanet-cli-device-vlan"
 version = "0.1.0"
 dependencies = [
  "clap",
- "clap_complete",
  "prost",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3492,13 +3464,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "netip",
  "prost",
  "ptree",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3514,7 +3484,6 @@ dependencies = [
  "prost",
  "serde",
  "serde_yaml",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3529,7 +3498,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "serde_yaml",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-commonpb",
@@ -3545,11 +3513,8 @@ dependencies = [
  "humantime",
  "log",
  "prost",
- "prost-types",
  "serde",
  "serde_json",
- "tokio",
- "tokio-stream",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3564,11 +3529,8 @@ dependencies = [
  "clap_complete",
  "log",
  "prost",
- "prost-types",
  "serde",
  "serde_json",
- "tokio",
- "tokio-stream",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3580,10 +3542,8 @@ name = "yanet-cli-gateway"
 version = "0.1.0"
 dependencies = [
  "clap",
- "clap_complete",
  "prost-types",
  "tabled",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-ynpb",
@@ -3595,10 +3555,7 @@ version = "0.1.0"
 dependencies = [
  "bytesize",
  "clap",
- "clap_complete",
- "colored",
  "ptree",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-ynpb",
@@ -3611,7 +3568,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "tabled",
- "tokio",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3622,13 +3578,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "prost",
- "prost-types",
- "ptree",
  "serde",
  "serde_yaml",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3642,14 +3594,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "netip",
  "prost",
- "prost-types",
  "ptree",
  "serde",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3662,13 +3611,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "log",
  "netip",
  "prost",
  "serde",
  "serde_json",
  "tabled",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3680,7 +3627,6 @@ name = "yanet-cli-operator-pipeline"
 version = "0.1.0"
 dependencies = [
  "clap",
- "clap_complete",
  "yanet-cli",
 ]
 
@@ -3691,13 +3637,11 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "log",
  "netip",
  "prost",
  "serde",
  "serde_json",
  "tabled",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3712,7 +3656,6 @@ dependencies = [
  "bytesize",
  "clap",
  "clap_complete",
- "colored",
  "log",
  "pcap-file",
  "pnet_packet",
@@ -3733,7 +3676,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "serde_yaml",
- "tokio",
  "tonic",
  "yanet-cli",
  "yanet-commonpb",
@@ -3781,15 +3723,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "netip",
  "prost",
- "prost-types",
- "ptree",
  "serde",
  "serde_yaml",
- "tabled",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
@@ -3803,11 +3740,9 @@ dependencies = [
  "clap",
  "clap_complete",
  "log",
- "netip",
  "prost",
  "serde",
  "serde_yaml",
- "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",

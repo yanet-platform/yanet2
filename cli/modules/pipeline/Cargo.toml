@@ -1,9 +1,10 @@
 [package]
 name = "yanet-cli-pipeline"
 version = "0.1.0"
-edition = "2021"
-authors = ["YANET Team"]
-description = "CLI for YANET pipeline module"
+edition = "2024"
+publish = false
+
+rust-version = "1.88"
 
 [lints]
 workspace = true
@@ -11,9 +12,8 @@ workspace = true
 [dependencies]
 ynpb = { path = "../../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
-ync = { path = "../../core", version = "0.1", package = "yanet-cli"}
+ync = { path = "../../core", version = "0.1", package = "yanet-cli" }
 serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }

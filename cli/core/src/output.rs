@@ -125,10 +125,10 @@ impl Output for HumanOutput {
             }
         }
 
-        if log::log_enabled!(log::Level::Debug) {
-            if let (Some(code), Some(msg)) = (&err.raw_code, &err.raw_message) {
-                eprintln!("    debug:     {code}: {msg}");
-            }
+        if log::log_enabled!(log::Level::Debug)
+            && let (Some(code), Some(msg)) = (&err.raw_code, &err.raw_message)
+        {
+            eprintln!("    debug:     {code}: {msg}");
         }
     }
 
@@ -323,11 +323,7 @@ const HINT_PREFIX: &str = "    hint: ";
 /// [`HumanOutput`]'s [`success`](Output::success)/[`failure`](Output::failure)
 /// already use.
 fn mark_prefix() -> &'static str {
-    if is_colored() {
-        "[–] "
-    } else {
-        "[-] "
-    }
+    if is_colored() { "[–] " } else { "[-] " }
 }
 
 /// Returns `true` if an empty-result report should be suppressed.

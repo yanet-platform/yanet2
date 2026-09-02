@@ -11,8 +11,8 @@ use ync::{
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
-    pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, GetPipelineRequest, ListPipelinesRequest,
-    Pipeline, UpdatePipelineRequest,
+    DeletePipelineRequest, GetPipelineRequest, ListPipelinesRequest, Pipeline, UpdatePipelineRequest,
+    pipeline_service_client::PipelineServiceClient,
 };
 
 const PIPELINE_SERVICE: &str = "controlplane.ynpb.v1.PipelineService";
@@ -66,10 +66,7 @@ pub struct ShowCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(
-    about = "Update pipeline configuration.",
-    after_help = "Examples:\n  yanet-cli pipeline update --name main --functions acl,route"
-)]
+#[command(after_help = "Examples:\n  yanet-cli pipeline update --name main --functions acl,route")]
 pub struct UpdateCmd {
     /// Pipeline name.
     #[arg(long, short = 'n', add = ArgValueCandidates::new(pipeline_candidates))]

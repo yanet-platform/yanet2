@@ -27,7 +27,7 @@ const SERDE_MESSAGES: &[&str] = &[
     ".common.commonpb.v1.IPRange",
 ];
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/commonpb/v1/target.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/metric.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/macaddr.proto");

@@ -9,16 +9,10 @@ rust-version = "1.88"
 [lints]
 workspace = true
 
-[[bin]]
-name = "yanet-cli-gateway"
-path = "src/main.rs"
-
 [dependencies]
 ynpb = { path = "../../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
 ync = { path = "../../core", version = "0.1", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost-types = "0.13"
-tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }
 tabled = { version = "0.18", features = ["ansi"] }

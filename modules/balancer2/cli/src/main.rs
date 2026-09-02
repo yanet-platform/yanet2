@@ -14,10 +14,14 @@ use std::path::PathBuf;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
-use yanet_cli_balancer2::balancerpb;
 use ync::{client::ConnectionArgs, completion, errors::Error, output::CommonFormat};
 
 use crate::service::Balancer2Service;
+
+#[allow(clippy::std_instead_of_core, non_snake_case)]
+pub mod balancerpb {
+    tonic::include_proto!("modules.balancer2.controlplane.balancerpb.v1");
+}
 
 /// Balancer2 module CLI.
 #[derive(Debug, Clone, Parser)]
