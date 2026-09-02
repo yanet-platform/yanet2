@@ -118,7 +118,13 @@ func (m *MirrorService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	reqRules := req.Rules
+	reqRules := req.GetRules()
+	if len(reqRules) == 0 {
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"mirror config must contain at least one rule",
+		)
+	}
 
 	rules := make([]cmirror.MirrorRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {

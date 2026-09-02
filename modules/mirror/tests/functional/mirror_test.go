@@ -282,6 +282,20 @@ func TestMirror_NoMatch(t *testing.T) {
 	require.Empty(t, result.Drop, "unmatched packet must not be dropped")
 }
 
+// Test_MirrorBackend_UpdateModuleEmptyRules verifies that an empty ruleset is
+// rejected with an actionable error.
+func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
+	_, _, backend := setupMirrorHarness(t, []string{"port0"})
+
+	_, err := backend.UpdateModule("test", nil)
+	require.EqualError(
+		t,
+		err,
+		"failed to update module config: failed to update mirror config: "+
+			"mirror config must contain at least one rule",
+	)
+}
+
 // TestMirror_ModeNone_IPv4 verifies that an IPv4 packet matched by an ip4
 // rule with ModeNone passes through to the next module without device redirect,
 // and that the per-rule counter is incremented.

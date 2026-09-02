@@ -288,6 +288,13 @@ mirror_module_config_update(
 	uint32_t rule_count,
 	yanet_error **err
 ) {
+	if (rule_count == 0) {
+		yanet_error_add(
+			err, "mirror config must contain at least one rule"
+		);
+		return -1;
+	}
+
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
 
