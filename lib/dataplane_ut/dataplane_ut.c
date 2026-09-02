@@ -274,8 +274,6 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
-	dp_config_mark_ready(ut->dp_config);
-
 	// Create the mock mempool now so step 2 can allocate mbufs.
 	ut->mempool = test_mempool_create();
 	if (ut->mempool == NULL) {
@@ -367,6 +365,30 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 
 	worker_counters_bind(ut->dp_config, &counter_ids);
 
+	// Seed the rx pool gauges from the shared mock pool before the
+	// instance becomes visible: the harness runs no worker rounds, so
+	// without seeding a scrape would read the zero-filled storage and
+	// fail the same pool validation the real control plane applies.
+	for (size_t idx = 0; idx < cfg->worker_count; ++idx) {
+		uint64_t *capacity = worker_counter_slot(
+			ut->dp_config, idx, counter_ids.rx_mempool_capacity
+		);
+		uint64_t *available = worker_counter_slot(
+			ut->dp_config, idx, counter_ids.rx_mempool_available
+		);
+		if (capacity == NULL || available == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: worker %zu has no rx pool "
+			    "counter slot",
+			    idx);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+
+		*capacity = ut->mempool->size;
+		*available = rte_mempool_avail_count(ut->mempool);
+	}
+
 	// Skipped when device_count == 0: the implicit device 0 (see above)
 	// has no dp_topology slot, so per-device worker counts stay
 	// unavailable in that mode -- a known, deferred gap.
@@ -404,6 +426,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 		free(device_worker_counts);
 	}
+
+	// Last: every field a reader can walk must be live by now, so no
+	// attach can observe a half-initialised instance.
+	dp_config_mark_ready(ut->dp_config);
 
 	return ut;
 }
@@ -504,6 +530,46 @@ dataplane_ut_round_result_free(struct dataplane_ut_round_result *result) {
 size_t
 dataplane_ut_mempool_outstanding(struct dataplane_ut *ut) {
 	return test_mempool_outstanding(ut->mempool);
+}
+
+int
+dataplane_ut_set_worker_counter(
+	struct dataplane_ut *ut,
+	size_t worker_idx,
+	const char *name,
+	uint64_t value
+) {
+	if (ut == NULL || name == NULL) {
+		return -1;
+	}
+	if (worker_idx >= ut->dp_config->worker_count) {
+		return -1;
+	}
+
+	struct counter_registry *registry = &ut->dp_config->worker_counters;
+	struct counter *counters = ADDR_OF(&registry->names);
+	for (uint64_t idx = 0; idx < registry->count; ++idx) {
+		if (strncmp(counters[idx].name, name, COUNTER_NAME_LEN) != 0) {
+			continue;
+		}
+
+		// Only a single-value counter has a well-defined "the"
+		// slot; a multi-value one is not this hook's contract.
+		if (counters[idx].size != 1) {
+			return -1;
+		}
+
+		uint64_t *slot =
+			worker_counter_slot(ut->dp_config, worker_idx, idx);
+		if (slot == NULL) {
+			return -1;
+		}
+
+		*slot = value;
+		return 0;
+	}
+
+	return -1;
 }
 
 void

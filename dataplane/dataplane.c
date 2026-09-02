@@ -831,6 +831,52 @@ dataplane_init(
 
 		worker_counters_bind(dp_config, &counter_ids);
 
+		// Publish each worker pool's occupancy before the instance
+		// becomes visible: until the worker threads run their first
+		// rounds, a scrape would otherwise read the zero-filled
+		// storage, fail pool validation, and drop the whole worker
+		// family despite a healthy startup.
+		for (uint32_t device_idx = 0;
+		     device_idx < dataplane->device_count;
+		     ++device_idx) {
+			struct dataplane_device *device =
+				dataplane->devices + device_idx;
+			for (uint32_t wrk_idx = 0;
+			     wrk_idx < device->worker_count;
+			     ++wrk_idx) {
+				struct dataplane_worker *worker =
+					device->workers + wrk_idx;
+				if (worker->instance != instance) {
+					continue;
+				}
+
+				uint64_t worker_idx = worker->dp_worker->idx;
+				if (worker_rx_pool_sampler_init(
+					    &worker->rx_pool_sampler,
+					    worker->rx_mempool,
+					    worker_counter_slot(
+						    dp_config,
+						    worker_idx,
+						    counter_ids
+							    .rx_mempool_capacity
+					    ),
+					    worker_counter_slot(
+						    dp_config,
+						    worker_idx,
+						    counter_ids
+							    .rx_mempool_available
+					    )
+				    )) {
+					LOG(ERROR,
+					    "failed to bind rx pool counters "
+					    "for worker %lu of instance %u",
+					    worker_idx,
+					    instance_idx);
+					return -1;
+				}
+			}
+		}
+
 		for (uint64_t device_idx = 0;
 		     device_idx < dataplane->device_count;
 		     ++device_idx) {
