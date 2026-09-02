@@ -14,16 +14,15 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	size_t rule_count,
 	struct memory_context *memory_context
 ) {
-	struct value_table *t =
-		memory_balloc(memory_context, sizeof(struct value_table));
-	if (t == NULL) {
+	struct vline *l = memory_balloc(memory_context, sizeof(struct vline));
+	if (l == NULL) {
 		return -1;
 	}
 
-	if (value_table_init(t, memory_context, "vlan", 1, 4096)) {
+	if (vline_init(l, memory_context, "vlan", 4096)) {
 		goto error_init;
 	}
-	SET_OFFSET_OF(data, t);
+	SET_OFFSET_OF(data, l);
 
 	struct remap_table remap_table;
 	if (remap_table_init(&remap_table, memory_context, 4096)) {
@@ -46,8 +45,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 			for (uint16_t vlan = r->vlan_ranges[idx].from;
 			     vlan <= r->vlan_ranges[idx].to;
 			     ++vlan) {
-				uint32_t *value =
-					value_table_get_ptr(t, 0, vlan);
+				uint32_t *value = vline_get_ptr(l, vlan);
 				if (remap_table_touch(
 					    &remap_table, *value, value
 				    ) < 0) {
@@ -58,7 +56,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	}
 
 	remap_table_compact(&remap_table);
-	value_table_compact(t, &remap_table);
+	vline_compact(l, &remap_table);
 	remap_table_free(&remap_table);
 
 	for (const struct filter_rule **r_ptr = rules;
@@ -76,8 +74,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 		if (r->vlan_range_count == 0) {
 			for (uint16_t vlan = 0; vlan <= 4095; ++vlan) {
 				if (value_registry_collect(
-					    registry,
-					    value_table_get(t, 0, vlan)
+					    registry, vline_get(l, vlan)
 				    )) {
 					goto error_collect;
 				}
@@ -88,8 +85,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 			     vlan <= r->vlan_ranges[idx].to;
 			     ++vlan) {
 				if (value_registry_collect(
-					    registry,
-					    value_table_get(t, 0, vlan)
+					    registry, vline_get(l, vlan)
 				    )) {
 					goto error_collect;
 				}
@@ -103,11 +99,11 @@ error_touch:
 
 error_collect:
 error_remap_table:
-	value_table_free(t);
+	vline_free(l);
 	SET_OFFSET_OF(data, NULL);
 
 error_init:
-	memory_bfree(memory_context, t, sizeof(struct value_table));
+	memory_bfree(memory_context, l, sizeof(struct vline));
 
 	return -1;
 }
@@ -116,10 +112,10 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(vlan)(
 	void *data, struct memory_context *memory_context
 ) {
-	struct value_table *t = (struct value_table *)data;
-	if (t == NULL) {
+	struct vline *l = (struct vline *)data;
+	if (l == NULL) {
 		return;
 	}
-	value_table_free(t);
-	memory_bfree(memory_context, t, sizeof(struct value_table));
+	vline_free(l);
+	memory_bfree(memory_context, l, sizeof(struct vline));
 }
