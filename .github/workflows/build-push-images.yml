@@ -87,6 +87,9 @@ jobs:
           - component: bird-adapter
             image: ghcr.io/yanet-platform/yanet2/bird-adapter
             dockerfile: deploy/bird-adapter.Dockerfile
+          - component: generic-operator
+            image: ghcr.io/yanet-platform/yanet2/generic-operator
+            dockerfile: deploy/yanet-generic-operator.Dockerfile
           - component: pipeline-operator
             image: ghcr.io/yanet-platform/yanet2/pipeline-operator
             dockerfile: deploy/yanet-pipeline-operator.Dockerfile
