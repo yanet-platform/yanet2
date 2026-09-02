@@ -72,7 +72,7 @@ pub struct UpdateConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefixes in the full desired set, replacing the current one entirely.
-    #[arg(long, short, required = true, num_args = 0..)]
+    #[arg(long = "prefix", short = 'p', alias = "prefixes", required = true, num_args = 0..)]
     pub prefixes: Vec<Contiguous<IpNetwork>>,
 }
 
@@ -139,7 +139,7 @@ impl DecapService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No decap configurations found."),
-                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefixes <cidr>'"),
+                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefix <cidr>'"),
                     );
                     return;
                 }
@@ -173,7 +173,7 @@ impl DecapService {
                 if response.prefixes4.is_empty() && response.prefixes6.is_empty() {
                     output::empty_with_hint(
                         format_args!("No decap prefixes found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefixes <cidr>'"),
+                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefix <cidr>'"),
                     );
                     return;
                 }

@@ -148,7 +148,7 @@ func testFWStateMapListEntries(t *testing.T, fw *framework.TestFramework) {
 	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_fw" +
-				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
 				" --map-name-v4 " + mapV4 + " --map-name-v6 " + mapV6,
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -413,7 +413,7 @@ func testFWStateCheckState(t *testing.T, fw *framework.TestFramework) {
 	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_fw" +
-				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
 				" --map-name-v4 fwstate0-v4 --map-name-v6 fwstate0-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -582,7 +582,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_udp" +
-				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
 				" --map-name-v4 fwstate_udp-v4 --map-name-v6 fwstate_udp-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_udp,fwstate:fwstate_udp,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -831,7 +831,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	fw.Run("Wire_acl_state_maps", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_ext" +
-				" --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
+				" /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml" +
 				" --map-name-v4 fwstate_ext-v4 --map-name-v6 fwstate_ext-v6",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_ext,fwstate:fwstate_ext,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",

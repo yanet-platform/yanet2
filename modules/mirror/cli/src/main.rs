@@ -82,9 +82,9 @@ pub struct UpdateCmd {
     /// The name of the module config to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config: String,
-    /// Ruleset file path.
-    #[arg(required = true, long = "rules", value_name = "PATH")]
-    pub rules: PathBuf,
+    /// Path to the ruleset YAML file.
+    #[arg(value_name = "PATH")]
+    pub file: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -290,7 +290,7 @@ impl MirrorService {
                 if config.rules.is_empty() {
                     output::empty_with_hint(
                         format_args!("No mirror rules found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-mirror update --name <name> --rules <path>'"),
+                        format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
                     );
                 }
             },
@@ -315,7 +315,7 @@ impl MirrorService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No mirror configurations found."),
-                        format_args!("create one with 'yanet-cli-mirror update --name <name> --rules <path>'"),
+                        format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
                     );
                     return;
                 }
@@ -343,7 +343,7 @@ impl MirrorService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config = MirrorConfig::load(&cmd.rules).map_err(|e| self.service.invalid("update", e.to_string()))?;
+        let config = MirrorConfig::load(&cmd.file).map_err(|e| self.service.invalid("update", e.to_string()))?;
         let rules: Vec<mirrorpb::Rule> = config
             .try_into()
             .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("update", e.to_string()))?;

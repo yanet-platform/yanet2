@@ -124,7 +124,7 @@ pub struct AddCmd {
     #[arg(long)]
     pub hardware_addr: MacAddr,
     /// Network interface name.
-    #[arg(long)]
+    #[arg(long, short = 'd')]
     pub device: Option<String>,
     /// Neighbour table name. Defaults to "static".
     #[arg(long, add = ArgValueCandidates::new(table_candidates))]

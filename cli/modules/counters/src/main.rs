@@ -37,26 +37,26 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, clap::Args, Default)]
 pub struct ByTagsCmd {
-    /// Counter name to show, as an exact name or a Rust regex pattern.
-    #[arg(short, long = "name", value_name = "PATTERN")]
+    /// Counter names to show, each an exact name or a Rust regex pattern.
+    #[arg(value_name = "PATTERN")]
     pub names: Vec<String>,
     /// Device name to filter by.
-    #[arg(short, long)]
+    #[arg(long, short = 'd')]
     pub device: Option<String>,
     /// Pipeline name to filter by.
-    #[arg(short, long)]
+    #[arg(long, short = 'p')]
     pub pipeline: Option<String>,
     /// Function name to filter by.
-    #[arg(short, long)]
+    #[arg(long, short = 'f')]
     pub function: Option<String>,
     /// Chain name to filter by.
-    #[arg(short, long)]
+    #[arg(long, short = 'c')]
     pub chain: Option<String>,
     /// Module type to filter by.
-    #[arg(short = 't', long)]
+    #[arg(long, short_alias = 't')]
     pub module_type: Option<String>,
     /// Module name to filter by.
-    #[arg(short = 'm', long)]
+    #[arg(long, short = 'm')]
     pub module_name: Option<String>,
     /// Owner level to filter by (device, pipeline, function, chain, module,
     /// object).

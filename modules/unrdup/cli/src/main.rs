@@ -77,8 +77,8 @@ pub struct UpdateConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Path to the YAML file describing the whole configuration.
-    #[arg(long = "config", short = 'c')]
-    pub config_path: PathBuf,
+    #[arg(value_name = "PATH")]
+    pub file: PathBuf,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -288,7 +288,7 @@ impl UnrdupService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No unrdup configurations found."),
-                        format_args!("create one with 'yanet-cli-unrdup update --name <name> --config <path>'"),
+                        format_args!("create one with 'yanet-cli-unrdup update --name <name> <path>'"),
                     );
                     return;
                 }
@@ -335,8 +335,7 @@ impl UnrdupService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
-        let config =
-            UnrdupConfig::load(&cmd.config_path).map_err(|err| self.service.invalid("update", err.to_string()))?;
+        let config = UnrdupConfig::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),

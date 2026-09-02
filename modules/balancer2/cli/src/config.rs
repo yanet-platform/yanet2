@@ -4,7 +4,7 @@ use core::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
-use std::fs::File;
+use std::{fs::File, path::Path};
 
 use filterpb::pb::PortRange;
 use netip::IpNetwork;
@@ -40,7 +40,7 @@ pub struct BalancerConfig {
 }
 
 impl BalancerConfig {
-    pub fn from_yaml_file(path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn from_yaml_file(path: &Path) -> Result<Self, Box<dyn Error>> {
         Ok(serde_yaml::from_reader(File::open(path)?)?)
     }
 }

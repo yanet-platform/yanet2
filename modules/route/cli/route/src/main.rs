@@ -164,8 +164,8 @@ pub struct FibUpdateCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Path to the FIB YAML file.
-    #[arg(required = true, long = "rules", value_name = "PATH")]
-    pub rules: PathBuf,
+    #[arg(value_name = "PATH")]
+    pub file: PathBuf,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -245,7 +245,7 @@ impl RouteService {
     }
 
     pub async fn update_fib(&mut self, cmd: FibUpdateCmd) -> Result<(), Error> {
-        let config = FibConfig::load(&cmd.rules).map_err(|err| self.service.invalid("update", err.to_string()))?;
+        let config = FibConfig::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
         let entry_count = config.entries.len();
         let request = UpdateFibRequest {
             module_name: cmd.config_name.clone(),
@@ -295,7 +295,7 @@ impl RouteService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No FIB configurations found."),
-                        format_args!("create one with 'yanet-cli-route fib update --name <name> --rules <path>'"),
+                        format_args!("create one with 'yanet-cli-route fib update --name <name> <path>'"),
                     );
                     return;
                 }

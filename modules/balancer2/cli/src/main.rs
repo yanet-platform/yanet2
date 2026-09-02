@@ -9,6 +9,7 @@ use core::{
     net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::FromStr,
 };
+use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -79,12 +80,12 @@ pub struct UpdateCmd {
     /// Balancer configuration name.
     #[arg(long, short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
-    /// Path to YAML configuration file.
-    #[arg(long, short = 'c')]
-    pub config: String,
+    /// Path to the YAML configuration file.
+    #[arg(value_name = "PATH")]
+    pub file: PathBuf,
     /// Sessions state name to bind this configuration to (required on first
     /// create; optional on subsequent updates of an existing config).
-    #[arg(long, short = 's', add = ArgValueCandidates::new(sessions_candidates))]
+    #[arg(long, short_alias = 's', add = ArgValueCandidates::new(sessions_candidates))]
     pub sessions: Option<String>,
 }
 
@@ -102,12 +103,12 @@ pub struct ShowCmd {
     pub name: String,
 
     /// Show all counters, active sessions and last packet timestamps.
-    #[arg(long, short = 's')]
+    #[arg(long, short_alias = 's')]
     pub stats: bool,
 
     /// Show allowed sources config per VS (with counters if --stats is
     /// present).
-    #[arg(long, short = 'a')]
+    #[arg(long, short_alias = 'a')]
     pub acl: bool,
 
     /// Show peers per VS.
@@ -119,14 +120,14 @@ pub struct ShowCmd {
     pub decap: bool,
 
     /// Enable all output sections (--stats --acl --peers --decap).
-    #[arg(long, short = 'd')]
+    #[arg(long)]
     pub detail: bool,
 
     #[command(flatten)]
     pub filter: FilterFlags,
 
     /// Filter by device name.
-    #[arg(long)]
+    #[arg(long, short = 'd')]
     pub device: Option<String>,
     /// Filter by pipeline name.
     #[arg(long, short = 'p')]
@@ -135,7 +136,7 @@ pub struct ShowCmd {
     #[arg(long, short = 'f')]
     pub function: Option<String>,
     /// Filter by chain name.
-    #[arg(long)]
+    #[arg(long, short = 'c')]
     pub chain: Option<String>,
 }
 

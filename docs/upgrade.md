@@ -121,3 +121,33 @@ be deleted while any published module config links it — update or delete
 the linking module first. The proto field renumbering on the two rewritten
 services means an old CLI against a new control plane misdecodes requests:
 upgrade the `yanet2-cli` package together with the control plane.
+
+## CLI flags follow one dictionary
+
+The file a command consumes is its positional argument now. Six flags are
+gone without an alias:
+
+```bash
+yanet-cli-acl update --name acl0 acl0.yaml                    # was --rules
+yanet-cli-mirror update --name mirror0 mirror0.yaml           # was --rules
+yanet-cli-route fib update --name route0 route0.yaml          # was --rules
+yanet-cli-unrdup update --name unrdup0 unrdup0.yaml           # was --config
+yanet-cli-balancer2 update --name lb0 --sessions s0 lb0.yaml  # was --config
+yanet-cli-device-trafgen upload --name gen0 replay.pcap       # was --pcap
+```
+
+`yanet-cli-counters` takes its name patterns as positional arguments
+(`yanet-cli-counters 'rx_.*' --device eth0`), `--name` is gone.
+`yanet-cli-dscp set-marking --flag` takes `never`, `default` or `always`
+instead of `0`, `1`, `2`.
+
+Every short letter means one thing in every binary: `-n` name, `-d`
+device, `-p` pipeline or prefix, `-f` function, `-c` chain, `-t` tag.
+Two commands reuse a letter for another flag, so check scripts that pass
+them: `yanet-cli-acl metrics-rules -c` selects a chain now, the config is
+`--name`, and `yanet-cli-balancer2 show -d` expects a device name, the
+old switch is `--detail`. The other displaced letters (`-s` and `-a` in
+balancer2, `-c` in `sessions update`, `-t` in counters, `-f` and `-s` in
+pdump) and the spellings `--config` on `acl metrics-rules` and
+`--prefixes` on `decap update` keep working as hidden aliases for one
+release.

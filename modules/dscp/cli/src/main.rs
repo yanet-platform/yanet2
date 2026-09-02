@@ -1,4 +1,4 @@
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{ArgAction, CommandFactory, Parser, ValueEnum, value_parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use dscppb::{
@@ -78,7 +78,7 @@ pub struct AddPrefixesCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefix to be added to the input filter of the DSCP module.
-    #[arg(long, short, required = true)]
+    #[arg(long, short = 'p', required = true)]
     pub prefix: Vec<Contiguous<IpNetwork>>,
 }
 
@@ -88,7 +88,7 @@ pub struct RemovePrefixesCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefix to be removed from the input filter of the DSCP module.
-    #[arg(long, short, required = true)]
+    #[arg(long, short = 'p', required = true)]
     pub prefix: Vec<Contiguous<IpNetwork>>,
 }
 
@@ -97,13 +97,33 @@ pub struct SetDscpMarkingCmd {
     /// DSCP module name to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0),
-    /// 2 - Always
-    #[arg(long)]
-    pub flag: u32,
-    /// DSCP mark value (0-63)
-    #[arg(long)]
+    /// When the DSCP field is rewritten.
+    #[arg(long, value_enum)]
+    pub flag: MarkingFlag,
+    /// DSCP mark value in 0..=63.
+    #[arg(long, value_parser = value_parser!(u32).range(0..=63))]
     pub mark: u32,
+}
+
+/// The marking mode of a DSCP config, carried on the wire as its number.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum MarkingFlag {
+    /// Never rewrite the DSCP field.
+    Never,
+    /// Rewrite the DSCP field only when the original value is 0.
+    Default,
+    /// Always rewrite the DSCP field.
+    Always,
+}
+
+impl From<MarkingFlag> for u32 {
+    fn from(flag: MarkingFlag) -> Self {
+        match flag {
+            MarkingFlag::Never => 0,
+            MarkingFlag::Default => 1,
+            MarkingFlag::Always => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -268,21 +288,12 @@ impl DscpService {
     }
 
     pub async fn set_dscp_marking(&mut self, cmd: SetDscpMarkingCmd) -> Result<(), Error> {
-        // Validate flag value
-        if cmd.flag > 2 {
-            return Err(self
-                .service
-                .invalid("set-marking", "Invalid flag value (must be 0, 1, or 2)"));
-        }
-
-        // Validate mark value (6-bit field)
-        if cmd.mark > 63 {
-            return Err(self.service.invalid("set-marking", "Invalid mark value (must be 0-63)"));
-        }
-
         let request = SetDscpMarkingRequest {
             name: cmd.config_name.clone(),
-            dscp_config: Some(DscpConfig { flag: cmd.flag, mark: cmd.mark }),
+            dscp_config: Some(DscpConfig {
+                flag: cmd.flag.into(),
+                mark: cmd.mark,
+            }),
         };
         log::trace!("SetDscpMarkingRequest: {request:?}");
         let response = self

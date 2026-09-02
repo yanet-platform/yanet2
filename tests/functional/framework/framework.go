@@ -159,7 +159,7 @@ func (f *TestFramework) CommonConfigCommands() []string {
 		p.CLI("yanet-cli-forward") + " update --name=forward0 " + p.ForwardYAML,
 
 		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
-		p.CLI("yanet-cli-route") + " fib update --name=route0 --rules " + p.ConfigDir + "/route0.yaml",
+		p.CLI("yanet-cli-route") + " fib update --name=route0 " + p.ConfigDir + "/route0.yaml",
 
 		p.CLI("yanet-cli-function") + " update --name=virt --chains chain0:10=forward:forward0",
 		p.CLI("yanet-cli-function") + " update --name=test --chains chain2:1=forward:forward0,route:route0",

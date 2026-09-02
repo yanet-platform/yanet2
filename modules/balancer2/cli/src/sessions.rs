@@ -35,6 +35,6 @@ pub struct SessionsUpdateCmd {
     #[arg(long, short = 'n', add = ArgValueCandidates::new(crate::sessions_candidates))]
     pub name: String,
     /// Capacity (number of session entries).
-    #[arg(long, short = 'c')]
+    #[arg(long, short_alias = 'c')]
     pub capacity: u64,
 }

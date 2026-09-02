@@ -54,7 +54,7 @@ pub struct SetConfigCmd {
     pub mode: Option<crate::dump_mode::Mode>,
 
     /// Snaplen is the maximum packet length to capture.
-    #[arg(long = "snaplen", short = 's')]
+    #[arg(long = "snaplen", short_alias = 's')]
     pub snaplen: Option<u32>,
 
     /// Per-worker ring buffer size
@@ -83,11 +83,11 @@ pub struct ReadCmd {
     /// individual packet, so every record captured in one round shares a
     /// single value. Repeated identical timestamps, including several
     /// leading zeros in the relative forms, are expected.
-    #[clap(long, short = 'f', value_enum, default_value_t = DumpOutputFormat::Text)]
+    #[arg(long, short_alias = 'f', value_enum, default_value_t = DumpOutputFormat::Text)]
     pub dump_format: DumpOutputFormat,
 
     /// Dump output destination.
-    #[clap(long, short = 'o')]
+    #[arg(long, short = 'o')]
     pub output: Option<String>,
 
     /// The number of packets to capture before exiting.

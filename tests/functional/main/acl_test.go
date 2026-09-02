@@ -25,7 +25,7 @@ func testACL(t *testing.T, fw *framework.TestFramework) {
 	// 1. ACL Configuration Tests
 	fw.Run("Configure_ACL_module", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl0 --rules /mnt/yanet2/tests/functional/testdata/acl.yaml",
+			framework.CLIACL + " update --name acl0 /mnt/yanet2/tests/functional/testdata/acl.yaml",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
@@ -517,7 +517,7 @@ func testACLMbufLeak(t *testing.T, fw *framework.TestFramework) {
 
 	fw.Run("Configure", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_mbufleak --rules /mnt/yanet2/tests/functional/testdata/acl-mbuf-leak.yaml",
+			framework.CLIACL + " update --name acl_mbufleak /mnt/yanet2/tests/functional/testdata/acl-mbuf-leak.yaml",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_mbufleak,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}

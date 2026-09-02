@@ -97,7 +97,7 @@ pub struct RouteUpdateCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Route prefix
-    #[arg(long = "prefix", short)]
+    #[arg(long = "prefix", short = 'p')]
     pub prefix: Contiguous<IpNetwork>,
     /// The IP address of the tunnel destination.
     #[arg(long = "dst")]
@@ -122,7 +122,7 @@ pub struct RouteWithdrawCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Route prefix
-    #[arg(long = "prefix", short)]
+    #[arg(long = "prefix", short = 'p')]
     pub prefix: Contiguous<IpNetwork>,
     /// The IP address of the tunnel destination.
     #[arg(long = "dst")]

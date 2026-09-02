@@ -61,7 +61,7 @@ impl ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Function name.
-    #[arg(short, long, add = ArgValueCandidates::new(function_candidates))]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(function_candidates))]
     pub name: String,
 }
 
@@ -72,7 +72,7 @@ pub struct ShowCmd {
 )]
 pub struct UpdateCmd {
     /// Function name.
-    #[arg(short, long, add = ArgValueCandidates::new(function_candidates))]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(function_candidates))]
     pub name: String,
     /// Chains in format `name:weight=type:name,type:name`.
     #[arg(long, required = true)]
@@ -82,7 +82,7 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Function name.
-    #[arg(short, long, add = ArgValueCandidates::new(function_candidates))]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(function_candidates))]
     pub name: String,
 }
 

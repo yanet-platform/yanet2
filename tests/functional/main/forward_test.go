@@ -27,7 +27,7 @@ func deviceCounterValues(
 	command.WriteString(testFramework.Paths.CLI("yanet-cli-counters"))
 	command.WriteString(" --format json --device " + device + " --kind device")
 	for _, name := range names {
-		command.WriteString(" --name " + name)
+		command.WriteString(" " + name)
 	}
 	output, err := testFramework.ExecuteCommand(command.String())
 	require.NoError(t, err)

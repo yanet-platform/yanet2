@@ -61,7 +61,7 @@ impl ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Pipeline name.
-    #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
 }
 
@@ -72,7 +72,7 @@ pub struct ShowCmd {
 )]
 pub struct UpdateCmd {
     /// Pipeline name.
-    #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
     /// Pipeline functions.
     #[arg(long, required = true, num_args = 0.., value_delimiter = ',')]
@@ -82,7 +82,7 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Pipeline name.
-    #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
 }
 

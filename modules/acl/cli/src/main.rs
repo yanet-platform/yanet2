@@ -289,7 +289,7 @@ impl ACLService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No ACL configurations found."),
-                        format_args!("create one with 'yanet-cli-acl update --name <name> --rules <path>'"),
+                        format_args!("create one with 'yanet-cli-acl update --name <name> <path>'"),
                     );
                     return;
                 }
@@ -338,7 +338,7 @@ impl ACLService {
                 if response.rules.is_empty() {
                     output::empty_with_hint(
                         format_args!("No ACL rules found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-acl update --name <name> --rules <path>'"),
+                        format_args!("create one with 'yanet-cli-acl update --name <name> <path>'"),
                     );
                 }
             },
@@ -401,10 +401,10 @@ impl ACLService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config = ACLConfig::load(&cmd.rules).map_err(|err| {
+        let config = ACLConfig::load(&cmd.file).map_err(|err| {
             self.service.invalid(
                 "update",
-                format!("failed to load rules from {}: {err}", cmd.rules.display()),
+                format!("failed to load rules from {}: {err}", cmd.file.display()),
             )
         })?;
         let rule_count = config.rules.len();
@@ -517,7 +517,7 @@ impl ACLService {
 
     pub async fn metrics_rules(&mut self, cmd: MetricsRulesCmd) -> Result<(), Error> {
         let request = GetMetricsRulesRequest {
-            config: cmd.config.clone().unwrap_or_default(),
+            config: cmd.config_name.clone().unwrap_or_default(),
             device: cmd.device.clone().unwrap_or_default(),
             pipeline: cmd.pipeline.clone().unwrap_or_default(),
             function: cmd.function.clone().unwrap_or_default(),
@@ -538,7 +538,7 @@ impl ACLService {
             || &metrics,
             || {
                 if metrics.is_empty() {
-                    match cmd.config.as_deref() {
+                    match cmd.config_name.as_deref() {
                         Some(name) => output::empty(format_args!("No ACL rule metrics found for '{name}'.")),
                         None => output::empty(format_args!("No ACL rule metrics found.")),
                     }

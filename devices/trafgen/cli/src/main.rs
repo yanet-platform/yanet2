@@ -71,10 +71,10 @@ pub struct UpdateCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Input pipeline assignments in "pipeline:weight" format.
-    #[arg(short, long)]
+    #[arg(long, short = 'i')]
     pub input: Vec<String>,
     /// Output pipeline assignments in "pipeline:weight" format.
-    #[arg(short, long)]
+    #[arg(long, short = 'o')]
     pub output: Vec<String>,
 }
 
@@ -91,7 +91,7 @@ pub struct UploadPcapCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Path to the pcap file whose packets are replayed.
-    #[arg(long, short)]
+    #[arg(value_name = "PATH")]
     pub pcap: PathBuf,
 }
 

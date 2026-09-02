@@ -40,13 +40,13 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// The name of the device.
-    #[arg(long, short)]
+    #[arg(long, short = 'n')]
     pub name: String,
     /// Pipeline assignments in format "pipeline_name:weight"
-    #[arg(short, long)]
+    #[arg(long, short = 'i')]
     pub input: Vec<String>,
     /// Pipeline assignments in format "pipeline_name:weight"
-    #[arg(short, long)]
+    #[arg(long, short = 'o')]
     pub output: Vec<String>,
 }
 

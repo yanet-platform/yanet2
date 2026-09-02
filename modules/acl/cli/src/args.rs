@@ -47,9 +47,9 @@ pub struct UpdateCmd {
     /// ACL config name
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
-    /// Path to the ruleset YAML file
-    #[arg(required = true, long = "rules", value_name = "PATH")]
-    pub rules: PathBuf,
+    /// Path to the ruleset YAML file.
+    #[arg(value_name = "PATH")]
+    pub file: PathBuf,
     /// Name of the standalone fwstate-map (kind V4) whose fwtable this
     /// config uses for state lookups
     #[arg(long = "map-name-v4", value_name = "NAME")]
@@ -87,9 +87,9 @@ pub struct ShowCmd {
 
 #[derive(Debug, Clone, Parser, Default)]
 pub struct MetricsRulesCmd {
-    /// ACL config name; omit to match every config
-    #[arg(long = "config", short = 'c', add = ArgValueCandidates::new(crate::config_candidates))]
-    pub config: Option<String>,
+    /// ACL config name, omit to match every config.
+    #[arg(long = "name", short = 'n', alias = "config", add = ArgValueCandidates::new(crate::config_candidates))]
+    pub config_name: Option<String>,
     /// Dataplane device name; omit to match every device
     #[arg(long = "device", short = 'd')]
     pub device: Option<String>,
@@ -100,7 +100,7 @@ pub struct MetricsRulesCmd {
     #[arg(long = "function", short = 'f')]
     pub function: Option<String>,
     /// Pipeline chain name; omit to match every chain
-    #[arg(long = "chain")]
+    #[arg(long = "chain", short = 'c')]
     pub chain: Option<String>,
 }
 

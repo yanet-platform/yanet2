@@ -62,8 +62,8 @@ impl Balancer2Service {
     }
 
     async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let yaml_config = BalancerConfig::from_yaml_file(&cmd.config)
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
+        let yaml_config =
+            BalancerConfig::from_yaml_file(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
         let parts: ConfigParts = yaml_config
             .try_into()
             .map_err(|err: Box<dyn core::error::Error>| self.service.invalid("update", err.to_string()))?;
@@ -109,7 +109,7 @@ impl Balancer2Service {
                     output::empty_with_hint(
                         format_args!("No balancer configurations found."),
                         format_args!(
-                            "create one with 'yanet-cli-balancer2 update --name <name> --config <path> --sessions <sessions-name>'"
+                            "create one with 'yanet-cli-balancer2 update --name <name> --sessions <sessions-name> <path>'"
                         ),
                     );
                     return;
