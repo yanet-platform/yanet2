@@ -87,7 +87,7 @@ Parses BIRD binary export format:
 
 ## Route Management
 
-After import, use [`route` CLI](../../../../modules/route/cli/route/src/main.rs:1):
+After import, use [`route` CLI](../../../../modules/route/cli/src/main.rs:1):
 
 ```bash
 # Show imported routes

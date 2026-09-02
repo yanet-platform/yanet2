@@ -10,8 +10,8 @@ rust-version = "1.88"
 workspace = true
 
 [dependencies]
-commonpb = { path = "../../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
-ync = { path = "../../../../cli/core", version = "0.1", package = "yanet-cli" }
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
+ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }

@@ -17,7 +17,7 @@ const SERDE_MESSAGES: &[&str] = &[
 ];
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../../controlplane/routepb/v1/route.proto");
+    println!("cargo:rerun-if-changed=../controlplane/routepb/v1/route.proto");
 
     let mut config = tonic_build::configure()
         .emit_rerun_if_changed(false)
@@ -46,10 +46,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             .message_attribute(message, "#[derive(serde::Serialize, serde::Deserialize)]")
             .message_attribute(message, "#[serde(deny_unknown_fields)]");
     }
-    config.compile_protos(
-        &["modules/route/controlplane/routepb/v1/route.proto"],
-        &["../../../../"],
-    )?;
+    config.compile_protos(&["modules/route/controlplane/routepb/v1/route.proto"], &["../../../"])?;
 
     Ok(())
 }

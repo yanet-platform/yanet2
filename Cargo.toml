@@ -34,7 +34,7 @@ members = [
     "modules/nat64/cli",
     "modules/pdump/cli",
     "modules/route-mpls/cli",
-    "modules/route/cli/route",
+    "modules/route/cli",
     "modules/unrdup/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
@@ -44,8 +44,6 @@ members = [
     "operators/route/cli/route",
     "operators/route/cli/neighbour",
 ]
-
-exclude = ["modules/route/cli"]
 
 [workspace.lints.clippy]
 std_instead_of_core = "deny"

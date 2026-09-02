@@ -1,7 +1,7 @@
 use clap::{ArgAction, Parser, value_parser};
-use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
+use vlanpb::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
@@ -9,7 +9,7 @@ use ync::{
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
-pub mod code {
+pub mod vlanpb {
     use serde::Serialize;
 
     tonic::include_proto!("devices.vlan.controlplane.vlanpb.v1");

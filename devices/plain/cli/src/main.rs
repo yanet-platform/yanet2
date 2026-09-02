@@ -1,6 +1,6 @@
 use clap::{ArgAction, Parser};
-use code::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
 use commonpb::pb::Device;
+use plainpb::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
@@ -9,7 +9,7 @@ use ync::{
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
-pub mod code {
+pub mod plainpb {
     use serde::Serialize;
 
     tonic::include_proto!("devices.plain.controlplane.plainpb.v1");
