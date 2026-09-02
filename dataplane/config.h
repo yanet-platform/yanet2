@@ -9,6 +9,7 @@
 
 struct dataplane_instance_config {
 	uint16_t numa_idx;
+	// Bytes, the file may add a KiB, MiB, GiB or TiB unit.
 	uint64_t dp_memory;
 	uint64_t cp_memory;
 };

@@ -40,7 +40,7 @@ type DataplaneOptions struct {
 // tests, optionally requesting runtime module plugins via opts.
 func DataplaneConfig(opts DataplaneOptions) string {
 	plugins := ""
-	cpMemory := "134217728"
+	cpMemory := "128 MiB"
 	packetRecircLimit := ""
 	if opts.PacketRecircLimit != 0 {
 		packetRecircLimit = fmt.Sprintf(
@@ -55,7 +55,7 @@ func DataplaneConfig(opts DataplaneOptions) string {
 				plugins += "    - " + module + "\n"
 			}
 		}
-		cpMemory = "167772160"
+		cpMemory = "160 MiB"
 	}
 
 	// The cp_memory value defaults to 128 MiB, matching the built-in main pool.
@@ -70,7 +70,7 @@ dataplane:
   dpdk_memory: 128
   loglevel: trace
 ` + packetRecircLimit + plugins + `  instances:
-    - dp_memory: 100663296
+    - dp_memory: 96 MiB
       cp_memory: ` + cpMemory + `
       numa_id: 0
   devices:

@@ -71,6 +71,47 @@ parse_unsigned(
 	return 0;
 }
 
+// A memory size is bytes with an optional binary unit: "1073741824",
+// "1 GiB" and "1GiB" spell the same size.
+static int
+parse_memory_size(
+	const char *field, const char *value, size_t length, uint64_t *result
+) {
+	static const char *const units[] = {"KiB", "MiB", "GiB", "TiB"};
+
+	unsigned shift = 0;
+	size_t number_length = length;
+	for (size_t idx = 0; idx < sizeof(units) / sizeof(units[0]); ++idx) {
+		if (length >= 3 && !memcmp(value + length - 3, units[idx], 3)) {
+			shift = 10 * (unsigned)(idx + 1);
+			number_length = length - 3;
+			break;
+		}
+	}
+	while (shift != 0 && number_length > 0 &&
+	       isspace((unsigned char)value[number_length - 1])) {
+		--number_length;
+	}
+
+	char *end = NULL;
+	errno = 0;
+	uintmax_t number = strtoumax(value, &end, 10);
+	if (number_length == 0 || !isdigit((unsigned char)*value) ||
+	    end != value + number_length || errno == ERANGE ||
+	    number > (UINT64_MAX >> shift)) {
+		fprintf(stderr, "invalid %s value ", field);
+		print_scalar(value, length);
+		fprintf(stderr,
+			" (length %zu): expected bytes with an optional "
+			"KiB, MiB, GiB or TiB unit\n",
+			length);
+		return -1;
+	}
+
+	*result = (uint64_t)number << shift;
+	return 0;
+}
+
 static int
 resolve_connections(struct dataplane_config *config) {
 	for (uint64_t conn_idx = 0; conn_idx < config->connection_count;
@@ -290,12 +331,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_instance;
 				break;
 			case state_instance_dp_memory:
-				if (parse_unsigned(
+				if (parse_memory_size(
 					    "instances.dp_memory",
 					    start,
 					    scalar_length,
-					    0,
-					    UINT64_MAX,
 					    &instance->dp_memory
 				    ) != 0) {
 					goto error;
@@ -303,12 +342,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_instance;
 				break;
 			case state_instance_cp_memory:
-				if (parse_unsigned(
+				if (parse_memory_size(
 					    "instances.cp_memory",
 					    start,
 					    scalar_length,
-					    0,
-					    UINT64_MAX,
 					    &instance->cp_memory
 				    ) != 0) {
 					goto error;

@@ -6,8 +6,9 @@ dataplane:
   # are dropped and counted in input_recirc_drop / output_recirc_drop.
   packet_recirc_limit: 64
   instances:
-    - dp_memory: 1073741824
-      cp_memory: 2147483648
+    # Instance memory is bytes, optionally with a KiB, MiB, GiB or TiB unit.
+    - dp_memory: 1 GiB
+      cp_memory: 2 GiB
       numa_id: 0
   devices:
     - port_name: 01:00.0
