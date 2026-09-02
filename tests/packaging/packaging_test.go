@@ -35,11 +35,33 @@ var shippedConfigPaths = []string{
 	"operators/bird-adapter/etc/yanet/bird-adapter-default.yaml",
 	"operators/pipeline/etc/yanet/yanet-pipeline-operator-default.yaml",
 	"operators/route/etc/yanet/yanet-route-operator-default.yaml",
-	"operators/generic/etc/yanet/generic-operator.d/forward.yaml",
-	"operators/generic/etc/yanet/generic-operator.d/decap.yaml",
-	"operators/generic/etc/yanet/forward.d/vlan-phy.yaml",
-	"operators/generic/etc/yanet/forward.d/phy-vlan.yaml",
+	"operators/generic/etc/yanet/generic-operator.d/forward-default.yaml",
+	"operators/generic/etc/yanet/generic-operator.d/decap-default.yaml",
+	"operators/generic/etc/yanet/forward.d/vlan-phy-default.yaml",
+	"operators/generic/etc/yanet/forward.d/phy-vlan-default.yaml",
 	"operators/generic/etc/yanet/decap.d/default.yaml",
+}
+
+// Test_GenericOperatorShippedConfigs_UseDefaultFileNames verifies that
+// packaged examples leave unsuffixed paths available to deployment configs.
+func Test_GenericOperatorShippedConfigs_UseDefaultFileNames(t *testing.T) {
+	const genericConfigPrefix = "operators/generic/etc/yanet/"
+
+	for _, configPath := range shippedConfigPaths {
+		if !strings.HasPrefix(configPath, genericConfigPrefix) {
+			continue
+		}
+
+		t.Run(configPath, func(t *testing.T) {
+			filename := filepath.Base(configPath)
+			require.True(
+				t,
+				filename == "default.yaml" || strings.HasSuffix(filename, "-default.yaml"),
+				"%q can collide with a deployment config",
+				configPath,
+			)
+		})
+	}
 }
 
 // collectEtcYanet2Values walks node's mapping and sequence structure and
@@ -165,7 +187,7 @@ func Test_GenericOperatorTemplateConfigsAreInstalled(t *testing.T) {
 	require.Len(t, match, 2, "no ExecStart config path in the generic operator template unit")
 
 	installed := loadInstalledPatterns(t)
-	for _, instance := range []string{"forward", "decap"} {
+	for _, instance := range []string{"forward-default", "decap-default"} {
 		configPath := strings.ReplaceAll(match[1], "%i", instance)
 		require.True(t, isInstalled(installed, strings.TrimPrefix(configPath, "/")),
 			"%q is not listed in any debian/*.install manifest", configPath)
