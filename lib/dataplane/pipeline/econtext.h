@@ -102,10 +102,6 @@ module_ectx_decode_device(struct module_ectx *module_ectx, uint64_t index) {
 	return cm_index[index];
 }
 
-struct chain_module_ectx {
-	struct module_ectx *module_ectx;
-};
-
 struct chain_ectx {
 	struct cp_chain *cp_chain;
 	struct counter_storage *counter_storage;
@@ -117,9 +113,21 @@ struct chain_ectx {
 	// context is released to workers; they are zero until then.
 	struct counter_value_handle *abs_counter_packet_pending_input;
 	struct counter_value_handle *abs_counter_packet_pending_output;
+	// Offset pointer to an array of per-slot offset pointers to the
+	// chain's module contexts, mirroring the tail below.
+	//
+	// Owned by the control plane: creation fills it and the free path
+	// walks it, so the relative addresses stay available after the
+	// tail is turned into absolute ones.
+	struct module_ectx **module_ptrs;
 	uint64_t length;
 	struct packet_front schedule;
-	struct chain_module_ectx modules[];
+	// Absolute addresses of the chain's module contexts.
+	//
+	// The publishing process copies them from the module_ptrs array
+	// before the context is released to workers; they are zero until
+	// then, and the packet hot path loads them directly.
+	struct module_ectx *modules[];
 };
 
 struct function_ectx {
@@ -140,6 +148,12 @@ struct function_ectx {
 	uint64_t chain_count;
 	struct chain_ectx **chains;
 	uint64_t chain_map_size;
+	// The function's chains, indexed by packet hash for the demux.
+	//
+	// Creation writes relative addresses; the publishing process
+	// recodes them to absolute ones in place, re-deriving the
+	// weighted expansion from the chains array and the controlplane
+	// weights so repeated passes stay correct.
 	struct chain_ectx *chain_map[];
 };
 
@@ -158,8 +172,20 @@ struct pipeline_ectx {
 	struct counter_value_handle *abs_counter_packet_pending_input;
 	struct counter_value_handle *abs_counter_packet_pending_output;
 	struct counter_storage *counter_storage;
+	// Offset pointer to an array of per-slot offset pointers to the
+	// pipeline's functions, mirroring the tail below.
+	//
+	// Owned by the control plane: creation fills it and the free and
+	// link paths walk it, so the relative addresses stay available
+	// after the tail is turned into absolute ones.
+	struct function_ectx **function_ptrs;
 	uint64_t length;
 	struct packet_front schedule;
+	// Absolute addresses of the pipeline's functions.
+	//
+	// The publishing process copies them from the function_ptrs
+	// array before the context is released to workers; they are zero
+	// until then, and the packet hot path loads them directly.
 	struct function_ectx *functions[];
 };
 
@@ -206,7 +232,13 @@ struct device_entry_ectx {
 	// routed back here during processing remain queued for the next
 	// traversal.
 	struct packet_front schedule;
-	uint64_t pipeline_map[];
+	// The entry's pipelines, indexed by packet hash for the demux.
+	//
+	// Creation writes relative addresses; the publishing process
+	// recodes them to absolute ones in place, re-deriving the
+	// weighted expansion from the pipelines array and the
+	// controlplane weights so repeated passes stay correct.
+	struct pipeline_ectx *pipeline_map[];
 };
 
 struct device_ectx {

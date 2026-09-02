@@ -77,11 +77,11 @@ dp_config_assign_worker_ectxs(
 		struct dp_worker *worker = ADDR_OF(workers + idx);
 		struct config_gen_ectx *expected =
 			cp_config_gen_worker_ectx(config_gen, idx);
-		// Derive the absolute counter pointers before the release
+		// Derive the absolute stage addresses before the release
 		// store.
 		//
 		// The store pairs with the acquire load at the worker's
-		// round start, so the derived pointers are complete before
+		// round start, so the derived addresses are complete before
 		// any stage runs. The derivation is idempotent, so a worker
 		// already holding this context is unaffected.
 		if (expected != NULL) {

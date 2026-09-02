@@ -466,14 +466,17 @@ chain_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
-		struct module_ectx *module_ectx =
-			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
-		if (module_ectx == NULL) {
-			continue;
-		}
+	struct module_ectx **module_ptrs = ADDR_OF(&chain_ectx->module_ptrs);
+	if (module_ptrs != NULL) {
+		for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
+			struct module_ectx *module_ectx =
+				ADDR_OF(module_ptrs + idx);
+			if (module_ectx == NULL) {
+				continue;
+			}
 
-		module_ectx_free(cp_config_gen, module_ectx);
+			module_ectx_free(cp_config_gen, module_ectx);
+		}
 	}
 	struct counter_storage *counter_storage =
 		ADDR_OF(&chain_ectx->counter_storage);
@@ -481,11 +484,19 @@ chain_ectx_free(
 		counter_storage_free(counter_storage);
 	}
 
+	if (module_ptrs != NULL) {
+		memory_bfree(
+			memory_context,
+			module_ptrs,
+			sizeof(struct module_ectx *) * chain_ectx->length
+		);
+	}
+
 	memory_bfree(
 		memory_context,
 		chain_ectx,
 		sizeof(struct chain_ectx) +
-			sizeof(struct chain_module_ectx) * chain_ectx->length
+			sizeof(struct module_ectx *) * chain_ectx->length
 	);
 }
 
@@ -504,9 +515,8 @@ chain_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	uint64_t ectx_size =
-		sizeof(struct chain_ectx) +
-		sizeof(struct chain_module_ectx) * cp_chain->length;
+	uint64_t ectx_size = sizeof(struct chain_ectx) +
+			     sizeof(struct module_ectx *) * cp_chain->length;
 	struct chain_ectx *chain_ectx =
 		(struct chain_ectx *)memory_balloc(memory_context, ectx_size);
 	if (chain_ectx == NULL) {
@@ -520,6 +530,21 @@ chain_ectx_create(
 	memset(chain_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&chain_ectx->cp_chain, cp_chain);
 	chain_ectx->length = cp_chain->length;
+
+	struct module_ectx **module_ptrs = (struct module_ectx **)memory_balloc(
+		memory_context, sizeof(struct module_ectx *) * cp_chain->length
+	);
+	if (module_ptrs == NULL && cp_chain->length > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the module "
+			"addresses of chain '%s'",
+			cp_chain->name
+		);
+		goto error;
+	}
+	memset(module_ptrs, 0, sizeof(struct module_ectx *) * cp_chain->length);
+	SET_OFFSET_OF(&chain_ectx->module_ptrs, module_ptrs);
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
@@ -617,9 +642,7 @@ chain_ectx_create(
 			goto error;
 		}
 
-		SET_OFFSET_OF(
-			&chain_ectx->modules[idx].module_ectx, module_ectx
-		);
+		SET_OFFSET_OF(module_ptrs + idx, module_ectx);
 	}
 
 	return chain_ectx;
@@ -814,20 +837,32 @@ pipeline_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
-		struct function_ectx *function_ectx =
-			ADDR_OF(pipeline_ectx->functions + idx);
-		if (function_ectx == NULL) {
-			continue;
-		}
+	struct function_ectx **function_ptrs =
+		ADDR_OF(&pipeline_ectx->function_ptrs);
+	if (function_ptrs != NULL) {
+		for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
+			struct function_ectx *function_ectx =
+				ADDR_OF(function_ptrs + idx);
+			if (function_ectx == NULL) {
+				continue;
+			}
 
-		function_ectx_free(cp_config_gen, function_ectx);
+			function_ectx_free(cp_config_gen, function_ectx);
+		}
 	}
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&pipeline_ectx->counter_storage);
 	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
+
+	if (function_ptrs != NULL) {
+		memory_bfree(
+			memory_context,
+			function_ptrs,
+			sizeof(struct function_ectx *) * pipeline_ectx->length
+		);
 	}
 
 	size_t ectx_size =
@@ -865,6 +900,25 @@ pipeline_ectx_create(
 	memset(pipeline_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&pipeline_ectx->cp_pipeline, cp_pipeline);
 	pipeline_ectx->length = cp_pipeline->length;
+
+	struct function_ectx **function_ptrs =
+		(struct function_ectx **)memory_balloc(
+			memory_context,
+			sizeof(struct function_ectx *) * cp_pipeline->length
+		);
+	if (function_ptrs == NULL && cp_pipeline->length > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the function "
+			"addresses of pipeline '%s'",
+			cp_pipeline->name
+		);
+		goto error;
+	}
+	memset(function_ptrs,
+	       0,
+	       sizeof(struct function_ectx *) * cp_pipeline->length);
+	SET_OFFSET_OF(&pipeline_ectx->function_ptrs, function_ptrs);
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 
@@ -939,7 +993,7 @@ pipeline_ectx_create(
 			goto error;
 		}
 
-		SET_OFFSET_OF(pipeline_ectx->functions + idx, function_ectx);
+		SET_OFFSET_OF(function_ptrs + idx, function_ectx);
 	}
 
 	return pipeline_ectx;
@@ -1082,7 +1136,10 @@ device_entry_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_device_entry->pipelines[idx].weight;
 		     ++weight_idx) {
-			device_entry_ectx->pipeline_map[pos] = idx;
+			SET_OFFSET_OF(
+				device_entry_ectx->pipeline_map + pos,
+				pipeline_ectx
+			);
 			++pos;
 		}
 	}
@@ -1495,9 +1552,9 @@ link_chain_ectx(
 	struct chain_ectx *chain_ectx,
 	yanet_error **err
 ) {
+	struct module_ectx **module_ptrs = ADDR_OF(&chain_ectx->module_ptrs);
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
-		struct module_ectx *module_ectx =
-			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
+		struct module_ectx *module_ectx = ADDR_OF(module_ptrs + idx);
 		if (module_ectx == NULL) {
 			continue;
 		}
@@ -1569,9 +1626,11 @@ link_pipeline_ectx(
 	struct pipeline_ectx *pipeline_ectx,
 	yanet_error **err
 ) {
+	struct function_ectx **function_ptrs =
+		ADDR_OF(&pipeline_ectx->function_ptrs);
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
-			ADDR_OF(pipeline_ectx->functions + idx);
+			ADDR_OF(function_ptrs + idx);
 		if (function_ectx == NULL) {
 			continue;
 		}
