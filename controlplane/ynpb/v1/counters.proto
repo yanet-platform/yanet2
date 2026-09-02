@@ -35,11 +35,28 @@ message CounterInfo {
   repeated CounterInstanceInfo instances = 2;
 }
 
-// Requests a snapshot of raw cumulative worker polling and traffic counters.
+// Requests a snapshot of raw worker polling and traffic counters together
+// with worker pool gauges.
 message WorkerCountersRequest {}
 
-// Returns one cumulative counter record per dataplane worker thread.
+// Returns one record per dataplane worker thread: cumulative counters and
+// point-in-time gauges, scoped to the instance this service serves.
 message WorkerCountersResponse { repeated WorkerCounter workers = 1; }
+
+// Occupancy of one worker's RX packet pool.
+//
+// Both values count mempool objects (mbufs). `available` is a gauge
+// resampled by the owning worker at most once every 10 ms — slow
+// worker rounds stretch the spacing further — so it reflects the most
+// recent dataplane sample rather than the moment of the read.
+// Objects in use by the NIC descriptors or in flight are the difference
+// `capacity - available`.
+message WorkerRxMempool {
+  // Total object capacity for the lifetime of this worker pool.
+  uint32 capacity = 1;
+  // Objects currently available in the most recent dataplane sample.
+  uint32 available = 2;
+}
 
 message WorkerCounter {
   // Stable worker index in the dataplane worker table.
@@ -78,6 +95,11 @@ message WorkerCounter {
   // drops such as an ACL deny, so nonzero alone is not a fault. Already
   // includes every local_tx_drops and remote_tx_drops packet.
   uint64 disposed = 16;
+  // Occupancy of this worker's RX packet pool. Absent only when the
+  // serving control plane predates this field; a dataplane without the
+  // pool gauges fails the whole read instead, so an empty value here is
+  // never a stand-in for a real pool.
+  WorkerRxMempool rx_mempool = 17;
 }
 
 // Requests a snapshot of raw cumulative per-port extended stats counters.

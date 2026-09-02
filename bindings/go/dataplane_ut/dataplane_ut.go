@@ -364,6 +364,39 @@ func (m *Harness) OutstandingMbufs() uint64 {
 	return uint64(C.dataplane_ut_mempool_outstanding(m.ptr))
 }
 
+// SetWorkerCounter overwrites the value of a named size-1 counter in the
+// given worker's shared worker-counter storage.
+//
+// A fault-injection hook for control-plane tests: it publishes snapshots
+// no healthy dataplane would produce, such as an availability above the
+// pool capacity. A counter carrying more than one value is refused.
+// Returns an error when the worker index or the counter name is unknown
+// or the counter is not size-1.
+func (m *Harness) SetWorkerCounter(worker int, name string, value uint64) error {
+	// The setter indexes the worker's counter storage directly, so an
+	// index outside the registered workers would corrupt C memory.
+	if worker < 0 || worker >= m.workerCount {
+		return fmt.Errorf(
+			"worker %d exceeds topology worker count %d",
+			worker,
+			m.workerCount,
+		)
+	}
+
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	if rc := C.dataplane_ut_set_worker_counter(
+		m.ptr,
+		C.size_t(worker),
+		cName,
+		C.uint64_t(value),
+	); rc != 0 {
+		return fmt.Errorf("failed to set worker %d counter %q", worker, name)
+	}
+	return nil
+}
+
 // SharedMemory returns the shared-memory handle backing this harness.
 func (m *Harness) SharedMemory() *ffi.SharedMemory {
 	shm := C.dataplane_ut_shm(m.ptr)
