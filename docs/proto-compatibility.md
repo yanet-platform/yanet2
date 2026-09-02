@@ -32,8 +32,9 @@ The following versioned package families are covered by the breaking gate.
 **Operators** — `operators/<name>/.../v1/`
 - `operators.pipeline.operatorpb.v1`
 - `operators.route.operatorpb.v1`
-- `operators.forward.operatorpb.v1` and `operators.decap.operatorpb.v1` exist only as runtime service
-  names of the static module operator (`common/go/operator/static.go`), not as proto packages
+- `operators.forward.operatorpb.v1` and `operators.decap.operatorpb.v1` exist only as runtime
+  `ReadinessService` and `MetricsService` names of the static module operator
+  (`common/go/operator`), not as proto packages
 - `operators.bird_adapter.adapterpb.v1` (directory `bird-adapter`, package `bird_adapter` — see Exclusions)
 
 `modules/balancer2` (`modules.balancer2.controlplane.balancerpb.v1`) is **pre-v1** and explicitly excluded from the breaking gate. See Freeze Status.
@@ -108,7 +109,7 @@ The following entries in `buf.yaml` intentionally deviate from the defaults. Eac
 - `modules/balancer2` — pre-v1 rewrite in flight; API shape is not yet stable. Remove this line from `buf.yaml` when balancer2 reaches v1.
 - `modules/nat64/controlplane/nat64pb/v1/nat64.proto` — the #2197 migration intentionally replaces all three NAT64 prefix byte fields with the shared family-typed IPv6 prefix message in one cutover. Remove this line after the new wire shape reaches `main`.
 - `controlplane/ynpb/v1/module.proto` — removed intentionally because no gateway ever registered or exposed its service, so no runtime route existed.
-- `operators/forward/operatorpb` and `operators/decap/operatorpb` — the readiness packages of the forward and decap operators were deleted on purpose: their wire route (`/operators.<name>.operatorpb.v1.ReadinessService/Ready`, `readinesspb` messages) is kept as a runtime service name registered by the static module operator, so callers that address the route by name (the announcer, the gateway proxy) are unaffected, and no generated client of these packages existed outside the operators themselves.
+- `operators/forward/operatorpb` and `operators/decap/operatorpb` — the readiness packages of the forward and decap operators were deleted on purpose. The static module operator preserves `/operators.<name>.operatorpb.v1.ReadinessService/Ready` and also registers `/operators.<name>.operatorpb.v1.MetricsService/GetMetrics` as runtime routes using the shared readiness and metrics messages. These runtime names do not recreate proto packages, and no generated client of the deleted packages existed outside the operators themselves.
 
 **`lint.except`** — six identifier-naming rules are disabled globally because enforcing them would require renaming existing wire identifiers, which would itself be a breaking change:
 - `ENUM_VALUE_PREFIX`

@@ -21,8 +21,8 @@ import (
 // The configs section spells the module configs the instance pushes, the
 // functions section the gateway functions published after them.
 type Config struct {
-	// Name is the instance name. The operator reports readiness under it,
-	// so it must match the name the announcer addresses.
+	// Name is the instance name. The operator reports readiness and metrics
+	// under it, so it must match the name clients address.
 	Name      xcfg.NonEmptyString       `yaml:"name"`
 	Logging   logging.Config            `yaml:"logging"`
 	Server    operator.GRPCServerConfig `yaml:"server"`

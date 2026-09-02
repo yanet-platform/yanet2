@@ -225,8 +225,8 @@ func (m *Reconciler[T]) Run(ctx context.Context) error {
 			continue
 		}
 
-		m.metrics.OnStateChanged(ReconcilerStateApplying)
 		err := m.backoff.RunContext(ctx, func() error {
+			m.metrics.OnStateChanged(ReconcilerStateApplying)
 			return m.actuator.Apply(ctx, target)
 		})
 		switch {
