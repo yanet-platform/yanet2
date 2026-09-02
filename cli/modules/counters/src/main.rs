@@ -11,7 +11,8 @@ use ync::{
 };
 use ynpb::pb::{
     CounterTag, CountersByTagsRequest, CountersByTagsResponse, PortCountersRequest, PortCountersResponse,
-    WorkerCounter, WorkerCountersRequest, WorkerCountersResponse, counters_service_client::CountersServiceClient,
+    WorkerCounter, WorkerCountersRequest, WorkerCountersResponse, WorkerRxMempool,
+    counters_service_client::CountersServiceClient,
 };
 
 const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
@@ -253,6 +254,8 @@ struct WorkerRow {
     remote_tx_drops: String,
     #[tabled(rename = "Disposed")]
     disposed: String,
+    #[tabled(rename = "RX pool free")]
+    rx_pool_free: String,
 }
 
 impl From<&WorkerCounter> for WorkerRow {
@@ -296,7 +299,19 @@ impl From<&WorkerCounter> for WorkerRow {
             local_tx_drops: format_number(w.local_tx_drops),
             remote_tx_drops: format_number(w.remote_tx_drops),
             disposed: format_number(w.disposed),
+            rx_pool_free: format_rx_pool_free(w.rx_mempool.as_ref()),
         }
+    }
+}
+
+/// Renders one worker's RX pool free objects as `available/capacity`.
+///
+/// An absent pool stays `n/a`: the serving side predates pool gauges,
+/// which presence on the wire distinguishes from any real occupancy.
+fn format_rx_pool_free(pool: Option<&WorkerRxMempool>) -> String {
+    match pool {
+        None => "n/a".to_string(),
+        Some(pool) => format!("{}/{}", pool.available, pool.capacity),
     }
 }
 
@@ -369,5 +384,36 @@ fn format_number(n: u64) -> String {
         }
 
         result.chars().rev().collect()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use ynpb::pb::WorkerRxMempool;
+
+    use super::format_rx_pool_free;
+
+    fn pool(available: u32, capacity: u32) -> Option<WorkerRxMempool> {
+        Some(WorkerRxMempool { capacity, available })
+    }
+
+    #[test]
+    fn test_format_rx_pool_free_absent_pool_is_na() {
+        assert_eq!(format_rx_pool_free(None), "n/a");
+    }
+
+    #[test]
+    fn test_format_rx_pool_free_full_pool() {
+        assert_eq!(format_rx_pool_free(pool(16384, 16384).as_ref()), "16384/16384");
+    }
+
+    #[test]
+    fn test_format_rx_pool_free_partially_used_pool() {
+        assert_eq!(format_rx_pool_free(pool(9728, 16384).as_ref()), "9728/16384");
+    }
+
+    #[test]
+    fn test_format_rx_pool_free_exhausted_pool() {
+        assert_eq!(format_rx_pool_free(pool(0, 16384).as_ref()), "0/16384");
     }
 }
