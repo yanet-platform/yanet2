@@ -3,6 +3,11 @@
 /*
  * Rectangular value table allowing one to touch each key pair using
  * remap table.
+ *
+ * The values are chunked by v index: the values array holds one chunk
+ * pointer per v index, and each chunk stores that row's h_dim entries,
+ * so a lookup indexes the chunk by v_idx directly and never multiplies
+ * or divides.
  */
 
 #include <stdint.h>
@@ -10,12 +15,12 @@
 #include "memory.h"
 #include "remap.h"
 
-#define VALUE_TABLE_CHUNK_SIZE 16384
-
 struct value_table {
 	struct memory_context *memory_context;
 	uint32_t v_dim;
 	uint32_t h_dim;
+	// Offset pointer to an array of v_dim chunk pointers, one chunk
+	// of h_dim entries per v index.
 	uint32_t **values;
 };
 
@@ -34,27 +39,22 @@ value_table_free(struct value_table *value_table) {
 
 	uint32_t **values = ADDR_OF(&value_table->values);
 	if (values != NULL) {
-		uint64_t value_count = value_table->v_dim;
-		value_count *= value_table->h_dim;
-		uint32_t chunk_count =
-			(value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
-			VALUE_TABLE_CHUNK_SIZE;
-
-		for (uint32_t chunk_idx = 0; chunk_idx < chunk_count;
-		     ++chunk_idx) {
-			uint32_t *chunk = ADDR_OF(values + chunk_idx);
+		for (uint32_t v_idx = 0; v_idx < value_table->v_dim; ++v_idx) {
+			uint32_t *chunk = ADDR_OF(values + v_idx);
 			if (chunk == NULL) {
 				continue;
 			}
 			memory_bfree(
 				memory_context,
 				chunk,
-				VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
+				value_table->h_dim * sizeof(uint32_t)
 			);
-			SET_OFFSET_OF(values + chunk_idx, NULL);
+			SET_OFFSET_OF(values + v_idx, NULL);
 		}
 		memory_bfree(
-			memory_context, values, chunk_count * sizeof(uint32_t *)
+			memory_context,
+			values,
+			value_table->v_dim * sizeof(uint32_t *)
 		);
 		SET_OFFSET_OF(&value_table->values, NULL);
 	}
@@ -95,34 +95,27 @@ value_table_init(
 	value_table->h_dim = h_dim;
 	SET_OFFSET_OF(&value_table->values, NULL);
 
-	uint64_t value_count = v_dim;
-	value_count *= h_dim;
-
-	uint32_t chunk_count = (value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
-			       VALUE_TABLE_CHUNK_SIZE;
-
 	uint32_t **values = (uint32_t **)memory_balloc(
-		memory_context, chunk_count * sizeof(uint32_t *)
+		memory_context, v_dim * sizeof(uint32_t *)
 	);
 	if (values == NULL) {
 		value_table_free(value_table);
 		return -1;
 	}
 
-	memset(values, 0, chunk_count * sizeof(uint32_t *));
+	memset(values, 0, v_dim * sizeof(uint32_t *));
 	SET_OFFSET_OF(&value_table->values, values);
 
-	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+	for (uint32_t v_idx = 0; v_idx < v_dim; ++v_idx) {
 		uint32_t *chunk = (uint32_t *)memory_balloc(
-			memory_context,
-			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
+			memory_context, h_dim * sizeof(uint32_t)
 		);
 		if (chunk == NULL) {
 			value_table_free(value_table);
 			return -1;
 		}
-		memset(chunk, 0, VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t));
-		SET_OFFSET_OF(values + chunk_idx, chunk);
+		memset(chunk, 0, h_dim * sizeof(uint32_t));
+		SET_OFFSET_OF(values + v_idx, chunk);
 	}
 
 	return 0;
@@ -135,14 +128,10 @@ value_table_get_ptr(
 	// values and the chunk pointers are set at init and cleared only by
 	// value_table_free, which never races a lookup — so on the query path
 	// they are never NULL and the NULL test in ADDR_OF is pure per-lookup
-	// overhead.
+	// overhead. The chunk is indexed by v_idx and the h_idx stays
+	// in-chunk, so the lookup adds and never multiplies or divides.
 	uint32_t **values = ADDR_OF_NONNULL(&value_table->values);
-	uint64_t idx = v_idx;
-	idx *= value_table->h_dim;
-	idx += h_idx;
-
-	return ADDR_OF_NONNULL(values + idx / VALUE_TABLE_CHUNK_SIZE) +
-	       idx % VALUE_TABLE_CHUNK_SIZE;
+	return ADDR_OF_NONNULL(values + v_idx) + h_idx;
 }
 
 static inline uint32_t
