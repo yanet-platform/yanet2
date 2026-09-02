@@ -145,9 +145,121 @@ pub fn bar_len(count: u64, max_count: u64) -> usize {
     n
 }
 
+/// Glyphs a histogram is drawn with, chosen once from
+/// [`crate::output::is_colored`].
+///
+/// The whole set degrades together, so a non-UTF-8 locale or a piped run
+/// never mixes block characters with ASCII. The sparkline has no ASCII
+/// form at all: a row of punctuation reads worse than no shape, and the
+/// bucket listing still carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Glyphs {
+    /// Header of a bucket-bound column, read "at most".
+    pub at_most: &'static str,
+    /// Range separator inside a collapsed run of buckets.
+    pub ellipsis: &'static str,
+    bar_full: char,
+    bar_partial: &'static [char],
+    spark: Option<&'static [char]>,
+}
+
+impl Glyphs {
+    /// Picks the Unicode or ASCII set from the shared colour decision.
+    pub fn detect() -> Self {
+        if crate::output::is_colored() {
+            Self::unicode()
+        } else {
+            Self::ascii()
+        }
+    }
+
+    /// Block characters, eighth-block bar remainders and a sparkline.
+    pub const fn unicode() -> Self {
+        Self {
+            at_most: "≤",
+            ellipsis: "…",
+            bar_full: '█',
+            bar_partial: &['▏', '▎', '▍', '▌', '▋', '▊', '▉'],
+            spark: Some(&['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']),
+        }
+    }
+
+    /// Hash bars, whole cells only, no sparkline.
+    pub const fn ascii() -> Self {
+        Self {
+            at_most: "<=",
+            ellipsis: "...",
+            bar_full: '#',
+            bar_partial: &[],
+            spark: None,
+        }
+    }
+
+    /// Whether [`sparkline`] draws anything with this set.
+    pub const fn has_sparkline(&self) -> bool {
+        self.spark.is_some()
+    }
+}
+
+/// Draws a bar of at most `width` cells proportional to `count / max`.
+///
+/// A non-zero count always shows at least a partial cell, so a populated
+/// bucket next to a dominant one is never drawn as empty. Zero counts and
+/// a zero maximum draw nothing.
+pub fn bar(count: u64, max: u64, width: usize, glyphs: &Glyphs) -> String {
+    if count == 0 || max == 0 || width == 0 {
+        return String::new();
+    }
+
+    let cells = count as f64 / max as f64 * width as f64;
+    let mut full = cells.floor() as usize;
+    let eighths = ((cells - full as f64) * 8.0).round() as usize;
+
+    if eighths == 8 {
+        full += 1;
+    }
+
+    let mut bar: String = core::iter::repeat_n(glyphs.bar_full, full).collect();
+
+    match glyphs.bar_partial.get(eighths.wrapping_sub(1)) {
+        Some(partial) if eighths < 8 => bar.push(*partial),
+        _ if bar.is_empty() => bar.push(*glyphs.bar_partial.first().unwrap_or(&glyphs.bar_full)),
+        _ => {}
+    }
+
+    bar
+}
+
+/// Draws one character per bucket scaled to the largest count.
+///
+/// An empty bucket takes the lowest glyph and any populated bucket at
+/// least the next one, so a bucket with one observation beside a bucket
+/// with a billion still shows. Returns `None` when the glyph set has no
+/// sparkline.
+pub fn sparkline(counts: &[u64], glyphs: &Glyphs) -> Option<String> {
+    let levels = glyphs.spark?;
+    let max = counts.iter().copied().max().unwrap_or(0);
+    let top = levels.len() - 1;
+
+    let line = counts
+        .iter()
+        .map(|&count| {
+            if count == 0 || max == 0 {
+                return levels[0];
+            }
+
+            let level = 1 + (count as f64 / max as f64 * (top - 1) as f64).round() as usize;
+
+            levels[level.clamp(1, top)]
+        })
+        .collect();
+
+    Some(line)
+}
+
 #[cfg(test)]
 mod test {
-    use super::{bar_len, wrap_words};
+    use super::{bar, bar_len, sparkline, wrap_words, Glyphs};
 
     #[test]
     fn bar_len_scaling() {
@@ -191,5 +303,60 @@ mod test {
     #[test]
     fn wrap_words_empty_text_returns_one_empty_line() {
         assert_eq!(vec![String::new()], wrap_words("", 10));
+    }
+
+    #[test]
+    fn test_bar_full_width_at_the_maximum() {
+        assert_eq!("████", bar(10, 10, 4, &Glyphs::unicode()));
+        assert_eq!("####", bar(10, 10, 4, &Glyphs::ascii()));
+    }
+
+    #[test]
+    fn test_bar_remainder_uses_eighth_blocks() {
+        // 3 of 8 over 4 cells is 1.5 cells: one full block and a half.
+        assert_eq!("█▌", bar(3, 8, 4, &Glyphs::unicode()));
+        assert_eq!("#", bar(3, 8, 4, &Glyphs::ascii()));
+    }
+
+    #[test]
+    fn test_bar_remainder_that_rounds_to_a_whole_cell_becomes_one() {
+        // 15 of 16 over one cell is 0.9375 cells, which rounds to eight
+        // eighths and so to one full block, never to a phantom partial.
+        assert_eq!("█", bar(15, 16, 1, &Glyphs::unicode()));
+    }
+
+    #[test]
+    fn test_bar_nonzero_count_is_never_empty() {
+        assert_eq!("▏", bar(1, 1_000_000, 32, &Glyphs::unicode()));
+        assert_eq!("#", bar(1, 1_000_000, 32, &Glyphs::ascii()));
+    }
+
+    #[test]
+    fn test_bar_zero_count_draws_nothing() {
+        assert_eq!("", bar(0, 10, 4, &Glyphs::unicode()));
+        assert_eq!("", bar(5, 0, 4, &Glyphs::unicode()));
+    }
+
+    #[test]
+    fn test_sparkline_scales_to_the_largest_count() {
+        assert_eq!(Some("▁▂▅█".to_owned()), sparkline(&[0, 1, 50, 100], &Glyphs::unicode()));
+    }
+
+    #[test]
+    fn test_sparkline_nonzero_count_is_never_the_zero_glyph() {
+        assert_eq!(
+            Some("█▂".to_owned()),
+            sparkline(&[1_000_000_000, 1], &Glyphs::unicode())
+        );
+    }
+
+    #[test]
+    fn test_sparkline_all_empty_is_flat() {
+        assert_eq!(Some("▁▁▁".to_owned()), sparkline(&[0, 0, 0], &Glyphs::unicode()));
+    }
+
+    #[test]
+    fn test_sparkline_has_no_ascii_form() {
+        assert_eq!(None, sparkline(&[1, 2, 3], &Glyphs::ascii()));
     }
 }

@@ -1,13 +1,16 @@
 //! Generic metrics probe CLI.
 
+mod histogram;
+
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, MetricTag, metric::Value};
+use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Label, Metric, MetricTag, metric::Value};
 use tabled::Tabled;
 use ync::{
     client::{self, Connection, ConnectionArgs},
     completion,
     discovery::{self, Resolution},
+    display::Glyphs,
     errors::{Error, ErrorKind},
     output::{self, CommonFormat},
 };
@@ -51,6 +54,13 @@ pub struct Cmd {
     /// `--tag 'config=*'`.
     #[arg(long = "tag", short = 't', value_name = "NAME=VALUE", global = true)]
     pub tags: Vec<String>,
+    /// Show every bucket of each histogram instead of one line per series.
+    ///
+    /// Empty buckets at either end are left out and a run of empty buckets
+    /// in the middle collapses into one row. In both views a percentile is
+    /// the upper bound of the bucket holding that observation.
+    #[arg(long)]
+    pub buckets: bool,
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
@@ -99,7 +109,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         resolve_alias(&connection, &name).await?
     };
 
-    run_probe(&connection, &name, tags).await
+    run_probe(&connection, &name, tags, cmd.buckets).await
 }
 
 /// Parses a `NAME=VALUE` tag entry into a [`MetricTag`].
@@ -152,7 +162,7 @@ async fn require_service(cmd: &Cmd) -> Error {
 /// Probes one metrics service's `GetMetrics` over the shared connection, and
 /// suggests the services that do exist when the probe finds none under that
 /// name.
-async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) -> Result<(), Error> {
+async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>, buckets: bool) -> Result<(), Error> {
     let result = connection
         .invoke_unary::<_, GetMetricsResponse>("metrics", name, "GetMetrics", GetMetricsRequest { tags })
         .await;
@@ -179,28 +189,31 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
                 .collect();
             scalars.sort_by(|a, b| a.name.cmp(&b.name));
 
-            let mut histograms: Vec<&Metric> = response
-                .metrics
-                .iter()
-                .filter(|m| matches!(&m.value, Some(Value::Histogram(_))))
-                .collect();
-            histograms.sort_by(|a, b| a.name.cmp(&b.name));
-
             if !scalars.is_empty() {
                 let rows: Vec<MetricRow> = scalars.iter().map(|m| MetricRow::from(*m)).collect();
                 ync::display::print_table_from_entries(rows);
             }
 
-            if !histograms.is_empty() {
-                println!();
-                println!("Histograms");
-                println!();
+            let groups = histogram::group(&response.metrics);
+            let glyphs = Glyphs::detect();
+            let mut printed = !scalars.is_empty();
 
-                for metric in &histograms {
-                    if let Some(Value::Histogram(h)) = &metric.value {
-                        print_histogram(&metric.name, &metric.labels, h);
-                    }
+            for group in &groups {
+                if printed {
+                    println!();
                 }
+
+                if buckets {
+                    histogram::print_buckets(group, &glyphs);
+                } else {
+                    histogram::print_summary(group, &glyphs);
+                }
+
+                printed = true;
+            }
+
+            if !groups.is_empty() {
+                println!();
             }
 
             println!("summary: {total} metrics");
@@ -295,15 +308,14 @@ pub struct MetricRow {
 impl From<&Metric> for MetricRow {
     fn from(m: &Metric) -> Self {
         let labels = {
-            let s = format_labels(&m.labels);
+            let s = format_labels(m.labels.iter());
             if s.is_empty() { "-".to_string() } else { s }
         };
 
         let (kind, value) = match &m.value {
             Some(Value::Counter(c)) => ("counter".to_string(), c.to_string()),
             Some(Value::Gauge(g)) => ("gauge".to_string(), g.to_string()),
-            Some(Value::Histogram(h)) => ("histogram".to_string(), format!("count={}", h.total_count)),
-            None => ("unknown".to_string(), "-".to_string()),
+            Some(Value::Histogram(_)) | None => ("unknown".to_string(), "-".to_string()),
         };
 
         Self {
@@ -317,74 +329,11 @@ impl From<&Metric> for MetricRow {
 
 /// Returns the `k=v, k=v` join of `labels`, or an empty string when `labels`
 /// is empty.
-fn format_labels(labels: &[Label]) -> String {
+fn format_labels<'a>(labels: impl Iterator<Item = &'a Label>) -> String {
     labels
-        .iter()
         .map(|l| format!("{}={}", l.name, l.value))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// Formats `value` as a human-readable bound string.
-///
-/// `+Inf`/`-Inf` become `"inf"`/`"-inf"`, whole numbers become their integer
-/// form, and all other values use the default `f64` display.
-fn format_bound(value: f64) -> String {
-    if value.is_infinite() {
-        if value.is_sign_negative() {
-            return "-inf".to_string();
-        }
-
-        return "inf".to_string();
-    }
-
-    if value.fract() == 0.0 {
-        return format!("{}", value as i64);
-    }
-
-    format!("{value}")
-}
-
-/// Prints a single histogram block to stdout.
-fn print_histogram(name: &str, labels: &[Label], histogram: &Histogram) {
-    let label_str = format_labels(labels);
-    if label_str.is_empty() {
-        println!("{name}");
-    } else {
-        println!("{name} {{{label_str}}}");
-    }
-
-    let buckets = &histogram.buckets;
-
-    if buckets.is_empty() {
-        println!("  count = {}", histogram.total_count);
-        println!();
-        return;
-    }
-
-    let max_count = buckets.iter().map(|b| b.count).max().unwrap_or(0);
-
-    let bounds: Vec<(String, String)> = buckets
-        .iter()
-        .enumerate()
-        .map(|(idx, bucket)| {
-            let lower = if idx == 0 { 0.0 } else { buckets[idx - 1].upper_bound };
-            (format_bound(lower), format_bound(bucket.upper_bound))
-        })
-        .collect();
-
-    let wl = bounds.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
-    let wu = bounds.iter().map(|(_, u)| u.len()).max().unwrap_or(0);
-    let wc = buckets.iter().map(|b| b.count.to_string().len()).max().unwrap_or(0);
-
-    for (bucket, (lower, upper)) in buckets.iter().zip(bounds.iter()) {
-        let bars = "∎".repeat(ync::display::bar_len(bucket.count, max_count));
-        let count = bucket.count;
-        println!("  {lower:>wl$} .. {upper:>wu$} [ {count:>wc$} ] {bars}");
-    }
-
-    println!("  count = {}", histogram.total_count);
-    println!();
 }
 
 #[cfg(test)]

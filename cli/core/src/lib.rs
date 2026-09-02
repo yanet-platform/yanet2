@@ -14,6 +14,7 @@ pub mod discovery;
 pub mod dispatcher;
 pub mod display;
 pub mod errors;
+pub mod histogram;
 pub mod humanfmt;
 pub mod logging;
 pub mod metrics;
