@@ -34,6 +34,12 @@ const BAR_WIDTH_MIN: usize = 8;
 /// Indent of a series' lines under its block header.
 const SERIES_INDENT: usize = 2;
 
+/// Cell of a series that lacks a label other series of its block carry.
+///
+/// Distinct from an empty cell: a label present with an empty value is a
+/// different series on the server side, and the two must not read alike.
+const ABSENT_LABEL: &str = "-";
+
 /// One histogram series: the wire metric and its histogram value.
 pub struct Series<'a> {
     metric: &'a Metric,
@@ -132,7 +138,8 @@ pub fn print_summary(group: &Group<'_>, glyphs: &Glyphs) {
 
 /// Builds the summary table of a group, header row first.
 ///
-/// Label columns first, then the observation count, the percentiles and,
+/// Label columns first, a series lacking one of them showing the absent
+/// marker, then the observation count, the percentiles and,
 /// when the glyph set has one, a sparkline over every bucket so the rows
 /// share one axis and compare at a glance. A sparkline that would not fit
 /// in `columns` is dropped rather than wrapped: broken across lines it
@@ -153,7 +160,7 @@ fn summary_rows(group: &Group<'_>, glyphs: &Glyphs, columns: Option<usize>) -> V
         let mut row: Vec<String> = group
             .varying
             .iter()
-            .map(|key| label_value(series.metric, key).unwrap_or("").to_owned())
+            .map(|key| label_value(series.metric, key).unwrap_or(ABSENT_LABEL).to_owned())
             .collect();
 
         row.push(format_number(series.histogram.total_count));
@@ -206,7 +213,7 @@ pub fn print_buckets(group: &Group<'_>, glyphs: &Glyphs) {
                 .filter(|label| group.varying.contains(&label.name.as_str()))
                 .collect();
             let identity = if own.is_empty() {
-                "-".to_owned()
+                ABSENT_LABEL.to_owned()
             } else {
                 format_labels(own.into_iter())
             };
@@ -527,6 +534,19 @@ mod test {
         assert_eq!(
             vec![("a_bytes", Unit::Bytes), ("b_seconds", Unit::Seconds)],
             groups.iter().map(|group| (group.name, group.unit)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_summary_rows_tell_an_absent_label_from_an_empty_value() {
+        let metrics = [metric("h", &[("config", "")]), metric("h", &[])];
+        let groups = group(&metrics);
+
+        let rows = summary_rows(&groups[0], &Glyphs::ascii(), None);
+
+        assert_eq!(
+            vec!["", "-"],
+            rows[1..].iter().map(|row| row[0].as_str()).collect::<Vec<_>>()
         );
     }
 

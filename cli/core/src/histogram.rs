@@ -85,11 +85,12 @@ impl Quantile {
 /// Locates the bucket holding the `percent`-th observation.
 ///
 /// The estimate is the bucket's upper bound rather than an interpolated
-/// point: it is exact for integer-valued histograms and a conservative
-/// bound for continuous ones, and it never invents precision the buckets
-/// do not have. The target rank rounds up, so p99 of ten observations is
-/// the tenth. The rank is taken over the bucket counts themselves, so a
-/// stale total on the wire cannot push it past the last bucket.
+/// point: exact when every bucket holds a single integer value, as the
+/// burst histograms do, a conservative bound otherwise, and never a
+/// precision the buckets do not have. The target rank rounds up, so p99 of ten
+/// observations is the tenth. The rank is taken over the bucket counts
+/// themselves, so a stale total on the wire cannot push it past the last
+/// bucket.
 pub fn quantile(buckets: &[Bucket], percent: f64) -> Quantile {
     let total: u64 = buckets.iter().map(|bucket| bucket.count).sum();
 
@@ -215,7 +216,7 @@ pub fn format_share(count: u64, total: u64) -> String {
 }
 
 /// Formats `seconds` on the s/ms/us/ns ladder, picking the coarsest step
-/// on which the rounded value is at least one.
+/// on which the rounded magnitude is at least one.
 fn format_seconds(seconds: f64) -> String {
     const LADDER: [(f64, &str); 4] = [(1.0, "s"), (1e-3, "ms"), (1e-6, "us"), (1e-9, "ns")];
 
@@ -223,11 +224,13 @@ fn format_seconds(seconds: f64) -> String {
         return "0s".to_owned();
     }
 
+    let (sign, magnitude) = sign_and_magnitude(seconds);
+
     for (position, (scale, suffix)) in LADDER.iter().enumerate() {
-        let scaled = round_readable(seconds / scale);
+        let scaled = round_readable(magnitude / scale);
 
         if scaled >= 1.0 || position + 1 == LADDER.len() {
-            return format!("{}{suffix}", render_readable(scaled));
+            return format!("{sign}{}{suffix}", render_readable(scaled));
         }
     }
 
@@ -235,22 +238,32 @@ fn format_seconds(seconds: f64) -> String {
 }
 
 /// Formats `bytes` on the IEC ladder, moving up a step whenever the
-/// rounded value would reach the next one.
+/// rounded magnitude would reach the next one.
 fn format_bytes(bytes: f64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
 
-    let mut value = bytes;
+    let (sign, mut value) = sign_and_magnitude(bytes);
     let mut unit = 0;
 
     loop {
         let rounded = round_readable(value);
 
         if rounded < 1024.0 || unit + 1 == UNITS.len() {
-            return format!("{}{}", render_readable(rounded), UNITS[unit]);
+            return format!("{sign}{}{}", render_readable(rounded), UNITS[unit]);
         }
 
         value /= 1024.0;
         unit += 1;
+    }
+}
+
+/// Splits `value` into the sign to print and its magnitude, so a ladder
+/// walks the magnitude and a negative bound keeps its unit.
+fn sign_and_magnitude(value: f64) -> (&'static str, f64) {
+    if value < 0.0 {
+        ("-", -value)
+    } else {
+        ("", value)
     }
 }
 
@@ -344,6 +357,12 @@ mod test {
     }
 
     #[test]
+    fn test_unit_format_seconds_negative_keeps_its_unit() {
+        assert_eq!("-1s", Unit::Seconds.format(-1.0));
+        assert_eq!("-2.5ms", Unit::Seconds.format(-0.0025));
+    }
+
+    #[test]
     fn test_unit_format_bytes_ladder() {
         assert_eq!("512B", Unit::Bytes.format(512.0));
         assert_eq!("1KiB", Unit::Bytes.format(1024.0));
@@ -355,6 +374,11 @@ mod test {
     fn test_unit_format_bytes_rounding_moves_up_a_step() {
         assert_eq!("1KiB", Unit::Bytes.format(1023.9));
         assert_eq!("1023B", Unit::Bytes.format(1023.0));
+    }
+
+    #[test]
+    fn test_unit_format_bytes_negative_keeps_its_unit() {
+        assert_eq!("-2KiB", Unit::Bytes.format(-2048.0));
     }
 
     #[test]
