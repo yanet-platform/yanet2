@@ -103,6 +103,23 @@ dataplane_ut_round_result_free(struct dataplane_ut_round_result *result);
 size_t
 dataplane_ut_mempool_outstanding(struct dataplane_ut *ut);
 
+// Overwrite the value of a named size-1 counter in one worker's shared
+// worker-counter storage.
+//
+// A fault-injection hook for control-plane tests: it produces snapshots
+// no healthy dataplane would publish (an available above capacity, a
+// zero capacity) without reaching into the storage layout. A
+// multi-value counter is refused, matching the doc contract. Returns 0
+// on success, -1 when the worker index or the counter name is unknown
+// or the counter carries more than one value.
+int
+dataplane_ut_set_worker_counter(
+	struct dataplane_ut *ut,
+	size_t worker_idx,
+	const char *name,
+	uint64_t value
+);
+
 // Run one pipeline round on worker_idx with the given input.
 //
 // input is drained to empty on return; result->output and result->drop

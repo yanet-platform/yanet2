@@ -1,5 +1,7 @@
 #pragma once
 
+#include <errno.h>
+
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 
@@ -81,6 +83,13 @@ test_pool_enqueue(struct rte_mempool *mp, void *const *obj_table, unsigned n) {
 
 static int
 test_pool_dequeue(struct rte_mempool *mp, void **obj_table, unsigned n) {
+	// The pool is a pure bookkeeping mock with no backing store, so
+	// exhaustion is defined by the outstanding count alone: refusing
+	// here keeps the reported occupancy consistent with the capacity.
+	if (*(size_t *)mp->pool_data + n > mp->size) {
+		return -ENOENT;
+	}
+
 	const size_t poison = ((const size_t *)mp->pool_data)[1];
 	for (unsigned idx = 0; idx < n; idx++) {
 		void *ptr = aligned_alloc(64, mp->header_size + mp->elt_size);
@@ -109,8 +118,7 @@ test_pool_dequeue(struct rte_mempool *mp, void **obj_table, unsigned n) {
 
 static unsigned
 test_pool_get_count(const struct rte_mempool *mp) {
-	(void)mp;
-	return 1024;
+	return (unsigned)(mp->size - *(const size_t *)mp->pool_data);
 }
 
 static const struct rte_mempool_ops test_pool_ops = {
@@ -122,8 +130,17 @@ static const struct rte_mempool_ops test_pool_ops = {
 	.get_count = test_pool_get_count,
 };
 
+// The default mock capacity, preserving the occupancy the pool reported
+// before sizing became configurable.
+#define TEST_MEMPOOL_DEFAULT_SIZE 1024
+
+// Fixture pools backing the tx pipe and staging tests: those tests hold
+// several deferred-free ring fills at once, so the default above is far
+// too small once the pool enforces its capacity.
+#define TEST_MEMPOOL_TX_FIXTURE_SIZE (1u << 14)
+
 static inline struct rte_mempool *
-test_mempool_create(void) {
+test_mempool_create_sized(uint32_t size) {
 	rte_mempool_ops_table.num_ops = 0;
 	rte_mempool_register_ops(&test_pool_ops);
 
@@ -142,6 +159,7 @@ test_mempool_create(void) {
 	mp->flags |= RTE_MEMPOOL_F_POOL_CREATED;
 	mp->socket_id = 0;
 	mp->cache_size = 0;
+	mp->size = size;
 	mp->elt_size = sizeof(struct rte_mbuf) + MBUF_MAX_SIZE;
 	mp->header_size = sizeof(struct rte_mempool_objhdr);
 	if (mp->header_size % 64 != 0) {
@@ -152,6 +170,11 @@ test_mempool_create(void) {
 		(char *)mp + sizeof(struct rte_mempool) + private_data_size;
 	rte_pktmbuf_pool_init(mp, NULL);
 	return mp;
+}
+
+static inline struct rte_mempool *
+test_mempool_create(void) {
+	return test_mempool_create_sized(TEST_MEMPOOL_DEFAULT_SIZE);
 }
 
 // Release resources allocated by test_mempool_create().

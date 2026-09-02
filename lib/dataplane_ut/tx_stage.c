@@ -34,7 +34,8 @@ dataplane_ut_tx_stage_new(uint32_t device_count, uint32_t pipes_per_device) {
 		return NULL;
 	}
 
-	fixture->mempool = test_mempool_create();
+	fixture->mempool =
+		test_mempool_create_sized(TEST_MEMPOOL_TX_FIXTURE_SIZE);
 	if (fixture->mempool == NULL) {
 		free(fixture);
 		return NULL;

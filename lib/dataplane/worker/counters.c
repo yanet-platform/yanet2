@@ -65,6 +65,22 @@ worker_counters_register(
 	if (register_one(registry, "drops", 1, &ids->drops)) {
 		return -1;
 	}
+	if (register_one(
+		    registry,
+		    "rx_mempool_capacity",
+		    1,
+		    &ids->rx_mempool_capacity
+	    )) {
+		return -1;
+	}
+	if (register_one(
+		    registry,
+		    "rx_mempool_available",
+		    1,
+		    &ids->rx_mempool_available
+	    )) {
+		return -1;
+	}
 	return 0;
 }
 
@@ -114,4 +130,20 @@ worker_counters_bind(
 	for (uint64_t idx = 0; idx < count; ++idx) {
 		bind_one(ADDR_OF(workers + idx), ids, ADDR_OF(storages + idx));
 	}
+}
+
+uint64_t *
+worker_counter_slot(
+	struct dp_config *dp_config, uint64_t worker_idx, uint64_t counter_id
+) {
+	if (worker_idx >= dp_config->worker_counter_storage_count) {
+		return NULL;
+	}
+	if (counter_id >= dp_config->worker_counters.count) {
+		return NULL;
+	}
+
+	struct counter_storage **storages =
+		ADDR_OF(&dp_config->worker_counter_storages);
+	return counter_get_address(counter_id, ADDR_OF(storages + worker_idx));
 }

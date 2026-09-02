@@ -20,7 +20,8 @@ dataplane_ut_tx_pipe_new(void) {
 		return NULL;
 	}
 
-	fixture->mempool = test_mempool_create();
+	fixture->mempool =
+		test_mempool_create_sized(TEST_MEMPOOL_TX_FIXTURE_SIZE);
 	if (fixture->mempool == NULL) {
 		free(fixture);
 		return NULL;

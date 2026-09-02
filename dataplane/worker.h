@@ -9,6 +9,7 @@
 
 #include "common/data_pipe.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/worker/rx_pool_sampler.h"
 #include "lib/dataplane/worker/tx_stage.h"
 
 struct dataplane;
@@ -49,6 +50,11 @@ struct dataplane_worker {
 	uint32_t device_id;
 
 	struct rte_mempool *rx_mempool;
+
+	// Publishes the rx pool occupancy gauge into shared counter
+	// storage. Bound before the instance becomes visible; state is
+	// dataplane-local on purpose (see the sampler header).
+	struct worker_rx_pool_sampler rx_pool_sampler;
 
 	struct worker_read_ctx read_ctx;
 	struct worker_write_ctx write_ctx;
