@@ -30,9 +30,7 @@ export interface UpdateDevicePlainRequest {
     device?: Device;
 }
 
-export interface UpdateDevicePlainResponse {
-    error?: string;
-}
+export interface UpdateDevicePlainResponse {}
 
 // VLAN device update request/response
 export interface UpdateDeviceVlanRequest {
@@ -41,9 +39,7 @@ export interface UpdateDeviceVlanRequest {
     vlan?: number;
 }
 
-export interface UpdateDeviceVlanResponse {
-    error?: string;
-}
+export interface UpdateDeviceVlanResponse {}
 
 /** Device type discriminator; the concrete set is owned by the device registry. */
 export type DeviceType = string;

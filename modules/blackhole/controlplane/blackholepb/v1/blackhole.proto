@@ -48,4 +48,4 @@ message UpdateConfigResponse {}
 message DeleteConfigRequest { string name = 1; }
 
 // DeleteConfigResponse is the response to a DeleteConfig call.
-message DeleteConfigResponse { bool deleted = 1; }
+message DeleteConfigResponse {}

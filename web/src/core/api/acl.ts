@@ -95,9 +95,7 @@ export interface DeleteConfigRequest {
     name?: string;
 }
 
-export interface DeleteConfigResponse {
-    deleted?: boolean;
-}
+export interface DeleteConfigResponse {}
 
 const aclService = createService('modules.acl.controlplane.aclpb.v1.ACLService');
 

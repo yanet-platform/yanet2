@@ -89,17 +89,13 @@ export interface UpdateConfigRequest {
     rules?: Rule[];
 }
 
-export interface UpdateConfigResponse {
-    error?: string;
-}
+export interface UpdateConfigResponse {}
 
 export interface DeleteConfigRequest {
     name?: string;
 }
 
-export interface DeleteConfigResponse {
-    deleted?: boolean;
-}
+export interface DeleteConfigResponse {}
 
 const forwardService = createService('modules.forward.controlplane.forwardpb.v1.ForwardService');
 

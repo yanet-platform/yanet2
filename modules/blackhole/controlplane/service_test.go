@@ -98,9 +98,8 @@ func Test_BlackholeService_DeleteConfig(t *testing.T) {
 	_, err := svc.UpdateConfig(ctx, &blackholepb.UpdateConfigRequest{Name: "blackhole0"})
 	require.NoError(t, err)
 
-	resp, err := svc.DeleteConfig(ctx, &blackholepb.DeleteConfigRequest{Name: "blackhole0"})
+	_, err = svc.DeleteConfig(ctx, &blackholepb.DeleteConfigRequest{Name: "blackhole0"})
 	require.NoError(t, err)
-	require.True(t, resp.Deleted)
 
 	_, err = svc.ShowConfig(ctx, &blackholepb.ShowConfigRequest{Name: "blackhole0"})
 	require.Equal(t, codes.NotFound, status.Code(err))

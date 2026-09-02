@@ -14,4 +14,4 @@ message UpdateDevicePlainRequest {
   common.commonpb.v1.Device device = 2;
 }
 
-message UpdateDevicePlainResponse { string error = 1; }
+message UpdateDevicePlainResponse {}

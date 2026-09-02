@@ -3,13 +3,10 @@ import type { BaseDevice, DeviceTypeManifest } from '@yanet/core/registry';
 import { IconPlain } from './icon';
 
 const save = async (device: BaseDevice): Promise<Record<string, unknown>> => {
-    const response = await devices.updatePlain({
+    await devices.updatePlain({
         name: device.id.name,
         device: toDevicePayload(device.inputPipelines, device.outputPipelines),
     });
-    if (response.error) {
-        throw new Error(response.error);
-    }
     return {};
 };
 

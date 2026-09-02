@@ -11,14 +11,11 @@ const vlanExt = (device: BaseDevice): VlanExt =>
 
 const save = async (device: BaseDevice): Promise<Record<string, unknown>> => {
     const { vlanId } = vlanExt(device);
-    const response = await devices.updateVlan({
+    await devices.updateVlan({
         name: device.id.name,
         device: toDevicePayload(device.inputPipelines, device.outputPipelines),
         vlan: vlanId ?? 0,
     });
-    if (response.error) {
-        throw new Error(response.error);
-    }
     return { vlanId: vlanId ?? 0 };
 };
 

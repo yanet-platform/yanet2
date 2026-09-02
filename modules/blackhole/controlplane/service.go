@@ -181,7 +181,7 @@ func (m *BlackholeService) DeleteConfig(
 
 	delete(m.configs, name)
 
-	return &blackholepb.DeleteConfigResponse{Deleted: true}, nil
+	return &blackholepb.DeleteConfigResponse{}, nil
 }
 
 // parkOrFree frees the handle when it is dangling and parks it for

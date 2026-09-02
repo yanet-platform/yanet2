@@ -250,7 +250,7 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 
 	delete(m.configs, name)
 
-	return &forwardpb.DeleteConfigResponse{Deleted: true}, nil
+	return &forwardpb.DeleteConfigResponse{}, nil
 }
 
 // parkOrFree frees the handle when it is dangling and parks it for

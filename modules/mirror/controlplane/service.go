@@ -222,7 +222,7 @@ func (m *MirrorService) DeleteConfig(
 
 	delete(m.configs, name)
 
-	return &mirrorpb.DeleteConfigResponse{Deleted: true}, nil
+	return &mirrorpb.DeleteConfigResponse{}, nil
 }
 
 // parkOrFree frees the handle when it is dangling and parks it for

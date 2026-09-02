@@ -16,4 +16,4 @@ message UpdateDeviceVlanRequest {
   uint32 vlan = 3;
 }
 
-message UpdateDeviceVlanResponse { string error = 1; }
+message UpdateDeviceVlanResponse {}
