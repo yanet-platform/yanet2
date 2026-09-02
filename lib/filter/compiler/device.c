@@ -31,18 +31,15 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 		}
 	}
 
-	struct value_table *t =
-		memory_balloc(memory_context, sizeof(struct value_table));
-	if (t == NULL) {
+	struct vline *l = memory_balloc(memory_context, sizeof(struct vline));
+	if (l == NULL) {
 		return -1;
 	}
-	int res = value_table_init(
-		t, memory_context, "device", 1, max_device_id + 1
-	);
+	int res = vline_init(l, memory_context, "device", max_device_id + 1);
 	if (res < 0) {
 		goto error_init;
 	}
-	SET_OFFSET_OF(data, t);
+	SET_OFFSET_OF(data, l);
 
 	struct remap_table remap_table;
 	if (remap_table_init(&remap_table, memory_context, max_device_id + 1)) {
@@ -62,8 +59,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 		}
 		remap_table_new_gen(&remap_table);
 		for (uint16_t idx = 0; idx < r->device_count; ++idx) {
-			uint32_t *value =
-				value_table_get_ptr(t, 0, r->devices[idx].id);
+			uint32_t *value = vline_get_ptr(l, r->devices[idx].id);
 			if (remap_table_touch(&remap_table, *value, value) <
 			    0) {
 				goto error_touch;
@@ -72,7 +68,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	}
 
 	remap_table_compact(&remap_table);
-	value_table_compact(t, &remap_table);
+	vline_compact(l, &remap_table);
 	remap_table_free(&remap_table);
 
 	for (const struct filter_rule **r_ptr = rules;
@@ -90,7 +86,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 		if (r->device_count == 0) {
 			for (uint64_t id = 0; id < max_device_id + 1; ++id) {
 				if (value_registry_collect(
-					    registry, value_table_get(t, 0, id)
+					    registry, vline_get(l, id)
 				    )) {
 					goto error_collect;
 				}
@@ -99,9 +95,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 			for (uint16_t idx = 0; idx < r->device_count; ++idx) {
 				if (value_registry_collect(
 					    registry,
-					    value_table_get(
-						    t, 0, r->devices[idx].id
-					    )
+					    vline_get(l, r->devices[idx].id)
 				    )) {
 					goto error_collect;
 				}
@@ -115,11 +109,11 @@ error_touch:
 
 error_collect:
 error_remap_table:
-	value_table_free(t);
+	vline_free(l);
 	SET_OFFSET_OF(data, NULL);
 
 error_init:
-	memory_bfree(memory_context, t, sizeof(struct value_table));
+	memory_bfree(memory_context, l, sizeof(struct vline));
 
 	return -1;
 }
@@ -128,10 +122,10 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(device)(
 	void *data, struct memory_context *memory_context
 ) {
-	struct value_table *t = (struct value_table *)data;
-	if (t == NULL) {
+	struct vline *l = (struct vline *)data;
+	if (l == NULL) {
 		return;
 	}
-	value_table_free(t);
-	memory_bfree(memory_context, t, sizeof(struct value_table));
+	vline_free(l);
+	memory_bfree(memory_context, l, sizeof(struct vline));
 }
