@@ -50,6 +50,6 @@ FILTER_ATTR_QUERY_FUNC(proto_range)(
 			proto += icmp_header->icmp_type;
 		}
 
-		result[idx] = value_table_get(&c->table, 0, proto);
+		result[idx] = vline_get(&c->line, proto);
 	}
 }

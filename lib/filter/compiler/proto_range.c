@@ -14,14 +14,13 @@ collect_proto_values(
 	struct memory_context *memory_context,
 	const struct filter_rule **rules,
 	uint32_t count,
-	struct value_table *table,
+	struct vline *line,
 	struct value_registry *registry
 ) {
-	if (value_table_init(
-		    table,
+	if (vline_init(
+		    line,
 		    memory_context,
 		    "proto-range",
-		    1,
 		    PROTO_RANGE_CLASSIFIER_MAX_VALUE
 	    )) {
 		return -1;
@@ -56,8 +55,7 @@ collect_proto_values(
 			for (uint32_t proto = proto_range->from;
 			     proto <= proto_range->to;
 			     ++proto) {
-				uint32_t *value =
-					value_table_get_ptr(table, 0, proto);
+				uint32_t *value = vline_get_ptr(line, proto);
 				if (remap_table_touch(
 					    &remap_table, *value, value
 				    ) < 0) {
@@ -68,7 +66,7 @@ collect_proto_values(
 	}
 
 	remap_table_compact(&remap_table);
-	value_table_compact(table, &remap_table);
+	vline_compact(line, &remap_table);
 	remap_table_free(&remap_table);
 
 	for (const struct filter_rule **rule_ptr = rules;
@@ -95,8 +93,7 @@ collect_proto_values(
 			     proto <= proto_range->to;
 			     ++proto) {
 				if (value_registry_collect(
-					    registry,
-					    value_table_get(table, 0, proto)
+					    registry, vline_get(line, proto)
 				    )) {
 					goto error_collect;
 				}
@@ -112,7 +109,7 @@ error_touch:
 error_collect:
 error_remap_table:
 
-	value_table_free(table);
+	vline_free(line);
 	return -1;
 }
 
@@ -131,7 +128,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 	}
 	SET_OFFSET_OF(data, classifier);
 	if (collect_proto_values(
-		    mctx, rules, rule_count, &classifier->table, registry
+		    mctx, rules, rule_count, &classifier->line, registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
 		memory_bfree(mctx, classifier, sizeof(*classifier));
@@ -150,7 +147,7 @@ FILTER_ATTR_COMPILER_FREE_FUNC(proto_range)(
 	}
 	struct proto_range_classifier *c =
 		(struct proto_range_classifier *)data;
-	value_table_free(&c->table);
+	vline_free(&c->line);
 	memory_bfree(memory_context, c, sizeof(*c));
 }
 

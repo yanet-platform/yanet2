@@ -165,3 +165,101 @@ value_table_compact(
 		}
 	}
 }
+
+/*
+ * Single-dimensional value line: a value_table of one row, with the
+ * values kept in one contiguous memory chunk instead of the chunked
+ * pointer array.
+ */
+struct vline {
+	struct memory_context *memory_context;
+	uint32_t size;
+	uint32_t *values;
+};
+
+// Releases a value line, including its own memory-tree node.
+//
+// Safe on a zero-initialised line, mirroring value_table_free.
+static inline void
+vline_free(struct vline *vline) {
+	struct memory_context *memory_context = ADDR_OF(&vline->memory_context);
+	if (memory_context == NULL) {
+		return;
+	}
+
+	uint32_t *values = ADDR_OF(&vline->values);
+	if (values != NULL) {
+		memory_bfree(
+			memory_context, values, vline->size * sizeof(uint32_t)
+		);
+		SET_OFFSET_OF(&vline->values, NULL);
+	}
+
+	// The memory_context was balloc'd out of its parent in vline_init,
+	// so it is released the same way.
+	struct memory_context *parent = ADDR_OF(&memory_context->parent);
+	memory_context_fini(memory_context);
+	memory_bfree(parent, memory_context, sizeof(*memory_context));
+	SET_OFFSET_OF(&vline->memory_context, NULL);
+}
+
+static inline int
+vline_init(
+	struct vline *vline,
+	struct memory_context *parent_context,
+	const char *name,
+	uint32_t size
+) {
+	// Balloc'd rather than embedded for the same reason as in
+	// value_table_init: a line lives inside shared-memory configs the
+	// dataplane reads, so an inline context would multiply across
+	// every line.
+	struct memory_context *memory_context = (struct memory_context *)
+		memory_balloc(parent_context, sizeof(*memory_context));
+	if (memory_context == NULL) {
+		SET_OFFSET_OF(&vline->memory_context, NULL);
+		SET_OFFSET_OF(&vline->values, NULL);
+		return -1;
+	}
+
+	memory_context_init_from(memory_context, parent_context, name);
+	SET_OFFSET_OF(&vline->memory_context, memory_context);
+
+	vline->size = size;
+	SET_OFFSET_OF(&vline->values, NULL);
+
+	uint32_t *values = (uint32_t *)memory_balloc(
+		memory_context, size * sizeof(uint32_t)
+	);
+	if (values == NULL) {
+		vline_free(vline);
+		return -1;
+	}
+
+	memset(values, 0, size * sizeof(uint32_t));
+	SET_OFFSET_OF(&vline->values, values);
+
+	return 0;
+}
+
+static inline uint32_t *
+vline_get_ptr(struct vline *vline, uint32_t idx) {
+	// The values chunk is set at init and cleared only by vline_free,
+	// which never races a lookup, so on the query path it is never
+	// NULL.
+	uint32_t *values = ADDR_OF_NONNULL(&vline->values);
+	return values + idx;
+}
+
+static inline uint32_t
+vline_get(struct vline *vline, uint32_t idx) {
+	return *vline_get_ptr(vline, idx);
+}
+
+static inline void
+vline_compact(struct vline *vline, struct remap_table *remap_table) {
+	for (uint32_t idx = 0; idx < vline->size; ++idx) {
+		uint32_t *value = vline_get_ptr(vline, idx);
+		*value = remap_table_compacted(remap_table, *value);
+	}
+}
