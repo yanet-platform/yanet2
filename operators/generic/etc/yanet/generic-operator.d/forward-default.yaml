@@ -18,10 +18,10 @@ reconcile:
 configs:
   - name: vlan-phy
     method: modules.forward.controlplane.forwardpb.v1.ForwardService/UpdateConfig
-    file: /etc/yanet2/forward.d/vlan-phy.yaml
+    file: /etc/yanet2/forward.d/vlan-phy-default.yaml
   - name: phy-vlan
     method: modules.forward.controlplane.forwardpb.v1.ForwardService/UpdateConfig
-    file: /etc/yanet2/forward.d/phy-vlan.yaml
+    file: /etc/yanet2/forward.d/phy-vlan-default.yaml
 
 functions:
   - name: fn:forward-vlan-phy

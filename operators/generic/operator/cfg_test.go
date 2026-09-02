@@ -18,8 +18,8 @@ import (
 // shippedInstanceConfigs lists the instance configs the package installs
 // under /etc/yanet2/generic-operator.d, relative to this test.
 var shippedInstanceConfigs = []string{
-	"../etc/yanet/generic-operator.d/forward.yaml",
-	"../etc/yanet/generic-operator.d/decap.yaml",
+	"../etc/yanet/generic-operator.d/forward-default.yaml",
+	"../etc/yanet/generic-operator.d/decap-default.yaml",
 }
 
 // Test_ShippedInstanceConfigs_NoUnknownKeys guards the shipped instance
