@@ -24,7 +24,7 @@ use ync::{
 use crate::format_labels;
 
 /// Percentiles shown for every series, as percents.
-const PERCENTILES: [f64; 3] = [50.0, 90.0, 99.0];
+const PERCENTILES: [u8; 3] = [50, 90, 99];
 
 /// Columns of the summary table after the label columns and before the
 /// optional sparkline: the count and the percentiles.
@@ -153,7 +153,7 @@ pub fn print_summary(group: &Group<'_>, glyphs: &Glyphs) {
 fn summary_rows(group: &Group<'_>, glyphs: &Glyphs) -> Vec<Vec<String>> {
     let mut headers: Vec<String> = group.varying.iter().map(|key| (*key).to_owned()).collect();
     headers.push("count".to_owned());
-    headers.extend(PERCENTILES.iter().map(|percent| format!("p{percent:.0}")));
+    headers.extend(PERCENTILES.iter().map(|percent| format!("p{percent}")));
 
     if glyphs.has_sparkline() {
         headers.push("distribution".to_owned());
@@ -290,7 +290,7 @@ pub fn print_buckets(group: &Group<'_>, glyphs: &Glyphs) {
 
         let stats: Vec<String> = PERCENTILES
             .iter()
-            .map(|&percent| format!("p{percent:.0} {}", quantile(buckets, percent).render(group.unit)))
+            .map(|&percent| format!("p{percent} {}", quantile(buckets, percent).render(group.unit)))
             .collect();
 
         println!(

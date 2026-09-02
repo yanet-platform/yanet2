@@ -40,8 +40,17 @@ impl Unit {
     /// choosing the step after rounding so a value just under a step reads
     /// `1s` or `1KiB` rather than `1000ms` or `1024B`. A plain whole number
     /// gets thousands separators. Bucket bounds are the main input, so
-    /// `0.001` seconds must read `1ms`, not `0.001`.
+    /// `0.001` seconds must read `1ms`, not `0.001`, and an infinite bound
+    /// keeps its sign as `+Inf` or `-Inf` in every unit.
     pub fn format(self, value: f64) -> String {
+        if value.is_infinite() {
+            return if value > 0.0 { "+Inf" } else { "-Inf" }.to_owned();
+        }
+
+        if value.is_nan() {
+            return "NaN".to_owned();
+        }
+
         match self {
             Self::Seconds => format_seconds(value),
             Self::Bytes => format_bytes(value),
@@ -89,38 +98,49 @@ impl Quantile {
 /// The estimate is the bucket's upper bound rather than an interpolated
 /// point: exact when every bucket holds a single integer value, as the
 /// burst histograms do, a conservative bound otherwise, and never a
-/// precision the buckets do not have. The target rank rounds up, so p99 of ten
-/// observations is the tenth. The rank is taken over the bucket counts
-/// themselves, so a stale total on the wire cannot push it past the last
-/// bucket.
-pub fn quantile(buckets: &[Bucket], percent: f64) -> Quantile {
+/// precision the buckets do not have. The target rank rounds up, so p99 of
+/// ten observations is the tenth, and it is computed in integers so a
+/// count beyond the float mantissa still lands in the right bucket. The
+/// rank is taken over the bucket counts themselves, so a stale total on
+/// the wire cannot push it past the last bucket. Only a `+Inf` bound is
+/// the overflow: a `-Inf` bound is an ordinary bucket that holds exactly
+/// the `-Inf` observations.
+pub fn quantile(buckets: &[Bucket], percent: u8) -> Quantile {
     let total: u64 = buckets.iter().map(|bucket| bucket.count).sum();
 
     if total == 0 {
         return Quantile::Empty;
     }
 
-    let target = ((total as f64 * percent / 100.0).ceil() as u64).clamp(1, total);
-    let mut cumulative = 0;
-    let mut last_finite = None;
+    let target = (u128::from(total) * u128::from(percent))
+        .div_ceil(100)
+        .clamp(1, u128::from(total));
+    let mut cumulative: u128 = 0;
+    let mut last_bound = None;
 
     for bucket in buckets {
-        cumulative += bucket.count;
+        cumulative += u128::from(bucket.count);
 
         if cumulative >= target {
-            return if bucket.upper_bound.is_finite() {
-                Quantile::Within(bucket.upper_bound)
+            return if is_overflow(bucket.upper_bound) {
+                last_bound.map_or(Quantile::Unbounded, Quantile::Above)
             } else {
-                last_finite.map_or(Quantile::Unbounded, Quantile::Above)
+                Quantile::Within(bucket.upper_bound)
             };
         }
 
-        if bucket.upper_bound.is_finite() {
-            last_finite = Some(bucket.upper_bound);
+        if !is_overflow(bucket.upper_bound) {
+            last_bound = Some(bucket.upper_bound);
         }
     }
 
     Quantile::Empty
+}
+
+/// Whether `bound` closes the overflow bucket that catches every
+/// observation above the last real bound.
+fn is_overflow(bound: f64) -> bool {
+    bound == f64::INFINITY
 }
 
 /// One row of an expanded bucket listing.
@@ -173,22 +193,22 @@ pub fn bucket_rows(buckets: &[Bucket]) -> Vec<BucketRow> {
 
 /// Labels the bucket at `index` by its upper bound.
 ///
-/// The overflow bucket is labelled `>` and the last finite bound before
-/// it, or `+Inf` when no finite bucket precedes it.
+/// The overflow bucket is labelled `>` and the last real bound before it,
+/// or `+Inf` when no other bucket precedes it.
 pub fn bucket_label(buckets: &[Bucket], index: usize, unit: Unit) -> String {
     let bound = buckets[index].upper_bound;
 
-    if bound.is_finite() {
+    if !is_overflow(bound) {
         return unit.format(bound);
     }
 
-    let last_finite = buckets[..index]
+    let last_bound = buckets[..index]
         .iter()
         .rev()
         .map(|bucket| bucket.upper_bound)
-        .find(|bound| bound.is_finite());
+        .find(|bound| !is_overflow(*bound));
 
-    match last_finite {
+    match last_bound {
         Some(bound) => format!(">{}", unit.format(bound)),
         None => "+Inf".to_owned(),
     }
@@ -347,6 +367,13 @@ mod test {
     }
 
     #[test]
+    fn test_unit_format_infinite_keeps_its_sign_in_every_unit() {
+        assert_eq!("+Inf", Unit::Seconds.format(f64::INFINITY));
+        assert_eq!("-Inf", Unit::Bytes.format(f64::NEG_INFINITY));
+        assert_eq!("-Inf", Unit::Plain.format(f64::NEG_INFINITY));
+    }
+
+    #[test]
     fn test_unit_format_seconds_rounding_moves_up_a_step() {
         assert_eq!("1s", Unit::Seconds.format(0.99951));
         assert_eq!("1ms", Unit::Seconds.format(0.00099951));
@@ -390,7 +417,7 @@ mod test {
 
     #[test]
     fn test_unit_format_plain_whole_number_has_separators() {
-        assert_eq!("1,234,567", Unit::Plain.format(1_234_567.0));
+        assert_eq!("1'234'567", Unit::Plain.format(1_234_567.0));
         assert_eq!("0", Unit::Plain.format(0.0));
     }
 
@@ -403,7 +430,7 @@ mod test {
     #[test]
     fn test_unit_format_plain_negative_keeps_separators_and_fractions() {
         assert_eq!("-3", Unit::Plain.format(-3.0));
-        assert_eq!("-1,234,567", Unit::Plain.format(-1_234_567.0));
+        assert_eq!("-1'234'567", Unit::Plain.format(-1_234_567.0));
         assert_eq!("-0.25", Unit::Plain.format(-0.25));
     }
 
@@ -411,16 +438,16 @@ mod test {
     fn test_quantile_empty_histogram() {
         let buckets = histogram(&[(1.0, 0), (2.0, 0)], 0);
 
-        assert_eq!(Quantile::Empty, quantile(&buckets, 50.0));
+        assert_eq!(Quantile::Empty, quantile(&buckets, 50));
     }
 
     #[test]
     fn test_quantile_first_bucket_holds_low_percentiles() {
         let buckets = histogram(&[(0.001, 63), (0.002, 6)], 0);
 
-        assert_eq!(Quantile::Within(0.001), quantile(&buckets, 50.0));
-        assert_eq!(Quantile::Within(0.001), quantile(&buckets, 90.0));
-        assert_eq!(Quantile::Within(0.002), quantile(&buckets, 99.0));
+        assert_eq!(Quantile::Within(0.001), quantile(&buckets, 50));
+        assert_eq!(Quantile::Within(0.001), quantile(&buckets, 90));
+        assert_eq!(Quantile::Within(0.002), quantile(&buckets, 99));
     }
 
     #[test]
@@ -429,22 +456,41 @@ mod test {
         // observation and still inside it, p91 is the tenth and beyond.
         let buckets = histogram(&[(1.0, 9), (2.0, 1)], 0);
 
-        assert_eq!(Quantile::Within(1.0), quantile(&buckets, 90.0));
-        assert_eq!(Quantile::Within(2.0), quantile(&buckets, 91.0));
+        assert_eq!(Quantile::Within(1.0), quantile(&buckets, 90));
+        assert_eq!(Quantile::Within(2.0), quantile(&buckets, 91));
+    }
+
+    #[test]
+    fn test_quantile_rank_is_exact_beyond_the_float_mantissa() {
+        // 2^53 observations: the exact p99 rank is 8'917'127'262'193'583,
+        // one more than a float computation gives, and that one lands in
+        // the second bucket.
+        let first = 8_917_127_262_193_582;
+        let buckets = histogram(&[(1.0, first), (2.0, (1u64 << 53) - first)], 0);
+
+        assert_eq!(Quantile::Within(2.0), quantile(&buckets, 99));
+    }
+
+    #[test]
+    fn test_quantile_negative_infinity_is_an_ordinary_bucket() {
+        let buckets = histogram(&[(f64::NEG_INFINITY, 3), (1.0, 1)], 0);
+
+        assert_eq!(Quantile::Within(f64::NEG_INFINITY), quantile(&buckets, 50));
+        assert_eq!("-Inf", quantile(&buckets, 50).render(Unit::Seconds));
     }
 
     #[test]
     fn test_quantile_overflow_reports_last_finite_bound() {
         let buckets = histogram(&[(1.0, 1), (5.0, 0)], 9);
 
-        assert_eq!(Quantile::Above(5.0), quantile(&buckets, 99.0));
+        assert_eq!(Quantile::Above(5.0), quantile(&buckets, 99));
     }
 
     #[test]
     fn test_quantile_overflow_without_finite_bound_is_unbounded() {
         let buckets = histogram(&[], 3);
 
-        assert_eq!(Quantile::Unbounded, quantile(&buckets, 50.0));
+        assert_eq!(Quantile::Unbounded, quantile(&buckets, 50));
     }
 
     #[test]
@@ -512,6 +558,14 @@ mod test {
 
         assert_eq!("5ms", bucket_label(&buckets, 0, Unit::Seconds));
         assert_eq!(">10ms", bucket_label(&buckets, 2, Unit::Seconds));
+    }
+
+    #[test]
+    fn test_bucket_label_negative_infinity_keeps_its_sign() {
+        let buckets = histogram(&[(f64::NEG_INFINITY, 1), (0.5, 1)], 1);
+
+        assert_eq!("-Inf", bucket_label(&buckets, 0, Unit::Plain));
+        assert_eq!(">0.5", bucket_label(&buckets, 2, Unit::Plain));
     }
 
     #[test]

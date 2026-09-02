@@ -431,16 +431,15 @@ pub fn paint_dim(text: &str) -> String {
     text.truecolor(127, 127, 127).to_string()
 }
 
-/// Returns `text` in the accent colour of drawn data, such as histogram
-/// bars and sparklines, or plain when colour is off.
+/// Returns `text` in the green of drawn data, such as histogram bars and
+/// sparklines, or plain when colour is off.
 ///
-/// Drawn shapes share one colour so a screen of bars does not compete with
-/// the state marks, which keep the standard red, green and yellow for
-/// their meaning. The soft green is a truecolour value like the grey of
-/// [`dim`], so it reads the same on any terminal theme.
+/// The standard palette green, the same the success mark uses, so it is
+/// green on every terminal and theme, including multiplexers without
+/// truecolour support.
 pub fn accent(text: &str) -> String {
     if is_colored() {
-        text.truecolor(127, 202, 166).to_string()
+        text.green().to_string()
     } else {
         text.to_string()
     }

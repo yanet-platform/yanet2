@@ -192,7 +192,7 @@ impl Glyphs {
             ellipsis: "…",
             bar_full: '█',
             bar_partial: &['▏', '▎', '▍', '▌', '▋', '▊', '▉'],
-            spark: Some(&['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']),
+            spark: Some(&['▁', '▂', '▃', '▄', '▅', '▆', '▇']),
         }
     }
 
@@ -252,7 +252,9 @@ pub fn bar(count: u64, max: u64, width: usize, glyphs: &Glyphs) -> String {
 ///
 /// An empty bucket takes the lowest glyph and any populated bucket at
 /// least the next one, so a bucket with one observation beside a bucket
-/// with a billion still shows. Returns `None` when the glyph set has no
+/// with a billion still shows. The tallest glyph stops an eighth short of
+/// the cell top, so the sparklines of stacked rows never touch and read
+/// as one column each. Returns `None` when the glyph set has no
 /// sparkline.
 pub fn sparkline(counts: &[u64], glyphs: &Glyphs) -> Option<String> {
     let levels = glyphs.spark?;
@@ -357,13 +359,13 @@ mod test {
 
     #[test]
     fn test_sparkline_scales_to_the_largest_count() {
-        assert_eq!(Some("▁▂▅█".to_owned()), sparkline(&[0, 1, 50, 100], &Glyphs::unicode()));
+        assert_eq!(Some("▁▂▅▇".to_owned()), sparkline(&[0, 1, 50, 100], &Glyphs::unicode()));
     }
 
     #[test]
     fn test_sparkline_nonzero_count_is_never_the_zero_glyph() {
         assert_eq!(
-            Some("█▂".to_owned()),
+            Some("▇▂".to_owned()),
             sparkline(&[1_000_000_000, 1], &Glyphs::unicode())
         );
     }

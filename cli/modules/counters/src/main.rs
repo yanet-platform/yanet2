@@ -357,17 +357,6 @@ fn format_number(n: u64) -> String {
     } else if n_f >= 100_000.0 {
         format!("{:.2}K", n_f / THOUSAND)
     } else {
-        // For smaller numbers, use thousand separators
-        let s = n.to_string();
-        let mut result = String::new();
-
-        for (count, c) in s.chars().rev().enumerate() {
-            if count > 0 && count % 3 == 0 {
-                result.push(',');
-            }
-            result.push(c);
-        }
-
-        result.chars().rev().collect()
+        ync::metrics::format_number(n)
     }
 }
