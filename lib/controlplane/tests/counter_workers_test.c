@@ -25,6 +25,7 @@
 #include "lib/controlplane/config/zone.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
@@ -530,6 +531,115 @@ test_worker_counters_per_worker(struct dp_config *dp_config) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that the rx pool gauges flow through the worker-counter read
+// like any shared-registry counter — each worker reports its own pair —
+// while the metadata the same read serves stays on the pre-gauge
+// layout, still reporting the values assigned at worker creation.
+static int
+test_worker_rx_mempool_gauges(struct dp_config *dp_config) {
+	const uint64_t capacity[CW_WORKER_COUNT] = {4096, 16384};
+	const uint64_t available[CW_WORKER_COUNT] = {4000, 0};
+	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
+		TEST_ASSERT_SUCCESS(
+			write_worker_counter(
+				dp_config,
+				w_idx,
+				"rx_mempool_capacity",
+				capacity[w_idx]
+			),
+			"failed to write worker %lu pool capacity",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_SUCCESS(
+			write_worker_counter(
+				dp_config,
+				w_idx,
+				"rx_mempool_available",
+				available[w_idx]
+			),
+			"failed to write worker %lu pool availability",
+			(unsigned long)w_idx
+		);
+	}
+
+	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
+		struct counter_handle_list *list =
+			yanet_get_worker_counters(dp_config, w_idx);
+		TEST_ASSERT_NOT_NULL(
+			list,
+			"worker %lu counter read returned NULL",
+			(unsigned long)w_idx
+		);
+
+		for (size_t idx = 0; idx < list->count; ++idx) {
+			struct counter_handle *cur =
+				yanet_get_counter(list, idx);
+			if (cur == NULL) {
+				continue;
+			}
+
+			if (strcmp(cur->name, "rx_mempool_capacity") == 0) {
+				TEST_ASSERT_EQUAL(
+					capacity[w_idx],
+					yanet_get_counter_value(cur->values, 0),
+					"worker %lu pool capacity",
+					(unsigned long)w_idx
+				);
+			}
+			if (strcmp(cur->name, "rx_mempool_available") == 0) {
+				TEST_ASSERT_EQUAL(
+					available[w_idx],
+					yanet_get_counter_value(cur->values, 0),
+					"worker %lu pool availability",
+					(unsigned long)w_idx
+				);
+			}
+		}
+
+		yanet_counter_handle_list_free(list);
+	}
+
+	// The gauges must not widen the metadata the read serves: the
+	// same fields still report the values assigned at worker creation
+	// (core and queue equal the worker index, device zero).
+	for (uint64_t w_idx = 0; w_idx < CW_WORKER_COUNT; ++w_idx) {
+		struct worker_counter_metadata metadata;
+		TEST_ASSERT_SUCCESS(
+			yanet_get_worker_counter_metadata(
+				dp_config, w_idx, &metadata
+			),
+			"failed to read worker %lu metadata",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			w_idx,
+			metadata.core_id,
+			"worker %lu core id",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			0,
+			metadata.device_id,
+			"worker %lu device id",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			w_idx,
+			metadata.queue_id,
+			"worker %lu queue id",
+			(unsigned long)w_idx
+		);
+		TEST_ASSERT_EQUAL(
+			WORKER_RX_BURST_SIZE,
+			metadata.rx_burst_size,
+			"worker %lu burst size",
+			(unsigned long)w_idx
+		);
+	}
+
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -583,6 +693,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_worker_counters_per_worker(dp_config);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_worker_rx_mempool_gauges(dp_config);
 	}
 
 	agent_detach(agent);
