@@ -290,13 +290,20 @@ mirror_module_config_update(
 ) {
 	struct mirror_module_config *config =
 		container_of(cp_module, struct mirror_module_config, cp_module);
-
-	struct mirror_target *targets = (struct mirror_target *)memory_balloc(
-		&cp_module->memory_context,
-		sizeof(struct mirror_target) * rule_count
-	);
-	if (targets == NULL) {
-		goto error;
+	struct mirror_target *targets = NULL;
+	if (rule_count > 0) {
+		targets = (struct mirror_target *)memory_balloc(
+			&cp_module->memory_context,
+			sizeof(struct mirror_target) * rule_count
+		);
+		if (targets == NULL) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to allocate mirror "
+				"targets"
+			);
+			goto error;
+		}
 	}
 
 	SET_OFFSET_OF(&config->targets, targets);
@@ -335,22 +342,35 @@ mirror_module_config_update(
 		}
 	}
 
-	// Create per filter rule list
-	struct filter_rule *filter_rules = (struct filter_rule *)malloc(
-		sizeof(struct filter_rule) * rule_count
-	);
-	if (filter_rules == NULL) {
-		goto error_target;
-	}
+	struct filter_rule *filter_rules = NULL;
+	// Keep the empty classifier's array base valid for pointer arithmetic.
+	const struct filter_rule *empty_filter_rule = NULL;
+	const struct filter_rule **filter_rule_ptrs = &empty_filter_rule;
+	if (rule_count > 0) {
+		filter_rules = (struct filter_rule *)malloc(
+			sizeof(struct filter_rule) * rule_count
+		);
+		if (filter_rules == NULL) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to allocate filter rules"
+			);
+			goto error_target;
+		}
 
-	make_filter_rules(mirror_rules, rule_count, filter_rules);
+		make_filter_rules(mirror_rules, rule_count, filter_rules);
 
-	const struct filter_rule **filter_rule_ptrs =
-		(const struct filter_rule **)malloc(
+		filter_rule_ptrs = (const struct filter_rule **)malloc(
 			sizeof(struct filter_rule *) * rule_count
 		);
-	if (filter_rule_ptrs == NULL) {
-		goto error_rules;
+		if (filter_rule_ptrs == NULL) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to allocate filter rule "
+				"pointers"
+			);
+			goto error_rules;
+		}
 	}
 
 	if (mirror_module_init_l2(
@@ -386,13 +406,17 @@ mirror_module_config_update(
 		goto error_rule_ptrs;
 	}
 
-	free(filter_rule_ptrs);
+	if (rule_count > 0) {
+		free(filter_rule_ptrs);
+	}
 	free(filter_rules);
 
 	return 0;
 
 error_rule_ptrs:
-	free(filter_rule_ptrs);
+	if (rule_count > 0) {
+		free(filter_rule_ptrs);
+	}
 
 error_rules:
 	free(filter_rules);

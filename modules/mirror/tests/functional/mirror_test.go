@@ -282,6 +282,22 @@ func TestMirror_NoMatch(t *testing.T) {
 	require.Empty(t, result.Drop, "unmatched packet must not be dropped")
 }
 
+// Test_MirrorBackend_UpdateModuleEmptyRules verifies that an empty ruleset
+// publishes a no-op module that passes packets through unchanged.
+func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
+	eth, ip4, _, icmp := mirEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+
+	h, agent, backend := setupMirrorHarness(t, []string{"port0"})
+	applyRules(t, backend, "test", nil)
+	wireMirrorPipeline(t, agent, "port0", "test", nil)
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "empty ruleset passes the packet through")
+	require.Empty(t, result.Drop, "empty ruleset must not drop the packet")
+}
+
 // TestMirror_ModeNone_IPv4 verifies that an IPv4 packet matched by an ip4
 // rule with ModeNone passes through to the next module without device redirect,
 // and that the per-rule counter is incremented.
