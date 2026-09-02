@@ -26,6 +26,8 @@ breaking:
     - PACKAGE
   ignore:
     - modules/balancer2
+    # No gateway registration ever exposed this service.
+    - controlplane/ynpb/v1/module.proto
     # The Perf RPC and its messages went away together with the tsc perf
     # counters they exported.
     - controlplane/ynpb/v1/counters.proto

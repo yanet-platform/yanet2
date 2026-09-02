@@ -107,6 +107,7 @@ The following entries in `buf.yaml` intentionally deviate from the defaults. Eac
 **`breaking.ignore`**
 - `modules/balancer2` — pre-v1 rewrite in flight; API shape is not yet stable. Remove this line from `buf.yaml` when balancer2 reaches v1.
 - `modules/nat64/controlplane/nat64pb/v1/nat64.proto` — the #2197 migration intentionally replaces all three NAT64 prefix byte fields with the shared family-typed IPv6 prefix message in one cutover. Remove this line after the new wire shape reaches `main`.
+- `controlplane/ynpb/v1/module.proto` — removed intentionally because no gateway ever registered or exposed its service, so no runtime route existed.
 - `operators/forward/operatorpb` and `operators/decap/operatorpb` — the readiness packages of the forward and decap operators were deleted on purpose: their wire route (`/operators.<name>.operatorpb.v1.ReadinessService/Ready`, `readinesspb` messages) is kept as a runtime service name registered by the static module operator, so callers that address the route by name (the announcer, the gateway proxy) are unaffected, and no generated client of these packages existed outside the operators themselves.
 
 **`lint.except`** — six identifier-naming rules are disabled globally because enforcing them would require renaming existing wire identifiers, which would itself be a breaking change:
