@@ -47,6 +47,9 @@ sequenceDiagram
     end
 ```
 
+The exported metric names, types and labels are listed in
+[metrics.md](metrics.md).
+
 ## System layer pyramid
 
 ```text
