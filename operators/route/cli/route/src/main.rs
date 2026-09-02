@@ -29,7 +29,7 @@ use crate::operatorpb::{
     ShowRoutesRequest, route_service_client::RouteServiceClient,
 };
 
-#[allow(clippy::all, clippy::std_instead_of_core, non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod operatorpb {
     tonic::include_proto!("operators.route.operatorpb.v1");
 }

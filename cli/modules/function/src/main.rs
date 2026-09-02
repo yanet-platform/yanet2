@@ -3,7 +3,7 @@
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::FunctionId;
-use tonic::{codec::CompressionEncoding, Status};
+use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
@@ -11,8 +11,8 @@ use ync::{
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
-    function_service_client::FunctionServiceClient, DeleteFunctionRequest, Function, FunctionChain, GetFunctionRequest,
-    ListFunctionsRequest, UpdateFunctionRequest,
+    DeleteFunctionRequest, Function, FunctionChain, GetFunctionRequest, ListFunctionsRequest, UpdateFunctionRequest,
+    function_service_client::FunctionServiceClient,
 };
 
 const FUNCTION_SERVICE: &str = "controlplane.ynpb.v1.FunctionService";
@@ -67,7 +67,6 @@ pub struct ShowCmd {
 
 #[derive(Debug, Clone, Parser)]
 #[command(
-    about = "Update function configuration.",
     after_help = "Examples:\n  yanet-cli function update --name my-function \\\n      --chains edge:20=filter:acl,route:ipv4 \\\n      --chains control:10=counter:rx"
 )]
 pub struct UpdateCmd {

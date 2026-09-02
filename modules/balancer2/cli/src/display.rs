@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
 use tabled::Tabled;
-use yanet_cli_balancer2::balancerpb;
 use ync::display::print_table_from_entries;
 
-use crate::{bytes_to_ip, format_ip_port};
+use crate::{balancerpb, bytes_to_ip, format_ip_port};
 
 fn print_module_stats(state: &balancerpb::BalancerState) {
     println!("Module:");

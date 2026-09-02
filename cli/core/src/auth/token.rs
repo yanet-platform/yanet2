@@ -3,7 +3,7 @@
 //! Produces tokens compatible with the server-side `sshcert` authenticator
 //! defined in `controlplane/internal/auth/sshcert/token.go`.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use serde::Serialize;
 
 use super::agent::{AgentError, SshAgent};

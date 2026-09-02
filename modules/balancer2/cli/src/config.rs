@@ -9,9 +9,8 @@ use std::{fs::File, path::Path};
 use filterpb::pb::PortRange;
 use netip::IpNetwork;
 use serde::{Deserialize, Deserializer};
-use yanet_cli_balancer2::balancerpb;
 
-use crate::ip_to_bytes;
+use crate::{balancerpb, ip_to_bytes};
 
 fn deserialize_from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where

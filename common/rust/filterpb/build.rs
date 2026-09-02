@@ -1,6 +1,6 @@
 use core::error::Error;
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     // Decoding mirrors the Go xproto contract: an omitted or null field
     // takes its zero value and an unknown key is refused.
     let serialize_deserialize = "#[derive(serde::Serialize, serde::Deserialize)]#[serde(default, deny_unknown_fields)]";

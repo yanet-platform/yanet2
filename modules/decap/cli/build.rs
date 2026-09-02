@@ -1,6 +1,6 @@
 use core::error::Error;
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../controlplane/decappb/v1/decap.proto");
 
     tonic_build::configure()

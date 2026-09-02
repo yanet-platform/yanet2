@@ -9,10 +9,6 @@ rust-version = "1.88"
 [lints]
 workspace = true
 
-[[bin]]
-name = "yanet-cli-ready"
-path = "src/main.rs"
-
 [dependencies]
 ync = { path = "../../core", version = "0.1", package = "yanet-cli" }
 readinesspb = { path = "../../../common/rust/readinesspb", version = "0.1", package = "yanet-readinesspb" }

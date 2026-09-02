@@ -10,8 +10,8 @@ use ync::{
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
-    counters_service_client::CountersServiceClient, CounterTag, CountersByTagsRequest, CountersByTagsResponse,
-    PortCountersRequest, PortCountersResponse, WorkerCounter, WorkerCountersRequest, WorkerCountersResponse,
+    CounterTag, CountersByTagsRequest, CountersByTagsResponse, PortCountersRequest, PortCountersResponse,
+    WorkerCounter, WorkerCountersRequest, WorkerCountersResponse, counters_service_client::CountersServiceClient,
 };
 
 const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
@@ -117,7 +117,7 @@ impl ModeCmd {
     }
 }
 
-pub fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 

@@ -1,5 +1,7 @@
 //! CLI for YANET "route" module.
 
+mod fib;
+
 use core::error::Error as StdError;
 use std::{
     fs::File,
@@ -9,19 +11,25 @@ use std::{
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
-use yanet_cli_route::{
-    fib::render::print_fib,
-    routepb::{
-        self, route_service_client::RouteServiceClient, DeleteConfigRequest, ListConfigsRequest, ShowFibRequest,
-        UpdateFibRequest,
-    },
-};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
+
+use crate::{
+    fib::render::print_fib,
+    routepb::{
+        DeleteConfigRequest, ListConfigsRequest, ShowFibRequest, UpdateFibRequest,
+        route_service_client::RouteServiceClient,
+    },
+};
+
+#[allow(clippy::std_instead_of_core, non_snake_case)]
+pub mod routepb {
+    tonic::include_proto!("modules.route.controlplane.routepb.v1");
+}
 
 /// Errors of the local YAML loader, reported to the user as invalid input.
 type LoadError = Box<dyn StdError>;

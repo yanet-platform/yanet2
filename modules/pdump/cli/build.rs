@@ -1,7 +1,7 @@
 use core::error::Error;
 use std::{env, path::PathBuf};
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../controlplane/pdumppb/v1/pdump.proto");
 
     tonic_build::configure()

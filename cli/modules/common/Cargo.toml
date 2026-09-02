@@ -1,7 +1,7 @@
 [package]
 name = "yanet-cli-common"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 rust-version = "1.88"
@@ -11,9 +11,6 @@ workspace = true
 
 [dependencies]
 ynpb = { path = "../../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
-ync = { path = "../../core", version = "0.1", package = "yanet-cli"}
-log = "0.4"
+ync = { path = "../../core", version = "0.1", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }

@@ -4,11 +4,6 @@ use std::time;
 use commonpb::pb::GetMetricsRequest;
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
-use yanet_cli_balancer2::balancerpb::{
-    self, GetConfigRequest, GetStateRequest, ListConfigsRequest, ListSessionsRequest, ListSessionsStatesRequest,
-    PacketHandlerRef, RealUpdate, UpdateConfigRequest, UpdateRealsRequest, UpdateSessionsStateRequest,
-    balancer_client::BalancerClient,
-};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
@@ -17,6 +12,11 @@ use ync::{
 
 use crate::{
     ConfigCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd, VsId,
+    balancerpb::{
+        self, GetConfigRequest, GetStateRequest, ListConfigsRequest, ListSessionsRequest, ListSessionsStatesRequest,
+        PacketHandlerRef, RealUpdate, UpdateConfigRequest, UpdateRealsRequest, UpdateSessionsStateRequest,
+        balancer_client::BalancerClient,
+    },
     config::{BalancerConfig, ConfigParts},
     display, ip_to_bytes,
     reals::{DisableRealCmd, EnableRealCmd, RealsMode},

@@ -12,7 +12,7 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{device_service_client::DeviceServiceClient, ListDevicesRequest, ListDevicesResponse};
+use ynpb::pb::{ListDevicesRequest, ListDevicesResponse, device_service_client::DeviceServiceClient};
 
 const DEVICE_SERVICE: &str = "controlplane.ynpb.v1.DeviceService";
 
@@ -32,7 +32,7 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-pub fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 

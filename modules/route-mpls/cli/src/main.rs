@@ -13,8 +13,8 @@ use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use netip::{Contiguous, IpNetwork};
 use routemplspb::{
-    route_mpls_service_client::RouteMplsServiceClient, update_event::Event, CreateConfigRequest, DeleteConfigRequest,
-    ListConfigsRequest, NextHop, Rule, ShowConfigRequest, UpdateConfigRequest, UpdateEvent,
+    CreateConfigRequest, DeleteConfigRequest, ListConfigsRequest, NextHop, Rule, ShowConfigRequest,
+    UpdateConfigRequest, UpdateEvent, route_mpls_service_client::RouteMplsServiceClient, update_event::Event,
 };
 use tonic::codec::CompressionEncoding;
 use ync::{

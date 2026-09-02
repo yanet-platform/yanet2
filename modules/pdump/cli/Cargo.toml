@@ -2,6 +2,8 @@
 name = "yanet-cli-pdump"
 version = "0.1.0"
 edition = "2024"
+publish = false
+
 rust-version = "1.88"
 
 [lints]
@@ -11,18 +13,17 @@ workspace = true
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 log = "0.4"
-colored = "3"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "macros", "signal"] }
 tonic = { version = "0.13", features = ["gzip"] }
 prost = "0.13"
 ptree = "0.5"
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
-bytesize = "2.0.1"
+bytesize = "2"
 pcap-file = "3.0.0-rc1"
-tokio-util = "0.7.15"
+tokio-util = "0.7"
 pnet_packet = "0.35"
 
 [build-dependencies]
-tonic-build = "0.13" 
-bindgen = "0.72.0"
+tonic-build = "0.13"
+bindgen = "0.72"

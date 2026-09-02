@@ -1,6 +1,10 @@
+// The dispatcher shares one dependency list with the library, so the
+// dependencies only the library reaches are declared for this binary too.
+#![allow(unused_crate_dependencies)]
+
 use std::{collections::HashSet, path::PathBuf, sync::LazyLock};
 
-use clap::{crate_name, parser::ValueSource, Arg, ArgAction, ArgMatches, Args as _, Command, FromArgMatches};
+use clap::{Arg, ArgAction, ArgMatches, Args as _, Command, FromArgMatches, crate_name, parser::ValueSource};
 use colored::{ColoredString, Colorize};
 use serde::Serialize;
 use yanet_cli::{

@@ -21,7 +21,7 @@ use serde::Deserialize;
 
 use crate::{
     auth::{self, AuthMethod},
-    client::{timeout_from_seconds, ConnectionArgs},
+    client::{ConnectionArgs, timeout_from_seconds},
 };
 
 /// Built-in target used when no flag, environment variable or file supplies

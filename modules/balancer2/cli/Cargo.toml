@@ -15,7 +15,6 @@ filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = 
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }
 prost = "0.13"
 prost-types = "0.13"
@@ -30,7 +29,3 @@ netip = "0.3"
 
 [build-dependencies]
 tonic-build = "0.13"
-
-[lib]
-name = "yanet_cli_balancer2"
-path = "src/lib.rs"

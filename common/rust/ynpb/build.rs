@@ -1,6 +1,6 @@
 use core::error::Error;
 
-pub fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")

@@ -30,17 +30,17 @@ use std::{
 use http::uri::PathAndQuery;
 use prost::Message;
 use tonic::{
+    Request, Status,
     client::Grpc,
     codec::{CompressionEncoding, ProstCodec},
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
-    Request, Status,
 };
 use tower::Layer;
 
 use crate::{
-    auth::{self, interceptor::AuthService, AuthArgs},
+    auth::{self, AuthArgs, interceptor::AuthService},
     config::{self, Settings},
-    errors::{root_cause, Error},
+    errors::{Error, root_cause},
     timeout::{TimeoutLayer, TimeoutService},
 };
 
@@ -502,7 +502,7 @@ impl<C> Service<C> {
     /// `action` is the user-facing verb (e.g. `"list"`); pass the returned
     /// closure to `Result::map_err` on an RPC result. The closure owns its
     /// captures, so it never borrows `self`.
-    pub fn status(&self, action: &'static str) -> impl FnOnce(Status) -> Error {
+    pub fn status(&self, action: &'static str) -> impl FnOnce(Status) -> Error + use<C> {
         let endpoint = self.endpoint.clone();
         let name = self.name;
 
@@ -586,12 +586,12 @@ mod test {
     use tokio::task::JoinHandle;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{
-        transport::{Certificate, Identity, Server, ServerTlsConfig},
         Status,
+        transport::{Certificate, Identity, Server, ServerTlsConfig},
     };
-    use tonic_health::pb::{health_client::HealthClient, HealthCheckRequest};
+    use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
 
-    use super::{connect, establish, parse_timeout, ConnectionArgs, ConnectionError, Service, TlsArgs};
+    use super::{ConnectionArgs, ConnectionError, Service, TlsArgs, connect, establish, parse_timeout};
     use crate::{
         auth::{AuthArgs, AuthMethod},
         config,

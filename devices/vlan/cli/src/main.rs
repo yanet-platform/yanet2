@@ -112,7 +112,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-pub fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
 

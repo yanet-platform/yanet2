@@ -7,7 +7,7 @@ use std::{
     process::{self, Stdio},
 };
 
-use clap::{builder::Str, Arg, ArgMatches, Command};
+use clap::{Arg, ArgMatches, Command, builder::Str};
 use clap_complete::CompleteEnv;
 
 /// A nested dispatch namespace, e.g. `device` or `operator`.
@@ -114,12 +114,11 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
                 continue;
             };
 
-            if let Ok(md) = path.metadata() {
-                if let Some(name) = name.strip_prefix(prefix) {
-                    if md.permissions().mode() & 0o111 != 0 {
-                        modules.insert(name.to_string());
-                    }
-                }
+            if let Ok(md) = path.metadata()
+                && let Some(name) = name.strip_prefix(prefix)
+                && md.permissions().mode() & 0o111 != 0
+            {
+                modules.insert(name.to_string());
             }
         }
     }
@@ -233,16 +232,15 @@ pub fn try_complete(name: &str, prefix: &str, behavior: &impl Dispatch) {
             process::exit(0);
         }
         // Namespaced: "yanet-cli <namespace> <module> ..."
-        if let Some(ns) = namespaces.iter().find(|ns| ns.name == cmd) {
-            if let Some(child) = args.get(4) {
-                if cursor > 2 {
-                    let ns_prefix = format!("{prefix}{}-", ns.name);
-                    let children = locate_modules(&ns_prefix).unwrap_or_default();
-                    if children.contains(child) {
-                        forward_completion(&ns_prefix, child, env::args().skip(5), 2);
-                        process::exit(0);
-                    }
-                }
+        if let Some(ns) = namespaces.iter().find(|ns| ns.name == cmd)
+            && let Some(child) = args.get(4)
+            && cursor > 2
+        {
+            let ns_prefix = format!("{prefix}{}-", ns.name);
+            let children = locate_modules(&ns_prefix).unwrap_or_default();
+            if children.contains(child) {
+                forward_completion(&ns_prefix, child, env::args().skip(5), 2);
+                process::exit(0);
             }
         }
     }
