@@ -40,6 +40,18 @@ pub fn fit_terminal_width(table: &mut Table) {
     }
 }
 
+/// Width in columns [`print_table`] would give `table` on an unbounded
+/// terminal: the shared style applied, nothing wrapped.
+///
+/// Lets a renderer decide what to leave out before the table is fitted,
+/// with the width semantics the renderer itself uses for wide characters
+/// and colour escapes.
+pub fn styled_width(table: &Table) -> usize {
+    let mut table = table.clone();
+    apply_style(&mut table);
+    table.total_width()
+}
+
 /// Returns the current terminal width in columns, detected from stdout.
 ///
 /// Returns `None` when stdout is not a TTY (piped or redirected), matching
@@ -198,6 +210,12 @@ impl Glyphs {
     /// Whether [`sparkline`] draws anything with this set.
     pub const fn has_sparkline(&self) -> bool {
         self.spark.is_some()
+    }
+
+    /// The glyph [`sparkline`] draws for an empty bucket, so a renderer can
+    /// tone the baseline down and let the populated buckets stand out.
+    pub fn spark_zero(&self) -> Option<char> {
+        self.spark.and_then(|levels| levels.first().copied())
     }
 }
 

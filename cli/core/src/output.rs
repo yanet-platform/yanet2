@@ -431,6 +431,31 @@ pub fn paint_dim(text: &str) -> String {
     text.truecolor(127, 127, 127).to_string()
 }
 
+/// Returns `text` in the accent colour of drawn data, such as histogram
+/// bars and sparklines, or plain when colour is off.
+///
+/// Drawn shapes share one colour so a screen of bars does not compete with
+/// the state marks, which keep the standard red, green and yellow for
+/// their meaning. The soft green is a truecolour value like the grey of
+/// [`dim`], so it reads the same on any terminal theme.
+pub fn accent(text: &str) -> String {
+    if is_colored() {
+        text.truecolor(127, 202, 166).to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+/// Returns `text` in bold, the weight a table header row carries, or plain
+/// when colour is off.
+pub fn strong(text: &str) -> String {
+    if is_colored() {
+        text.bold().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
 /// Returns `true` if the current locale advertises UTF-8 encoding.
 fn is_utf8_locale() -> bool {
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {

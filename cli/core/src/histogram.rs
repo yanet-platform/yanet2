@@ -46,8 +46,10 @@ impl Unit {
             Self::Seconds => format_seconds(value),
             Self::Bytes => format_bytes(value),
             Self::Plain => {
-                if value >= 0.0 && value.fract() == 0.0 && value < u64::MAX as f64 {
-                    format_number(value as u64)
+                let (sign, magnitude) = sign_and_magnitude(value);
+
+                if magnitude.fract() == 0.0 && magnitude < u64::MAX as f64 {
+                    format!("{sign}{}", format_number(magnitude as u64))
                 } else {
                     render_readable(round_readable(value))
                 }
@@ -399,8 +401,9 @@ mod test {
     }
 
     #[test]
-    fn test_unit_format_plain_negative_is_not_clamped_to_zero() {
+    fn test_unit_format_plain_negative_keeps_separators_and_fractions() {
         assert_eq!("-3", Unit::Plain.format(-3.0));
+        assert_eq!("-1,234,567", Unit::Plain.format(-1_234_567.0));
         assert_eq!("-0.25", Unit::Plain.format(-0.25));
     }
 

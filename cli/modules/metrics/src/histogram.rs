@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use commonpb::pb::{Histogram, Label, Metric, metric::Value};
 use tabled::{
+    Table,
     builder::Builder,
     settings::{Alignment, Margin, object::Columns},
 };
@@ -24,6 +25,10 @@ use crate::format_labels;
 
 /// Percentiles shown for every series, as percents.
 const PERCENTILES: [f64; 3] = [50.0, 90.0, 99.0];
+
+/// Columns of the summary table after the label columns and before the
+/// optional sparkline: the count and the percentiles.
+const SUMMARY_FIXED: usize = 1 + PERCENTILES.len();
 
 /// Widest bar of a bucket listing, in cells.
 const BAR_WIDTH: usize = 32;
@@ -124,14 +129,17 @@ pub fn group(metrics: &[Metric]) -> Vec<Group<'_>> {
 pub fn print_summary(group: &Group<'_>, glyphs: &Glyphs) {
     print_header(group, glyphs);
 
-    let mut builder = Builder::new();
+    let mut rows = summary_rows(group, glyphs);
+    fit_sparkline(&mut rows, group.varying.len(), display::terminal_width());
 
-    for row in summary_rows(group, glyphs, display::terminal_width()) {
-        builder.push_record(row);
+    if has_sparkline(&rows, group.varying.len()) {
+        for cell in rows.iter_mut().skip(1).filter_map(|row| row.last_mut()) {
+            *cell = paint_sparkline(cell, glyphs);
+        }
     }
 
-    let numeric = group.varying.len()..group.varying.len() + 1 + PERCENTILES.len();
-    let mut table = builder.build();
+    let numeric = group.varying.len()..group.varying.len() + SUMMARY_FIXED;
+    let mut table = table_of(&rows);
     table.modify(Columns::new(numeric), Alignment::right());
     display::print_table(table);
 }
@@ -139,12 +147,10 @@ pub fn print_summary(group: &Group<'_>, glyphs: &Glyphs) {
 /// Builds the summary table of a group, header row first.
 ///
 /// Label columns first, a series lacking one of them showing the absent
-/// marker, then the observation count, the percentiles and,
-/// when the glyph set has one, a sparkline over every bucket so the rows
-/// share one axis and compare at a glance. A sparkline that would not fit
-/// in `columns` is dropped rather than wrapped: broken across lines it
-/// shows nothing, and the bucket listing still carries the shape.
-fn summary_rows(group: &Group<'_>, glyphs: &Glyphs, columns: Option<usize>) -> Vec<Vec<String>> {
+/// marker, then the observation count, the percentiles and, when the glyph
+/// set has one, a sparkline over every bucket so the rows share one axis
+/// and compare at a glance.
+fn summary_rows(group: &Group<'_>, glyphs: &Glyphs) -> Vec<Vec<String>> {
     let mut headers: Vec<String> = group.varying.iter().map(|key| (*key).to_owned()).collect();
     headers.push("count".to_owned());
     headers.extend(PERCENTILES.iter().map(|percent| format!("p{percent:.0}")));
@@ -179,13 +185,74 @@ fn summary_rows(group: &Group<'_>, glyphs: &Glyphs, columns: Option<usize>) -> V
         rows.push(row);
     }
 
-    if glyphs.has_sparkline() && columns.is_some_and(|columns| table_width(&rows) > columns) {
-        for row in &mut rows {
+    rows
+}
+
+/// Drops the sparkline column when the table would not fit in `columns`.
+///
+/// Broken across lines a sparkline shows nothing, and the bucket listing
+/// still carries the shape, so the column goes rather than wraps. The
+/// width is measured the way the table is rendered: wide characters by
+/// their columns, colour escapes not at all.
+fn fit_sparkline(rows: &mut [Vec<String>], label_columns: usize, columns: Option<usize>) {
+    let Some(columns) = columns else {
+        return;
+    };
+
+    if has_sparkline(rows, label_columns) && display::styled_width(&table_of(rows)) > columns {
+        for row in rows.iter_mut() {
             row.pop();
         }
     }
+}
 
-    rows
+/// Whether summary `rows` still carry the sparkline column.
+fn has_sparkline(rows: &[Vec<String>], label_columns: usize) -> bool {
+    rows.first()
+        .is_some_and(|header| header.len() > label_columns + SUMMARY_FIXED)
+}
+
+/// Colours a sparkline so the populated buckets stand out: the empty
+/// baseline dimmed, everything above it in the accent colour.
+fn paint_sparkline(line: &str, glyphs: &Glyphs) -> String {
+    let Some(zero) = glyphs.spark_zero() else {
+        return line.to_owned();
+    };
+
+    let mut painted = String::new();
+    let mut run = String::new();
+    let mut run_is_zero = None;
+
+    for glyph in line.chars().map(Some).chain(core::iter::once(None)) {
+        let is_zero = glyph.map(|glyph| glyph == zero);
+
+        if run_is_zero.is_some() && run_is_zero != is_zero {
+            painted.push_str(&if run_is_zero == Some(true) {
+                output::dim(&run)
+            } else {
+                output::accent(&run)
+            });
+            run.clear();
+        }
+
+        if let Some(glyph) = glyph {
+            run.push(glyph);
+            run_is_zero = is_zero;
+        }
+    }
+
+    painted
+}
+
+/// Builds an unstyled table from `rows`, header row first.
+fn table_of(rows: &[Vec<String>]) -> Table {
+    let mut builder = Builder::new();
+
+    for row in rows {
+        builder.push_record(row.iter().map(String::as_str));
+    }
+
+    builder.build()
 }
 
 /// Prints every series of a group as a bucket listing.
@@ -271,17 +338,11 @@ pub fn print_buckets(group: &Group<'_>, glyphs: &Glyphs) {
 
         for (row, cell) in rows.iter().zip(cells.iter_mut().skip(1)) {
             if let BucketRow::Bucket(index) = *row {
-                cell[3] = display::bar(buckets[index].count, max, width, glyphs);
+                cell[3] = output::accent(&display::bar(buckets[index].count, max, width, glyphs));
             }
         }
 
-        let mut builder = Builder::new();
-
-        for cell in cells {
-            builder.push_record(cell);
-        }
-
-        let mut table = builder.build();
+        let mut table = table_of(&cells);
         table.modify(Columns::new(..3), Alignment::right());
         table.with(Margin::new(SERIES_INDENT * 2, 0, 0, 0));
         display::print_table(table);
@@ -296,7 +357,7 @@ pub fn print_buckets(group: &Group<'_>, glyphs: &Glyphs) {
 /// bucket layout in every producer today, so the header speaks for all of
 /// them.
 fn print_header(group: &Group<'_>, glyphs: &Glyphs) {
-    let mut line = group.name.to_owned();
+    let mut line = output::strong(group.name);
 
     if !group.constant.is_empty() {
         line.push_str("  ");
@@ -326,34 +387,17 @@ fn print_header(group: &Group<'_>, glyphs: &Glyphs) {
 
 /// Picks the bar width that keeps a bucket listing inside the terminal.
 ///
-/// `cells` are the listing's rows with an empty bar column, so their table
-/// width is exactly the part the bar cannot have. Off a terminal the bar
-/// takes its full width.
+/// `cells` are the listing's rows with an empty bar column, so their
+/// rendered width is exactly the part the bar cannot have. Off a terminal
+/// the bar takes its full width.
 fn bar_width(cells: &[Vec<String>]) -> usize {
     let Some(columns) = display::terminal_width() else {
         return BAR_WIDTH;
     };
 
     columns
-        .saturating_sub(SERIES_INDENT * 2 + table_width(cells))
+        .saturating_sub(SERIES_INDENT * 2 + display::styled_width(&table_of(cells)))
         .clamp(BAR_WIDTH_MIN, BAR_WIDTH)
-}
-
-/// Width in columns the shared table style needs for `rows`, header
-/// included: every cell padded by one space on each side and one border
-/// between neighbouring columns.
-fn table_width(rows: &[Vec<String>]) -> usize {
-    let columns = rows.first().map_or(0, Vec::len);
-    let text: usize = (0..columns)
-        .map(|column| {
-            rows.iter()
-                .map(|row| row.get(column).map_or(0, |cell| cell.chars().count()))
-                .max()
-                .unwrap_or(0)
-        })
-        .sum();
-
-    text + 3 * columns - 1
 }
 
 /// Returns the value of the label named `key` on `metric`, if present.
@@ -378,15 +422,31 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
             (None, None) => return Ordering::Equal,
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
-            (Some(x), Some(y)) => match (x.parse::<u64>(), y.parse::<u64>()) {
-                (Ok(x), Ok(y)) => x.cmp(&y),
-                _ => x.cmp(y),
-            },
+            (Some(x), Some(y)) => compare_runs(x, y),
         };
 
         if ordering.is_ne() {
             return ordering;
         }
+    }
+}
+
+/// Orders two runs: digit runs by numeric value at any length, anything
+/// else as text.
+///
+/// Digits are compared by length after leading zeros and then digit by
+/// digit, so the order never changes mode on a value too large to parse
+/// and stays a total order, which sorting requires.
+fn compare_runs(x: &str, y: &str) -> Ordering {
+    let is_digits = |run: &str| run.bytes().all(|byte| byte.is_ascii_digit());
+
+    if is_digits(x) && is_digits(y) {
+        let x = x.trim_start_matches('0');
+        let y = y.trim_start_matches('0');
+
+        x.len().cmp(&y.len()).then_with(|| x.cmp(y))
+    } else {
+        x.cmp(y)
     }
 }
 
@@ -542,7 +602,7 @@ mod test {
         let metrics = [metric("h", &[("config", "")]), metric("h", &[])];
         let groups = group(&metrics);
 
-        let rows = summary_rows(&groups[0], &Glyphs::ascii(), None);
+        let rows = summary_rows(&groups[0], &Glyphs::ascii());
 
         assert_eq!(
             vec!["", "-"],
@@ -555,7 +615,8 @@ mod test {
         let metrics = [bursts("0")];
         let groups = group(&metrics);
 
-        let rows = summary_rows(&groups[0], &Glyphs::unicode(), Some(120));
+        let mut rows = summary_rows(&groups[0], &Glyphs::unicode());
+        fit_sparkline(&mut rows, 0, Some(120));
 
         assert_eq!("distribution", rows[0].last().map(String::as_str).unwrap());
         assert_eq!(34, rows[1].last().map(|cell| cell.chars().count()).unwrap());
@@ -566,7 +627,8 @@ mod test {
         let metrics = [bursts("0")];
         let groups = group(&metrics);
 
-        let rows = summary_rows(&groups[0], &Glyphs::unicode(), Some(60));
+        let mut rows = summary_rows(&groups[0], &Glyphs::unicode());
+        fit_sparkline(&mut rows, 0, Some(60));
 
         assert_eq!("p99", rows[0].last().map(String::as_str).unwrap());
         assert!(rows.iter().all(|row| row.len() == rows[0].len()));
@@ -577,7 +639,8 @@ mod test {
         let metrics = [bursts("0")];
         let groups = group(&metrics);
 
-        let rows = summary_rows(&groups[0], &Glyphs::unicode(), None);
+        let mut rows = summary_rows(&groups[0], &Glyphs::unicode());
+        fit_sparkline(&mut rows, 0, None);
 
         assert_eq!("distribution", rows[0].last().map(String::as_str).unwrap());
     }
@@ -587,20 +650,9 @@ mod test {
         let metrics = [bursts("0")];
         let groups = group(&metrics);
 
-        let rows = summary_rows(&groups[0], &Glyphs::ascii(), None);
+        let rows = summary_rows(&groups[0], &Glyphs::ascii());
 
         assert_eq!(vec!["count", "p50", "p90", "p99"], rows[0]);
-    }
-
-    #[test]
-    fn test_table_width_counts_padding_and_borders() {
-        // " ab │ c " is eight columns wide.
-        let rows = vec![
-            vec!["ab".to_owned(), "c".to_owned()],
-            vec!["a".to_owned(), "".to_owned()],
-        ];
-
-        assert_eq!(8, table_width(&rows));
     }
 
     #[test]
@@ -608,6 +660,13 @@ mod test {
         assert_eq!(Ordering::Less, natural_cmp("2", "10"));
         assert_eq!(Ordering::Less, natural_cmp("eth2", "eth10"));
         assert_eq!(Ordering::Equal, natural_cmp("eth10", "eth10"));
+    }
+
+    #[test]
+    fn test_natural_cmp_orders_digit_runs_beyond_u64_and_leading_zeros() {
+        assert_eq!(Ordering::Less, natural_cmp("9", "500000000000000000000"));
+        assert_eq!(Ordering::Greater, natural_cmp("500000000000000000000", "10"));
+        assert_eq!(Ordering::Equal, natural_cmp("007", "7"));
     }
 
     #[test]
