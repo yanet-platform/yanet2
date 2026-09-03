@@ -50,8 +50,8 @@ func startServiceRunner(t *testing.T, runner *gateway.InProcessServiceRunner) {
 	}
 }
 
-// Test_InProcessServiceRunner_Run_ServesThroughRegistry verifies that a runner answers
-// RPCs through the registry's connection to it.
+// Test_InProcessServiceRunner_Run_ServesThroughRegistry verifies that a
+// runner answers RPCs through the registry's connection to it.
 //
 // The services are recorded as in-process backends labeled with the
 // gateway's endpoint, the address they are reachable at from outside.
@@ -82,8 +82,8 @@ func Test_InProcessServiceRunner_Run_ServesThroughRegistry(t *testing.T) {
 	require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
 }
 
-// Test_InProcessServiceRunner_Run_ShutsDownWithOpenStream verifies that the runner
-// returns within a bounded time after its context is canceled.
+// Test_InProcessServiceRunner_Run_ShutsDownWithOpenStream verifies that the
+// runner returns within a bounded time after its context is canceled.
 //
 // A client keeps a server-streaming RPC open on the runner's own gRPC server
 // meanwhile, reproducing the hang an unattended readiness watch causes on

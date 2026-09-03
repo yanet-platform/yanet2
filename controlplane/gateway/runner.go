@@ -18,13 +18,14 @@ import (
 // UnaryInterceptedService is implemented by services that contribute their own
 // unary interceptors to the gRPC server the runner gives them.
 //
-// InProcessServiceRunner appends these after the framework access-log interceptor.
+// InProcessServiceRunner appends these after the framework access-log
+// interceptor.
 type UnaryInterceptedService interface {
 	UnaryServerInterceptors() []grpc.UnaryServerInterceptor
 }
 
-// InProcessServiceRunner serves an in-process Service on its own gRPC server behind an
-// in-memory listener and registers it with the gateway's registry directly.
+// InProcessServiceRunner serves an in-process Service on its own gRPC server
+// behind an in-memory listener and registers it with the registry directly.
 //
 // The service never touches the network: its server is reachable only
 // through the connection the runner hands to the registry, so no transport
@@ -39,7 +40,7 @@ type InProcessServiceRunner struct {
 	log      *zap.Logger
 }
 
-// InProcessServiceRunnerOption configures the InProcessServiceRunner constructor.
+// InProcessServiceRunnerOption configures the in-process runner constructor.
 type InProcessServiceRunnerOption func(*inProcessServiceRunnerOptions)
 
 type inProcessServiceRunnerOptions struct {
@@ -59,8 +60,8 @@ func WithInProcessServiceRunnerLog(log *zap.Logger) InProcessServiceRunnerOption
 	}
 }
 
-// NewInProcessServiceRunner creates a runner that registers module's services in
-// registry under endpoint, the address the gateway itself serves.
+// NewInProcessServiceRunner creates a runner that registers module's
+// services in registry under endpoint, the address the gateway itself serves.
 //
 // That address is where the services are reachable from outside. An endpoint
 // the module carries for itself only applies when it runs in a separate
