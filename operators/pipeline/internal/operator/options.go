@@ -35,6 +35,9 @@ func (noopMetricsCollector) Collect() []*commonpb.Metric {
 }
 
 type serviceOptions struct {
+	// Metrics supplies snapshots for the metrics service.
+	//
+	// It defaults to an empty collector when no sink is configured.
 	Metrics MetricsCollector
 	Log     *zap.Logger
 }

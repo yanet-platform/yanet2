@@ -13,6 +13,9 @@ import (
 // MetricsCollector renders the current state of the operator metrics
 // as a flat slice of commonpb.Metric values.
 type MetricsCollector interface {
+	// Collect returns the current metrics snapshot.
+	//
+	// The service applies request tag filters to this snapshot before returning it.
 	Collect() []*commonpb.Metric
 }
 

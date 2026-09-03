@@ -34,7 +34,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	for idx := range cfg.Gateways {
 		gatewayMetrics[idx] = NewGatewayMetrics(cfg.Gateways[idx].Name)
 	}
-	metrics := NewMetrics(gatewayMetrics)
+	reconcilerMetrics := operator.NewReconcilerMetrics("pipeline_operator")
+	metrics := NewMetrics(reconcilerMetrics, gatewayMetrics)
 
 	service := NewService(
 		WithServiceMetrics(metrics),
@@ -114,7 +115,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 			return nil
 		}),
-		operator.WithMetrics(metrics),
+		operator.WithMetrics(reconcilerMetrics),
 		operator.WithLog(log),
 	)
 

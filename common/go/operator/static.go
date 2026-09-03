@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
@@ -42,7 +43,7 @@ type StaticTarget struct {
 // StaticConfig is the part of an operator's configuration the static module
 // operator consumes.
 type StaticConfig struct {
-	// Server is where the operator serves its own readiness.
+	// Server is where the operator serves its readiness and metrics.
 	Server GRPCServerConfig
 	// Gateways lists the gateways every target is pushed to.
 	Gateways []GatewayConfig
@@ -74,7 +75,7 @@ func WithStaticLog(log *zap.Logger) StaticOption {
 }
 
 // NewStaticModuleOperator builds an operator that pushes targets to every
-// gateway on each reconcile pass and reports readiness under name.
+// gateway on each reconcile pass and reports readiness and metrics under name.
 func NewStaticModuleOperator(
 	name string,
 	cfg StaticConfig,
@@ -99,8 +100,17 @@ func NewStaticModuleOperator(
 	}
 
 	tracker := readiness.NewTracker(staticScopes(cfg), readiness.WithLog(log))
+	operatorLabel := commonpb.NewLabel("operator", name)
+	reconcilerMetrics := NewReconcilerMetrics("generic_operator", operatorLabel)
+	metricsCollectors := []MetricsCollector{reconcilerMetrics}
 	actuators := make([]Actuator[[]StaticTarget], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
+		gatewayMetrics := NewApplyMetrics(
+			"generic_operator_gateway",
+			operatorLabel,
+			commonpb.NewLabel("gateway", gw.Name),
+		)
+		metricsCollectors = append(metricsCollectors, gatewayMetrics)
 		conn, err := dialGateway(gw)
 		if err != nil {
 			for _, a := range actuators {
@@ -114,14 +124,21 @@ func NewStaticModuleOperator(
 			functions: ynpb.NewFunctionServiceClient(conn),
 			log:       log.With(zap.String("gateway", gw.Name)),
 		}
-		observed := NewObservedActuator(actuator, "config:"+gw.Name, tracker.Observe)
+		observed := NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
+			tracker.Observe(scope, err)
+			gatewayMetrics.Observe(err)
+		})
 		actuators = append(actuators, observed)
 	}
 
 	return NewOperator(
 		NewFanOutActuator(actuators, WithFanOutLog(log)),
 		newStaticSource(state),
-		WithGRPCServer(cfg.Server, staticReadinessRegistrar(name, tracker)),
+		WithGRPCServer(
+			cfg.Server,
+			staticReadinessRegistrar(name, tracker),
+			NewMetricsServiceRegistrar(name, metricsCollectors...),
+		),
 		WithGateways(cfg.Register, cfg.Gateways...),
 		WithWorkers(func(ctx context.Context) error {
 			<-ctx.Done()
@@ -129,6 +146,7 @@ func NewStaticModuleOperator(
 			return nil
 		}),
 		WithLog(log),
+		WithMetrics(reconcilerMetrics),
 		WithReconcile(cfg.Reconcile),
 	), nil
 }
