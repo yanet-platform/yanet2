@@ -102,17 +102,15 @@ func NewStaticModuleOperator(
 	tracker := readiness.NewTracker(staticScopes(cfg), readiness.WithLog(log))
 	operatorLabel := commonpb.NewLabel("operator", name)
 	reconcilerMetrics := NewReconcilerMetrics("generic_operator", operatorLabel)
-	metricsCollectors := make([]MetricsCollector, 1, len(cfg.Gateways)+1)
-	metricsCollectors[0] = reconcilerMetrics
-	gatewayMetrics := make([]*ApplyMetrics, len(cfg.Gateways))
+	metricsCollectors := []MetricsCollector{reconcilerMetrics}
 	actuators := make([]Actuator[[]StaticTarget], 0, len(cfg.Gateways))
-	for idx, gw := range cfg.Gateways {
-		gatewayMetrics[idx] = NewApplyMetrics(
+	for _, gw := range cfg.Gateways {
+		gatewayMetrics := NewApplyMetrics(
 			"generic_operator_gateway",
 			operatorLabel,
 			commonpb.NewLabel("gateway", gw.Name),
 		)
-		metricsCollectors = append(metricsCollectors, gatewayMetrics[idx])
+		metricsCollectors = append(metricsCollectors, gatewayMetrics)
 		conn, err := dialGateway(gw)
 		if err != nil {
 			for _, a := range actuators {
@@ -128,7 +126,7 @@ func NewStaticModuleOperator(
 		}
 		observed := NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
 			tracker.Observe(scope, err)
-			gatewayMetrics[idx].Observe(err)
+			gatewayMetrics.Observe(err)
 		})
 		actuators = append(actuators, observed)
 	}

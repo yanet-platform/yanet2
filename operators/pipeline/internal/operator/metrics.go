@@ -15,7 +15,7 @@ const (
 
 // Metrics is the single observability sink for the operator.
 type Metrics struct {
-	*operator.ReconcilerMetrics
+	reconcilerMetrics *operator.ReconcilerMetrics
 
 	stageAdvance metrics.Counter
 	queueDepth   metrics.Gauge
@@ -23,9 +23,16 @@ type Metrics struct {
 	gateways []*GatewayMetrics
 }
 
-func NewMetrics(gateways []*GatewayMetrics) *Metrics {
+// NewMetrics combines shared reconcile metrics with pipeline-specific metrics.
+//
+// The supplied reconcile collector is also wired directly into the generic
+// reconciler, while this value provides the complete service snapshot.
+func NewMetrics(
+	reconcilerMetrics *operator.ReconcilerMetrics,
+	gateways []*GatewayMetrics,
+) *Metrics {
 	return &Metrics{
-		ReconcilerMetrics: operator.NewReconcilerMetrics("pipeline_operator"),
+		reconcilerMetrics: reconcilerMetrics,
 		gateways:          gateways,
 	}
 }
@@ -39,7 +46,7 @@ func (m *Metrics) OnQueueChanged(depth int) {
 }
 
 func (m *Metrics) Collect() []*commonpb.Metric {
-	out := m.ReconcilerMetrics.Collect()
+	out := m.reconcilerMetrics.Collect()
 
 	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_stage_advance_total",

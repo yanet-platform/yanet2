@@ -19,7 +19,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
-	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // BackendRegistry is the subset of backend lookup API required by the HTTP proxy.
@@ -285,14 +284,7 @@ func (m *TransparentWebGRPCProxy) getMethodDescriptor(fullMethodName string) (pr
 	serviceName := protoreflect.FullName(service)
 	serviceDesc, err := protoregistry.GlobalFiles.FindDescriptorByName(serviceName)
 	if err != nil {
-		descriptorName, ok := dynamicOperatorDescriptorName(service)
-		if !ok {
-			return nil, fmt.Errorf("service not found: %s", service)
-		}
-		serviceDesc, err = protoregistry.GlobalFiles.FindDescriptorByName(descriptorName)
-		if err != nil {
-			return nil, fmt.Errorf("service not found: %s", service)
-		}
+		return nil, fmt.Errorf("service not found: %s", service)
 	}
 
 	svcDesc, ok := serviceDesc.(protoreflect.ServiceDescriptor)
@@ -306,16 +298,6 @@ func (m *TransparentWebGRPCProxy) getMethodDescriptor(fullMethodName string) (pr
 	}
 
 	return methodDesc, nil
-}
-
-// dynamicOperatorDescriptorName maps runtime-only operator services to the
-// shared protobuf contract that supplies their HTTP request and response types.
-func dynamicOperatorDescriptorName(service string) (protoreflect.FullName, bool) {
-	if strings.HasPrefix(service, "operators.") &&
-		strings.HasSuffix(service, ".operatorpb.v1.MetricsService") {
-		return protoreflect.FullName(ynpb.MetricsService_ServiceDesc.ServiceName), true
-	}
-	return "", false
 }
 
 // isServerStreaming checks if the given method is a server streaming method.

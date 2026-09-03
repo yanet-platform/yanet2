@@ -7,16 +7,24 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
 )
+
+// MetricsCollector renders the current state of the operator metrics
+// as a flat slice of commonpb.Metric values.
+type MetricsCollector interface {
+	// Collect returns the current metrics snapshot.
+	//
+	// The service applies request tag filters to this snapshot before returning it.
+	Collect() []*commonpb.Metric
+}
 
 // Service implements the PipelineOperatorService gRPC API.
 type Service struct {
 	operatorpb.UnimplementedPipelineOperatorServiceServer
 	operatorpb.UnimplementedMetricsServiceServer
 
-	metrics operator.MetricsCollector
+	metrics MetricsCollector
 	log     *zap.Logger
 }
 

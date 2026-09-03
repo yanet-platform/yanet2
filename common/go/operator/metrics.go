@@ -2,7 +2,6 @@ package operator
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,45 +25,20 @@ type MetricsCollector interface {
 	Collect() []*commonpb.Metric
 }
 
-type metricSet struct {
-	prefix string
-	labels []*commonpb.Label
-}
-
-func (m *metricSet) makePrefix(suffix string) string {
-	if m.prefix == "" {
+func makeMetricName(prefix, suffix string) string {
+	if prefix == "" {
 		return suffix
 	}
-	return m.prefix + "_" + suffix
-}
-
-type outcomeCounters struct {
-	mu     sync.Mutex
-	total  uint64
-	errors uint64
-}
-
-func (m *outcomeCounters) observe(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.total++
-	if err != nil {
-		m.errors++
-	}
-}
-
-func (m *outcomeCounters) snapshot() (total uint64, errors uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.total, m.errors
+	return prefix + "_" + suffix
 }
 
 // ReconcilerMetrics records the standard reconcile lifecycle metrics.
 type ReconcilerMetrics struct {
-	metricSet
-	outcomeCounters
+	prefix string
+	labels []*commonpb.Label
+
+	reconcileTotal  metrics.Counter
+	reconcileErrors metrics.Counter
 
 	backoffSeconds metrics.Gauge
 	state          atomic.Int32
@@ -72,8 +46,11 @@ type ReconcilerMetrics struct {
 
 // ApplyMetrics records the outcomes of applying state to one target.
 type ApplyMetrics struct {
-	metricSet
-	outcomeCounters
+	prefix string
+	labels []*commonpb.Label
+
+	applyTotal  metrics.Counter
+	applyErrors metrics.Counter
 }
 
 // NewReconcilerMetrics constructs a collector and observer for the standard
@@ -82,19 +59,20 @@ func NewReconcilerMetrics(
 	prefix string,
 	labels ...*commonpb.Label,
 ) *ReconcilerMetrics {
-	metrics := &ReconcilerMetrics{
-		metricSet: metricSet{
-			prefix: prefix,
-			labels: labels,
-		},
+	collector := &ReconcilerMetrics{
+		prefix: prefix,
+		labels: labels,
 	}
-	metrics.OnStateChanged(reconcilerMetricStateUnknown)
-	return metrics
+	collector.OnStateChanged(reconcilerMetricStateUnknown)
+	return collector
 }
 
 // OnReconcileCompleted records one reconcile attempt and whether it failed.
 func (m *ReconcilerMetrics) OnReconcileCompleted(err error) {
-	m.observe(err)
+	m.reconcileTotal.Inc()
+	if err != nil {
+		m.reconcileErrors.Inc()
+	}
 }
 
 // OnBackoffScheduled records the delay before the next reconcile attempt.
@@ -113,20 +91,23 @@ func (m *ReconcilerMetrics) OnStateChanged(state ReconcilerState) {
 }
 
 func (m *ReconcilerMetrics) Collect() []*commonpb.Metric {
-	total, errors := m.snapshot()
+	// Load errors first because updates publish the attempt first. This keeps
+	// a concurrent snapshot from reporting more errors than attempts.
+	errors := m.reconcileErrors.Load()
+	total := m.reconcileTotal.Load()
 	metricList := []*commonpb.Metric{
 		commonpb.NewMetricCounter(
-			m.makePrefix("reconcile_total"),
+			makeMetricName(m.prefix, "reconcile_total"),
 			total,
 			m.labels...,
 		),
 		commonpb.NewMetricCounter(
-			m.makePrefix("reconcile_errors_total"),
+			makeMetricName(m.prefix, "reconcile_errors_total"),
 			errors,
 			m.labels...,
 		),
 		commonpb.NewMetricGauge(
-			m.makePrefix("backoff_seconds"),
+			makeMetricName(m.prefix, "backoff_seconds"),
 			m.backoffSeconds.Load(),
 			m.labels...,
 		),
@@ -142,7 +123,7 @@ func (m *ReconcilerMetrics) Collect() []*commonpb.Metric {
 		labels = append(labels, m.labels...)
 		labels = append(labels, commonpb.NewLabel("state", reconcilerStateName(state)))
 		metricList = append(metricList, commonpb.NewMetricGauge(
-			m.makePrefix("state"),
+			makeMetricName(m.prefix, "state"),
 			value,
 			labels...,
 		))
@@ -154,28 +135,32 @@ func (m *ReconcilerMetrics) Collect() []*commonpb.Metric {
 // NewApplyMetrics constructs a collector for apply outcomes.
 func NewApplyMetrics(prefix string, labels ...*commonpb.Label) *ApplyMetrics {
 	return &ApplyMetrics{
-		metricSet: metricSet{
-			prefix: prefix,
-			labels: labels,
-		},
+		prefix: prefix,
+		labels: labels,
 	}
 }
 
 // Observe records one apply attempt and whether it failed.
 func (m *ApplyMetrics) Observe(err error) {
-	m.observe(err)
+	m.applyTotal.Inc()
+	if err != nil {
+		m.applyErrors.Inc()
+	}
 }
 
 func (m *ApplyMetrics) Collect() []*commonpb.Metric {
-	total, errors := m.snapshot()
+	// Load errors first because updates publish the attempt first. This keeps
+	// a concurrent snapshot from reporting more errors than attempts.
+	errors := m.applyErrors.Load()
+	total := m.applyTotal.Load()
 	return []*commonpb.Metric{
 		commonpb.NewMetricCounter(
-			m.makePrefix("apply_total"),
+			makeMetricName(m.prefix, "apply_total"),
 			total,
 			m.labels...,
 		),
 		commonpb.NewMetricCounter(
-			m.makePrefix("apply_errors_total"),
+			makeMetricName(m.prefix, "apply_errors_total"),
 			errors,
 			m.labels...,
 		),
