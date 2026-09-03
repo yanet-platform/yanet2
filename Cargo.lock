@@ -3352,7 +3352,7 @@ dependencies = [
  "log",
  "prost",
  "serde",
- "serde_json",
+ "tabled",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
