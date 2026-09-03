@@ -2,7 +2,6 @@ package framework
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
