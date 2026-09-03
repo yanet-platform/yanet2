@@ -1,8 +1,6 @@
 package operator
 
 import (
-	"time"
-
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/common/go/operator"
@@ -15,41 +13,20 @@ const (
 	kindDeviceVlan  = "device-vlan"
 )
 
-var reconcilerStateNames = map[operator.ReconcilerState]string{
-	operator.ReconcilerStateIdle:     "idle",
-	operator.ReconcilerStateApplying: "applying",
-	operator.ReconcilerStateSleeping: "sleeping",
-}
-
 // Metrics is the single observability sink for the operator.
 type Metrics struct {
-	reconcileTotal  metrics.Counter
-	reconcileErrors metrics.Counter
-	stageAdvance    metrics.Counter
+	*operator.ReconcilerMetrics
 
-	states         map[operator.ReconcilerState]*metrics.Gauge
-	queueDepth     metrics.Gauge
-	backoffSeconds metrics.Gauge
+	stageAdvance metrics.Counter
+	queueDepth   metrics.Gauge
 
 	gateways []*GatewayMetrics
 }
 
 func NewMetrics(gateways []*GatewayMetrics) *Metrics {
-	states := make(map[operator.ReconcilerState]*metrics.Gauge, len(reconcilerStateNames))
-	for state := range reconcilerStateNames {
-		states[state] = &metrics.Gauge{}
-	}
-
 	return &Metrics{
-		states:   states,
-		gateways: gateways,
-	}
-}
-
-func (m *Metrics) OnReconcileCompleted(err error) {
-	m.reconcileTotal.Inc()
-	if err != nil {
-		m.reconcileErrors.Inc()
+		ReconcilerMetrics: operator.NewReconcilerMetrics("pipeline_operator"),
+		gateways:          gateways,
 	}
 }
 
@@ -57,59 +34,20 @@ func (m *Metrics) OnStageAdvanced() {
 	m.stageAdvance.Inc()
 }
 
-func (m *Metrics) OnBackoffScheduled(delay time.Duration) {
-	m.backoffSeconds.Store(delay.Seconds())
-}
-
-func (m *Metrics) OnBackoffReset() {
-	m.backoffSeconds.Store(0)
-}
-
 func (m *Metrics) OnQueueChanged(depth int) {
 	m.queueDepth.Store(float64(depth))
 }
 
-func (m *Metrics) OnStateChanged(state operator.ReconcilerState) {
-	for k, g := range m.states {
-		if k == state {
-			g.Store(1)
-		} else {
-			g.Store(0)
-		}
-	}
-}
-
-// Collect renders the current state of every metric as a []*commonpb.Metric.
 func (m *Metrics) Collect() []*commonpb.Metric {
-	out := make([]*commonpb.Metric, 0)
+	out := m.ReconcilerMetrics.Collect()
 
-	out = append(out, commonpb.NewMetricCounter(
-		"pipeline_operator_reconcile_total",
-		m.reconcileTotal.Load(),
-	))
-	out = append(out, commonpb.NewMetricCounter(
-		"pipeline_operator_reconcile_errors_total",
-		m.reconcileErrors.Load(),
-	))
 	out = append(out, commonpb.NewMetricCounter(
 		"pipeline_operator_stage_advance_total",
 		m.stageAdvance.Load(),
 	))
-
-	for state, g := range m.states {
-		out = append(out, commonpb.NewMetricGauge(
-			"pipeline_operator_state",
-			g.Load(),
-			commonpb.NewLabel("state", reconcilerStateNames[state]),
-		))
-	}
 	out = append(out, commonpb.NewMetricGauge(
 		"pipeline_operator_queue_depth",
 		m.queueDepth.Load(),
-	))
-	out = append(out, commonpb.NewMetricGauge(
-		"pipeline_operator_backoff_seconds",
-		m.backoffSeconds.Load(),
 	))
 
 	for _, g := range m.gateways {
@@ -122,13 +60,12 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 // GatewayMetrics is the per-gateway implementation of
 // GatewayActuatorMetricsObserver.
 type GatewayMetrics struct {
+	*operator.ApplyMetrics
+
 	name string
 
 	resourceUpdate       map[string]*metrics.Counter
 	resourceUpdateErrors map[string]*metrics.Counter
-
-	apply       metrics.Counter
-	applyErrors metrics.Counter
 
 	gcRuns         metrics.Counter
 	gcErrors       metrics.Counter
@@ -147,6 +84,10 @@ func NewGatewayMetrics(name string) *GatewayMetrics {
 	}
 
 	return &GatewayMetrics{
+		ApplyMetrics: operator.NewApplyMetrics(
+			"pipeline_operator_gateway",
+			commonpb.NewLabel("gateway", name),
+		),
 		name:                 name,
 		resourceUpdate:       resourceUpdate,
 		resourceUpdateErrors: resourceUpdateErrors,
@@ -154,10 +95,7 @@ func NewGatewayMetrics(name string) *GatewayMetrics {
 }
 
 func (m *GatewayMetrics) OnApplyCompleted(err error) {
-	m.apply.Inc()
-	if err != nil {
-		m.applyErrors.Inc()
-	}
+	m.ApplyMetrics.Observe(err)
 }
 
 func (m *GatewayMetrics) OnResourceUpdated(kind string, err error) {
@@ -186,22 +124,9 @@ func (m *GatewayMetrics) OnGC(deleted, failed int, err error) {
 	}
 }
 
-// Collect renders the current state of this gateway's metrics as a
-// []*commonpb.Metric.
 func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	gw := commonpb.NewLabel("gateway", m.name)
-	out := make([]*commonpb.Metric, 0)
-
-	out = append(out, commonpb.NewMetricCounter(
-		"pipeline_operator_gateway_apply_total",
-		m.apply.Load(),
-		gw,
-	))
-	out = append(out, commonpb.NewMetricCounter(
-		"pipeline_operator_gateway_apply_errors_total",
-		m.applyErrors.Load(),
-		gw,
-	))
+	out := m.ApplyMetrics.Collect()
 
 	for kind, c := range m.resourceUpdate {
 		out = append(out, commonpb.NewMetricCounter(

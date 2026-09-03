@@ -19,6 +19,8 @@ var reconcilerMetricStates = []ReconcilerState{
 	ReconcilerStateSleeping,
 }
 
+const reconcilerMetricStateUnknown ReconcilerState = -1
+
 // MetricsCollector exposes operator metrics to a metrics service.
 type MetricsCollector interface {
 	Collect() []*commonpb.Metric
@@ -80,12 +82,14 @@ func NewReconcilerMetrics(
 	prefix string,
 	labels ...*commonpb.Label,
 ) *ReconcilerMetrics {
-	return &ReconcilerMetrics{
+	metrics := &ReconcilerMetrics{
 		metricSet: metricSet{
 			prefix: prefix,
 			labels: labels,
 		},
 	}
+	metrics.OnStateChanged(reconcilerMetricStateUnknown)
+	return metrics
 }
 
 // OnReconcileCompleted records one reconcile attempt and whether it failed.
