@@ -12,6 +12,20 @@ listen_addr: "localhost:50051"
 # Connect directly to the route operator or to the gateway that proxies it.
 route_operator_endpoint: "[::1]:8080"
 
+# TLS towards that endpoint.
+#
+# Absent: plaintext. Present, even empty: TLS with the system roots.
+#
+#   route_operator_tls:
+#     # PEM bundle that replaces the system roots.
+#     ca_file: /etc/yanet2/tls/ca.pem
+#     # Client certificate, both files or neither.
+#     cert_file: /etc/yanet2/tls/bird-adapter.pem
+#     key_file: /etc/yanet2/tls/bird-adapter.key
+#     # Host the server certificate is checked against, defaults to the host
+#     # of the endpoint.
+#     server_name: gateway.numa0
+
 # BIRD import applied at startup. An empty name disables it, leaving the
 # server bare until the client subcommand configures it at runtime.
 bird:

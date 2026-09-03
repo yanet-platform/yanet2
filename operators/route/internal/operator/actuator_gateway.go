@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -45,13 +44,9 @@ func NewGatewayActuator(
 		return nil, fmt.Errorf("gateway actuator: function is required")
 	}
 
-	endpoint := cfg.Endpoint.Unwrap()
-	conn, err := grpc.NewClient(
-		endpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	conn, err := operator.DialGateway(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)
+		return nil, err
 	}
 
 	fn := opts.Function

@@ -8,6 +8,19 @@ logging:
 gateways:
   - name: numa0
     endpoint: "[::1]:8080"
+    # TLS towards the gateway.
+    #
+    # Absent: plaintext. Present, even empty: TLS with the system roots.
+    #
+    #   tls:
+    #     # PEM bundle that replaces the system roots.
+    #     ca_file: /etc/yanet2/tls/ca.pem
+    #     # Client certificate, both files or neither.
+    #     cert_file: /etc/yanet2/tls/operator.pem
+    #     key_file: /etc/yanet2/tls/operator.key
+    #     # Host the server certificate is checked against, defaults to the
+    #     # host of the endpoint.
+    #     server_name: gateway.numa0
 
 # The operator's own gRPC server.
 #

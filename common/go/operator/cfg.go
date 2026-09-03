@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
 const (
@@ -54,6 +55,8 @@ type GatewayConfig struct {
 	Name string `yaml:"name"`
 	// Endpoint is the gRPC address of the Gateway.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
+	// TLS enables TLS towards the Gateway when present, plaintext otherwise.
+	TLS *xgrpc.ClientTLSConfig `yaml:"tls"`
 }
 
 // RegisterConfig holds the gateway registration heartbeat parameter.

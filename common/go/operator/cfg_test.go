@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
 // verifies that valid names and addresses pass without resolving their hosts,
@@ -39,4 +40,24 @@ func Test_GRPCServerConfig_Validate_AdvertiseEndpoint(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// Test_GatewayConfig_Decode_RejectsHalfKeypair verifies that loading a
+// gateway list validates its tls block, so a client certificate given
+// without its key fails at startup rather than at the first dial.
+func Test_GatewayConfig_Decode_RejectsHalfKeypair(t *testing.T) {
+	t.Parallel()
+
+	var cfg struct {
+		Gateways []operator.GatewayConfig `yaml:"gateways"`
+	}
+	err := xcfg.Decode([]byte(`
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+    tls:
+      cert_file: /etc/yanet2/tls/operator.pem
+`), &cfg)
+
+	require.ErrorContains(t, err, "cert_file and key_file must be set together")
 }

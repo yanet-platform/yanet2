@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
@@ -93,9 +94,14 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 			zap.String("gateway_endpoint", cfg.Endpoint.Unwrap()),
 		)
 
+		creds, err := xgrpc.ClientCredentials(cfg.TLS)
+		if err != nil {
+			return fmt.Errorf("failed to build transport credentials for gateway %q: %w", cfg.Name, err)
+		}
+
 		registrar, err := gateway.NewGatewayRegistrar(
 			cfg.Endpoint.Unwrap(),
-			nil,
+			creds,
 			gateway.WithBackOff(shortBackOff),
 			gateway.WithMaxElapsedTime(m.interval/2),
 			gateway.WithRegistrarLog(log),
