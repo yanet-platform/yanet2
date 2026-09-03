@@ -37,8 +37,8 @@ type ReconcilerMetrics struct {
 	prefix string
 	labels []*commonpb.Label
 
-	reconcileTotal  metrics.Counter
-	reconcileErrors metrics.Counter
+	total  metrics.Counter
+	errors metrics.Counter
 
 	backoffSeconds metrics.Gauge
 	state          atomic.Int32
@@ -49,8 +49,8 @@ type ApplyMetrics struct {
 	prefix string
 	labels []*commonpb.Label
 
-	applyTotal  metrics.Counter
-	applyErrors metrics.Counter
+	total  metrics.Counter
+	errors metrics.Counter
 }
 
 // NewReconcilerMetrics constructs a collector and observer for the standard
@@ -69,9 +69,9 @@ func NewReconcilerMetrics(
 
 // OnReconcileCompleted records one reconcile attempt and whether it failed.
 func (m *ReconcilerMetrics) OnReconcileCompleted(err error) {
-	m.reconcileTotal.Inc()
+	m.total.Inc()
 	if err != nil {
-		m.reconcileErrors.Inc()
+		m.errors.Inc()
 	}
 }
 
@@ -93,8 +93,8 @@ func (m *ReconcilerMetrics) OnStateChanged(state ReconcilerState) {
 func (m *ReconcilerMetrics) Collect() []*commonpb.Metric {
 	// Load errors first because updates publish the attempt first. This keeps
 	// a concurrent snapshot from reporting more errors than attempts.
-	errors := m.reconcileErrors.Load()
-	total := m.reconcileTotal.Load()
+	errors := m.errors.Load()
+	total := m.total.Load()
 	metricList := []*commonpb.Metric{
 		commonpb.NewMetricCounter(
 			makeMetricName(m.prefix, "reconcile_total"),
@@ -142,17 +142,17 @@ func NewApplyMetrics(prefix string, labels ...*commonpb.Label) *ApplyMetrics {
 
 // Observe records one apply attempt and whether it failed.
 func (m *ApplyMetrics) Observe(err error) {
-	m.applyTotal.Inc()
+	m.total.Inc()
 	if err != nil {
-		m.applyErrors.Inc()
+		m.errors.Inc()
 	}
 }
 
 func (m *ApplyMetrics) Collect() []*commonpb.Metric {
 	// Load errors first because updates publish the attempt first. This keeps
 	// a concurrent snapshot from reporting more errors than attempts.
-	errors := m.applyErrors.Load()
-	total := m.applyTotal.Load()
+	errors := m.errors.Load()
+	total := m.total.Load()
 	return []*commonpb.Metric{
 		commonpb.NewMetricCounter(
 			makeMetricName(m.prefix, "apply_total"),
