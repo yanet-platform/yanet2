@@ -25,9 +25,8 @@ func TestParseToken(t *testing.T) {
 	)
 
 	authInfo, err := authenticator.Authenticate(
-		t.Context(), raw,
-		&core.RequestInfo{FullMethod: "/test.Service/Method"},
-	)
+		t.Context(), core.Credential{Token: raw},
+		&core.RequestInfo{FullMethod: "/test.Service/Method"})
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }
@@ -37,9 +36,8 @@ func authenticateRawKeyToken(t *testing.T, raw string) error {
 
 	authenticator := sshkey.NewAuthenticator(sshkey.NewKeyStore(map[string][]sshkey.KeyEntry{}))
 	_, err := authenticator.Authenticate(
-		t.Context(), raw,
-		&core.RequestInfo{FullMethod: "/test.Service/Method"},
-	)
+		t.Context(), core.Credential{Token: raw},
+		&core.RequestInfo{FullMethod: "/test.Service/Method"})
 	return err
 }
 

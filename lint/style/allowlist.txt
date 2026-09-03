@@ -150,8 +150,6 @@ receiver:modules/pdump/controlplane/ring.go:workerArea.read:1  # legacy: rename 
 receiver:operators/bird-adapter/cmd/yanet-bird-adapter/client.go:logLevelFlag.Type:1  # legacy: rename the receiver to m
 sugar:modules/pdump/controlplane/ffi.go:pdumpGoControlplaneLog:Sugar():1  # legacy: migrate off zap.SugaredLogger
 sugar:modules/pdump/controlplane/ffi.go:pdumpGoControlplaneLog:Sugar():2  # legacy: migrate off zap.SugaredLogger
-testctx:controlplane/internal/auth/interceptor_test.go:TestExtractToken:Background:1  # legacy: migrate to t.Context()
-testctx:controlplane/internal/auth/interceptor_test.go:TestExtractToken:Background:2  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/interceptor_test.go:TestStreamServerInterceptor:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/interceptor_test.go:TestUnaryServerInterceptor:Background:1  # legacy: migrate to t.Context()
 testctx:controlplane/internal/auth/none/authenticator_test.go:TestNoneAuthenticator_Authenticate:Background:1  # legacy: migrate to t.Context()

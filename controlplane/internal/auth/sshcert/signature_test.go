@@ -41,9 +41,8 @@ func authenticateWithSignature(
 
 	_, err = authenticator.Authenticate(
 		t.Context(),
-		"sshcert "+base64.StdEncoding.EncodeToString(encoded),
-		&core.RequestInfo{FullMethod: "/test.Service/Method"},
-	)
+		core.Credential{Token: "sshcert " + base64.StdEncoding.EncodeToString(encoded)},
+		&core.RequestInfo{FullMethod: "/test.Service/Method"})
 	return err
 }
 

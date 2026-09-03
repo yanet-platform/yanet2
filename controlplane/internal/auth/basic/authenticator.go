@@ -28,19 +28,19 @@ func (m *BasicAuthenticator) Name() string {
 	return "basic"
 }
 
-// IsTokenSupported checks if the token is a Basic Auth token.
-func (m *BasicAuthenticator) IsTokenSupported(token string) bool {
-	return strings.HasPrefix(strings.ToLower(token), "basic ")
+// Supports checks if the credential carries a Basic Auth token.
+func (m *BasicAuthenticator) Supports(credential core.Credential) bool {
+	return strings.HasPrefix(strings.ToLower(credential.Token), "basic ")
 }
 
 // Authenticate validates the Basic Auth token.
 func (m *BasicAuthenticator) Authenticate(
 	ctx context.Context,
-	token string,
+	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.AuthInfo, error) {
 	// Extract base64 part.
-	parts := strings.SplitN(token, " ", 2)
+	parts := strings.SplitN(credential.Token, " ", 2)
 	if len(parts) != 2 {
 		return nil, status.Error(codes.Unauthenticated, "invalid token format")
 	}

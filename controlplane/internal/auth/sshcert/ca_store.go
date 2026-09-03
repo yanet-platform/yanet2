@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 const (
@@ -34,7 +36,7 @@ type CAEntry struct {
 // CAStore stores trusted certificate authority public keys.
 type CAStore struct {
 	snapshot atomic.Pointer[[]CAEntry]
-	loader   Loader
+	source   loader.Loader
 }
 
 // NewCAStore creates a CAStore from an in-memory slice.
@@ -47,8 +49,8 @@ func NewCAStore(entries []CAEntry) *CAStore {
 
 // NewCAStoreFromLoader creates a CAStore by loading CA data from
 // the given loader.
-func NewCAStoreFromLoader(loader Loader) (*CAStore, error) {
-	data, err := loader.Load()
+func NewCAStoreFromLoader(source loader.Loader) (*CAStore, error) {
+	data, err := source.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load CA data: %w", err)
 	}
@@ -58,7 +60,7 @@ func NewCAStoreFromLoader(loader Loader) (*CAStore, error) {
 		return nil, err
 	}
 
-	m := &CAStore{loader: loader}
+	m := &CAStore{source: source}
 	m.snapshot.Store(&entries)
 
 	return m, nil
@@ -103,11 +105,11 @@ func (m *CAStore) VerifyCA(cert *ssh.Certificate) error {
 //
 // On error the old data is preserved.
 func (m *CAStore) Reload() error {
-	if m.loader == nil {
+	if m.source == nil {
 		return nil
 	}
 
-	data, err := m.loader.Load()
+	data, err := m.source.Load()
 	if err != nil {
 		return fmt.Errorf("failed to reload CA data: %w", err)
 	}

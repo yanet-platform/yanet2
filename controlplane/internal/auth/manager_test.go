@@ -46,7 +46,7 @@ func TestManager_Authenticate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
-			principal, err := m.Authenticate(ctx, tt.token, requestInfo)
+			principal, err := m.Authenticate(ctx, core.Credential{Token: tt.token}, requestInfo)
 			if err != nil {
 				t.Fatalf("Authenticate() error = %v, want nil", err)
 			}
@@ -83,7 +83,7 @@ func TestManager_Authorize(t *testing.T) {
 
 	// Create a test principal.
 	requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
-	principal, err := m.Authenticate(ctx, "", requestInfo)
+	principal, err := m.Authenticate(ctx, core.Credential{Token: ""}, requestInfo)
 	if err != nil {
 		t.Fatalf("Authenticate() error = %v", err)
 	}
@@ -213,7 +213,7 @@ func TestNewManagerEnabled(t *testing.T) {
 	requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
 
 	t.Run("known active user authenticates with group and method", func(t *testing.T) {
-		principal, err := manager.Authenticate(t.Context(), basicToken("alice", "s3cret"), requestInfo)
+		principal, err := manager.Authenticate(t.Context(), core.Credential{Token: basicToken("alice", "s3cret")}, requestInfo)
 		require.NoError(t, err)
 		assert.Equal(t, "alice", principal.User)
 		assert.Equal(t, []string{"operators"}, principal.Groups)
@@ -229,7 +229,7 @@ func TestNewManagerEnabled(t *testing.T) {
 	})
 
 	t.Run("unsupported token falls through to none authenticator", func(t *testing.T) {
-		principal, err := manager.Authenticate(t.Context(), "bearer whatever", requestInfo)
+		principal, err := manager.Authenticate(t.Context(), core.Credential{Token: "bearer whatever"}, requestInfo)
 		require.NoError(t, err)
 		assert.True(t, principal.IsAnonymous)
 		assert.Equal(t, "none", principal.AuthMethod)
@@ -241,7 +241,7 @@ func TestNewManagerEnabled(t *testing.T) {
 	})
 
 	t.Run("disabled identity fails authentication", func(t *testing.T) {
-		_, err := manager.Authenticate(t.Context(), basicToken("mallory", "s3cret"), requestInfo)
+		_, err := manager.Authenticate(t.Context(), core.Credential{Token: basicToken("mallory", "s3cret")}, requestInfo)
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		assert.Equal(t, codes.Unauthenticated, st.Code())
@@ -249,7 +249,7 @@ func TestNewManagerEnabled(t *testing.T) {
 	})
 
 	t.Run("valid credentials without an identity entry fail authentication", func(t *testing.T) {
-		_, err := manager.Authenticate(t.Context(), basicToken("ghost", "s3cret"), requestInfo)
+		_, err := manager.Authenticate(t.Context(), core.Credential{Token: basicToken("ghost", "s3cret")}, requestInfo)
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		assert.Equal(t, codes.Unauthenticated, st.Code())

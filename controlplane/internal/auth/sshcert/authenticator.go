@@ -104,9 +104,10 @@ func (m *Authenticator) Name() string {
 	return "sshcert"
 }
 
-// IsTokenSupported checks if the token has the "sshcert " prefix.
-func (m *Authenticator) IsTokenSupported(token string) bool {
-	return strings.HasPrefix(strings.ToLower(token), tokenPrefix)
+// Supports checks if the credential carries a token with the "sshcert "
+// prefix.
+func (m *Authenticator) Supports(credential core.Credential) bool {
+	return strings.HasPrefix(strings.ToLower(credential.Token), tokenPrefix)
 }
 
 // Authenticate validates the SSH certificate token and returns authentication
@@ -117,10 +118,10 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 // principal becomes the local account lookup name.
 func (m *Authenticator) Authenticate(
 	ctx context.Context,
-	rawToken string,
+	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.AuthInfo, error) {
-	token, err := parseToken(rawToken)
+	token, err := parseToken(credential.Token)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,

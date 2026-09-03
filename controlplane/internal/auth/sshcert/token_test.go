@@ -24,9 +24,8 @@ func authenticateRawToken(t *testing.T, raw string) error {
 
 	_, err := authenticator.Authenticate(
 		t.Context(),
-		raw,
-		&core.RequestInfo{FullMethod: "/test.Service/Method"},
-	)
+		core.Credential{Token: raw},
+		&core.RequestInfo{FullMethod: "/test.Service/Method"})
 	return err
 }
 
@@ -55,9 +54,8 @@ func TestParseToken(t *testing.T) {
 	t.Cleanup(authenticator.Close)
 
 	authInfo, err := authenticator.Authenticate(
-		t.Context(), raw,
-		&core.RequestInfo{FullMethod: "/test.Service/Method"},
-	)
+		t.Context(), core.Credential{Token: raw},
+		&core.RequestInfo{FullMethod: "/test.Service/Method"})
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }
@@ -134,9 +132,8 @@ func TestToken_CanonicalSignedDataAuthenticates(t *testing.T) {
 	t.Cleanup(authenticator.Close)
 
 	_, err := authenticator.Authenticate(
-		t.Context(), raw,
-		&core.RequestInfo{FullMethod: "/test.Service/Method"},
-	)
+		t.Context(), core.Credential{Token: raw},
+		&core.RequestInfo{FullMethod: "/test.Service/Method"})
 	require.NoError(t, err)
 }
 

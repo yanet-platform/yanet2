@@ -204,7 +204,7 @@ func TestNewFromConfigCASources(t *testing.T) {
 			cert, userSigner := generateUserCert(t, testCase.ca, "alice", 1)
 			token := signCertToken(t, userSigner, cert, method, time.Now().UnixNano(), "nonce-1")
 
-			authInfo, err := authenticator.Authenticate(t.Context(), token, requestInfo)
+			authInfo, err := authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 			require.NoError(t, err)
 			require.Equal(t, &core.AuthInfo{
 				Subject:    core.NewLocalSubject("alice"),
@@ -217,7 +217,7 @@ func TestNewFromConfigCASources(t *testing.T) {
 		cert, userSigner := generateUserCert(t, caThree, "alice", 2)
 		token := signCertToken(t, userSigner, cert, method, time.Now().UnixNano(), "nonce-1")
 
-		_, err := authenticator.Authenticate(t.Context(), token, requestInfo)
+		_, err := authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "CA verification failed")
 	})
@@ -242,7 +242,7 @@ func TestNewFromConfigKRLSource(t *testing.T) {
 		authenticator := newAuthenticator(t, rawConfig)
 		token := signCertToken(t, userSigner, cert, method, time.Now().UnixNano(), "nonce-1")
 
-		_, err := authenticator.Authenticate(t.Context(), token, requestInfo)
+		_, err := authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "certificate revocation check failed")
 	})
@@ -253,7 +253,7 @@ func TestNewFromConfigKRLSource(t *testing.T) {
 		authenticator := newAuthenticator(t, rawConfig)
 		token := signCertToken(t, userSigner, cert, method, time.Now().UnixNano(), "nonce-1")
 
-		authInfo, err := authenticator.Authenticate(t.Context(), token, requestInfo)
+		authInfo, err := authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 		require.NoError(t, err)
 		require.Equal(t, &core.AuthInfo{
 			Subject:    core.NewLocalSubject("alice"),

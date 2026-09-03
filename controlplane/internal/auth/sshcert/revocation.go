@@ -6,6 +6,8 @@ import (
 
 	"github.com/stripe/krl"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 // RevocationChecker checks whether a certificate has been revoked.
@@ -39,7 +41,7 @@ func (m *nopRevocationChecker) Reload() error {
 // KRLRevocationChecker checks certificates against an OpenSSH KRL.
 type KRLRevocationChecker struct {
 	krlData atomic.Pointer[krl.KRL]
-	loader  Loader
+	source  loader.Loader
 }
 
 // NewKRLRevocationChecker creates a RevocationChecker from a parsed
@@ -54,9 +56,9 @@ func NewKRLRevocationChecker(k *krl.KRL) *KRLRevocationChecker {
 // NewKRLRevocationCheckerFromLoader creates a RevocationChecker by
 // loading KRL data from the given loader.
 func NewKRLRevocationCheckerFromLoader(
-	loader Loader,
+	source loader.Loader,
 ) (*KRLRevocationChecker, error) {
-	data, err := loader.Load()
+	data, err := source.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load KRL data: %w", err)
 	}
@@ -66,7 +68,7 @@ func NewKRLRevocationCheckerFromLoader(
 		return nil, fmt.Errorf("failed to parse KRL: %w", err)
 	}
 
-	m := &KRLRevocationChecker{loader: loader}
+	m := &KRLRevocationChecker{source: source}
 	m.krlData.Store(k)
 
 	return m, nil
@@ -86,11 +88,11 @@ func (m *KRLRevocationChecker) IsRevoked(cert *ssh.Certificate) error {
 //
 // On error the old data is preserved.
 func (m *KRLRevocationChecker) Reload() error {
-	if m.loader == nil {
+	if m.source == nil {
 		return nil
 	}
 
-	data, err := m.loader.Load()
+	data, err := m.source.Load()
 	if err != nil {
 		return fmt.Errorf("failed to reload KRL data: %w", err)
 	}

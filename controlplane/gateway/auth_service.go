@@ -35,7 +35,7 @@ func (m *AuthService) IntrospectToken(
 	// IntrospectToken is not bound to a specific method, so we pass
 	// an empty RequestInfo.
 	requestInfo := &core.RequestInfo{}
-	principal, err := m.manager.Authenticate(ctx, token, requestInfo)
+	principal, err := m.manager.Authenticate(ctx, core.Credential{Token: token}, requestInfo)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
 	}
