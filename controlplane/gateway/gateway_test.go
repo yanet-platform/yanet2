@@ -237,6 +237,8 @@ type lifecycleService struct {
 	closed chan struct{}
 }
 
+// newLifecycleService returns a service whose run and close markers fire
+// exactly once, so it expects one gateway run and one close.
 func newLifecycleService(name string) *lifecycleService {
 	return &lifecycleService{
 		name:   name,

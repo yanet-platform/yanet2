@@ -143,7 +143,8 @@ type serviceRunner interface {
 	Ready() <-chan struct{}
 	// ServiceType returns the concrete service type used in diagnostics.
 	ServiceType() string
-	// Run runs the runner until the context is canceled.
+	// Run runs the runner's work and returns once it is done or the context
+	// is canceled. A runner without background work returns at once.
 	Run(ctx context.Context) error
 	// Close releases the hosted service's resources.
 	Close() error
@@ -444,7 +445,10 @@ func (m *Gateway) Close() error {
 	return errors.Join(errs...)
 }
 
-// pendingRunners returns the runners that are not ready yet.
+// pendingRunners returns the runners not ready at the time of the call.
+//
+// Taken before any runner starts, the result is exactly the in-process
+// runners, since a framework runner is ready from construction.
 func (m *Gateway) pendingRunners() []serviceRunner {
 	var pending []serviceRunner
 	for _, runner := range m.runners {
@@ -487,6 +491,11 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 
+	// The runners still registering are snapshotted before any runner
+	// starts, so a runner that registers instantly still leaves readiness to
+	// the waiting goroutine below and the log it emits never blocks this one.
+	pending := m.pendingRunners()
+
 	for _, runner := range m.runners {
 		wg.Go(func() error {
 			return runner.Run(ctx)
@@ -506,7 +515,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 	// That message text is matched verbatim by an external observer to
 	// decide the gateway is ready to accept module RPCs, so its wording is a
 	// contract and must stay identical between the branches.
-	if pending := m.pendingRunners(); len(pending) > 0 {
+	if len(pending) > 0 {
 		wg.Go(func() error {
 			for _, runner := range pending {
 				select {
