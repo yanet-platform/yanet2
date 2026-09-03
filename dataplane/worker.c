@@ -60,8 +60,20 @@
 #include "lib/logging/log.h"
 
 #include <rte_ethdev.h>
+#include <rte_prefetch.h>
 
 #include <string.h>
+
+// Lookahead that hides the two cache misses every received packet costs.
+//
+// Every received packet costs two cache lines nobody has touched lately:
+// its metadata in the headroom, last written a whole pool rotation ago,
+// and the first line of the frame, written by the NIC. The out-of-order
+// window overlaps that latency for two or three packets on its own. Eight
+// was measured rather than derived: on the firewall profile it is where
+// the parser stops waiting on the frame line, while the prefetches are
+// still few enough not to be dropped.
+#define WORKER_RX_PREFETCH_DISTANCE 8
 
 static void
 worker_read(
@@ -78,7 +90,22 @@ worker_read(
 		worker->dp_worker->rx_bursts[read] += 1;
 	}
 
+	// Keep the lookahead full: the first packets up front, then one more
+	// for every packet parsed.
+	for (uint32_t idx = 0; idx < read && idx < WORKER_RX_PREFETCH_DISTANCE;
+	     ++idx) {
+		rte_prefetch0(mbufs[idx]->buf_addr);
+		rte_prefetch0(rte_pktmbuf_mtod(mbufs[idx], void *));
+	}
+
 	for (uint32_t idx = 0; idx < read; ++idx) {
+		if (idx + WORKER_RX_PREFETCH_DISTANCE < read) {
+			struct rte_mbuf *ahead =
+				mbufs[idx + WORKER_RX_PREFETCH_DISTANCE];
+			rte_prefetch0(ahead->buf_addr);
+			rte_prefetch0(rte_pktmbuf_mtod(ahead, void *));
+		}
+
 		struct packet *packet = mbuf_to_packet(mbufs[idx]);
 		memset(packet, 0, sizeof(struct packet));
 		// FIXME update packet fields
