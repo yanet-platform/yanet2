@@ -29,8 +29,8 @@ func ExtractCredential(ctx context.Context) core.Credential {
 		}
 	}
 
-	if p, ok := peer.FromContext(ctx); ok {
-		if info, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+	if peerInfo, ok := peer.FromContext(ctx); ok {
+		if info, ok := peerInfo.AuthInfo.(credentials.TLSInfo); ok {
 			state := info.State
 			credential.TLS = &state
 		}

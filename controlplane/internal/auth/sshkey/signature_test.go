@@ -26,7 +26,8 @@ func authenticateKeyToken(
 	_, err := authenticator.Authenticate(
 		t.Context(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	return err
 }
 

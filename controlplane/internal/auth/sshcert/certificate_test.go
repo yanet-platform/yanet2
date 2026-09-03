@@ -41,7 +41,8 @@ func authenticateCertificate(
 	_, err := authenticator.Authenticate(
 		t.Context(),
 		core.Credential{Token: token},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	return err
 }
 
@@ -73,7 +74,8 @@ func TestParseCertificate_InvalidBase64(t *testing.T) {
 	_, err := authenticator.Authenticate(
 		t.Context(),
 		core.Credential{Token: certificateToken(t, "!!!invalid!!!")},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid certificate: invalid base64")
 }
@@ -92,7 +94,8 @@ func TestParseCertificate_NotACert(t *testing.T) {
 	_, err := authenticator.Authenticate(
 		t.Context(),
 		core.Credential{Token: certificateToken(t, certificate)},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid certificate: not a certificate")
 }

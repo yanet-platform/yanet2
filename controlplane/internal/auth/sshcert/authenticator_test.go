@@ -71,7 +71,8 @@ func TestAuthenticator_HappyPath(t *testing.T) {
 	authInfo, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 	assert.Equal(t, "sshcert", authInfo.AuthMethod)
@@ -107,7 +108,8 @@ func TestAuthenticator_ExpiredTimestamp(t *testing.T) {
 	_, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	assertGRPCCode(t, err, codes.Unauthenticated)
 }
@@ -141,7 +143,8 @@ func TestAuthenticator_MethodBindingMismatch(t *testing.T) {
 	_, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/OtherMethod"})
+		&core.RequestInfo{FullMethod: "/test.Service/OtherMethod"},
+	)
 	require.Error(t, err)
 	assertGRPCCode(t, err, codes.Unauthenticated)
 }
@@ -178,7 +181,8 @@ func TestAuthenticator_UntrustedCA(t *testing.T) {
 	_, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	assertGRPCCode(t, err, codes.Unauthenticated)
 }
@@ -212,7 +216,8 @@ func TestAuthenticator_ExpiredCertificate(t *testing.T) {
 	_, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	assertGRPCCode(t, err, codes.Unauthenticated)
 }
@@ -251,7 +256,8 @@ func TestAuthenticator_RevokedCertificate(t *testing.T) {
 	_, err = auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	assertGRPCCode(t, err, codes.Unauthenticated)
 }
@@ -280,7 +286,8 @@ func TestAuthenticator_HostCertRejected(t *testing.T) {
 	_, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.Error(t, err)
 	assertGRPCCode(t, err, codes.Unauthenticated)
 }
@@ -315,7 +322,8 @@ func TestAuthenticator_NopRevocationChecker(t *testing.T) {
 	authInfo, err := auth.Authenticate(
 		context.Background(),
 		core.Credential{Token: rawToken},
-		&core.RequestInfo{FullMethod: "/test.Service/Method"})
+		&core.RequestInfo{FullMethod: "/test.Service/Method"},
+	)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 	assert.Equal(t, "sshcert", authInfo.AuthMethod)
