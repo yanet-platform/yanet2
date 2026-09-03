@@ -59,7 +59,10 @@
 
 #include "lib/logging/log.h"
 
+#include <rte_errno.h>
 #include <rte_ethdev.h>
+#include <rte_lcore.h>
+#include <rte_mempool.h>
 #include <rte_prefetch.h>
 
 #include <string.h>
@@ -333,6 +336,25 @@ static void *
 worker_thread_start(void *arg) {
 	struct dataplane_worker *worker = (struct dataplane_worker *)arg;
 
+	// Give the thread an lcore id so the pool cache serves it.
+	//
+	// The mempool cache is indexed by lcore id, and a plain thread has
+	// none: every alloc and free then goes through the pool ring, which
+	// recycles mbufs in FIFO order over the whole pool. With the cache a
+	// freed mbuf is the next one the NIC gets back, its lines still in
+	// L2. Registering also disables DPDK multi-process support for the
+	// rest of the process, so no secondary process can attach afterwards.
+	// The call fails when EAL has no lcore id left or the multi-process
+	// channel is already in use, and the worker then runs without the
+	// cache.
+	if (rte_thread_register() != 0) {
+		LOG(ERROR,
+		    "failed to register worker core_id=%u as an lcore, running "
+		    "without the pool cache: %s",
+		    worker->config.core_id,
+		    rte_strerror(rte_errno));
+	}
+
 	while (1) {
 		worker_loop_round(worker);
 	}
@@ -466,11 +488,19 @@ dataplane_worker_init(
 
 	uint32_t num_mbufs = config->num_mbufs ? config->num_mbufs : 16384;
 
+	// Sized under both limits the pool enforces, so a small pool degrades
+	// instead of failing to start.
+	//
+	// The pool refuses a cache above its own maximum, or one whose flush
+	// threshold, one and a half times the cache, exceeds the pool.
+	uint32_t cache_size =
+		RTE_MIN((uint32_t)RTE_MEMPOOL_CACHE_MAX_SIZE, num_mbufs / 2);
+
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,
 		num_mbufs,
 		MBUF_MAX_SIZE,
-		0,
+		cache_size,
 		sizeof(struct rte_pktmbuf_pool_private),
 		rte_pktmbuf_pool_init,
 		NULL,
