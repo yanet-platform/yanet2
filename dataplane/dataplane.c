@@ -846,7 +846,16 @@ dataplane_init(
 				return -1;
 			}
 		}
+	}
 
+	// Mark instances ready only after all of them are set up, so a
+	// failure cannot leave a ready instance that no dataplane serves.
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		struct dataplane_instance *instance =
+			dataplane->instances + instance_idx;
+		struct dp_config *dp_config = instance->dp_config;
 		dp_config_mark_ready(dp_config);
 	}
 
