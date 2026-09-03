@@ -36,7 +36,6 @@ func (noopMetricsCollector) Collect() []*commonpb.Metric {
 }
 
 type serviceOptions struct {
-	// Metrics supplies snapshots to the metrics service.
 	Metrics commonoperator.MetricsCollector
 	Log     *zap.Logger
 }
