@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -111,7 +110,7 @@ func NewStaticModuleOperator(
 			commonpb.NewLabel("gateway", gw.Name),
 		)
 		metricsCollectors = append(metricsCollectors, gatewayMetrics)
-		conn, err := dialGateway(gw)
+		conn, err := DialGateway(gw)
 		if err != nil {
 			for _, a := range actuators {
 				_ = a.Close()
@@ -312,15 +311,6 @@ type staticGatewayActuator struct {
 	conn      *grpc.ClientConn
 	functions ynpb.FunctionServiceClient
 	log       *zap.Logger
-}
-
-func dialGateway(cfg GatewayConfig) (*grpc.ClientConn, error) {
-	endpoint := cfg.Endpoint.Unwrap()
-	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)
-	}
-	return conn, nil
 }
 
 // Apply tries every target regardless of partial failures and joins the

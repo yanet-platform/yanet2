@@ -60,6 +60,9 @@ type ServerConfig struct {
 	// RouteService for RIB updates — either the route operator directly or the
 	// gateway that proxies it.
 	RouteOperatorEndpoint string `yaml:"route_operator_endpoint"`
+	// RouteOperatorTLS enables TLS towards the route operator endpoint when
+	// present, plaintext otherwise.
+	RouteOperatorTLS *xgrpc.ClientTLSConfig `yaml:"route_operator_tls"`
 	// BIRD configures the BIRD import applied at startup.
 	BIRD xcfg.Optional[BIRDConfig] `yaml:"bird"`
 }
@@ -139,8 +142,17 @@ func runServer() error {
 		zap.String("route_operator_endpoint", cfg.RouteOperatorEndpoint),
 	)
 
+	routeOperatorCreds, err := xgrpc.ClientCredentials(cfg.RouteOperatorTLS)
+	if err != nil {
+		return fmt.Errorf("failed to build transport credentials for the route operator endpoint: %w", err)
+	}
+
 	// Create the adapter service
-	adapterService := birdAdapter.NewAdapterService(cfg.RouteOperatorEndpoint, birdAdapter.WithAdapterServiceLog(log))
+	adapterService := birdAdapter.NewAdapterService(
+		cfg.RouteOperatorEndpoint,
+		birdAdapter.WithAdapterServiceLog(log),
+		birdAdapter.WithRouteOperatorCredentials(routeOperatorCreds),
+	)
 
 	// Create gRPC server
 	grpcServer := grpc.NewServer()

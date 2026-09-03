@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
@@ -47,18 +48,20 @@ func (m *levelFilterCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *za
 type AdapterService struct {
 	adapterpb.UnimplementedAdapterServiceServer
 
-	importsMu             sync.Mutex
-	imports               map[string]*importHolder
-	routeOperatorEndpoint string    // gRPC endpoint of the route operator's RouteService for RIB updates
-	quitCh                chan bool // Signals all background BIRD import loops to stop
-	log                   *zap.Logger
+	importsMu                sync.Mutex
+	imports                  map[string]*importHolder
+	routeOperatorEndpoint    string                           // gRPC endpoint of the route operator's RouteService for RIB updates
+	routeOperatorCredentials credentials.TransportCredentials // Transport credentials for that endpoint
+	quitCh                   chan bool                        // Signals all background BIRD import loops to stop
+	log                      *zap.Logger
 }
 
 // AdapterServiceOption configures the AdapterService constructor.
 type AdapterServiceOption func(*adapterServiceOptions)
 
 type adapterServiceOptions struct {
-	Log *zap.Logger
+	RouteOperatorCredentials credentials.TransportCredentials
+	Log                      *zap.Logger
 }
 
 type methodLogOption func(*methodLogOptions)
@@ -81,7 +84,8 @@ func withMethodLog(log *zap.Logger) methodLogOption {
 
 func newAdapterServiceOptions() *adapterServiceOptions {
 	return &adapterServiceOptions{
-		Log: zap.NewNop(),
+		RouteOperatorCredentials: insecure.NewCredentials(),
+		Log:                      zap.NewNop(),
 	}
 }
 
@@ -89,6 +93,14 @@ func newAdapterServiceOptions() *adapterServiceOptions {
 func WithAdapterServiceLog(log *zap.Logger) AdapterServiceOption {
 	return func(o *adapterServiceOptions) {
 		o.Log = log
+	}
+}
+
+// WithRouteOperatorCredentials sets the transport credentials for the route
+// operator connection, plaintext by default.
+func WithRouteOperatorCredentials(creds credentials.TransportCredentials) AdapterServiceOption {
+	return func(o *adapterServiceOptions) {
+		o.RouteOperatorCredentials = creds
 	}
 }
 
@@ -102,10 +114,11 @@ func NewAdapterService(
 	}
 
 	return &AdapterService{
-		imports:               make(map[string]*importHolder),
-		routeOperatorEndpoint: routeOperatorEndpoint,
-		quitCh:                make(chan bool),
-		log:                   opts.Log,
+		imports:                  make(map[string]*importHolder),
+		routeOperatorEndpoint:    routeOperatorEndpoint,
+		routeOperatorCredentials: opts.RouteOperatorCredentials,
+		quitCh:                   make(chan bool),
+		log:                      opts.Log,
 	}
 }
 
@@ -226,7 +239,7 @@ func (m *AdapterService) SetupImport(params ImportParams) error {
 
 	conn, err := grpc.NewClient(
 		m.routeOperatorEndpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(m.routeOperatorCredentials),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {
