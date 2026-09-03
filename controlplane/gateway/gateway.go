@@ -51,12 +51,6 @@ type BackgroundService interface {
 	Run(ctx context.Context) error
 }
 
-// ClosableService is an optional interface for services that hold resources
-// that must be released on shutdown.
-type ClosableService interface {
-	Close() error
-}
-
 // serviceEntry pairs a service with its declared backend kind.
 type serviceEntry struct {
 	Service Service
@@ -137,6 +131,24 @@ func WithListener(listener net.Listener) GatewayOption {
 	}
 }
 
+// serviceRunner runs one hosted Service for the gateway's lifetime.
+//
+// The gateway starts every runner, waits for every runner to become ready
+// before it publishes its own readiness, and closes every runner on
+// shutdown, without caring whether the service shares the gateway's gRPC
+// server or has one of its own.
+type serviceRunner interface {
+	// Ready returns a channel closed once the runner's services are
+	// reachable through the gateway.
+	Ready() <-chan struct{}
+	// ServiceType returns the concrete service type used in diagnostics.
+	ServiceType() string
+	// Run runs the runner until the context is canceled.
+	Run(ctx context.Context) error
+	// Close releases the hosted service's resources.
+	Close() error
+}
+
 // Gateway is the Gateway API to YANET modules.
 //
 // It is a gRPC server that acts as a proxy for each YANET module's
@@ -153,9 +165,7 @@ type Gateway struct {
 	server           *grpc.Server
 	listener         net.Listener
 	memoryListener   *bufconn.Listener
-	services         []Service
-	sharedServices   []Service
-	serviceRunners   []*ServiceRunner
+	runners          []serviceRunner
 	registry         *BackendRegistry
 	readinessTracker *readiness.Tracker
 	log              *zap.Logger
@@ -378,12 +388,11 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		)
 	}
 
-	var services []Service
-	var sharedServices []Service
-	var serviceRunners []*ServiceRunner
+	var runners []serviceRunner
 
 	for _, entry := range opts.Services {
-		if entry.Kind == BackendKindBuiltin {
+		switch entry.Kind {
+		case BackendKindBuiltin:
 			// Shared-server service: register on the gateway's gRPC server and
 			// point every service name at the shared loopback backend.
 			entry.Service.RegisterService(server)
@@ -396,13 +405,14 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 				)
 			}
 
-			sharedServices = append(sharedServices, entry.Service)
-		} else {
-			runner := NewServiceRunner(entry.Service, registry, endpoint, WithServiceRunnerLog(log))
-			serviceRunners = append(serviceRunners, runner)
+			runners = append(runners, newBuiltinServiceRunner(entry.Service))
+		case BackendKindInProcess:
+			runners = append(runners, NewInProcessServiceRunner(entry.Service, registry, endpoint, WithInProcessServiceRunnerLog(log)))
+		case BackendKindExternal:
+			return nil, fmt.Errorf("service %q is external and cannot be hosted inside the gateway", entry.Service.Name())
+		default:
+			return nil, fmt.Errorf("service %q has unknown backend kind %s", entry.Service.Name(), entry.Kind)
 		}
-
-		services = append(services, entry.Service)
 	}
 
 	return &Gateway{
@@ -410,9 +420,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		server:           server,
 		listener:         opts.Listener,
 		memoryListener:   memoryListener,
-		services:         services,
-		sharedServices:   sharedServices,
-		serviceRunners:   serviceRunners,
+		runners:          runners,
 		registry:         registry,
 		readinessTracker: rdTracker,
 		log:              log,
@@ -423,14 +431,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 func (m *Gateway) Close() error {
 	var errs []error
 
-	for _, service := range m.services {
-		closer, ok := service.(ClosableService)
-		if !ok {
-			continue
-		}
-
-		if err := closer.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close service %T: %w", service, err))
+	for _, runner := range m.runners {
+		if err := runner.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close service %s: %w", runner.ServiceType(), err))
 		}
 	}
 
@@ -439,6 +442,20 @@ func (m *Gateway) Close() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// pendingRunners returns the runners that are not ready yet.
+func (m *Gateway) pendingRunners() []serviceRunner {
+	var pending []serviceRunner
+	for _, runner := range m.runners {
+		select {
+		case <-runner.Ready():
+		default:
+			pending = append(pending, runner)
+		}
+	}
+
+	return pending
 }
 
 // Run runs the gateway API until the specified context is canceled.
@@ -470,9 +487,8 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 
-	for _, runner := range m.serviceRunners {
+	for _, runner := range m.runners {
 		wg.Go(func() error {
-			m.log.Info("starting in-process service", zap.String("service", runner.ServiceType()))
 			return runner.Run(ctx)
 		})
 	}
@@ -481,29 +497,18 @@ func (m *Gateway) Run(ctx context.Context) error {
 		return m.runRegistrySweeper(ctx)
 	})
 
-	// Runners schedule the background jobs of their own services, so only the
-	// shared-server ones are scheduled here.
-	for _, service := range m.sharedServices {
-		if background, ok := service.(BackgroundService); ok {
-			wg.Go(func() error {
-				return background.Run(ctx)
-			})
-		}
-	}
-
-	// The readiness marker is published once every in-process service
-	// runner has finished its initial service registration, and
-	// immediately when there are none. Both branches emit the identical
-	// "all built-in modules ready" message, so a run publishes at most
-	// one readiness marker: the waiting branch publishes none if the
+	// The readiness marker is published once every runner still registering
+	// has finished, and immediately when none is. Both branches emit the
+	// identical "all built-in modules ready" message, so a run publishes at
+	// most one readiness marker: the waiting branch publishes none if the
 	// context is canceled before every runner has registered.
 	//
 	// That message text is matched verbatim by an external observer to
 	// decide the gateway is ready to accept module RPCs, so its wording is a
 	// contract and must stay identical between the branches.
-	if len(m.serviceRunners) > 0 {
+	if pending := m.pendingRunners(); len(pending) > 0 {
 		wg.Go(func() error {
-			for _, runner := range m.serviceRunners {
+			for _, runner := range pending {
 				select {
 				case <-ctx.Done():
 					return nil
@@ -511,7 +516,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 				}
 			}
 			m.log.Info("all built-in modules ready",
-				zap.Int("count", len(m.serviceRunners)),
+				zap.Int("count", len(pending)),
 			)
 			m.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 			return nil

@@ -32,7 +32,7 @@ func (m *healthService) RegisterService(server *grpc.Server) {
 
 // startServiceRunner runs runner until the test ends, failing the test if
 // it does not register within a bounded time or exits with an error.
-func startServiceRunner(t *testing.T, runner *gateway.ServiceRunner) {
+func startServiceRunner(t *testing.T, runner *gateway.InProcessServiceRunner) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -64,7 +64,7 @@ func Test_ServiceRunner_Run_ServesThroughRegistry(t *testing.T) {
 	registry := gateway.NewBackendRegistry()
 	t.Cleanup(func() { _ = registry.Close() })
 
-	startServiceRunner(t, gateway.NewServiceRunner(&healthService{}, registry, gatewayEndpoint))
+	startServiceRunner(t, gateway.NewInProcessServiceRunner(&healthService{}, registry, gatewayEndpoint))
 
 	entry := getBackendEntry(t, registry, serviceName)
 	require.Equal(t, gateway.BackendKindInProcess, entry.Kind())
@@ -94,7 +94,7 @@ func Test_ServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	registry := gateway.NewBackendRegistry()
 	t.Cleanup(func() { _ = registry.Close() })
 
-	runner := gateway.NewServiceRunner(&blockingReadinessService{}, registry, "gateway.test:8080")
+	runner := gateway.NewInProcessServiceRunner(&blockingReadinessService{}, registry, "gateway.test:8080")
 
 	ctx, cancel := context.WithCancel(t.Context())
 	var group errgroup.Group
