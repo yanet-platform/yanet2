@@ -78,13 +78,7 @@ enum RegistrationStatus {
 }
 
 // RegisterRequest is the request to register a new module.
-message RegisterRequest {
-  BackendDesc backend = 1;
-  // in_process is set by registrants that run inside the gateway process
-  // (the director's in-process service runner). Separate-process registrants
-  // leave it false.
-  bool in_process = 2;
-}
+message RegisterRequest { BackendDesc backend = 1; }
 
 // RegisterResponse is the response to the RegisterRequest.
 message RegisterResponse { RegistrationStatus status = 1; }

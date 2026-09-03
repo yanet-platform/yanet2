@@ -140,16 +140,14 @@ func TestReadinessService_Ready(t *testing.T) {
 	require.Equal(t, readinesspb.State_STATE_READY, resp.GetScopes()[0].GetState())
 }
 
-type readinessLatchService struct {
-	endpoint string
-}
+type readinessLatchService struct{}
 
 func (m *readinessLatchService) Name() string {
 	return "readiness-latch-service"
 }
 
 func (m *readinessLatchService) Endpoint() string {
-	return m.endpoint
+	return ""
 }
 
 func (m *readinessLatchService) ServicesNames() []string {
@@ -181,9 +179,7 @@ func Test_GatewayRun_ReadinessDrainLatchesLateReady(t *testing.T) {
 	}))
 
 	listener := NewTestListener(t)
-	service := &readinessLatchService{
-		endpoint: newTestUnixSocketPath(t),
-	}
+	service := &readinessLatchService{}
 	gw, err := gateway.NewGateway(
 		gateway.DefaultConfig(),
 		gateway.WithLog(log),

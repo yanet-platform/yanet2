@@ -123,10 +123,9 @@ func (m *GatewayService) Register(
 		)
 	}
 
+	// Every registrant that reaches this RPC runs outside the gateway
+	// process: in-process services register directly and never call it.
 	kind := BackendKindExternal
-	if req.GetInProcess() {
-		kind = BackendKindInProcess
-	}
 
 	log := m.log.With(
 		zap.String("service", backendDesc.GetName()),
