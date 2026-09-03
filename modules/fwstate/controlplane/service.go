@@ -3,7 +3,6 @@ package fwstate
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -238,7 +237,10 @@ func (m *FWStateService) UpdateConfig(
 					zap.String("config", name), zap.Error(err))
 			}
 			m.log.Error("failed to publish fwstate config", zap.String("config", name), zap.Error(err))
-			return classifyPublishError(err)
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				return status.Errorf(codes.FailedPrecondition, "failed to publish fwstate config: %v", err)
+			}
+			return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 		}
 
 		// The publish retired the generations holding this service's
@@ -311,22 +313,6 @@ func (m *FWStateService) publishUpdate(
 	m.configs[name] = newConfig
 
 	return nil
-}
-
-// classifyPublishError maps a failed config publish to its gRPC status.
-//
-// The C generation install validates every declared object link against
-// the published objects and refuses the update with the exact error
-// text "linked object '<type>:<name>' not found for module
-// '<type>:<name>'". That refusal names a map the request asked for but
-// no published object provides — a client-input error, so it surfaces
-// as InvalidArgument with the C text intact; every other publish
-// failure is internal.
-func classifyPublishError(err error) error {
-	if strings.Contains(err.Error(), "linked object") {
-		return status.Errorf(codes.InvalidArgument, "failed to publish fwstate config: %v", err)
-	}
-	return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 }
 
 // configForMutation returns a handle whose lifetime remains protected by the

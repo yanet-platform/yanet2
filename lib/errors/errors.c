@@ -7,6 +7,7 @@
 
 struct yanet_error {
 	char *message;
+	enum yanet_error_kind kind;
 	struct yanet_error *cause;
 };
 
@@ -17,11 +18,17 @@ struct yanet_error {
 // It is legal to pass as a cause to yanet_error_wrap().
 static yanet_error err_oom = {
 	.message = (char *)"out of memory",
+	.kind = YANET_ERROR_NONE,
 	.cause = NULL,
 };
 
 static yanet_error *
-yanet_error_vwrap(yanet_error *cause, const char *fmt, va_list ap) {
+yanet_error_vwrap(
+	yanet_error *cause,
+	enum yanet_error_kind kind,
+	const char *fmt,
+	va_list ap
+) {
 	char *message = NULL;
 	if (vasprintf(&message, fmt, ap) < 0) {
 		// Preserve the chain; drop the new frame. If there was no
@@ -36,6 +43,7 @@ yanet_error_vwrap(yanet_error *cause, const char *fmt, va_list ap) {
 	}
 
 	err->message = message;
+	err->kind = kind;
 	err->cause = cause;
 	return err;
 }
@@ -51,14 +59,14 @@ yanet_error *
 yanet_error_wrap(yanet_error *cause, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	yanet_error *err = yanet_error_vwrap(cause, fmt, ap);
+	yanet_error *err = yanet_error_vwrap(cause, YANET_ERROR_NONE, fmt, ap);
 	va_end(ap);
 	return err;
 }
 
 static yanet_error *
-yanet_error_vnew(const char *fmt, va_list ap) {
-	return yanet_error_vwrap(NULL, fmt, ap);
+yanet_error_vnew(enum yanet_error_kind kind, const char *fmt, va_list ap) {
+	return yanet_error_vwrap(NULL, kind, fmt, ap);
 }
 
 // Creates a leaf error with a printf-formatted message.
@@ -72,7 +80,7 @@ yanet_error *
 yanet_error_new(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	yanet_error *err = yanet_error_vwrap(NULL, fmt, ap);
+	yanet_error *err = yanet_error_vwrap(NULL, YANET_ERROR_NONE, fmt, ap);
 	va_end(ap);
 	return err;
 }
@@ -151,12 +159,42 @@ yanet_error_add(yanet_error **err, const char *fmt, ...) {
 	va_start(ap, fmt);
 
 	if (*err == NULL) {
-		*err = yanet_error_vnew(fmt, ap);
+		*err = yanet_error_vnew(YANET_ERROR_NONE, fmt, ap);
 	} else {
-		*err = yanet_error_vwrap(*err, fmt, ap);
+		*err = yanet_error_vwrap(*err, YANET_ERROR_NONE, fmt, ap);
 	}
 
 	va_end(ap);
+}
+
+void
+yanet_error_add_kind(
+	yanet_error **err, enum yanet_error_kind kind, const char *fmt, ...
+) {
+	if (err == NULL) {
+		return;
+	}
+
+	va_list ap;
+	va_start(ap, fmt);
+
+	if (*err == NULL) {
+		*err = yanet_error_vnew(kind, fmt, ap);
+	} else {
+		*err = yanet_error_vwrap(*err, kind, fmt, ap);
+	}
+
+	va_end(ap);
+}
+
+enum yanet_error_kind
+yanet_error_kind(const yanet_error *err) {
+	for (const yanet_error *cur = err; cur != NULL; cur = cur->cause) {
+		if (cur->kind != YANET_ERROR_NONE) {
+			return cur->kind;
+		}
+	}
+	return YANET_ERROR_NONE;
 }
 
 void

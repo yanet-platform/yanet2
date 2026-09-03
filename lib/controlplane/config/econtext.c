@@ -340,8 +340,9 @@ module_ectx_create(
 				    linked_objects[link_idx].name,
 				    &object_idx
 			    )) {
-				yanet_error_add(
+				yanet_error_add_kind(
 					err,
+					YANET_ERROR_FAILED_PRECONDITION,
 					"linked object '%s:%s' not found for "
 					"module '%s:%s'",
 					linked_objects[link_idx].type,
@@ -594,8 +595,9 @@ chain_ectx_create(
 		);
 
 		if (cp_module == NULL) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"module '%s:%s' not found in chain '%s' of "
 				"function '%s' in pipeline '%s'",
 				cp_chain->modules[idx].type,
@@ -996,8 +998,9 @@ pipeline_ectx_create(
 			cp_config_gen, cp_pipeline->functions[idx].name
 		);
 		if (cp_function == NULL) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"function '%s' not found for pipeline '%s'",
 				cp_pipeline->functions[idx].name,
 				cp_pipeline->name
@@ -1185,8 +1188,9 @@ device_entry_ectx_create(
 			new_config_gen, cp_device_entry->pipelines[idx].name
 		);
 		if (cp_pipeline == NULL) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"pipeline '%s' not found in device entry",
 				cp_device_entry->pipelines[idx].name
 			);

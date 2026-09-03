@@ -105,10 +105,13 @@ func (m *TrafgenService) UpdateDevice(
 	}
 
 	if err := m.apply(name, packets, ratePps, input, output); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update device config %q: %v", name, err,
-		)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// The device names an entity of the graph it runs that the
+			// configuration cannot resolve.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to update device config %q: %v", name, err)
 	}
 
 	return &trafgenpb.UpdateDeviceResponse{}, nil

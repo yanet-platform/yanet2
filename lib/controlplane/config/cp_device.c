@@ -500,8 +500,9 @@ cp_device_try_destroy(struct cp_device *self, yanet_error **err) {
 	if (refcnt != 0) {
 		// errno is set last, right before the return, so the error
 		// formatting above cannot clobber what the caller reads.
-		yanet_error_add(
+		yanet_error_add_kind(
 			err,
+			YANET_ERROR_BUSY,
 			"device '%s:%s' is still referenced by a live "
 			"generation",
 			self->type,

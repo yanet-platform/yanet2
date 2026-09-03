@@ -413,12 +413,9 @@ func (m *FWStateMapService) DeleteMap(
 	if err := cfwstate.DeleteMapObject(
 		m.agent, fwMap.Config().Kind().ObjectType(), name,
 	); err != nil {
-		// The C object deletion refuses while a published module links
-		// the object, failing with the exact error "object
-		// '<type>:<name>' is linked by module '<type>:<name>'": surface
-		// that refusal as a precondition failure so the operator
-		// updates or deletes the linking module first.
-		if strings.Contains(err.Error(), "is linked by module") {
+		// The object deletion refuses while a published module links the
+		// object: a precondition failure, the linking module goes first.
+		if errors.Is(err, ffi.ErrBusy) {
 			m.log.Warn("fwstate-map deletion refused while a published module links it",
 				zap.String("map", name),
 				zap.Error(err),
