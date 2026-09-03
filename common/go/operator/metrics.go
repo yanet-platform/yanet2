@@ -44,15 +44,6 @@ type ReconcilerMetrics struct {
 	state          atomic.Int32
 }
 
-// ApplyMetrics records the outcomes of applying state to one target.
-type ApplyMetrics struct {
-	prefix string
-	labels []*commonpb.Label
-
-	total  metrics.Counter
-	errors metrics.Counter
-}
-
 // NewReconcilerMetrics constructs a collector and observer for the standard
 // reconcile lifecycle metric families.
 func NewReconcilerMetrics(
@@ -130,6 +121,15 @@ func (m *ReconcilerMetrics) Collect() []*commonpb.Metric {
 	}
 
 	return metricList
+}
+
+// ApplyMetrics records the outcomes of applying state to one target.
+type ApplyMetrics struct {
+	prefix string
+	labels []*commonpb.Label
+
+	total  metrics.Counter
+	errors metrics.Counter
 }
 
 // NewApplyMetrics constructs a collector for apply outcomes.
