@@ -8,6 +8,7 @@ use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
     fw_state_service_client::FwStateServiceClient,
 };
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
@@ -43,6 +44,107 @@ pub struct Cmd {
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
+}
+
+/// Makes text that came off the wire safe to hand a terminal.
+///
+/// A name is stored as it was given, so it can carry an escape sequence or
+/// a newline. It is spelled out rather than dropped: two names that differ
+/// only in one must not read alike.
+fn escape_wire_text(value: &str) -> String {
+    value.escape_debug().to_string()
+}
+
+/// Orders the stored configuration names for a human reader.
+///
+/// The service builds its reply by walking a map, so the order it answers
+/// in changes between calls and would otherwise reshuffle the listing under
+/// an operator watching it.
+fn config_list_rows(configs: &[String]) -> Vec<ConfigRow> {
+    let mut names: Vec<&String> = configs.iter().collect();
+    names.sort();
+
+    names
+        .into_iter()
+        .map(|name| ConfigRow { config: escape_wire_text(name) })
+        .collect()
+}
+
+/// Renders a stored nanosecond timeout as the milliseconds an operator reads.
+///
+/// Zero is a meaningful setting here, so a value below a millisecond keeps
+/// its remainder rather than truncating into one.
+fn format_timeout_millis(nanos: u64) -> String {
+    const NANOS_PER_MILLI: u64 = 1_000_000;
+
+    let millis = nanos / NANOS_PER_MILLI;
+    let remainder = nanos % NANOS_PER_MILLI;
+    if remainder == 0 {
+        return millis.to_string();
+    }
+
+    let fraction = format!("{remainder:06}");
+    format!("{millis}.{}", fraction.trim_end_matches('0'))
+}
+
+#[derive(Tabled)]
+struct ConfigRow {
+    #[tabled(rename = "Config")]
+    config: String,
+}
+
+#[derive(Tabled)]
+struct SettingRow {
+    #[tabled(rename = "Setting")]
+    setting: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+impl SettingRow {
+    fn new(setting: &str, value: String) -> Self {
+        Self { setting: setting.to_string(), value }
+    }
+}
+
+/// Lays out one stored configuration for a human reader.
+///
+/// Fields the module documents as ignored are left out.
+fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
+    let mut rows = vec![
+        SettingRow::new("name", escape_wire_text(&response.name)),
+        SettingRow::new("map name v4", escape_wire_text(&response.map_name_v4)),
+        SettingRow::new("map name v6", escape_wire_text(&response.map_name_v6)),
+    ];
+
+    let Some(sync_config) = response.sync_config.as_ref() else {
+        return rows;
+    };
+
+    let address = |addr: Option<&IpAddress>| addr.map_or_else(|| "-".to_string(), ToString::to_string);
+    rows.push(SettingRow::new("src addr", address(sync_config.src_addr.as_ref())));
+    rows.push(SettingRow::new(
+        "dst addr multicast",
+        address(sync_config.dst_addr_multicast.as_ref()),
+    ));
+    rows.push(SettingRow::new(
+        "port multicast",
+        sync_config.port_multicast.to_string(),
+    ));
+
+    for (setting, nanos) in [
+        ("tcp syn-ack timeout", sync_config.tcp_syn_ack),
+        ("tcp syn timeout", sync_config.tcp_syn),
+        ("tcp fin timeout", sync_config.tcp_fin),
+        ("tcp timeout", sync_config.tcp),
+        ("udp timeout", sync_config.udp),
+        ("default timeout", sync_config.default),
+        ("sync suppress timeout", sync_config.sync_suppress_timeout),
+    ] {
+        rows.push(SettingRow::new(setting, format!("{} ms", format_timeout_millis(nanos))));
+    }
+
+    rows
 }
 
 /// Merges the linked map object names an update should carry.
@@ -95,11 +197,7 @@ impl FWStateService {
                     return;
                 }
 
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.configs)
-                        .expect("fwstate config list JSON serialization must not fail")
-                );
+                ync::display::print_table_from_entries(config_list_rows(&response.configs));
             },
         );
 
@@ -121,12 +219,7 @@ impl FWStateService {
 
         output::data(
             || &response,
-            || {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response).expect("fwstate config JSON serialization must not fail")
-                );
-            },
+            || ync::display::print_table_from_entries(config_rows(&response)),
         );
 
         Ok(())
@@ -296,7 +389,84 @@ mod tests {
     }
 
     #[test]
-    fn test_merged_map_names_create_without_map_names_links_none() {
+    fn test_format_timeout_millis_whole_milliseconds() {
+        assert_eq!("120000", format_timeout_millis(120_000_000_000));
+        assert_eq!("16000", format_timeout_millis(16_000_000_000));
+        assert_eq!("1", format_timeout_millis(1_000_000));
+    }
+
+    #[test]
+    fn test_format_timeout_millis_zero_stays_zero() {
+        assert_eq!("0", format_timeout_millis(0));
+    }
+
+    #[test]
+    fn test_format_timeout_millis_below_a_millisecond_keeps_its_remainder() {
+        assert_eq!("0.5", format_timeout_millis(500_000));
+        assert_eq!("0.001", format_timeout_millis(1_000));
+        assert_eq!("0.000001", format_timeout_millis(1));
+    }
+
+    #[test]
+    fn test_format_timeout_millis_fractional_milliseconds() {
+        assert_eq!("1.5", format_timeout_millis(1_500_000));
+        assert_eq!("60000.1", format_timeout_millis(60_000_100_000));
+    }
+
+    #[test]
+    fn test_config_rows_carry_converted_timeouts() {
+        let response = ShowConfigResponse {
+            name: "fwstate0".to_string(),
+            sync_config: Some(fwstatepb::SyncConfig {
+                tcp: 60_000_000_000,
+                sync_suppress_timeout: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let values: Vec<String> = config_rows(&response).into_iter().map(|row| row.value).collect();
+        assert!(values.contains(&"60000 ms".to_string()), "{values:?}");
+        assert!(values.contains(&"0 ms".to_string()), "{values:?}");
+        assert!(
+            !values.iter().any(|value| value.contains("60000000000")),
+            "no row may carry the stored nanoseconds: {values:?}"
+        );
+    }
+
+    #[test]
+    fn test_config_rows_without_sync_config_omit_timeouts() {
+        let response = show_response("fwstate0", "map4", "map6");
+
+        let settings: Vec<String> = config_rows(&response).into_iter().map(|row| row.setting).collect();
+        assert_eq!(vec!["name", "map name v4", "map name v6"], settings);
+    }
+
+    #[test]
+    fn test_escape_wire_text_spells_out_control_characters() {
+        assert_eq!("fwstate0", escape_wire_text("fwstate0"));
+        assert_eq!("a\\nb", escape_wire_text("a\nb"));
+        assert_eq!("\\u{1b}\\r[2J", escape_wire_text("\u{1b}\r[2J"));
+    }
+
+    #[test]
+    fn test_config_list_rows_are_ordered() {
+        let configs = ["fwstate2".to_string(), "fwstate0".to_string(), "fwstate1".to_string()];
+
+        let names: Vec<String> = config_list_rows(&configs).into_iter().map(|row| row.config).collect();
+        assert_eq!(vec!["fwstate0", "fwstate1", "fwstate2"], names);
+    }
+
+    #[test]
+    fn test_config_rows_escape_names() {
+        let response = show_response("fw\nstate0", "map\u{1b}4", "map6");
+
+        let values: Vec<String> = config_rows(&response).into_iter().map(|row| row.value).collect();
+        assert_eq!(vec!["fw\\nstate0", "map\\u{1b}4", "map6"], values);
+    }
+
+    #[test]
+    fn test_merged_map_names_create_without_map_names_is_rejected() {
         let cmd = update_cmd("cfg", None, None);
         let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd);
 
