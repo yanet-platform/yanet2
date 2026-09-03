@@ -494,8 +494,8 @@ jobs:
         if: always()
         with:
           name: functional-test-logs
-             path: |
-               tests/functional/main/test.log
-               tests/functional/converted/test.log
-               /tmp/yanet2-lab-*/**/supervisor.log
-               /tmp/yanet2-lab-*/**/last-report.json
+          path: |
+            tests/functional/main/test.log
+            tests/functional/converted/test.log
+            /tmp/yanet2-lab-*/**/supervisor.log
+            /tmp/yanet2-lab-*/**/last-report.json

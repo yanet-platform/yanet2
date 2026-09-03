@@ -725,9 +725,7 @@ func (q *QEMUManager) RestartSerial() error {
 	}
 	q.startSerialReader()
 	readyTimeout := VMReadyTimeout()
-	if readyTimeout > 20*time.Second {
-		readyTimeout = 20 * time.Second
-	}
+	readyTimeout = min(readyTimeout, 20*time.Second)
 	if err := q.WaitForReady(readyTimeout); err != nil {
 		return fmt.Errorf("wait for ready after serial restart: %w", err)
 	}
