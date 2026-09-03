@@ -543,7 +543,11 @@ chain_ectx_create(
 		);
 		goto error;
 	}
-	memset(module_ptrs, 0, sizeof(struct module_ectx *) * cp_chain->length);
+	if (cp_chain->length > 0) {
+		memset(module_ptrs,
+		       0,
+		       sizeof(struct module_ectx *) * cp_chain->length);
+	}
 	SET_OFFSET_OF(&chain_ectx->module_ptrs, module_ptrs);
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
@@ -915,9 +919,11 @@ pipeline_ectx_create(
 		);
 		goto error;
 	}
-	memset(function_ptrs,
-	       0,
-	       sizeof(struct function_ectx *) * cp_pipeline->length);
+	if (cp_pipeline->length > 0) {
+		memset(function_ptrs,
+		       0,
+		       sizeof(struct function_ectx *) * cp_pipeline->length);
+	}
 	SET_OFFSET_OF(&pipeline_ectx->function_ptrs, function_ptrs);
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
