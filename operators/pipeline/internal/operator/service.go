@@ -7,7 +7,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
 )
 
@@ -16,7 +16,7 @@ type Service struct {
 	operatorpb.UnimplementedPipelineOperatorServiceServer
 	operatorpb.UnimplementedMetricsServiceServer
 
-	metrics commonoperator.MetricsCollector
+	metrics operator.MetricsCollector
 	log     *zap.Logger
 }
 

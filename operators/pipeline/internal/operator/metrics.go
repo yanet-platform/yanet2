@@ -60,9 +60,8 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 // GatewayMetrics is the per-gateway implementation of
 // GatewayActuatorMetricsObserver.
 type GatewayMetrics struct {
-	*operator.ApplyMetrics
-
-	name string
+	applyMetrics *operator.ApplyMetrics
+	name         string
 
 	resourceUpdate       map[string]*metrics.Counter
 	resourceUpdateErrors map[string]*metrics.Counter
@@ -84,7 +83,7 @@ func NewGatewayMetrics(name string) *GatewayMetrics {
 	}
 
 	return &GatewayMetrics{
-		ApplyMetrics: operator.NewApplyMetrics(
+		applyMetrics: operator.NewApplyMetrics(
 			"pipeline_operator_gateway",
 			commonpb.NewLabel("gateway", name),
 		),
@@ -95,7 +94,7 @@ func NewGatewayMetrics(name string) *GatewayMetrics {
 }
 
 func (m *GatewayMetrics) OnApplyCompleted(err error) {
-	m.ApplyMetrics.Observe(err)
+	m.applyMetrics.Observe(err)
 }
 
 func (m *GatewayMetrics) OnResourceUpdated(kind string, err error) {
@@ -126,7 +125,7 @@ func (m *GatewayMetrics) OnGC(deleted, failed int, err error) {
 
 func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	gw := commonpb.NewLabel("gateway", m.name)
-	out := m.ApplyMetrics.Collect()
+	out := m.applyMetrics.Collect()
 
 	for kind, c := range m.resourceUpdate {
 		out = append(out, commonpb.NewMetricCounter(
