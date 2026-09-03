@@ -26,8 +26,7 @@ var operatorCLIs = []string{
 
 var operatorArtifacts = []string{
 	"build/operators/route/yanet-route-operator",
-	"build/operators/forward/yanet-forward-operator",
-	"build/operators/decap/yanet-decap-operator",
+	"build/operators/generic/yanet-generic-operator",
 	"build/operators/pipeline/yanet-pipeline-operator",
 	"build/operators/bird-adapter/yanet-bird-adapter",
 }
@@ -67,8 +66,8 @@ var operatorScopes = []OperatorScope{
 	{Name: "dataplane", Command: "pgrep -f '[y]anet-dataplane' >/dev/null", Reason: "yanet-dataplane process is not running"},
 	{Name: "controlplane", Command: "pgrep -f '[y]anet-controlplane' >/dev/null", Reason: "yanet-controlplane process is not running"},
 	{Name: "route-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-route-operator ' >/dev/null", Reason: "yanet-route-operator process is not running"},
-	{Name: "forward-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-forward-operator ' >/dev/null", Reason: "yanet-forward-operator process is not running"},
-	{Name: "decap-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-decap-operator ' >/dev/null", Reason: "yanet-decap-operator process is not running"},
+	{Name: "forward-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-generic-operator -c /tmp/yanet/config/operators/forward.yaml' >/dev/null", Reason: "forward operator process is not running"},
+	{Name: "decap-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-generic-operator -c /tmp/yanet/config/operators/decap.yaml' >/dev/null", Reason: "decap operator process is not running"},
 	{Name: "pipeline-operator", Command: "pgrep -f '^/tmp/yanet/operators/yanet-pipeline-operator ' >/dev/null", Reason: "yanet-pipeline-operator process is not running"},
 	{Name: "bird", Command: "pgrep -x bird >/dev/null", Reason: "bird process is not running"},
 	{Name: "bird-adapter", Command: "pgrep -f '^/tmp/yanet/operators/yanet-bird-adapter server ' >/dev/null", Reason: "yanet-bird-adapter server process is not running"},
@@ -256,8 +255,7 @@ func PrepareOperators(fw *framework.TestFramework) error {
 	}
 	copyCommands := []string{
 		"cp /mnt/build/operators/route/yanet-route-operator /tmp/yanet/operators/",
-		"cp /mnt/build/operators/forward/yanet-forward-operator /tmp/yanet/operators/",
-		"cp /mnt/build/operators/decap/yanet-decap-operator /tmp/yanet/operators/",
+		"cp /mnt/build/operators/generic/yanet-generic-operator /tmp/yanet/operators/",
 		"cp /mnt/build/operators/pipeline/yanet-pipeline-operator /tmp/yanet/operators/",
 		"cp /mnt/build/operators/bird-adapter/yanet-bird-adapter /tmp/yanet/operators/",
 	}
@@ -300,8 +298,8 @@ func StartOperators(fw *framework.TestFramework) error {
 		"ip nei replace 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0",
 		"ip nei replace 2001:db8::1 lladdr 52:54:00:6b:ff:a1 dev kni0",
 		"bash -c 'nohup /tmp/yanet/operators/yanet-route-operator -c /tmp/yanet/config/operators/route.yaml > /tmp/yanet/logs/yanet-route-operator.log 2>&1 &'",
-		"bash -c 'nohup /tmp/yanet/operators/yanet-forward-operator -c /tmp/yanet/config/operators/forward.yaml > /tmp/yanet/logs/yanet-forward-operator.log 2>&1 &'",
-		"bash -c 'nohup /tmp/yanet/operators/yanet-decap-operator -c /tmp/yanet/config/operators/decap.yaml > /tmp/yanet/logs/yanet-decap-operator.log 2>&1 &'",
+		"bash -c 'nohup /tmp/yanet/operators/yanet-generic-operator -c /tmp/yanet/config/operators/forward.yaml > /tmp/yanet/logs/yanet-forward-operator.log 2>&1 &'",
+		"bash -c 'nohup /tmp/yanet/operators/yanet-generic-operator -c /tmp/yanet/config/operators/decap.yaml > /tmp/yanet/logs/yanet-decap-operator.log 2>&1 &'",
 		"bash -c 'nohup bird -c /tmp/yanet/config/operators/bird.conf > /tmp/yanet/logs/bird.log 2>&1 &'",
 		"bash -c 'nohup /tmp/yanet/operators/yanet-bird-adapter server -c /tmp/yanet/config/operators/bird-adapter.yaml > /tmp/yanet/logs/yanet-bird-adapter.log 2>&1 &'",
 	}
@@ -403,20 +401,30 @@ server: {endpoint: "[::1]:50003"}
 gateways: [{name: numa0, endpoint: "[::1]:8080"}]
 register: {interval: 1s}
 reconcile: {interval: 1s, initial_backoff: 100ms, max_backoff: 1s}
+configs:
+  - {name: forward0, method: modules.forward.controlplane.forwardpb.v1.ForwardService/UpdateConfig, file: /tmp/yanet/config/operators/forward-rules.yaml}
 functions:
-  - {name: "fn:forward", chain: default, weight: 1, module: forward0, rules_file: /tmp/yanet/config/operators/forward-rules.yaml}
+  - name: "fn:forward"
+    chains:
+      - chain: {name: default, modules: [{type: forward, name: forward0}]}
+        weight: 1
 `,
 	"/tmp/yanet/config/operators/forward-rules.yaml": `rules:
-  - {target: virtio_user_kni0, counter: to_kni, vlan_ranges: [{from: 0, to: 4095}], srcs: ["0.0.0.0/0", "::/0"], dsts: ["203.0.113.14/32", "fe80::/64"], mode: Out, devices: ["01:00.0"]}
-  - {target: "01:00.0", counter: to_phy, vlan_ranges: [{from: 0, to: 4095}], srcs: ["0.0.0.0/0", "::/0"], dsts: ["0.0.0.0/0", "::/0"], mode: None, devices: ["01:00.0"]}
+  - {action: {target: virtio_user_kni0, counter: to_kni, mode: OUT}, vlan_ranges: [{from: 0, to: 4095}], sources4: ["0.0.0.0/0"], sources6: ["::/0"], destinations4: ["203.0.113.14/32"], destinations6: ["fe80::/64"], devices: [{name: "01:00.0"}]}
+  - {action: {target: "01:00.0", counter: to_phy, mode: NONE}, vlan_ranges: [{from: 0, to: 4095}], sources4: ["0.0.0.0/0"], sources6: ["::/0"], destinations4: ["0.0.0.0/0"], destinations6: ["::/0"], devices: [{name: "01:00.0"}]}
 `,
 	"/tmp/yanet/config/operators/decap.yaml": `logging: {level: info}
 server: {endpoint: "[::1]:50004"}
 gateways: [{name: numa0, endpoint: "[::1]:8080"}]
 register: {interval: 1s}
 reconcile: {interval: 1s, initial_backoff: 100ms, max_backoff: 1s}
+configs:
+  - {name: decap0, method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig, file: /tmp/yanet/config/operators/decap-prefixes.yaml}
 functions:
-  - {name: "fn:decap", chain: default, weight: 1, module: decap0, prefixes_file: /tmp/yanet/config/operators/decap-prefixes.yaml}
+  - name: "fn:decap"
+    chains:
+      - chain: {name: default, modules: [{type: decap, name: decap0}]}
+        weight: 1
 `,
 	"/tmp/yanet/config/operators/decap-prefixes.yaml": "prefixes4: []\nprefixes6: []\n",
 	"/tmp/yanet/config/operators/pipeline.yaml": `logging: {level: info}

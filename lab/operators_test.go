@@ -75,8 +75,7 @@ func TestRequiredArtifacts(t *testing.T) {
 		filepath.Join(root, "build", "controlplane", "yanet-controlplane"),
 		filepath.Join(root, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
 		filepath.Join(root, "build", "operators", "route", "yanet-route-operator"),
-		filepath.Join(root, "build", "operators", "forward", "yanet-forward-operator"),
-		filepath.Join(root, "build", "operators", "decap", "yanet-decap-operator"),
+		filepath.Join(root, "build", "operators", "generic", "yanet-generic-operator"),
 		filepath.Join(root, "build", "operators", "pipeline", "yanet-pipeline-operator"),
 		filepath.Join(root, "build", "operators", "bird-adapter", "yanet-bird-adapter"),
 	}
