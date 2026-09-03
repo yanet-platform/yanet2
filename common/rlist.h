@@ -5,6 +5,11 @@
 // A member embeds a node and is reached back through the node; a head is
 // a plain node that points at itself when empty. Insertion appends at
 // the tail, so first-out order matches insertion order.
+//
+// A node embedded in shared memory keeps absolute addresses in its
+// links: only the process that builds the list ever writes or walks
+// them, and that process leaves them zeroed until the first build, so
+// no other mapping ever dereferences a foreign address.
 struct rlist {
 	struct rlist *prev;
 	struct rlist *next;

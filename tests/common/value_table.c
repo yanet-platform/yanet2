@@ -34,9 +34,8 @@ test_free_after_failed_init(void) {
 // no child attached to the parent.
 static void
 test_partial_failure_no_child(void) {
-	// Big enough for the context struct and the tiny values array (a
-	// single chunk pointer for these dims), too small for the first
-	// 64KB values chunk.
+	// Big enough for the context struct, too small for the values
+	// pointer array (1024 chunk pointers for these dims).
 	void *arena = malloc(1 << 12);
 	assert(arena != NULL);
 
@@ -49,7 +48,7 @@ test_partial_failure_no_child(void) {
 	assert(res == 0);
 
 	struct value_table table;
-	res = value_table_init(&table, &mem_ctx, "test-table", 1, 10);
+	res = value_table_init(&table, &mem_ctx, "test-table", 1, 1024);
 	assert(res == -1);
 
 	assert(ADDR_OF(&mem_ctx.first_child) == NULL);

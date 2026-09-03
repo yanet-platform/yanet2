@@ -102,19 +102,15 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 // An entry parked on the processed list after running this tick is
 // moved back to the active list so it runs again, reproducing the
 // recirculation semantics; an entry already queued for this tick is
-// left where it is. Before the lists are built the packet is only
-// placed on the entry's schedule and the first full sweep picks it up.
+// left where it is. Packets are only scheduled from inside a worker
+// round, and the round's preparation builds the worklists before any
+// of them, so no readiness check is needed here.
 static inline void
 device_entry_ectx_schedule(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_entry_ectx *device_entry_ectx,
 	struct packet *packet
 ) {
-	if (!config_gen_ectx->schedules_ready) {
-		packet_front_input(&device_entry_ectx->schedule, packet);
-		return;
-	}
-
 	if (device_entry_ectx->schedule_list !=
 	    config_gen_ectx->schedule_active) {
 		rlist_remove(&device_entry_ectx->schedule_node);
