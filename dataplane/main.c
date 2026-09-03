@@ -1,13 +1,45 @@
 #include <getopt.h>
 #include <stdio.h>
 
+#include <rte_common.h>
+#include <rte_cpuflags.h>
 #include <rte_version.h>
 
 #include "common/buildinfo.h"
 #include "config.h"
 #include "dataplane.h"
+#include "lib/dataplane/module/module.h"
 #include "lib/logging/log.h"
 #include "yanet_build_stamp.h"
+
+// Lists the ISA extensions the build assumes and names the ones this host
+// lacks, since EAL refuses to start on a CPU missing any of them.
+static void
+print_isa(void) {
+	static const enum rte_cpu_flag_t flags[] = {RTE_COMPILE_TIME_CPUFLAGS};
+
+	printf("  ISA:       ");
+	for (size_t i = 0; i < RTE_DIM(flags); ++i) {
+		printf(" %s", rte_cpu_get_flag_name(flags[i]));
+	}
+	printf("\n");
+
+	printf("  Host CPU:  ");
+	size_t missing = 0;
+	for (size_t i = 0; i < RTE_DIM(flags); ++i) {
+		if (rte_cpu_get_flag_enabled(flags[i]) == 1) {
+			continue;
+		}
+		if (missing++ == 0) {
+			printf(" lacks");
+		}
+		printf(" %s", rte_cpu_get_flag_name(flags[i]));
+	}
+	if (missing == 0) {
+		printf(" supports every listed extension");
+	}
+	printf("\n");
+}
 
 static void
 print_version(void) {
@@ -16,9 +48,16 @@ print_version(void) {
 	       YANET_COMPILER_ID,
 	       YANET_COMPILER_VERSION);
 	printf("  Build type: %s\n", YANET_BUILD_TYPE);
+	printf("  Sanitizers: %s\n", YANET_SANITIZERS);
 	printf("  Built:      %s\n", YANET_BUILD_DATE);
 	printf("  Git commit: %s\n", YANET_GIT_COMMIT);
 	printf("  DPDK:       %s\n", rte_version());
+	printf("  Target:     %s (DPDK platform %s)\n",
+	       YANET_TARGET,
+	       YANET_DPDK_PLATFORM);
+	print_isa();
+	printf("  Cache line: %d\n", YANET_CACHE_LINE_SIZE);
+	printf("  Module ABI: %d\n", YANET_MODULE_ABI_VERSION);
 }
 
 static void
