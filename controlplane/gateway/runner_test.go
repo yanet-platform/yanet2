@@ -32,7 +32,7 @@ func (m *healthService) RegisterService(server *grpc.Server) {
 
 // startServiceRunner runs runner until the test ends, failing the test if
 // it does not register within a bounded time or exits with an error.
-func startServiceRunner(t *testing.T, runner *gateway.ServiceRunner) {
+func startServiceRunner(t *testing.T, runner *gateway.InProcessServiceRunner) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -50,12 +50,12 @@ func startServiceRunner(t *testing.T, runner *gateway.ServiceRunner) {
 	}
 }
 
-// Test_ServiceRunner_Run_ServesThroughRegistry verifies that a runner answers
-// RPCs through the registry's connection to it.
+// Test_InProcessServiceRunner_Run_ServesThroughRegistry verifies that a
+// runner answers RPCs through the registry's connection to it.
 //
 // The services are recorded as in-process backends labeled with the
 // gateway's endpoint, the address they are reachable at from outside.
-func Test_ServiceRunner_Run_ServesThroughRegistry(t *testing.T) {
+func Test_InProcessServiceRunner_Run_ServesThroughRegistry(t *testing.T) {
 	t.Parallel()
 
 	const gatewayEndpoint = "gateway.test:8080"
@@ -64,7 +64,7 @@ func Test_ServiceRunner_Run_ServesThroughRegistry(t *testing.T) {
 	registry := gateway.NewBackendRegistry()
 	t.Cleanup(func() { _ = registry.Close() })
 
-	startServiceRunner(t, gateway.NewServiceRunner(&healthService{}, registry, gatewayEndpoint))
+	startServiceRunner(t, gateway.NewInProcessServiceRunner(&healthService{}, registry, gatewayEndpoint))
 
 	entry := getBackendEntry(t, registry, serviceName)
 	require.Equal(t, gateway.BackendKindInProcess, entry.Kind())
@@ -82,19 +82,19 @@ func Test_ServiceRunner_Run_ServesThroughRegistry(t *testing.T) {
 	require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
 }
 
-// Test_ServiceRunner_Run_ShutsDownWithOpenStream verifies that the runner
-// returns within a bounded time after its context is canceled.
+// Test_InProcessServiceRunner_Run_ShutsDownWithOpenStream verifies that the
+// runner returns within a bounded time after its context is canceled.
 //
 // A client keeps a server-streaming RPC open on the runner's own gRPC server
 // meanwhile, reproducing the hang an unattended readiness watch causes on
 // shutdown.
-func Test_ServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
+func Test_InProcessServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	t.Parallel()
 
 	registry := gateway.NewBackendRegistry()
 	t.Cleanup(func() { _ = registry.Close() })
 
-	runner := gateway.NewServiceRunner(&blockingReadinessService{}, registry, "gateway.test:8080")
+	runner := gateway.NewInProcessServiceRunner(&blockingReadinessService{}, registry, "gateway.test:8080")
 
 	ctx, cancel := context.WithCancel(t.Context())
 	var group errgroup.Group

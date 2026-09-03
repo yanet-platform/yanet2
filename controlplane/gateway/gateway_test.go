@@ -229,6 +229,81 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 	require.Contains(t, string(body), "controlplane.ynpb.v1.Gateway")
 }
 
+// lifecycleService is a Service recording that its background job ran and
+// that it was closed, under a unique gRPC service name.
+type lifecycleService struct {
+	name   string
+	ran    chan struct{}
+	closed chan struct{}
+}
+
+// newLifecycleService returns a service whose run and close markers fire
+// exactly once, so it expects one gateway run and one close.
+func newLifecycleService(name string) *lifecycleService {
+	return &lifecycleService{
+		name:   name,
+		ran:    make(chan struct{}),
+		closed: make(chan struct{}),
+	}
+}
+
+func (m *lifecycleService) Name() string                   { return m.name }
+func (m *lifecycleService) Endpoint() string               { return "" }
+func (m *lifecycleService) ServicesNames() []string        { return []string{"test." + m.name} }
+func (m *lifecycleService) RegisterService(_ *grpc.Server) {}
+
+func (m *lifecycleService) Run(ctx context.Context) error {
+	close(m.ran)
+	<-ctx.Done()
+	return nil
+}
+
+func (m *lifecycleService) Close() error {
+	close(m.closed)
+	return nil
+}
+
+// Test_Gateway_HostsRunAndCloseEveryService verifies that the gateway runs
+// the background job of a framework service and of a module service alike,
+// and closes both on shutdown.
+func Test_Gateway_HostsRunAndCloseEveryService(t *testing.T) {
+	t.Parallel()
+
+	builtin := newLifecycleService("builtin")
+	module := newLifecycleService("module")
+
+	gw, err := gateway.NewGateway(gateway.DefaultConfig(),
+		gateway.WithListener(NewTestListener(t)),
+		gateway.WithBuiltinService(builtin),
+		gateway.WithService(module),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+
+	for _, service := range []*lifecycleService{builtin, module} {
+		select {
+		case <-service.ran:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("background job of %s did not start", service.name)
+		}
+	}
+
+	cancel()
+	require.NoError(t, group.Wait())
+	require.NoError(t, gw.Close())
+
+	for _, service := range []*lifecycleService{builtin, module} {
+		select {
+		case <-service.closed:
+		default:
+			t.Fatalf("%s was not closed", service.name)
+		}
+	}
+}
+
 // NewTestListener opens an ephemeral loopback TCP listener for a test to
 // pass into WithListener or hold open to occupy a port, registering a
 // cleanup that closes it.
