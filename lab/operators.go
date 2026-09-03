@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yanet-platform/yanet2/lab/internal/operatorwait"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
@@ -217,7 +218,7 @@ var forwardingExpected = []byte{
 
 // OperatorFingerprintFiles lists source files that invalidate the lab operator snapshot.
 func OperatorFingerprintFiles() []string {
-	files := append([]string{"lab/operators.go"}, operatorArtifacts...)
+	files := append([]string{"lab/operators.go", "lab/internal/operatorwait/bird.go"}, operatorArtifacts...)
 	for _, name := range operatorCLIs {
 		files = append(files, "target/release/"+name)
 	}
@@ -314,7 +315,9 @@ func StartOperators(fw *framework.TestFramework) error {
 		return fmt.Errorf("wait for BIRD export sockets: %w\n%s", err, output)
 	}
 	adapterClient := "bash /tmp/yanet/operators/configure-bird.sh"
-	if _, err := fw.ExecuteCommand("sleep 1"); err != nil {
+	if err := operatorwait.BirdAdapter(func(command string, timeout time.Duration) (string, error) {
+		return fw.ExecuteCommandWithTimeout(command, timeout)
+	}); err != nil {
 		return err
 	}
 	if output, err := fw.ExecuteCommand(adapterClient); err != nil {

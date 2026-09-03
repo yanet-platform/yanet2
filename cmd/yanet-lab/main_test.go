@@ -546,15 +546,16 @@ func TestHandleRuntimeConnectionIncludesProtocolVersion(t *testing.T) {
 
 func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, supervisorExecTimeout)
-	fast := []string{"shell", "report", "serial"}
+	fast := []string{"shell", "serial"}
 	for _, action := range fast {
 		require.Equal(t, supervisorRequestTimeout, requestTimeout(action), "fast action %q", action)
 	}
 	assert.Equal(t, supervisorStatusTimeout, requestTimeout("status"))
 	assert.Greater(t, requestTimeout("status"), 30*time.Second)
+	assert.Equal(t, supervisorStatusTimeout, requestTimeout("report"))
 	assert.Equal(t, supervisorManifestTimeout+30*time.Second, requestTimeout("manifest"))
 	assert.Equal(t, supervisorExecTimeout+30*time.Second, requestTimeout("exec"))
-	assert.Equal(t, supervisorResetTimeout, requestTimeout("reset"))
+	assert.Equal(t, supervisorResetTimeout+30*time.Second, requestTimeout("reset"))
 	assert.Equal(t, supervisorShutdownTimeout, requestTimeout("down"))
 }
 
@@ -604,6 +605,22 @@ func TestWriteReportOverwritesLastReport(t *testing.T) {
 	if string(data) != "second" {
 		t.Fatalf("report = %q", data)
 	}
+}
+
+// Test_WriteReport_RejectsSymlinkDestination verifies that report output cannot
+// follow a session-path symlink to an unrelated file.
+func Test_WriteReport_RejectsSymlinkDestination(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target")
+	report := filepath.Join(directory, "last-report.txt")
+	require.NoError(t, os.WriteFile(target, []byte("unchanged"), 0o600))
+	require.NoError(t, os.Symlink(target, report))
+
+	_, err := writeReport(directory, []byte("replaced"))
+	require.Error(t, err)
+	data, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, "unchanged", string(data))
 }
 
 func TestCopySerialInputDetachesOnEscape(t *testing.T) {
@@ -962,6 +979,46 @@ func TestSupervisorShutdownHooksAreSerialized(t *testing.T) {
 	require.Equal(t, []string{"down-before-wait", "down-cleanup", "down-result", "signal-before-wait"}, orderSnapshot())
 }
 
+// Test_HandleConnection_DownFailureKeepsSupervisorForRetry verifies that a
+// failed cleanup keeps the supervisor socket available for the documented retry.
+func Test_HandleConnection_DownFailureKeepsSupervisorForRetry(t *testing.T) {
+	directory := t.TempDir()
+	state := &supervisor{}
+	shutdownCalls := 0
+	shutdown := func() error {
+		shutdownCalls++
+		if shutdownCalls == 1 {
+			return errors.New("cleanup failed")
+		}
+		return nil
+	}
+	stopCalled := false
+	stop := func() { stopCalled = true }
+
+	callDown := func() response {
+		server, client := net.Pipe()
+		done := make(chan struct{})
+		go func() {
+			handleConnection(server, nil, directory, state, nil, shutdown, stop)
+			close(done)
+		}()
+		require.NoError(t, json.NewEncoder(client).Encode(request{Action: "down"}))
+		var reply response
+		require.NoError(t, json.NewDecoder(client).Decode(&reply))
+		require.NoError(t, client.Close())
+		<-done
+		return reply
+	}
+
+	require.True(t, callDown().OK)
+	require.False(t, stopCalled)
+	require.FileExists(t, filepath.Join(directory, shutdownMarkerName))
+
+	require.True(t, callDown().OK)
+	require.True(t, stopCalled)
+	require.NoFileExists(t, filepath.Join(directory, shutdownMarkerName))
+}
+
 func TestEnsurePrivateDirectoryRejectsUnsafePaths(t *testing.T) {
 	testCases := []struct {
 		name    string
@@ -1018,6 +1075,92 @@ func TestEnsureSSHKeyRejectsMissingPub(t *testing.T) {
 	require.NoError(t, os.WriteFile(keyPath, []byte("PRIVATE KEY"), 0o600))
 	_, err := ensureSSHKey(directory)
 	require.Error(t, err)
+}
+
+// Test_EnsureSSHKey_GenerationFailureRemovesPartialPair verifies that a failed
+// generator cannot leave state that blocks the next startup attempt.
+func Test_EnsureSSHKey_GenerationFailureRemovesPartialPair(t *testing.T) {
+	original := lookupKeygen
+	t.Cleanup(func() { lookupKeygen = original })
+
+	testCases := []struct {
+		name       string
+		createBoth bool
+	}{
+		{name: "private file only"},
+		{name: "private and public files", createBoth: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			directory := t.TempDir()
+			generator := filepath.Join(directory, "ssh-keygen")
+			script := "#!/bin/sh\nprintf private > \"$7\"\n"
+			if testCase.createBoth {
+				script += "printf public > \"$7.pub\"\n"
+			}
+			script += "exit 1\n"
+			require.NoError(t, os.WriteFile(generator, []byte(script), 0o700))
+			lookupKeygen = func() (string, error) { return generator, nil }
+
+			privatePath := filepath.Join(directory, "id_ed25519")
+			_, err := ensureSSHKey(directory)
+			require.ErrorContains(t, err, "generate lab SSH key")
+			require.NoFileExists(t, privatePath)
+			require.NoFileExists(t, privatePath+".pub")
+		})
+	}
+}
+
+// Test_EnsureSSHKey_CleanupFailurePreservesGenerationError verifies that
+// cleanup diagnostics augment rather than replace the generator failure.
+func Test_EnsureSSHKey_CleanupFailurePreservesGenerationError(t *testing.T) {
+	original := lookupKeygen
+	t.Cleanup(func() { lookupKeygen = original })
+
+	directory := t.TempDir()
+	generator := filepath.Join(directory, "ssh-keygen")
+	script := "#!/bin/sh\nmkdir \"$7\"\nprintf retained > \"$7/child\"\nexit 1\n"
+	require.NoError(t, os.WriteFile(generator, []byte(script), 0o700))
+	lookupKeygen = func() (string, error) { return generator, nil }
+
+	_, err := ensureSSHKey(directory)
+	require.ErrorContains(t, err, "generate lab SSH key")
+	require.ErrorContains(t, err, "remove partial SSH key")
+}
+
+// Test_EnsureSSHKey_InvalidGeneratedPairIsRemoved verifies that validation
+// failures cannot persist malformed generated credentials.
+func Test_EnsureSSHKey_InvalidGeneratedPairIsRemoved(t *testing.T) {
+	original := lookupKeygen
+	t.Cleanup(func() { lookupKeygen = original })
+
+	testCases := []struct {
+		name        string
+		privateMode string
+		publicMode  string
+	}{
+		{name: "invalid private mode", privateMode: "644", publicMode: "644"},
+		{name: "invalid public mode", privateMode: "600", publicMode: "600"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			directory := t.TempDir()
+			generator := filepath.Join(directory, "ssh-keygen")
+			script := fmt.Sprintf(
+				"#!/bin/sh\nprintf private > \"$7\"\nprintf public > \"$7.pub\"\nchmod %s \"$7\"\nchmod %s \"$7.pub\"\n",
+				testCase.privateMode,
+				testCase.publicMode,
+			)
+			require.NoError(t, os.WriteFile(generator, []byte(script), 0o700))
+			lookupKeygen = func() (string, error) { return generator, nil }
+
+			privatePath := filepath.Join(directory, "id_ed25519")
+			_, err := ensureSSHKey(directory)
+			require.Error(t, err)
+			require.NoFileExists(t, privatePath)
+			require.NoFileExists(t, privatePath+".pub")
+		})
+	}
 }
 
 func TestClassifyStaleSupervisor(t *testing.T) {
@@ -2009,13 +2152,12 @@ func TestDownWritesShutdownMarkerOnError(t *testing.T) {
 	require.NoError(t, json.NewDecoder(client).Decode(&reply))
 	require.True(t, reply.OK)
 	require.Equal(t, "lab stopped", reply.Output)
-
+	require.NoError(t, handlers.Wait())
 	select {
 	case <-stopCalled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("stop callback not invoked within 5s")
+		t.Fatal("failed shutdown must keep the supervisor available for retry")
+	default:
 	}
-	require.NoError(t, handlers.Wait())
 
 	path := filepath.Join(directory, shutdownMarkerName)
 	info, err := os.Lstat(path)

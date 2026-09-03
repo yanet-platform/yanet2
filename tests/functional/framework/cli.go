@@ -19,7 +19,10 @@ var (
 	ansiEscapeRegex    = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 	controlCharRegex   = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 	errMarkersNotFound = errors.New("markers not found in output")
+	errCommandTimeout  = errors.New("command timeout")
 )
+
+var serialRecoveryTimeout = 5 * time.Second
 
 // cliManagerInner holds the shared connection state that should not be copied
 // between CLIManager instances. This allows multiple CLIManager wrappers
@@ -147,14 +150,15 @@ func (c *CLIManager) ExecuteCommand(command string) (string, error) {
 	commandMarker := fmt.Sprintf("CMD_START_%d", tm)
 	endMarker := fmt.Sprintf("CMD_END_%d", tm)
 
-	fullCommand := fmt.Sprintf("echo '%s'; %s; echo \"=$?=%s\"\n", commandMarker, command, endMarker)
+	fullCommand := commandWithMarkers(command, commandMarker, endMarker)
 	_, err := stdin.Write([]byte(fullCommand))
 	if err != nil {
 		return "", fmt.Errorf("failed to send command to VM: %w", err)
 	}
 
 	// Wait for command completion and collect output
-	return c.waitForCommandCompletionWithMarkers(command, fullCommand, commandMarker, endMarker, 30*time.Second)
+	output, err := c.waitForCommandCompletionWithMarkers(command, fullCommand, commandMarker, endMarker, 30*time.Second)
+	return c.finishTimedCommand(stdin, output, err, commandMarker, endMarker)
 }
 
 // ExecuteCommandWithTimeout is like ExecuteCommand but with a custom timeout.
@@ -175,17 +179,34 @@ func (c *CLIManager) ExecuteCommandWithTimeout(command string, timeout time.Dura
 	tm := time.Now().UnixNano()
 	commandMarker := fmt.Sprintf("CMD_START_%d", tm)
 	endMarker := fmt.Sprintf("CMD_END_%d", tm)
-	fullCommand := fmt.Sprintf("echo '%s'; %s; echo \"=$?=%s\"\n", commandMarker, command, endMarker)
+	fullCommand := commandWithMarkers(command, commandMarker, endMarker)
 	_, err := stdin.Write([]byte(fullCommand))
 	if err != nil {
 		return "", fmt.Errorf("failed to send command to VM: %w", err)
 	}
 	output, err := c.waitForCommandCompletionWithMarkers(command, fullCommand, commandMarker, endMarker, timeout)
-	if err != nil {
-		if stdinErr := writeInterrupt(stdin); stdinErr != nil {
-			c.log.Warnf("failed to interrupt timed-out command: %v", stdinErr)
-		}
-		c.inner.qemu.resetSerialBuffer()
+	return c.finishTimedCommand(stdin, output, err, commandMarker, endMarker)
+}
+
+func (c *CLIManager) finishTimedCommand(
+	stdin io.Writer,
+	output string,
+	err error,
+	startMarker string,
+	endMarker string,
+) (string, error) {
+	if !errors.Is(err, errCommandTimeout) {
+		return output, err
+	}
+	if recoveryErr := c.recoverTimedOutCommand(
+		stdin,
+		startMarker,
+		endMarker,
+		serialRecoveryTimeout,
+	); recoveryErr != nil {
+		c.inner.qemu.AbortSerial()
+		c.inner.qemu.setVMReady(false)
+		return output, errors.Join(err, fmt.Errorf("serial recovery failed: %w", recoveryErr))
 	}
 	return output, err
 }
@@ -193,6 +214,31 @@ func (c *CLIManager) ExecuteCommandWithTimeout(command string, timeout time.Dura
 func writeInterrupt(stdin io.Writer) error {
 	_, err := stdin.Write([]byte{3, '\n'})
 	return err
+}
+
+func commandWithMarkers(command, startMarker, endMarker string) string {
+	return fmt.Sprintf("interrupted=0; trap 'interrupted=1; printf \"=130=%s\\n\"' INT; echo '%s'; %s; status=$?; trap - INT; if [ \"$interrupted\" -eq 0 ]; then printf \"=$status=%s\\n\"; fi\n", endMarker, startMarker, command, endMarker)
+}
+
+func (c *CLIManager) recoverTimedOutCommand(
+	stdin io.Writer,
+	startMarker string,
+	endMarker string,
+	timeout time.Duration,
+) error {
+	if err := writeInterrupt(stdin); err != nil {
+		return fmt.Errorf("interrupt command: %w", err)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if c.inner.qemu.serialBufferContainsCompletionMarker(startMarker, endMarker) {
+			c.inner.qemu.discardSerialThrough(endMarker)
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("original command did not complete after interrupt within %v", timeout)
 }
 
 // ExecuteCommands executes multiple CLI commands sequentially within the QEMU
@@ -270,6 +316,9 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 	parseRetries := 0
 
 	for time.Now().Before(deadline) {
+		if !c.inner.qemu.hasSerialConnection() {
+			return c.inner.qemu.serialBufferSnapshot(), fmt.Errorf("serial console closed")
+		}
 		// Look for start marker
 		if !foundStart && c.inner.qemu.serialBufferContains(startMarker) {
 			foundStart = true
@@ -304,7 +353,7 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 
 	// Return whatever output we have, even if incomplete.
 	output := c.inner.qemu.serialBufferSnapshot()
-	return output, fmt.Errorf("command timeout after %v (start found: %v)", timeout, foundStart)
+	return output, fmt.Errorf("%w after %v (start found: %v)", errCommandTimeout, timeout, foundStart)
 }
 
 // extractCommandOutputWithMarkers parses the raw VM output to extract the actual

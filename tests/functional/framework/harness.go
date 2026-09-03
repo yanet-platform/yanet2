@@ -667,9 +667,12 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	// to avoid unbounded overlay accumulation.
 	dir := filepath.Dir(baselineTemplate)
 	base := filepath.Base(baselineTemplate)
-	prefix := strings.TrimSuffix(base, "-"+baselineTemplateVersion+".qcow2")
-	prefix = strings.TrimSuffix(prefix, "-"+m.fingerprint[:16])
-	if matches, err := filepath.Glob(filepath.Join(dir, prefix+"-"+baselineTemplateVersion+".qcow2")); err == nil {
+	prefix := strings.TrimSuffix(base, "-"+m.fingerprint[:16]+"-"+baselineTemplateVersion+".qcow2")
+	if prefix != base {
+		matches, err := filepath.Glob(filepath.Join(dir, prefix+"-*-"+baselineTemplateVersion+".qcow2"))
+		if err != nil {
+			return nil
+		}
 		for _, old := range matches {
 			if old != baselineTemplate {
 				_ = os.Remove(old)

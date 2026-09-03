@@ -221,6 +221,15 @@ func TestSerialBufferContains(t *testing.T) {
 	}
 }
 
+func TestSerialCompletionMarkerRejectsCommandEcho(t *testing.T) {
+	q := &QEMUManager{}
+	q.serialBuffer.WriteString("echo \"=$?=CMD_END_TEST\"\n")
+	require.False(t, q.serialBufferContainsCompletionMarker("CMD_START_TEST", "CMD_END_TEST"))
+
+	q.serialBuffer.WriteString("=130=CMD_END_TEST\n")
+	require.True(t, q.serialBufferContainsCompletionMarker("CMD_START_TEST", "CMD_END_TEST"))
+}
+
 // Test_SerialBufferScan_FindsAndDiscardsMarkerBeyondOneMiB verifies that the
 // marker scan covers the complete tail retained after buffer trimming.
 func Test_SerialBufferScan_FindsAndDiscardsMarkerBeyondOneMiB(t *testing.T) {
@@ -249,5 +258,126 @@ func TestNewQEMUManagerUsesProvidedProjectRoot(t *testing.T) {
 	}
 	if manager.TargetDir != filepath.Join(root, "target") {
 		t.Fatalf("target directory = %q, want %q", manager.TargetDir, filepath.Join(root, "target"))
+	}
+}
+
+// Test_QEMUManager_ConfigureSSHHostForward_RequiredFailuresPropagate verifies
+// that every required monitor and parsing failure aborts startup.
+func Test_QEMUManager_ConfigureSSHHostForward_RequiredFailuresPropagate(t *testing.T) {
+	monitorErr := errors.New("monitor unavailable")
+	testCases := []struct {
+		name      string
+		responses map[string]string
+		errors    map[string]error
+		contains  string
+	}{
+		{
+			name:     "monitor add fails",
+			errors:   map[string]error{"hostfwd_add net0 tcp:127.0.0.1:0-:22": monitorErr},
+			contains: "add SSH host forward",
+		},
+		{
+			name:      "monitor add returns error",
+			responses: map[string]string{"hostfwd_add net0 tcp:127.0.0.1:0-:22": "Could not set up host forwarding rule"},
+			contains:  "Could not set up host forwarding rule",
+		},
+		{
+			name:     "monitor query fails",
+			errors:   map[string]error{"info usernet": monitorErr},
+			contains: "query SSH host forward",
+		},
+		{
+			name:      "monitor reply cannot be parsed",
+			responses: map[string]string{"info usernet": "no forwards"},
+			contains:  "parse SSH host forward",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			manager := &QEMUManager{log: zap.NewNop().Sugar()}
+			err := manager.configureSSHHostForward(true, func(command string) (string, error) {
+				return testCase.responses[command], testCase.errors[command]
+			})
+			require.Error(t, err)
+			require.ErrorContains(t, err, "required SSH forwarding failed")
+			require.ErrorContains(t, err, testCase.contains)
+			if len(testCase.errors) > 0 {
+				require.ErrorIs(t, err, monitorErr)
+			}
+		})
+	}
+}
+
+// Test_QEMUManager_ConfigureSSHHostForward_DebugFailureIsWarningOnly verifies
+// that keep-alive debugging remains usable when its optional forward fails.
+func Test_QEMUManager_ConfigureSSHHostForward_DebugFailureIsWarningOnly(t *testing.T) {
+	manager := &QEMUManager{log: zap.NewNop().Sugar()}
+	require.NoError(t, manager.configureSSHHostForward(false, func(string) (string, error) {
+		return "", errors.New("monitor unavailable")
+	}))
+	require.Zero(t, manager.SSHPort())
+}
+
+// Test_QEMUManager_ConfigureSSHHostForward_SuccessRecordsPort verifies that a
+// parsed monitor forward is exposed to SSH clients.
+func Test_QEMUManager_ConfigureSSHHostForward_SuccessRecordsPort(t *testing.T) {
+	manager := &QEMUManager{log: zap.NewNop().Sugar()}
+	require.NoError(t, manager.configureSSHHostForward(true, func(command string) (string, error) {
+		if command == "info usernet" {
+			return "TCP[HOST_FORWARD] 12 127.0.0.1 43007 10.0.2.15 22 0 0", nil
+		}
+		return "", nil
+	}))
+	require.Equal(t, 43007, manager.SSHPort())
+}
+
+// Test_QEMUManager_ParseUsernetSSHPort_RejectsUnrelatedRows verifies that only
+// the requested loopback forward to guest port 22 is selected.
+func Test_QEMUManager_ParseUsernetSSHPort_RejectsUnrelatedRows(t *testing.T) {
+	rows := []string{
+		"TCP[LISTEN] 12 127.0.0.1 43007 10.0.2.15 22 0 0",
+		"TCP[HOST_FORWARD] 12 0.0.0.0 43007 10.0.2.15 22 0 0",
+		"TCP[HOST_FORWARD] 12 127.0.0.1 0 10.0.2.15 22 0 0",
+		"TCP[HOST_FORWARD] 12 127.0.0.1 65536 10.0.2.15 22 0 0",
+	}
+	for _, row := range rows {
+		t.Run(row, func(t *testing.T) {
+			_, err := parseUsernetSSHPort(row)
+			require.Error(t, err)
+		})
+	}
+}
+
+// Test_QEMUManager_Start_EarlyFailureClearsStaleSSHPort verifies that reused
+// managers never expose forwarding state from an earlier start.
+func Test_QEMUManager_Start_EarlyFailureClearsStaleSSHPort(t *testing.T) {
+	manager := &QEMUManager{
+		Name:      "stale-port-test",
+		ImagePath: filepath.Join(t.TempDir(), "missing.qcow2"),
+		sshPort:   43007,
+		log:       zap.NewNop().Sugar(),
+	}
+
+	_, err := manager.Start()
+	require.Error(t, err)
+	require.Zero(t, manager.SSHPort())
+}
+
+// Test_QEMUManager_StopAfterStartupError_RestoresForceStop verifies that
+// cleanup-only termination does not alter later keep-alive behavior.
+func Test_QEMUManager_StopAfterStartupError_RestoresForceStop(t *testing.T) {
+	for _, forceStop := range []bool{false, true} {
+		manager := &QEMUManager{
+			WorkDir:   t.TempDir(),
+			forceStop: forceStop,
+			log:       zap.NewNop().Sugar(),
+		}
+		startErr := errors.New("forwarding failed")
+
+		err := manager.stopAfterStartupError(startErr)
+
+		require.ErrorIs(t, err, startErr)
+		require.Equal(t, forceStop, manager.forceStop)
 	}
 }

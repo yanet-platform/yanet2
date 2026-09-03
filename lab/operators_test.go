@@ -1,16 +1,21 @@
 package lab_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/lab"
+	"github.com/yanet-platform/yanet2/lab/internal/operatorwait"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
@@ -82,6 +87,12 @@ func TestRequiredArtifacts(t *testing.T) {
 		expected = append(expected, filepath.Join(root, "target", "release", name))
 	}
 	require.Equal(t, expected, artifacts)
+}
+
+// Test_OperatorFingerprintFiles_IncludesListenerWait verifies that readiness
+// changes invalidate the cached operator baseline.
+func Test_OperatorFingerprintFiles_IncludesListenerWait(t *testing.T) {
+	require.Contains(t, lab.OperatorFingerprintFiles(), "lab/internal/operatorwait/bird.go")
 }
 
 // Test_PrepareOperators_StagingFailureNamesCommand verifies that a failed
@@ -271,4 +282,104 @@ func scopeResultByName(scopes []lab.ScopeResult, name string) lab.ScopeResult {
 		}
 	}
 	return lab.ScopeResult{}
+}
+
+// Test_BirdAdapterWait_ListenerReadyContinues verifies that readiness is
+// accepted without an additional fixed startup delay.
+func Test_BirdAdapterWait_ListenerReadyContinues(t *testing.T) {
+	var command string
+	var timeout time.Duration
+	err := operatorwait.BirdAdapter(func(value string, valueTimeout time.Duration) (string, error) {
+		command = value
+		timeout = valueTimeout
+		return "", nil
+	})
+
+	require.NoError(t, err)
+	require.Contains(t, command, "/dev/tcp/127.0.0.1/50051")
+	require.Equal(t, 65*time.Second, timeout)
+}
+
+// Test_BirdAdapterWait_ListenerTimeoutIncludesDiagnostics verifies that a
+// bounded readiness failure retains adapter logs for startup diagnosis.
+func Test_BirdAdapterWait_ListenerTimeoutIncludesDiagnostics(t *testing.T) {
+	calls := 0
+	err := operatorwait.BirdAdapter(func(command string, timeout time.Duration) (string, error) {
+		calls++
+		if calls == 1 {
+			require.Contains(t, command, "/dev/tcp/127.0.0.1/50051")
+			require.Equal(t, 65*time.Second, timeout)
+			return "", errors.New("listener timeout")
+		}
+		require.Equal(t, "tail -c 8192 /tmp/yanet/logs/yanet-bird-adapter.log", command)
+		require.Equal(t, 10*time.Second, timeout)
+		return "adapter failed to bind", nil
+	})
+
+	require.Equal(t, 2, calls)
+	require.ErrorContains(t, err, "listener timeout")
+	require.ErrorContains(t, err, "adapter failed to bind")
+}
+
+// Test_BirdAdapterWait_DiagnosticsFailurePreservesBothErrors verifies that
+// readiness and bounded diagnostic failures remain visible together.
+func Test_BirdAdapterWait_DiagnosticsFailurePreservesBothErrors(t *testing.T) {
+	calls := 0
+	err := operatorwait.BirdAdapter(func(string, time.Duration) (string, error) {
+		calls++
+		if calls == 1 {
+			return "", errors.New("listener timeout")
+		}
+		return "partial adapter output", errors.New("diagnostic timeout")
+	})
+
+	require.ErrorContains(t, err, "listener timeout")
+	require.ErrorContains(t, err, "diagnostic timeout")
+	require.ErrorContains(t, err, "partial adapter output")
+}
+
+// Test_BirdAdapterWait_DelayedListenerReceivesNoApplicationData verifies that
+// the real readiness probe accepts a late listener without writing bytes.
+func Test_BirdAdapterWait_DelayedListenerReceivesNoApplicationData(t *testing.T) {
+	type listenerResult struct {
+		data []byte
+		err  error
+	}
+	reservedListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(reservedListener.Addr().String())
+	require.NoError(t, err)
+	require.NoError(t, reservedListener.Close())
+	result := make(chan listenerResult, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		listener, err := net.Listen("tcp", "127.0.0.1:"+port)
+		if err != nil {
+			result <- listenerResult{err: err}
+			return
+		}
+		defer listener.Close()
+		connection, err := listener.Accept()
+		if err != nil {
+			result <- listenerResult{err: err}
+			return
+		}
+		defer connection.Close()
+		_ = connection.SetReadDeadline(time.Now().Add(time.Second))
+		data, err := io.ReadAll(connection)
+		result <- listenerResult{data: data, err: err}
+	}()
+
+	err = operatorwait.BirdAdapter(func(command string, timeout time.Duration) (string, error) {
+		command = strings.Replace(command, "127.0.0.1/50051", "127.0.0.1/"+port, 1)
+		ctx, cancel := context.WithTimeout(t.Context(), timeout)
+		defer cancel()
+		output, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
+		return string(output), err
+	})
+	require.NoError(t, err)
+
+	listenerResultValue := <-result
+	require.NoError(t, listenerResultValue.err)
+	require.Empty(t, listenerResultValue.data)
 }

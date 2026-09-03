@@ -184,6 +184,8 @@ func OverlayHasSnapshot(imagePath, name string) bool {
 // Returns (true, nil) when booted from snapshot, (false, nil) when doing
 // a full cold boot.
 func (q *QEMUManager) Start() (bool, error) {
+	q.sshPort = 0
+
 	// Check if there's already a running QEMU process with the same VM name
 	vmName := "yanet-test-vm-" + q.Name
 	if err := q.checkForExistingVM(vmName); err != nil {
@@ -451,45 +453,61 @@ func (q *QEMUManager) Start() (bool, error) {
 	// serial socket, so the forward is added only now that both consoles
 	// are wired up.
 	if q.enableSSHForward || ShouldKeepVMAlive() {
-		q.addSSHHostForward()
+		if err := q.configureSSHHostForward(q.enableSSHForward, q.SendMonitorCommand); err != nil {
+			return false, q.stopAfterStartupError(err)
+		}
 	}
 
 	return fromSnapshot, nil
+}
+
+func (q *QEMUManager) stopAfterStartupError(startErr error) error {
+	forceStop := q.forceStop
+	q.ForceStop()
+	stopErr := q.Stop()
+	q.forceStop = forceStop
+	if stopErr != nil {
+		return errors.Join(startErr, fmt.Errorf("stop failed after startup error: %w", stopErr))
+	}
+	return startErr
 }
 
 // addSSHHostForward asks the QEMU monitor to add a hostfwd rule for SSH,
 // leaving port 0 for the kernel to assign. QEMU binds and holds that port
 // itself, so no other process can race for it the way it could with a port
 // picked ahead of time on the host.
-//
-// A failed hostfwd_add is local to the monitor command and never takes the
-// VM down, so failure here only logs a warning: YANET_KEEP_VM_ALIVE exists
-// to leave a VM for a human to inspect, and killing that VM because a
-// debug convenience could not get a port would defeat its purpose.
-func (q *QEMUManager) addSSHHostForward() {
-	resp, err := q.SendMonitorCommand("hostfwd_add net0 tcp:127.0.0.1:0-:22")
+func (q *QEMUManager) addSSHHostForward(send func(string) (string, error)) error {
+	resp, err := send("hostfwd_add net0 tcp:127.0.0.1:0-:22")
 	if err != nil {
-		q.log.Warnf("Keep VM alive mode: hostfwd_add failed: %v; SSH access will be unavailable", err)
-		return
+		return fmt.Errorf("add SSH host forward: %w", err)
 	}
 	if resp != "" {
-		q.log.Warnf("Keep VM alive mode: hostfwd_add returned an error: %s; SSH access will be unavailable", resp)
-		return
+		return fmt.Errorf("add SSH host forward: monitor returned %s", resp)
 	}
 
-	info, err := q.SendMonitorCommand("info usernet")
+	info, err := send("info usernet")
 	if err != nil {
-		q.log.Warnf("Keep VM alive mode: info usernet failed: %v; SSH access will be unavailable", err)
-		return
+		return fmt.Errorf("query SSH host forward: %w", err)
 	}
 	port, err := parseUsernetSSHPort(info)
 	if err != nil {
-		q.log.Warnf("Keep VM alive mode: could not determine the forwarded SSH port: %v; SSH access will be unavailable", err)
-		return
+		return fmt.Errorf("parse SSH host forward: %w", err)
 	}
 
 	q.sshPort = port
-	q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", q.sshPort)
+	q.log.Infof("SSH port forwarding enabled: 127.0.0.1:%d -> VM:22", q.sshPort)
+	return nil
+}
+
+func (q *QEMUManager) configureSSHHostForward(required bool, send func(string) (string, error)) error {
+	q.sshPort = 0
+	if err := q.addSSHHostForward(send); err != nil {
+		if required {
+			return fmt.Errorf("required SSH forwarding failed: %w", err)
+		}
+		q.log.Warnf("Keep VM alive mode: %v; SSH access will be unavailable", err)
+	}
+	return nil
 }
 
 // parseUsernetSSHPort extracts the host-side port of the guest-port-22
@@ -501,10 +519,10 @@ func (q *QEMUManager) addSSHHostForward() {
 func parseUsernetSSHPort(output string) (int, error) {
 	for line := range strings.SplitSeq(output, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 6 || !strings.HasPrefix(fields[0], "TCP[") || fields[5] != "22" {
+		if len(fields) < 6 || fields[0] != "TCP[HOST_FORWARD]" || fields[2] != "127.0.0.1" || fields[5] != "22" {
 			continue
 		}
-		if port, err := strconv.Atoi(fields[3]); err == nil {
+		if port, err := strconv.Atoi(fields[3]); err == nil && port > 0 && port <= 65535 {
 			return port, nil
 		}
 	}
@@ -696,10 +714,23 @@ func (q *QEMUManager) AbortSerial() {
 // goroutine after an AbortSerial call. Use this to restore command execution
 // capability after an abort.
 func (q *QEMUManager) RestartSerial() error {
+	q.setVMReady(false)
+	q.readySignal = make(chan bool, 1)
+	q.resetSerialBuffer()
 	if err := q.connectToSerial(); err != nil {
 		return err
 	}
+	if stdin := q.GetStdin(); stdin != nil {
+		_, _ = stdin.Write([]byte("\n\n"))
+	}
 	q.startSerialReader()
+	readyTimeout := VMReadyTimeout()
+	if readyTimeout > 20*time.Second {
+		readyTimeout = 20 * time.Second
+	}
+	if err := q.WaitForReady(readyTimeout); err != nil {
+		return fmt.Errorf("wait for ready after serial restart: %w", err)
+	}
 	return nil
 }
 
@@ -718,8 +749,9 @@ func (q *QEMUManager) discardSerialThrough(marker string) {
 	if len(data) > scanSize {
 		data = data[len(data)-scanSize:]
 	}
-	if index := bytes.Index(data, []byte(marker)); index >= 0 {
+	if index := bytes.LastIndex(data, []byte(marker)); index >= 0 {
 		remainder := append([]byte(nil), data[index+len(marker):]...)
+		remainder = bytes.TrimPrefix(remainder, []byte{'\n'})
 		q.serialBuffer.Reset()
 		q.serialBuffer.Write(remainder)
 	}
@@ -737,6 +769,54 @@ func (q *QEMUManager) serialBufferContains(marker string) bool {
 		data = data[len(data)-scanSize:]
 	}
 	return bytes.Contains(data, []byte(marker))
+}
+
+func (q *QEMUManager) serialBufferContainsCompletionMarker(startMarker, endMarker string) bool {
+	q.serialMutex.Lock()
+	defer q.serialMutex.Unlock()
+	data := q.serialBuffer.Bytes()
+	scanSize := maxSerialBufferSize/2 + len(endMarker)
+	if len(data) > scanSize {
+		data = data[len(data)-scanSize:]
+	}
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		if bytes.Contains(line, []byte(startMarker)) {
+			continue
+		}
+		for rest := line; ; {
+			index := bytes.Index(rest, []byte(endMarker))
+			if index < 0 {
+				break
+			}
+			prefix := rest[:index]
+			if bytes.HasSuffix(prefix, []byte{'='}) {
+				digits := prefix[:len(prefix)-1]
+				separator := bytes.LastIndexByte(digits, '=')
+				if separator < 0 || separator+1 == len(digits) {
+					rest = rest[index+len(endMarker):]
+					continue
+				}
+				valid := true
+				for _, digit := range digits[separator+1:] {
+					if digit < '0' || digit > '9' {
+						valid = false
+						break
+					}
+				}
+				if valid {
+					return true
+				}
+			}
+			rest = rest[index+len(endMarker):]
+		}
+	}
+	return false
+}
+
+func (q *QEMUManager) hasSerialConnection() bool {
+	q.serialMutex.Lock()
+	defer q.serialMutex.Unlock()
+	return q.serialConn != nil
 }
 
 // serialBufferSnapshot returns the current contents of the serial console output buffer.
@@ -1013,7 +1093,7 @@ func (q *QEMUManager) readSerial(done chan struct{}) {
 	readySig := q.readySignal
 
 	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 1024*1024), maxSerialBufferSize+serialTrimMargin)
 	scanner.Split(promptAwareSplit)
 	readyOnce := false
 

@@ -98,29 +98,20 @@ type request struct {
 	Columns  int      `json:"columns,omitempty"`
 }
 
-// response is the wire shape shared by the CLI envelope and every Supervisor
-// reply.
+// response is the stable wire envelope shared by client and supervisor replies.
 //
-// Two protocol version fields travel together so the CLI envelope contract
-// (Protocol) and the Supervisor protocol contract (SupervisorProtocolVersion)
-// can evolve independently per AD-8 / FR-21.
-//
-// The CLI side sets Protocol=cliProtocolVersion in JSON output (printResponse);
-// the non-JSON CLI branch leaves it zero. In either case the Supervisor's
-// SupervisorProtocolVersion is forwarded untouched. The Supervisor side never
-// sets Protocol; it stamps SupervisorProtocolVersion=supervisorProtocolVersion
-// on every reply, including the pre-ready and decode-error paths.
+// Client JSON and supervisor transport versions travel independently. Rendering
+// stamps the client version, while every supervisor reply carries its transport
+// version unchanged, including startup and malformed-request failures.
 type response struct {
 	OK      bool           `json:"ok"`
 	Output  string         `json:"output,omitempty"`
 	Error   string         `json:"error,omitempty"`
 	Report  *lab.RunReport `json:"report,omitempty"`
 	SSHPort int            `json:"ssh_port,omitempty"`
-	// Protocol is the CLI JSON envelope version. Set to cliProtocolVersion
-	// by the CLI before printing a response in --json mode.
+	// Protocol identifies the rendered client JSON envelope.
 	Protocol int `json:"protocol,omitempty"`
-	// SupervisorProtocolVersion is the Supervisor protocol version the
-	// Supervisor stamps on every reply.
+	// SupervisorProtocolVersion identifies the supervisor transport contract.
 	SupervisorProtocolVersion int `json:"supervisorProtocolVersion"`
 	// Status is the overall Operator Profile verdict for status replies:
 	// READY when every scope is ready, NOT_READY otherwise.
@@ -1143,13 +1134,15 @@ func requestTimeout(action string) time.Duration {
 	case "exec":
 		return supervisorExecTimeout + 30*time.Second
 	case "reset":
-		return supervisorResetTimeout
+		return supervisorResetTimeout + 30*time.Second
 	case "down":
 		return supervisorShutdownTimeout
 	// status runs every Operator Profile probe in one guest command bounded
 	// by the command runner, so the CLI deadline must exceed that bound
 	// instead of the protocol handshake budget.
 	case "status":
+		return supervisorStatusTimeout
+	case "report":
 		return supervisorStatusTimeout
 	default:
 		return supervisorRequestTimeout
@@ -1457,23 +1450,28 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 		select {
 		case report = <-manifestDone:
 		case <-timer.C:
-			fw.AbortGuestSerial()
-			report = <-manifestDone
-			if err := fw.RestartGuestSerial(); err != nil {
+			select {
+			case report = <-manifestDone:
+				// Completion won the timer race; return the real report.
+			default:
+				fw.AbortGuestSerial()
+				report = <-manifestDone
+				if err := fw.RestartGuestSerial(); err != nil {
+					report.Results = append(report.Results, lab.Result{
+						Name:  "serial-restart",
+						Kind:  "error",
+						Error: "failed to restart serial after timeout: " + err.Error(),
+					})
+				}
+				report.Success = false
 				report.Results = append(report.Results, lab.Result{
-					Name:  "serial-restart",
-					Kind:  "error",
-					Error: "failed to restart serial after timeout: " + err.Error(),
+					Name:  "server-timeout",
+					Kind:  "timeout",
+					Error: "manifest exceeded server-side timeout (" + supervisorManifestTimeout.String() + ")",
 				})
+				reply.OK = false
+				reply.Error = "manifest exceeded server-side timeout"
 			}
-			report.Success = false
-			report.Results = append(report.Results, lab.Result{
-				Name:  "server-timeout",
-				Kind:  "timeout",
-				Error: "manifest exceeded server-side timeout (" + supervisorManifestTimeout.String() + ")",
-			})
-			reply.OK = false
-			reply.Error = "manifest exceeded server-side timeout"
 		}
 		timer.Stop()
 		reply.Report = &report
@@ -1501,7 +1499,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 	case "down":
 		reply.Output = "lab stopped"
 		_ = json.NewEncoder(connection).Encode(reply)
-		_ = state.ShutdownWithBeforeWaitAndResult(func() {
+		shutdownErr := state.ShutdownWithBeforeWaitAndResult(func() {
 			if fw != nil {
 				fw.AbortGuestSerial()
 			}
@@ -1514,7 +1512,9 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 				fmt.Fprintf(os.Stderr, "write shutdown marker: %v\n", markerErr)
 			}
 		})
-		stop()
+		if shutdownErr == nil {
+			stop()
+		}
 		return
 	default:
 		reply.OK = false
@@ -1549,15 +1549,26 @@ func ensureSSHKey(dir string) (string, error) {
 	defer cancel()
 	command = exec.CommandContext(ctx, command.Path, command.Args[1:]...)
 	if output, runErr := command.CombinedOutput(); runErr != nil {
-		return "", fmt.Errorf("generate lab SSH key: %w: %s", runErr, output)
+		generationErr := fmt.Errorf("generate lab SSH key: %w: %s", runErr, output)
+		return "", cleanupGeneratedSSHKey(path, generationErr)
 	}
 	if err := validatePrivateFile(path, 0o600); err != nil {
-		return "", err
+		return "", cleanupGeneratedSSHKey(path, err)
 	}
 	if err := validatePublicFile(path + ".pub"); err != nil {
-		return "", err
+		return "", cleanupGeneratedSSHKey(path, err)
 	}
 	return path, nil
+}
+
+func cleanupGeneratedSSHKey(privatePath string, generationErr error) error {
+	errorsToJoin := []error{generationErr}
+	for _, path := range []string{privatePath, privatePath + ".pub"} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errorsToJoin = append(errorsToJoin, fmt.Errorf("remove partial SSH key %s: %w", path, err))
+		}
+	}
+	return errors.Join(errorsToJoin...)
 }
 
 func setupGuestShell(fw *framework.TestFramework, keyPath string) error {
@@ -1641,16 +1652,15 @@ func setError(reply *response, err error) {
 
 func writeReport(dir string, data []byte) (string, error) {
 	path := filepath.Join(dir, "last-report.txt")
-	file, err := os.Create(path)
+	file, err := openPrivateFile(path, os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return "", err
 	}
-	if _, err := file.Write(data); err != nil {
+	if err := file.Truncate(0); err != nil {
 		_ = file.Close()
-		_ = os.Remove(path)
 		return "", err
 	}
-	if err := file.Chmod(0o600); err != nil {
+	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
 		return "", err

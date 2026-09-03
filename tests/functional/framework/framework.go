@@ -1432,13 +1432,15 @@ func (f *TestFramework) Unmount9P() error {
 		f.log.Debug("9P mounts already unmounted, skipping")
 		return nil
 	}
-	// Batch all umounts into a single command to avoid 6 round-trips
-	// through the serial console (~600ms → ~100ms).
+	// Batch all umounts into a single command to avoid six round-trips
+	// through the serial console. A share already detached by the guest is
+	// successful; mountpoint and unmount failures make the batch fail.
 	var cmd strings.Builder
-	cmd.WriteString("umount")
+	cmd.WriteString("failed=0; for mount_point in")
 	for _, mp := range guest9PMountPoints {
 		cmd.WriteString(" " + mp)
 	}
+	cmd.WriteString("; do mountpoint -q \"$mount_point\"; mount_status=$?; if [ \"$mount_status\" -eq 0 ]; then umount \"$mount_point\" || failed=1; elif [ \"$mount_status\" -ne 1 ]; then failed=1; fi; done; exit $failed")
 	if _, err := f.ExecuteCommand(cmd.String()); err != nil {
 		return fmt.Errorf("unmount 9P shares: %w", err)
 	}
