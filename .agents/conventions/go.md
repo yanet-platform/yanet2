@@ -5,6 +5,7 @@ Loaded on demand by the agent writing or reviewing Go; this is the single source
 - **Receiver names**: always `m`. No type-letter mnemonics.
 - **No abbreviated identifiers**: spell out names in production and tests (`labels`, `metrics`, `durationSeconds`); only `ok`, `err`, `ctx`, `idx`, and short-scope type-assert temporaries are exceptions.
 - **Naming**: `*Config`, never `*Cfg`; constructors are `NewStore`/`NewClient`, never bare `New`.
+- **Interfaces**: the consumer declares the interface, in the package that calls through it and in the file holding the field or parameter it is passed to, with only the methods it uses; two consumers keep two narrow interfaces instead of sharing one wide one. A constructor returns the concrete type, never an interface its own package declares. Exceptions: a factory that selects among implementations by its input may declare that interface beside itself (`auth/sshcert.NewLoader`), and a leaf package may hold a shared interface to break an import cycle between its consumer and several implementers (`auth/core.Authenticator`).
 - **Loop index**: use `idx`, not `i`; prefer `for idx := range n` to C-style loops (Go 1.22+, enforced by `modernize`).
 - **Maps**: `map[K]V{}` not `make(map[K]V)`.
 - **gRPC**: `grpc.NewClient` not `grpc.Dial`.
