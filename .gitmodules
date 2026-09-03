@@ -4,3 +4,6 @@
 [submodule "subprojects/libpcap"]
 	path = subprojects/libpcap
 	url = https://github.com/the-tcpdump-group/libpcap.git
+[submodule "subprojects/regex"]
+	path = subprojects/regex
+	url = https://github.com/rust-lang/regex
