@@ -175,18 +175,18 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	return m, nil
 }
 
-// Authenticate attempts to authenticate the given token using registered
-// authenticators.
+// Authenticate attempts to authenticate the given credential using
+// registered authenticators.
 //
 // Returns the authenticated Principal on success.
 func (m *Manager) Authenticate(
 	ctx context.Context,
-	token string,
+	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.Principal, error) {
 	// Iterate through authenticators, first match wins.
 	for _, auth := range m.authenticators {
-		if !auth.IsTokenSupported(token) {
+		if !auth.Supports(credential) {
 			continue
 		}
 
@@ -194,7 +194,7 @@ func (m *Manager) Authenticate(
 			zap.String("authenticator", auth.Name()),
 		)
 
-		authInfo, err := auth.Authenticate(ctx, token, reqInfo)
+		authInfo, err := auth.Authenticate(ctx, credential, reqInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +204,7 @@ func (m *Manager) Authenticate(
 
 	// This shouldn't happen with NoneAuthenticator registered, because it
 	// accepts everything.
-	return nil, fmt.Errorf("no authenticator supports the given token")
+	return nil, fmt.Errorf("no authenticator supports the given credential")
 }
 
 // buildPrincipal resolves an authenticated subject into its authorization

@@ -62,12 +62,12 @@ func TestNewFromConfig(t *testing.T) {
 	require.Equal(t, "basic", authenticator.Name())
 
 	validToken := basicToken("alice", "s3cret")
-	require.True(t, authenticator.IsTokenSupported(validToken))
-	require.False(t, authenticator.IsTokenSupported("sshkey abc"))
+	require.True(t, authenticator.Supports(core.Credential{Token: validToken}))
+	require.False(t, authenticator.Supports(core.Credential{Token: "sshkey abc"}))
 
 	requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
 
-	authInfo, err := authenticator.Authenticate(t.Context(), validToken, requestInfo)
+	authInfo, err := authenticator.Authenticate(t.Context(), core.Credential{Token: validToken}, requestInfo)
 	require.NoError(t, err)
 	require.Equal(t, &core.AuthInfo{
 		Subject:    core.NewLocalSubject("alice"),
@@ -75,7 +75,7 @@ func TestNewFromConfig(t *testing.T) {
 	}, authInfo)
 
 	wrongToken := basicToken("alice", "wrong-password")
-	_, err = authenticator.Authenticate(t.Context(), wrongToken, requestInfo)
+	_, err = authenticator.Authenticate(t.Context(), core.Credential{Token: wrongToken}, requestInfo)
 	require.Error(t, err)
 }
 

@@ -75,9 +75,10 @@ func (m *Authenticator) Name() string {
 	return "sshkey"
 }
 
-// IsTokenSupported checks if the token has the "sshkey " prefix.
-func (m *Authenticator) IsTokenSupported(token string) bool {
-	return strings.HasPrefix(strings.ToLower(token), tokenPrefix)
+// Supports checks if the credential carries a token with the "sshkey "
+// prefix.
+func (m *Authenticator) Supports(credential core.Credential) bool {
+	return strings.HasPrefix(strings.ToLower(credential.Token), tokenPrefix)
 }
 
 // Authenticate validates the SSH key token and returns authentication info.
@@ -87,10 +88,10 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 // the local account lookup name.
 func (m *Authenticator) Authenticate(
 	ctx context.Context,
-	rawToken string,
+	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.AuthInfo, error) {
-	token, err := parseToken(rawToken)
+	token, err := parseToken(credential.Token)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated, "invalid sshkey token: %v", err,

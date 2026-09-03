@@ -27,7 +27,7 @@ func TestAuthenticator_Name(t *testing.T) {
 	assert.Equal(t, "sshcert", auth.Name())
 }
 
-func TestAuthenticator_IsTokenSupported(t *testing.T) {
+func TestAuthenticator_Supports(t *testing.T) {
 	ca := generateTestCA(t)
 	store := sshcert.NewCAStore([]sshcert.CAEntry{
 		{PublicKey: ca.PublicKey()},
@@ -36,9 +36,9 @@ func TestAuthenticator_IsTokenSupported(t *testing.T) {
 	auth := sshcert.NewAuthenticator(store, sshcert.NewNopRevocationChecker())
 	defer auth.Close()
 
-	assert.True(t, auth.IsTokenSupported("sshcert eyJ0ZXN0Ig=="))
-	assert.False(t, auth.IsTokenSupported("sshkey eyJ0ZXN0Ig=="))
-	assert.False(t, auth.IsTokenSupported("basic dGVzdA=="))
+	assert.True(t, auth.Supports(core.Credential{Token: "sshcert eyJ0ZXN0Ig=="}))
+	assert.False(t, auth.Supports(core.Credential{Token: "sshkey eyJ0ZXN0Ig=="}))
+	assert.False(t, auth.Supports(core.Credential{Token: "basic dGVzdA=="}))
 }
 
 func TestAuthenticator_HappyPath(t *testing.T) {
@@ -70,7 +70,7 @@ func TestAuthenticator_HappyPath(t *testing.T) {
 
 	authInfo, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestAuthenticator_ExpiredTimestamp(t *testing.T) {
 
 	_, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.Error(t, err)
@@ -142,7 +142,7 @@ func TestAuthenticator_MethodBindingMismatch(t *testing.T) {
 
 	_, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/OtherMethod"},
 	)
 	require.Error(t, err)
@@ -180,7 +180,7 @@ func TestAuthenticator_UntrustedCA(t *testing.T) {
 
 	_, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.Error(t, err)
@@ -215,7 +215,7 @@ func TestAuthenticator_ExpiredCertificate(t *testing.T) {
 
 	_, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.Error(t, err)
@@ -255,7 +255,7 @@ func TestAuthenticator_RevokedCertificate(t *testing.T) {
 
 	_, err = auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.Error(t, err)
@@ -285,7 +285,7 @@ func TestAuthenticator_HostCertRejected(t *testing.T) {
 
 	_, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.Error(t, err)
@@ -321,7 +321,7 @@ func TestAuthenticator_NopRevocationChecker(t *testing.T) {
 
 	authInfo, err := auth.Authenticate(
 		context.Background(),
-		rawToken,
+		core.Credential{Token: rawToken},
 		&core.RequestInfo{FullMethod: "/test.Service/Method"},
 	)
 	require.NoError(t, err)
