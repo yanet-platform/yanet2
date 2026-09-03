@@ -177,12 +177,12 @@ func TestFWStateUpdateRollbackKeepsPublishedConfig(t *testing.T) {
 	publishConfig(t, service, concurrencyUpdateRequest(name, mapsA, 9999))
 
 	// A map name that resolves to no published object fails the update
-	// at the generation install with InvalidArgument naming the map,
+	// at the generation install with FailedPrecondition naming the map,
 	// leaving the previous config in place.
 	failing := concurrencyUpdateRequest(name, mapsB, 10000)
 	failing.MapNameV4 = "no-such-map"
 	_, err := service.UpdateConfig(t.Context(), failing)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Contains(t, err.Error(), "no-such-map")
 	requirePublishedConfig(t, service, fwstateStateSnapshot{name: name, mapNameV4: mapsA.v4Name(), port: 9999})
 

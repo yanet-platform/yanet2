@@ -140,9 +140,9 @@ func TestFWStateDeleteKeepsSameNamedACLConfig(t *testing.T) {
 }
 
 // TestFWStateUpdateUnknownMapNameRejected checks that an update naming a
-// map object that is not published fails with InvalidArgument carrying the
-// C-side generation-install error naming the object, and that nothing is
-// published by the failed update.
+// map object that is not published fails with FailedPrecondition carrying
+// the C-side generation-install error naming the object, and that nothing
+// is published by the failed update.
 func TestFWStateUpdateUnknownMapNameRejected(t *testing.T) {
 	const configName = "fwstate-unknown-map"
 
@@ -154,7 +154,7 @@ func TestFWStateUpdateUnknownMapNameRejected(t *testing.T) {
 	request.MapNameV6 = "no-such-map"
 
 	_, err := service.UpdateConfig(t.Context(), request)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Contains(t, err.Error(), "no-such-map")
 	require.Contains(t, err.Error(), "linked object")
 

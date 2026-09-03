@@ -3,6 +3,7 @@ package acl_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -678,7 +679,7 @@ func TestUpdateConfig_IdempotencyCountsSyncConfig(t *testing.T) {
 
 // TestUpdateConfigClassifiesUpdateError verifies that a module update
 // failing with the generation install's linked-object refusal surfaces
-// as InvalidArgument naming the missing map, while any other update
+// as FailedPrecondition naming the missing map, while any other update
 // failure stays Internal.
 //
 // A client typo in fwtable_name_v4 must be distinguishable from a
@@ -695,13 +696,14 @@ func TestUpdateConfigClassifiesUpdateError(t *testing.T) {
 	t.Run("linked object not found", func(t *testing.T) {
 		b := newFakeBackend()
 		svc := newTestService(b)
-		b.SetUpdateErr(errors.New(
-			"linked object 'fwstate_map_v4:missing-map' not found for module 'acl:acl0'",
+		b.SetUpdateErr(fmt.Errorf(
+			"linked object 'fwstate_map_v4:missing-map' not found for module 'acl:acl0': %w",
+			ffi.ErrFailedPrecondition,
 		))
 
 		_, err := svc.UpdateConfig(t.Context(), request)
 		require.Error(t, err)
-		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+		assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 		assert.Contains(t, err.Error(), "missing-map")
 		assertAllHandlesFreed(t, b)
 	})

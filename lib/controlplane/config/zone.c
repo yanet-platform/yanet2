@@ -320,8 +320,9 @@ cp_config_delete_module(
 	if (cp_module_registry_delete(
 		    &new_config_gen->module_registry, module_type, module_name
 	    )) {
-		yanet_error_add(
+		yanet_error_add_kind(
 			err,
+			YANET_ERROR_NOT_FOUND,
 			"failed to delete module '%s:%s' from registry",
 			module_type,
 			module_name
@@ -404,8 +405,9 @@ cp_config_update_modules(
 				    linked_objects[link_idx].name,
 				    &object_idx
 			    )) {
-				yanet_error_add(
+				yanet_error_add_kind(
 					err,
+					YANET_ERROR_FAILED_PRECONDITION,
 					"linked object '%s:%s' not found for "
 					"module '%s:%s'",
 					linked_objects[link_idx].type,
@@ -526,7 +528,12 @@ cp_config_delete_function(
 
 	uint64_t index;
 	if (cp_config_gen_lookup_function_index(old_config_gen, name, &index)) {
-		yanet_error_add(err, "function '%s' not found", name);
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_NOT_FOUND,
+			"function '%s' not found",
+			name
+		);
 		goto error_unlock;
 	}
 
@@ -651,7 +658,12 @@ cp_config_delete_pipeline(
 
 	uint64_t index;
 	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
-		yanet_error_add(err, "pipeline '%s' not found", name);
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_NOT_FOUND,
+			"pipeline '%s' not found",
+			name
+		);
 		goto error_unlock;
 	}
 
@@ -813,9 +825,9 @@ cp_config_delete_device(
 		struct dp_port *port =
 			&ADDR_OF(&dp_config->dp_topology.devices)[idx];
 		if (strncmp(port->device_name, name, CP_DEVICE_NAME_LEN) == 0) {
-			errno = EBUSY;
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_INVALID_ARGUMENT,
 				"device '%s' is a predefined topology device "
 				"and cannot be deleted",
 				name
@@ -836,7 +848,12 @@ cp_config_delete_device(
 	}
 
 	if (cp_device_registry_delete(&new_config_gen->device_registry, name)) {
-		yanet_error_add(err, "device '%s' not found", name);
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_NOT_FOUND,
+			"device '%s' not found",
+			name
+		);
 		goto error_free;
 	}
 
@@ -921,8 +938,9 @@ cp_config_delete_object(
 	if (cp_config_gen_lookup_object_index(
 		    old_config_gen, object_type, object_name, &index
 	    )) {
-		yanet_error_add(
+		yanet_error_add_kind(
 			err,
+			YANET_ERROR_NOT_FOUND,
 			"object '%s:%s' not found",
 			object_type,
 			object_name
@@ -958,8 +976,9 @@ cp_config_delete_object(
 				    object_name,
 				    CP_OBJECT_NAME_LEN
 			    )) {
-				yanet_error_add(
+				yanet_error_add_kind(
 					err,
+					YANET_ERROR_BUSY,
 					"object '%s:%s' is linked by module "
 					"'%s:%s'",
 					object_type,

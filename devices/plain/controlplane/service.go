@@ -58,7 +58,13 @@ func (m *DevicePlainService) UpdateDevice(
 		if err := deviceConfig.Free(); err != nil {
 			return nil, fmt.Errorf("failed to update device and free the unpublished replacement: %w (update error: %v)", err, err)
 		}
-		return nil, fmt.Errorf("failed to update device: %w", err)
+		code := codes.Internal
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			// The device names an entity of the graph it runs that the
+			// configuration cannot resolve.
+			code = codes.FailedPrecondition
+		}
+		return nil, status.Errorf(code, "failed to update device: %v", err)
 	}
 
 	// The update retired the generations holding this service's deferred

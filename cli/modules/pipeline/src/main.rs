@@ -218,8 +218,10 @@ impl PipelineService {
             }),
         };
 
-        // Update is an upsert, so a resource-level NotFound names a referenced
-        // function, not the pipeline. Keep the backend message verbatim.
+        // Update is an upsert, so a referenced function the live configuration
+        // cannot resolve is a failed precondition, never a missing pipeline.
+        //
+        // The backend message is kept verbatim.
         self.service
             .client()
             .update(request)
