@@ -1,10 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
-	"os"
 
 	"google.golang.org/grpc/credentials"
 
@@ -19,11 +20,6 @@ type TLSConfig struct {
 	CertFile xcfg.NonEmptyString `yaml:"cert_file"`
 	// KeyFile is the path to the PEM-encoded server private key.
 	KeyFile xcfg.NonEmptyString `yaml:"key_file"`
-	// ServerName is the SNI / hostname used by in-process loopback
-	// clients.
-	//
-	// Optional. Defaults to the host parsed from the dial endpoint.
-	ServerName string `yaml:"server_name"`
 }
 
 // ServerCredentials loads the cert/key pair and returns gRPC server
@@ -40,34 +36,30 @@ func (m *TLSConfig) ServerCredentials() (credentials.TransportCredentials, error
 	}), nil
 }
 
-// LoopbackClientCredentials returns gRPC client transport credentials
-// that trust the gateway's own server certificate as the only CA.
+// LoopbackCredentials returns client credentials that accept exactly the
+// certificate this config serves, for the hop the gateway makes into its
+// own server without leaving the process.
 //
-// Used by self-dials inside the controlplane-director process.
-//
-// fallbackHost is used as ServerName when m.ServerName is empty.
-func (m *TLSConfig) LoopbackClientCredentials(
-	fallbackHost string,
-) (credentials.TransportCredentials, error) {
-	certFile := m.CertFile.Unwrap()
-	pem, err := os.ReadFile(certFile)
+// Server credentials apply to every listener of a gRPC server, the
+// in-memory one included, so the loopback has to complete a TLS handshake.
+// Pinning replaces name and chain verification: the certificate need not
+// name any host for the loopback and no CA is consulted.
+func (m *TLSConfig) LoopbackCredentials() (credentials.TransportCredentials, error) {
+	cert, err := tls.LoadX509KeyPair(m.CertFile.Unwrap(), m.KeyFile.Unwrap())
 	if err != nil {
-		return nil, fmt.Errorf("failed to read gateway TLS cert: %w", err)
+		return nil, fmt.Errorf("failed to load gateway TLS keypair: %w", err)
 	}
 
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("failed to parse PEM certificates from %q", certFile)
-	}
-
-	name := m.ServerName
-	if name == "" {
-		name = fallbackHost
-	}
+	pinned := cert.Certificate[0]
 
 	return credentials.NewTLS(&tls.Config{
-		RootCAs:    pool,
-		ServerName: name,
-		MinVersion: tls.VersionTLS12,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 || !bytes.Equal(rawCerts[0], pinned) {
+				return errors.New("loopback peer did not present the gateway's own certificate")
+			}
+			return nil
+		},
 	}), nil
 }

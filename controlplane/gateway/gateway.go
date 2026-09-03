@@ -14,8 +14,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
@@ -30,14 +33,13 @@ import (
 
 // Service is the interface that gateway services must implement.
 //
-// When Endpoint returns an empty string the service shares the gateway's own
-// gRPC server. When Endpoint returns a non-empty host:port or unix path the
-// service runs its own listener and registers itself with the gateway client.
+// A framework service shares the gateway's own gRPC server. A module or
+// device service gets a gRPC server of its own behind an in-memory listener,
+// so inside the gateway process it never touches the network.
 type Service interface {
 	Name() string
-	// Endpoint returns "" when the service shares the gateway's own gRPC
-	// server, or a host:port / unix path when the service runs its own
-	// listener.
+	// Endpoint returns the address the service would bind when run in a
+	// separate process. Inside the gateway process it is ignored.
 	Endpoint() string
 	ServicesNames() []string
 	RegisterService(server *grpc.Server)
@@ -150,7 +152,9 @@ type Gateway struct {
 	cfg              Config
 	server           *grpc.Server
 	listener         net.Listener
+	memoryListener   *bufconn.Listener
 	services         []Service
+	sharedServices   []Service
 	serviceRunners   []*ServiceRunner
 	registry         *BackendRegistry
 	readinessTracker *readiness.Tracker
@@ -166,8 +170,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	log := opts.Log
 	registry := NewBackendRegistry()
 
-	// The endpoint backs loopback dial, SNI host, and registration; it
-	// follows the injected listener, else the configured server endpoint.
+	// Every backend hosted inside this process is labeled with the address it
+	// is reachable at from outside: the injected listener's, else the configured.
 	endpoint := cfg.Server.Endpoint
 	if opts.Listener != nil {
 		endpoint = opts.Listener.Addr().String()
@@ -338,17 +342,25 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	metricsService := NewMetricsService(metricsCollectors(serverMetrics, opts.Services)...)
 	ynpb.RegisterMetricsServiceServer(server, metricsService)
 
-	// Dial a single loopback connection shared by services hosted on the
-	// gateway's own gRPC server.
+	// Gateway-hosted services are reached through one in-memory connection
+	// back into this server, a backend for the HTTP surface and the registry.
 	//
-	// Out-of-process module backends (from the Register RPC) each get their
-	// own connection via RegisterBackend in the registration loop.
-	creds, err := TransportCredentials(cfg.Server.TLS, endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
+	// No network hop is involved, and the interceptor chain still runs on every
+	// request that comes through it. External backends (from the Register RPC)
+	// each get their own network connection via RegisterBackend in the
+	// registration loop.
+	// The loopback completes the handshake the server credentials impose on
+	// every listener, so under TLS it pins the gateway's own certificate.
+	loopbackCreds := credentials.TransportCredentials(insecure.NewCredentials())
+	if cfg.Server.TLS != nil {
+		loopbackCreds, err = cfg.Server.TLS.LoopbackCredentials()
+		if err != nil {
+			return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
+		}
 	}
 
-	loopback, err := dialBackend(endpoint, creds)
+	memoryListener := newMemoryListener()
+	loopback, err := dialMemoryBackend(endpoint, memoryListener, loopbackCreds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
@@ -367,13 +379,13 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	var services []Service
+	var sharedServices []Service
 	var serviceRunners []*ServiceRunner
 
 	for _, entry := range opts.Services {
-		if entry.Service.Endpoint() == "" {
+		if entry.Kind == BackendKindBuiltin {
 			// Shared-server service: register on the gateway's gRPC server and
-			// point every service name at the shared loopback backend using the
-			// declared kind.
+			// point every service name at the shared loopback backend.
 			entry.Service.RegisterService(server)
 
 			for _, name := range entry.Service.ServicesNames() {
@@ -383,9 +395,10 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 					zap.Stringer("kind", entry.Kind),
 				)
 			}
+
+			sharedServices = append(sharedServices, entry.Service)
 		} else {
-			// Out-of-process: wrap in a ServiceRunner.
-			runner := NewServiceRunner(entry.Service, endpoint, cfg.Server.TLS, WithServiceRunnerLog(log))
+			runner := NewServiceRunner(entry.Service, registry, endpoint, WithServiceRunnerLog(log))
 			serviceRunners = append(serviceRunners, runner)
 		}
 
@@ -396,7 +409,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		cfg:              cfg,
 		server:           server,
 		listener:         opts.Listener,
+		memoryListener:   memoryListener,
 		services:         services,
+		sharedServices:   sharedServices,
 		serviceRunners:   serviceRunners,
 		registry:         registry,
 		readinessTracker: rdTracker,
@@ -444,7 +459,10 @@ func (m *Gateway) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 
 	wg.Go(func() error {
-		return m.server.Serve(listener)
+		return serve(m.server, listener)
+	})
+	wg.Go(func() error {
+		return serve(m.server, m.memoryListener)
 	})
 	if m.cfg.Server.HTTPEndpoint != "" {
 		wg.Go(func() error {
@@ -454,7 +472,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 
 	for _, runner := range m.serviceRunners {
 		wg.Go(func() error {
-			m.log.Info("starting out-of-process service", zap.String("service", runner.ServiceType()))
+			m.log.Info("starting in-process service", zap.String("service", runner.ServiceType()))
 			return runner.Run(ctx)
 		})
 	}
@@ -463,18 +481,17 @@ func (m *Gateway) Run(ctx context.Context) error {
 		return m.runRegistrySweeper(ctx)
 	})
 
-	// Schedule Run for any in-process BackgroundService.
-	for _, service := range m.services {
-		if service.Endpoint() == "" {
-			if background, ok := service.(BackgroundService); ok {
-				wg.Go(func() error {
-					return background.Run(ctx)
-				})
-			}
+	// Runners schedule the background jobs of their own services, so only the
+	// shared-server ones are scheduled here.
+	for _, service := range m.sharedServices {
+		if background, ok := service.(BackgroundService); ok {
+			wg.Go(func() error {
+				return background.Run(ctx)
+			})
 		}
 	}
 
-	// The readiness marker is published once every out-of-process service
+	// The readiness marker is published once every in-process service
 	// runner has finished its initial service registration, and
 	// immediately when there are none. Both branches emit the identical
 	// "all built-in modules ready" message, so a run publishes at most

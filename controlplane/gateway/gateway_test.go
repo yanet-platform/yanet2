@@ -2,9 +2,20 @@ package gateway_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"io"
+	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,30 +35,32 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// sharedServerService is a test Service whose Endpoint returns "" so it is
-// hosted on the gateway's own gRPC server.
-type sharedServerService struct {
+// kindProbeService is a test Service with no endpoint and no gRPC services
+// of its own, registered only to observe the kind each option assigns it.
+type kindProbeService struct {
 	name     string
 	svcNames []string
 }
 
-func (m *sharedServerService) Name() string                   { return m.name }
-func (m *sharedServerService) Endpoint() string               { return "" }
-func (m *sharedServerService) ServicesNames() []string        { return m.svcNames }
-func (m *sharedServerService) RegisterService(_ *grpc.Server) {}
+func (m *kindProbeService) Name() string                   { return m.name }
+func (m *kindProbeService) Endpoint() string               { return "" }
+func (m *kindProbeService) ServicesNames() []string        { return m.svcNames }
+func (m *kindProbeService) RegisterService(_ *grpc.Server) {}
 
 // TestNewGateway_DeclaredKindsWired verifies that WithBuiltinService records
-// BackendKindBuiltin and WithService records BackendKindInProcess for services
-// that share the gateway's own gRPC server, regardless of endpoint being empty
-// in both cases.
+// BackendKindBuiltin and WithService records BackendKindInProcess.
+//
+// The kind follows the registration option alone: both probes report an
+// empty endpoint, and the framework one shares the gateway's server while
+// the module one gets an in-memory server of its own.
 func TestNewGateway_DeclaredKindsWired(t *testing.T) {
 	t.Parallel()
 
-	builtinSvc := &sharedServerService{
+	builtinSvc := &kindProbeService{
 		name:     "builtin-framework",
 		svcNames: []string{"test.BuiltinService"},
 	}
-	inprocSvc := &sharedServerService{
+	inprocSvc := &kindProbeService{
 		name:     "inproc-module",
 		svcNames: []string{"test.InProcessService"},
 	}
@@ -73,17 +86,26 @@ func TestNewGateway_DeclaredKindsWired(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
+	// The module probe is registered by its runner after Run starts, so the
+	// listing is polled until both probes are present, not merely until the
+	// gateway answers.
 	client := ynpb.NewGatewayClient(conn)
-	var response *ynpb.ListServicesResponse
-	require.Eventually(t, func() bool {
-		response, err = client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
-		return err == nil
-	}, 5*time.Second, 50*time.Millisecond, "gateway did not become reachable")
-
 	kinds := map[string]ynpb.BackendKind{}
-	for _, entry := range response.GetServices() {
-		kinds[entry.GetBackend().GetName()] = entry.GetKind()
-	}
+	require.Eventually(t, func() bool {
+		response, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		if listErr != nil {
+			return false
+		}
+
+		kinds = map[string]ynpb.BackendKind{}
+		for _, entry := range response.GetServices() {
+			kinds[entry.GetBackend().GetName()] = entry.GetKind()
+		}
+
+		_, builtinSeen := kinds["test.BuiltinService"]
+		_, inprocSeen := kinds["test.InProcessService"]
+		return builtinSeen && inprocSeen
+	}, 5*time.Second, 50*time.Millisecond, "gateway did not register both probes")
 
 	// Framework services registered with WithBuiltinService must be built-in.
 	require.Equal(t, ynpb.BackendKind_BACKEND_KIND_BUILTIN, kinds["controlplane.ynpb.v1.Gateway"], "controlplane.ynpb.v1.Gateway must be built-in")
@@ -95,6 +117,116 @@ func TestNewGateway_DeclaredKindsWired(t *testing.T) {
 
 	cancel()
 	require.NoError(t, group.Wait())
+}
+
+// newFreeAddress returns a loopback address that was free when checked, for
+// a server that has to bind a listener of its own.
+func newFreeAddress(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	address := listener.Addr().String()
+	require.NoError(t, listener.Close())
+
+	return address
+}
+
+// newTestServerTLS issues a throwaway self-signed certificate for 127.0.0.1,
+// writes the PEM pair under the test's temporary directory and returns the
+// file paths with a pool trusting that certificate.
+func newTestServerTLS(t *testing.T) (certFile, keyFile string, pool *x509.CertPool) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "gateway.test"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "server.pem")
+	keyFile = filepath.Join(dir, "server.key")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600))
+
+	leaf, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	pool = x509.NewCertPool()
+	pool.AddCert(leaf)
+
+	return certFile, keyFile, pool
+}
+
+// Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS verifies that with server TLS
+// configured the HTTP surface still reaches gateway-hosted services.
+//
+// Server credentials apply to every listener, the in-memory one included, so
+// the in-process loopback has to complete the handshake they impose.
+func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+
+	cfg := gateway.DefaultConfig()
+	cfg.Server.HTTPEndpoint = newFreeAddress(t)
+	cfg.Server.TLS = &gateway.TLSConfig{
+		CertFile: xcfg.MustNonEmptyString(certFile),
+		KeyFile:  xcfg.MustNonEmptyString(keyFile),
+	}
+
+	listener := NewTestListener(t)
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+		},
+		Timeout: 5 * time.Second,
+	}
+	url := "https://" + cfg.Server.HTTPEndpoint + "/api/controlplane.ynpb.v1.Gateway/ListServices"
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		response, postErr := client.Post(url, "application/json", strings.NewReader("{}"))
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
+
+	require.Equal(t, http.StatusOK, statusCode, string(body))
+	require.Contains(t, string(body), "controlplane.ynpb.v1.Gateway")
 }
 
 // NewTestListener opens an ephemeral loopback TCP listener for a test to
@@ -115,38 +247,22 @@ func NewTestListener(t *testing.T) net.Listener {
 	return listener
 }
 
-// newTestUnixSocketPath returns a unique path short enough for Unix socket
-// limits, independent of the configured temporary root and test name.
-//
-// Cleanup preserves the prior testing.TempDir behavior and runs after both
-// success and ordinary test failure. The directory contains only the socket
-// entry, not diagnostic state worth preserving after the test.
-func newTestUnixSocketPath(t *testing.T) string {
-	t.Helper()
-
-	directory, err := os.MkdirTemp("/tmp", "y2-")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, os.RemoveAll(directory))
-	})
-
-	return filepath.Join(directory, "s")
-}
+// ynpbReadinessServiceName is the full name the readiness service is
+// registered under.
+var ynpbReadinessServiceName = ynpb.ReadinessService_ServiceDesc.ServiceName
 
 // blockingReadinessService is a fake Service whose Watch handler blocks on
 // the stream context instead of returning, reproducing a server-streaming
 // RPC that only ends once the client disconnects.
 type blockingReadinessService struct {
 	ynpb.UnimplementedReadinessServiceServer
-
-	endpoint string
 }
 
 func (m *blockingReadinessService) Name() string     { return "blocking-readiness" }
-func (m *blockingReadinessService) Endpoint() string { return m.endpoint }
+func (m *blockingReadinessService) Endpoint() string { return "" }
 
 func (m *blockingReadinessService) ServicesNames() []string {
-	return []string{ynpb.ReadinessService_ServiceDesc.ServiceName}
+	return []string{ynpbReadinessServiceName}
 }
 
 func (m *blockingReadinessService) RegisterService(server *grpc.Server) {
@@ -398,73 +514,6 @@ func TestGateway_Director_RegistryMissCarriesReasonTrailer(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Gateway.Run did not return within the shutdown grace period")
-	}
-}
-
-// TestServiceRunner_Run_ShutsDownWithOpenStream verifies that
-// ServiceRunner.Run returns within a bounded time after its context is
-// canceled, even while a client keeps a server-streaming RPC open on the
-// runner's own out-of-process gRPC server, reproducing the same hang for an
-// operator's readiness stream proxied through the gateway.
-func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
-	t.Parallel()
-
-	gatewayListener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	gatewayServer := grpc.NewServer()
-	ynpb.RegisterGatewayServer(gatewayServer, gateway.NewGatewayService(gateway.NewBackendRegistry()))
-
-	var gatewayGroup errgroup.Group
-	gatewayGroup.Go(func() error {
-		return gatewayServer.Serve(gatewayListener)
-	})
-	// Stop before waiting: Serve only returns once the server is stopped, and
-	// t.Cleanup runs in LIFO order, so registering both steps in a single
-	// cleanup keeps the ordering correct regardless of what else is
-	// registered around it.
-	t.Cleanup(func() {
-		gatewayServer.Stop()
-		_ = gatewayGroup.Wait()
-	})
-
-	backendAddr := newTestUnixSocketPath(t)
-	runner := gateway.NewServiceRunner(
-		&blockingReadinessService{endpoint: backendAddr},
-		gatewayListener.Addr().String(),
-		nil,
-	)
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	var runnerGroup errgroup.Group
-	runnerGroup.Go(func() error {
-		return runner.Run(ctx)
-	})
-
-	select {
-	case <-runner.Ready():
-	case <-time.After(5 * time.Second):
-		t.Fatal("service runner did not become ready")
-	}
-
-	conn, err := grpc.NewClient("unix://"+backendAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-
-	// As above, the stream is deliberately left open across shutdown.
-	_ = watchUntilOpen(t, t.Context(), ynpb.NewReadinessServiceClient(conn))
-
-	cancel()
-
-	runErr := make(chan error, 1)
-	go func() { runErr <- runnerGroup.Wait() }()
-
-	select {
-	case err := <-runErr:
-		require.NoError(t, err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("ServiceRunner.Run did not return within the shutdown grace period")
 	}
 }
 

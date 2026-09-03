@@ -14,7 +14,7 @@ service runners have finished initial registration.
 | `gateway` | All built-in service runners completed their initial registration. |
 
 The scope starts at `STATE_UNKNOWN` and is latched to `STATE_READY` once every
-out-of-process service runner signals `Ready()` (or immediately when there are
+in-process service runner signals `Ready()` (or immediately when there are
 no runners). On shutdown `Drain` flips it to `STATE_NOT_READY` with reason
 `SHUTTING_DOWN`, and `WithDrainLatch` makes any later `Set` a no-op.
 

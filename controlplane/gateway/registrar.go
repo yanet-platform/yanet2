@@ -10,6 +10,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
 
@@ -19,7 +21,6 @@ import (
 type gatewayRegistrarOptions struct {
 	Backoff        func() backoff.BackOff
 	MaxElapsedTime time.Duration
-	InProcess      bool
 	Log            *zap.Logger
 }
 
@@ -62,14 +63,6 @@ func WithMaxElapsedTime(d time.Duration) GatewayRegistrarOption {
 	}
 }
 
-// WithInProcess marks every RegisterRequest sent by this registrar as
-// originating from inside the gateway process.
-func WithInProcess(inProcess bool) GatewayRegistrarOption {
-	return func(o *gatewayRegistrarOptions) {
-		o.InProcess = inProcess
-	}
-}
-
 // GatewayRegistrar registers service backends in a single gateway endpoint.
 //
 // A single GatewayRegistrar instance is tied to exactly one endpoint.
@@ -79,14 +72,15 @@ type GatewayRegistrar struct {
 	conn           *grpc.ClientConn
 	backoff        func() backoff.BackOff
 	maxElapsedTime time.Duration
-	inProcess      bool
 	log            *zap.Logger
 }
 
-// NewGatewayRegistrar creates a registrar for the given gateway endpoint.
+// NewGatewayRegistrar creates a registrar for the given gateway endpoint,
+// dialing it with the given transport credentials, or in plaintext when
+// none are given.
 func NewGatewayRegistrar(
 	endpoint string,
-	tlsConfig *TLSConfig,
+	creds credentials.TransportCredentials,
 	options ...GatewayRegistrarOption,
 ) (*GatewayRegistrar, error) {
 	opts := newGatewayRegistrarOptions()
@@ -94,9 +88,8 @@ func NewGatewayRegistrar(
 		o(opts)
 	}
 
-	creds, err := TransportCredentials(tlsConfig, endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize gateway transport credentials: %w", err)
+	if creds == nil {
+		creds = insecure.NewCredentials()
 	}
 
 	conn, err := grpc.NewClient(
@@ -114,7 +107,6 @@ func NewGatewayRegistrar(
 		conn:           conn,
 		backoff:        opts.Backoff,
 		maxElapsedTime: opts.MaxElapsedTime,
-		inProcess:      opts.InProcess,
 		log:            opts.Log,
 	}, nil
 }
@@ -163,7 +155,6 @@ func (m *GatewayRegistrar) RegisterServices(
 				Name:     name,
 				Endpoint: backendEndpoint,
 			},
-			InProcess: m.inProcess,
 		}
 
 		wg.Go(func() error {

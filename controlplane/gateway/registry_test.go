@@ -661,37 +661,24 @@ func TestBackendRegistry_RenewCannotExemptExternalFromEviction(t *testing.T) {
 	require.True(t, b.Closed(), "entry must not have become immortal after a renewal")
 }
 
-// TestGatewayService_RegisterKindResolution verifies that the Register RPC
-// maps in_process=true to gateway.BackendKindInProcess and in_process=false
-// (or unset) to gateway.BackendKindExternal.
-func TestGatewayService_RegisterKindResolution(t *testing.T) {
-	cases := []struct {
-		name      string
-		inProcess bool
-		wantKind  gateway.BackendKind
-	}{
-		{"external when unset", false, gateway.BackendKindExternal},
-		{"in-process when set", true, gateway.BackendKindInProcess},
-	}
+// Test_GatewayService_Register_AlwaysExternal verifies that a backend arriving
+// through the Register RPC is recorded as external.
+//
+// Every in-process service registers directly and never calls the RPC, so
+// nothing reaching it can be anything but external.
+func Test_GatewayService_Register_AlwaysExternal(t *testing.T) {
+	reg := gateway.NewBackendRegistry()
+	t.Cleanup(func() { _ = reg.Close() })
+	svc := gateway.NewGatewayService(reg)
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			reg := gateway.NewBackendRegistry()
-			svc := gateway.NewGatewayService(reg)
+	_, err := svc.Register(t.Context(), &ynpb.RegisterRequest{
+		Backend: &ynpb.BackendDesc{
+			Name:     "svc.Test",
+			Endpoint: "passthrough:test-endpoint",
+		},
+	})
+	require.NoError(t, err)
 
-			_, err := svc.Register(t.Context(), &ynpb.RegisterRequest{
-				Backend: &ynpb.BackendDesc{
-					Name:     "svc.Test",
-					Endpoint: "passthrough:test-endpoint",
-				},
-				InProcess: tc.inProcess,
-			})
-			require.NoError(t, err)
-
-			entry := getBackendEntry(t, reg, "svc.Test")
-			require.Equal(t, tc.wantKind, entry.Kind())
-
-			_ = reg.Close()
-		})
-	}
+	entry := getBackendEntry(t, reg, "svc.Test")
+	require.Equal(t, gateway.BackendKindExternal, entry.Kind())
 }
