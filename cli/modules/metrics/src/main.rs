@@ -35,9 +35,7 @@ const NO_SERVICES: &str = "no metrics services are registered with the gateway";
 pub struct Cmd {
     /// Metrics service to probe: either a fully-qualified gRPC service name
     /// (e.g. `operators.route.operatorpb.v1.MetricsService`) or a short
-    /// alias matched against the discovered services (e.g. `route`). When an
-    /// alias matches exactly one module service and any operator services, it
-    /// selects the module; name an operator service in full.
+    /// alias matched against the discovered services (e.g. `route`).
     ///
     /// Omitting it lists the available services as a usage error.
     #[arg(value_name = "SERVICE", add = ArgValueCandidates::new(service_candidates))]
@@ -219,9 +217,8 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
 /// not registered, its operator down or not yet up — because the alias is
 /// resolved against the live registry. It therefore carries the same kind the
 /// gateway's own answer would map to, so that a monitoring script gets one
-/// exit code for both spellings of the condition. An alias shared by exactly
-/// one module service and any operator services retains its established module
-/// meaning; other ambiguous aliases are bad input.
+/// exit code for both spellings of the condition. An ambiguous alias, in
+/// contrast, really is bad input.
 async fn resolve_alias(connection: &Connection, alias: &str) -> Result<String, Error> {
     let services = discovery::list_services(connection, METRICS_SERVICE).await?;
     let endpoint = connection.endpoint();
@@ -229,16 +226,6 @@ async fn resolve_alias(connection: &Connection, alias: &str) -> Result<String, E
     match discovery::resolve_alias(alias, &services) {
         Resolution::Resolved(name) => Ok(name),
         Resolution::Ambiguous(candidates) => {
-            let only_modules_and_operators = candidates
-                .iter()
-                .all(|candidate| candidate.starts_with("modules.") || candidate.starts_with("operators."));
-            if only_modules_and_operators {
-                let mut module_matches = candidates.iter().filter(|candidate| candidate.starts_with("modules."));
-                if let (Some(name), None) = (module_matches.next(), module_matches.next()) {
-                    return Ok(name.clone());
-                }
-            }
-
             let message = format!("service name \"{alias}\" is ambiguous");
 
             Err(
