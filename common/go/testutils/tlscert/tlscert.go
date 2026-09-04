@@ -150,6 +150,45 @@ func (m *CA) IssueServer(t *testing.T, hosts ...string) Keypair {
 	return m.issue(t, "server", template)
 }
 
+// IssueIntermediate issues a subordinate authority with the given common
+// name that signs from the same directory.
+func (m *CA) IssueIntermediate(t *testing.T, commonName string) *CA {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber:          newSerial(t),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, m.certificate, &key.PublicKey, m.key)
+	require.NoError(t, err)
+
+	certificate, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(certificate)
+
+	bundleFile := filepath.Join(m.dir, fmt.Sprintf("intermediate-%d.pem", m.issued.Add(1)))
+	writePEM(t, bundleFile, "CERTIFICATE", der)
+
+	return &CA{
+		certificate: certificate,
+		key:         key,
+		pool:        pool,
+		bundleFile:  bundleFile,
+		dir:         m.dir,
+	}
+}
+
 // IssueClient issues a client certificate with the given common name, valid
 // for an hour unless an option says otherwise.
 func (m *CA) IssueClient(t *testing.T, commonName string, options ...IssueOption) Keypair {
@@ -173,8 +212,28 @@ func (m *CA) IssueClient(t *testing.T, commonName string, options ...IssueOption
 // RevocationList signs a DER-encoded list revoking the given certificates,
 // with the next update expected at nextUpdate.
 //
-// Passing a past nextUpdate yields a list that is already stale.
+// Lists are numbered in the order they are signed, so a later call yields a
+// newer list. Passing a past nextUpdate yields a list that is already stale.
 func (m *CA) RevocationList(t *testing.T, nextUpdate time.Time, revoked ...*x509.Certificate) []byte {
+	t.Helper()
+
+	return m.revocationList(t, m.issued.Add(1), nextUpdate, revoked...)
+}
+
+// RevocationListFile writes the list RevocationList would sign to a file
+// under the CA's directory and returns its path.
+func (m *CA) RevocationListFile(t *testing.T, nextUpdate time.Time, revoked ...*x509.Certificate) string {
+	t.Helper()
+
+	number := m.issued.Add(1)
+	path := filepath.Join(m.dir, fmt.Sprintf("revoked-%d.crl", number))
+	require.NoError(t, os.WriteFile(path, m.revocationList(t, number, nextUpdate, revoked...), 0o600))
+
+	return path
+}
+
+// revocationList signs list number revoking the given certificates.
+func (m *CA) revocationList(t *testing.T, number int64, nextUpdate time.Time, revoked ...*x509.Certificate) []byte {
 	t.Helper()
 
 	entries := make([]x509.RevocationListEntry, 0, len(revoked))
@@ -186,7 +245,7 @@ func (m *CA) RevocationList(t *testing.T, nextUpdate time.Time, revoked ...*x509
 	}
 
 	template := &x509.RevocationList{
-		Number:                    big.NewInt(m.issued.Add(1)),
+		Number:                    big.NewInt(number),
 		ThisUpdate:                nextUpdate.Add(-time.Hour),
 		NextUpdate:                nextUpdate,
 		RevokedCertificateEntries: entries,
@@ -196,17 +255,6 @@ func (m *CA) RevocationList(t *testing.T, nextUpdate time.Time, revoked ...*x509
 	require.NoError(t, err)
 
 	return der
-}
-
-// RevocationListFile writes the list RevocationList would sign to a file
-// under the CA's directory and returns its path.
-func (m *CA) RevocationListFile(t *testing.T, nextUpdate time.Time, revoked ...*x509.Certificate) string {
-	t.Helper()
-
-	path := filepath.Join(m.dir, fmt.Sprintf("revoked-%d.crl", m.issued.Load()+1))
-	require.NoError(t, os.WriteFile(path, m.RevocationList(t, nextUpdate, revoked...), 0o600))
-
-	return path
 }
 
 // issue signs template with the CA and writes the pair under a unique name.

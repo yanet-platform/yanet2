@@ -2,6 +2,7 @@ package x509_test
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"net/url"
 	"testing"
 	"time"
@@ -178,5 +179,43 @@ func Test_Authenticator_Authenticate_RejectsMissingChain(t *testing.T) {
 		_, err := authenticator.Authenticate(t.Context(), credential, &core.RequestInfo{})
 		require.Equal(t, codes.Unauthenticated, status.Code(err))
 		require.ErrorContains(t, err, x509auth.ErrNoVerifiedCertificate.Error())
+	}
+}
+
+// Test_Authenticator_Authenticate_ChecksIntermediates verifies that a
+// revoked intermediate authority rejects every certificate issued through
+// it, since the handshake alone never consults the revocation lists.
+func Test_Authenticator_Authenticate_ChecksIntermediates(t *testing.T) {
+	root := tlscert.NewCA(t)
+	intermediate := root.IssueIntermediate(t, "test intermediate")
+	client := intermediate.IssueClient(t, "route-operator")
+	credential := core.Credential{
+		TLS: &tls.ConnectionState{
+			VerifiedChains: [][]*x509.Certificate{{client.Leaf, intermediate.Certificate(), root.Certificate()}},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		crlFiles []string
+		wantErr  error
+	}{
+		{name: "intermediate revoked", crlFiles: []string{root.RevocationListFile(t, time.Now().Add(time.Hour), intermediate.Certificate())}, wantErr: x509auth.ErrCertificateRevoked},
+		{name: "intermediate current", crlFiles: []string{root.RevocationListFile(t, time.Now().Add(time.Hour))}},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			authenticator := newAuthenticator(t, newStore(t, root, testCase.crlFiles...))
+
+			_, err := authenticator.Authenticate(t.Context(), credential, &core.RequestInfo{})
+			if testCase.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Equal(t, codes.Unauthenticated, status.Code(err))
+			require.ErrorContains(t, err, testCase.wantErr.Error())
+		})
 	}
 }

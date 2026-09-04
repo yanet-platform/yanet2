@@ -3,8 +3,11 @@ package x509_test
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +168,57 @@ func Test_Store_Collect_ReportsNextUpdate(t *testing.T) {
 
 	require.Equal(t, []x509auth.RevocationListInfo{{Source: crlFile, NextUpdate: nextUpdate.UTC()}}, store.RevocationLists())
 	require.EqualValues(t, nextUpdate.Unix(), findMetric(t, store, "auth_x509_crl_next_update_seconds", crlFile).GetGauge())
+}
+
+// Test_NewStore_RejectsEndEntityInBundle verifies that a bundle holding a
+// certificate that is not an authority fails construction, since such a
+// certificate in the pool would verify itself.
+func Test_NewStore_RejectsEndEntityInBundle(t *testing.T) {
+	ca := tlscert.NewCA(t)
+	client := ca.IssueClient(t, "route-operator")
+
+	_, err := x509auth.NewStore([]loader.Loader{loader.NewLoader(client.CertFile)}, nil)
+	require.ErrorIs(t, err, x509auth.ErrNotAuthority)
+}
+
+// Test_Store_Reload_RejectsOlderRevocationList verifies that a correctly
+// signed but older list does not replace the accepted one, so a replayed
+// list cannot undo a revocation.
+func Test_Store_Reload_RejectsOlderRevocationList(t *testing.T) {
+	ca := tlscert.NewCA(t)
+	client := ca.IssueClient(t, "route-operator")
+	older := ca.RevocationList(t, time.Now().Add(time.Hour))
+	crlFile := ca.RevocationListFile(t, time.Now().Add(time.Hour), client.Leaf)
+	store := newStore(t, ca, crlFile)
+	require.True(t, store.IsRevoked(client.Leaf))
+
+	require.NoError(t, os.WriteFile(crlFile, older, 0o600))
+
+	require.ErrorIs(t, store.Reload(), x509auth.ErrRevocationListRollback)
+	require.True(t, store.IsRevoked(client.Leaf))
+	require.EqualValues(t, 1, findMetric(t, store, "auth_x509_refresh_errors_total", crlFile).GetCounter())
+}
+
+// Test_Store_Collect_RedactsSourceURL verifies that a source fetched from a
+// URL is labeled without the credentials and query the URL carries.
+func Test_Store_Collect_RedactsSourceURL(t *testing.T) {
+	ca := tlscert.NewCA(t)
+	bundle, err := os.ReadFile(ca.BundleFile())
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bundle)
+	}))
+	t.Cleanup(server.Close)
+
+	source := strings.Replace(server.URL, "http://", "http://user:secret@", 1) + "/ca.pem?token=secret"
+	store, err := x509auth.NewStore([]loader.Loader{loader.NewLoader(source)}, nil)
+	require.NoError(t, err)
+
+	require.EqualValues(t, 0, findMetric(t, store, "auth_x509_refresh_errors_total", server.URL+"/ca.pem").GetCounter())
+	for _, metric := range store.Collect() {
+		for _, label := range metric.GetLabels() {
+			require.NotContains(t, label.GetValue(), "secret")
+		}
+	}
 }

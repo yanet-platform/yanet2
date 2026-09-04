@@ -3,6 +3,7 @@ package x509
 import (
 	"context"
 	"crypto/x509"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -105,10 +106,11 @@ func (m *Authenticator) Authenticate(
 	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.AuthInfo, error) {
-	leaf, ok := verifiedLeaf(credential)
+	chain, ok := verifiedChain(credential)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, ErrNoVerifiedCertificate.Error())
 	}
+	leaf := chain[0]
 
 	if err := checkValidity(leaf, time.Now()); err != nil {
 		return nil, status.Errorf(
@@ -117,7 +119,9 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	if m.store.IsRevoked(leaf) {
+	// The handshake does not consult the revocation lists, so a revoked
+	// intermediate is only caught by checking every link of the chain.
+	if slices.ContainsFunc(chain, m.store.IsRevoked) {
 		return nil, status.Error(codes.Unauthenticated, ErrCertificateRevoked.Error())
 	}
 
@@ -192,13 +196,14 @@ func (m *Authenticator) refresh() {
 	}
 }
 
-// verifiedLeaf returns the client certificate the handshake verified.
-func verifiedLeaf(credential core.Credential) (*x509.Certificate, bool) {
+// verifiedChain returns the chain the handshake verified, the client
+// certificate first.
+func verifiedChain(credential core.Credential) ([]*x509.Certificate, bool) {
 	if credential.TLS == nil || len(credential.TLS.VerifiedChains) == 0 || len(credential.TLS.VerifiedChains[0]) == 0 {
 		return nil, false
 	}
 
-	return credential.TLS.VerifiedChains[0][0], true
+	return credential.TLS.VerifiedChains[0], true
 }
 
 // checkValidity checks that now falls within the certificate's validity

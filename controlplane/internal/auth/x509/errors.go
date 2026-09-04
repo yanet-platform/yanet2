@@ -20,6 +20,12 @@ var (
 	ErrNoSubjectName = errors.New("certificate has neither a common name nor a single spiffe id")
 	// ErrNoAuthorities is returned when a bundle holds no certificate.
 	ErrNoAuthorities = errors.New("no certificates found")
+	// ErrNotAuthority is returned when a bundle holds a certificate that is
+	// not a certificate authority.
+	ErrNotAuthority = errors.New("certificate is not a certificate authority")
+	// ErrRevocationListRollback is returned when a source serves a list older
+	// than the one already accepted from it.
+	ErrRevocationListRollback = errors.New("revocation list is older than the accepted one")
 	// ErrUntrustedRevocationList is returned when no trusted authority signed
 	// the revocation list.
 	ErrUntrustedRevocationList = errors.New("revocation list not signed by a trusted authority")

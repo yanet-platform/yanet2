@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/url"
 	"sync/atomic"
 	"time"
 
@@ -127,8 +128,9 @@ func (m *Store) RevocationLists() []RevocationListInfo {
 // Reload rebuilds the snapshot from the sources.
 //
 // A failed authority source aborts the reload and keeps the current
-// snapshot. A failed revocation list source keeps that source's last
-// accepted list. Every failure is counted and returned, joined.
+// snapshot. A revocation list source that fails, or serves a list older
+// than the one accepted from it, keeps that last accepted list. Every
+// failure is counted and returned, joined.
 func (m *Store) Reload() error {
 	authorities, err := m.loadAuthorities()
 	if err != nil {
@@ -144,14 +146,20 @@ func (m *Store) Reload() error {
 	lists := map[string]*x509.RevocationList{}
 	previous := m.snapshot.Load()
 	for _, source := range m.crlSources {
+		var kept *x509.RevocationList
+		if previous != nil {
+			kept = previous.Lists[source.Source()]
+		}
+
 		list, err := loadRevocationList(source, authorities)
+		if err == nil && kept != nil && isOlder(list, kept) {
+			err = ErrRevocationListRollback
+		}
 		if err != nil {
 			m.refreshErrors[source.Source()].Inc()
 			errs = append(errs, fmt.Errorf("load revocation list from %q: %w", source.Source(), err))
-			if previous != nil {
-				if kept, ok := previous.Lists[source.Source()]; ok {
-					lists[source.Source()] = kept
-				}
+			if kept != nil {
+				lists[source.Source()] = kept
 			}
 			continue
 		}
@@ -170,13 +178,16 @@ func (m *Store) Reload() error {
 
 // Collect reports the next update of every loaded revocation list and the
 // failed refreshes of every source.
+//
+// A source is labeled without the credentials and query its URL may carry,
+// since metrics are read more widely than the configuration.
 func (m *Store) Collect() []*commonpb.Metric {
 	var out []*commonpb.Metric
 	for _, info := range m.RevocationLists() {
 		out = append(out, commonpb.NewMetricGauge(
 			metricCRLNextUpdate,
 			float64(info.NextUpdate.Unix()),
-			commonpb.MetricLabelsToProto(metrics.Labels{labelSource: info.Source})...,
+			commonpb.MetricLabelsToProto(metrics.Labels{labelSource: sourceLabel(info.Source)})...,
 		))
 	}
 	for _, sources := range [][]loader.Loader{m.caSources, m.crlSources} {
@@ -184,7 +195,7 @@ func (m *Store) Collect() []*commonpb.Metric {
 			out = append(out, commonpb.NewMetricCounter(
 				metricRefreshErrors,
 				m.refreshErrors[source.Source()].Load(),
-				commonpb.MetricLabelsToProto(metrics.Labels{labelSource: source.Source()})...,
+				commonpb.MetricLabelsToProto(metrics.Labels{labelSource: sourceLabel(source.Source())})...,
 			))
 		}
 	}
@@ -217,7 +228,12 @@ func loadCertificates(source loader.Loader) ([]*x509.Certificate, error) {
 	return parseCertificates(data)
 }
 
-// parseCertificates parses every certificate block of a PEM bundle.
+// parseCertificates parses every certificate block of a PEM bundle and
+// requires each to be an authority.
+//
+// A certificate placed in the pool verifies itself as a chain of one, so an
+// end-entity certificate here would authenticate itself instead of
+// reporting the misconfiguration.
 func parseCertificates(data []byte) ([]*x509.Certificate, error) {
 	var certificates []*x509.Certificate
 	for {
@@ -233,6 +249,9 @@ func parseCertificates(data []byte) ([]*x509.Certificate, error) {
 		certificate, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
 			return nil, fmt.Errorf("parse certificate: %w", err)
+		}
+		if !certificate.BasicConstraintsValid || !certificate.IsCA {
+			return nil, fmt.Errorf("%w: %s", ErrNotAuthority, certificate.Subject)
 		}
 		certificates = append(certificates, certificate)
 	}
@@ -271,6 +290,31 @@ func loadRevocationList(source loader.Loader, authorities []*x509.Certificate) (
 	}
 
 	return nil, ErrUntrustedRevocationList
+}
+
+// isOlder reports whether candidate predates accepted, by list number when
+// both carry one and by issue time otherwise.
+func isOlder(candidate, accepted *x509.RevocationList) bool {
+	if candidate.Number != nil && accepted.Number != nil {
+		return candidate.Number.Cmp(accepted.Number) < 0
+	}
+
+	return candidate.ThisUpdate.Before(accepted.ThisUpdate)
+}
+
+// sourceLabel names a source in metrics, stripping the user, query and
+// fragment off a URL.
+func sourceLabel(source string) string {
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Host == "" {
+		return source
+	}
+
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+
+	return parsed.String()
 }
 
 // indexRevoked flattens the lists into one lookup set.

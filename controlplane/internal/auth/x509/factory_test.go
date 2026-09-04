@@ -57,3 +57,15 @@ func Test_NewFromConfig_WiresSources(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "pipeline-operator", info.Subject.Login)
 }
+
+// Test_NewFromConfig_RejectsUnknownKey verifies that a key the config does
+// not declare is an error, so a misspelled revocation list key cannot
+// silently leave revocation off.
+func Test_NewFromConfig_RejectsUnknownKey(t *testing.T) {
+	ca := tlscert.NewCA(t)
+
+	_, err := x509auth.NewFromConfig(decodeConfigNode(t, "config:\n"+
+		"  ca_sources:\n    - "+ca.BundleFile()+"\n"+
+		"  crl_source: /etc/yanet2/auth/clients.crl\n"))
+	require.ErrorContains(t, err, "crl_source")
+}
