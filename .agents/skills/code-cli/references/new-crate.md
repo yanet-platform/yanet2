@@ -38,7 +38,7 @@ clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 netip = "0.3"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
-tabled = { version = "0.18", features = ["ansi"] }
+tabled = { version = "0.21", features = ["ansi"] }
 tonic = { version = "0.13", features = ["gzip"] }
 
 [build-dependencies]
