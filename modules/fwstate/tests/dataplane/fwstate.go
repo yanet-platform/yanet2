@@ -132,6 +132,14 @@ func SetSyncSuppressTimeout(cpModule *C.struct_cp_module, ns uint64) {
 	m.sync_config.sync_suppress_timeout = C.uint64_t(ns)
 }
 
+// ClearSyncDestination leaves the module config without a sync
+// destination, the state a config created with no sync settings carries.
+func ClearSyncDestination(cpModule *C.struct_cp_module) {
+	m := (*C.struct_fwstate_module_config)(unsafe.Pointer(cpModule))
+	m.sync_config.port_multicast = 0
+	m.sync_config.dst_addr_multicast = [16]C.uint8_t{}
+}
+
 // SetSyncTCPTimeouts overrides the TCP established (tcp) and teardown
 // (tcp_fin) timeouts so a test can distinguish an established refresh from a
 // shorter-TTL state transition.

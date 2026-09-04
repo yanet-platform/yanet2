@@ -1,4 +1,4 @@
-package fwstate
+package fwstate_test
 
 import (
 	"strings"
@@ -9,145 +9,37 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
-// TestValidateSyncPorts verifies that ports above the uint16 range are
-// rejected with InvalidArgument, while zero and boundary values pass.
-func TestValidateSyncPorts(t *testing.T) {
-	cases := []struct {
-		name          string
-		portMulticast uint32
-		wantErr       bool
-	}{
-		{
-			name:          "zero",
-			portMulticast: 0,
-			wantErr:       false,
-		},
-		{
-			name:          "boundary value",
-			portMulticast: 65535,
-			wantErr:       false,
-		},
-		{
-			name:          "just above boundary",
-			portMulticast: 65536,
-			wantErr:       true,
-		},
-	}
+// Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination verifies
+// that a request naming part of the sync destination is refused.
+//
+// The InvalidArgument it fails with names every part left out, and the
+// agent is not touched before it does.
+func Test_FWStateService_UpdateConfig_RejectsPartialSyncDestination(t *testing.T) {
+	service := fwstate.NewFWStateService(nil)
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &fwstatepb.SyncConfig{
-				PortMulticast: tc.portMulticast,
-			}
-
-			err := validateSyncPorts(cfg)
-			if !tc.wantErr {
-				require.NoError(t, err)
-				return
-			}
-
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-		})
-	}
+	_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name: "cfg",
+		SyncConfig: &fwstatepb.SyncConfig{
+			PortMulticast: 9999,
+		},
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "src_addr")
+	require.Contains(t, err.Error(), "dst_addr_multicast")
 }
 
-// TestValidateSyncConfigMulticastRequired checks that the multicast
-// destination pair is validated as required.
-func TestValidateSyncConfigMulticastRequired(t *testing.T) {
-	newConfig := func() *fwstatepb.SyncConfig {
-		return &fwstatepb.SyncConfig{
-			SrcAddr:       &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			PortMulticast: 1,
-		}
-	}
-
-	t.Run("missing multicast address", func(t *testing.T) {
-		err := validateSyncConfig(newConfig())
-		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "dst_addr_multicast"))
-	})
-
-	t.Run("zero multicast port", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
-		cfg.PortMulticast = 0
-
-		err := validateSyncConfig(cfg)
-		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "port_multicast"))
-	})
-
-	t.Run("valid", func(t *testing.T) {
-		cfg := newConfig()
-		cfg.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
-
-		err := validateSyncConfig(cfg)
-		require.NoError(t, err)
-	})
-}
-
-// TestUpdateConfigRequiresMapNames checks that a request without both map
-// object names is rejected with InvalidArgument naming the missing field,
-// before any backend or agent state is touched.
-func TestUpdateConfigRequiresMapNames(t *testing.T) {
-	syncConfig := &fwstatepb.SyncConfig{
-		SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-		PortMulticast:    9999,
-	}
-
-	cases := []struct {
-		name       string
-		request    *fwstatepb.UpdateConfigRequest
-		wantDetail string
-	}{
-		{
-			name: "missing map_name_v4",
-			request: &fwstatepb.UpdateConfigRequest{
-				Name:       "cfg",
-				MapNameV6:  "maps-v6",
-				SyncConfig: syncConfig,
-			},
-			wantDetail: "map_name_v4",
-		},
-		{
-			name: "missing map_name_v6",
-			request: &fwstatepb.UpdateConfigRequest{
-				Name:       "cfg",
-				MapNameV4:  "maps-v4",
-				SyncConfig: syncConfig,
-			},
-			wantDetail: "map_name_v6",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			service := NewFWStateService(nil)
-
-			_, err := service.UpdateConfig(t.Context(), tc.request)
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Contains(t, err.Error(), tc.wantDetail)
-		})
-	}
-}
-
-// TestUpdateConfigRejectsUnrepresentableMapNames checks that map names too
-// long for the fixed-size C object registry, or containing NUL bytes, are
-// rejected before any C state is built: cp_module_link_object would
-// silently truncate them and link an unintended map.
-func TestUpdateConfigRejectsUnrepresentableMapNames(t *testing.T) {
-	syncConfig := &fwstatepb.SyncConfig{
-		SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-		PortMulticast:    9999,
-	}
-
+// Test_FWStateService_UpdateConfig_RejectsUnrepresentableMapNames verifies
+// that a map name the C object registry cannot carry is refused.
+//
+// A name too long, or one holding a NUL byte, would be truncated on the
+// way in and link an unintended map, so it is refused before any C state
+// is built.
+func Test_FWStateService_UpdateConfig_RejectsUnrepresentableMapNames(t *testing.T) {
 	cases := []struct {
 		name   string
 		mapV4  string
@@ -170,17 +62,153 @@ func TestUpdateConfigRejectsUnrepresentableMapNames(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			service := NewFWStateService(nil)
+			service := fwstate.NewFWStateService(nil)
 
 			_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
-				Name:       "cfg",
-				MapNameV4:  tc.mapV4,
-				MapNameV6:  tc.mapV6,
-				SyncConfig: syncConfig,
+				Name:      "cfg",
+				MapNameV4: tc.mapV4,
+				MapNameV6: tc.mapV6,
 			})
 			require.Error(t, err)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 			require.Contains(t, err.Error(), tc.detail)
 		})
 	}
+}
+
+// syncTestAddr is the address both ends of a test sync destination use;
+// only its presence matters to the validation under test.
+func syncTestAddr() *commonpb.IPAddress {
+	return &commonpb.IPAddress{
+		Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+	}
+}
+
+const syncTestPort = 9999
+
+// showConfig reads back the stored config, which must exist.
+func showConfig(
+	testingTB testing.TB,
+	service *fwstate.FWStateService,
+	name string,
+) *fwstatepb.ShowConfigResponse {
+	testingTB.Helper()
+
+	response, err := service.ShowConfig(
+		testingTB.Context(), &fwstatepb.ShowConfigRequest{Name: name},
+	)
+	require.NoError(testingTB, err)
+
+	return response
+}
+
+// Test_FWStateService_UpdateConfig_CreatesConfigWithoutSyncOrMaps
+// verifies that a create naming only the config succeeds.
+//
+// The installed module links no map and matches no sync packet, leaving
+// both to a later update.
+func Test_FWStateService_UpdateConfig_CreatesConfigWithoutSyncOrMaps(t *testing.T) {
+	const configName = "fwstate-bare"
+
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-bare")
+	service := fwstate.NewFWStateService(agent)
+
+	_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name: configName,
+	})
+	require.NoError(t, err)
+	require.True(t, hasCPConfig(agent.DPConfig().CPConfigs(), fwstateModuleType, configName))
+
+	stored := showConfig(t, service, configName)
+	require.Empty(t, stored.GetMapNameV4())
+	require.Empty(t, stored.GetMapNameV6())
+	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
+	require.Equal(t, make([]byte, 16), stored.GetSyncConfig().GetSrcAddr().GetAddr())
+	require.Equal(t, make([]byte, 16), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+
+	// The timeouts are not part of the sync destination and always carry
+	// the defaults, so an unconfigured config is still a usable one.
+	require.NotZero(t, stored.GetSyncConfig().GetUdp())
+}
+
+// Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater verifies
+// that a later update supplies what a bare create left out.
+func Test_FWStateService_UpdateConfig_AttachesMapsAndSyncLater(t *testing.T) {
+	const configName = "fwstate-attach-later"
+
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-attach-later")
+	maps := newFWStateTestMaps(t, agent, "attach-later", 1024)
+	service := fwstate.NewFWStateService(agent)
+
+	_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name: configName,
+	})
+	require.NoError(t, err)
+
+	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name:      configName,
+		MapNameV4: maps.v4Name(),
+		MapNameV6: maps.v6Name(),
+		SyncConfig: &fwstatepb.SyncConfig{
+			SrcAddr:          syncTestAddr(),
+			DstAddrMulticast: syncTestAddr(),
+			PortMulticast:    syncTestPort,
+		},
+	})
+	require.NoError(t, err)
+
+	stored := showConfig(t, service, configName)
+	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
+	require.Equal(t, maps.v6Name(), stored.GetMapNameV6())
+	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
+	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
+}
+
+// Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync
+// verifies that unnamed links and untouched sync stay as they were.
+//
+// An update naming neither a map nor a sync destination must not
+// silently unlink the maps or stop synchronization.
+func Test_FWStateService_UpdateConfig_KeepsUnnamedLinksAndUntouchedSync(t *testing.T) {
+	const (
+		configName = "fwstate-partial-update"
+		udpTimeout = 45e9
+	)
+
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, "fwstate-partial-update")
+	maps := newFWStateTestMaps(t, agent, "partial-update", 1024)
+	service := fwstate.NewFWStateService(agent)
+
+	_, err := service.UpdateConfig(t.Context(), validDeleteTestUpdateRequest(
+		configName, maps.v4Name(), maps.v6Name(),
+	))
+	require.NoError(t, err)
+
+	// A timeout-only update: no map name, and a sync config naming no
+	// part of the destination.
+	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name:       configName,
+		SyncConfig: &fwstatepb.SyncConfig{Udp: udpTimeout},
+	})
+	require.NoError(t, err)
+
+	stored := showConfig(t, service, configName)
+	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
+	require.Equal(t, maps.v6Name(), stored.GetMapNameV6())
+	require.EqualValues(t, udpTimeout, stored.GetSyncConfig().GetUdp())
+	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
+	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetSrcAddr().GetAddr())
+
+	// An update carrying no sync settings at all keeps them too.
+	_, err = service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+		Name:      configName,
+		MapNameV4: maps.v4Name(),
+		MapNameV6: maps.v6Name(),
+	})
+	require.NoError(t, err)
+
+	stored = showConfig(t, service, configName)
+	require.EqualValues(t, udpTimeout, stored.GetSyncConfig().GetUdp())
+	require.EqualValues(t, syncTestPort, stored.GetSyncConfig().GetPortMulticast())
+	require.Equal(t, syncTestAddr().GetAddr(), stored.GetSyncConfig().GetDstAddrMulticast().GetAddr())
 }

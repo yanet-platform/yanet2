@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
@@ -58,4 +59,110 @@ func TestValidateSyncConfigTimeoutsSuppressOverflow(t *testing.T) {
 		Tcp:                 120e9,
 		SyncSuppressTimeout: 8e9,
 	}).ValidateTimeouts())
+}
+
+// Test_SyncConfig_ValidateFields_RejectsUnusableValues verifies that a
+// value stated in a form the config cannot store is rejected.
+//
+// A port past the uint16 range and an address of a width other than an
+// IPv6 one fail; the values that stand for "leave this as it is" pass.
+func Test_SyncConfig_ValidateFields_RejectsUnusableValues(t *testing.T) {
+	addr := func(size int) *commonpb.IPAddress {
+		return &commonpb.IPAddress{Addr: make([]byte, size)}
+	}
+
+	cases := []struct {
+		name    string
+		config  *SyncConfig
+		wantErr string
+	}{
+		{
+			name:   "nothing set",
+			config: &SyncConfig{},
+		},
+		{
+			name:   "boundary port",
+			config: &SyncConfig{PortMulticast: 65535},
+		},
+		{
+			name:    "port above the boundary",
+			config:  &SyncConfig{PortMulticast: 65536},
+			wantErr: "port_multicast",
+		},
+		{
+			name:    "ipv4-width source address",
+			config:  &SyncConfig{SrcAddr: addr(4)},
+			wantErr: "src_addr",
+		},
+		{
+			name:    "truncated multicast address",
+			config:  &SyncConfig{DstAddrMulticast: addr(15)},
+			wantErr: "dst_addr_multicast",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.ValidateFields()
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+// Test_SyncConfig_Validate_DestinationIsAllOrNothing verifies that a
+// merged config naming part of the sync destination is rejected.
+//
+// One naming all of that destination, or none of it, is accepted.
+func Test_SyncConfig_Validate_DestinationIsAllOrNothing(t *testing.T) {
+	addr := func() *commonpb.IPAddress {
+		return &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
+	}
+	zeroAddr := func() *commonpb.IPAddress {
+		return &commonpb.IPAddress{Addr: make([]byte, 16)}
+	}
+
+	t.Run("missing multicast address", func(t *testing.T) {
+		config := &SyncConfig{SrcAddr: addr(), PortMulticast: 1}
+
+		require.ErrorContains(t, config.Validate(), "dst_addr_multicast")
+	})
+
+	t.Run("zero multicast port", func(t *testing.T) {
+		config := &SyncConfig{SrcAddr: addr(), DstAddrMulticast: addr()}
+
+		require.ErrorContains(t, config.Validate(), "port_multicast")
+	})
+
+	t.Run("only the source address", func(t *testing.T) {
+		err := (&SyncConfig{SrcAddr: addr()}).Validate()
+
+		require.ErrorContains(t, err, "dst_addr_multicast")
+		require.ErrorContains(t, err, "port_multicast")
+	})
+
+	t.Run("no destination at all", func(t *testing.T) {
+		require.NoError(t, (&SyncConfig{}).Validate())
+	})
+
+	// The stored form of an unset address, which every merge over a
+	// config without synchronization produces.
+	t.Run("zero-filled addresses", func(t *testing.T) {
+		require.NoError(t, (&SyncConfig{
+			SrcAddr:          zeroAddr(),
+			DstAddrMulticast: zeroAddr(),
+		}).Validate())
+	})
+
+	t.Run("complete destination", func(t *testing.T) {
+		require.NoError(t, (&SyncConfig{
+			SrcAddr:          addr(),
+			DstAddrMulticast: addr(),
+			PortMulticast:    1,
+		}).Validate())
+	})
 }

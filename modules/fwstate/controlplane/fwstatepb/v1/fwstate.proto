@@ -29,8 +29,11 @@ service MetricsService {
 message UpdateConfigRequest {
   string name = 1;
   // Names of the published fwstate_map_v4 / fwstate_map_v6 objects whose
-  // fwtables receive the synced state. Both are required: the module owns
-  // neither family's table itself.
+  // fwtables receive the synced state.
+  //
+  // The module owns neither family's table itself. An empty name keeps
+  // the link the config already has, so a config created without one
+  // inserts no state for that family until a later update names its map.
   string map_name_v4 = 2;
   string map_name_v6 = 3;
   SyncConfig sync_config = 4;
@@ -58,18 +61,21 @@ message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
 
-// Firewall state synchronization configuration
 // SyncConfig carries the receive-side fwstate synchronization parameters:
-// incoming-packet matching, connection timeouts, and the suppression
-// window. The emission addressing for modules that synthesize sync
-// packets lives with the ACL module's own configuration.
+// incoming-packet matching, connection timeouts and the suppression window.
+//
+// The emission addressing for modules that synthesize sync packets lives
+// with the ACL module's own configuration. Synchronization itself is
+// optional: a config naming none of src_addr, dst_addr_multicast and
+// port_multicast matches no sync packet and passes every packet through.
+// Naming only part of that destination is rejected.
 message SyncConfig {
   common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source address stamped on forwarded internal frames;
   // Deprecated: the emission-side destination MAC moved to the ACL
   // module's SyncConfig; fwstate ignores this field.
   common.commonpb.v1.MACAddress dst_ether = 2 [ deprecated = true ];
   common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address matched on incoming sync packets;
-  uint32 port_multicast = 4;                           // Multicast port. The applied config requires 1..65535. Zero keeps the current port on update.
+  uint32 port_multicast = 4;                           // Multicast port, 1..65535. Zero keeps the port the config already has.
   // Deprecated: the emission-side unicast destination moved to the ACL
   // module's SyncConfig; fwstate ignores this field.
   common.commonpb.v1.IPAddress dst_addr_unicast = 5 [ deprecated = true ];

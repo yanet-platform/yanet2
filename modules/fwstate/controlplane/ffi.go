@@ -16,14 +16,16 @@ type FwStateConfig struct {
 	mapNameV6 string
 }
 
-// NewFWStateModuleConfig builds the config in one step: the request's
-// sync config merges over the replaced config's values (or the defaults
-// for a fresh config) and both map names are declared as object links,
-// resolving against published objects when the config is published.
+// NewFWStateModuleConfig builds the config in one step, ready to
+// publish.
 //
-// The map names are remembered only after the C construction succeeds,
-// so a failed construction leaves the previous linkage visible to
-// readers.
+// The request's sync settings merge over the values they replace, and
+// each named map is declared as an object link resolving against
+// published objects when the config is published. An empty map name
+// declares no link, and the module then counts and drops that family's
+// synced state. The map names are remembered only after the construction
+// succeeds, so a failed construction leaves the previous linkage visible
+// to readers.
 func NewFWStateModuleConfig(
 	agent *ffi.Agent,
 	name string,
@@ -31,21 +33,12 @@ func NewFWStateModuleConfig(
 	syncConfig *fwstatepb.SyncConfig,
 	fw4MapName, fw6MapName string,
 ) (*FwStateConfig, error) {
-	current := cfwstate.DefaultSyncConfig()
-	if old != nil {
-		current = old.ModuleConfig.GetSyncConfig()
-	}
-
-	var finalSync *cfwstate.SyncConfig
-	if syncConfig != nil {
-		merged := syncConfig.ToCWithDefaults(current)
-		finalSync = &merged
-	}
+	merged := mergedSyncConfigC(old, syncConfig)
 
 	moduleCfg, err := cfwstate.NewModuleConfig(
 		agent,
 		name,
-		finalSync,
+		&merged,
 		fw4MapName,
 		fw6MapName,
 	)
@@ -59,18 +52,57 @@ func NewFWStateModuleConfig(
 	}, nil
 }
 
-// mergedSyncConfig merges the request's sync config over the replaced
-// config's current values (or the defaults for a fresh config): the
-// exact values a construction would install.
+// mergedMapNames returns the map object links a replacement config
+// should declare.
+//
+// A request naming a map relinks that family; leaving it unnamed keeps
+// the link the replaced config had, the only spelling the request has
+// for "leave this family alone". A fresh config left unnamed declares no
+// link at all, and the maps can be attached by a later update.
+func mergedMapNames(
+	old *FwStateConfig,
+	req *fwstatepb.UpdateConfigRequest,
+) (string, string) {
+	mapNameV4, mapNameV6 := req.GetMapNameV4(), req.GetMapNameV6()
+	if old == nil {
+		return mapNameV4, mapNameV6
+	}
+	if mapNameV4 == "" {
+		mapNameV4 = old.MapNameV4()
+	}
+	if mapNameV6 == "" {
+		mapNameV6 = old.MapNameV6()
+	}
+	return mapNameV4, mapNameV6
+}
+
+// mergedSyncConfig returns the sync settings a construction would
+// install: the request merged over the values it replaces.
 func mergedSyncConfig(
 	old *FwStateConfig,
 	syncConfig *fwstatepb.SyncConfig,
 ) *fwstatepb.SyncConfig {
+	return fwstatepb.FromCSyncConfig(mergedSyncConfigC(old, syncConfig))
+}
+
+// mergedSyncConfigC is the merge in the form the construction consumes.
+//
+// A request carrying no sync settings at all asks for no sync change,
+// which is not the same as asking for the defaults: it keeps the
+// replaced config's values, so an update touching only the linked maps
+// leaves synchronization exactly as it was.
+func mergedSyncConfigC(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+) cfwstate.SyncConfig {
 	current := cfwstate.DefaultSyncConfig()
 	if old != nil {
 		current = old.ModuleConfig.GetSyncConfig()
 	}
-	return fwstatepb.FromCSyncConfig(syncConfig.ToCWithDefaults(current))
+	if syncConfig == nil {
+		return current
+	}
+	return syncConfig.ToCWithDefaults(current)
 }
 
 // MergedSyncConfig returns the request's sync config merged with the
