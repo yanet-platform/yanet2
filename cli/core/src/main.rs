@@ -342,7 +342,7 @@ fn print_principal(endpoint: &str, principal: &Principal) {
             "hint".to_owned()
         };
 
-        println!("{indent}{hint}: pass --auth sshcert or --client-cert to authenticate");
+        println!("{indent}{hint}: pass --auth sshcert, or --client-cert with --client-key, to authenticate");
     }
 }
 
