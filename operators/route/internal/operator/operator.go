@@ -152,16 +152,23 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	operatorSvc := NewRouteOperatorService()
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
+	gatewayActuators := make([]*GatewayActuator, 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
 		gatewayMetrics := metrics.Gateway(gw.Name)
 
-		actuator, err := NewGatewayActuator(
-			gw,
+		actuatorOptions := []GatewayActuatorOption{
 			WithGatewayActuatorLog(log),
 			WithGatewayActuatorFunction(cfg.Function),
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
-		)
+		}
+		if cfg.NetlinkSidecar.Enabled {
+			actuatorOptions = append(
+				actuatorOptions,
+				WithGatewayActuatorNetlinkSidecar(),
+			)
+		}
+		actuator, err := NewGatewayActuator(gw, actuatorOptions...)
 		if err != nil {
 			for _, a := range actuators {
 				_ = a.Close()
@@ -174,6 +181,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		metered := newMeteredActuator(actuator, gatewayMetrics)
 		observed := operator.NewObservedActuator(metered, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
 		actuators = append(actuators, observed)
+		gatewayActuators = append(gatewayActuators, actuator)
 	}
 
 	fanOut := operator.NewFanOutActuator(
@@ -218,8 +226,19 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		workers = append(workers, neighMonitor.Run)
 	}
 
+	var actuator Actuator = fanOut
+	if cfg.NetlinkSidecar.Enabled {
+		actuator = NewNetlinkSidecarActuator(
+			fanOut,
+			cfg.Static.Routes,
+			cfg.NetlinkSidecar.UpdateTimeout,
+			neighTable.Snapshot,
+			gatewayActuators...,
+		)
+	}
+
 	app := operator.NewOperator(
-		fanOut,
+		actuator,
 		source,
 		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithLog(log),

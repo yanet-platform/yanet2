@@ -73,8 +73,10 @@ static:
   routes:
     - prefix: 2a02:6b8:c00::/40
       nexthop_addr: fe80::1
+      # interface: eth0  # Required only when netlink_sidecar is enabled.
     - prefix: 2a02:6b8:fc00::/40
       nexthop_addr: fe80::1
+      # interface: eth0  # Required only when netlink_sidecar is enabled.
   # Static neighbour entries seeded into operator-managed tables.
   neighbours: []
 
@@ -93,6 +95,13 @@ netlink_monitor:
   disabled: false
   table_name: kernel
   default_priority: 100
+
+# Publish the configured static-route snapshot to the host netlink sidecar,
+# trying gateway connections in order until one succeeds. Disabled preserves
+# legacy RIB-only seeding.
+netlink_sidecar:
+  enabled: false
+  update_timeout: 30s
 
 # Readiness probes reported to the gateway.
 #

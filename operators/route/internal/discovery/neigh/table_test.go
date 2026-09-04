@@ -68,6 +68,47 @@ func TestNeighTableMergeHigherPriorityLoses(t *testing.T) {
 	require.Equal(t, "kernel", entry.Source)
 }
 
+func TestNeighTableSnapshotFiltersSourcesBeforeMerging(t *testing.T) {
+	nt := NewNeighTable()
+	mustCreateSource(t, nt, "gateway-a", 100, false)
+	mustCreateSource(t, nt, "gateway-b", 100, false)
+
+	nextHop := netip.MustParseAddr("fe80::1")
+	entryA := makeEntry(nextHop.String(), [6]byte{0xAA, 0, 0, 0, 0, 1}, 100)
+	entryA.HardwareRoute.Device = "kni0"
+	entryB := makeEntry(nextHop.String(), [6]byte{0xBB, 0, 0, 0, 0, 2}, 100)
+	entryB.HardwareRoute.Device = "kni1"
+	require.NoError(t, nt.Add("gateway-a", []NeighbourEntry{entryA}))
+	require.NoError(t, nt.Add("gateway-b", []NeighbourEntry{entryB}))
+
+	snapshot := nt.Snapshot()
+	viewA := snapshot.ViewByDevices([]string{"kni0"})
+	actualA, ok := viewA.Lookup(nextHop)
+	require.True(t, ok)
+	require.Equal(t, "kni0", actualA.HardwareRoute.Device)
+	require.Equal(t, "gateway-a", actualA.Source)
+
+	viewB := snapshot.ViewByDevices([]string{"kni1"})
+	actualB, ok := viewB.Lookup(nextHop)
+	require.True(t, ok)
+	require.Equal(t, "kni1", actualB.HardwareRoute.Device)
+	require.Equal(t, "gateway-b", actualB.Source)
+
+	unfiltered, ok := snapshot.ViewByDevices(nil).Lookup(nextHop)
+	require.True(t, ok)
+	require.Equal(t, "gateway-a", unfiltered.Source)
+
+	updatedA := entryA
+	updatedA.HardwareRoute.Device = "kni2"
+	require.NoError(t, nt.Add("gateway-a", []NeighbourEntry{updatedA}))
+	oldSnapshotEntry, ok := snapshot.ViewByDevices([]string{"kni0"}).Lookup(nextHop)
+	require.True(t, ok)
+	require.Equal(t, "kni0", oldSnapshotEntry.HardwareRoute.Device)
+	newSnapshotEntry, ok := nt.Snapshot().ViewByDevices([]string{"kni2"}).Lookup(nextHop)
+	require.True(t, ok)
+	require.Equal(t, "kni2", newSnapshotEntry.HardwareRoute.Device)
+}
+
 func TestNeighTableDefaultPriority(t *testing.T) {
 	nt := NewNeighTable()
 	mustCreateSource(t, nt, "static", 42, true)

@@ -18,8 +18,9 @@ type routeSnapshot interface {
 type RouteSnapshot struct {
 	// RIBs maps each module config name to its route dump.
 	RIBs map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]
-	// Neighbours is the neighbour view used to resolve route nexthops.
-	Neighbours neigh.NexthopCacheView
+	// Neighbours retains individual sources so gateways can filter by device
+	// before equal next hops are merged.
+	Neighbours neigh.TableSnapshot
 }
 
 // RouteSource is the operator.StateSource[RouteSnapshot] used by the route
@@ -73,7 +74,7 @@ func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
 	for name, ribRef := range ribs {
 		dumps[name] = ribRef.DumpRoutes()
 	}
-	return RouteSnapshot{RIBs: dumps, Neighbours: m.neighTable.View()}, true
+	return RouteSnapshot{RIBs: dumps, Neighbours: m.neighTable.Snapshot()}, true
 }
 
 func (m *RouteSource) Wake() <-chan struct{} {

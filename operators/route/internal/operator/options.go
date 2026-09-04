@@ -204,10 +204,18 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function   FunctionConfig
-	Devices    []string
-	OnFIBBuilt func(module string, stats FIBBuildStats)
-	Log        *zap.Logger
+	Function              FunctionConfig
+	Devices               []string
+	NetlinkSidecarEnabled bool
+	OnFIBBuilt            func(module string, stats FIBBuildStats)
+	Log                   *zap.Logger
+}
+
+// WithGatewayActuatorNetlinkSidecar enables static-route snapshot publication.
+func WithGatewayActuatorNetlinkSidecar() GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.NetlinkSidecarEnabled = true
+	}
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {

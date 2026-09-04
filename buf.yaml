@@ -19,6 +19,7 @@ lint:
     PACKAGE_DIRECTORY_MATCH:
       - modules/route-mpls
       - operators/bird-adapter
+      - operators/netlink-dataplane-sidecar
     ENUM_VALUE_UPPER_SNAKE_CASE:
       - common/filterpb
 breaking:
