@@ -24,16 +24,6 @@ const MAX_RESPONSE_SIZE: usize = 1 << 20;
 /// Maximum number of identities accepted from agent.
 const MAX_IDENTITIES: usize = 1024;
 
-/// Names the certificates an agent holds, for the error raised when none
-/// carries the requested key id.
-fn agent_key_ids(key_ids: &[String]) -> String {
-    if key_ids.is_empty() {
-        "it holds no certificate".to_owned()
-    } else {
-        format!("it holds: {}", key_ids.join(", "))
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
     #[error("SSH_AUTH_SOCK environment variable not set")]
@@ -54,8 +44,8 @@ pub enum AgentError {
     #[error("SSH key parse error: {0}")]
     SshKey(#[from] ssh_key::Error),
 
-    #[error("no certificate with key id {key_id} in the SSH agent, {}", agent_key_ids(.key_ids))]
-    NoCertificateFound { key_id: String, key_ids: Vec<String> },
+    #[error("no suitable certificate found in SSH agent")]
+    NoCertificateFound,
 
     #[error("payload too large for SSH agent protocol")]
     PayloadTooLarge,
@@ -124,28 +114,23 @@ impl SshAgent {
         parse_identities_answer(&response)
     }
 
-    /// Find the certificate whose key id is exactly `key_id`.
-    pub async fn find_certificate(&mut self, key_id: &str) -> Result<(Certificate, Vec<u8>), AgentError> {
+    /// Find the certificate whose key id is the given tag.
+    pub async fn find_certificate(&mut self, tag: &str) -> Result<(Certificate, Vec<u8>), AgentError> {
         let identities = self.identities().await?;
-        let mut key_ids = Vec::new();
 
         for identity in identities {
-            let Some(cert) = identity.certificate() else {
-                continue;
-            };
-            let found = cert.key_id().to_owned();
-            if found != key_id {
-                key_ids.push(found);
-                continue;
-            }
+            if let Some(cert) = identity.certificate()
+                && cert.key_id() == tag
+            {
+                let blob = identity.to_bytes()?;
 
-            let blob = identity.to_bytes()?;
-            if let SshIdentity::Certificate(cert) = identity {
-                return Ok((*cert, blob));
+                if let SshIdentity::Certificate(cert) = identity {
+                    return Ok((*cert, blob));
+                }
             }
         }
 
-        Err(AgentError::NoCertificateFound { key_id: key_id.to_owned(), key_ids })
+        Err(AgentError::NoCertificateFound)
     }
 
     /// Sign data using the key identified by `key_blob`.
