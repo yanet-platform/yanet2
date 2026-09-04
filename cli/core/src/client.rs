@@ -611,8 +611,7 @@ mod test {
         ConnectionArgs, ConnectionError, Service, TlsArgs, connect, establish, ipv6_server_name, parse_timeout,
     };
 
-    /// Verifies that only an IPv6 literal yields a server name, its bare
-    /// address, while a name or an IPv4 literal yields nothing.
+    /// Verifies that only an IPv6 literal yields a bare-address server name.
     #[test]
     fn test_ipv6_server_name_strips_brackets_only() {
         assert_eq!(Some("::1".to_owned()), ipv6_server_name("grpcs://[::1]:8080"));
