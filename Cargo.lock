@@ -783,6 +783,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -904,6 +910,15 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
  "allocator-api2",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+dependencies = [
+ "foldhash",
 ]
 
 [[package]]
@@ -1036,7 +1051,7 @@ dependencies = [
  "hyper",
  "libc",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -1528,11 +1543,12 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
-version = "0.7.1"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
+checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
 dependencies = [
  "fixedbitset 0.5.7",
+ "hashbrown 0.15.5",
  "indexmap",
 ]
 
@@ -1698,9 +1714,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.5"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -1708,16 +1724,15 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.13.5"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
+checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck",
  "itertools 0.14.0",
  "log",
  "multimap",
- "once_cell",
- "petgraph 0.7.1",
+ "petgraph 0.8.3",
  "prettyplease",
  "prost",
  "prost-types",
@@ -1728,9 +1743,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.13.5"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
@@ -1741,9 +1756,9 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.13.5"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
+checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
  "prost",
 ]
@@ -2189,16 +2204,6 @@ checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 
 [[package]]
 name = "socket2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
-dependencies = [
- "libc",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
@@ -2475,7 +2480,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.5",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]
@@ -2570,9 +2575,9 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tonic"
-version = "0.13.1"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
+checksum = "ac2a5518c70fa84342385732db33fb3f44bc4cc748936eb5833d2df34d6445ef"
 dependencies = [
  "async-trait",
  "axum",
@@ -2588,9 +2593,9 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost",
  "rustls-native-certs",
- "socket2 0.5.10",
+ "socket2",
+ "sync_wrapper",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -2602,9 +2607,45 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.13.1"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
+checksum = "c68f61875ac5293cf72e6c8cf0158086428c82c37229e98c840878f1706b0322"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "tonic-health"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcfab99db777fba2802f0dfa861d1628d1ae916fb199d29819941f139ae85082"
+dependencies = [
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+]
+
+[[package]]
+name = "tonic-prost"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50849f68853be452acf590cde0b146665b8d507b3b8af17261df47e02c209ea0"
+dependencies = [
+ "bytes",
+ "prost",
+ "tonic",
+]
+
+[[package]]
+name = "tonic-prost-build"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "654e5643eff75d7f8c99197ce1440ed19a3474eada74c12bbac488b2cafdae27"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -2612,18 +2653,8 @@ dependencies = [
  "prost-types",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "tonic-health"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb87334d340313fefa513b6e60794d44a86d5f039b523229c99c323e4e19ca4b"
-dependencies = [
- "prost",
- "tokio",
- "tokio-stream",
- "tonic",
+ "tempfile",
+ "tonic-build",
 ]
 
 [[package]]
@@ -3082,7 +3113,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "simple_logger",
- "socket2 0.6.5",
+ "socket2",
  "ssh-key",
  "tabled",
  "terminal_size",
@@ -3091,6 +3122,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-health",
+ "tonic-prost",
  "tower",
  "uuid",
  "yanet-commonpb",
@@ -3110,7 +3142,8 @@ dependencies = [
  "serde_yaml",
  "tabled",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
  "yanet-filterpb",
@@ -3133,7 +3166,8 @@ dependencies = [
  "serde_yaml",
  "tabled",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
  "yanet-filterpb",
@@ -3149,7 +3183,8 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
 ]
 
@@ -3188,7 +3223,8 @@ dependencies = [
  "ptree",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3212,7 +3248,8 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3226,7 +3263,8 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3239,7 +3277,8 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3256,7 +3295,8 @@ dependencies = [
  "ptree",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3271,7 +3311,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
  "yanet-filterpb",
@@ -3302,7 +3343,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3318,7 +3360,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3368,7 +3411,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
  "yanet-filterpb",
@@ -3386,7 +3430,8 @@ dependencies = [
  "ptree",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3403,7 +3448,8 @@ dependencies = [
  "serde_json",
  "tabled",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3429,7 +3475,8 @@ dependencies = [
  "serde_json",
  "tabled",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3451,7 +3498,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
 ]
 
@@ -3498,7 +3546,8 @@ dependencies = [
  "tabled",
  "tokio",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3514,7 +3563,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
 ]
@@ -3530,7 +3580,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
  "yanet-filterpb",
@@ -3545,7 +3596,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tonic",
- "tonic-build",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -3557,7 +3608,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tonic",
- "tonic-build",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -3569,7 +3620,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tonic",
- "tonic-build",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -3580,7 +3631,8 @@ dependencies = [
  "prost-types",
  "serde",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-commonpb",
 ]
 

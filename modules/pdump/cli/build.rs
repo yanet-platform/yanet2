@@ -4,7 +4,7 @@ use std::{env, path::PathBuf};
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../controlplane/pdumppb/v1/pdump.proto");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute(".", "#[derive(Serialize)]")

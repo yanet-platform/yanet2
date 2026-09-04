@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/state.proto");
     println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/filter.proto");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .protoc_arg("--experimental_allow_proto3_optional")

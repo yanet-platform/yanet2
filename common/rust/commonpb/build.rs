@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6network.proto");
     println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6prefix.proto");
 
-    let mut config = tonic_build::configure()
+    let mut config = tonic_prost_build::configure()
         .build_server(false)
         // Covers `Metric`'s `value` oneof, generated as its own enum --
         // `Metric` cannot derive `Serialize`/`Deserialize` unless that enum

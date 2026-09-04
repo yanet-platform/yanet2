@@ -36,17 +36,23 @@ ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 netip = "0.3"
-prost = "0.13"
+prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 tabled = { version = "0.21", features = ["ansi"] }
-tonic = { version = "0.13", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip"] }
+tonic-prost = "0.14"
 
 [build-dependencies]
-tonic-build = "0.13"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
 ```
 
 Add a dependency only when the code uses it; `netip` and `tabled` are
 listed because almost every binary parses an address or prints a table.
+
+`tonic-prost-build` keeps its default features off: the default
+`cleanup-markdown` re-renders proto doc comments and fails clippy's
+`doc_lazy_continuation` on the generated code, while `transport` keeps the
+generated `connect` constructors that tonic-build 0.13 always emitted.
 
 ## build.rs
 
@@ -61,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let proto = "<owner>/<x>/controlplane/<x>pb/v1/<x>.proto";
     println!("cargo:rerun-if-changed={root}/{proto}");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")

@@ -1,7 +1,7 @@
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .field_attribute(

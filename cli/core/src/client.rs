@@ -32,9 +32,10 @@ use prost::Message;
 use tonic::{
     Request, Status,
     client::Grpc,
-    codec::{CompressionEncoding, ProstCodec},
+    codec::CompressionEncoding,
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
 };
+use tonic_prost::ProstCodec;
 use tower::Layer;
 
 use crate::{
