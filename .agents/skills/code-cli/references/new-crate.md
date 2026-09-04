@@ -38,7 +38,7 @@ clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 netip = "0.3"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
-tabled = { version = "0.21", features = ["ansi"] }
+tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 
@@ -48,6 +48,9 @@ tonic-prost-build = { version = "0.14", default-features = false, features = ["t
 
 Add a dependency only when the code uses it; `netip` and `tabled` are
 listed because almost every binary parses an address or prints a table.
+`tabled` keeps its default features off, since the default `assert`
+feature links `testing_table` into the binary, and lists `derive` only
+when a row type derives `Tabled`.
 
 `tonic-prost-build` keeps its default features off: the default
 `cleanup-markdown` re-renders proto doc comments and fails clippy's
