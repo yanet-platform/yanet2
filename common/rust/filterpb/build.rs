@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let serialize_deserialize = "#[derive(serde::Serialize, serde::Deserialize)]#[serde(default, deny_unknown_fields)]";
     let null_as_default = "#[serde(deserialize_with = \"crate::null_as_default\")]";
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute(".common.filterpb.v1.Device", serialize_deserialize)

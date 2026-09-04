@@ -18,9 +18,10 @@ colored = "3"
 tabled = { version = "0.21", features = ["ansi"] }
 terminal_size = "0.4"
 tokio = { version = "1", features = ["net", "io-util", "time", "sync", "rt"] }
-prost = "0.13"
-prost-types = "0.13"
-tonic = { version = "0.13", features = ["gzip", "tls-aws-lc", "tls-native-roots"] }
+prost = "0.14"
+prost-types = "0.14"
+tonic = { version = "0.14", features = ["gzip", "tls-aws-lc", "tls-native-roots"] }
+tonic-prost = "0.14"
 ynpb = { path = "../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
 commonpb = { path = "../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 tower = "0.5"
@@ -43,5 +44,5 @@ libc = "0.2"
 tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["macros", "test-util"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic-health = "0.13"
+tonic-health = "0.14"
 socket2 = "0.6"

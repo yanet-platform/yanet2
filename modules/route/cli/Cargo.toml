@@ -14,8 +14,9 @@ commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = 
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-prost = "0.13"
-tonic = { version = "0.13", features = ["gzip"] }
+prost = "0.14"
+tonic = { version = "0.14", features = ["gzip"] }
+tonic-prost = "0.14"
 tabled = { version = "0.21", features = ["ansi"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
@@ -26,4 +27,4 @@ netip = "0.3"
 tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
 
 [build-dependencies]
-tonic-build = "0.13"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

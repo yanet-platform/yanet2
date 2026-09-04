@@ -10,11 +10,12 @@ rust-version = "1.88"
 workspace = true
 
 [dependencies]
-prost = "0.13"
-prost-types = "0.13"
+prost = "0.14"
+prost-types = "0.14"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.13", features = ["gzip"] }
+tonic = { version = "0.14", features = ["gzip"] }
+tonic-prost = "0.14"
 commonpb = { path = "../commonpb", version = "0.1", package = "yanet-commonpb" }
 
 [build-dependencies]
-tonic-build = "0.13"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
