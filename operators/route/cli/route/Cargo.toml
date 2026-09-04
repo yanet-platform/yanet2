@@ -18,7 +18,7 @@ prost = "0.14"
 netip = "0.3"
 colored = "3"
 serde = "1"
-tabled = { version = "0.21", features = ["ansi"] }
+tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 
