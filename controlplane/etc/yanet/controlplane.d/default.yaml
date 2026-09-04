@@ -35,6 +35,17 @@ gateway:
     #   - type: basic
     #     config:
     #       credentials_path: /etc/yanet2/auth/basic_auth.yaml
+    #   # A client certificate presented in the TLS handshake identifies a
+    #   # caller that sends no token by its common name, which must be listed
+    #   # in the identities file. Requires server.tls. Revocation lists are
+    #   # optional and must be signed by one of the authorities.
+    #   - type: x509
+    #     config:
+    #       ca_sources:
+    #         - /etc/yanet2/auth/client-ca.pem
+    #       crl_sources:
+    #         - https://pki.example.com/yanet-clients.crl
+    #       refresh_interval: 5m
     # permissions_path: /etc/yanet2/auth/permissions.yaml
   registry:
     # The gateway drops backends that stopped refreshing their registration,
