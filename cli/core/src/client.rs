@@ -200,9 +200,8 @@ fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionEr
     Ok(tls)
 }
 
-/// Returns the address of an IPv6-literal endpoint without its brackets,
-/// the form the certificate verifier understands, or nothing for a name or
-/// an IPv4 literal, which tonic derives from the endpoint itself.
+/// Returns the bare address of an IPv6-literal endpoint for certificate
+/// verification, or nothing for a name or an IPv4 literal.
 ///
 /// Left to tonic, the bracketed host of the URI reaches the verifier as it
 /// is and every IPv6-literal endpoint fails with an invalid name.
@@ -612,9 +611,8 @@ mod test {
         ConnectionArgs, ConnectionError, Service, TlsArgs, connect, establish, ipv6_server_name, parse_timeout,
     };
 
-    /// Verifies that an IPv6-literal endpoint yields its bare address for
-    /// certificate verification, while a name or an IPv4 literal yields
-    /// nothing and stays with tonic's own derivation.
+    /// Verifies that only an IPv6 literal yields a server name, its bare
+    /// address, while a name or an IPv4 literal yields nothing.
     #[test]
     fn test_ipv6_server_name_strips_brackets_only() {
         assert_eq!(Some("::1".to_owned()), ipv6_server_name("grpcs://[::1]:8080"));
