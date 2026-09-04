@@ -7,17 +7,22 @@ use std::{collections::HashSet, path::PathBuf, sync::LazyLock};
 use clap::{Arg, ArgAction, ArgMatches, Args as _, Command, FromArgMatches, crate_name, parser::ValueSource};
 use colored::{ColoredString, Colorize};
 use serde::Serialize;
+use tonic::{Status, codec::CompressionEncoding};
 use yanet_cli::{
     auth::AuthMethod,
-    client::ConnectionArgs,
+    client::{ConnectionArgs, Service},
     config::{self, Origin, Settings},
     dispatcher::{self, Dispatch, Namespace},
     errors::Error,
     init,
     output::{self, CommonFormat},
 };
+use ynpb::pb::{IntrospectTokenRequest, Principal, auth_service_client::AuthServiceClient};
 
 static ERROR: LazyLock<ColoredString> = LazyLock::new(|| "error".bold().bright_red());
+
+/// The fully-qualified gRPC service name used in error messages.
+const AUTH_SERVICE_NAME: &str = "controlplane.ynpb.v1.AuthService";
 
 const NAMESPACES: &[Namespace] = &[
     Namespace {
@@ -94,15 +99,23 @@ impl Dispatch for Dispatcher {
         let cmd = Command::new(crate_name!())
             .version(yanet_cli::version())
             .allow_external_subcommands(true)
-            .subcommand(config_command());
+            .subcommand(config_command())
+            .subcommand(auth_command());
 
         dispatcher::add_subcommands(cmd, modules)
     }
 
     fn try_match(&self, matches: &ArgMatches) -> Option<i32> {
-        let show_matches = matches.subcommand_matches("config")?.subcommand_matches("show")?;
+        if let Some(show_matches) = matches
+            .subcommand_matches("config")
+            .and_then(|config| config.subcommand_matches("show"))
+        {
+            return Some(run_config_show(show_matches));
+        }
 
-        Some(run_config_show(show_matches))
+        let whoami_matches = matches.subcommand_matches("auth")?.subcommand_matches("whoami")?;
+
+        Some(run_auth_whoami(whoami_matches))
     }
 
     fn on_empty_subcommand(&self, modules: &HashSet<String>) -> i32 {
@@ -128,24 +141,14 @@ impl Dispatch for Dispatcher {
     }
 
     fn reserved(&self) -> &[&'static str] {
-        &["config"]
+        &["config", "auth"]
     }
 }
 
-/// Builds the `config show` subcommand tree.
-///
-/// `show` embeds [`ConnectionArgs`] directly (rather than a dedicated
-/// `Cmd`) so its flags, environment variables and completion candidates stay
-/// identical to every other command's.
-fn config_command() -> Command {
-    const SHOW_ABOUT: &str = "Prints the effective connection settings and where each came from.";
-    const SHOW_LONG_ABOUT: &str = "Prints the effective connection settings and where each came \
-        from. Reads /etc/yanet2/cli.yaml merged with $XDG_CONFIG_HOME/yanet2/cli.yaml \
-        (~/.config by default), or the single file named by YANET_CONFIG.";
-
-    let show = ConnectionArgs::augment_args(Command::new("show"))
-        .about(SHOW_ABOUT)
-        .long_about(SHOW_LONG_ABOUT)
+/// Adds the `--format` and `-v` arguments every command carries, for a
+/// built-in that embeds [`ConnectionArgs`] instead of a derived `Cmd`.
+fn output_args(command: Command) -> Command {
+    command
         .arg(
             Arg::new("format")
                 .long("format")
@@ -161,7 +164,35 @@ fn config_command() -> Command {
                 .action(ArgAction::Count)
                 .global(true)
                 .help("Be verbose: shows debug log lines and raw gRPC error details."),
-        );
+        )
+}
+
+/// Reads the arguments added by [`output_args`].
+fn output_options(matches: &ArgMatches) -> (CommonFormat, u8) {
+    let format = matches
+        .get_one::<CommonFormat>("format")
+        .copied()
+        .unwrap_or(CommonFormat::Human);
+
+    (format, matches.get_count("verbose"))
+}
+
+/// Builds the `config show` subcommand tree.
+///
+/// `show` embeds [`ConnectionArgs`] directly (rather than a dedicated
+/// `Cmd`) so its flags, environment variables and completion candidates stay
+/// identical to every other command's.
+fn config_command() -> Command {
+    const SHOW_ABOUT: &str = "Prints the effective connection settings and where each came from.";
+    const SHOW_LONG_ABOUT: &str = "Prints the effective connection settings and where each came \
+        from. Reads /etc/yanet2/cli.yaml merged with $XDG_CONFIG_HOME/yanet2/cli.yaml \
+        (~/.config by default), or the single file named by YANET_CONFIG.";
+
+    let show = output_args(
+        ConnectionArgs::augment_args(Command::new("show"))
+            .about(SHOW_ABOUT)
+            .long_about(SHOW_LONG_ABOUT),
+    );
 
     Command::new("config")
         .about("Configuration file inspection.")
@@ -174,11 +205,7 @@ fn config_command() -> Command {
 fn run_config_show(matches: &ArgMatches) -> i32 {
     let connection =
         ConnectionArgs::from_arg_matches(matches).expect("show's own augmented matches must parse into ConnectionArgs");
-    let format = matches
-        .get_one::<CommonFormat>("format")
-        .copied()
-        .unwrap_or(CommonFormat::Human);
-    let verbose = matches.get_count("verbose");
+    let (format, verbose) = output_options(matches);
 
     init(verbose, format);
 
@@ -196,6 +223,150 @@ fn run_config_show(matches: &ArgMatches) -> i32 {
             output::failure(&error);
             error.exit_code()
         }
+    }
+}
+
+/// Builds the `auth whoami` subcommand tree.
+///
+/// `whoami` embeds [`ConnectionArgs`] like `config show`, so the very flags
+/// that select a token or a certificate are the ones it reports on.
+fn auth_command() -> Command {
+    const WHOAMI_ABOUT: &str = "Prints the identity the gateway resolves for the current connection settings.";
+    const WHOAMI_LONG_ABOUT: &str = "Prints the identity the gateway resolves for the current connection \
+        settings: the token of --auth when one is sent, else the client certificate of --client-cert, \
+        else anonymous.";
+
+    let whoami = output_args(
+        ConnectionArgs::augment_args(Command::new("whoami"))
+            .about(WHOAMI_ABOUT)
+            .long_about(WHOAMI_LONG_ABOUT),
+    );
+
+    Command::new("auth")
+        .about("Authentication inspection.")
+        .subcommand_required(true)
+        .subcommand(whoami)
+}
+
+/// Runs `auth whoami`: asks the gateway to introspect the call's own
+/// credential and reports the principal through the shared output backend.
+fn run_auth_whoami(matches: &ArgMatches) -> i32 {
+    let connection = ConnectionArgs::from_arg_matches(matches)
+        .expect("whoami's own augmented matches must parse into ConnectionArgs");
+    let (format, verbose) = output_options(matches);
+
+    init(verbose, format);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build the CLI runtime");
+
+    match runtime.block_on(whoami(&connection)) {
+        Ok((endpoint, principal)) => {
+            output::data(|| &principal, || print_principal(&endpoint, &principal));
+            0
+        }
+        Err(err) => {
+            output::failure(&err);
+            err.exit_code()
+        }
+    }
+}
+
+/// Introspects the call's own credential: an empty token makes the gateway
+/// look at what the connection itself presents. Returns the endpoint reached
+/// along with the principal, since who one is depends on where one asked.
+async fn whoami(connection: &ConnectionArgs) -> Result<(String, Principal), Error> {
+    let mut service = Service::connect_for(connection, "whoami", AUTH_SERVICE_NAME, |channel| {
+        AuthServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
+
+    let response = service
+        .client()
+        .introspect_token(IntrospectTokenRequest { token: String::new() })
+        .await
+        .map_err(service.status("whoami"))?
+        .into_inner();
+
+    let principal = response.principal.ok_or_else(|| {
+        Error::from_status(
+            Status::internal("the gateway returned no principal"),
+            "whoami",
+            service.endpoint(),
+            AUTH_SERVICE_NAME,
+        )
+    })?;
+
+    Ok((service.endpoint().to_owned(), principal))
+}
+
+/// Width of the widest detail label (`Auth method`) plus two separating
+/// spaces.
+const DETAIL_WIDTH: usize = 13;
+
+/// Renders a verdict line and its details in the mark style of `ready`: a
+/// green mark for an authenticated caller, a yellow one for anonymous, the
+/// details indented under the name.
+fn print_principal(endpoint: &str, principal: &Principal) {
+    let colored = output::is_colored();
+    let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = if principal.is_anonymous {
+        ("[~]", "[!!]", |s| s.yellow().to_string())
+    } else {
+        ("[✓]", "[ok]", |s| s.green().to_string())
+    };
+    let mark = if colored {
+        color(unicode_mark)
+    } else {
+        ascii_mark.to_owned()
+    };
+    let indent = " ".repeat(if colored { 4 } else { 5 });
+    let user = if colored {
+        principal.user.bold().to_string()
+    } else {
+        principal.user.clone()
+    };
+
+    println!("{mark} {user} at {endpoint}");
+    if !principal.is_anonymous {
+        print_detail(&indent, "Groups", &groups_str(&principal.groups));
+    }
+    print_detail(&indent, "Auth method", &auth_method_str(&principal.auth_method));
+    if principal.is_anonymous {
+        let hint = if colored {
+            "hint".bright_green().to_string()
+        } else {
+            "hint".to_owned()
+        };
+
+        println!("{indent}{hint}: pass --auth sshcert or --client-cert to authenticate");
+    }
+}
+
+fn print_detail(indent: &str, label: &str, value: &str) {
+    println!("{indent}{}{value}", output::dim(&format!("{label:<DETAIL_WIDTH$}")));
+}
+
+/// Names the credential behind an authentication method after its wire
+/// name, so the line reads without knowing the authenticator names.
+fn auth_method_str(method: &str) -> String {
+    match method {
+        "x509" => "x509, client certificate".to_owned(),
+        "sshcert" => "sshcert, SSH certificate token".to_owned(),
+        "sshkey" => "sshkey, SSH key token".to_owned(),
+        "basic" => "basic, password token".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+fn groups_str(groups: &[String]) -> String {
+    if groups.is_empty() {
+        "-".to_owned()
+    } else {
+        groups.join(", ")
     }
 }
 

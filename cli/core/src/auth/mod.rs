@@ -22,6 +22,8 @@ pub use self::interceptor::AuthLayer;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
+    /// No token. A client certificate given for the TLS connection
+    /// identifies the caller instead.
     None,
     /// SSH certificate authentication via ssh-agent.
     Sshcert,
