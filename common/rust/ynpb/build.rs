@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "controlplane/ynpb/v1/inspect.proto",
                 "controlplane/ynpb/v1/counters.proto",
                 "controlplane/ynpb/v1/gateway.proto",
+                "controlplane/ynpb/v1/auth.proto",
             ],
             &["../../.."],
         )?;
