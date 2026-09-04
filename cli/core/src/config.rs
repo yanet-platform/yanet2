@@ -157,8 +157,6 @@ impl Settings {
             AuthMethod::None => Ok(auth::ResolvedAuth::None),
             AuthMethod::Sshcert => match self.cert_tag.value.as_deref().map(str::trim) {
                 Some(tag) if !tag.is_empty() => Ok(auth::ResolvedAuth::Sshcert { tag: tag.to_owned() }),
-                // An empty tag matches every identity in the agent through
-                // `contains("")`, so it is treated the same as no tag at all.
                 _ => Err(Error::MissingCertTag),
             },
         }
