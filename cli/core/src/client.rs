@@ -27,7 +27,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use http::uri::PathAndQuery;
+use http::{Uri, uri::PathAndQuery};
 use prost::Message;
 use tonic::{
     Request, Status,
@@ -193,7 +193,23 @@ fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionEr
         tls = tls.identity(identity);
     }
 
+    if let Some(address) = ipv6_server_name(&settings.endpoint.value) {
+        tls = tls.domain_name(address);
+    }
+
     Ok(tls)
+}
+
+/// Returns the bare address of an IPv6-literal endpoint for certificate
+/// verification, or nothing for a name or an IPv4 literal.
+///
+/// Left to tonic, the bracketed host of the URI reaches the verifier as it
+/// is and every IPv6-literal endpoint fails with an invalid name.
+fn ipv6_server_name(endpoint: &str) -> Option<String> {
+    let uri: Uri = endpoint.parse().ok()?;
+    let host = uri.host()?;
+
+    host.strip_prefix('[')?.strip_suffix(']').map(str::to_owned)
 }
 
 /// Reads one PEM input while preserving its role and path in the error.
@@ -591,7 +607,21 @@ mod test {
     };
     use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
 
-    use super::{ConnectionArgs, ConnectionError, Service, TlsArgs, connect, establish, parse_timeout};
+    use super::{
+        ConnectionArgs, ConnectionError, Service, TlsArgs, connect, establish, ipv6_server_name, parse_timeout,
+    };
+
+    /// Verifies that only an IPv6 literal yields a bare-address server name.
+    #[test]
+    fn test_ipv6_server_name_strips_brackets_only() {
+        assert_eq!(Some("::1".to_owned()), ipv6_server_name("grpcs://[::1]:8080"));
+        assert_eq!(
+            Some("2a02:6b8::1".to_owned()),
+            ipv6_server_name("grpcs://[2a02:6b8::1]:8080")
+        );
+        assert_eq!(None, ipv6_server_name("grpcs://localhost:8080"));
+        assert_eq!(None, ipv6_server_name("grpcs://127.0.0.1:8080"));
+    }
     use crate::{
         auth::{AuthArgs, AuthMethod},
         config,
