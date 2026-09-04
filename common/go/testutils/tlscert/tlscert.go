@@ -65,6 +65,13 @@ func WithURIs(uris ...*url.URL) IssueOption {
 	}
 }
 
+// WithSerial sets the serial number of the issued certificate.
+func WithSerial(serial *big.Int) IssueOption {
+	return func(template *x509.Certificate) {
+		template.SerialNumber = serial
+	}
+}
+
 // WithExtKeyUsage replaces the extended key usages of the issued certificate.
 func WithExtKeyUsage(usages ...x509.ExtKeyUsage) IssueOption {
 	return func(template *x509.Certificate) {
@@ -236,6 +243,18 @@ func (m *CA) RevocationListFile(t *testing.T, nextUpdate time.Time, revoked ...*
 	return path
 }
 
+// SignRevocationList signs the given list template as this CA and returns
+// the DER encoding, for tests that need a list shape the helpers above do
+// not produce.
+func (m *CA) SignRevocationList(t *testing.T, template *x509.RevocationList) []byte {
+	t.Helper()
+
+	der, err := x509.CreateRevocationList(rand.Reader, template, m.certificate, m.key)
+	require.NoError(t, err)
+
+	return der
+}
+
 // revocationList signs list number revoking the given certificates.
 func (m *CA) revocationList(t *testing.T, number int64, nextUpdate time.Time, revoked ...*x509.Certificate) []byte {
 	t.Helper()
@@ -248,17 +267,12 @@ func (m *CA) revocationList(t *testing.T, number int64, nextUpdate time.Time, re
 		})
 	}
 
-	template := &x509.RevocationList{
+	return m.SignRevocationList(t, &x509.RevocationList{
 		Number:                    big.NewInt(number),
 		ThisUpdate:                nextUpdate.Add(-time.Hour),
 		NextUpdate:                nextUpdate,
 		RevokedCertificateEntries: entries,
-	}
-
-	der, err := x509.CreateRevocationList(rand.Reader, template, m.certificate, m.key)
-	require.NoError(t, err)
-
-	return der
+	})
 }
 
 // issue signs template with the CA and writes the pair under a unique name.

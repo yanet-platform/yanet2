@@ -3,6 +3,7 @@ package x509
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -30,10 +31,18 @@ const (
 	pemTypeRevocationList = "X509 CRL"
 )
 
-// revocationKey identifies a certificate the way a revocation list does, by
-// issuer and serial number.
+// oidDeltaCRLIndicator marks a list that only holds changes against a base
+// list, RFC 5280 section 5.2.4.
+var oidDeltaCRLIndicator = asn1.ObjectIdentifier{2, 5, 29, 27}
+
+// revocationKey identifies a certificate the way a revocation list does: by
+// issuer name, issuer key and serial number.
+//
+// The issuer key keeps an old and a new authority of the same name apart
+// during a rollover, when their serial sequences may overlap.
 type revocationKey struct {
 	Issuer string
+	KeyID  string
 	Serial string
 }
 
@@ -99,7 +108,7 @@ func (m *Store) Pool() *x509.CertPool {
 
 // IsRevoked reports whether a loaded revocation list names the certificate.
 func (m *Store) IsRevoked(certificate *x509.Certificate) bool {
-	key := newRevocationKey(certificate.RawIssuer, certificate.SerialNumber)
+	key := newRevocationKey(certificate.RawIssuer, certificate.AuthorityKeyId, certificate.SerialNumber)
 	_, ok := m.snapshot.Load().Revoked[key]
 
 	return ok
@@ -280,6 +289,14 @@ func loadRevocationList(source loader.Loader, authorities []*x509.Certificate) (
 		return nil, fmt.Errorf("parse revocation list: %w", err)
 	}
 
+	// A delta list indexed as a complete one would drop every revocation
+	// of its base list.
+	for _, extension := range list.Extensions {
+		if extension.Id.Equal(oidDeltaCRLIndicator) {
+			return nil, ErrDeltaRevocationList
+		}
+	}
+
 	for _, authority := range authorities {
 		if !bytes.Equal(authority.RawSubject, list.RawIssuer) {
 			continue
@@ -330,13 +347,17 @@ func indexRevoked(lists map[string]*x509.RevocationList) map[revocationKey]struc
 	revoked := map[revocationKey]struct{}{}
 	for _, list := range lists {
 		for _, entry := range list.RevokedCertificateEntries {
-			revoked[newRevocationKey(list.RawIssuer, entry.SerialNumber)] = struct{}{}
+			revoked[newRevocationKey(list.RawIssuer, list.AuthorityKeyId, entry.SerialNumber)] = struct{}{}
 		}
 	}
 
 	return revoked
 }
 
-func newRevocationKey(rawIssuer []byte, serial *big.Int) revocationKey {
-	return revocationKey{Issuer: string(rawIssuer), Serial: serial.String()}
+func newRevocationKey(rawIssuer []byte, authorityKeyID []byte, serial *big.Int) revocationKey {
+	return revocationKey{
+		Issuer: string(rawIssuer),
+		KeyID:  string(authorityKeyID),
+		Serial: serial.String(),
+	}
 }

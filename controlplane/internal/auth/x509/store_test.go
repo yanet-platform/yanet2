@@ -2,7 +2,10 @@ package x509_test
 
 import (
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -263,4 +266,62 @@ func requireLowerNumber(t *testing.T, der []byte, file string) {
 	require.NoError(t, err)
 
 	require.Equal(t, -1, candidate.Number.Cmp(accepted.Number))
+}
+
+// Test_NewStore_RejectsDeltaRevocationList verifies that a delta list is
+// refused, since indexing it as a complete list would drop the revocations
+// of its base list.
+func Test_NewStore_RejectsDeltaRevocationList(t *testing.T) {
+	ca := tlscert.NewCA(t)
+
+	baseNumber, err := asn1.Marshal(big.NewInt(1))
+	require.NoError(t, err)
+	delta := ca.SignRevocationList(t, &x509.RevocationList{
+		Number:     big.NewInt(2),
+		ThisUpdate: time.Now().Add(-time.Minute),
+		NextUpdate: time.Now().Add(time.Hour),
+		ExtraExtensions: []pkix.Extension{{
+			Id:       asn1.ObjectIdentifier{2, 5, 29, 27},
+			Critical: true,
+			Value:    baseNumber,
+		}},
+	})
+	crlFile := filepath.Join(t.TempDir(), "delta.crl")
+	require.NoError(t, os.WriteFile(crlFile, delta, 0o600))
+
+	_, err = x509auth.NewStore(
+		[]loader.Loader{loader.NewLoader(ca.BundleFile())},
+		[]loader.Loader{loader.NewLoader(crlFile)},
+	)
+	require.ErrorIs(t, err, x509auth.ErrDeltaRevocationList)
+}
+
+// Test_Store_IsRevoked_DistinguishesIssuerKeys verifies that a revocation by
+// one authority does not reach a certificate of the same serial issued by
+// another authority of the same name, as happens during a key rollover.
+func Test_Store_IsRevoked_DistinguishesIssuerKeys(t *testing.T) {
+	oldCA := tlscert.NewCA(t)
+	newCA := tlscert.NewCA(t)
+	require.Equal(t, oldCA.Certificate().RawSubject, newCA.Certificate().RawSubject)
+
+	serial := big.NewInt(42)
+	oldClient := oldCA.IssueClient(t, "route-operator", tlscert.WithSerial(serial))
+	newClient := newCA.IssueClient(t, "route-operator", tlscert.WithSerial(serial))
+
+	oldBundle, err := os.ReadFile(oldCA.BundleFile())
+	require.NoError(t, err)
+	newBundle, err := os.ReadFile(newCA.BundleFile())
+	require.NoError(t, err)
+	bundle := filepath.Join(t.TempDir(), "rollover.pem")
+	require.NoError(t, os.WriteFile(bundle, append(oldBundle, newBundle...), 0o600))
+
+	crlFile := oldCA.RevocationListFile(t, time.Now().Add(time.Hour), oldClient.Leaf)
+	store, err := x509auth.NewStore(
+		[]loader.Loader{loader.NewLoader(bundle)},
+		[]loader.Loader{loader.NewLoader(crlFile)},
+	)
+	require.NoError(t, err)
+
+	require.True(t, store.IsRevoked(oldClient.Leaf))
+	require.False(t, store.IsRevoked(newClient.Leaf))
 }

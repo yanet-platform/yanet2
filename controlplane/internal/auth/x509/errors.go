@@ -26,6 +26,9 @@ var (
 	// ErrRevocationListRollback is returned when a source serves a list older
 	// than the one already accepted from it.
 	ErrRevocationListRollback = errors.New("revocation list is older than the accepted one")
+	// ErrDeltaRevocationList is returned when a source serves a delta list,
+	// which only holds changes against a base list this store does not track.
+	ErrDeltaRevocationList = errors.New("delta revocation lists are not supported")
 	// ErrUntrustedRevocationList is returned when no trusted authority signed
 	// the revocation list.
 	ErrUntrustedRevocationList = errors.New("revocation list not signed by a trusted authority")
