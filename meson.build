@@ -300,6 +300,7 @@ if not dataplane_only
   # and operator binaries below can only depend on these targets if the
   # directories that define them are entered first.
   subdir('operators/bird-adapter/adapterpb')
+  subdir('operators/netlink-dataplane-sidecar/sidecarpb')
   subdir('operators/pipeline/operatorpb')
   subdir('operators/route/operatorpb')
   subdir('controlplane')

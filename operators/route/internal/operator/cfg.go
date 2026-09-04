@@ -2,6 +2,7 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -30,7 +31,8 @@ const (
 )
 
 const (
-	DefaultRIBTTL = 5 * time.Minute
+	DefaultRIBTTL                      = 5 * time.Minute
+	DefaultNetlinkSidecarUpdateTimeout = 30 * time.Second
 )
 
 // Config is the top-level YAML configuration for yanet-route-operator.
@@ -47,6 +49,7 @@ type Config struct {
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`
 	NetlinkMonitor NetlinkMonitorConfig `yaml:"netlink_monitor"`
+	NetlinkSidecar NetlinkSidecarConfig `yaml:"netlink_sidecar"`
 	Readiness      ReadinessConfig      `yaml:"readiness"`
 	// GatewayDevices maps each gateway name to the egress device names its
 	// dataplane instance owns.
@@ -103,6 +106,14 @@ func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
 	}
+	if m.NetlinkSidecar.Enabled {
+		if m.NetlinkSidecar.UpdateTimeout <= 0 {
+			return errors.New("netlink_sidecar.update_timeout must be positive when enabled")
+		}
+		if _, err := staticRoutesToProto(m.Static.Routes); err != nil {
+			return fmt.Errorf("invalid static routes for netlink sidecar: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -136,6 +147,9 @@ func DefaultConfig() *Config {
 		NetlinkMonitor: NetlinkMonitorConfig{
 			TableName:       "kernel",
 			DefaultPriority: 100,
+		},
+		NetlinkSidecar: NetlinkSidecarConfig{
+			UpdateTimeout: DefaultNetlinkSidecarUpdateTimeout,
 		},
 		Readiness: ReadinessConfig{
 			ExpectBird:      true,
@@ -184,6 +198,9 @@ type StaticRouteConfig struct {
 	Prefix string `yaml:"prefix"`
 	// NexthopAddr is the next-hop IP address.
 	NexthopAddr string `yaml:"nexthop_addr"`
+	// Interface is the OS egress interface used by the netlink sidecar. It is
+	// required only when netlink sidecar publication is enabled.
+	Interface string `yaml:"interface"`
 }
 
 // StaticNeighbourConfig describes a single static neighbour entry to
@@ -213,4 +230,11 @@ type NetlinkMonitorConfig struct {
 	// DefaultPriority is the default priority for kernel-learned
 	// neighbour entries.
 	DefaultPriority uint32 `yaml:"default_priority"`
+}
+
+// NetlinkSidecarConfig controls static-route snapshots sent to the dataplane
+// netlink sidecar through gateway connections.
+type NetlinkSidecarConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	UpdateTimeout time.Duration `yaml:"update_timeout"`
 }

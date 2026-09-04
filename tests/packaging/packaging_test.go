@@ -24,6 +24,12 @@ import (
 // checked against the debian install manifests.
 const etcYanet2Prefix = "/etc/yanet2/"
 
+const (
+	netlinkDataplaneSidecarBinaryName = "yanet-netlink-dataplane-sidecar"
+	netlinkDataplaneSidecarPackage    = "yanet2-netlink-dataplane-sidecar"
+	netlinkDataplaneSidecarConfigPath = "etc/yanet2/yanet-netlink-dataplane-sidecar-default.yaml"
+)
+
 // shippedConfigPaths lists every default config YAML installed under
 // /etc/yanet2, relative to the repository root.
 //
@@ -33,6 +39,7 @@ var shippedConfigPaths = []string{
 	"controlplane/etc/yanet/controlplane.d/default.yaml",
 	"dataplane.yaml",
 	"operators/bird-adapter/etc/yanet/bird-adapter-default.yaml",
+	"operators/netlink-dataplane-sidecar/etc/yanet/yanet-netlink-dataplane-sidecar-default.yaml",
 	"operators/pipeline/etc/yanet/yanet-pipeline-operator-default.yaml",
 	"operators/route/etc/yanet/yanet-route-operator-default.yaml",
 	"operators/generic/etc/yanet/generic-operator.d/forward-default.yaml",
@@ -60,6 +67,54 @@ func Test_GenericOperatorShippedConfigs_UseDefaultFileNames(t *testing.T) {
 				"%q can collide with a deployment config",
 				configPath,
 			)
+		})
+	}
+}
+
+// Test_NetlinkDataplaneSidecarDebianPackage_InstallsBinaryAndConfig verifies
+// that the dedicated package owns both runtime artifacts at their built paths.
+func Test_NetlinkDataplaneSidecarDebianPackage_InstallsBinaryAndConfig(t *testing.T) {
+	control, err := os.ReadFile("../../debian/control")
+	require.NoError(t, err)
+	require.Regexp(
+		t,
+		regexp.MustCompile(`(?m)^Package: `+regexp.QuoteMeta(netlinkDataplaneSidecarPackage)+`$`),
+		string(control),
+	)
+
+	manifest, err := os.ReadFile("../../debian/" + netlinkDataplaneSidecarPackage + ".install")
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"usr/bin/" + netlinkDataplaneSidecarBinaryName,
+		netlinkDataplaneSidecarConfigPath,
+	}, strings.Fields(string(manifest)))
+}
+
+// Test_NetlinkDataplaneSidecarDockerfile_UsesDedicatedPackageAndConfig verifies
+// that the image installs and starts the artifacts owned by the sidecar package.
+func Test_NetlinkDataplaneSidecarDockerfile_UsesDedicatedPackageAndConfig(t *testing.T) {
+	data, err := os.ReadFile("../../deploy/yanet-netlink-dataplane-sidecar.Dockerfile")
+	require.NoError(t, err)
+
+	for _, expected := range []struct {
+		name string
+		line string
+	}{
+		{
+			name: "dedicated debian package",
+			line: "COPY deploy/packages/" + netlinkDataplaneSidecarPackage + "_*.deb /tmp/",
+		},
+		{
+			name: "packaged binary",
+			line: `ENTRYPOINT ["` + netlinkDataplaneSidecarBinaryName + `"]`,
+		},
+		{
+			name: "packaged default config",
+			line: `CMD ["-c", "/` + netlinkDataplaneSidecarConfigPath + `"]`,
+		},
+	} {
+		t.Run(expected.name, func(t *testing.T) {
+			require.Contains(t, string(data), expected.line)
 		})
 	}
 }

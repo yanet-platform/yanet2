@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package operators.netlink_dataplane_sidecar.sidecarpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/sidecarpb/v1;sidecarpb";
+
+import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/ipprefix.proto";
+
+// NetlinkDataplaneService receives host-network state owned by the sidecar.
+service NetlinkDataplaneService {
+  // UpdateStaticRoutes commits one complete desired static-route snapshot.
+  // One or more requests are chunks of one snapshot; the server commits at EOF
+  // and responds after kernel reconciliation. Send one empty request to clear.
+  rpc UpdateStaticRoutes(stream UpdateStaticRoutesRequest) returns (UpdateStaticRoutesResponse);
+}
+
+message StaticRoute {
+  common.commonpb.v1.IPPrefix prefix = 1;
+  common.commonpb.v1.IPAddress nexthop = 2;
+  string interface = 3;
+}
+
+message UpdateStaticRoutesRequest { repeated StaticRoute routes = 1; }
+
+message UpdateStaticRoutesResponse {}

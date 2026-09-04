@@ -2,6 +2,7 @@ package xbackoff
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -136,7 +137,10 @@ func (m *Backoff) RunContext(ctx context.Context, op func() error) error {
 			return nil
 		}
 		if cerr := ctx.Err(); cerr != nil {
-			return cerr
+			if errors.Is(err, cerr) {
+				return err
+			}
+			return errors.Join(err, cerr)
 		}
 
 		m.attempt++
@@ -144,8 +148,14 @@ func (m *Backoff) RunContext(ctx context.Context, op func() error) error {
 		if m.onRetry != nil {
 			m.onRetry(m.attempt, d, err)
 		}
-		if err := m.sleeper.Sleep(ctx, d); err != nil {
-			return err
+		if sleepErr := m.sleeper.Sleep(ctx, d); sleepErr != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				if errors.Is(err, cerr) {
+					return errors.Join(err, sleepErr)
+				}
+				return errors.Join(err, sleepErr, cerr)
+			}
+			return sleepErr
 		}
 	}
 }
