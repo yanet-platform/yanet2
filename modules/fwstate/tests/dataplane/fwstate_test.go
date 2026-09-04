@@ -18,13 +18,15 @@ import (
 type SyncPacketOption func(*syncPacketConfig)
 
 type syncPacketConfig struct {
-	srcPort    uint16
-	dstPort    uint16
-	srcAddr    string
-	dstAddr    string
-	isExternal bool
-	flags      uint8
-	fib        uint8
+	srcPort      uint16
+	dstPort      uint16
+	srcAddr      string
+	dstAddr      string
+	outerDstAddr string
+	outerDstPort uint16
+	isExternal   bool
+	flags        uint8
+	fib          uint8
 }
 
 // WithPorts sets custom source and destination ports
@@ -40,6 +42,15 @@ func WithAddrs(srcAddr, dstAddr string) SyncPacketOption {
 	return func(c *syncPacketConfig) {
 		c.srcAddr = srcAddr
 		c.dstAddr = dstAddr
+	}
+}
+
+// WithOuterDst sets the sync destination the packet is addressed to, the
+// pair a module matches its own configuration against.
+func WithOuterDst(addr string, port uint16) SyncPacketOption {
+	return func(c *syncPacketConfig) {
+		c.outerDstAddr = addr
+		c.outerDstPort = port
 	}
 }
 
@@ -69,11 +80,13 @@ func WithFib(fib uint8) SyncPacketOption {
 func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketOption) gopacket.Packet {
 	// Apply defaults
 	cfg := syncPacketConfig{
-		srcPort:    12345,
-		dstPort:    9999,
-		srcAddr:    "2001:db8::1",
-		dstAddr:    "2001:db8::2",
-		isExternal: false,
+		srcPort:      12345,
+		dstPort:      9999,
+		srcAddr:      "2001:db8::1",
+		dstAddr:      "2001:db8::2",
+		outerDstAddr: "ff02::1",
+		outerDstPort: 9999,
+		isExternal:   false,
 	}
 
 	// Apply options
@@ -104,12 +117,12 @@ func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketO
 		NextHeader: layers.IPProtocolUDP,
 		HopLimit:   64,
 		SrcIP:      srcIP,
-		DstIP:      net.ParseIP("ff02::1"), // Multicast destination
+		DstIP:      net.ParseIP(cfg.outerDstAddr), // Multicast destination
 	}
 
 	udp := layers.UDP{
 		SrcPort: 12345,
-		DstPort: 9999, // Sync port
+		DstPort: layers.UDPPort(cfg.outerDstPort), // Sync port
 	}
 	udp.SetNetworkLayerForChecksum(&ip6)
 
@@ -157,6 +170,34 @@ func TestFWStateExternalPacket(t *testing.T) {
 	// External packets should be dropped
 	require.Empty(t, result.Output, "External packet should not be forwarded")
 	require.NotEmpty(t, result.Drop, "External packet should be dropped")
+}
+
+// Test_FWStateModule_UnconfiguredSync_PassesSyncPacketThrough verifies
+// that a module carrying no sync destination claims no packet at all.
+//
+// A packet an otherwise identical configured module would consume is
+// passed through instead.
+func Test_FWStateModule_UnconfiguredSync_PassesSyncPacketThrough(t *testing.T) {
+	// The packet is addressed to the unset destination itself, the only
+	// one such a config could match.
+	//
+	// It is external, and a claimed external packet is dropped after its
+	// frames are applied, so passing it through can only mean it was
+	// never claimed.
+	pkt := createSyncPacket(
+		t, layers.IPProtocolUDP, WithExternal(), WithOuterDst("::", 0),
+	)
+
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
+	ClearSyncDestination(cpModule)
+
+	result := xerror.Unwrap(fwstateHandlePackets(cpModule, storage, pkt))
+
+	require.NotEmpty(t, result.Output, "an unclaimed packet should be passed through")
+	require.Empty(t, result.Drop, "an unclaimed packet should not be dropped")
 }
 
 func TestFWStateNonSyncPacket(t *testing.T) {

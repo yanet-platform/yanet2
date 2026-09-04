@@ -67,6 +67,12 @@ static bool
 is_fw_state_sync_packet(
 	struct packet *packet, struct fwstate_sync_config *sync_config
 ) {
+	// A config that names no sync destination claims no packet: the
+	// module passes everything through until one is configured.
+	if (sync_config->port_multicast == 0) {
+		return false;
+	}
+
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	// Check for multicast Ethernet destination

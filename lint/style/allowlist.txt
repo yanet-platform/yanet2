@@ -212,7 +212,6 @@ testpkg:modules/dscp/controlplane/service_test.go:dscp:1  # legacy: migrate to t
 testpkg:modules/fwstate/controlplane/fwstatepb/v1/convert_test.go:fwstatepb:1  # legacy: migrate to the external test package
 testpkg:modules/fwstate/controlplane/fwstatepb/v1/fwstate_test.go:fwstatepb:1  # legacy: migrate to the external test package
 testpkg:modules/fwstate/controlplane/metrics_test.go:fwstate:1  # legacy: migrate to the external test package
-testpkg:modules/fwstate/controlplane/service_test.go:fwstate:1  # legacy: migrate to the external test package
 testpkg:modules/fwstate/tests/dataplane/cursor_test.go:fwstate:1  # legacy: migrate to the external test package
 testpkg:modules/fwstate/tests/dataplane/fwstate_test.go:fwstate:1  # legacy: migrate to the external test package
 testpkg:modules/nat64/controlplane/service_test.go:nat64:1  # legacy: migrate to the external test package

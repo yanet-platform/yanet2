@@ -47,23 +47,16 @@ pub struct Cmd {
 
 /// Merges the linked map object names an update should carry.
 ///
-/// The pre-flight lookup answers an unknown name with an empty message,
-/// while a stored config always echoes the requested one — an empty name
-/// in the reply therefore marks the create case. A create has no stored
-/// names to merge from and the server rejects empty ones, so both
-/// map-name flags are required then; otherwise each flag, when present,
-/// overrides the stored value.
-fn merged_map_names(current: &ShowConfigResponse, cmd: &UpdateCmd) -> Result<(String, String), String> {
-    if current.name.is_empty() && (cmd.map_name_v4.is_none() || cmd.map_name_v6.is_none()) {
-        return Err(format!(
-            "creating config '{}' requires --map-name-v4 and --map-name-v6",
-            cmd.config_name
-        ));
-    }
-    Ok((
+/// Each flag, when present, overrides the stored name; an absent one
+/// keeps what the pre-flight lookup reported. A config that names no map
+/// links none and inserts no synced state for that family, which is what
+/// a create left without map flags installs until a later update names
+/// them.
+fn merged_map_names(current: &ShowConfigResponse, cmd: &UpdateCmd) -> (String, String) {
+    (
         cmd.map_name_v4.clone().unwrap_or_else(|| current.map_name_v4.clone()),
         cmd.map_name_v6.clone().unwrap_or_else(|| current.map_name_v6.clone()),
-    ))
+    )
 }
 
 pub struct FWStateService {
@@ -97,9 +90,7 @@ impl FWStateService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No FWState configurations found."),
-                        format_args!(
-                            "provision maps with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map> --src-addr <addr> --dst-addr-multicast <addr> --port-multicast <port>'"
-                        ),
+                        format_args!("create one with 'yanet-cli-fwstate update --name <name>'"),
                     );
                     return;
                 }
@@ -170,8 +161,7 @@ impl FWStateService {
             .await
             .map_err(self.service.status("update"))?
             .into_inner();
-        let (map_name_v4, map_name_v6) =
-            merged_map_names(&current, &cmd).map_err(|err| self.service.invalid("update", err))?;
+        let (map_name_v4, map_name_v6) = merged_map_names(&current, &cmd);
         let mut sync_config = current.sync_config.unwrap_or_default();
 
         // Update only the fields that were provided
@@ -306,24 +296,25 @@ mod tests {
     }
 
     #[test]
-    fn test_merged_map_names_create_without_map_names_is_rejected() {
+    fn test_merged_map_names_create_without_map_names_links_none() {
         let cmd = update_cmd("cfg", None, None);
-        let err = merged_map_names(&show_response("", "", ""), &cmd).unwrap_err();
+        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd);
 
-        assert_eq!("creating config 'cfg' requires --map-name-v4 and --map-name-v6", err);
+        assert_eq!(("", ""), (map_name_v4.as_str(), map_name_v6.as_str()));
     }
 
     #[test]
-    fn test_merged_map_names_create_with_one_map_name_is_rejected() {
+    fn test_merged_map_names_create_with_one_map_name_links_only_it() {
         let empty_reply = show_response("", "", "");
-        assert!(merged_map_names(&empty_reply, &update_cmd("cfg", Some("v4"), None)).is_err());
-        assert!(merged_map_names(&empty_reply, &update_cmd("cfg", None, Some("v6"))).is_err());
+        let (map_name_v4, map_name_v6) = merged_map_names(&empty_reply, &update_cmd("cfg", Some("v4"), None));
+
+        assert_eq!(("v4", ""), (map_name_v4.as_str(), map_name_v6.as_str()));
     }
 
     #[test]
     fn test_merged_map_names_create_with_both_map_names_uses_flags() {
         let cmd = update_cmd("cfg", Some("map4"), Some("map6"));
-        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd).unwrap();
+        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd);
 
         assert_eq!(("map4", "map6"), (map_name_v4.as_str(), map_name_v6.as_str()));
     }
@@ -331,7 +322,7 @@ mod tests {
     #[test]
     fn test_merged_map_names_existing_config_keeps_stored_names_without_flags() {
         let cmd = update_cmd("cfg", None, None);
-        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("cfg", "stored4", "stored6"), &cmd).unwrap();
+        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("cfg", "stored4", "stored6"), &cmd);
 
         assert_eq!(("stored4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
     }
@@ -339,7 +330,7 @@ mod tests {
     #[test]
     fn test_merged_map_names_existing_config_flag_overrides_stored_name() {
         let reply = show_response("cfg", "stored4", "stored6");
-        let (map_name_v4, map_name_v6) = merged_map_names(&reply, &update_cmd("cfg", Some("new4"), None)).unwrap();
+        let (map_name_v4, map_name_v6) = merged_map_names(&reply, &update_cmd("cfg", Some("new4"), None));
 
         assert_eq!(("new4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
     }
