@@ -20,7 +20,9 @@ prost = "0.13"
 ptree = "0.5"
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 bytesize = "2"
-pcap-file = "3.0.0-rc1"
+# Pinned exactly: semver sorts rc.2 below rc1, so a caret requirement
+# resolves back to rc1, and rc.3 needs Rust 1.93 above the 1.88 MSRV.
+pcap-file = "=3.0.0-rc.2"
 tokio-util = "0.7"
 pnet_packet = "0.35"
 
