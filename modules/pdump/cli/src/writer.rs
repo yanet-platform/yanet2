@@ -171,7 +171,7 @@ impl PdumpWriter {
             .meta
             .ok_or_else(|| -> Box<dyn Error> { "pdump record missing metadata".into() })?;
         let ts = Duration::from_nanos(meta.timestamp);
-        let packet = PcapPacket::new_owned(ts, meta.packet_len, rec.data);
+        let packet = PcapPacket::new(ts, meta.packet_len, rec.data)?;
         Ok(writer.inner.write_packet(&packet)?)
     }
 
@@ -181,12 +181,13 @@ impl PdumpWriter {
             .ok_or_else(|| -> Box<dyn Error> { "pdump record missing metadata".into() })?;
         let ts = Duration::from_nanos(meta.timestamp);
 
-        let mut packet_block = EnhancedPacketBlock::default();
-        packet_block.interface_id = writer.interface_id;
-        packet_block.timestamp = ts;
-        packet_block.original_len = meta.packet_len;
-        packet_block.data = rec.data.into();
-        packet_block.set_write_ts_resolution(TsResolution::NANO);
+        let packet_block = EnhancedPacketBlock {
+            interface_id: writer.interface_id,
+            timestamp: ts,
+            original_len: meta.packet_len,
+            data: rec.data.into(),
+            options: vec![],
+        };
 
         Ok(writer.inner.write_block(&Block::EnhancedPacket(packet_block))?)
     }
