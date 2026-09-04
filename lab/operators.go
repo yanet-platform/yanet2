@@ -396,7 +396,8 @@ link_map: {kni0: "01:00.0"}
 netlink_monitor: {disabled: true}
 readiness: {expect_bird: true, rate_threshold: 50, stability_window: 1s, sample_interval: 1s, reconnect_grace: 1s}
 `,
-	"/tmp/yanet/config/operators/forward.yaml": `logging: {level: info}
+	"/tmp/yanet/config/operators/forward.yaml": `name: forward
+logging: {level: info}
 server: {endpoint: "[::1]:50003"}
 gateways: [{name: numa0, endpoint: "[::1]:8080"}]
 register: {interval: 1s}
@@ -413,7 +414,8 @@ functions:
   - {action: {target: virtio_user_kni0, counter: to_kni, mode: OUT}, vlan_ranges: [{from: 0, to: 4095}], sources4: ["0.0.0.0/0"], sources6: ["::/0"], destinations4: ["203.0.113.14/32"], destinations6: ["fe80::/64"], devices: [{name: "01:00.0"}]}
   - {action: {target: "01:00.0", counter: to_phy, mode: NONE}, vlan_ranges: [{from: 0, to: 4095}], sources4: ["0.0.0.0/0"], sources6: ["::/0"], destinations4: ["0.0.0.0/0"], destinations6: ["::/0"], devices: [{name: "01:00.0"}]}
 `,
-	"/tmp/yanet/config/operators/decap.yaml": `logging: {level: info}
+	"/tmp/yanet/config/operators/decap.yaml": `name: decap
+logging: {level: info}
 server: {endpoint: "[::1]:50004"}
 gateways: [{name: numa0, endpoint: "[::1]:8080"}]
 register: {interval: 1s}
