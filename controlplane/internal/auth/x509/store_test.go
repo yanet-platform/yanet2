@@ -222,3 +222,45 @@ func Test_Store_Collect_RedactsSourceURL(t *testing.T) {
 		}
 	}
 }
+
+// Test_Store_Reload_AcceptsRotatedIssuerList verifies that after the
+// authority behind a source rotates, the new issuer's list is accepted even
+// though its number is below the old issuer's, since rollback is only
+// judged between lists of one issuer.
+func Test_Store_Reload_AcceptsRotatedIssuerList(t *testing.T) {
+	oldCA := tlscert.NewCA(t)
+	oldClient := oldCA.IssueClient(t, "route-operator")
+	_ = oldCA.RevocationList(t, time.Now().Add(time.Hour))
+	crlFile := oldCA.RevocationListFile(t, time.Now().Add(time.Hour), oldClient.Leaf)
+	store := newStore(t, oldCA, crlFile)
+
+	newCA := tlscert.NewCA(t)
+	newClient := newCA.IssueClient(t, "route-operator")
+	newList := newCA.RevocationList(t, time.Now().Add(time.Hour), newClient.Leaf)
+	requireLowerNumber(t, newList, crlFile)
+
+	newBundle, err := os.ReadFile(newCA.BundleFile())
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(oldCA.BundleFile(), newBundle, 0o600))
+	require.NoError(t, os.WriteFile(crlFile, newList, 0o600))
+
+	require.NoError(t, store.Reload())
+	require.True(t, store.IsRevoked(newClient.Leaf))
+	require.False(t, store.IsRevoked(oldClient.Leaf))
+}
+
+// requireLowerNumber asserts that the DER list carries a lower number than
+// the list stored in file, the precondition a rotation test relies on.
+func requireLowerNumber(t *testing.T, der []byte, file string) {
+	t.Helper()
+
+	candidate, err := x509.ParseRevocationList(der)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(file)
+	require.NoError(t, err)
+	accepted, err := x509.ParseRevocationList(data)
+	require.NoError(t, err)
+
+	require.Equal(t, -1, candidate.Number.Cmp(accepted.Number))
+}

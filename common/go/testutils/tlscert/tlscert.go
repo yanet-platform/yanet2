@@ -151,8 +151,9 @@ func (m *CA) IssueServer(t *testing.T, hosts ...string) Keypair {
 }
 
 // IssueIntermediate issues a subordinate authority with the given common
-// name that signs from the same directory.
-func (m *CA) IssueIntermediate(t *testing.T, commonName string) *CA {
+// name that signs from the same directory, valid for an hour unless an
+// option says otherwise.
+func (m *CA) IssueIntermediate(t *testing.T, commonName string, options ...IssueOption) *CA {
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -166,6 +167,9 @@ func (m *CA) IssueIntermediate(t *testing.T, commonName string) *CA {
 		IsCA:                  true,
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+	}
+	for _, option := range options {
+		option(template)
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, m.certificate, &key.PublicKey, m.key)

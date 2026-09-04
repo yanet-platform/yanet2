@@ -292,9 +292,17 @@ func loadRevocationList(source loader.Loader, authorities []*x509.Certificate) (
 	return nil, ErrUntrustedRevocationList
 }
 
-// isOlder reports whether candidate predates accepted, by list number when
-// both carry one and by issue time otherwise.
+// isOlder reports whether candidate predates accepted from the same
+// issuer, by list number when both carry one and by issue time otherwise.
+//
+// Lists of different issuers, by name or by signing key, are not ordered,
+// so a rotated authority may start its numbering afresh at the same source
+// even when it keeps its name.
 func isOlder(candidate, accepted *x509.RevocationList) bool {
+	if !bytes.Equal(candidate.RawIssuer, accepted.RawIssuer) ||
+		!bytes.Equal(candidate.AuthorityKeyId, accepted.AuthorityKeyId) {
+		return false
+	}
 	if candidate.Number != nil && accepted.Number != nil {
 		return candidate.Number.Cmp(accepted.Number) < 0
 	}

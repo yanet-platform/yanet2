@@ -219,3 +219,24 @@ func Test_Authenticator_Authenticate_ChecksIntermediates(t *testing.T) {
 		})
 	}
 }
+
+// Test_Authenticator_Authenticate_RejectsExpiredIntermediate verifies that
+// the validity period of every link is checked at the time of the call, so
+// a chain through an authority that has since expired stops authenticating
+// without waiting for the connection to end.
+func Test_Authenticator_Authenticate_RejectsExpiredIntermediate(t *testing.T) {
+	root := tlscert.NewCA(t)
+	now := time.Now()
+	intermediate := root.IssueIntermediate(t, "test intermediate", tlscert.WithValidity(now.Add(-2*time.Hour), now.Add(-time.Hour)))
+	client := intermediate.IssueClient(t, "route-operator")
+	authenticator := newAuthenticator(t, newStore(t, root))
+
+	credential := core.Credential{
+		TLS: &tls.ConnectionState{
+			VerifiedChains: [][]*x509.Certificate{{client.Leaf, intermediate.Certificate(), root.Certificate()}},
+		},
+	}
+	_, err := authenticator.Authenticate(t.Context(), credential, &core.RequestInfo{})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	require.ErrorContains(t, err, x509auth.ErrCertificateExpired.Error())
+}

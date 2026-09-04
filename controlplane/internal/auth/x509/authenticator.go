@@ -112,15 +112,18 @@ func (m *Authenticator) Authenticate(
 	}
 	leaf := chain[0]
 
-	if err := checkValidity(leaf, time.Now()); err != nil {
-		return nil, status.Errorf(
-			codes.Unauthenticated,
-			"certificate validity check failed: %v", err,
-		)
+	// The handshake's verdict ages with the connection and never consulted
+	// the revocation lists, so every link of the chain is checked now.
+	now := time.Now()
+	for _, certificate := range chain {
+		if err := checkValidity(certificate, now); err != nil {
+			return nil, status.Errorf(
+				codes.Unauthenticated,
+				"certificate validity check failed: %v", err,
+			)
+		}
 	}
 
-	// The handshake does not consult the revocation lists, so a revoked
-	// intermediate is only caught by checking every link of the chain.
 	if slices.ContainsFunc(chain, m.store.IsRevoked) {
 		return nil, status.Error(codes.Unauthenticated, ErrCertificateRevoked.Error())
 	}
