@@ -32,6 +32,10 @@ type Route struct {
 	Prefix netip.Prefix
 	// NextHop is the IP address where traffic should be forwarded next.
 	NextHop netip.Addr
+	// Device restricts a configured route to a logical egress device.
+	//
+	// Empty leaves next-hop resolution unrestricted.
+	Device string
 	// Peer is the IP address of the BGP peer that advertised this route.
 	//
 	// This field is used to distinguish similar routes from different peers.

@@ -93,6 +93,9 @@ func (m *Service) UpdateStaticRoutes(
 				return status.Error(codes.Aborted, "another static route update is in progress")
 			}
 			defer m.streamMutex.Unlock()
+			if err := stream.Context().Err(); err != nil {
+				return status.FromContextError(err).Err()
+			}
 			update, err := m.store.ReplaceTracked(routes)
 			if err != nil {
 				return status.Errorf(codes.InvalidArgument, "invalid route snapshot: %v", err)

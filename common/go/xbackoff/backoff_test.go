@@ -9,7 +9,9 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 )
 
-func TestRunContextPreservesOperationErrorOnCancellation(t *testing.T) {
+// Test_RunContext_OperationCancellation verifies that canceling from an
+// operation preserves both the cancellation and its joined failure cause.
+func Test_RunContext_OperationCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	operationErr := errors.New("rollback failed")
 	retry := xbackoff.New(time.Hour)
@@ -27,7 +29,9 @@ func TestRunContextPreservesOperationErrorOnCancellation(t *testing.T) {
 	}
 }
 
-func TestRunContextPreservesOperationErrorWhenSleepIsCanceled(t *testing.T) {
+// Test_RunContext_SleepCancellation verifies that canceling the retry delay
+// preserves the preceding operation failure alongside the cancellation.
+func Test_RunContext_SleepCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	operationErr := errors.New("rollback failed")
 	retry := xbackoff.New(time.Hour, xbackoff.WithSleeper(sleeperFunc(func(context.Context, time.Duration) error {

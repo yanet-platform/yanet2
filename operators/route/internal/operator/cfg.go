@@ -113,6 +113,14 @@ func (m *Config) Validate() error {
 		if _, err := staticRoutesToProto(m.Static.Routes); err != nil {
 			return fmt.Errorf("invalid static routes for netlink sidecar: %w", err)
 		}
+		for idx, route := range m.Static.Routes {
+			if device, mapped := m.LinkMap[route.Interface]; mapped && device == "" {
+				return fmt.Errorf(
+					"static route %d: interface %q maps to an empty device",
+					idx, route.Interface,
+				)
+			}
+		}
 	}
 
 	return nil
@@ -198,8 +206,11 @@ type StaticRouteConfig struct {
 	Prefix string `yaml:"prefix"`
 	// NexthopAddr is the next-hop IP address.
 	NexthopAddr string `yaml:"nexthop_addr"`
-	// Interface is the OS egress interface used by the netlink sidecar. It is
-	// required only when netlink sidecar publication is enabled.
+	// Interface is the OS egress interface used by the netlink sidecar.
+	//
+	// When sidecar publication is enabled, it is required and also constrains
+	// dataplane egress after link-name mapping. One prefix and next-hop pair
+	// cannot name multiple interfaces because static RIB identity is IP-based.
 	Interface string `yaml:"interface"`
 }
 

@@ -30,6 +30,7 @@ import (
 )
 
 type recordingGateway struct {
+	ynpb.UnimplementedGatewayServer
 	routepb.UnimplementedRouteServiceServer
 	ynpb.UnimplementedFunctionServiceServer
 	sidecarpb.UnimplementedNetlinkDataplaneServiceServer
@@ -44,14 +45,35 @@ type recordingGateway struct {
 	staticRouteCommitted func()
 	fibError             error
 	functionError        error
+	registeredEndpoint   string
 }
 
 type gatewayState struct {
+	registeredEndpoint   string
 	staticRouteCalls     int
 	staticRouteSnapshots [][][]*sidecarpb.StaticRoute
 	fibRequests          []*routepb.UpdateFIBRequest
 	functionGets         int
 	functionUpdates      int
+}
+
+// Register captures the operator's advertised endpoint without proxying it.
+func (m *recordingGateway) Register(
+	ctx context.Context,
+	request *ynpb.RegisterRequest,
+) (*ynpb.RegisterResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registeredEndpoint = request.GetBackend().GetEndpoint()
+	return &ynpb.RegisterResponse{}, nil
+}
+
+// setErrors changes the injected failures while reconciliation is running.
+func (m *recordingGateway) setErrors(staticRouteError, fibError error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.staticRouteError = staticRouteError
+	m.fibError = fibError
 }
 
 // UpdateStaticRoutes records every complete client stream as one snapshot.
@@ -146,6 +168,7 @@ func (m *recordingGateway) state() gatewayState {
 	defer m.mu.Unlock()
 
 	return gatewayState{
+		registeredEndpoint:   m.registeredEndpoint,
 		staticRouteCalls:     m.staticRouteCalls,
 		staticRouteSnapshots: append([][][]*sidecarpb.StaticRoute(nil), m.staticRouteSnapshots...),
 		fibRequests:          append([]*routepb.UpdateFIBRequest(nil), m.fibRequests...),
@@ -162,6 +185,7 @@ func serveRecordingGateway(t *testing.T, gateway *recordingGateway) string {
 	require.NoError(t, err)
 
 	server := grpc.NewServer()
+	ynpb.RegisterGatewayServer(server, gateway)
 	routepb.RegisterRouteServiceServer(server, gateway)
 	ynpb.RegisterFunctionServiceServer(server, gateway)
 	sidecarpb.RegisterNetlinkDataplaneServiceServer(server, gateway)
@@ -185,15 +209,18 @@ func newTestGatewayActuator(
 	if !sidecarEnabled {
 		return actuator
 	}
-	return routeoperator.NewNetlinkSidecarActuator(
+	sidecar, err := routeoperator.NewNetlinkSidecarActuator(
 		actuator,
 		staticRoutes,
 		5*time.Second,
 		func() neigh.TableSnapshot { return dynamicRIBSnapshot().Neighbours },
 		actuator,
 	)
+	require.NoError(t, err)
+	return sidecar
 }
 
+// newRawTestGatewayActuator returns a route-module client without observation wrappers.
 func newRawTestGatewayActuator(
 	t *testing.T,
 	name string,
@@ -344,6 +371,8 @@ func Test_GatewayActuator_Apply_EnabledPublishesOnlyStaticConfigEveryTime(t *tes
 	require.Len(t, state.fibRequests[1].GetEntries(), 1)
 }
 
+// Test_NetlinkSidecarActuator_RefreshesNeighboursAfterPublication verifies that
+// a completed publication refreshes the neighbour snapshot used by the FIB.
 func Test_NetlinkSidecarActuator_RefreshesNeighboursAfterPublication(t *testing.T) {
 	gateway := &recordingGateway{}
 	endpoint := serveRecordingGateway(t, gateway)
@@ -359,7 +388,7 @@ func Test_NetlinkSidecarActuator_RefreshesNeighboursAfterPublication(t *testing.
 		defer neighboursMu.Unlock()
 		currentNeighbours = freshNeighbours
 	}
-	actuator := routeoperator.NewNetlinkSidecarActuator(
+	actuator, err := routeoperator.NewNetlinkSidecarActuator(
 		inner,
 		nil,
 		5*time.Second,
@@ -370,6 +399,7 @@ func Test_NetlinkSidecarActuator_RefreshesNeighboursAfterPublication(t *testing.
 		},
 		inner,
 	)
+	require.NoError(t, err)
 
 	require.NoError(t, applyGatewayActuator(t, actuator, snapshot))
 
@@ -437,18 +467,24 @@ func Test_GatewayActuator_Apply_EmptyStaticSnapshotSendsChunk(t *testing.T) {
 	require.Empty(t, state.staticRouteSnapshots[0][0])
 }
 
-// Test_GatewayActuator_Apply_ConversionFailureStartsNoWork verifies that all
-// configured routes convert before sidecar, FIB, or function RPC work.
-func Test_GatewayActuator_Apply_ConversionFailureStartsNoStream(t *testing.T) {
+// Test_NetlinkSidecarActuator_RejectsInvalidSnapshot verifies that all configured
+// routes convert during construction, before sidecar, FIB, or function RPC work.
+func Test_NetlinkSidecarActuator_RejectsInvalidSnapshot(t *testing.T) {
 	gateway := &recordingGateway{}
 	endpoint := serveRecordingGateway(t, gateway)
-	actuator := newTestGatewayActuator(t, endpoint, []routeoperator.StaticRouteConfig{
-		{Prefix: "192.0.2.0/24", NexthopAddr: "192.0.2.1", Interface: "static0"},
-		{Prefix: "not-a-prefix", NexthopAddr: "192.0.2.2", Interface: "static1"},
-	}, true)
-
-	err := applyGatewayActuator(t, actuator, emptyFIBSnapshot())
+	inner := newRawTestGatewayActuator(t, "numa0", endpoint, true)
+	actuator, err := routeoperator.NewNetlinkSidecarActuator(
+		inner,
+		[]routeoperator.StaticRouteConfig{
+			{Prefix: "192.0.2.0/24", NexthopAddr: "192.0.2.1", Interface: "static0"},
+			{Prefix: "not-a-prefix", NexthopAddr: "192.0.2.2", Interface: "static1"},
+		},
+		time.Second,
+		func() neigh.TableSnapshot { return nil },
+		inner,
+	)
 	require.ErrorContains(t, err, "static route 1: invalid prefix")
+	require.Nil(t, actuator)
 
 	state := gateway.state()
 	require.Zero(t, state.staticRouteCalls)
@@ -500,7 +536,7 @@ func Test_NetlinkSidecarActuator_TriesGatewaysUntilSuccess(t *testing.T) {
 		true,
 	)
 	fanOut := commonoperator.NewFanOutActuator([]routeoperator.Actuator{first, second})
-	actuator := routeoperator.NewNetlinkSidecarActuator(
+	actuator, err := routeoperator.NewNetlinkSidecarActuator(
 		fanOut,
 		[]routeoperator.StaticRouteConfig{{
 			Prefix:      "192.0.2.0/24",
@@ -512,6 +548,7 @@ func Test_NetlinkSidecarActuator_TriesGatewaysUntilSuccess(t *testing.T) {
 		first,
 		second,
 	)
+	require.NoError(t, err)
 
 	require.NoError(t, applyGatewayActuator(t, actuator, emptyFIBSnapshot()))
 
@@ -523,4 +560,26 @@ func Test_NetlinkSidecarActuator_TriesGatewaysUntilSuccess(t *testing.T) {
 	require.Len(t, secondState.fibRequests, 1)
 	require.Equal(t, 1, firstState.functionUpdates)
 	require.Equal(t, 1, secondState.functionUpdates)
+}
+
+// Test_NetlinkSidecarActuator_OwnsCompiledSnapshot verifies that caller edits
+// after construction cannot change either the validated routes or later streams.
+func Test_NetlinkSidecarActuator_OwnsCompiledSnapshot(t *testing.T) {
+	gateway := &recordingGateway{}
+	routes := []routeoperator.StaticRouteConfig{{
+		Prefix: "192.0.2.123/24", NexthopAddr: "192.0.2.1", Interface: "static0",
+	}}
+	actuator := newTestGatewayActuator(t, serveRecordingGateway(t, gateway), routes, true)
+	routes[0] = routeoperator.StaticRouteConfig{Prefix: "invalid"}
+
+	for range 2 {
+		require.NoError(t, applyGatewayActuator(t, actuator, emptyFIBSnapshot()))
+	}
+	snapshots := gateway.state().staticRouteSnapshots
+	require.Len(t, snapshots, 2)
+	for _, snapshot := range snapshots {
+		require.Equal(t, []staticRouteRecord{{
+			prefix: "192.0.2.0/24", nexthop: "192.0.2.1", interfaceName: "static0",
+		}}, decodeStaticRouteSnapshot(t, snapshot))
+	}
 }

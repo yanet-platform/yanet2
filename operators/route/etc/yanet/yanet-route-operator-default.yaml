@@ -80,8 +80,10 @@ static:
   # Static neighbour entries seeded into operator-managed tables.
   neighbours: []
 
-# Mapping from logical link names (as carried in routes) to OS
-# interface names used by the netlink monitor.
+# Mapping from OS interface names to logical dataplane device names.
+#
+# With sidecar publication enabled, use the same mapping as the sidecar so
+# configured static interfaces resolve against the published neighbour devices.
 link_map: {}
 
 # RIB session TTL — stale FeedRIB sessions are garbage-collected
@@ -99,6 +101,10 @@ netlink_monitor:
 # Publish the configured static-route snapshot to the host netlink sidecar,
 # trying gateway connections in order until one succeeds. Disabled preserves
 # legacy RIB-only seeding.
+#
+# Static interfaces also constrain dataplane egress after link-name mapping.
+# One prefix and next-hop pair cannot use multiple interfaces. Readiness
+# consumers must include the whole-pass "reconcile" scope when this is enabled.
 netlink_sidecar:
   enabled: false
   update_timeout: 30s

@@ -10,7 +10,9 @@ import (
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 )
 
-func TestSourceDistinguishesStartupFromExplicitEmptySnapshot(t *testing.T) {
+// Test_Source_DistinguishesExplicitEmptySnapshot verifies that empty routes
+// become initialized only after an explicit store replacement.
+func Test_Source_DistinguishesExplicitEmptySnapshot(t *testing.T) {
 	store := route.NewStore()
 	source := sidecaroperator.NewSource(store)
 
@@ -26,7 +28,9 @@ func TestSourceDistinguishesStartupFromExplicitEmptySnapshot(t *testing.T) {
 	require.Empty(t, committed.Routes)
 }
 
-func TestSourceReturnsCurrentRoutesAndStoreWake(t *testing.T) {
+// Test_Source_ReturnsSnapshotAndWake verifies that callers receive isolated
+// route copies and observe both replacements and explicit store notifications.
+func Test_Source_ReturnsSnapshotAndWake(t *testing.T) {
 	store := route.NewStore()
 	source := sidecaroperator.NewSource(store)
 	routes := []route.Route{{

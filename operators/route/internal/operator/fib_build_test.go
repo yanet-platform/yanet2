@@ -53,7 +53,7 @@ func Test_BuildFIB_BestPerSourceFiltersWorse(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), nil)
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 1, stats.FilteredRoutes)
@@ -90,7 +90,7 @@ func Test_BuildFIB_EqualCostECMPPreserved(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), nil)
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 0, stats.FilteredRoutes)
@@ -128,7 +128,7 @@ func Test_BuildFIB_StaticAndBirdBothInFIB(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), nil)
 
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 0, stats.FilteredRoutes, "static route is its own source's best — not filtered")
@@ -194,8 +194,7 @@ func Test_BuildFIB_PerGatewayDeviceFilter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			view := neigh.FilterByDevices(cache.View(), tc.devices)
-			fib, _ := BuildFIB(ribDump, view)
+			fib, _ := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), tc.devices)
 			require.Len(t, fib.Entries, 1)
 			require.Len(t, fib.Entries[0].Nexthops, 1)
 			require.Equal(t, tc.wantDevice, fib.Entries[0].Nexthops[0].Device)
@@ -222,8 +221,7 @@ func Test_BuildFIB_DeviceFilterStarvesPrefix(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth2"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), []string{"eth2"})
 	require.Empty(t, fib.Entries)
 	require.Equal(t, 1, stats.NeighbourNotFound)
 }
@@ -259,7 +257,7 @@ func Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), nil)
 
 	require.Len(t, fib.Entries, 1)
 	require.Len(t, fib.Entries[0].Nexthops, 1)
@@ -306,8 +304,7 @@ func Test_BuildFIB_MultiSourceWithDeviceFilter(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), []string{"eth1"})
 
 	require.Len(t, fib.Entries, 1)
 	require.Len(t, fib.Entries[0].Nexthops, 2, "bird fallback and static, both on eth1")
@@ -362,8 +359,7 @@ func Test_BuildFIB_MultiPrefix(t *testing.T) {
 		},
 	}
 
-	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
-	fib, stats := BuildFIB(ribDump, view)
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), []string{"eth1"})
 
 	require.Len(t, fib.Entries, 2)
 	require.Equal(t, 1, stats.NeighbourNotFound, "only the eth2 route of the wider prefix is dropped")
@@ -413,7 +409,7 @@ func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 		},
 	}
 
-	fib, stats := BuildFIB(ribDump, cache.View())
+	fib, stats := BuildFIB(ribDump, neigh.NewTableSnapshot(cache.View()), nil)
 
 	require.Len(t, fib.Entries, 1)
 	require.Equal(t, 1, stats.PrefixesAdded)

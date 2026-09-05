@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
+
+	vnetlink "github.com/vishvananda/netlink"
 
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
+
+const netlinkSocketTimeout = 5 * time.Second
 
 // Operator is the sidecar's lifecycle wrapper around the common framework.
 type Operator struct {
@@ -54,11 +59,11 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 		}
 	}()
 
-	linkReconciler := opts.NewLinkReconciler(handle)
-	if linkReconciler == nil {
-		return nil, errors.New("create link reconciler: factory returned nil")
+	if err := handle.SetSocketTimeout(netlinkSocketTimeout); err != nil {
+		return nil, fmt.Errorf("configure netlink socket timeout: %w", err)
 	}
-	routeReconciler, err := opts.NewRouteReconciler(handle, route.ReconcilerConfig{
+	linkReconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
+	routeReconciler, err := route.NewReconciler(handle, route.ReconcilerConfig{
 		Table:    cfg.Route.Table,
 		Protocol: cfg.Route.Protocol,
 		Priority: cfg.Route.Priority,
@@ -66,10 +71,6 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 	if err != nil {
 		return nil, fmt.Errorf("create route reconciler: %w", err)
 	}
-	if routeReconciler == nil {
-		return nil, errors.New("create route reconciler: factory returned nil")
-	}
-
 	store := route.NewStore()
 	service, err := route.NewService(store, route.ServiceConfig{MaxRoutes: cfg.Route.MaxRoutes})
 	if err != nil {
@@ -106,17 +107,15 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 		handle,
 		targets,
 		cfg.LinkMap,
-		WithActuatorNetplanLoader(opts.LoadNetplan),
-		WithActuatorNeighbourDiscoverer(opts.DiscoverNeighbours),
-		WithActuatorNeighbourPublisher(opts.PublishNeighbours),
 	)
 	actuator.SetRuntimeResources(connections, handle)
 
 	source := NewSource(store)
 	eventWorker := NewNeighbourEventWorker(
 		store,
-		opts.SubscribeNeighbours,
+		vnetlink.NeighSubscribeWithOptions,
 		cfg.Reconcile.MaxBackoff.Unwrap(),
+		WithNeighbourEventWorkerLog(opts.Log),
 	)
 	app := commonoperator.NewOperator(
 		actuator,
@@ -150,12 +149,6 @@ func validateDependencies(options *options) error {
 		{Name: "logger", Missing: options.Log == nil},
 		{Name: "netlink handle factory", Missing: options.NewNetlinkHandle == nil},
 		{Name: "gateway dialer", Missing: options.DialGateway == nil},
-		{Name: "link reconciler factory", Missing: options.NewLinkReconciler == nil},
-		{Name: "route reconciler factory", Missing: options.NewRouteReconciler == nil},
-		{Name: "netplan loader", Missing: options.LoadNetplan == nil},
-		{Name: "neighbour discoverer", Missing: options.DiscoverNeighbours == nil},
-		{Name: "neighbour publisher", Missing: options.PublishNeighbours == nil},
-		{Name: "neighbour subscriber", Missing: options.SubscribeNeighbours == nil},
 	}
 	for _, dependency := range dependencies {
 		if dependency.Missing {
@@ -179,8 +172,4 @@ func closeRuntimeResources(connections []GatewayConnection, handle NetlinkHandle
 		handle.Close()
 	}
 	return closeErr
-}
-
-func netplanParseFile(path string) (netplan.State, error) {
-	return netplan.ParseFile(path)
 }

@@ -79,6 +79,18 @@ func (m *Config) Validate() error {
 	if err := m.Server.Validate(); err != nil {
 		return fmt.Errorf("invalid server configuration: %w", err)
 	}
+	if m.Register.Interval.Unwrap() <= 0 {
+		return errors.New("register.interval must be positive")
+	}
+	if m.Reconcile.Interval.Unwrap() <= 0 {
+		return errors.New("reconcile.interval must be positive")
+	}
+	if m.Reconcile.InitialBackoff.Unwrap() <= 0 {
+		return errors.New("reconcile.initial_backoff must be positive")
+	}
+	if m.Reconcile.MaxBackoff.Unwrap() <= 0 {
+		return errors.New("reconcile.max_backoff must be positive")
+	}
 	if err := m.Reconcile.Validate(); err != nil {
 		return fmt.Errorf("invalid reconcile configuration: %w", err)
 	}

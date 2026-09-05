@@ -95,7 +95,7 @@ func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
 	require.Len(t, snapshot.RIBs, 1)
 	require.Contains(t, snapshot.RIBs, "route0")
 
-	fib, _ := BuildFIB(snapshot.RIBs["route0"], snapshot.Neighbours.ViewByDevices(nil))
+	fib, _ := BuildFIB(snapshot.RIBs["route0"], snapshot.Neighbours, nil)
 	fib.Name = "route0"
 
 	expected := FIB{

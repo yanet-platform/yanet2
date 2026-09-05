@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
@@ -15,7 +16,9 @@ import (
 
 const shippedConfigPath = "../../etc/yanet/yanet-netlink-dataplane-sidecar-default.yaml"
 
-func TestConfigDefaults(t *testing.T) {
+// Test_Config_Defaults verifies that omitted settings retain the shared
+// scheduling defaults and sidecar route and neighbour ownership defaults.
+func Test_Config_Defaults(t *testing.T) {
 	cfg := sidecaroperator.DefaultConfig()
 	require.Equal(t, zapcore.InfoLevel, cfg.Logging.Level)
 	require.Equal(t, "[::1]:0", cfg.Server.Endpoint.Unwrap())
@@ -51,7 +54,72 @@ gateways:
 	)
 }
 
-func TestGatewayConfigConvertsToCommonOperatorConfig(t *testing.T) {
+// Test_Config_RejectsNegativeSchedulingYAML verifies that nonzero duration
+// decoding cannot admit negative heartbeat or reconciliation delays.
+func Test_Config_RejectsNegativeSchedulingYAML(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		yaml string
+	}{
+		{name: "register.interval", yaml: "register:\n  interval: -1s\n"},
+		{name: "reconcile.interval", yaml: "reconcile:\n  interval: -1s\n"},
+		{name: "reconcile.initial_backoff", yaml: "reconcile:\n  initial_backoff: -2s\n  max_backoff: -1s\n"},
+		{name: "reconcile.max_backoff", yaml: "reconcile:\n  max_backoff: -1s\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := twoGatewayConfig()
+
+			err := xcfg.Decode([]byte(test.yaml), config)
+
+			require.ErrorContains(t, err, test.name+" must be positive")
+		})
+	}
+}
+
+// Test_Config_RejectsZeroScheduling verifies that direct construction has the
+// same positive-duration precondition as YAML configuration.
+func Test_Config_RejectsZeroScheduling(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		field func(*sidecaroperator.Config) *xcfg.NonZero[time.Duration]
+	}{
+		{
+			name: "register.interval",
+			field: func(config *sidecaroperator.Config) *xcfg.NonZero[time.Duration] {
+				return &config.Register.Interval
+			},
+		},
+		{
+			name: "reconcile.interval",
+			field: func(config *sidecaroperator.Config) *xcfg.NonZero[time.Duration] {
+				return &config.Reconcile.Interval
+			},
+		},
+		{
+			name: "reconcile.initial_backoff",
+			field: func(config *sidecaroperator.Config) *xcfg.NonZero[time.Duration] {
+				return &config.Reconcile.InitialBackoff
+			},
+		},
+		{
+			name: "reconcile.max_backoff",
+			field: func(config *sidecaroperator.Config) *xcfg.NonZero[time.Duration] {
+				return &config.Reconcile.MaxBackoff
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := twoGatewayConfig()
+			*test.field(config) = xcfg.NonZero[time.Duration]{}
+
+			require.ErrorContains(t, config.Validate(), test.name+" must be positive")
+		})
+	}
+}
+
+// Test_GatewayConfig_OperatorConversion verifies that conversion preserves the
+// gateway identity, endpoint, and original TLS configuration pointer.
+func Test_GatewayConfig_OperatorConversion(t *testing.T) {
 	gateway := validGateway("numa0", "netlink-dataplane-numa0", nil)
 
 	converted := gateway.OperatorConfig()
@@ -61,7 +129,9 @@ func TestGatewayConfigConvertsToCommonOperatorConfig(t *testing.T) {
 	require.Same(t, gateway.TLS, converted.TLS)
 }
 
-func TestConfigValidation(t *testing.T) {
+// Test_Config_Validation verifies that invalid endpoints, ambiguous ownership,
+// and unsupported route settings each report their configuration error.
+func Test_Config_Validation(t *testing.T) {
 	tests := []struct {
 		name          string
 		mutate        func(*sidecaroperator.Config)
@@ -247,7 +317,9 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-func TestConfigRejectsRouteValuesThatOverflowNetlink(t *testing.T) {
+// Test_Config_RejectsNetlinkOverflow verifies that route table and priority
+// values exceeding the wire's unsigned 32-bit range cannot pass validation.
+func Test_Config_RejectsNetlinkOverflow(t *testing.T) {
 	if ^uint(0) == uint(^uint32(0)) {
 		t.Skip("int cannot represent values above uint32 on this platform")
 	}
@@ -266,7 +338,9 @@ func TestConfigRejectsRouteValuesThatOverflowNetlink(t *testing.T) {
 	require.ErrorContains(t, cfg.Validate(), "priority must be within")
 }
 
-func TestConfigAllowsIndependentEndpointFamiliesAndGRPCTargetURI(t *testing.T) {
+// Test_Config_AllowsIndependentEndpoints verifies that a numeric listener,
+// advertised service name, and DNS gRPC target may use different address forms.
+func Test_Config_AllowsIndependentEndpoints(t *testing.T) {
 	cfg := sidecaroperator.DefaultConfig()
 	cfg.Server.Endpoint = xcfg.MustNonEmptyString("127.0.0.1:0")
 	cfg.Server.AdvertiseEndpoint = "sidecar.internal:http"
@@ -278,7 +352,9 @@ func TestConfigAllowsIndependentEndpointFamiliesAndGRPCTargetURI(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
-func TestConfigAllowsMultipleTablesOnOneGatewayEndpoint(t *testing.T) {
+// Test_Config_AllowsSharedGatewayEndpoint verifies that distinct neighbour
+// tables and device ownership permit two gateways to share one endpoint.
+func Test_Config_AllowsSharedGatewayEndpoint(t *testing.T) {
 	cfg := sidecaroperator.DefaultConfig()
 	first := validGateway("numa0", "netlink-dataplane-numa0", []string{"logical0"})
 	second := validGateway("numa1", "netlink-dataplane-numa1", []string{"logical1"})
@@ -288,7 +364,9 @@ func TestConfigAllowsMultipleTablesOnOneGatewayEndpoint(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
-func TestShippedDefaultConfig(t *testing.T) {
+// Test_Config_ShippedDefaults verifies that the shipped YAML has only known
+// keys and loads with gateways and the expected netplan path.
+func Test_Config_ShippedDefaults(t *testing.T) {
 	data, err := os.ReadFile(shippedConfigPath)
 	require.NoError(t, err)
 	require.NoError(t, xcfg.CheckKnownKeys[sidecaroperator.Config](data))

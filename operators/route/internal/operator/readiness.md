@@ -1,8 +1,8 @@
 # Route operator readiness
 
-The route operator exposes four readiness dimensions, each as its own scope:
+The route operator exposes readiness dimensions as separate scopes:
 FIB programming per gateway, kernel neighbour resolution, the RIB content, and
-(optionally) the BIRD FeedRIB transport session.
+(optionally) the BIRD FeedRIB transport session and sidecar-enabled reconciliation.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
 - Service implementation: `readiness_service.go` (`ReadinessService`).
@@ -14,6 +14,7 @@ FIB programming per gateway, kernel neighbour resolution, the RIB content, and
 | Scope                    | Meaning                                              |
 | ------------------------ | --------------------------------------------------- |
 | `fib:<gateway>:<module>` | Per-gateway FIB apply outcome into the dataplane module. |
+| `reconcile`              | Complete sidecar publication and gateway fan-out outcome (only when `netlink_sidecar.enabled`). |
 | `neighbours`             | Kernel neighbour (ARP/ND) resolution state.          |
 | `rib`                    | Routing information base content readiness.          |
 | `bird-session`           | BIRD FeedRIB transport liveness (only when `readiness.expect_bird`). |
@@ -30,6 +31,20 @@ Driven by the apply outcome recorded through `Observe` (via
 - Apply succeeded: `STATE_READY`.
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
 - Apply failed, never applied: `STATE_NOT_READY` (`APPLY_FAILED`).
+
+### `reconcile`
+
+When sidecar publication is enabled, consumers must include this scope when
+evaluating readiness. It observes the entire reconcile pass, including a failed
+prerequisite that prevents gateway FIB updates from being attempted. Success is
+READY; failure is NOT_READY before the first successful pass and DEGRADED after
+one, with reason `APPLY_FAILED`. Recovery returns it to READY.
+
+Per-gateway FIB scopes still describe only actual gateway attempts. A failed
+prerequisite leaves those scopes untouched, and a failed gateway does not
+overwrite another gateway's successful observation. The whole-pass scope
+publishes the reconcile interval as its freshness contract and is observed on
+every completed attempt, including prerequisite failures.
 
 ### `neighbours`
 
@@ -87,7 +102,7 @@ During normal operation it never reaches `STATE_NOT_READY`; only the shutdown
 drain forces it there.
 
 On shutdown `Drain` flips every route scope to `STATE_NOT_READY` with reason
-`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`.
+`SHUTTING_DOWN`, including `fib`, `reconcile`, `neighbours`, `rib`, and `bird-session`.
 This is best-effort: the operator tracker is not drain-latched, so an apply in
 flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
 reconciler stops.
@@ -95,7 +110,7 @@ reconciler stops.
 ## `observed_at` freshness
 
 `observed_at` reflects how recently each scope's source was re-evaluated, not
-whether the evaluation succeeded — read `state` for outcome. The four scope
+whether the evaluation succeeded — read `state` for outcome. The scope
 families refresh on different clocks.
 
 Freshness checks must poll `Ready`, not `Watch`. `Watch` emits only on
@@ -107,7 +122,8 @@ without changing state.
 
 ### `fib:<gateway>:<module>`
 
-Advances on every reconcile apply attempt via `Observe`, regardless of success.
+Advances on every gateway apply attempt via `Observe`, regardless of success.
+When a sidecar prerequisite fails, only the `reconcile` scope is observed.
 
 Config parameters (under `reconcile:`):
 

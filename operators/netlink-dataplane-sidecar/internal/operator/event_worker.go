@@ -7,7 +7,9 @@ import (
 	"time"
 
 	vnetlink "github.com/vishvananda/netlink"
+	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 )
 
@@ -21,12 +23,31 @@ type NeighbourSubscriber func(
 	vnetlink.NeighSubscribeOptions,
 ) error
 
+type neighbourEventWorkerOptions struct {
+	Log *zap.Logger
+}
+
+func newNeighbourEventWorkerOptions() *neighbourEventWorkerOptions {
+	return &neighbourEventWorkerOptions{Log: zap.NewNop()}
+}
+
+// NeighbourEventWorkerOption configures neighbour subscription diagnostics.
+type NeighbourEventWorkerOption func(*neighbourEventWorkerOptions)
+
+// WithNeighbourEventWorkerLog sets the logger for subscription recovery.
+func WithNeighbourEventWorkerLog(log *zap.Logger) NeighbourEventWorkerOption {
+	return func(options *neighbourEventWorkerOptions) {
+		options.Log = log
+	}
+}
+
 // NeighbourEventWorker wakes full reconciliation after netlink events without
 // allowing a continuous event stream to bypass reconciliation backoff.
 type NeighbourEventWorker struct {
 	store        *route.Store
 	subscribe    NeighbourSubscriber
 	wakeInterval time.Duration
+	log          *zap.Logger
 }
 
 // NewNeighbourEventWorker creates an event-driven wake worker.
@@ -34,15 +55,21 @@ func NewNeighbourEventWorker(
 	store *route.Store,
 	subscribe NeighbourSubscriber,
 	wakeInterval time.Duration,
+	options ...NeighbourEventWorkerOption,
 ) *NeighbourEventWorker {
+	opts := newNeighbourEventWorkerOptions()
+	for _, option := range options {
+		option(opts)
+	}
 	return &NeighbourEventWorker{
 		store:        store,
 		subscribe:    subscribe,
 		wakeInterval: wakeInterval,
+		log:          opts.Log,
 	}
 }
 
-// Run subscribes until cancellation or any subscription failure.
+// Run restores lost subscriptions without interrupting periodic reconciliation.
 func (m *NeighbourEventWorker) Run(ctx context.Context) error {
 	if m.store == nil {
 		return errors.New("run neighbour event worker: route store is nil")
@@ -54,6 +81,20 @@ func (m *NeighbourEventWorker) Run(ctx context.Context) error {
 		return errors.New("run neighbour event worker: wake interval must be positive")
 	}
 
+	for ctx.Err() == nil {
+		err := m.runSubscription(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		m.log.Warn("neighbour event subscription failed; retrying", zap.Error(err))
+		if err := (xbackoff.TimerSleeper{}).Sleep(ctx, m.wakeInterval); err != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *NeighbourEventWorker) runSubscription(ctx context.Context) error {
 	updates := make(chan vnetlink.NeighUpdate, 1)
 	done := make(chan struct{})
 	callbackErrors := make(chan error, 1)
@@ -78,11 +119,11 @@ func (m *NeighbourEventWorker) Run(ctx context.Context) error {
 			wakeTimer.Stop()
 		}
 		close(done)
-		// The upstream sender uses an unconditional channel send. Draining until
-		// it closes prevents that goroutine from being stranded during teardown.
-		// A broken injected subscriber cannot block operator shutdown forever.
+		// Drain the upstream sender before replacing a lost subscription.
+		// Shutdown permits a bounded drain if the sender does not finish.
 		drainTimer := time.NewTimer(subscriptionDrainTimeout)
 		defer drainTimer.Stop()
+		var shutdown <-chan struct{}
 		for {
 			select {
 			case _, open := <-updates:
@@ -90,10 +131,16 @@ func (m *NeighbourEventWorker) Run(ctx context.Context) error {
 					return
 				}
 			case <-drainTimer.C:
+				shutdown = ctx.Done()
+			case <-shutdown:
 				return
 			}
 		}
 	}()
+
+	// A full snapshot covers events missed before initial subscription or
+	// while a lost subscription was being restored.
+	m.store.Notify()
 
 	for {
 		select {

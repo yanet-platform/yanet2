@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -118,8 +119,6 @@ func (m *GatewayActuator) NetlinkSidecar() sidecarpb.NetlinkDataplaneServiceClie
 // Every FIB is attempted and the function is published even on a partial
 // failure — the joined errors let the reconcile loop retry under backoff.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
-	neighbours := snapshot.Neighbours.ViewByDevices(m.devices)
-
 	var err error
 	for name, dump := range snapshot.RIBs {
 		if name == "" {
@@ -127,7 +126,7 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 			continue
 		}
 
-		fib, stats := BuildFIB(dump, neighbours)
+		fib, stats := BuildFIB(dump, snapshot.Neighbours, m.devices)
 		fib.Name = name
 		m.onFIBBuilt(name, stats)
 		if e := m.pushFIB(ctx, fib); e != nil {
@@ -142,7 +141,7 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 // to the normal concurrent gateway FIB fan-out.
 type NetlinkSidecarActuator struct {
 	inner              Actuator
-	staticRoutes       []StaticRouteConfig
+	staticRoutes       []*sidecarpb.StaticRoute
 	updateTimeout      time.Duration
 	snapshotNeighbours func() neigh.TableSnapshot
 	targets            []netlinkSidecarTarget
@@ -153,15 +152,32 @@ type netlinkSidecarTarget struct {
 	Client sidecarpb.NetlinkDataplaneServiceClient
 }
 
-// NewNetlinkSidecarActuator wraps inner with ordered gateway failover for the
-// single sidecar service shared by all gateways.
+// NewNetlinkSidecarActuator compiles an immutable route snapshot and wraps the
+// gateway fan-out with ordered publication through the shared sidecar.
 func NewNetlinkSidecarActuator(
 	inner Actuator,
 	staticRoutes []StaticRouteConfig,
 	updateTimeout time.Duration,
 	snapshotNeighbours func() neigh.TableSnapshot,
 	gateways ...*GatewayActuator,
-) *NetlinkSidecarActuator {
+) (*NetlinkSidecarActuator, error) {
+	if inner == nil {
+		return nil, errors.New("publish static-route snapshot: wrapped actuator is nil")
+	}
+	if updateTimeout <= 0 {
+		return nil, fmt.Errorf(
+			"publish static-route snapshot: update timeout must be positive, got %s",
+			updateTimeout,
+		)
+	}
+	if snapshotNeighbours == nil {
+		return nil, errors.New("publish static-route snapshot: neighbour snapshotter is nil")
+	}
+	routes, err := staticRoutesToProto(staticRoutes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build static-route snapshot: %w", err)
+	}
+
 	targets := make([]netlinkSidecarTarget, 0, len(gateways))
 	for idx, gateway := range gateways {
 		if gateway == nil {
@@ -175,33 +191,16 @@ func NewNetlinkSidecarActuator(
 	}
 	return &NetlinkSidecarActuator{
 		inner:              inner,
-		staticRoutes:       append([]StaticRouteConfig(nil), staticRoutes...),
+		staticRoutes:       routes,
 		updateTimeout:      updateTimeout,
 		snapshotNeighbours: snapshotNeighbours,
 		targets:            targets,
-	}
+	}, nil
 }
 
 // Apply commits the static-route snapshot through the first reachable gateway.
 // Gateway FIBs are not changed unless the sidecar commit succeeds.
 func (m *NetlinkSidecarActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
-	if m.inner == nil {
-		return errors.New("publish static-route snapshot: wrapped actuator is nil")
-	}
-	if m.updateTimeout <= 0 {
-		return fmt.Errorf(
-			"publish static-route snapshot: update timeout must be positive, got %s",
-			m.updateTimeout,
-		)
-	}
-	if m.snapshotNeighbours == nil {
-		return errors.New("publish static-route snapshot: neighbour snapshotter is nil")
-	}
-	routes, err := staticRoutesToProto(m.staticRoutes)
-	if err != nil {
-		return fmt.Errorf("failed to build static-route snapshot: %w", err)
-	}
-
 	var publishErr error
 	for _, target := range m.targets {
 		if target.Client == nil {
@@ -213,7 +212,7 @@ func (m *NetlinkSidecarActuator) Apply(ctx context.Context, snapshot RouteSnapsh
 		}
 
 		updateCtx, cancel := context.WithTimeout(ctx, m.updateTimeout)
-		err := pushStaticRoutes(updateCtx, target.Client, routes)
+		err := pushStaticRoutes(updateCtx, target.Client, m.staticRoutes)
 		cancel()
 		if err == nil {
 			snapshot.Neighbours = m.snapshotNeighbours()
@@ -287,9 +286,8 @@ func finishFailedStream(
 }
 
 type staticRouteKey struct {
-	prefix        netip.Prefix
-	nexthop       netip.Addr
-	interfaceName string
+	prefix  netip.Prefix
+	nexthop netip.Addr
 }
 
 func staticRoutesToProto(routes []StaticRouteConfig) ([]*sidecarpb.StaticRoute, error) {
@@ -329,6 +327,9 @@ func staticRoutesToProto(routes []StaticRouteConfig) ([]*sidecarpb.StaticRoute, 
 		if route.Interface == "" {
 			return nil, fmt.Errorf("static route %d: interface is required", idx)
 		}
+		if strings.ContainsRune(route.Interface, '\x00') {
+			return nil, fmt.Errorf("static route %d: interface contains a NUL byte", idx)
+		}
 		if len(route.Interface) >= unix.IFNAMSIZ {
 			return nil, fmt.Errorf(
 				"static route %d: interface %q exceeds Linux IFNAMSIZ",
@@ -346,11 +347,17 @@ func staticRoutesToProto(routes []StaticRouteConfig) ([]*sidecarpb.StaticRoute, 
 		}
 
 		key := staticRouteKey{
-			prefix:        prefix,
-			nexthop:       nexthop,
-			interfaceName: route.Interface,
+			prefix:  prefix,
+			nexthop: nexthop,
 		}
 		if previous, duplicate := seen[key]; duplicate {
+			if routes[previous].Interface != route.Interface {
+				return nil, fmt.Errorf(
+					"static routes %d and %d have the same prefix and nexthop (%s via %s) "+
+						"but different interfaces %q and %q; the RIB cannot distinguish these paths",
+					previous, idx, prefix, nexthop, routes[previous].Interface, route.Interface,
+				)
+			}
 			return nil, fmt.Errorf("static route %d duplicates static route %d", idx, previous)
 		}
 		seen[key] = idx
