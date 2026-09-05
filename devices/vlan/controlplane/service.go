@@ -55,6 +55,9 @@ func (m *DeviceVlanService) UpdateDevice(
 	if err := ffi.ValidateDeviceName(name); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	if err := request.GetDevice().Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	vlan := request.GetVlan()
 	if vlan > maxVlanID {

@@ -48,6 +48,9 @@ func (m *DevicePlainService) UpdateDevice(
 	if err := ffi.ValidateDeviceName(name); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	if err := request.GetDevice().Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice())
 	if err != nil {

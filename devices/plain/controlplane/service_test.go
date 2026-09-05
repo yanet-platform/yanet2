@@ -15,6 +15,19 @@ import (
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 )
 
+// Test_DevicePlainService_UpdateDevice_RejectsInvalidWeights verifies that model
+// validation produces InvalidArgument before allocating a device through FFI.
+func Test_DevicePlainService_UpdateDevice_RejectsInvalidWeights(t *testing.T) {
+	service := NewDevicePlainService(nil)
+	_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+		Name: "weights",
+		Device: &commonpb.Device{
+			Input: []*commonpb.DevicePipeline{{Name: "pipeline", Weight: 65536}},
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 // TestUpdateDevice_ReclaimsSupersededDevice verifies that repeated
 // UpdateDevice calls do not leak shared-memory arena space.
 //
