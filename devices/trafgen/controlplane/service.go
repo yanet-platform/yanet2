@@ -90,6 +90,9 @@ func (m *TrafgenService) UpdateDevice(
 	if err := ffi.ValidateDeviceName(name); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	if err := req.GetDevice().Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	input := pipelinesFromProto(req.GetDevice().GetInput())
 	output := pipelinesFromProto(req.GetDevice().GetOutput())

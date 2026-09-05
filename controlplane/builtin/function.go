@@ -161,32 +161,18 @@ func (m *Function) Update(
 	request *ynpb.UpdateFunctionRequest,
 ) (*ynpb.UpdateFunctionResponse, error) {
 	reqFunction := request.GetFunction()
-	if reqFunction == nil {
-		return nil, status.Error(codes.InvalidArgument, "function is required")
-	}
-
-	reqFunctionId := reqFunction.GetId()
-	if reqFunctionId == nil {
-		return nil, status.Error(codes.InvalidArgument, "function id is required")
-	}
-	if reqFunctionId.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "function name is required")
+	if err := reqFunction.Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	function := ffi.FunctionConfig{
-		Name: reqFunctionId.Name,
+		Name: reqFunction.Id.Name,
 	}
 	for _, reqFunctionChain := range reqFunction.Chains {
 		reqChain := reqFunctionChain.GetChain()
-		if reqChain == nil {
-			return nil, status.Error(codes.InvalidArgument, "function chain is required")
-		}
 
 		modules := make([]ffi.ChainModuleConfig, 0, len(reqChain.Modules))
 		for _, reqChainModule := range reqChain.Modules {
-			if reqChainModule == nil {
-				return nil, status.Error(codes.InvalidArgument, "module id is required")
-			}
 			modules = append(modules, ffi.ChainModuleConfig{
 				Type: reqChainModule.Type,
 				Name: reqChainModule.Name,
