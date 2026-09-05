@@ -271,8 +271,8 @@ func collectNet6ShareVerdicts(
 	require.NoError(t, err)
 
 	verdicts := make(map[string]string, len(packets))
-	for _, info := range result.Output {
-		verdicts[net6SharePacketKey(info)] = "output"
+	for _, out := range result.Output {
+		verdicts[net6SharePacketKey(out.PacketInfo)] = "output"
 	}
 	for _, info := range result.Drop {
 		verdicts[net6SharePacketKey(info)] = "drop"

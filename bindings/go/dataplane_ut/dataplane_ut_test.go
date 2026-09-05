@@ -332,3 +332,171 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 	assert.Equal(t, []uint64{0, 0}, counters[0].Values[0], "worker 0 never ran the round")
 	assert.Equal(t, []uint64{1, uint64(len(payload))}, counters[0].Values[1], "worker 1 ran the matching round")
 }
+
+// TestHandlePacketsOnDevice_InvalidDeviceID verifies that
+// HandlePacketsOnDevice rejects an rxDeviceID at or beyond the harness's
+// registered device count instead of stamping a packet that would index the
+// C-side per-device scheduling arrays out of bounds.
+func TestHandlePacketsOnDevice_InvalidDeviceID(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	}
+
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	result, err := h.HandlePacketsOnDevice(0, 5)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds topology device count")
+	require.Nil(t, result)
+}
+
+// TestHandlePacketsOnDevice_InvalidWorker verifies that HandlePacketsOnDevice
+// rejects a worker index at or beyond the harness's registered worker count
+// instead of indexing the C-side worker array out of bounds.
+func TestHandlePacketsOnDevice_InvalidWorker(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	}
+
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	result, err := h.HandlePacketsOnDevice(3, 0)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds topology worker count")
+	require.Nil(t, result)
+}
+
+// TestHandlePacketsOnDevice_EgressDeviceID verifies that OutputPacket.DeviceID
+// carries the egress device the round resolved rather than the ingress one,
+// and that HandlePacketsOnDevice actually chooses that ingress device.
+//
+// Two crossed forward rules — port0 ingress redirected out through port1 and
+// port1 ingress out through port0 — let the same packet bytes leave through
+// opposite devices depending only on the injected ingress device. A harness
+// that discarded tx_device_id, or an entrypoint that still pinned every packet
+// to device 0, could not produce both answers.
+func TestHandlePacketsOnDevice_EgressDeviceID(t *testing.T) {
+	const (
+		port0 uint16 = 0
+		port1 uint16 = 1
+	)
+
+	cfg := Config{
+		CPMemory:      uint64(datasize.MB * 64),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   2,
+		Devices:       []string{"port0", "port1"},
+		Modules:       []string{"forward"},
+		DevicesToLoad: []string{"plain"},
+		Workers: []WorkerSpec{
+			{DeviceID: 0, QueueID: 0},
+			{DeviceID: 1, QueueID: 0},
+		},
+	}
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("egress-device-test", 0, datasize.MB*16)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	backend := forward.NewBackend(agent)
+	moduleHandle, err := backend.UpdateModule("cross", []cforward.ForwardRule{
+		{
+			Target:  "port1",
+			Mode:    cforward.ModeOut,
+			Counter: "port0_to_port1",
+			Devices: filter.Devices{{Name: "port0"}},
+		},
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "port1_to_port0",
+			Devices: filter.Devices{{Name: "port1"}},
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(moduleHandle.Free)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "cross",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name:    "cross_chain",
+				Modules: []ffi.ChainModuleConfig{{Type: "forward", Name: "cross"}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "cross",
+		Functions: []string{"cross"},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "sink"}))
+
+	// Both devices carry the same input pipeline, so which rule matches is
+	// decided purely by the injected ingress device, and both carry an
+	// output pipeline so either egress can complete.
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+		{
+			Name:   "port0",
+			Input:  []ffi.DevicePipelineConfig{{Name: "cross", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "sink", Weight: 1}},
+		},
+		{
+			Name:   "port1",
+			Input:  []ffi.DevicePipelineConfig{{Name: "cross", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "sink", Weight: 1}},
+		},
+	}))
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("1.2.3.4"),
+		DstIP:    net.ParseIP("10.0.0.5"),
+	}
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+	}
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+
+	fromPort0, err := h.HandlePacketsOnDevice(0, port0, pkt)
+	require.NoError(t, err)
+	require.Len(t, fromPort0.Output, 1)
+	assert.Empty(t, fromPort0.Drop)
+	assert.Equal(t, port1, fromPort0.Output[0].DeviceID, "ingress port0 must egress on port1")
+	assert.Len(t, fromPort0.OutputOn(port1), 1)
+	assert.Empty(t, fromPort0.OutputOn(port0))
+
+	fromPort1, err := h.HandlePacketsOnDevice(1, port1, pkt)
+	require.NoError(t, err)
+	require.Len(t, fromPort1.Output, 1)
+	assert.Empty(t, fromPort1.Drop)
+	assert.Equal(t, port0, fromPort1.Output[0].DeviceID, "ingress port1 must egress on port0")
+	assert.Len(t, fromPort1.OutputOn(port0), 1)
+	assert.Empty(t, fromPort1.OutputOn(port1))
+
+	// HandlePackets pins the ingress to device 0, so it must agree with the
+	// explicit port0 injection above.
+	pinned, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, pinned.Output, 1)
+	assert.Equal(t, port1, pinned.Output[0].DeviceID)
+}

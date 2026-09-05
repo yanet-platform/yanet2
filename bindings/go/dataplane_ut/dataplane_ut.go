@@ -206,10 +206,44 @@ type Config struct {
 	Workers []WorkerSpec
 }
 
+// OutputPacket is a parsed output packet paired with the egress device the
+// dataplane resolved for it.
+//
+// DeviceID is the packet's tx_device_id, indexing Config.Devices. The real
+// worker picks its transmit ring from that same field, so it is the egress
+// device a test must assert on to tell a fan-out apart from two copies
+// leaving through one device.
+type OutputPacket struct {
+	*framework.PacketInfo
+	DeviceID uint16
+}
+
+// RawPacket holds one packet's raw first-segment bytes and its device id.
+type RawPacket struct {
+	Data []byte
+	// DeviceID is tx_device_id. On a dropped packet it is the last target
+	// resolved before the drop rather than an egress.
+	DeviceID uint16
+}
+
 // Result of one pipeline round.
+//
+// Drop carries no device id because a dropped packet never egressed.
 type Result struct {
-	Output []*framework.PacketInfo
+	Output []OutputPacket
 	Drop   []*framework.PacketInfo
+}
+
+// OutputOn returns the output packets the dataplane sent to deviceID, in
+// round order.
+func (m *Result) OutputOn(deviceID uint16) []OutputPacket {
+	var on []OutputPacket
+	for idx := range m.Output {
+		if m.Output[idx].DeviceID == deviceID {
+			on = append(on, m.Output[idx])
+		}
+	}
+	return on
 }
 
 // RawResult holds the raw first-segment bytes of each output and drop packet
@@ -218,8 +252,20 @@ type Result struct {
 // Use this when the packets under test cannot be decoded by gopacket (e.g.
 // malformed or multi-segment packets that are passed through as-is).
 type RawResult struct {
-	Output [][]byte
-	Drop   [][]byte
+	Output []RawPacket
+	Drop   []RawPacket
+}
+
+// OutputOn returns the raw output packets the dataplane sent to deviceID, in
+// round order.
+func (m *RawResult) OutputOn(deviceID uint16) []RawPacket {
+	var on []RawPacket
+	for idx := range m.Output {
+		if m.Output[idx].DeviceID == deviceID {
+			on = append(on, m.Output[idx])
+		}
+	}
+	return on
 }
 
 // Harness is a handle to an in-process dataplane harness.
@@ -424,13 +470,40 @@ func (m *Harness) AdvanceTime(d time.Duration) time.Time {
 
 // HandlePackets runs packets through worker 0 for one pipeline round.
 func (m *Harness) HandlePackets(packets ...gopacket.Packet) (*Result, error) {
-	return m.handlePackets(0, nil, packets...)
+	return m.handlePackets(0, 0, 0, nil, packets...)
 }
 
 // HandlePacketsOnWorker runs packets through the given worker index for one
 // pipeline round.
 func (m *Harness) HandlePacketsOnWorker(worker int, packets ...gopacket.Packet) (*Result, error) {
-	return m.handlePackets(worker, nil, packets...)
+	return m.handlePackets(worker, 0, 0, nil, packets...)
+}
+
+// HandlePacketsOnDevice runs packets through the given worker for one pipeline
+// round, stamping rxDeviceID as both the ingress and egress device of every
+// input packet.
+//
+// This mirrors the real dataplane's ingress stamp, where the polling worker's
+// own device becomes the packet's rx and tx device (see dataplane/worker.c).
+// HandlePackets pins every packet to device 0, so a test that needs
+// device-keyed module behavior on parsed packets uses this instead.
+func (m *Harness) HandlePacketsOnDevice(
+	worker int,
+	rxDeviceID uint16,
+	packets ...gopacket.Packet,
+) (*Result, error) {
+	// The round dispatch indexes per-device scheduling arrays by the packet
+	// device id, so an id outside the registered topology would corrupt
+	// memory on the C side.
+	if int(rxDeviceID) >= m.deviceCount {
+		return nil, fmt.Errorf(
+			"device id %d exceeds topology device count %d",
+			rxDeviceID,
+			m.deviceCount,
+		)
+	}
+
+	return m.handlePackets(worker, rxDeviceID, rxDeviceID, nil, packets...)
 }
 
 // HandlePacketsWithHashes runs one pipeline round with caller-supplied per-packet hash values.
@@ -451,7 +524,7 @@ func (m *Harness) HandlePacketsWithHashes(
 			len(packets),
 		)
 	}
-	return m.handlePackets(0, hashes, packets...)
+	return m.handlePackets(0, 0, 0, hashes, packets...)
 }
 
 // HandleSegmentedPackets runs one pipeline round on worker 0 where each input
@@ -538,21 +611,37 @@ func (m *Harness) handleSegmentedPackets(
 	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
 	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
 
-	rawBytes := func(list *dataplane.PacketList) [][]byte {
+	rawPackets := func(list *dataplane.PacketList) []RawPacket {
 		data := list.Data()
-		out := make([][]byte, 0, len(data))
+		out := make([]RawPacket, 0, len(data))
 		for idx := range data {
 			b := make([]byte, len(data[idx].Payload))
 			copy(b, data[idx].Payload)
-			out = append(out, b)
+			out = append(out, RawPacket{
+				Data:     b,
+				DeviceID: data[idx].TxDeviceId,
+			})
 		}
 		return out
 	}
 
 	return &RawResult{
-		Output: rawBytes(output),
-		Drop:   rawBytes(drop),
+		Output: rawPackets(output),
+		Drop:   rawPackets(drop),
 	}, nil
+}
+
+// outputPackets parses each packet in list and pairs it with the egress device
+// the round resolved for it.
+func outputPackets(list *dataplane.PacketList) []OutputPacket {
+	out := make([]OutputPacket, 0, list.Count())
+	for pkt := list.First(); pkt != nil; pkt = pkt.Next() {
+		out = append(out, OutputPacket{
+			PacketInfo: pkt.Info(),
+			DeviceID:   pkt.Data().TxDeviceId,
+		})
+	}
+	return out
 }
 
 // handlePackets is the shared implementation for all HandlePackets variants.
@@ -561,6 +650,7 @@ func (m *Harness) handleSegmentedPackets(
 // then runs one pipeline round on the given worker index.
 func (m *Harness) handlePackets(
 	worker int,
+	txDeviceID, rxDeviceID uint16,
 	hashes []uint32,
 	packets ...gopacket.Packet,
 ) (*Result, error) {
@@ -582,8 +672,8 @@ func (m *Harness) handlePackets(
 	for idx := range payloads {
 		data = append(data, dataplane.PacketData{
 			Payload:    payloads[idx],
-			TxDeviceId: 0,
-			RxDeviceId: 0,
+			TxDeviceId: txDeviceID,
+			RxDeviceId: rxDeviceID,
 		})
 	}
 
@@ -618,7 +708,7 @@ func (m *Harness) handlePackets(
 	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
 
 	return &Result{
-		Output: output.Info(),
+		Output: outputPackets(output),
 		Drop:   drop.Info(),
 	}, nil
 }

@@ -30,6 +30,13 @@ const (
 	mirMemSize = 16 * datasize.MB
 )
 
+// Egress device ids the fan-out assertions use, indexing the devices slice
+// passed to setupMirrorHarness.
+const (
+	mirPort0 uint16 = 0
+	mirPort1 uint16 = 1
+)
+
 // setupMirrorHarness builds a dataplane harness with the mirror module
 // loaded and attaches a control-plane agent.
 //
@@ -359,9 +366,14 @@ func TestMirror_ModeOut_IPv4(t *testing.T) {
 
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
-	// The packet is queued via pending_output -> device_ectx_process_output on
-	// port1 -> dummy output pipeline -> packet_front.output.
-	require.Len(t, result.Output, 2, "re-routed ModeOut packet plus its mirror copy must reach output")
+	// The clone is queued via pending_output -> device_ectx_process_output on
+	// port1 -> dummy output pipeline -> packet_front.output, while the original
+	// keeps its ingress device and leaves through port0's sink. Asserting per
+	// device is what separates a real fan-out from both copies leaving through
+	// one device.
+	require.Len(t, result.Output, 2, "the original and its mirror copy must both reach output")
+	require.Len(t, result.OutputOn(mirPort0), 1, "the original must egress on port0")
+	require.Len(t, result.OutputOn(mirPort1), 1, "the mirror copy must egress on port1")
 	require.Empty(t, result.Drop, "ModeOut packet with valid device must not be dropped")
 	require.Zero(t, h.OutstandingMbufs())
 
@@ -403,9 +415,12 @@ func TestMirror_ModeIn_IPv4(t *testing.T) {
 
 	result, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
-	// The packet traverses: pending_input -> device_ectx_process_input on
-	// port1 -> dummy_extra_in_port1 pipeline -> packet_front.output.
-	require.Len(t, result.Output, 2, "re-routed ModeIn packet plus its mirror copy must reach output")
+	// The clone traverses: pending_input -> device_ectx_process_input on port1
+	// -> sink_in_port1 pipeline -> packet_front.output, while the original
+	// keeps its ingress device and leaves through port0's sink.
+	require.Len(t, result.Output, 2, "the original and its mirror copy must both reach output")
+	require.Len(t, result.OutputOn(mirPort0), 1, "the original must egress on port0")
+	require.Len(t, result.OutputOn(mirPort1), 1, "the mirror copy must egress on port1")
 	require.Empty(t, result.Drop, "ModeIn packet with valid device must not be dropped")
 
 	path := dataplaneut.CounterPath{

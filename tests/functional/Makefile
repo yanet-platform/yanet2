@@ -53,12 +53,19 @@ endif
 # falling back to the preyanet snapshot only when baseline fails.
 test: prepare-vm
 	@echo "Running all functional tests..."
-	go test -count=1 -v ./main/...
+	go test -count=1 -v ./main/... ./multidev/...
 
 # Run main functional tests
 test-main: prepare-vm
 	@echo "Running main functional tests..."
 	go test -count=1 -v -failfast ./main/...
+
+# Run the multi-device functional tests.
+# This package boots its own VM pool, so the first run bakes a second
+# baseline template overlay.
+test-multidev: prepare-vm
+	@echo "Running multi-device functional tests..."
+	go test -count=1 -v -failfast ./multidev/...
 
 # Run specific test
 test-run:

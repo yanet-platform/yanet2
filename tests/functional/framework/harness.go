@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,14 +31,67 @@ func baselineTemplatePath(qemuImage, baselineTag string) string {
 // each name listed in Modules. Leaving both empty produces a configuration
 // that relies solely on the modules statically linked into the dataplane
 // binary.
+// ExtraDevices declares further ports alongside the baseline 01:00.0 and
+// virtio_user_kni0 pair, so a test can assert which device a packet egressed
+// on. Naming the guest's second NIC ("02:00.0") is what makes it reachable at
+// all: it is bound to vfio-pci at boot but undeclared by default, so nothing
+// can be routed there.
+//
+// Each extra device adds a busy-poll worker on core 0, which the guest's two
+// cores already share, so this belongs to a test package with its own
+// BaselineTag rather than the default baseline.
 type DataplaneOptions struct {
 	PluginDir         string
 	Modules           []string
 	PacketRecircLimit uint16
+	ExtraDevices      []string
+}
+
+// dataplaneDeviceBlock renders one entry of the dataplane `devices:` list,
+// using the same mac, mtu and single-worker shape every functional-test device
+// shares.
+func dataplaneDeviceBlock(portName string) string {
+	return `    - port_name: ` + portName + `
+      mac_addr: 52:54:00:6b:ff:a5
+      mtu: 7000
+      max_lro_packet_size: 7200
+      rss_hash: 0
+      workers:
+        - core_id: 0
+          instance_id: 0
+          rx_queue_len: 1024
+          tx_queue_len: 1024
+          num_mbufs: 2048
+`
+}
+
+// dataplaneConnections renders a `connections:` entry for every ordered pair of
+// distinct devices.
+//
+// A packet whose tx_device_id names a device other than the polling worker's
+// own is handed over a tx pipe, and with no connection between the two the
+// worker has nowhere to put it: the packet is dropped and remote_tx_drops is
+// incremented (see dataplane/worker.c). Cross-device egress therefore needs
+// the pairing declared, not just the device.
+func dataplaneConnections(devices []string) string {
+	var connections strings.Builder
+	for _, src := range devices {
+		for _, dst := range devices {
+			if src == dst {
+				continue
+			}
+			connections.WriteString(`    - src_device: ` + src + `
+      dst_device: ` + dst + `
+`)
+		}
+	}
+
+	return connections.String()
 }
 
 // DataplaneConfig returns the baseline dataplane YAML used by functional
-// tests, optionally requesting runtime module plugins via opts.
+// tests, optionally requesting runtime module plugins or extra devices via
+// opts.
 func DataplaneConfig(opts DataplaneOptions) string {
 	plugins := ""
 	cpMemory := "128 MiB"
@@ -58,6 +112,13 @@ func DataplaneConfig(opts DataplaneOptions) string {
 		cpMemory = "160 MiB"
 	}
 
+	deviceNames := append([]string{"01:00.0", "virtio_user_kni0"}, opts.ExtraDevices...)
+
+	var devices strings.Builder
+	for _, name := range deviceNames {
+		devices.WriteString(dataplaneDeviceBlock(name))
+	}
+
 	// The cp_memory value defaults to 128 MiB, matching the built-in main pool.
 	//
 	// The plugin-loading configuration bumps it to 160 MiB to carry headroom
@@ -74,34 +135,8 @@ dataplane:
       cp_memory: ` + cpMemory + `
       numa_id: 0
   devices:
-    - port_name: 01:00.0
-      mac_addr: 52:54:00:6b:ff:a5
-      mtu: 7000
-      max_lro_packet_size: 7200
-      rss_hash: 0
-      workers:
-        - core_id: 0
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
-          num_mbufs: 2048
-    - port_name: virtio_user_kni0
-      mac_addr: 52:54:00:6b:ff:a5
-      mtu: 7000
-      max_lro_packet_size: 7200
-      rss_hash: 0
-      workers:
-        - core_id: 0
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
-          num_mbufs: 2048
-  connections:
-    - src_device: 01:00.0
-      dst_device: virtio_user_kni0
-    - src_device: virtio_user_kni0
-      dst_device: 01:00.0
-`
+` + devices.String() + `  connections:
+` + dataplaneConnections(deviceNames)
 }
 
 // DefaultControlplaneConfig returns the baseline controlplane YAML used by

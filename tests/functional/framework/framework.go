@@ -658,6 +658,153 @@ func (f *TestFramework) SendPacketAndCaptureAll(inputIfaceIndex int, outputIface
 	return outputClient.ReceiveAllPackets(timeout, outputDumpPath)
 }
 
+// SendPacketAndCaptureByIface sends packet once on inputIface and captures what
+// each interface in outputIfaces received, keyed by interface index.
+//
+// This is what distinguishes a real fan-out from a single copy: the one-output
+// Send methods observe a single interface per send, so telling the two apart
+// with them means re-sending the packet.
+func (f *TestFramework) SendPacketAndCaptureByIface(
+	inputIface int,
+	outputIfaces []int,
+	packet []byte,
+	timeout time.Duration,
+) (map[int][][]byte, error) {
+	return f.SendPacketsAndCaptureByIface(inputIface, outputIfaces, [][]byte{packet}, timeout)
+}
+
+// SendPacketsAndCaptureByIface sends every packet in one write on inputIface,
+// then captures what each interface in outputIfaces received, keyed by
+// interface index.
+//
+// Every output socket is connected and drained before the send, so a copy
+// delivered to an interface the test does not primarily expect is observed
+// rather than mistaken for stale traffic. The captures run concurrently, so the
+// call costs about timeout regardless of how many interfaces are watched.
+// An interface that received nothing is absent from the result.
+//
+// outputIfaces must not repeat an index: ReceiveAllPackets does not hold the
+// client's connection mutex, so two readers on one socket would interleave
+// reads of the same stream.
+func (f *TestFramework) SendPacketsAndCaptureByIface(
+	inputIface int,
+	outputIfaces []int,
+	packets [][]byte,
+	timeout time.Duration,
+) (map[int][][]byte, error) {
+	f.log.Infof(
+		"Sending %d packet(s) on interface %d and capturing on interfaces %v",
+		len(packets), inputIface, outputIfaces,
+	)
+
+	outputClients := make(map[int]*SocketClient, len(outputIfaces))
+	for _, iface := range outputIfaces {
+		if _, dup := outputClients[iface]; dup {
+			return nil, fmt.Errorf("output interface %d listed more than once", iface)
+		}
+
+		client, err := f.GetSocketClient(iface)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get socket client for interface %d: %w", iface, err)
+		}
+		if err := client.Connect(); err != nil {
+			return nil, fmt.Errorf("failed to connect to socket for interface %d: %w", iface, err)
+		}
+		outputClients[iface] = client
+	}
+
+	inputClient, err := f.GetSocketClient(inputIface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get input socket client: %w", err)
+	}
+	if err := inputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to input socket: %w", err)
+	}
+
+	// Drain stale packets left by a previous test from every watched
+	// interface before sending. A short deadline flushes already-buffered
+	// data without blocking for new traffic.
+	for iface, client := range outputClients {
+		_, _ = client.ReceiveAllPackets(50*time.Millisecond, f.getIfaceDumpPath(iface))
+	}
+
+	inputDumpPath, _ := f.getDumpFilePaths()
+	if err := inputClient.SendPackets(packets, inputDumpPath); err != nil {
+		return nil, fmt.Errorf("failed to send packets: %w", err)
+	}
+
+	type capture struct {
+		iface   int
+		packets [][]byte
+		err     error
+	}
+
+	results := make(chan capture, len(outputClients))
+	var wg sync.WaitGroup
+	for iface, client := range outputClients {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			received, err := client.ReceiveAllPackets(timeout, f.getIfaceDumpPath(iface))
+			results <- capture{iface: iface, packets: received, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	captured := make(map[int][][]byte, len(outputClients))
+	for result := range results {
+		if result.err != nil {
+			return nil, fmt.Errorf(
+				"failed to capture on interface %d: %w", result.iface, result.err,
+			)
+		}
+		if len(result.packets) > 0 {
+			captured[result.iface] = result.packets
+		}
+	}
+
+	return captured, nil
+}
+
+// SendPacketAndParseByIface is SendPacketAndCaptureByIface with every captured
+// packet parsed.
+func (f *TestFramework) SendPacketAndParseByIface(
+	inputIface int,
+	outputIfaces []int,
+	packet []byte,
+	timeout time.Duration,
+) (map[int][]*PacketInfo, error) {
+	inputPacketInfo, err := f.PacketParser.ParsePacket(packet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse input packet: %w", err)
+	}
+	f.log.Debugf("Sending packet: %s", inputPacketInfo.String())
+
+	captured, err := f.SendPacketAndCaptureByIface(inputIface, outputIfaces, packet, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	parsed := make(map[int][]*PacketInfo, len(captured))
+	for iface, packets := range captured {
+		infos := make([]*PacketInfo, 0, len(packets))
+		for idx, data := range packets {
+			info, err := f.PacketParser.ParsePacket(data)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"failed to parse packet %d captured on interface %d: %w", idx, iface, err,
+				)
+			}
+			f.log.Debugf("Received packet %d on interface %d: %s", idx, iface, info.String())
+			infos = append(infos, info)
+		}
+		parsed[iface] = infos
+	}
+
+	return parsed, nil
+}
+
 // SendPacketAndParse sends a network packet, captures the response, and parses both
 // the input and output packets into structured PacketInfo objects. This high-level
 // method provides comprehensive packet analysis for detailed testing scenarios.
@@ -949,6 +1096,20 @@ func (f *TestFramework) getDumpFilePaths() (string, string) {
 	outputDumpPath := filepath.Join(f.qemu.WorkDir, fmt.Sprintf("%s.out.dump", f.testName))
 
 	return inputDumpPath, outputDumpPath
+}
+
+// getIfaceDumpPath returns the dump file path for one captured interface.
+// If debug is disabled or testName is empty, returns an empty string.
+//
+// The multi-interface capture methods key their dumps by interface rather than
+// sharing getDumpFilePaths' single output path, so concurrent captures do not
+// interleave into one file.
+func (f *TestFramework) getIfaceDumpPath(iface int) string {
+	if !IsDebugEnabled() || f.testName == "" {
+		return ""
+	}
+
+	return filepath.Join(f.qemu.WorkDir, fmt.Sprintf("%s.out%d.dump", f.testName, iface))
 }
 
 // StartYANET initializes and launches the complete YANET network processing stack
