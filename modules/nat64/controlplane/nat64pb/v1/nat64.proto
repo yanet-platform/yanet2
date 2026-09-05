@@ -18,13 +18,17 @@ service NAT64Service {
   // AddPrefix adds a new NAT64 prefix to the configuration
   rpc AddPrefix(AddPrefixRequest) returns (AddPrefixResponse) {}
 
-  // RemovePrefix removes a NAT64 prefix from the configuration
+  // RemovePrefix removes a NAT64 prefix from the configuration.
+  //
+  // Returns NotFound if the config or prefix is absent.
   rpc RemovePrefix(RemovePrefixRequest) returns (RemovePrefixResponse) {}
 
   // AddMapping adds a new IPv4-IPv6 address mapping
   rpc AddMapping(AddMappingRequest) returns (AddMappingResponse) {}
 
-  // RemoveMapping removes an IPv4-IPv6 address mapping
+  // RemoveMapping removes an IPv4-IPv6 address mapping.
+  //
+  // Returns NotFound if the config or IPv4 mapping is absent.
   rpc RemoveMapping(RemoveMappingRequest) returns (RemoveMappingResponse) {}
 
   // SetMTU sets MTU values for IPv4/IPv6

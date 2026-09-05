@@ -240,7 +240,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 
 	inst, ok := m.configs[name]
 	if !ok {
-		return &nat64pb.RemovePrefixResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	next := inst.Clone()
 
@@ -252,7 +252,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 		}
 	}
 	if removeIdx == -1 {
-		return &nat64pb.RemovePrefixResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "prefix not found in config %q", name)
 	}
 
 	next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
@@ -324,7 +324,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 
 	inst, ok := m.configs[name]
 	if !ok {
-		return &nat64pb.RemoveMappingResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	next := inst.Clone()
 
@@ -332,7 +332,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 		return mapping.IPv4 == ipv4
 	})
 	if len(next.Config.Mappings) == len(inst.Config.Mappings) {
-		return &nat64pb.RemoveMappingResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "mapping for %s not found in config %q", ipv4, name)
 	}
 
 	if err := m.updateModuleConfig(name, next); err != nil {

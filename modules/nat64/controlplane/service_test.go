@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -202,14 +203,14 @@ func Test_NAT64Service_PrefixMutation_Invalid(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
 			service := NewNAT64Service(&mockBackend{})
 
 			t.Run("add", func(t *testing.T) {
 				_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
 					Name:   "nat64-0",
-					Prefix: testCase.prefix,
+					Prefix: tc.prefix,
 				})
 				require.Equal(t, codes.InvalidArgument, status.Code(err))
 			})
@@ -217,7 +218,7 @@ func Test_NAT64Service_PrefixMutation_Invalid(t *testing.T) {
 			t.Run("remove", func(t *testing.T) {
 				_, err := service.RemovePrefix(t.Context(), &nat64pb.RemovePrefixRequest{
 					Name:   "nat64-0",
-					Prefix: testCase.prefix,
+					Prefix: tc.prefix,
 				})
 				require.Equal(t, codes.InvalidArgument, status.Code(err))
 			})
@@ -428,4 +429,63 @@ func Test_NAT64Service_DeleteConfig_ParksThenReclaims(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, service.deferred)
 	require.Equal(t, int64(1), backend.first.freed.Load())
+}
+
+// Test_NAT64Service_Remove_NotFound verifies that a missing prefix or mapping
+// leaves the published config intact, including after a successful deletion.
+func Test_NAT64Service_Remove_NotFound(t *testing.T) {
+	for _, element := range []string{"prefix", "mapping"} {
+		for _, scenario := range []string{"unknown config", "absent element", "already removed"} {
+			t.Run(element+"/"+scenario, func(t *testing.T) {
+				backend := &mockBackend{}
+				service := NewNAT64Service(backend)
+				prefix := mustIPv6Prefix(t, "64:ff9b::/96")
+				ipv4 := commonpb.NewIPv4Address([4]byte{192, 0, 2, 1})
+				name := "nat64-0"
+				_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{Name: name, Prefix: prefix})
+				require.NoError(t, err)
+				_, err = service.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
+					Name: name, Ipv4: ipv4,
+					Ipv6: commonpb.NewIPv6Address(netip.MustParseAddr("2001:db8::1").As16()),
+				})
+				require.NoError(t, err)
+
+				remove := func() error {
+					if element == "prefix" {
+						_, err := service.RemovePrefix(t.Context(), &nat64pb.RemovePrefixRequest{Name: name, Prefix: prefix})
+						return err
+					}
+					_, err := service.RemoveMapping(t.Context(), &nat64pb.RemoveMappingRequest{Name: name, Ipv4: ipv4})
+					return err
+				}
+				switch scenario {
+				case "unknown config":
+					name = "missing"
+				case "absent element":
+					prefix = mustIPv6Prefix(t, "2001:db8::/96")
+					ipv4 = commonpb.NewIPv4Address([4]byte{192, 0, 2, 2})
+				case "already removed":
+					require.NoError(t, remove())
+					show, err := service.ShowConfig(t.Context(), &nat64pb.ShowConfigRequest{Name: name})
+					require.NoError(t, err)
+					if element == "prefix" {
+						require.Empty(t, show.GetConfig().GetPrefixes())
+					}
+					require.Empty(t, show.GetConfig().GetMappings())
+				}
+
+				before, err := service.ShowConfig(t.Context(), &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+				require.NoError(t, err)
+				updates := len(backend.configs)
+				require.Equal(t, codes.NotFound, status.Code(remove()))
+				after, err := service.ShowConfig(t.Context(), &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+				require.NoError(t, err)
+				require.True(t, proto.Equal(before, after), "a rejected removal must preserve the config")
+				require.Equal(t, updates, len(backend.configs))
+				configs, err := service.ListConfigs(t.Context(), &nat64pb.ListConfigsRequest{})
+				require.NoError(t, err)
+				require.Equal(t, []string{"nat64-0"}, configs.GetConfigs())
+			})
+		}
+	}
 }
