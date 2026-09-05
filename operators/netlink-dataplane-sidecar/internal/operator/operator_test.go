@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
@@ -16,7 +17,10 @@ import (
 )
 
 type fakeNetlinkHandle struct {
-	closed bool
+	Closed             bool
+	SocketTimeout      time.Duration
+	SocketTimeoutCalls int
+	SocketTimeoutErr   error
 }
 
 func (m *fakeNetlinkHandle) LinkList() ([]vnetlink.Link, error) {
@@ -88,11 +92,17 @@ func (m *fakeNetlinkHandle) NeighList(int, int) ([]vnetlink.Neigh, error) {
 }
 
 func (m *fakeNetlinkHandle) Close() {
-	m.closed = true
+	m.Closed = true
+}
+
+func (m *fakeNetlinkHandle) SetSocketTimeout(timeout time.Duration) error {
+	m.SocketTimeout = timeout
+	m.SocketTimeoutCalls++
+	return m.SocketTimeoutErr
 }
 
 type fakeGatewayConnection struct {
-	closed bool
+	Closed bool
 }
 
 func (m *fakeGatewayConnection) Invoke(
@@ -115,11 +125,13 @@ func (m *fakeGatewayConnection) NewStream(
 }
 
 func (m *fakeGatewayConnection) Close() error {
-	m.closed = true
+	m.Closed = true
 	return nil
 }
 
-func TestNewOperatorCleansResourcesAfterPartialDialFailure(t *testing.T) {
+// Test_NewOperator_CleansPartialDialFailure verifies that a later gateway dial
+// failure closes the earlier connection and kernel handle before returning.
+func Test_NewOperator_CleansPartialDialFailure(t *testing.T) {
 	handle := &fakeNetlinkHandle{}
 	firstConnection := &fakeGatewayConnection{}
 	dialErr := errors.New("second dial failed")
@@ -146,11 +158,13 @@ func TestNewOperatorCleansResourcesAfterPartialDialFailure(t *testing.T) {
 
 	require.Nil(t, runnable)
 	require.ErrorIs(t, err, dialErr)
-	require.True(t, firstConnection.closed)
-	require.True(t, handle.closed)
+	require.True(t, firstConnection.Closed)
+	require.True(t, handle.Closed)
 }
 
-func TestNewOperatorClosesHandleReturnedWithFactoryError(t *testing.T) {
+// Test_NewOperator_ClosesPartialHandle verifies that a factory returning both
+// a handle and an error releases the handle and preserves the error.
+func Test_NewOperator_ClosesPartialHandle(t *testing.T) {
 	handle := &fakeNetlinkHandle{}
 	factoryErr := errors.New("partial handle failure")
 
@@ -166,10 +180,56 @@ func TestNewOperatorClosesHandleReturnedWithFactoryError(t *testing.T) {
 
 	require.Nil(t, runnable)
 	require.ErrorIs(t, err, factoryErr)
-	require.True(t, handle.closed)
+	require.True(t, handle.Closed)
 }
 
-func TestNewOperatorRejectsInvalidEndpointsBeforeCreatingNetlinkHandle(t *testing.T) {
+// Test_NewOperator_ConfiguresSharedSocketTimeout verifies that every shared
+// kernel socket is bounded before any gateway dependency is constructed.
+func Test_NewOperator_ConfiguresSharedSocketTimeout(t *testing.T) {
+	handle := &fakeNetlinkHandle{}
+	runnable, err := sidecaroperator.NewOperator(
+		twoGatewayConfig(),
+		sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) {
+			return handle, nil
+		}),
+		sidecaroperator.WithGatewayDialer(func(
+			commonoperator.GatewayConfig,
+		) (sidecaroperator.GatewayConnection, error) {
+			require.Equal(t, 5*time.Second, handle.SocketTimeout)
+			require.Equal(t, 1, handle.SocketTimeoutCalls)
+			return &fakeGatewayConnection{}, nil
+		}),
+	)
+	require.NoError(t, err)
+	require.NoError(t, runnable.Close())
+}
+
+// Test_NewOperator_ClosesHandleOnSocketTimeoutFailure verifies that failure
+// to bound kernel I/O releases the handle before gateway construction.
+func Test_NewOperator_ClosesHandleOnSocketTimeoutFailure(t *testing.T) {
+	timeoutErr := errors.New("socket timeout configuration failed")
+	handle := &fakeNetlinkHandle{SocketTimeoutErr: timeoutErr}
+	runnable, err := sidecaroperator.NewOperator(
+		twoGatewayConfig(),
+		sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) {
+			return handle, nil
+		}),
+		sidecaroperator.WithGatewayDialer(func(
+			commonoperator.GatewayConfig,
+		) (sidecaroperator.GatewayConnection, error) {
+			t.Fatal("gateway dialed after socket timeout configuration failed")
+			return nil, nil
+		}),
+	)
+
+	require.Nil(t, runnable)
+	require.ErrorIs(t, err, timeoutErr)
+	require.True(t, handle.Closed)
+}
+
+// Test_NewOperator_RejectsInvalidConfigBeforeCreatingHandle verifies that bad
+// endpoints and scheduling values cannot allocate kernel resources.
+func Test_NewOperator_RejectsInvalidConfigBeforeCreatingHandle(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*sidecaroperator.Config)
@@ -178,6 +238,18 @@ func TestNewOperatorRejectsInvalidEndpointsBeforeCreatingNetlinkHandle(t *testin
 			name: "malformed server endpoint",
 			mutate: func(cfg *sidecaroperator.Config) {
 				cfg.Server.Endpoint = xcfg.MustNonEmptyString("::1:8080")
+			},
+		},
+		{
+			name: "negative register interval",
+			mutate: func(config *sidecaroperator.Config) {
+				config.Register.Interval = xcfg.MustNonZero(-time.Second)
+			},
+		},
+		{
+			name: "zero reconcile maximum backoff",
+			mutate: func(config *sidecaroperator.Config) {
+				config.Reconcile.MaxBackoff = xcfg.NonZero[time.Duration]{}
 			},
 		},
 	}
@@ -206,7 +278,9 @@ func TestNewOperatorRejectsInvalidEndpointsBeforeCreatingNetlinkHandle(t *testin
 	}
 }
 
-func TestOperatorCloseReleasesEveryConnectionAndHandle(t *testing.T) {
+// Test_Operator_CloseReleasesResources verifies that normal shutdown closes
+// both gateway connections and the shared kernel handle.
+func Test_Operator_CloseReleasesResources(t *testing.T) {
 	handle := &fakeNetlinkHandle{}
 	connections := []*fakeGatewayConnection{{}, {}}
 	dialCount := 0
@@ -229,9 +303,9 @@ func TestOperatorCloseReleasesEveryConnectionAndHandle(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, runnable.Close())
-	require.True(t, connections[0].closed)
-	require.True(t, connections[1].closed)
-	require.True(t, handle.closed)
+	require.True(t, connections[0].Closed)
+	require.True(t, connections[1].Closed)
+	require.True(t, handle.Closed)
 }
 
 func twoGatewayConfig() *sidecaroperator.Config {

@@ -66,6 +66,70 @@ network:
 	}}, state)
 }
 
+// Test_Parse_RejectsNullManagedStanza verifies that incomplete managed entries
+// cannot become authoritative empty address configurations.
+func Test_Parse_RejectsNullManagedStanza(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "bare managed key", value: ""},
+		{name: "explicit null", value: "null"},
+		{name: "null shorthand", value: "~"},
+		{name: "alias to null", value: "*empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := fmt.Sprintf(`
+defaults: &empty null
+network:
+  version: 2
+  vlans: {}
+  ethernets:
+    kni0: %s
+`, test.value)
+
+			state, err := netplan.Parse([]byte(data))
+
+			require.ErrorContains(t, err, `link "kni0": configuration mapping is required`)
+			require.Equal(t, netplan.State{}, state)
+		})
+	}
+}
+
+// Test_Parse_AcceptsExplicitEmptyManagedStanza verifies that intentionally
+// empty mappings, including aliases, retain their normal clearing semantics.
+func Test_Parse_AcceptsExplicitEmptyManagedStanza(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "empty mapping", value: "{}"},
+		{name: "alias to empty mapping", value: "*empty"},
+		{name: "explicit empty addresses", value: "{addresses: []}"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := fmt.Sprintf(`
+defaults: &empty {}
+network:
+  version: 2
+  vlans: {}
+  ethernets:
+    management0: null
+    kni0: %s
+`, test.value)
+
+			state, err := netplan.Parse([]byte(data))
+
+			require.NoError(t, err)
+			require.Len(t, state.Links, 1)
+			require.Equal(t, "kni0", state.Links[0].Name)
+			require.Empty(t, state.Links[0].Addresses)
+		})
+	}
+}
+
+// Test_Parse_RejectsNegativeMTU verifies that negative YAML sizes are rejected
+// with the affected managed link identified in the error.
 func Test_Parse_RejectsNegativeMTU(t *testing.T) {
 	_, err := netplan.Parse([]byte(`
 network:
@@ -79,6 +143,8 @@ network:
 	require.ErrorContains(t, err, `link "kni0": MTU must be within`)
 }
 
+// Test_Parse_RejectsOversizedMTU verifies that a YAML size above the signed
+// kernel limit is rejected even when the host integer can represent it.
 func Test_Parse_RejectsOversizedMTU(t *testing.T) {
 	if strconv.IntSize < 64 {
 		t.Skip("int cannot represent an MTU above MaxInt32")
@@ -97,6 +163,8 @@ network:
 	require.ErrorContains(t, err, `link "kni0": MTU must be within`)
 }
 
+// Test_Parse_RejectsKernelInvalidManagedVLANName verifies that a quoted YAML
+// name cannot bypass Linux's prohibition on colons in interface names.
 func Test_Parse_RejectsKernelInvalidManagedVLANName(t *testing.T) {
 	_, err := netplan.Parse([]byte(`
 network:
@@ -112,6 +180,8 @@ network:
 	require.ErrorContains(t, err, `vlan "tenant:100": interface name contains`)
 }
 
+// Test_Parse_RejectsDuplicateManagedVLANIdentity verifies that distinct YAML
+// names cannot request the same VLAN tag on the same managed parent.
 func Test_Parse_RejectsDuplicateManagedVLANIdentity(t *testing.T) {
 	_, err := netplan.Parse([]byte(`
 network:

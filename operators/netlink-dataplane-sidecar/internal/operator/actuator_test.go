@@ -42,7 +42,9 @@ func (actuatorFunc) Close() error {
 	return nil
 }
 
-func TestActuatorOrdersOperationsAndSkipsUninitializedRoutes(t *testing.T) {
+// Test_Actuator_OrdersOperations verifies that links precede route installation
+// and neighbour refresh, while an uninitialized snapshot skips route changes.
+func Test_Actuator_OrdersOperations(t *testing.T) {
 	operations := []string{}
 	netplanState := netplan.State{Links: []netplan.Link{{Name: "kni0"}}}
 	links := linkReconcilerFunc(func(context.Context, netplan.State) error {
@@ -101,7 +103,9 @@ func TestActuatorOrdersOperationsAndSkipsUninitializedRoutes(t *testing.T) {
 	)
 }
 
-func TestActuatorJoinsRouteAndPublishErrors(t *testing.T) {
+// Test_Actuator_JoinsRouteAndPublishErrors verifies that both failures reach
+// the caller and pending update, while the store reverts to uninitialized state.
+func Test_Actuator_JoinsRouteAndPublishErrors(t *testing.T) {
 	routeErr := errors.New("route failure")
 	publishErr := errors.New("publish failure")
 	store := route.NewStore()
@@ -153,7 +157,81 @@ func TestActuatorJoinsRouteAndPublishErrors(t *testing.T) {
 	require.Empty(t, reverted.Routes)
 }
 
-func TestActuatorValidatesLogicalDevicesBeforeLinkMutation(t *testing.T) {
+// Test_Actuator_NeighbourFailurePreservesCommittedRoutes verifies that a
+// neighbour refresh failure cannot reject or forget installed kernel routes.
+func Test_Actuator_NeighbourFailurePreservesCommittedRoutes(t *testing.T) {
+	for _, failure := range []string{"discovery", "publication"} {
+		t.Run(failure, func(t *testing.T) {
+			refreshErr := errors.New("neighbour refresh failed")
+			store := route.NewStore()
+			desired := []route.Route{{
+				Prefix:    netip.MustParsePrefix("192.0.2.0/24"),
+				Nexthop:   netip.MustParseAddr("192.0.2.1"),
+				Interface: "kni0",
+			}}
+			update, err := store.ReplaceTracked(desired)
+			require.NoError(t, err)
+			snapshot, ok := sidecaroperator.NewSource(store).Snapshot()
+			require.True(t, ok)
+			attempts := 0
+			actuator := sidecaroperator.NewActuator(
+				"/test/netplan.yaml",
+				linkReconcilerFunc(func(context.Context, netplan.State) error { return nil }),
+				routeReconcilerFunc(func(
+					ctx context.Context,
+					routes []route.Route,
+					state netplan.State,
+				) error {
+					require.Equal(t, desired, routes)
+					attempts++
+					return nil
+				}),
+				nil,
+				nil,
+				nil,
+				sidecaroperator.WithActuatorNetplanLoader(func(string) (netplan.State, error) {
+					return netplan.State{}, nil
+				}),
+				sidecaroperator.WithActuatorNeighbourDiscoverer(func(
+					neighbour.Backend,
+					netplan.State,
+					map[string]string,
+				) ([]neighbour.Entry, error) {
+					if failure == "discovery" {
+						return nil, refreshErr
+					}
+					return nil, nil
+				}),
+				sidecaroperator.WithActuatorNeighbourPublisher(func(
+					ctx context.Context,
+					entries []neighbour.Entry,
+					targets []neighbour.GatewayTarget,
+				) error {
+					if attempts == 1 {
+						// The successful gateway is refreshed before acknowledgement.
+						waitCtx, cancel := context.WithCancel(ctx)
+						cancel()
+						require.ErrorIs(t, update.Wait(waitCtx), context.Canceled)
+					}
+					return refreshErr
+				}),
+			)
+
+			require.ErrorIs(t, actuator.Apply(t.Context(), snapshot), refreshErr)
+			require.NoError(t, update.Wait(t.Context()))
+			next, ok := sidecaroperator.NewSource(store).Snapshot()
+			require.True(t, ok)
+			require.True(t, next.Initialized)
+			require.Equal(t, desired, next.Routes)
+			require.ErrorIs(t, actuator.Apply(t.Context(), next), refreshErr)
+			require.Equal(t, 2, attempts)
+		})
+	}
+}
+
+// Test_Actuator_ValidatesLogicalDevices verifies that colliding logical device
+// mappings fail before the link reconciler can mutate kernel state.
+func Test_Actuator_ValidatesLogicalDevices(t *testing.T) {
 	linksCalled := false
 	actuator := sidecaroperator.NewActuator(
 		"/test/netplan.yaml",
@@ -179,7 +257,9 @@ func TestActuatorValidatesLogicalDevicesBeforeLinkMutation(t *testing.T) {
 	require.False(t, linksCalled)
 }
 
-func TestFailedRouteSnapshotIsNotRetriedAfterStoreRollback(t *testing.T) {
+// Test_Actuator_RetriesCommittedSnapshot verifies that a rejected route update
+// wakes reconciliation with the last committed routes instead of retrying it.
+func Test_Actuator_RetriesCommittedSnapshot(t *testing.T) {
 	previousRoute := route.Route{
 		Prefix:    netip.MustParsePrefix("192.0.2.0/24"),
 		Nexthop:   netip.MustParseAddr("192.0.2.1"),

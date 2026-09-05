@@ -62,6 +62,20 @@ func Test_ReadinessScopeSpecs_ConfigurationMappings(t *testing.T) {
 			},
 		},
 		{
+			name: "sidecar prerequisite adds a whole-pass observation contract",
+			configure: func(config *Config) {
+				config.NetlinkSidecar.Enabled = true
+			},
+			expectedIntervals: map[string]time.Duration{
+				"fib:gw0:route0": 10 * time.Second,
+				"fib:gw1:route0": 10 * time.Second,
+				"reconcile":      10 * time.Second,
+				"neighbours":     neigh.DefaultUpdateInterval,
+				"rib":            2 * time.Second,
+				"bird-session":   2 * time.Second,
+			},
+		},
+		{
 			name: "disabled neighbours remain present without a contract",
 			configure: func(config *Config) {
 				config.NetlinkMonitor.Disabled = true

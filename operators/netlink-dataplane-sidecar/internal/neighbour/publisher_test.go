@@ -339,6 +339,8 @@ func Test_Publish_EmptySnapshotClearsTable(t *testing.T) {
 	}}, client.removeRequests)
 }
 
+// Test_Publish_RemovesObsoleteOwnedTablesAfterCurrentTableReconciles verifies that
+// stale owned tables are deleted in name order only after current table reads.
 func Test_Publish_RemovesObsoleteOwnedTablesAfterCurrentTableReconciles(t *testing.T) {
 	client := newFakeClient(testOwnedTable, 100)
 	client.listTablesResponse.Tables = append(client.listTablesResponse.Tables,
@@ -362,6 +364,8 @@ func Test_Publish_RemovesObsoleteOwnedTablesAfterCurrentTableReconciles(t *testi
 	}, client.removeTableRequests)
 }
 
+// Test_Publish_PreservesAllConfiguredTablesOnSharedEndpoint verifies that one
+// target's cleanup preserves its peer's configured table and foreign tables.
 func Test_Publish_PreservesAllConfiguredTablesOnSharedEndpoint(t *testing.T) {
 	const (
 		firstTable  = "netlink-dataplane-first"
@@ -399,6 +403,8 @@ func Test_Publish_PreservesAllConfiguredTablesOnSharedEndpoint(t *testing.T) {
 	}}, client.removeTableRequests)
 }
 
+// Test_Publish_DoesNotRemoveObsoleteBuiltInTable verifies that an owned-looking
+// name cannot authorize deletion of a table protected as built in.
 func Test_Publish_DoesNotRemoveObsoleteBuiltInTable(t *testing.T) {
 	client := newFakeClient(testOwnedTable, 100)
 	client.listTablesResponse.Tables = append(client.listTablesResponse.Tables,
@@ -561,6 +567,8 @@ func Test_Publish_RejectsDuplicateNextHopWithinTarget(t *testing.T) {
 	require.Empty(t, client.operations)
 }
 
+// Test_Publish_RejectsDeviceWithoutGatewayOwnerBeforeRPC verifies that a desired
+// neighbour on an unassigned device prevents calls to every gateway.
 func Test_Publish_RejectsDeviceWithoutGatewayOwnerBeforeRPC(t *testing.T) {
 	firstClient := newFakeClient("netlink-dataplane-first", 100)
 	secondClient := newFakeClient("netlink-dataplane-second", 100)
@@ -591,7 +599,9 @@ func Test_Publish_RejectsDeviceWithoutGatewayOwnerBeforeRPC(t *testing.T) {
 	require.Empty(t, secondClient.operations)
 }
 
-func Test_ValidateManagedDeviceOwnership_RejectsLinkWithoutOwnerWithoutNeighbours(t *testing.T) {
+// Test_ValidateManagedDeviceOwnership_RejectsUnownedLink verifies that every
+// managed link needs a gateway owner even without any discovered neighbours.
+func Test_ValidateManagedDeviceOwnership_RejectsUnownedLink(t *testing.T) {
 	firstClient := newFakeClient("netlink-dataplane-first", 100)
 	secondClient := newFakeClient("netlink-dataplane-second", 100)
 
@@ -619,6 +629,8 @@ func Test_ValidateManagedDeviceOwnership_RejectsLinkWithoutOwnerWithoutNeighbour
 	require.Empty(t, secondClient.operations)
 }
 
+// Test_Publish_RejectsDuplicateDeviceOwnershipBeforeRPC verifies that an empty
+// snapshot cannot bypass exclusive device ownership across gateways.
 func Test_Publish_RejectsDuplicateDeviceOwnershipBeforeRPC(t *testing.T) {
 	firstClient := newFakeClient("netlink-dataplane-first", 100)
 	secondClient := newFakeClient("netlink-dataplane-second", 100)

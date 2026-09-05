@@ -68,7 +68,9 @@ func TestNeighTableMergeHigherPriorityLoses(t *testing.T) {
 	require.Equal(t, "kernel", entry.Source)
 }
 
-func TestNeighTableSnapshotFiltersSourcesBeforeMerging(t *testing.T) {
+// Test_NeighTable_SnapshotFiltersBeforeMerging verifies that device-specific
+// views retain colliding next hops and an old snapshot survives source updates.
+func Test_NeighTable_SnapshotFiltersBeforeMerging(t *testing.T) {
 	nt := NewNeighTable()
 	mustCreateSource(t, nt, "gateway-a", 100, false)
 	mustCreateSource(t, nt, "gateway-b", 100, false)

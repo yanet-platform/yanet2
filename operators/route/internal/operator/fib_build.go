@@ -42,16 +42,24 @@ type FIBBuildStats struct {
 // BuildFIB resolves a RIB dump against the supplied neighbour view and
 // produces a deduplicated FIB.
 //
-// A route is eligible only when its nexthop resolves in the neighbour view;
-// pass a device-filtered view to restrict a gateway to its own egress
-// devices. The best routes per source are chosen among the eligible routes,
-// so a gateway can fall back to a lower-priority route it can actually reach
-// rather than a globally best one it cannot.
+// Neighbours are filtered by gateway ownership and any configured route egress
+// before equal next hops are merged. The best routes per source are chosen
+// among the resolvable routes, so a gateway can fall back to a reachable path.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
-	neighbours neigh.NexthopCacheView,
+	neighbours neigh.TableSnapshot,
+	devices []string,
 ) (FIB, FIBBuildStats) {
 	var stats FIBBuildStats
+	deviceSet := map[string]struct{}{}
+	for _, device := range devices {
+		if device != "" {
+			deviceSet[device] = struct{}{}
+		}
+	}
+	views := map[string]neigh.NexthopCacheView{
+		"": neighbours.ViewByDevices(devices),
+	}
 
 	entries := make([]FIBEntry, 0)
 
@@ -69,7 +77,18 @@ func BuildFIB(
 
 			local := make([]rib.Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
-				if _, ok := neighbours.Lookup(r.NextHop.Unmap()); !ok {
+				if r.Device != "" && len(deviceSet) != 0 {
+					if _, owned := deviceSet[r.Device]; !owned {
+						stats.NeighbourNotFound++
+						continue
+					}
+				}
+				view, ok := views[r.Device]
+				if !ok {
+					view = neighbours.ViewByDevices([]string{r.Device})
+					views[r.Device] = view
+				}
+				if _, ok := view.Lookup(r.NextHop.Unmap()); !ok {
 					stats.NeighbourNotFound++
 					continue
 				}
@@ -90,7 +109,7 @@ func BuildFIB(
 
 			nexthops := make([]neigh.HardwareRoute, 0, len(bestRoutes))
 			for _, r := range bestRoutes {
-				entry, _ := neighbours.Lookup(r.NextHop.Unmap())
+				entry, _ := views[r.Device].Lookup(r.NextHop.Unmap())
 				nexthops = append(nexthops, entry.HardwareRoute)
 			}
 

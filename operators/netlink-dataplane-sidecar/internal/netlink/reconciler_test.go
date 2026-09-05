@@ -1,6 +1,7 @@
 package netlink_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,7 +23,9 @@ import (
 
 const ownedAlias = "yanet-netlink-dataplane-sidecar"
 
-func TestReconcilerLateKNI(t *testing.T) {
+// Test_Reconciler_LateKNI verifies that an absent base link is never created
+// and a later pass brings it up once it appears.
+func Test_Reconciler_LateKNI(t *testing.T) {
 	backend := newFakeBackend()
 	sysctl := &fakeSysctl{}
 	reconciler := netreconcile.NewReconciler(backend, sysctl)
@@ -31,7 +34,6 @@ func TestReconcilerLateKNI(t *testing.T) {
 	err := reconciler.Apply(t.Context(), state)
 	require.ErrorContains(t, err, `find base link "kni0"`)
 	require.ErrorContains(t, err, "base KNI link is not available yet")
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.added)
 	require.Empty(t, backend.deleted)
 
@@ -40,16 +42,19 @@ func TestReconcilerLateKNI(t *testing.T) {
 	require.True(t, backend.links["kni0"].Attrs().Flags&net.FlagUp != 0)
 }
 
-func TestZeroValueReconcilerReturnsInitializationError(t *testing.T) {
+// Test_Reconciler_ZeroValue verifies that an uninitialized reconciler returns
+// an error instead of attempting kernel operations.
+func Test_Reconciler_ZeroValue(t *testing.T) {
 	var reconciler netreconcile.Reconciler
 
 	err := reconciler.Apply(t.Context(), netplan.State{})
 
 	require.ErrorContains(t, err, "nil apply slot")
-	require.False(t, netreconcile.IsRetryable(err))
 }
 
-func TestReconcilerCreatesAndMarksVLAN(t *testing.T) {
+// Test_Reconciler_CreatesAndMarksVLAN verifies that a new VLAN has the requested
+// parent, tag, MTU, and ownership marker, with both links brought up.
+func Test_Reconciler_CreatesAndMarksVLAN(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -71,7 +76,9 @@ func TestReconcilerCreatesAndMarksVLAN(t *testing.T) {
 	require.True(t, backend.links["kni0"].Attrs().Flags&net.FlagUp != 0)
 }
 
-func TestReconcilerCreatesZeroMTUVLANAtDesiredParentMTU(t *testing.T) {
+// Test_Reconciler_CreatesZeroMTUVLANAtDesiredParentMTU verifies that an omitted
+// child MTU inherits the requested parent size rather than its old size.
+func Test_Reconciler_CreatesZeroMTUVLANAtDesiredParentMTU(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -88,7 +95,9 @@ func TestReconcilerCreatesZeroMTUVLANAtDesiredParentMTU(t *testing.T) {
 	require.Equal(t, 1500, backend.links["kni0"].Attrs().MTU)
 }
 
-func TestReconcilerLowersChildMTUBeforeParent(t *testing.T) {
+// Test_Reconciler_LowersChildMTUBeforeParent verifies that shrinking a VLAN and
+// its parent converges without violating the kernel's child MTU constraint.
+func Test_Reconciler_LowersChildMTUBeforeParent(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -108,7 +117,9 @@ func TestReconcilerLowersChildMTUBeforeParent(t *testing.T) {
 	require.Equal(t, 1400, backend.links["tenant.100"].Attrs().MTU)
 }
 
-func TestReconcilerRejectsVLANMTUAboveDesiredParentBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsOversizedChildMTU verifies that an incompatible desired
+// child size fails before inspecting or changing kernel links.
+func Test_Reconciler_RejectsOversizedChildMTU(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -119,13 +130,14 @@ func TestReconcilerRejectsVLANMTUAboveDesiredParentBeforeMutation(t *testing.T) 
 	}})
 
 	require.ErrorContains(t, err, "VLAN MTU 2000 exceeds parent")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.listCalls)
 	require.Empty(t, backend.added)
 	require.Zero(t, backend.links["kni0"].Attrs().MTU)
 }
 
-func TestReconcilerRejectsNegativeMTUBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsNegativeMTU verifies that a negative size fails before
+// the first kernel link listing.
+func Test_Reconciler_RejectsNegativeMTU(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -136,11 +148,12 @@ func TestReconcilerRejectsNegativeMTUBeforeMutation(t *testing.T) {
 	}}})
 
 	require.ErrorContains(t, err, "MTU must be within")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.listCalls)
 }
 
-func TestReconcilerRejectsOversizedMTUBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsOversizedMTU verifies that sizes exceeding the signed
+// kernel limit fail before the first link listing.
+func Test_Reconciler_RejectsOversizedMTU(t *testing.T) {
 	if strconv.IntSize < 64 {
 		t.Skip("int cannot represent an MTU above MaxInt32")
 	}
@@ -155,11 +168,12 @@ func TestReconcilerRejectsOversizedMTUBeforeMutation(t *testing.T) {
 	}}})
 
 	require.ErrorContains(t, err, "MTU must be within")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.listCalls)
 }
 
-func TestReconcilerRejectsPreservedVLANMTUAboveDesiredParentBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsPreservedChildMTU verifies that an omitted child size
+// cannot permit shrinking its parent below the child's current MTU.
+func Test_Reconciler_RejectsPreservedChildMTU(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -175,12 +189,13 @@ func TestReconcilerRejectsPreservedVLANMTUAboveDesiredParentBeforeMutation(t *te
 	}})
 
 	require.ErrorContains(t, err, "effective VLAN MTU 8900 exceeds parent")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Equal(t, 9000, backend.links["kni0"].Attrs().MTU)
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerRejectsParentMTUBelowUnmanagedChildBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsParentMTUBelowUnmanagedChild verifies that foreign
+// children constrain parent resizing without being modified themselves.
+func Test_Reconciler_RejectsParentMTUBelowUnmanagedChild(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -196,12 +211,13 @@ func TestReconcilerRejectsParentMTUBelowUnmanagedChildBeforeMutation(t *testing.
 	}}})
 
 	require.ErrorContains(t, err, `current MTU 8900 exceeds desired parent "kni0" MTU 1500`)
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Equal(t, 9000, backend.links["kni0"].Attrs().MTU)
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerDoesNotExemptMarkedNonVLANFromParentMTUValidation(t *testing.T) {
+// Test_Reconciler_ValidatesMarkedNonVLANMTU verifies that an ownership alias on
+// a non-VLAN child cannot bypass the parent size constraint.
+func Test_Reconciler_ValidatesMarkedNonVLANMTU(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -218,11 +234,12 @@ func TestReconcilerDoesNotExemptMarkedNonVLANFromParentMTUValidation(t *testing.
 	}}})
 
 	require.ErrorContains(t, err, `current MTU 8900 exceeds desired parent "kni0" MTU 1500`)
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Equal(t, 9000, backend.links["kni0"].Attrs().MTU)
 }
 
-func TestReconcilerRechecksChildMTUsImmediatelyBeforeLoweringParent(t *testing.T) {
+// Test_Reconciler_RechecksChildMTUs verifies that a foreign child's concurrent
+// MTU increase prevents shrinking the parent using stale validation.
+func Test_Reconciler_RechecksChildMTUs(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -243,11 +260,12 @@ func TestReconcilerRechecksChildMTUsImmediatelyBeforeLoweringParent(t *testing.T
 	}}})
 
 	require.ErrorContains(t, err, `child link "foreign.100" MTU 8900 exceeds desired parent MTU 1500`)
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Equal(t, 9000, backend.links["kni0"].Attrs().MTU)
 }
 
-func TestReconcilerRejectsVLANWhoseParentIsMissingFromDesiredState(t *testing.T) {
+// Test_Reconciler_RejectsMissingDesiredParent verifies that an existing kernel
+// parent cannot satisfy an incomplete desired VLAN topology.
+func Test_Reconciler_RejectsMissingDesiredParent(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(vlan("parent.100", 10, 9, 100, ownedAlias))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -259,13 +277,14 @@ func TestReconcilerRejectsVLANWhoseParentIsMissingFromDesiredState(t *testing.T)
 	}}})
 
 	require.ErrorContains(t, err, `parent "parent.100" is missing from desired state`)
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.listCalls)
 	require.Empty(t, backend.added)
 	require.Empty(t, backend.deleted)
 }
 
-func TestReconcilerRejectsDuplicateDesiredVLANIdentityBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsDuplicateVLANIdentity verifies that different names
+// cannot claim the same parent and tag before any kernel inspection.
+func Test_Reconciler_RejectsDuplicateVLANIdentity(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -277,12 +296,13 @@ func TestReconcilerRejectsDuplicateDesiredVLANIdentityBeforeMutation(t *testing.
 	}})
 
 	require.ErrorContains(t, err, `VLAN parent "kni0" ID 100 is already used`)
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.listCalls)
 	require.Empty(t, backend.added)
 }
 
-func TestReconcilerRequiresExplicitOwnershipHandoffForExistingVLAN(t *testing.T) {
+// Test_Reconciler_RequiresOwnershipHandoff verifies that a matching unmarked
+// VLAN is neither adopted nor deleted during reconciliation.
+func Test_Reconciler_RequiresOwnershipHandoff(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 10, 100, ""))
@@ -295,12 +315,13 @@ func TestReconcilerRequiresExplicitOwnershipHandoffForExistingVLAN(t *testing.T)
 	err := reconciler.Apply(t.Context(), state)
 
 	require.ErrorContains(t, err, "requires explicit ownership handoff")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.aliasChanges)
 	require.Empty(t, backend.deleted)
 }
 
-func TestReconcilerRejectsUnownedVLANBeforeConfiguration(t *testing.T) {
+// Test_Reconciler_RejectsUnownedVLANBeforeConfiguration verifies that a missing
+// ownership marker prevents changes to links, addresses, and IPv6 policy.
+func Test_Reconciler_RejectsUnownedVLANBeforeConfiguration(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 10, 100, ""))
@@ -326,7 +347,9 @@ func TestReconcilerRejectsUnownedVLANBeforeConfiguration(t *testing.T) {
 	require.Empty(t, sysctl.writes)
 }
 
-func TestReconcilerRejectsMatchingVLANOwnedByAnotherManager(t *testing.T) {
+// Test_Reconciler_RejectsForeignOwnedVLAN verifies that matching topology does
+// not authorize changing a VLAN marked as belonging to another manager.
+func Test_Reconciler_RejectsForeignOwnedVLAN(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 10, 100, "foreign-owner"))
@@ -342,7 +365,9 @@ func TestReconcilerRejectsMatchingVLANOwnedByAnotherManager(t *testing.T) {
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerRejectsMismatchedExistingVLAN(t *testing.T) {
+// Test_Reconciler_RejectsMismatchedExistingVLAN verifies that foreign link type,
+// parent, or tag conflicts fail without link, address, or sysctl mutations.
+func Test_Reconciler_RejectsMismatchedExistingVLAN(t *testing.T) {
 	tests := []struct {
 		name string
 		link vnetlink.Link
@@ -366,7 +391,6 @@ func TestReconcilerRejectsMismatchedExistingVLAN(t *testing.T) {
 				{Name: "tenant.100", Parent: "kni0", VLANID: 100},
 			}})
 			require.ErrorContains(t, err, tt.want)
-			require.False(t, netreconcile.IsRetryable(err))
 			require.Empty(t, backend.added)
 			require.Empty(t, backend.deleted)
 			require.Empty(t, backend.aliasChanges)
@@ -378,7 +402,9 @@ func TestReconcilerRejectsMismatchedExistingVLAN(t *testing.T) {
 	}
 }
 
-func TestReconcilerRejectsExistingVLANWithWrongProtocol(t *testing.T) {
+// Test_Reconciler_RejectsWrongVLANProtocol verifies that an existing 802.1ad
+// link cannot satisfy an 802.1q request and remains untouched.
+func Test_Reconciler_RejectsWrongVLANProtocol(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	existing := vlan("tenant.100", 20, 10, 100, "")
@@ -391,12 +417,13 @@ func TestReconcilerRejectsExistingVLANWithWrongProtocol(t *testing.T) {
 		{Name: "tenant.100", Parent: "kni0", VLANID: 100},
 	}})
 	require.ErrorContains(t, err, "protocol is 802.1ad, want 802.1q")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.added)
 	require.Empty(t, backend.deleted)
 }
 
-func TestReconcilerRejectsVLANMasqueradingAsBaseKNIBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsVLANAsBaseKNI verifies that a VLAN using a base link's
+// name is rejected before changing its MTU or bringing it up.
+func Test_Reconciler_RejectsVLANAsBaseKNI(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(vlan("kni0", 10, 9, 100, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -406,12 +433,13 @@ func TestReconcilerRejectsVLANMasqueradingAsBaseKNIBeforeMutation(t *testing.T) 
 		MTU:  9000,
 	}}})
 	require.ErrorContains(t, err, "base KNI link is unexpectedly a VLAN")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Zero(t, backend.links["kni0"].Attrs().MTU)
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerRecreatesMismatchedOwnedVLAN(t *testing.T) {
+// Test_Reconciler_RecreatesMismatchedOwnedVLAN verifies that an owned topology
+// mismatch is replaced with the requested parent, tag, marker, and address.
+func Test_Reconciler_RecreatesMismatchedOwnedVLAN(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 99, 200, ownedAlias))
@@ -438,7 +466,9 @@ func TestReconcilerRecreatesMismatchedOwnedVLAN(t *testing.T) {
 	require.Equal(t, []string{"192.0.2.9/24"}, addressStrings(backend.addresses["tenant.100"]))
 }
 
-func TestReconcilerDeletesConflictingStaleVLANBeforeRenamedReplacement(t *testing.T) {
+// Test_Reconciler_RenamesOwnedVLAN verifies that a stale owned name releases
+// its parent and tag so a replacement can claim the same VLAN identity.
+func Test_Reconciler_RenamesOwnedVLAN(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("old.100", 20, 10, 100, ownedAlias))
@@ -456,7 +486,9 @@ func TestReconcilerDeletesConflictingStaleVLANBeforeRenamedReplacement(t *testin
 	require.Contains(t, backend.links, "new.100")
 }
 
-func TestReconcilerPreservesZeroMTUVLANValueDuringRecreation(t *testing.T) {
+// Test_Reconciler_PreservesMTUDuringRecreation verifies that an omitted desired
+// MTU retains the old child's size when its topology must be replaced.
+func Test_Reconciler_PreservesMTUDuringRecreation(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -475,7 +507,9 @@ func TestReconcilerPreservesZeroMTUVLANValueDuringRecreation(t *testing.T) {
 	require.Equal(t, 8900, backend.links["tenant.100"].Attrs().MTU)
 }
 
-func TestReconcilerRejectsPreservedRecreatedVLANMTUAboveParent(t *testing.T) {
+// Test_Reconciler_RejectsRecreatedChildMTU verifies that an inherited child MTU
+// exceeding the desired parent prevents both deletion and recreation.
+func Test_Reconciler_RejectsRecreatedChildMTU(t *testing.T) {
 	backend := newFakeBackend()
 	parent := dummy("kni0", 10, "")
 	parent.MTU = 9000
@@ -491,12 +525,13 @@ func TestReconcilerRejectsPreservedRecreatedVLANMTUAboveParent(t *testing.T) {
 	}})
 
 	require.ErrorContains(t, err, "effective VLAN MTU 8900 exceeds parent")
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.deleted)
 	require.Empty(t, backend.added)
 }
 
-func TestReconcilerRecreatesExplicitlyOwnedVLANWithResidualAddress(t *testing.T) {
+// Test_Reconciler_RecreatesVLANWithResidualAddress verifies that an old address
+// does not prevent replacing an explicitly owned VLAN with wrong topology.
+func Test_Reconciler_RecreatesVLANWithResidualAddress(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	original := vlan("tenant.100", 20, 99, 200, ownedAlias)
@@ -516,7 +551,9 @@ func TestReconcilerRecreatesExplicitlyOwnedVLANWithResidualAddress(t *testing.T)
 	require.Empty(t, backend.addresses["tenant.100"])
 }
 
-func TestReconcilerDoesNotRecreateOwnedVLANAfterIncompleteAddressDump(t *testing.T) {
+// Test_Reconciler_PreservesVLANAfterIncompleteDump verifies that a failed
+// address dump on another managed link prevents destructive reconciliation.
+func Test_Reconciler_PreservesVLANAfterIncompleteDump(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(dummy("kni1", 11, ""))
@@ -538,7 +575,9 @@ func TestReconcilerDoesNotRecreateOwnedVLANAfterIncompleteAddressDump(t *testing
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerDoesNotDeleteReplacedVLANDuringRecreation(t *testing.T) {
+// Test_Reconciler_PreservesConcurrentVLANReplacement verifies that a new
+// foreign link at the same name is not deleted using an old ownership check.
+func Test_Reconciler_PreservesConcurrentVLANReplacement(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 99, 200, ownedAlias))
@@ -555,12 +594,13 @@ func TestReconcilerDoesNotDeleteReplacedVLANDuringRecreation(t *testing.T) {
 	}})
 
 	require.ErrorContains(t, err, "identity changed during reconciliation")
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.deleted)
 	require.Equal(t, 21, backend.links["tenant.100"].Attrs().Index)
 }
 
-func TestReconcilerDoesNotMutateVLANAfterParentReplacement(t *testing.T) {
+// Test_Reconciler_StopsAfterParentReplacement verifies that a changed parent
+// identity prevents child MTU, link-state, and sysctl mutations.
+func Test_Reconciler_StopsAfterParentReplacement(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 10, 100, ownedAlias))
@@ -578,13 +618,14 @@ func TestReconcilerDoesNotMutateVLANAfterParentReplacement(t *testing.T) {
 	}})
 
 	require.ErrorContains(t, err, `link "kni0" identity changed during reconciliation`)
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Zero(t, backend.links["tenant.100"].Attrs().MTU)
 	require.Empty(t, backend.up)
 	require.Empty(t, sysctl.writes)
 }
 
-func TestReconcilerPreservesAddressAddedToRecreatedVLAN(t *testing.T) {
+// Test_Reconciler_PreservesConcurrentAddress verifies that an address arriving
+// during revalidation survives replacement of the owned VLAN.
+func Test_Reconciler_PreservesConcurrentAddress(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 99, 200, ownedAlias))
@@ -606,7 +647,9 @@ func TestReconcilerPreservesAddressAddedToRecreatedVLAN(t *testing.T) {
 	require.Equal(t, []string{"192.0.2.9/24"}, addressStrings(backend.addresses["tenant.100"]))
 }
 
-func TestReconcilerValidatesNewlyCreatedVLANBeforeMutation(t *testing.T) {
+// Test_Reconciler_ValidatesNewlyCreatedVLAN verifies that a foreign replacement
+// appearing after creation is not relabeled as owned.
+func Test_Reconciler_ValidatesNewlyCreatedVLAN(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.beforeLinkByName = func(name string, call int) {
@@ -626,7 +669,9 @@ func TestReconcilerValidatesNewlyCreatedVLANBeforeMutation(t *testing.T) {
 	require.Equal(t, "foreign-owner", backend.links["tenant.100"].Attrs().Alias)
 }
 
-func TestReconcilerPreservesForeignAddressesAndDeletesStaleOwnedAddresses(t *testing.T) {
+// Test_Reconciler_PreservesForeignAddresses verifies that subsequent snapshots
+// remove only previously claimed addresses and leave unmanaged links intact.
+func Test_Reconciler_PreservesForeignAddresses(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(dummy("management0", 11, ""))
@@ -688,7 +733,9 @@ func TestReconcilerPreservesForeignAddressesAndDeletesStaleOwnedAddresses(t *tes
 	}, sysctl.writes)
 }
 
-func TestReconcilerDeletesOwnedAddressesWhenBaseLeavesDesiredState(t *testing.T) {
+// Test_Reconciler_RemovesRetiredBaseAddresses verifies that retiring a base
+// link removes its claimed addresses but preserves the link and foreign IPs.
+func Test_Reconciler_RemovesRetiredBaseAddresses(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addresses["kni0"] = []vnetlink.Addr{mustAddr("192.0.2.9/24")}
@@ -706,7 +753,9 @@ func TestReconcilerDeletesOwnedAddressesWhenBaseLeavesDesiredState(t *testing.T)
 	require.Equal(t, []string{"198.51.100.7/25"}, backend.deletedAddresses)
 }
 
-func TestReconcilerRemovesOnlyForeignIPv6LinkLocalWhenDisabled(t *testing.T) {
+// Test_Reconciler_DisablesIPv6LinkLocal verifies that disabling generation
+// removes link-local IPs present before or after link-up, but keeps global IPs.
+func Test_Reconciler_DisablesIPv6LinkLocal(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	slaacAddress := mustAddr("2001:db8::9/64")
@@ -735,7 +784,9 @@ func TestReconcilerRemovesOnlyForeignIPv6LinkLocalWhenDisabled(t *testing.T) {
 	require.Equal(t, []string{"kni0/accept_ra=0", "kni0/addr_gen_mode=1"}, sysctl.writes)
 }
 
-func TestReconcilerTracksSuccessfulAddressesAfterPartialApply(t *testing.T) {
+// Test_Reconciler_TracksPartialAddressSuccess verifies that addresses installed
+// before a later failure remain owned and can be removed on the next pass.
+func Test_Reconciler_TracksPartialAddressSuccess(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addresses["kni0"] = []vnetlink.Addr{mustAddr("192.0.2.9/24")}
@@ -760,7 +811,9 @@ func TestReconcilerTracksSuccessfulAddressesAfterPartialApply(t *testing.T) {
 	require.Equal(t, []string{"198.51.100.7/25"}, backend.deletedAddresses)
 }
 
-func TestReconcilerDoesNotDeleteAddressFromReplacedLink(t *testing.T) {
+// Test_Reconciler_PreservesReplacedLinkAddresses verifies that a changed link
+// identity invalidates address deletion authorized by an earlier snapshot.
+func Test_Reconciler_PreservesReplacedLinkAddresses(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -780,12 +833,13 @@ func TestReconcilerDoesNotDeleteAddressFromReplacedLink(t *testing.T) {
 	})
 
 	require.ErrorContains(t, err, "identity changed during reconciliation")
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.deletedAddresses)
 	require.Equal(t, []string{"198.51.100.7/25"}, addressStrings(backend.addresses["kni0"]))
 }
 
-func TestReconcilerSerializesConcurrentApply(t *testing.T) {
+// Test_Reconciler_SerializesConcurrentApply verifies that concurrent identical
+// requests both succeed and converge on a single configured address.
+func Test_Reconciler_SerializesConcurrentApply(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -804,7 +858,9 @@ func TestReconcilerSerializesConcurrentApply(t *testing.T) {
 	require.Equal(t, []string{"198.51.100.7/25"}, addressStrings(backend.addresses["kni0"]))
 }
 
-func TestReconcilerStopsWaitingForConcurrentApplyAfterCancellation(t *testing.T) {
+// Test_Reconciler_CancelsConcurrentWait verifies that a canceled caller returns
+// without waiting for the active reconciliation to finish.
+func Test_Reconciler_CancelsConcurrentWait(t *testing.T) {
 	backend := newFakeBackend()
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -828,7 +884,9 @@ func TestReconcilerStopsWaitingForConcurrentApplyAfterCancellation(t *testing.T)
 	require.NoError(t, <-firstResult)
 }
 
-func TestReconcilerDeletesOnlyStaleOwnedVLANs(t *testing.T) {
+// Test_Reconciler_DeletesOnlyStaleOwnedVLANs verifies that an empty desired
+// state preserves foreign VLANs and marked non-VLAN links.
+func Test_Reconciler_DeletesOnlyStaleOwnedVLANs(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ownedAlias))
 	backend.addLink(vlan("owned.100", 20, 10, 100, ownedAlias))
@@ -843,7 +901,9 @@ func TestReconcilerDeletesOnlyStaleOwnedVLANs(t *testing.T) {
 	require.Contains(t, backend.links, "owned-dummy")
 }
 
-func TestReconcilerDoesNotDeleteReplacedStaleVLAN(t *testing.T) {
+// Test_Reconciler_PreservesReplacedStaleVLAN verifies that a foreign link
+// replacing a stale owned VLAN cannot be deleted by the old cleanup plan.
+func Test_Reconciler_PreservesReplacedStaleVLAN(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(vlan("stale.100", 20, 10, 100, ownedAlias))
 	backend.beforeLinkByName = func(name string, call int) {
@@ -856,12 +916,13 @@ func TestReconcilerDoesNotDeleteReplacedStaleVLAN(t *testing.T) {
 	err := reconciler.Apply(t.Context(), netplan.State{})
 
 	require.ErrorContains(t, err, "identity changed during reconciliation")
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Empty(t, backend.deleted)
 	require.Equal(t, 21, backend.links["stale.100"].Attrs().Index)
 }
 
-func TestReconcilerDoesNotDeleteStaleVLANAfterCancellationDuringValidation(t *testing.T) {
+// Test_Reconciler_CancelsStaleVLANDeletion verifies that cancellation during
+// identity validation preserves the link and returns the cancellation error.
+func Test_Reconciler_CancelsStaleVLANDeletion(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(vlan("stale.100", 20, 10, 100, ownedAlias))
 	ctx, cancel := context.WithCancel(t.Context())
@@ -878,7 +939,9 @@ func TestReconcilerDoesNotDeleteStaleVLANAfterCancellationDuringValidation(t *te
 	require.Contains(t, backend.links, "stale.100")
 }
 
-func TestReconcilerDoesNotDeleteAddressAfterCancellationDuringValidation(t *testing.T) {
+// Test_Reconciler_CancelsAddressDeletion verifies that cancellation during
+// link revalidation preserves an address scheduled for removal.
+func Test_Reconciler_CancelsAddressDeletion(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	stale := mustAddr("192.0.2.1/24")
@@ -908,7 +971,9 @@ func TestReconcilerDoesNotDeleteAddressAfterCancellationDuringValidation(t *test
 	require.Equal(t, []string{"192.0.2.1/24"}, addressStrings(backend.addresses["kni0"]))
 }
 
-func TestReconcilerDeletesExplicitlyOwnedStaleVLANWithResidualAddress(t *testing.T) {
+// Test_Reconciler_DeletesStaleVLANWithResidualAddress verifies that residual
+// addresses do not prevent deletion of an explicitly owned obsolete link.
+func Test_Reconciler_DeletesStaleVLANWithResidualAddress(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(vlan("stale.100", 20, 10, 100, ownedAlias))
 	backend.addresses["stale.100"] = []vnetlink.Addr{mustAddr("192.0.2.9/24")}
@@ -919,7 +984,9 @@ func TestReconcilerDeletesExplicitlyOwnedStaleVLANWithResidualAddress(t *testing
 	require.NotContains(t, backend.links, "stale.100")
 }
 
-func TestReconcilerDeletesExplicitlyOwnedStaleVLANWithoutAddressDump(t *testing.T) {
+// Test_Reconciler_DeletesStaleVLANWithoutAddressDump verifies that a failing
+// address dump does not block deletion of an explicitly owned obsolete link.
+func Test_Reconciler_DeletesStaleVLANWithoutAddressDump(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(vlan("stale.100", 20, 10, 100, ownedAlias))
 	backend.addrListErr["stale.100"] = errors.New("address dump unavailable")
@@ -930,7 +997,9 @@ func TestReconcilerDeletesExplicitlyOwnedStaleVLANWithoutAddressDump(t *testing.
 	require.NotContains(t, backend.links, "stale.100")
 }
 
-func TestReconcilerSkipsPerAddressCleanupBeforeDeletingOwnedVLAN(t *testing.T) {
+// Test_Reconciler_SkipsDeletedVLANAddressCleanup verifies that withdrawing a
+// previously configured VLAN succeeds even when its address dump is unavailable.
+func Test_Reconciler_SkipsDeletedVLANAddressCleanup(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -954,7 +1023,9 @@ func TestReconcilerSkipsPerAddressCleanupBeforeDeletingOwnedVLAN(t *testing.T) {
 	require.NotContains(t, backend.links, "tenant.100")
 }
 
-func TestReconcilerAppliesIPv6Sysctls(t *testing.T) {
+// Test_Reconciler_AppliesIPv6Sysctls verifies that each link's RA and link-local
+// choices produce the corresponding kernel policy values independently.
+func Test_Reconciler_AppliesIPv6Sysctls(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	backend.addLink(vlan("tenant.100", 20, 10, 100, ownedAlias))
@@ -980,7 +1051,9 @@ func TestReconcilerAppliesIPv6Sysctls(t *testing.T) {
 	}, sysctl.writes)
 }
 
-func TestReconcilerAppliesIPv6PolicyBeforeBringingLinkUp(t *testing.T) {
+// Test_Reconciler_AppliesIPv6PolicyBeforeLinkUp verifies that IPv6 policy is
+// installed while the link is still down, before automatic address generation.
+func Test_Reconciler_AppliesIPv6PolicyBeforeLinkUp(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	sysctl := &fakeSysctl{
@@ -997,7 +1070,9 @@ func TestReconcilerAppliesIPv6PolicyBeforeBringingLinkUp(t *testing.T) {
 	require.Equal(t, []string{"kni0"}, backend.up)
 }
 
-func TestReconcilerDoesNotWriteSysctlToReplacementLink(t *testing.T) {
+// Test_Reconciler_PreservesReplacementLinkSysctls verifies that a link replaced
+// during sysctl validation receives neither the policy write nor link-up.
+func Test_Reconciler_PreservesReplacementLinkSysctls(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	sysctl := &fakeSysctl{
@@ -1013,12 +1088,13 @@ func TestReconcilerDoesNotWriteSysctlToReplacementLink(t *testing.T) {
 	}}})
 
 	require.ErrorContains(t, err, `link "kni0" identity changed during reconciliation`)
-	require.True(t, netreconcile.IsRetryable(err))
 	require.Empty(t, sysctl.writes)
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerMarksCancellationDuringSysctlValidationNonRetryable(t *testing.T) {
+// Test_Reconciler_PropagatesCancellationDuringSysctlValidation verifies that
+// cancellation is preserved and prevents the pending sysctl and link writes.
+func Test_Reconciler_PropagatesCancellationDuringSysctlValidation(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1028,32 +1104,32 @@ func TestReconcilerMarksCancellationDuringSysctlValidationNonRetryable(t *testin
 	err := reconciler.Apply(ctx, netplan.State{Links: []netplan.Link{{Name: "kni0"}}})
 
 	require.ErrorIs(t, err, context.Canceled)
-	require.False(t, netreconcile.IsRetryable(err))
 	require.Empty(t, sysctl.writes)
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerGivesWrappedCancellationPriorityOverRetryableError(t *testing.T) {
+// Test_Reconciler_PreservesJoinedSysctlErrors verifies that wrapping retains
+// both cancellation and the other cause of a failed sysctl write.
+func Test_Reconciler_PreservesJoinedSysctlErrors(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
+	validationErr := errors.New("injected validation failure")
 	sysctl := &fakeSysctl{setError: errors.Join(
 		context.Canceled,
-		&netreconcile.ApplyError{
-			Operation: "injected validation",
-			Retryable: true,
-			Err:       errors.New("transient failure"),
-		},
+		validationErr,
 	)}
 	reconciler := netreconcile.NewReconciler(backend, sysctl)
 
 	err := reconciler.Apply(t.Context(), netplan.State{Links: []netplan.Link{{Name: "kni0"}}})
 
 	require.ErrorIs(t, err, context.Canceled)
-	require.False(t, netreconcile.IsRetryable(err))
+	require.ErrorIs(t, err, validationErr)
 	require.Empty(t, sysctl.writes)
 }
 
-func TestReconcilerRejectsIPv4LinkLocalBeforeMutation(t *testing.T) {
+// Test_Reconciler_RejectsIPv4LinkLocal verifies that unsupported automatic IPv4
+// addressing fails before MTU or link-state changes.
+func Test_Reconciler_RejectsIPv4LinkLocal(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -1068,7 +1144,9 @@ func TestReconcilerRejectsIPv4LinkLocalBeforeMutation(t *testing.T) {
 	require.Empty(t, backend.up)
 }
 
-func TestReconcilerRejectsProcfsEscapingInterfaceName(t *testing.T) {
+// Test_Reconciler_RejectsProcfsEscape verifies that path traversal in a link
+// name fails before any kernel link listing.
+func Test_Reconciler_RejectsProcfsEscape(t *testing.T) {
 	backend := newFakeBackend()
 	reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
 
@@ -1077,7 +1155,9 @@ func TestReconcilerRejectsProcfsEscapingInterfaceName(t *testing.T) {
 	require.Empty(t, backend.listCalls)
 }
 
-func TestReconcilerRejectsKernelInvalidAndReservedInterfaceNames(t *testing.T) {
+// Test_Reconciler_RejectsInvalidInterfaceNames verifies that Linux-invalid and
+// reserved sysctl names fail before any kernel link listing.
+func Test_Reconciler_RejectsInvalidInterfaceNames(t *testing.T) {
 	for _, name := range []string{"tenant:100", "tenant 100", "all", "default"} {
 		t.Run(name, func(t *testing.T) {
 			backend := newFakeBackend()
@@ -1086,13 +1166,14 @@ func TestReconcilerRejectsKernelInvalidAndReservedInterfaceNames(t *testing.T) {
 			err := reconciler.Apply(t.Context(), netplan.State{Links: []netplan.Link{{Name: name}}})
 
 			require.ErrorContains(t, err, "interface name")
-			require.False(t, netreconcile.IsRetryable(err))
 			require.Empty(t, backend.listCalls)
 		})
 	}
 }
 
-func TestReconcilerStopsBetweenOperationsWhenContextIsCanceled(t *testing.T) {
+// Test_Reconciler_CancelsBetweenOperations verifies that cancellation after
+// the first sysctl write prevents further policy writes and address mutations.
+func Test_Reconciler_CancelsBetweenOperations(t *testing.T) {
 	backend := newFakeBackend()
 	backend.addLink(dummy("kni0", 10, ""))
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1110,7 +1191,9 @@ func TestReconcilerStopsBetweenOperationsWhenContextIsCanceled(t *testing.T) {
 	require.Empty(t, backend.deletedAddresses)
 }
 
-func TestReconcilerDoesNotCleanUpAfterIncompleteList(t *testing.T) {
+// Test_Reconciler_SkipsCleanupAfterIncompleteList verifies that interrupted
+// link or address dumps cannot authorize stale VLAN or address deletion.
+func Test_Reconciler_SkipsCleanupAfterIncompleteList(t *testing.T) {
 	t.Run("link list", func(t *testing.T) {
 		backend := newFakeBackend()
 		backend.addLink(vlan("stale.100", 20, 10, 100, ownedAlias))
@@ -1150,6 +1233,8 @@ type fakeBackend struct {
 	addressesOnUp     map[string][]vnetlink.Addr
 	addrListErr       map[string]error
 	addrReplaceErr    map[string]error
+	linkAddErr        map[string]error
+	mtuErr            map[string]error
 	aliasErr          map[string]error
 	linkListErr       error
 	nextIndex         int
@@ -1175,6 +1260,8 @@ func newFakeBackend() *fakeBackend {
 		addressesOnUp:   map[string][]vnetlink.Addr{},
 		addrListErr:     map[string]error{},
 		addrReplaceErr:  map[string]error{},
+		linkAddErr:      map[string]error{},
+		mtuErr:          map[string]error{},
 		aliasErr:        map[string]error{},
 		linkByNameCalls: map[string]int{},
 		addrListCalls:   map[string]int{},
@@ -1218,6 +1305,9 @@ func (m *fakeBackend) LinkByName(name string) (vnetlink.Link, error) {
 }
 
 func (m *fakeBackend) LinkAdd(link vnetlink.Link) error {
+	if err := m.linkAddErr[link.Attrs().Name]; err != nil {
+		return err
+	}
 	if _, exists := m.links[link.Attrs().Name]; exists {
 		return errors.New("link already exists")
 	}
@@ -1249,6 +1339,13 @@ func (m *fakeBackend) LinkAdd(link vnetlink.Link) error {
 }
 
 func (m *fakeBackend) LinkDel(link vnetlink.Link) error {
+	for _, child := range m.links {
+		if child.Attrs().ParentIndex == link.Attrs().Index {
+			if err := m.LinkDel(child); err != nil {
+				return err
+			}
+		}
+	}
 	delete(m.links, link.Attrs().Name)
 	delete(m.addresses, link.Attrs().Name)
 	m.deleted = append(m.deleted, link.Attrs().Name)
@@ -1265,6 +1362,9 @@ func (m *fakeBackend) LinkSetAlias(link vnetlink.Link, alias string) error {
 }
 
 func (m *fakeBackend) LinkSetMTU(link vnetlink.Link, mtu int) error {
+	if err := m.mtuErr[link.Attrs().Name]; err != nil {
+		return err
+	}
 	if _, isVLAN := link.(*vnetlink.Vlan); !isVLAN {
 		for _, candidate := range m.links {
 			vlanLink, ok := candidate.(*vnetlink.Vlan)
@@ -1287,6 +1387,13 @@ func (m *fakeBackend) linkByIndex(index int) vnetlink.Link {
 }
 
 func (m *fakeBackend) LinkSetUp(link vnetlink.Link) error {
+	if child, ok := link.(*vnetlink.Vlan); ok {
+		parent := m.linkByIndex(child.ParentIndex)
+		if parent == nil || (parent.Attrs().Flags&net.FlagUp == 0 &&
+			(child.LooseBinding == nil || !*child.LooseBinding)) {
+			return unix.ENETDOWN
+		}
+	}
 	link.Attrs().Flags |= net.FlagUp
 	name := link.Attrs().Name
 	m.addresses[name] = append(m.addresses[name], m.addressesOnUp[name]...)
@@ -1295,7 +1402,7 @@ func (m *fakeBackend) LinkSetUp(link vnetlink.Link) error {
 	return nil
 }
 
-func (m *fakeBackend) AddrList(link vnetlink.Link, _ int) ([]vnetlink.Addr, error) {
+func (m *fakeBackend) AddrList(link vnetlink.Link, family int) ([]vnetlink.Addr, error) {
 	name := link.Attrs().Name
 	m.addrListCalls[name]++
 	if m.beforeAddrList != nil {
@@ -1305,7 +1412,15 @@ func (m *fakeBackend) AddrList(link vnetlink.Link, _ int) ([]vnetlink.Addr, erro
 	if err := m.addrListErr[name]; err != nil {
 		return nil, err
 	}
-	return append([]vnetlink.Addr(nil), m.addresses[name]...), nil
+	var addresses []vnetlink.Addr
+	for _, address := range m.addresses[name] {
+		if family == vnetlink.FAMILY_ALL ||
+			(family == vnetlink.FAMILY_V4 && address.IP.To4() != nil) ||
+			(family == vnetlink.FAMILY_V6 && address.IP.To4() == nil) {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses, nil
 }
 
 func (m *fakeBackend) AddrReplace(link vnetlink.Link, address *vnetlink.Addr) error {
@@ -1314,13 +1429,27 @@ func (m *fakeBackend) AddrReplace(link vnetlink.Link, address *vnetlink.Addr) er
 	if err := m.addrReplaceErr[name+"/"+wanted]; err != nil {
 		return err
 	}
+	replacement := *address
+	for _, existing := range m.addresses[name] {
+		if existing.IP.To4() == nil && existing.IP.Equal(address.IP) {
+			m.replacedAddresses = append(m.replacedAddresses, wanted)
+			return nil
+		}
+		if addressString(existing) == wanted {
+			replacement.Flags = existing.Flags
+			break
+		}
+		if sameIPv4Subnet(existing, replacement) {
+			replacement.Flags |= unix.IFA_F_SECONDARY
+		}
+	}
 	current := m.addresses[name][:0]
 	for _, existing := range m.addresses[name] {
 		if addressString(existing) != wanted {
 			current = append(current, existing)
 		}
 	}
-	m.addresses[name] = append(current, *address)
+	m.addresses[name] = append(current, replacement)
 	m.replacedAddresses = append(m.replacedAddresses, wanted)
 	return nil
 }
@@ -1330,13 +1459,22 @@ func (m *fakeBackend) AddrDel(link vnetlink.Link, address *vnetlink.Addr) error 
 	deleted := addressString(*address)
 	current := m.addresses[name][:0]
 	for _, existing := range m.addresses[name] {
-		if addressString(existing) != deleted {
+		secondary := address.Flags&unix.IFA_F_SECONDARY == 0 &&
+			existing.Flags&unix.IFA_F_SECONDARY != 0 && sameIPv4Subnet(*address, existing)
+		if addressString(existing) != deleted && !secondary {
 			current = append(current, existing)
 		}
 	}
 	m.addresses[name] = current
 	m.deletedAddresses = append(m.deletedAddresses, deleted)
 	return nil
+}
+
+// sameIPv4Subnet identifies addresses sharing the kernel's IPv4 primary group.
+func sameIPv4Subnet(first, second vnetlink.Addr) bool {
+	return first.IPNet != nil && second.IPNet != nil &&
+		first.IP.To4() != nil && second.IP.To4() != nil &&
+		bytes.Equal(first.Mask, second.Mask) && first.IPNet.Contains(second.IP)
 }
 
 type fakeSysctl struct {

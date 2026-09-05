@@ -187,11 +187,14 @@ func ParseFile(path string) (State, error) {
 }
 
 func parseLink(name, parent string, vlanID int, node yaml.Node) (Link, error) {
-	var config linkConfig
+	var config *linkConfig
 	if err := node.Decode(&config); err != nil {
 		return Link{}, fmt.Errorf("link %q: decode configuration: %w", name, err)
 	}
-	return linkFromConfig(name, parent, vlanID, config)
+	if config == nil {
+		return Link{}, fmt.Errorf("link %q: configuration mapping is required", name)
+	}
+	return linkFromConfig(name, parent, vlanID, *config)
 }
 
 func linkFromConfig(name, parent string, vlanID int, config linkConfig) (Link, error) {

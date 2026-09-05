@@ -50,6 +50,12 @@ type Operator struct {
 
 // NewOperator constructs an Operator from the supplied configuration.
 func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
+	if cfg.NetlinkSidecar.Enabled {
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid sidecar-enabled route configuration: %w", err)
+		}
+	}
+
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
@@ -228,13 +234,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	var actuator Actuator = fanOut
 	if cfg.NetlinkSidecar.Enabled {
-		actuator = NewNetlinkSidecarActuator(
+		sidecarActuator, err := NewNetlinkSidecarActuator(
 			fanOut,
 			cfg.Static.Routes,
 			cfg.NetlinkSidecar.UpdateTimeout,
 			neighTable.Snapshot,
 			gatewayActuators...,
 		)
+		if err != nil {
+			_ = fanOut.Close()
+			return nil, err
+		}
+		actuator = operator.NewObservedActuator(sidecarActuator, "reconcile", tracker.Observe)
 	}
 
 	app := operator.NewOperator(
@@ -339,6 +350,21 @@ func applyStaticSeed(
 		}
 
 		holder := routeSvc.getOrCreateRib(module)
+		if cfg.NetlinkSidecar.Enabled {
+			device := route.Interface
+			if mapped, ok := cfg.LinkMap[device]; ok {
+				device = mapped
+			}
+			holder.Update(rib.Route{
+				Prefix:    prefix,
+				NextHop:   nexthop,
+				Peer:      netip.IPv6Unspecified(),
+				SourceID:  rib.RouteSourceStatic,
+				Device:    device,
+				UpdatedAt: time.Now(),
+			})
+			continue
+		}
 		if err := holder.AddUnicastRoute(prefix, nexthop, rib.RouteSourceStatic); err != nil {
 			return fmt.Errorf("failed to seed static route %s via %s: %w", prefix, nexthop, err)
 		}
@@ -410,6 +436,12 @@ func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
 	for _, gw := range cfg.Gateways {
 		specs = append(specs, readiness.ScopeSpec{
 			Name:                        fmt.Sprintf("fib:%s:%s", gw.Name, moduleName),
+			ExpectedObservationInterval: fibInterval,
+		})
+	}
+	if cfg.NetlinkSidecar.Enabled {
+		specs = append(specs, readiness.ScopeSpec{
+			Name:                        "reconcile",
 			ExpectedObservationInterval: fibInterval,
 		})
 	}

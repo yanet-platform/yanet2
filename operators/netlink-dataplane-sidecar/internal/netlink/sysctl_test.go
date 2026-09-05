@@ -11,7 +11,9 @@ import (
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 )
 
-func TestProcSysctlWritesDescriptorOpenedBeforeLinkValidation(t *testing.T) {
+// Test_ProcSysctl_PinsDescriptorBeforeValidation verifies that replacing the
+// path during validation cannot redirect a write to the replacement file.
+func Test_ProcSysctl_PinsDescriptorBeforeValidation(t *testing.T) {
 	root := t.TempDir()
 	interfaceDirectory := filepath.Join(root, "kni0")
 	require.NoError(t, os.Mkdir(interfaceDirectory, 0o755))
@@ -34,7 +36,9 @@ func TestProcSysctlWritesDescriptorOpenedBeforeLinkValidation(t *testing.T) {
 	require.Equal(t, "2", string(opened))
 }
 
-func TestProcSysctlDoesNotWriteWhenLinkValidationFails(t *testing.T) {
+// Test_ProcSysctl_RejectsFailedValidation verifies that a link validation error
+// is returned without changing the previously opened sysctl file.
+func Test_ProcSysctl_RejectsFailedValidation(t *testing.T) {
 	root := t.TempDir()
 	interfaceDirectory := filepath.Join(root, "kni0")
 	require.NoError(t, os.Mkdir(interfaceDirectory, 0o755))

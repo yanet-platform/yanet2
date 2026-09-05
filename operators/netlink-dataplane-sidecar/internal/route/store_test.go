@@ -82,6 +82,8 @@ func Test_Store_SnapshotStateDistinguishesInitializedEmpty(t *testing.T) {
 	require.True(t, initialized)
 }
 
+// Test_Store_FailedUpdateRestoresPreviousSnapshot verifies that apply failure
+// restores committed routes, wakes reconciliation, and reaches the waiter.
 func Test_Store_FailedUpdateRestoresPreviousSnapshot(t *testing.T) {
 	previous := []route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")}
 	candidate := []route.Route{testRoute("198.51.100.0/24", "198.51.100.1", "kni1")}
@@ -102,6 +104,8 @@ func Test_Store_FailedUpdateRestoresPreviousSnapshot(t *testing.T) {
 	require.True(t, wakeReady(store.Wake()))
 }
 
+// Test_Store_FailedSupersedingUpdateRestoresLastSuccessfulSnapshot verifies that
+// failed overlapping candidates roll back to committed, not rejected, routes.
 func Test_Store_FailedSupersedingUpdateRestoresLastSuccessfulSnapshot(t *testing.T) {
 	stable := []route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")}
 	firstRejected := []route.Route{testRoute("198.51.100.0/24", "198.51.100.1", "kni1")}
@@ -129,6 +133,8 @@ func Test_Store_FailedSupersedingUpdateRestoresLastSuccessfulSnapshot(t *testing
 	require.True(t, wakeReady(store.Wake()))
 }
 
+// Test_Store_StaleSuccessCannotReplaceNewerFailureRollbackBaseline verifies that
+// a late older success cannot change the baseline used by subsequent rollbacks.
 func Test_Store_StaleSuccessCannotReplaceNewerFailureRollbackBaseline(t *testing.T) {
 	stable := []route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")}
 	older := []route.Route{testRoute("198.51.100.0/24", "198.51.100.1", "kni1")}
@@ -157,6 +163,8 @@ func Test_Store_StaleSuccessCannotReplaceNewerFailureRollbackBaseline(t *testing
 	require.Equal(t, stable, store.Snapshot())
 }
 
+// Test_Store_StaleFailureWakesReconciliationOfNewerSnapshot verifies that an old
+// apply failure triggers repair without replacing the newer committed routes.
 func Test_Store_StaleFailureWakesReconciliationOfNewerSnapshot(t *testing.T) {
 	older := []route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")}
 	newer := []route.Route{testRoute("198.51.100.0/24", "198.51.100.1", "kni1")}
@@ -174,6 +182,8 @@ func Test_Store_StaleFailureWakesReconciliationOfNewerSnapshot(t *testing.T) {
 	require.True(t, wakeReady(store.Wake()))
 }
 
+// Test_Update_WaitPrefersCompletedResultOverCanceledContext verifies that a
+// completed apply error remains observable when the waiter's context is canceled.
 func Test_Update_WaitPrefersCompletedResultOverCanceledContext(t *testing.T) {
 	store := route.NewStore()
 	update, err := store.ReplaceTracked([]route.Route{
@@ -340,6 +350,8 @@ func Test_Store_ReplaceAllowsECMP(t *testing.T) {
 	require.Equal(t, routes, store.Snapshot())
 }
 
+// Test_Store_RejectsOversizedECMPBeforeCommit verifies that a multipath group
+// exceeding the Linux attribute limit leaves a new store empty and uninitialized.
 func Test_Store_RejectsOversizedECMPBeforeCommit(t *testing.T) {
 	store := route.NewStore()
 	routes := make([]route.Route, 4096)

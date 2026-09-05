@@ -1,6 +1,7 @@
 package operator_test
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -61,9 +62,9 @@ func Test_Config_Validate_StaticInterfaceRequiredOnlyForEnabledSidecar(t *testin
 				Endpoint: xcfg.MustNonEmptyString("127.0.0.1:8080"),
 			}}
 			config.NetlinkSidecar.Enabled = test.enabled
-			for _, interfaceName := range test.interfaces {
+			for idx, interfaceName := range test.interfaces {
 				config.Static.Routes = append(config.Static.Routes, operator.StaticRouteConfig{
-					Prefix:      "192.0.2.0/24",
+					Prefix:      fmt.Sprintf("192.0.%d.0/24", idx+2),
 					NexthopAddr: "192.0.2.1",
 					Interface:   interfaceName,
 				})
@@ -79,6 +80,8 @@ func Test_Config_Validate_StaticInterfaceRequiredOnlyForEnabledSidecar(t *testin
 	}
 }
 
+// Test_Config_Validate_EnabledSidecarRequiresPositiveUpdateTimeout verifies that
+// an enabled static-route publisher always has a finite positive RPC budget.
 func Test_Config_Validate_EnabledSidecarRequiresPositiveUpdateTimeout(t *testing.T) {
 	config := operator.DefaultConfig()
 	config.Gateways = []commonoperator.GatewayConfig{{
@@ -91,6 +94,8 @@ func Test_Config_Validate_EnabledSidecarRequiresPositiveUpdateTimeout(t *testing
 	require.ErrorContains(t, config.Validate(), "update_timeout must be positive")
 }
 
+// Test_Config_Validate_EnabledSidecarRejectsCanonicalDuplicateRoutes verifies that
+// host bits cannot disguise duplicate static routes in one complete snapshot.
 func Test_Config_Validate_EnabledSidecarRejectsCanonicalDuplicateRoutes(t *testing.T) {
 	config := operator.DefaultConfig()
 	config.Gateways = []commonoperator.GatewayConfig{{
@@ -106,6 +111,8 @@ func Test_Config_Validate_EnabledSidecarRejectsCanonicalDuplicateRoutes(t *testi
 	require.ErrorContains(t, config.Validate(), "duplicates static route 0")
 }
 
+// Test_Config_Validate_EnabledSidecarRejectsIPv4MappedRoutes verifies that static
+// addresses cannot lose their configured family during wire conversion.
 func Test_Config_Validate_EnabledSidecarRejectsIPv4MappedRoutes(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -144,4 +151,57 @@ func Test_Config_Validate_EnabledSidecarRejectsIPv4MappedRoutes(t *testing.T) {
 			require.ErrorContains(t, config.Validate(), test.errorContains)
 		})
 	}
+}
+
+// Test_Config_Validate_RejectsNULInterface verifies that a malformed Linux
+// interface is rejected before any sidecar publication can start.
+func Test_Config_Validate_RejectsNULInterface(t *testing.T) {
+	config := operator.DefaultConfig()
+	config.Gateways = []commonoperator.GatewayConfig{{
+		Name:     "numa0",
+		Endpoint: xcfg.MustNonEmptyString("127.0.0.1:8080"),
+	}}
+	config.NetlinkSidecar.Enabled = true
+	config.Static.Routes = []operator.StaticRouteConfig{{
+		Prefix:      "192.0.2.0/24",
+		NexthopAddr: "192.0.2.1",
+		Interface:   "eth\x000",
+	}}
+
+	require.ErrorContains(t, config.Validate(), "interface contains a NUL byte")
+}
+
+// Test_Config_Validate_RejectsAmbiguousStaticIdentity verifies that one static
+// RIB identity cannot silently replace a route bound to a different interface.
+func Test_Config_Validate_RejectsAmbiguousStaticIdentity(t *testing.T) {
+	config := operator.DefaultConfig()
+	config.Gateways = []commonoperator.GatewayConfig{{
+		Name:     "numa0",
+		Endpoint: xcfg.MustNonEmptyString("127.0.0.1:8080"),
+	}}
+	config.NetlinkSidecar.Enabled = true
+	config.Static.Routes = []operator.StaticRouteConfig{
+		{Prefix: "2001:db8::/64", NexthopAddr: "fe80::1", Interface: "kni0"},
+		{Prefix: "2001:db8::1/64", NexthopAddr: "fe80::1", Interface: "kni1"},
+	}
+
+	require.ErrorContains(t, config.Validate(), "same prefix and nexthop")
+	require.ErrorContains(t, config.Validate(), "different interfaces")
+}
+
+// Test_Config_Validate_RejectsEmptyStaticDevice verifies that link-name mapping
+// cannot silently remove a configured route's egress constraint.
+func Test_Config_Validate_RejectsEmptyStaticDevice(t *testing.T) {
+	config := operator.DefaultConfig()
+	config.Gateways = []commonoperator.GatewayConfig{{
+		Name:     "numa0",
+		Endpoint: xcfg.MustNonEmptyString("127.0.0.1:8080"),
+	}}
+	config.NetlinkSidecar.Enabled = true
+	config.LinkMap = map[string]string{"kni0": ""}
+	config.Static.Routes = []operator.StaticRouteConfig{{
+		Prefix: "192.0.2.0/24", NexthopAddr: "192.0.2.1", Interface: "kni0",
+	}}
+
+	require.ErrorContains(t, config.Validate(), "maps to an empty device")
 }

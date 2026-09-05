@@ -136,9 +136,14 @@ func (m *Actuator) SetRuntimeResources(connections []GatewayConnection, handle N
 
 // Apply reads the latest netplan and reconciles links before dependent state.
 func (m *Actuator) Apply(ctx context.Context, snapshot State) (applyErr error) {
+	routesApplied := false
 	if snapshot.Initialized {
 		defer func() {
-			snapshot.RouteUpdate.Complete(applyErr)
+			if routesApplied {
+				snapshot.RouteUpdate.Complete(nil)
+			} else {
+				snapshot.RouteUpdate.Complete(applyErr)
+			}
 		}()
 	}
 
@@ -158,6 +163,8 @@ func (m *Actuator) Apply(ctx context.Context, snapshot State) (applyErr error) {
 	if snapshot.Initialized {
 		if err := m.routes.Apply(ctx, snapshot.Routes, netplanState); err != nil {
 			applyErr = errors.Join(applyErr, fmt.Errorf("reconcile routes: %w", err))
+		} else {
+			routesApplied = true
 		}
 	}
 	if err := ctx.Err(); err != nil {

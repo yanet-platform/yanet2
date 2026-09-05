@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/netip"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -44,6 +47,8 @@ func Test_Service_UpdateStaticRoutes_CommitsMultipleChunks(t *testing.T) {
 	}, snapshot)
 }
 
+// Test_Service_UpdateStaticRoutes_WaitsForKernelApplication verifies that a
+// staged snapshot wakes reconciliation but is acknowledged only after success.
 func Test_Service_UpdateStaticRoutes_WaitsForKernelApplication(t *testing.T) {
 	store := route.NewStore()
 	service, err := route.NewService(store, route.ServiceConfig{MaxRoutes: 1})
@@ -75,6 +80,8 @@ func Test_Service_UpdateStaticRoutes_WaitsForKernelApplication(t *testing.T) {
 	require.NotNil(t, stream.response)
 }
 
+// Test_Service_UpdateStaticRoutes_ReturnsKernelApplicationFailure verifies that
+// failed application returns Unavailable and restores the prior route snapshot.
 func Test_Service_UpdateStaticRoutes_ReturnsKernelApplicationFailure(t *testing.T) {
 	store := route.NewStore()
 	initial := []route.Route{testRoute("198.51.100.0/24", "198.51.100.1", "kni1")}
@@ -112,7 +119,7 @@ func Test_Service_UpdateStaticRoutes_ReturnsKernelApplicationFailure(t *testing.
 
 // Test_Service_UpdateStaticRoutes_ExplicitEmptyChunkClearsState verifies that
 // an explicit empty request is a valid complete empty snapshot.
-func Test_Service_UpdateStaticRoutes_EmptyStreamClearsState(t *testing.T) {
+func Test_Service_UpdateStaticRoutes_ExplicitEmptyChunkClearsState(t *testing.T) {
 	initial := []route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")}
 	store, service := newTestService(t, 10, initial)
 	stream := &fakeUpdateStream{ctx: t.Context(), requests: []*sidecarpb.UpdateStaticRoutesRequest{{}}}
@@ -210,6 +217,75 @@ func Test_Service_UpdateStaticRoutes_ReceiveErrorPreservesState(t *testing.T) {
 	require.False(t, wakeReady(store.Wake()))
 }
 
+// Test_Service_UpdateStaticRoutes_CanceledBeforeCommitPreservesState verifies
+// that a canceled or expired stream cannot replace or clear the prior snapshot.
+func Test_Service_UpdateStaticRoutes_CanceledBeforeCommitPreservesState(t *testing.T) {
+	tests := []struct {
+		name          string
+		timeout       time.Duration
+		clearSnapshot bool
+		expectedCode  codes.Code
+	}{
+		{
+			name:         "canceled replacement",
+			timeout:      time.Hour,
+			expectedCode: codes.Canceled,
+		},
+		{
+			name:          "canceled empty snapshot",
+			timeout:       time.Hour,
+			clearSnapshot: true,
+			expectedCode:  codes.Canceled,
+		},
+		{
+			name:         "expired replacement",
+			timeout:      -time.Second,
+			expectedCode: codes.DeadlineExceeded,
+		},
+		{
+			name:          "expired empty snapshot",
+			timeout:       -time.Second,
+			clearSnapshot: true,
+			expectedCode:  codes.DeadlineExceeded,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			initial := []route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")}
+			store := route.NewStore()
+			require.NoError(t, store.Replace(initial))
+			require.True(t, wakeReady(store.Wake()))
+			_, _, initialUpdate := store.SnapshotUpdate()
+			service, err := route.NewService(store, route.ServiceConfig{MaxRoutes: 1})
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithTimeout(t.Context(), test.timeout)
+			defer cancel()
+			request := &sidecarpb.UpdateStaticRoutesRequest{}
+			if !test.clearSnapshot {
+				request.Routes = []*sidecarpb.StaticRoute{
+					mustProtoRoute(t, "198.51.100.0/24", "198.51.100.1", "kni1"),
+				}
+			}
+			stream := &fakeUpdateStream{
+				ctx:                   ctx,
+				requests:              []*sidecarpb.UpdateStaticRoutesRequest{request},
+				receiveError:          io.EOF,
+				beforeTerminalReceive: cancel,
+			}
+
+			err = service.UpdateStaticRoutes(stream)
+			require.Equal(t, test.expectedCode, status.Code(err))
+			snapshot, initialized, update := store.SnapshotUpdate()
+			require.Equal(t, initial, snapshot)
+			require.True(t, initialized)
+			require.Same(t, initialUpdate, update)
+			require.False(t, wakeReady(store.Wake()))
+			require.Nil(t, stream.response)
+		})
+	}
+}
+
 // Test_Service_UpdateStaticRoutes_ConcurrentWriterRetriesSafely verifies that
 // an update waiting for apply rejects another commit and permits retry.
 func Test_Service_UpdateStaticRoutes_ConcurrentWriterRetriesSafely(t *testing.T) {
@@ -279,16 +355,18 @@ func Test_Service_UpdateStaticRoutes_ConcurrentWriterRetriesSafely(t *testing.T)
 	}, store.Snapshot())
 }
 
+// Test_Service_UpdateStaticRoutes_IdleStreamDoesNotBlockCommit verifies that
+// staging an idle stream does not prevent another snapshot from being applied.
 func Test_Service_UpdateStaticRoutes_IdleStreamDoesNotBlockCommit(t *testing.T) {
 	store, service := newTestService(t, 10, nil)
 	idleStarted := make(chan struct{})
 	idleContinue := make(chan struct{})
-	idleReleased := false
-	defer func() {
-		if !idleReleased {
-			close(idleContinue)
-		}
-	}()
+	releaseIdle := sync.OnceFunc(func() { close(idleContinue) })
+	var workers errgroup.Group
+	t.Cleanup(func() {
+		releaseIdle()
+		require.NoError(t, workers.Wait())
+	})
 	idle := &fakeUpdateStream{
 		ctx: t.Context(),
 		requests: []*sidecarpb.UpdateStaticRoutesRequest{{Routes: []*sidecarpb.StaticRoute{
@@ -300,9 +378,10 @@ func Test_Service_UpdateStaticRoutes_IdleStreamDoesNotBlockCommit(t *testing.T) 
 		},
 	}
 	idleResult := make(chan error, 1)
-	go func() {
+	workers.Go(func() error {
 		idleResult <- service.UpdateStaticRoutes(idle)
-	}()
+		return nil
+	})
 	<-idleStarted
 
 	active := &fakeUpdateStream{ctx: t.Context(), requests: []*sidecarpb.UpdateStaticRoutesRequest{{
@@ -315,11 +394,12 @@ func Test_Service_UpdateStaticRoutes_IdleStreamDoesNotBlockCommit(t *testing.T) 
 		testRoute("198.51.100.0/24", "198.51.100.1", "kni1"),
 	}, store.Snapshot())
 
-	close(idleContinue)
-	idleReleased = true
+	releaseIdle()
 	require.NoError(t, <-idleResult)
 }
 
+// Test_Service_UpdateStaticRoutes_BoundsConcurrentStagedSnapshots verifies that
+// fully occupied staging slots reject an extra snapshot without changing state.
 func Test_Service_UpdateStaticRoutes_BoundsConcurrentStagedSnapshots(t *testing.T) {
 	store := route.NewStore()
 	service, err := route.NewService(store, route.ServiceConfig{
@@ -332,6 +412,12 @@ func Test_Service_UpdateStaticRoutes_BoundsConcurrentStagedSnapshots(t *testing.
 	ready := make(chan struct{}, 2)
 	release := make(chan struct{})
 	results := make(chan error, 2)
+	releaseStreams := sync.OnceFunc(func() { close(release) })
+	var workers errgroup.Group
+	t.Cleanup(func() {
+		releaseStreams()
+		require.NoError(t, workers.Wait())
+	})
 	for range 2 {
 		stream := &fakeUpdateStream{
 			ctx: t.Context(),
@@ -344,9 +430,10 @@ func Test_Service_UpdateStaticRoutes_BoundsConcurrentStagedSnapshots(t *testing.
 			ready <- struct{}{}
 			<-release
 		}
-		go func() {
+		workers.Go(func() error {
 			results <- service.UpdateStaticRoutes(stream)
-		}()
+			return nil
+		})
 	}
 	<-ready
 	<-ready
@@ -357,11 +444,13 @@ func Test_Service_UpdateStaticRoutes_BoundsConcurrentStagedSnapshots(t *testing.
 	require.ErrorContains(t, err, "too many static route snapshots")
 	require.False(t, store.Initialized())
 
-	close(release)
+	releaseStreams()
 	require.ErrorIs(t, <-results, receiveErr)
 	require.ErrorIs(t, <-results, receiveErr)
 }
 
+// Test_Service_UpdateStaticRoutes_AdmitsBeforeReceivingFirstChunk verifies that
+// an idle admitted stream consumes a slot before receiving any route data.
 func Test_Service_UpdateStaticRoutes_AdmitsBeforeReceivingFirstChunk(t *testing.T) {
 	store := route.NewStore()
 	service, err := route.NewService(store, route.ServiceConfig{
@@ -373,6 +462,12 @@ func Test_Service_UpdateStaticRoutes_AdmitsBeforeReceivingFirstChunk(t *testing.
 	receiveErr := errors.New("release idle stream")
 	started := make(chan struct{})
 	release := make(chan struct{})
+	releaseStream := sync.OnceFunc(func() { close(release) })
+	var workers errgroup.Group
+	t.Cleanup(func() {
+		releaseStream()
+		require.NoError(t, workers.Wait())
+	})
 	first := &fakeUpdateStream{
 		ctx:          t.Context(),
 		requests:     []*sidecarpb.UpdateStaticRoutesRequest{{}},
@@ -383,9 +478,10 @@ func Test_Service_UpdateStaticRoutes_AdmitsBeforeReceivingFirstChunk(t *testing.
 		},
 	}
 	firstResult := make(chan error, 1)
-	go func() {
+	workers.Go(func() error {
 		firstResult <- service.UpdateStaticRoutes(first)
-	}()
+		return nil
+	})
 	<-started
 
 	overflow := &fakeUpdateStream{ctx: t.Context()}
@@ -393,7 +489,7 @@ func Test_Service_UpdateStaticRoutes_AdmitsBeforeReceivingFirstChunk(t *testing.
 	require.Equal(t, codes.ResourceExhausted, status.Code(err))
 	require.Zero(t, overflow.position)
 
-	close(release)
+	releaseStream()
 	require.ErrorIs(t, <-firstResult, receiveErr)
 }
 
@@ -515,18 +611,22 @@ func newTestService(
 	service, err := route.NewService(store, route.ServiceConfig{MaxRoutes: maxRoutes})
 	require.NoError(t, err)
 	stop := make(chan struct{})
-	t.Cleanup(func() { close(stop) })
-	go func() {
+	var workers errgroup.Group
+	t.Cleanup(func() {
+		close(stop)
+		require.NoError(t, workers.Wait())
+	})
+	workers.Go(func() error {
 		for {
 			select {
 			case <-store.Wake():
 				_, _, update := store.SnapshotUpdate()
 				update.Complete(nil)
 			case <-stop:
-				return
+				return nil
 			}
 		}
-	}()
+	})
 	return store, service
 }
 

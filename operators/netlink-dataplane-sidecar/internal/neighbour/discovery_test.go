@@ -96,6 +96,8 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 	}, entries)
 }
 
+// Test_Discover_RejectsMappedAndFallbackDeviceCollision verifies that a mapped
+// name cannot alias another managed link's unmapped logical device.
 func Test_Discover_RejectsMappedAndFallbackDeviceCollision(t *testing.T) {
 	entries, err := neighbour.Discover(
 		fakeBackend{},
@@ -107,6 +109,8 @@ func Test_Discover_RejectsMappedAndFallbackDeviceCollision(t *testing.T) {
 	require.Nil(t, entries)
 }
 
+// Test_Discover_RejectsMappingForUnmanagedLink verifies that mappings outside
+// the managed topology invalidate discovery rather than being silently ignored.
 func Test_Discover_RejectsMappingForUnmanagedLink(t *testing.T) {
 	entries, err := neighbour.Discover(
 		fakeBackend{},
@@ -174,6 +178,8 @@ func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
 	}}, entries)
 }
 
+// Test_Discover_RejectsMissingOrInvalidManagedLinks verifies that absent,
+// duplicate, or unusable managed links invalidate the entire neighbour snapshot.
 func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -227,6 +233,8 @@ func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
 	}
 }
 
+// Test_Discover_RejectsInvalidManagedVLANIdentity verifies that a VLAN's type,
+// owner, tag, protocol, and parent must match before publishing neighbours.
 func Test_Discover_RejectsInvalidManagedVLANIdentity(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -384,6 +392,8 @@ func Test_Discover_DumpErrorsInvalidateSnapshot(t *testing.T) {
 	}
 }
 
+// Test_Discover_RejectsLinkRecreationDuringNeighbourDump verifies that a link
+// replaced between dumps cannot publish neighbours tied to its old identity.
 func Test_Discover_RejectsLinkRecreationDuringNeighbourDump(t *testing.T) {
 	backend := &changingBackend{
 		linkSnapshots: [][]vnetlink.Link{

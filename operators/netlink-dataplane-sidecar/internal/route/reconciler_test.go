@@ -190,6 +190,8 @@ func Test_Reconciler_RouteAddRaceSkipsCleanup(t *testing.T) {
 	require.Empty(t, backend.deleted)
 }
 
+// Test_Reconciler_ReplacesOwnedRouteWithUnexpectedAttributes verifies that
+// drift in source, metrics, flags, or next-hop encoding restores canonical routes.
 func Test_Reconciler_ReplacesOwnedRouteWithUnexpectedAttributes(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -261,6 +263,8 @@ func Test_Reconciler_ReplacesOwnedRouteWithUnexpectedAttributes(t *testing.T) {
 	}
 }
 
+// Test_Reconciler_EquivalentRouteRevalidatesEachInterfaceOnce verifies that an
+// unchanged route requires only one lookup of its output interface per pass.
 func Test_Reconciler_EquivalentRouteRevalidatesEachInterfaceOnce(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -280,6 +284,8 @@ func Test_Reconciler_EquivalentRouteRevalidatesEachInterfaceOnce(t *testing.T) {
 	require.Equal(t, []string{"kni0"}, backend.linkCalls)
 }
 
+// Test_Reconciler_IgnoresKernelMaintainedRouteFlags verifies that runtime
+// offload and reachability flags do not trigger route deletion or addition.
 func Test_Reconciler_IgnoresKernelMaintainedRouteFlags(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -309,6 +315,8 @@ func Test_Reconciler_IgnoresKernelMaintainedRouteFlags(t *testing.T) {
 	require.Empty(t, backend.deleted)
 }
 
+// Test_Reconciler_RollsBackChangedRouteWhenReplacementAddFails verifies that
+// failure to add the desired route restores the exact route deleted before it.
 func Test_Reconciler_RollsBackChangedRouteWhenReplacementAddFails(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -332,6 +340,8 @@ func Test_Reconciler_RollsBackChangedRouteWhenReplacementAddFails(t *testing.T) 
 	require.Equal(t, current, backend.added[0])
 }
 
+// Test_Reconciler_RollsBackRouteOnDifferentOldInterface verifies that a failed
+// egress change restores the old next hop and interface rather than the new one.
 func Test_Reconciler_RollsBackRouteOnDifferentOldInterface(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni-old"] = testLink("kni-old", 10)
@@ -359,6 +369,8 @@ func Test_Reconciler_RollsBackRouteOnDifferentOldInterface(t *testing.T) {
 	require.Equal(t, current, backend.added[0])
 }
 
+// Test_Reconciler_RollsBackEarlierDeleteWhenLaterDeleteFails verifies that
+// failure removing a second conflicting route restores the first removed variant.
 func Test_Reconciler_RollsBackEarlierDeleteWhenLaterDeleteFails(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -468,6 +480,8 @@ func Test_Reconciler_EmptySnapshotDeletesOnlyExactOwner(t *testing.T) {
 	require.Equal(t, owned, backend.deleted[0])
 }
 
+// Test_Reconciler_DeletesOwnedDefaultRouteWithExplicitZeroPrefix verifies that
+// an implicit default destination is made explicit in the kernel delete request.
 func Test_Reconciler_DeletesOwnedDefaultRouteWithExplicitZeroPrefix(t *testing.T) {
 	backend := newFakeRouteBackend()
 	owned := testKernelRoute("0.0.0.0/0", testTable, testProtocol, testPriority)
@@ -609,6 +623,8 @@ func Test_Reconciler_DumpFailurePreventsMutation(t *testing.T) {
 	}
 }
 
+// Test_Reconciler_LinkReplacementAfterDumpPreventsRouteMutation verifies that
+// stale interface identity detected after route dumps blocks both add and delete.
 func Test_Reconciler_LinkReplacementAfterDumpPreventsRouteMutation(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -633,6 +649,8 @@ func Test_Reconciler_LinkReplacementAfterDumpPreventsRouteMutation(t *testing.T)
 	require.Empty(t, backend.deleted)
 }
 
+// Test_Reconciler_LinkReplacementDuringDeletePreventsAddAndUnsafeRollback verifies
+// that a changed output link blocks both the desired add and unsafe restoration.
 func Test_Reconciler_LinkReplacementDuringDeletePreventsAddAndUnsafeRollback(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -711,6 +729,8 @@ func Test_Reconciler_ChangedRouteDeleteFailureRollsBackEarlierChanges(t *testing
 	require.Equal(t, backend.added[0], backend.deleted[1])
 }
 
+// Test_Reconciler_StaleDeleteFailureRollsBackWholePass verifies that cleanup
+// failure restores earlier stale deletions and undoes the desired route change.
 func Test_Reconciler_StaleDeleteFailureRollsBackWholePass(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -806,6 +826,8 @@ func Test_Reconciler_ContextCancellationRollsBackBeforeCleanup(t *testing.T) {
 	require.Equal(t, backend.added[0], backend.deleted[0])
 }
 
+// Test_Reconciler_CancellationDuringChangeRestoresOriginalRoute verifies that
+// cancellation after deletion still permits restoring the original kernel route.
 func Test_Reconciler_CancellationDuringChangeRestoresOriginalRoute(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -831,6 +853,8 @@ func Test_Reconciler_CancellationDuringChangeRestoresOriginalRoute(t *testing.T)
 	require.Equal(t, []vnetlink.Route{current}, backend.added)
 }
 
+// Test_Reconciler_CancellationStopsRemainingChangedRouteDeletes verifies that
+// cancellation after the first variant deletion restores it without deleting more.
 func Test_Reconciler_CancellationStopsRemainingChangedRouteDeletes(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
@@ -984,6 +1008,8 @@ func Test_Reconciler_ConstructorAllowsUnassignedProtocol(t *testing.T) {
 	require.NotNil(t, reconciler)
 }
 
+// Test_Reconciler_ConstructorRejectsValuesThatOverflowNetlink verifies that
+// out-of-range table and priority values cannot construct a kernel route owner.
 func Test_Reconciler_ConstructorRejectsValuesThatOverflowNetlink(t *testing.T) {
 	if ^uint(0) == uint(^uint32(0)) {
 		t.Skip("int cannot represent values above uint32 on this platform")

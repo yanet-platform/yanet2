@@ -85,7 +85,6 @@ type storeSnapshot struct {
 	Routes      []Route
 	Initialized bool
 	Update      *Update
-	Generation  uint64
 }
 
 // NewStore creates an empty route store with a coalescing wake channel.
@@ -194,13 +193,10 @@ func (m *Store) completeUpdate(
 	}
 	m.settled = generation
 	if applyErr == nil {
-		if generation >= m.applied.Generation {
-			m.applied = storeSnapshot{
-				Routes:      append([]Route(nil), routes...),
-				Initialized: true,
-				Update:      update,
-				Generation:  generation,
-			}
+		m.applied = storeSnapshot{
+			Routes:      append([]Route(nil), routes...),
+			Initialized: true,
+			Update:      update,
 		}
 		if m.update != update {
 			m.notify()
