@@ -5,6 +5,7 @@ package cfwstate
 //#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
 //#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/pipeline -lpipeline
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"

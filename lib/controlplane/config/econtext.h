@@ -14,7 +14,7 @@ config_gen_ectx_get_device(
 	if (index >= config_gen_ectx->device_count) {
 		return NULL;
 	}
-	return ADDR_OF(config_gen_ectx->devices + index);
+	return config_gen_ectx->devices[index];
 }
 
 // Return the object execution context installed at the given object index, or
@@ -38,9 +38,9 @@ static inline void
 device_entry_ectx_count_recirc_drop(
 	struct device_entry_ectx *entry_ectx, const struct packet *packet
 ) {
-	uint64_t *counter = counter_handle_get_value(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_recirc_drop)
-	);
+	uint64_t *counter =
+		counter_handle_get_value(entry_ectx->counter_packet_recirc_drop
+		);
 	counter[0] += 1;
 	counter[1] += rte_pktmbuf_pkt_len(packet_to_mbuf(packet));
 }
@@ -78,10 +78,10 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 			struct device_entry_ectx *device_entry_ectx;
 			if (pass == 0) {
 				device_entry_ectx =
-					ADDR_OF(&device_ectx->input_pipelines);
+					device_ectx->abs_input_pipelines;
 			} else {
 				device_entry_ectx =
-					ADDR_OF(&device_ectx->output_pipelines);
+					device_ectx->abs_output_pipelines;
 			}
 
 			rlist_add(
@@ -151,7 +151,7 @@ module_ectx_route_input(
 	packet_front->pending_input_bytes += packet->data_len;
 
 	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&module_ectx->config_gen_ectx);
+		module_ectx->abs_config_gen_ectx;
 	struct device_ectx *device_ectx = config_gen_ectx_get_device(
 		config_gen_ectx, packet->tx_device_id
 	);
@@ -159,8 +159,7 @@ module_ectx_route_input(
 		packet_front_drop(packet_front, packet);
 		return;
 	}
-	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->input_pipelines);
+	struct device_entry_ectx *entry_ectx = device_ectx->abs_input_pipelines;
 	if (!packet_recirc_try_redirect(
 		    packet, module_ectx->packet_recirc_limit
 	    )) {
@@ -191,7 +190,7 @@ module_ectx_route_output(
 	packet_front->pending_output_bytes += packet->data_len;
 
 	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&module_ectx->config_gen_ectx);
+		module_ectx->abs_config_gen_ectx;
 	struct device_ectx *device_ectx = config_gen_ectx_get_device(
 		config_gen_ectx, packet->tx_device_id
 	);
@@ -200,7 +199,7 @@ module_ectx_route_output(
 		return;
 	}
 	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->output_pipelines);
+		device_ectx->abs_output_pipelines;
 	if (!packet_recirc_try_redirect(
 		    packet, module_ectx->packet_recirc_limit
 	    )) {

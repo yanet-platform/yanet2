@@ -51,32 +51,30 @@ module_ectx_process(
 
 	const uint64_t input_bytes = packet_front_input_bytes(packet_front);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&module_ectx->rx_counter),
-		packets_count,
-		input_bytes
+		module_ectx->rx_counter, packets_count, input_bytes
 	);
 
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&module_ectx->tx_counter),
+		module_ectx->tx_counter,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&module_ectx->drop_counter),
+		module_ectx->drop_counter,
 		packet_front_drop_count(packet_front) - drop_count,
 		packet_front_drop_bytes(packet_front) - drop_bytes
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&module_ectx->pending_input_counter),
+		module_ectx->pending_input_counter,
 		packet_front_pending_input_count(packet_front) -
 			pending_input_count,
 		packet_front_pending_input_bytes(packet_front) -
 			pending_input_bytes
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&module_ectx->pending_output_counter),
+		module_ectx->pending_output_counter,
 		packet_front_pending_output_count(packet_front) -
 			pending_output_count,
 		packet_front_pending_output_bytes(packet_front) -
@@ -87,7 +85,7 @@ module_ectx_process(
 struct dp_config *
 module_ectx_dp_config(struct module_ectx *module_ectx) {
 	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&module_ectx->config_gen_ectx);
+		module_ectx->abs_config_gen_ectx;
 	if (config_gen_ectx == NULL) {
 		return NULL;
 	}
@@ -99,6 +97,264 @@ module_ectx_dp_config(struct module_ectx *module_ectx) {
 	}
 
 	return ADDR_OF(&cp_config_gen->dp_config);
+}
+
+static void
+module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
+	struct cp_module *cp_module = ADDR_OF(&module_ectx->cp_module);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&module_ectx->counter_storage);
+
+	module_ectx->rx_counter = counter_get_value_handle(
+		cp_module->rx_counter_id, counter_storage
+	);
+	module_ectx->tx_counter = counter_get_value_handle(
+		cp_module->tx_counter_id, counter_storage
+	);
+	module_ectx->drop_counter = counter_get_value_handle(
+		cp_module->drop_counter_id, counter_storage
+	);
+	module_ectx->pending_input_counter = counter_get_value_handle(
+		cp_module->pending_input_counter_id, counter_storage
+	);
+	module_ectx->pending_output_counter = counter_get_value_handle(
+		cp_module->pending_output_counter_id, counter_storage
+	);
+
+	module_ectx->abs_mc_index = ADDR_OF(&module_ectx->mc_index);
+	module_ectx->abs_cm_index = ADDR_OF(&module_ectx->cm_index);
+	module_ectx->abs_counter_storage =
+		ADDR_OF(&module_ectx->counter_storage);
+	module_ectx->abs_config_gen_ectx =
+		ADDR_OF(&module_ectx->config_gen_ectx);
+
+	struct counter_storage **abs_runtime =
+		ADDR_OF(&module_ectx->abs_runtime_counter_storages);
+	if (abs_runtime != NULL) {
+		struct counter_storage **runtime =
+			ADDR_OF(&module_ectx->runtime_counter_storages);
+		for (uint64_t idx = 0;
+		     idx < module_ectx->runtime_counter_storage_count;
+		     ++idx) {
+			abs_runtime[idx] = ADDR_OF(runtime + idx);
+		}
+	}
+
+	struct module_object_link_ectx *object_links =
+		ADDR_OF(&module_ectx->object_links);
+	for (uint64_t idx = 0; idx < module_ectx->object_link_count; ++idx) {
+		object_links[idx].abs_object_ectx =
+			ADDR_OF(&object_links[idx].object_ectx);
+	}
+}
+
+static void
+chain_ectx_resolve_absolutes(struct chain_ectx *chain_ectx) {
+	struct cp_chain *cp_chain = ADDR_OF(&chain_ectx->cp_chain);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&chain_ectx->counter_storage);
+
+	chain_ectx->abs_counter_packet_pending_input = counter_get_value_handle(
+		cp_chain->counter_packet_pending_input, counter_storage
+	);
+	chain_ectx->abs_counter_packet_pending_output =
+		counter_get_value_handle(
+			cp_chain->counter_packet_pending_output, counter_storage
+		);
+
+	struct module_ectx **module_ptrs = ADDR_OF(&chain_ectx->module_ptrs);
+	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
+		struct module_ectx *module_ectx = ADDR_OF(module_ptrs + idx);
+		chain_ectx->modules[idx] = module_ectx;
+		module_ectx_resolve_absolutes(module_ectx);
+	}
+}
+
+static void
+function_ectx_resolve_absolutes(struct function_ectx *function_ectx) {
+	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&function_ectx->counter_storage);
+
+	function_ectx->abs_counter_packet_in = counter_get_value_handle(
+		cp_function->counter_packet_in, counter_storage
+	);
+	function_ectx->abs_counter_packet_out = counter_get_value_handle(
+		cp_function->counter_packet_out, counter_storage
+	);
+	function_ectx->abs_counter_packet_drop = counter_get_value_handle(
+		cp_function->counter_packet_drop, counter_storage
+	);
+	function_ectx->abs_counter_packet_pending_input =
+		counter_get_value_handle(
+			cp_function->counter_packet_pending_input,
+			counter_storage
+		);
+	function_ectx->abs_counter_packet_pending_output =
+		counter_get_value_handle(
+			cp_function->counter_packet_pending_output,
+			counter_storage
+		);
+
+	struct chain_ectx **chain_ptrs = ADDR_OF(&function_ectx->chain_ptrs);
+	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
+		chains[idx] = ADDR_OF(chain_ptrs + idx);
+		chain_ectx_resolve_absolutes(chains[idx]);
+	}
+
+	// Recode the chain map to absolute addresses in place.
+	//
+	// The recode re-derives the weighted expansion from the relative
+	// chain addresses and the controlplane weights, in the order
+	// creation used, so a repeated pass never transforms an
+	// already-absolute entry.
+	uint64_t pos = 0;
+	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
+		for (uint64_t weight_idx = 0;
+		     weight_idx < cp_function->chains[idx].weight;
+		     ++weight_idx) {
+			function_ectx->chain_map[pos] =
+				ADDR_OF(chain_ptrs + idx);
+			++pos;
+		}
+	}
+}
+
+static void
+pipeline_ectx_resolve_absolutes(struct pipeline_ectx *pipeline_ectx) {
+	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&pipeline_ectx->counter_storage);
+
+	pipeline_ectx->abs_counter_packet_in = counter_get_value_handle(
+		cp_pipeline->counter_packet_in, counter_storage
+	);
+	pipeline_ectx->abs_counter_packet_out = counter_get_value_handle(
+		cp_pipeline->counter_packet_out, counter_storage
+	);
+	pipeline_ectx->abs_counter_packet_drop = counter_get_value_handle(
+		cp_pipeline->counter_packet_drop, counter_storage
+	);
+	pipeline_ectx->abs_counter_packet_pending_input =
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_pending_input,
+			counter_storage
+		);
+	pipeline_ectx->abs_counter_packet_pending_output =
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_pending_output,
+			counter_storage
+		);
+
+	struct function_ectx **function_ptrs =
+		ADDR_OF(&pipeline_ectx->function_ptrs);
+	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
+		pipeline_ectx->functions[idx] = ADDR_OF(function_ptrs + idx);
+		function_ectx_resolve_absolutes(pipeline_ectx->functions[idx]);
+	}
+}
+
+static void
+device_entry_ectx_resolve_absolutes(
+	struct device_entry_ectx *entry_ectx,
+	struct cp_device_entry *cp_device_entry,
+	struct counter_storage *counter_storage
+) {
+	entry_ectx->counter_packet_rx = counter_get_value_handle(
+		cp_device_entry->counter_packet_rx, counter_storage
+	);
+	entry_ectx->counter_packet_entry = counter_get_value_handle(
+		cp_device_entry->counter_packet_entry, counter_storage
+	);
+	entry_ectx->counter_packet_tx = counter_get_value_handle(
+		cp_device_entry->counter_packet_tx, counter_storage
+	);
+	entry_ectx->counter_packet_drop = counter_get_value_handle(
+		cp_device_entry->counter_packet_drop, counter_storage
+	);
+	entry_ectx->counter_packet_recirc_drop = counter_get_value_handle(
+		cp_device_entry->counter_packet_recirc_drop, counter_storage
+	);
+	entry_ectx->counter_packet_pending_input = counter_get_value_handle(
+		cp_device_entry->counter_packet_pending_input, counter_storage
+	);
+	entry_ectx->counter_packet_pending_output = counter_get_value_handle(
+		cp_device_entry->counter_packet_pending_output, counter_storage
+	);
+	entry_ectx->abs_device_ectx = ADDR_OF(&entry_ectx->device_ectx);
+
+	struct pipeline_ectx **pipeline_ptrs =
+		ADDR_OF(&entry_ectx->pipeline_ptrs);
+	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
+	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
+		pipelines[idx] = ADDR_OF(pipeline_ptrs + idx);
+		pipeline_ectx_resolve_absolutes(pipelines[idx]);
+	}
+
+	// Recode the pipeline map to absolute addresses in place.
+	//
+	// The recode re-derives the weighted expansion from the relative
+	// pipeline addresses and the controlplane weights, in the order
+	// creation used, so a repeated pass never transforms an
+	// already-absolute entry.
+	uint64_t pos = 0;
+	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
+		for (uint64_t weight_idx = 0;
+		     weight_idx < cp_device_entry->pipelines[idx].weight;
+		     ++weight_idx) {
+			entry_ectx->pipeline_map[pos] =
+				ADDR_OF(pipeline_ptrs + idx);
+			++pos;
+		}
+	}
+}
+
+// Derive the absolute addresses the packet hot path runs on: the
+// counter pointers of every stage, resolved from the counter registry
+// ids and the stage counter storages, and the stage hop addresses,
+// copied or recoded from the controlplane-owned relative arrays.
+//
+// Runs in the dataplane process before the context is released to the
+// worker, and recomputes everything from controlplane-owned data, so a
+// re-run never corrupts a previous derivation.
+void
+config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
+	struct device_ectx **device_ptrs =
+		ADDR_OF(&config_gen_ectx->device_ptrs);
+	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
+		config_gen_ectx->devices[idx] = ADDR_OF(device_ptrs + idx);
+		struct device_ectx *device_ectx = config_gen_ectx->devices[idx];
+		if (device_ectx == NULL) {
+			continue;
+		}
+
+		struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+		struct counter_storage *counter_storage =
+			ADDR_OF(&device_ectx->counter_storage);
+
+		struct device_entry_ectx *input =
+			ADDR_OF(&device_ectx->input_pipelines);
+		device_ectx->abs_input_pipelines = input;
+		if (input != NULL) {
+			device_entry_ectx_resolve_absolutes(
+				input,
+				ADDR_OF(&cp_device->input_pipelines),
+				counter_storage
+			);
+		}
+
+		struct device_entry_ectx *output =
+			ADDR_OF(&device_ectx->output_pipelines);
+		device_ectx->abs_output_pipelines = output;
+		if (output != NULL) {
+			device_entry_ectx_resolve_absolutes(
+				output,
+				ADDR_OF(&cp_device->output_pipelines),
+				counter_storage
+			);
+		}
+	}
 }
 
 static inline void
@@ -119,19 +375,18 @@ chain_ectx_process(
 			packet_front_switch(packet_front);
 		}
 
-		struct module_ectx *module_ectx =
-			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
-
-		module_ectx_process(dp_worker, module_ectx, packet_front);
+		module_ectx_process(
+			dp_worker, chain_ectx->modules[idx], packet_front
+		);
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&chain_ectx->counter_packet_pending_input),
+		chain_ectx->abs_counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front),
 		packet_front_pending_input_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&chain_ectx->counter_packet_pending_output),
+		chain_ectx->abs_counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front),
 		packet_front_pending_output_bytes(packet_front)
 	);
@@ -151,7 +406,7 @@ function_ectx_run_single_chain(
 	struct packet_front *packet_front
 ) {
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
-	struct chain_ectx *chain_ectx = ADDR_OF(chains);
+	struct chain_ectx *chain_ectx = chains[0];
 
 	struct packet_front *schedule = &chain_ectx->schedule;
 	packet_front_take_input(schedule, packet_front);
@@ -176,7 +431,7 @@ function_ectx_run_chains(
 		uint64_t map_idx = packet->hash % function_ectx->chain_map_size;
 
 		struct chain_ectx *chain_ectx =
-			ADDR_OF(function_ectx->chain_map + map_idx);
+			function_ectx->chain_map[map_idx];
 		packet_front_input(&chain_ectx->schedule, packet);
 
 		packet = packet_list_pop(&packet_front->output);
@@ -187,7 +442,7 @@ function_ectx_run_chains(
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
-		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
+		struct chain_ectx *chain_ectx = chains[idx];
 
 		chain_ectx_process(
 			dp_worker, chain_ectx, &chain_ectx->schedule
@@ -234,7 +489,7 @@ function_ectx_process(
 		packet_front_pending_output_bytes(packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_in),
+		function_ectx->abs_counter_packet_in,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -252,24 +507,24 @@ function_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_out),
+		function_ectx->abs_counter_packet_out,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_drop),
+		function_ectx->abs_counter_packet_drop,
 		packet_front_drop_count(packet_front) - drop_count,
 		packet_front_drop_bytes(packet_front) - drop_bytes
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_input),
+		function_ectx->abs_counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front) -
 			pending_input_count,
 		packet_front_pending_input_bytes(packet_front) -
 			pending_input_bytes
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_output),
+		function_ectx->abs_counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front) -
 			pending_output_count,
 		packet_front_pending_output_bytes(packet_front) -
@@ -285,35 +540,34 @@ pipeline_ectx_process(
 ) {
 	// Packets arrive in output list, count them before processing
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_in),
+		pipeline_ectx->abs_counter_packet_in,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
-		struct function_ectx *function_ectx =
-			ADDR_OF(pipeline_ectx->functions + idx);
-
-		function_ectx_process(dp_worker, function_ectx, packet_front);
+		function_ectx_process(
+			dp_worker, pipeline_ectx->functions[idx], packet_front
+		);
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_out),
+		pipeline_ectx->abs_counter_packet_out,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_drop),
+		pipeline_ectx->abs_counter_packet_drop,
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_pending_input),
+		pipeline_ectx->abs_counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front),
 		packet_front_pending_input_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_pending_output),
+		pipeline_ectx->abs_counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front),
 		packet_front_pending_output_bytes(packet_front)
 	);
@@ -333,7 +587,7 @@ device_entry_ectx_dispatch_single(
 	struct packet_front *packet_front
 ) {
 	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
-	struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines);
+	struct pipeline_ectx *pipeline_ectx = pipelines[0];
 
 	struct packet_front *schedule = &pipeline_ectx->schedule;
 	packet_front_take_output(schedule, packet_front);
@@ -357,12 +611,9 @@ device_entry_ectx_dispatch_many(
 
 	struct packet *packet = packet_list_pop(&packet_front->output);
 	while (packet != NULL) {
-		uint64_t pipeline_idx =
+		struct pipeline_ectx *pipeline_ectx =
 			entry_ectx->pipeline_map
 				[packet->hash % entry_ectx->pipeline_map_size];
-
-		struct pipeline_ectx *pipeline_ectx =
-			ADDR_OF(pipelines + pipeline_idx);
 		packet_front_output(&pipeline_ectx->schedule, packet);
 
 		packet = packet_list_pop(&packet_front->output);
@@ -371,7 +622,7 @@ device_entry_ectx_dispatch_many(
 	packet_front->output_bytes = 0;
 
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
-		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
+		struct pipeline_ectx *pipeline_ectx = pipelines[idx];
 
 		pipeline_ectx_process(
 			dp_worker, pipeline_ectx, &pipeline_ectx->schedule
@@ -433,7 +684,7 @@ device_ectx_process_entry(
 	struct packet_front *packet_front
 ) {
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_rx),
+		entry_ectx->counter_packet_rx,
 		packet_front_input_count(packet_front),
 		packet_front_input_bytes(packet_front)
 	);
@@ -441,7 +692,7 @@ device_ectx_process_entry(
 	entry_ectx->handler(dp_worker, device_ectx, packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_entry),
+		entry_ectx->counter_packet_entry,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -449,22 +700,22 @@ device_ectx_process_entry(
 	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_tx),
+		entry_ectx->counter_packet_tx,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_drop),
+		entry_ectx->counter_packet_drop,
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_pending_input),
+		entry_ectx->counter_packet_pending_input,
 		packet_front_pending_input_count(packet_front),
 		packet_front_pending_input_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_pending_output),
+		entry_ectx->counter_packet_pending_output,
 		packet_front_pending_output_count(packet_front),
 		packet_front_pending_output_bytes(packet_front)
 	);
@@ -476,8 +727,7 @@ device_ectx_process_input(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
-	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->input_pipelines);
+	struct device_entry_ectx *entry_ectx = device_ectx->abs_input_pipelines;
 
 	device_ectx_process_entry(
 		dp_worker, device_ectx, entry_ectx, packet_front
@@ -491,7 +741,7 @@ device_ectx_process_output(
 	struct packet_front *packet_front
 ) {
 	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->output_pipelines);
+		device_ectx->abs_output_pipelines;
 
 	device_ectx_process_entry(
 		dp_worker, device_ectx, entry_ectx, packet_front

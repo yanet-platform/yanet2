@@ -5,6 +5,7 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
 //#cgo LDFLAGS: -L../../build/devices/plain/api -ldev_plain_api
 //#cgo LDFLAGS: -L../../build/devices/vlan/api -ldev_vlan_api
 //#cgo LDFLAGS: -L../../build/lib/logging/ -llogging

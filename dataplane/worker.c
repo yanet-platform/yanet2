@@ -144,7 +144,7 @@ worker_read(
 		}
 		device_entry_ectx_schedule(
 			config_gen_ectx,
-			ADDR_OF(&device_ectx->input_pipelines),
+			device_ectx->abs_input_pipelines,
 			packet
 		);
 	}

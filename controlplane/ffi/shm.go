@@ -6,6 +6,7 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
 //#cgo LDFLAGS: -L../../build/lib/errors -lerrors
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounter_pattern
 //#cgo LDFLAGS: -L../../build/lib/counters -lrure
