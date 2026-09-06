@@ -87,10 +87,8 @@ pub struct ModuleConfigCmd {
     /// Module configuration name.
     #[arg(long = "name", short = 'n')]
     pub name: String,
-    /// Names of the virtual services to install, in index order.
-    #[arg(long = "service", value_name = "SERVICE")]
-    pub services: Vec<String>,
-    /// YAML document with the destination filter rules.
+    /// YAML document with the destination filter rules; each rule names the
+    /// virtual service it routes to.
     #[arg(long = "file", value_name = "PATH")]
     pub file: Option<PathBuf>,
 }
@@ -162,7 +160,8 @@ struct RangeDoc {
 }
 
 /// YAML document populating a module configuration: the destination filter
-/// rules routing traffic to services.
+/// rules routing traffic to services; the linked services are exactly those
+/// the rules name.
 #[derive(Debug, Deserialize)]
 struct ModuleConfigDocument {
     /// Destination rules, in rule order.
@@ -424,7 +423,6 @@ impl L3BService {
     pub async fn update_module_config(&mut self, cmd: ModuleConfigCmd) -> Result<(), Error> {
         let mut config = ModuleConfig {
             name: cmd.name.clone(),
-            services: cmd.services.clone(),
             ..Default::default()
         };
 

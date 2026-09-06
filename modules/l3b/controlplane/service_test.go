@@ -59,8 +59,8 @@ func (m *mockBackend) ListServices() []string {
 }
 
 func (m *mockBackend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
-	for _, serviceName := range config.GetServices() {
-		if _, ok := m.services[serviceName]; !ok {
+	for _, rule := range config.GetDestinationFilterRules() {
+		if _, ok := m.services[rule.GetService()]; !ok {
 			return errNotFound
 		}
 	}
@@ -158,8 +158,10 @@ func Test_L3BService_UpdateModuleConfigUnknownService(t *testing.T) {
 
 	_, err := svc.UpdateModuleConfig(t.Context(), &l3bpb.UpdateModuleConfigRequest{
 		Config: &l3bpb.ModuleConfig{
-			Name:     "l3b0",
-			Services: []string{"absent"},
+			Name: "l3b0",
+			DestinationFilterRules: []*l3bpb.DestinationFilterRule{{
+				Service: "absent",
+			}},
 		},
 	})
 	require.Equal(t, codes.NotFound, status.Code(err))
@@ -174,8 +176,10 @@ func Test_L3BService_UpdateAndListModuleConfig(t *testing.T) {
 
 	_, err = svc.UpdateModuleConfig(ctx, &l3bpb.UpdateModuleConfigRequest{
 		Config: &l3bpb.ModuleConfig{
-			Name:     "l3b0",
-			Services: []string{"vs0"},
+			Name: "l3b0",
+			DestinationFilterRules: []*l3bpb.DestinationFilterRule{{
+				Service: "vs0",
+			}},
 		},
 	})
 	require.NoError(t, err)

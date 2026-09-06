@@ -88,52 +88,40 @@ func (m *ModuleConfig) Free() error {
 	)
 }
 
-// Update installs the destination filter rules and links the named virtual
-// service objects into the module configuration. The services must already be
-// published through agent_update_objects; the update links them in array
-// order.
-func (m *ModuleConfig) Update(
-	rules []DestinationFilterRule,
-	serviceNames []string,
-) error {
-	// A rule indexing beyond the service array would publish a
-	// configuration the dataplane can only honor by dropping traffic.
+// Update installs the destination filter rules into the module configuration,
+// linking the virtual service object each rule names. The services must
+// already be published through agent_update_objects; rules naming the same
+// service share one link.
+func (m *ModuleConfig) Update(rules []DestinationFilterRule) error {
+	// A rule without a service name would fail the object link deep inside
+	// the C update; reject it with the offending rule identified.
 	for idx := range rules {
-		if int(rules[idx].VirtualServiceIndex) >= len(serviceNames) {
-			return fmt.Errorf(
-				"rule %d references virtual service index %d beyond the %d linked services",
-				idx, rules[idx].VirtualServiceIndex, len(serviceNames),
-			)
+		if rules[idx].VirtualService == "" {
+			return fmt.Errorf("rule %d names no virtual service", idx)
 		}
 	}
 
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
+	// The C update copies each rule's service name into its module link
+	// record, so the strings are freed as soon as the call returns.
+	var cNames []*C.char
+	defer func() {
+		for _, cName := range cNames {
+			C.free(unsafe.Pointer(cName))
+		}
+	}()
+
 	var cRulesPtr *C.struct_l3b_destination_filter_rule
 	if len(rules) > 0 {
 		cRules := make([]C.struct_l3b_destination_filter_rule, len(rules))
 		for idx := range rules {
-			cRules[idx] = rules[idx].cBuild(pinner)
+			cName := C.CString(rules[idx].VirtualService)
+			cNames = append(cNames, cName)
+			cRules[idx] = rules[idx].cBuild(pinner, cName)
 		}
 		cRulesPtr = &cRules[0]
-	}
-
-	// The C update copies each name into its module link record, so the
-	// strings are freed as soon as the call returns.
-	var cNamesPtr **C.char
-	if len(serviceNames) > 0 {
-		cNames := make([]*C.char, len(serviceNames))
-		for idx, name := range serviceNames {
-			cNames[idx] = C.CString(name)
-		}
-		defer func() {
-			for _, cName := range cNames {
-				C.free(unsafe.Pointer(cName))
-			}
-		}()
-		pinner.Pin(&cNames[0])
-		cNamesPtr = &cNames[0]
 	}
 
 	var cErr *C.yanet_error
@@ -141,8 +129,6 @@ func (m *ModuleConfig) Update(
 		m.asRawPtr(),
 		cRulesPtr,
 		C.uint32_t(len(rules)),
-		cNamesPtr,
-		C.uint32_t(len(serviceNames)),
 		&cErr,
 	)
 	if rc != 0 {
@@ -156,19 +142,21 @@ func (m *ModuleConfig) Update(
 
 // DestinationFilterRule describes a destination-side classification rule.
 type DestinationFilterRule struct {
-	Net6s               []xnetip.BiContiguous
-	Net4s               []xnetip.Contiguous[xnetip.Network4]
-	ProtoRanges         filter.ProtoRanges
-	VirtualServiceIndex uint32
+	Net6s       []xnetip.BiContiguous
+	Net4s       []xnetip.Contiguous[xnetip.Network4]
+	ProtoRanges filter.ProtoRanges
+	// Name of the linked virtual service object the rule routes to.
+	VirtualService string
 }
 
 func (m *DestinationFilterRule) cBuild(
 	pinner *runtime.Pinner,
+	virtualService *C.char,
 ) C.struct_l3b_destination_filter_rule {
 	c := C.struct_l3b_destination_filter_rule{}
 	filter.CBuildNet6s(&c.net6s, m.Net6s, pinner)
 	filter.CBuildNet4s(&c.net4s, m.Net4s, pinner)
 	filter.CBuildProtoRanges(&c.proto_ranges, m.ProtoRanges, pinner)
-	c.virtual_service_index = C.uint32_t(m.VirtualServiceIndex)
+	c.virtual_service = virtualService
 	return c
 }

@@ -41,11 +41,8 @@ l3b_module_config_new(
 		return NULL;
 	}
 
-	config->virtual_service_count = 0;
-	SET_OFFSET_OF(&config->virtual_service_links, NULL);
-
-	config->virtual_service_index_count = 0;
-	SET_OFFSET_OF(&config->virtual_service_indexes, NULL);
+	config->destination_filter_rule_count = 0;
+	SET_OFFSET_OF(&config->rule_object_links, NULL);
 
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
@@ -62,23 +59,12 @@ l3b_module_config_destroy(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip6, L3B_DESTINATION_FILTER_IP6_TAG);
 
 	struct memory_context *memory_context = &cp_module->memory_context;
-	uint64_t *virtual_service_links =
-		ADDR_OF(&config->virtual_service_links);
-	if (virtual_service_links != NULL) {
+	uint64_t *rule_object_links = ADDR_OF(&config->rule_object_links);
+	if (rule_object_links != NULL) {
 		memory_bfree(
 			memory_context,
-			virtual_service_links,
-			sizeof(uint64_t) * config->virtual_service_count
-		);
-	}
-
-	uint32_t *virtual_service_indexes =
-		ADDR_OF(&config->virtual_service_indexes);
-	if (virtual_service_indexes != NULL) {
-		memory_bfree(
-			memory_context,
-			virtual_service_indexes,
-			sizeof(uint32_t) * config->virtual_service_index_count
+			rule_object_links,
+			sizeof(uint64_t) * config->destination_filter_rule_count
 		);
 	}
 
@@ -227,82 +213,53 @@ l3b_module_config_update(
 	struct cp_module *cp_module,
 	const struct l3b_destination_filter_rule *destination_filter_rules,
 	uint32_t destination_filter_rule_count,
-	const char *const *service_names,
-	uint32_t service_count,
 	yanet_error **err
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 	struct memory_context *memory_context = &cp_module->memory_context;
 
-	// Link each named virtual service object and record the link index in
-	// service-slot order; the dataplane resolves the link at execution
-	// time to reach the object.
+	// Link the virtual service each rule names and record the per-rule link
+	// index; rules naming the same service share one link, and the
+	// dataplane resolves the link at execution time to reach the object.
 	//
 	// The module is freshly constructed, so no earlier links exist.
-	if (service_count > 0) {
+	if (destination_filter_rule_count > 0) {
 		uint64_t *link_array = (uint64_t *)memory_balloc(
-			memory_context, sizeof(uint64_t) * service_count
+			memory_context,
+			sizeof(uint64_t) * destination_filter_rule_count
 		);
 		if (link_array == NULL) {
 			yanet_error_add(
-				err, "failed to allocate virtual service links"
-			);
-			return -1;
-		}
-
-		for (uint32_t idx = 0; idx < service_count; ++idx) {
-			if (cp_module_link_object(
-				    cp_module,
-				    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
-				    service_names[idx],
-				    &link_array[idx],
-				    err
-			    )) {
-				memory_bfree(
-					memory_context,
-					link_array,
-					sizeof(uint64_t) * service_count
-				);
-				return -1;
-			}
-		}
-		SET_OFFSET_OF(&config->virtual_service_links, link_array);
-	} else {
-		SET_OFFSET_OF(&config->virtual_service_links, NULL);
-	}
-	config->virtual_service_count = service_count;
-
-	// Map each destination filter rule index to its virtual service index;
-	// the filter query returns the rule index, the dataplane looks the
-	// virtual service up through this array.
-	if (destination_filter_rule_count > 0) {
-		uint32_t *virtual_service_indexes = (uint32_t *)memory_balloc(
-			memory_context,
-			sizeof(uint32_t) * destination_filter_rule_count
-		);
-		if (virtual_service_indexes == NULL) {
-			yanet_error_add(
-				err,
-				"failed to allocate virtual service indexes"
+				err, "failed to allocate rule object links"
 			);
 			return -1;
 		}
 
 		for (uint32_t idx = 0; idx < destination_filter_rule_count;
 		     ++idx) {
-			virtual_service_indexes[idx] =
-				destination_filter_rules[idx]
-					.virtual_service_index;
+			if (cp_module_link_object(
+				    cp_module,
+				    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
+				    destination_filter_rules[idx]
+					    .virtual_service,
+				    &link_array[idx],
+				    err
+			    )) {
+				memory_bfree(
+					memory_context,
+					link_array,
+					sizeof(uint64_t) *
+						destination_filter_rule_count
+				);
+				return -1;
+			}
 		}
-		SET_OFFSET_OF(
-			&config->virtual_service_indexes,
-			virtual_service_indexes
-		);
+		SET_OFFSET_OF(&config->rule_object_links, link_array);
 	} else {
-		SET_OFFSET_OF(&config->virtual_service_indexes, NULL);
+		SET_OFFSET_OF(&config->rule_object_links, NULL);
 	}
-	config->virtual_service_index_count = destination_filter_rule_count;
+	config->destination_filter_rule_count = destination_filter_rule_count;
 
 	if (build_destination_filters(
 		    config,

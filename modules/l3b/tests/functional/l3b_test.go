@@ -268,11 +268,11 @@ func publishModuleConfig(
 	require.NoError(t, err)
 
 	rules := []cl3b.DestinationFilterRule{{
-		Net4s:               []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
-		ProtoRanges:         filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
-		VirtualServiceIndex: 0,
+		Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
+		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+		VirtualService: serviceName,
 	}}
-	require.NoError(t, module.Update(rules, []string{serviceName}))
+	require.NoError(t, module.Update(rules))
 
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
 	return module

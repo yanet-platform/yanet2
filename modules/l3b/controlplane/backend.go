@@ -280,23 +280,13 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Resolve service names in module order before building anything.
-	serviceNames := make([]string, 0, len(config.GetServices()))
-	serviceIndex := make(map[string]uint32, len(config.GetServices()))
-	for idx, serviceName := range config.GetServices() {
-		if _, ok := m.services[serviceName]; !ok {
-			return fmt.Errorf("unknown virtual service %q", serviceName)
-		}
-		serviceNames = append(serviceNames, serviceName)
-		serviceIndex[serviceName] = uint32(idx)
-	}
-
+	// Resolve the service each rule names before building anything; the
+	// rules themselves carry the names into the module configuration.
 	rules := make([]cl3b.DestinationFilterRule, 0, len(config.GetDestinationFilterRules()))
 	for _, rule := range config.GetDestinationFilterRules() {
 		serviceName := rule.GetService()
-		index, ok := serviceIndex[serviceName]
-		if !ok {
-			return fmt.Errorf("destination rule references unknown service %q", serviceName)
+		if _, ok := m.services[serviceName]; !ok {
+			return status.Errorf(codes.NotFound, "unknown virtual service %q", serviceName)
 		}
 
 		net6s, err := filterpbconv.ToNet6s(rule.GetNet6S())
@@ -313,10 +303,10 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 		}
 
 		rules = append(rules, cl3b.DestinationFilterRule{
-			Net6s:               net6s,
-			Net4s:               net4s,
-			ProtoRanges:         protoRanges,
-			VirtualServiceIndex: index,
+			Net6s:          net6s,
+			Net4s:          net4s,
+			ProtoRanges:    protoRanges,
+			VirtualService: serviceName,
 		})
 	}
 
@@ -328,7 +318,7 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to create module config %q: %w", name, err)
 	}
-	if err := module.Update(rules, serviceNames); err != nil {
+	if err := module.Update(rules); err != nil {
 		_ = module.Free()
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}

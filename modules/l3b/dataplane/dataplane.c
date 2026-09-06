@@ -78,12 +78,12 @@ l3b_handle_packets(
 		}
 	}
 
-	// The module-level filters stay zeroed until the first virtual service
-	// is published; querying a zeroed filter is undefined (value_table_get
-	// dereferences a relative pointer via ADDR_OF_NONNULL). Skip the query
-	// and treat every TCP/UDP packet as unmatched while there are no
-	// services.
-	if (config->virtual_service_count > 0) {
+	// The module-level filters stay zeroed until the first destination
+	// rule is installed; querying a zeroed filter is undefined
+	// (value_table_get dereferences a relative pointer via
+	// ADDR_OF_NONNULL). Skip the query and treat every TCP/UDP packet as
+	// unmatched while there are no rules.
+	if (config->destination_filter_rule_count > 0) {
 		filter_query(
 			&config->filter_ip4,
 			l3b_destination_filter_ip4,
@@ -118,7 +118,7 @@ l3b_handle_packets(
 		}
 
 		uint32_t rule_index = FILTER_RULE_INVALID;
-		if (config->virtual_service_count > 0) {
+		if (config->destination_filter_rule_count > 0) {
 			if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 				rule_index = ip4_result[ip4_idx];
 			} else {
@@ -132,24 +132,16 @@ l3b_handle_packets(
 			ip6_idx++;
 		}
 
-		uint32_t virtual_service_index = FILTER_RULE_INVALID;
+		// Each rule carries the object link of the virtual service it
+		// routes to.
 		if (rule_index != FILTER_RULE_INVALID &&
-		    rule_index < config->virtual_service_index_count) {
-			uint32_t *virtual_service_indexes =
-				ADDR_OF(&config->virtual_service_indexes);
-			virtual_service_index =
-				virtual_service_indexes[rule_index];
-		}
-
-		if (virtual_service_index != FILTER_RULE_INVALID &&
-		    virtual_service_index < config->virtual_service_count) {
-			uint64_t *virtual_service_links =
-				ADDR_OF(&config->virtual_service_links);
+		    rule_index < config->destination_filter_rule_count) {
+			uint64_t *rule_object_links =
+				ADDR_OF(&config->rule_object_links);
 			struct virtual_service *virtual_service =
 				l3b_module_ectx_virtual_service(
 					module_ectx,
-					virtual_service_links
-						[virtual_service_index]
+					rule_object_links[rule_index]
 				);
 			if (virtual_service == NULL) {
 				packet_front_drop(packet_front, packet);

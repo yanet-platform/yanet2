@@ -18,13 +18,15 @@ struct agent;
 
 /*
  * A destination-side classification rule: the IPv6/IPv4 networks, protocol
- * ranges and the virtual service a matching packet is forwarded to.
+ * ranges and the name of the virtual service a matching packet is forwarded
+ * to.
  */
 struct l3b_destination_filter_rule {
 	struct filter_net6s net6s;
 	struct filter_net4s net4s;
 	struct filter_proto_ranges proto_ranges;
-	uint32_t virtual_service_index;
+	// Name of the linked virtual service object.
+	const char *virtual_service;
 };
 
 struct cp_module *
@@ -38,16 +40,14 @@ l3b_module_config_new(
 int
 l3b_module_config_free(struct cp_module *config, yanet_error **err);
 
-// Publish the virtual services named by service_names and compile the
-// destination filters that route packets to them. Each name is linked through
-// cp_module_link_object in array order; each destination filter rule's
-// virtual_service_index selects a slot in that array.
+// Compile the destination filters and link the virtual service each rule
+// names through cp_module_link_object. Rules naming the same service share one
+// link; the dataplane resolves each rule's link to the service object at
+// execution time.
 int
 l3b_module_config_update(
 	struct cp_module *cp_module,
 	const struct l3b_destination_filter_rule *destination_filter_rules,
 	uint32_t destination_filter_rule_count,
-	const char *const *service_names,
-	uint32_t service_count,
 	yanet_error **err
 );

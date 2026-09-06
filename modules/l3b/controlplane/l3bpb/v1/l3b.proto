@@ -73,13 +73,11 @@ message VirtualService {
   uint32 index_mask = 5;
 }
 
-// ModuleConfig describes a named module configuration. services lists the
-// virtual services, in index order, that destination_filter_rule.service
-// names refer to.
+// ModuleConfig describes a named module configuration. The virtual services
+// linked into it are exactly those its destination_filter_rules name.
 message ModuleConfig {
   string name = 1;
   repeated DestinationFilterRule destination_filter_rules = 2;
-  repeated string services = 3;
 }
 
 message CreateServiceRequest { VirtualService service = 1; }
