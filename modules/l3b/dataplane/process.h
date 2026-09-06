@@ -11,6 +11,8 @@
 
 #include "lib/dataplane/worker/worker.h"
 
+#include "lib/l3state/lookup.h"
+
 #include "objects/l3b/api/l3b_session_table_object.h"
 #include "objects/l3b/api/l3b_virtual_service_object.h"
 
@@ -181,56 +183,6 @@ l3b_real_ring_select(
 }
 
 /*
- * Build the session key of a packet: its source address and source port.
- *
- * The family byte plus the zero-padded address keep IPv4 and IPv6 flows
- * apart within one table; both port fields are stored little-endian.
- */
-static inline void
-l3b_session_key_of(struct packet *packet, struct l3b_session_key *key) {
-	memset(key, 0, sizeof(*key));
-
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	uint16_t src_port = 0;
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		src_port = rte_be_to_cpu_16(tcp_hdr->src_port);
-	} else {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		src_port = rte_be_to_cpu_16(udp_hdr->src_port);
-	}
-	key->src_port = src_port;
-
-	if (packet->network_header.type ==
-	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv4_hdr *,
-			packet->network_header.offset
-		);
-		key->family = 4;
-		memcpy(key->src_addr, &ipv4_hdr->src_addr, NET4_LEN);
-	} else {
-		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packet->network_header.offset
-		);
-		key->family = 6;
-		memcpy(key->src_addr, ipv6_hdr->src_addr, NET6_LEN);
-	}
-}
-
-/*
  * Whether the real server at the index can take traffic.
  */
 static inline bool
@@ -313,14 +265,17 @@ l3b_virtual_service_process(
 	// went away or was disabled falls through to the scheduler and
 	// re-pins.
 	uint32_t real_index;
-	struct l3b_session_key key;
-	l3b_session_key_of(packet, &key);
+	struct l3s_key key;
+	l3s_key_of_packet(packet, &key);
 
 	struct l3b_session_table_object *session_table =
 		ADDR_OF(&virtual_service->session_table);
 	if (session_table != NULL &&
-	    l3b_session_table_lookup(
-		    session_table, dp_worker->current_time, &key, &real_index
+	    l3s_table_lookup(
+		    &session_table->table,
+		    dp_worker->current_time,
+		    &key,
+		    &real_index
 	    ) == 0 &&
 	    l3b_real_is_ready(virtual_service, real_index)) {
 		struct real_server *real_servers =
@@ -335,11 +290,11 @@ l3b_virtual_service_process(
 	}
 
 	if (session_table != NULL) {
-		l3b_session_table_insert(
-			session_table,
+		l3s_table_insert(
+			&session_table->table,
 			dp_worker->idx,
 			dp_worker->current_time,
-			L3B_SESSION_TTL_SECONDS * 1000000000ull,
+			l3s_default_ttl(),
 			&key,
 			real_index
 		);

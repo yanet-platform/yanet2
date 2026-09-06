@@ -42,10 +42,12 @@ package dataplaneut
 // references between them (fwstate->acl, worker->pipeline, etc.).
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
+#cgo LDFLAGS: -L../../../build/lib/statemap
+#cgo LDFLAGS: -L../../../build/lib/l3state
 #cgo LDFLAGS: -lblackhole_dp -ll3b_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -ll3b_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
-#cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
+#cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
 #cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
 #cgo LDFLAGS: -Wl,--end-group
 

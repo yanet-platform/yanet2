@@ -3,9 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "fwmap.h"
 #include "fwstate_cursor.h"
 #include "layermap.h"
+#include "lib/statemap/fwmap.h"
 #include "types.h"
 
 /*

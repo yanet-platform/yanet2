@@ -3,6 +3,7 @@ package cfwstate
 //#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/fwstate/api -lfwstate_cp
 //#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
+//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
 //#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
@@ -10,7 +11,7 @@ package cfwstate
 //#include "api/agent.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
 //#include "lib/fwstate/config.h"
-//#include "lib/fwstate/fwmap.h"
+//#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/errors/errors.h"
 import "C"

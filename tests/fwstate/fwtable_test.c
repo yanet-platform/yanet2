@@ -9,7 +9,7 @@
 // the same key write-locks that bucket and spins forever on its own
 // read lock — the exact sequence a post-rotation sync packet drives.
 
-#include "lib/fwstate/fwtable.h"
+#include "lib/statemap/fwtable.h"
 #include "test_utils.h"
 #include <assert.h>
 #include <stdbool.h>

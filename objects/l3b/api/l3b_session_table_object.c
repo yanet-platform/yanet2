@@ -7,6 +7,7 @@
 #include "common/strutils.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/object/object.h"
+#include "lib/l3state/l3state.h"
 
 struct cp_object *
 l3b_session_table_object_create(
@@ -47,21 +48,7 @@ l3b_session_table_object_create(
 	// Layer memory is allocated through the object's own memory context,
 	// so the session stores are attributed to the table object.
 	fwmap_config_t config = {0};
-	config.key_size = sizeof(struct l3b_session_key);
-	config.value_size = sizeof(struct l3b_session_value);
-	config.hash_fn_id = FWMAP_HASH_FNV1A;
-	config.rand_fn_id = FWMAP_RAND_DEFAULT;
-	config.copy_key_fn_id = FWMAP_COPY_KEY_DEFAULT;
-	// A re-pin overwrites the record; a promoted record keeps the real the
-	// session was already pinned to.
-	config.update_value_fn_id = FWMAP_UPDATE_VALUE_DEFAULT;
-	config.promote_value_fn_id = FWMAP_PROMOTE_VALUE_KEEP_OLD;
-	config.worker_count = worker_count;
-	config.index_size =
-		index_size != 0 ? index_size : L3B_SESSION_INDEX_SIZE;
-	config.extra_bucket_count = extra_bucket_count != 0
-					    ? extra_bucket_count
-					    : L3B_SESSION_EXTRA_BUCKETS;
+	l3s_config(worker_count, index_size, extra_bucket_count, &config);
 
 	if (fwtable_insert_layer_cp(
 		    &object->table, &config, &object->cp_object.memory_context

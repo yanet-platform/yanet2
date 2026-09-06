@@ -1,7 +1,7 @@
 package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
-//#include "lib/fwstate/fwmap.h"
+//#include "lib/statemap/fwmap.h"
 import "C"
 
 // MapStats stores per-map statistics reported by fwstate.

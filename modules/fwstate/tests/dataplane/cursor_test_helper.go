@@ -6,7 +6,7 @@ package fwstate
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "lib/fwstate/config.h"
-#include "lib/fwstate/fwmap.h"
+#include "lib/statemap/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
 #include "lib/fwstate/types.h"
 #include "common/memory.h"

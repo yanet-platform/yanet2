@@ -15,9 +15,9 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
-#include "lib/fwstate/fwtable.h"
 #include "lib/fwstate/types.h"
 #include "lib/logging/log.h"
+#include "lib/statemap/fwtable.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
 #include "objects/fwstate/api/fwstate_map_v6_object.h"
 

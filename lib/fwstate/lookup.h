@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "fwtable.h"
+#include "lib/statemap/fwtable.h"
 
 struct packet;
 

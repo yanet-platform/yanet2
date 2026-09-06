@@ -5,6 +5,7 @@ package cl3bobject
 //#cgo CFLAGS: -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/objects/l3b/api -ll3b_objects
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
+//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"

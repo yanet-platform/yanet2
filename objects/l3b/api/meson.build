@@ -4,7 +4,7 @@ cp_dependencies = [
   lib_counters_dep,
   lib_errors_dep,
   lib_filter_compiler_dep,
-  lib_fwstate_dep,
+  lib_l3state_dep,
 ]
 
 includes = include_directories('../../..')

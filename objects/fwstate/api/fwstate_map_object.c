@@ -12,8 +12,9 @@
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
 #include "lib/fwstate/config.h"
-#include "lib/fwstate/fwtable.h"
+#include "lib/fwstate/ops.h"
 #include "lib/fwstate/types.h"
+#include "lib/statemap/fwtable.h"
 
 // Shared helpers: the v4 and v6 objects share an identical
 // {cp_object, fwtable_t} layout and differ only in the fwmap_config used
@@ -151,6 +152,10 @@ fwstate_map_v4_object_init(
 	yanet_error **err
 ) {
 	memset(self, 0, sizeof(struct fwstate_map_v4_object));
+
+	// Creating a table is the first fwstate operation any process
+	// performs; it also installs the domain's fwmap callbacks.
+	fwstate_fwmap_registry_ensure();
 
 	return cp_object_init(
 		&self->cp_object, agent, FWSTATE_MAP_V4_OBJECT_TYPE, name, err
@@ -319,6 +324,8 @@ fwstate_map_v6_object_init(
 	yanet_error **err
 ) {
 	memset(self, 0, sizeof(struct fwstate_map_v6_object));
+
+	fwstate_fwmap_registry_ensure();
 
 	return cp_object_init(
 		&self->cp_object, agent, FWSTATE_MAP_V6_OBJECT_TYPE, name, err
