@@ -3397,17 +3397,15 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "prost",
- "prost-types",
  "serde",
  "serde_yaml",
  "tokio",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "yanet-cli",
- "yanet-commonpb",
  "yanet-filterpb",
 ]
 

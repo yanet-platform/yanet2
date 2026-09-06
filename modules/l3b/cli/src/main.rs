@@ -1,5 +1,5 @@
-use std::net::IpAddr;
-use std::path::PathBuf;
+use core::net::IpAddr;
+use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -11,12 +11,12 @@ use l3bpb::{
 use serde::Deserialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
 
-#[allow(non_snake_case)]
+#[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod l3bpb {
     use serde::Serialize;
 
@@ -25,7 +25,7 @@ pub mod l3bpb {
 
 /// L3b module.
 #[derive(Debug, Clone, Parser)]
-#[command(version, about)]
+#[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]
@@ -57,6 +57,21 @@ pub enum ModeCmd {
     UpdateRealServerState(RealServerCmd),
     /// Set the weight of a real server within a named virtual service.
     UpdateRealServerWeight(WeightCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::CreateService(..) => "create-service",
+            Self::UpdateService(..) => "update-service",
+            Self::DeleteService(..) => "delete-service",
+            Self::ListServices => "list-services",
+            Self::UpdateModuleConfig(..) => "update-module-config",
+            Self::ListModuleConfigs => "list-module-configs",
+            Self::UpdateRealServerState(..) => "update-real-server-state",
+            Self::UpdateRealServerWeight(..) => "update-real-server-weight",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -278,11 +293,16 @@ impl From<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
 
 /// Reads and parses a YAML document from a file, attributing failures to the
 /// given verb as invalid input.
-fn load_document<T: for<'de> Deserialize<'de>>(path: &PathBuf, verb: &str, endpoint: &str) -> Result<T, Error> {
+#[allow(clippy::result_large_err)]
+fn load_document<T: for<'de> Deserialize<'de>>(
+    path: &Path,
+    verb: &'static str,
+    service: &L3BService,
+) -> Result<T, Error> {
     let file = std::fs::File::open(path)
-        .map_err(|err| Error::invalid_argument(verb, endpoint, format!("failed to open {}: {err}", path.display())))?;
+        .map_err(|err| service.invalid(verb, format!("failed to open {}: {err}", path.display())))?;
     serde_yaml::from_reader(file)
-        .map_err(|err| Error::invalid_argument(verb, endpoint, format!("invalid document {}: {err}", path.display())))
+        .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -301,7 +321,8 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = L3BService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = L3BService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::CreateService(cmd) => service.create_service(cmd).await,
@@ -316,37 +337,34 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct L3BService {
-    client: L3bServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<L3bServiceClient<LayeredChannel>>,
 }
 
 impl L3BService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = L3bServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
+            L3bServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+    fn invalid(&self, verb: &'static str, message: String) -> Error {
+        self.service.invalid(verb, message)
     }
 
     pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
         let service = self.virtual_service(&cmd).await?;
         let request = CreateServiceRequest { service: Some(service) };
         log::trace!("create service request: {request:?}");
-        self.client
+        self.service
+            .client()
             .create_service(request)
             .await
-            .map_err(self.map_err("create-service"))?;
+            .map_err(self.service.status("create-service"))?;
         output::success("create-service", format_args!("Created service {}.", cmd.name));
         Ok(())
     }
@@ -355,10 +373,11 @@ impl L3BService {
         let service = self.virtual_service(&cmd).await?;
         let request = UpdateServiceRequest { service: Some(service) };
         log::trace!("update service request: {request:?}");
-        self.client
+        self.service
+            .client()
             .update_service(request)
             .await
-            .map_err(self.map_err("update-service"))?;
+            .map_err(self.service.status("update-service"))?;
         output::success("update-service", format_args!("Updated service {}.", cmd.name));
         Ok(())
     }
@@ -374,7 +393,7 @@ impl L3BService {
         };
 
         if let Some(path) = &cmd.file {
-            let document: ServiceDocument = load_document(path, "create-service", &self.endpoint)?;
+            let document: ServiceDocument = load_document(path, "create-service", self)?;
             service.real_servers = document.real_servers.iter().map(Into::into).collect();
             service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
         }
@@ -385,10 +404,11 @@ impl L3BService {
     pub async fn delete_service(&mut self, cmd: NameCmd) -> Result<(), Error> {
         let request = DeleteServiceRequest { name: cmd.name.clone() };
         log::trace!("delete service request: {request:?}");
-        self.client
+        self.service
+            .client()
             .delete_service(request)
             .await
-            .map_err(self.map_err("delete-service"))?;
+            .map_err(self.service.status("delete-service"))?;
         output::success("delete-service", format_args!("Deleted service {}.", cmd.name));
         Ok(())
     }
@@ -397,10 +417,11 @@ impl L3BService {
         let request = ListServicesRequest {};
         log::trace!("list services request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .list_services(ListServicesRequest {})
             .await
-            .map_err(self.map_err("list-services"))?
+            .map_err(self.service.status("list-services"))?
             .into_inner();
         log::debug!("list services response: {response:?}");
 
@@ -427,16 +448,17 @@ impl L3BService {
         };
 
         if let Some(path) = &cmd.file {
-            let document: ModuleConfigDocument = load_document(path, "update-module-config", &self.endpoint)?;
+            let document: ModuleConfigDocument = load_document(path, "update-module-config", self)?;
             config.destination_filter_rules = document.destination_filter_rules.iter().map(Into::into).collect();
         }
 
         let request = UpdateModuleConfigRequest { config: Some(config) };
         log::trace!("update module config request: {request:?}");
-        self.client
+        self.service
+            .client()
             .update_module_config(request)
             .await
-            .map_err(self.map_err("update-module-config"))?;
+            .map_err(self.service.status("update-module-config"))?;
         output::success(
             "update-module-config",
             format_args!("Updated module config {}.", cmd.name),
@@ -448,10 +470,11 @@ impl L3BService {
         let request = ListModuleConfigsRequest {};
         log::trace!("list module configs request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .list_module_configs(ListModuleConfigsRequest {})
             .await
-            .map_err(self.map_err("list-module-configs"))?
+            .map_err(self.service.status("list-module-configs"))?
             .into_inner();
         log::debug!("list module configs response: {response:?}");
 
@@ -478,10 +501,11 @@ impl L3BService {
             enabled: cmd.enabled,
         };
         log::trace!("update real server state request: {request:?}");
-        self.client
+        self.service
+            .client()
             .update_real_server_state(request)
             .await
-            .map_err(self.map_err("update-real-server-state"))?;
+            .map_err(self.service.status("update-real-server-state"))?;
         output::success(
             "update-real-server-state",
             format_args!(
@@ -499,10 +523,11 @@ impl L3BService {
             weight: cmd.weight,
         };
         log::trace!("update real server weight request: {request:?}");
-        self.client
+        self.service
+            .client()
             .update_real_server_weight(request)
             .await
-            .map_err(self.map_err("update-real-server-weight"))?;
+            .map_err(self.service.status("update-real-server-weight"))?;
         output::success(
             "update-real-server-weight",
             format_args!(
