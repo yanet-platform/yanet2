@@ -598,6 +598,7 @@ dataplane_init(
 			"fwstate_map_v4",
 			"fwstate_map_v6",
 			"l3b_virtual_service",
+			"l3b_session_table",
 		};
 		for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]);
 		     ++i) {

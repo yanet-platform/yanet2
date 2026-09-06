@@ -53,7 +53,7 @@ func setupL3bHarness(
 		Devices:       []string{deviceName},
 		Modules:       []string{"l3b", "forward"},
 		DevicesToLoad: []string{"plain"},
-		ObjectsToLoad: []string{"l3b_virtual_service"},
+		ObjectsToLoad: []string{"l3b_virtual_service", "l3b_session_table"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
 	require.NoError(t, err)
@@ -241,12 +241,13 @@ func publishVirtualService(
 			DestinationAddress: xerror.Unwrap(netip.ParseAddr(realDst)),
 			SourceNet:          xnetip.MustParseNetwork(sourceNet),
 		}},
-		HashMask:     0,
-		IndexMask:    0,
-		RingCapacity: 1 * 1000,
+		HashMask:         0,
+		IndexMask:        0,
+		RingCapacity:     1 * 1000,
+		SessionIndexSize: 4096,
 	}
 
-	object, err := cl3bobject.CreateVirtualService(agent, name, serviceConfig)
+	object, err := cl3bobject.CreateVirtualService(agent, name, 1, serviceConfig)
 	require.NoError(t, err)
 
 	require.NoError(t, object.UpdateRing([]uint32{0}))
@@ -376,4 +377,91 @@ func TestL3b_ForwardsNonInitialFragments(t *testing.T) {
 	require.False(t, info.IsTunneled, "the fragment must not be encapsulated")
 	require.Equal(t, "10.0.0.1", info.SrcIP.String())
 	require.Equal(t, "192.168.1.1", info.DstIP.String())
+}
+
+// TestL3b_SessionSticksFlowToReal verifies the session table semantics: a
+// flow keeps the real server it was pinned to even after the scheduler ring
+// changes underneath, while a new flow follows the updated ring.
+func TestL3b_SessionSticksFlowToReal(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	serviceConfig := cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
+		}},
+		RealServers: []cl3bobject.RealServer{
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.11")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
+		},
+		HashMask:         0,
+		IndexMask:        0,
+		RingCapacity:     2 * 1000,
+		SessionIndexSize: 4096,
+	}
+
+	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Free() })
+	require.NoError(t, service.UpdateRing([]uint32{0}))
+	require.NoError(t, service.Publish(agent))
+
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	packetOf := func(srcIP string, srcPort uint16) gopacket.Packet {
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP(srcIP),
+			DstIP:    net.ParseIP("192.168.1.1"),
+		}
+		tcp := layers.TCP{
+			SrcPort: layers.TCPPort(srcPort),
+			DstPort: 80,
+			Seq:     1,
+			Window:  1024,
+		}
+		tcp.SetNetworkLayerForChecksum(&ip4)
+		return xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+	}
+
+	outerDstOf := func(packet gopacket.Packet) string {
+		result, err := h.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Empty(t, result.Drop)
+		require.Len(t, result.Output, 1)
+		info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
+		require.NoError(t, err)
+		require.True(t, info.IsTunneled)
+		return info.DstIP.String()
+	}
+
+	// The first flow is pinned to real 0 by the initial ring.
+	flowA := packetOf("10.0.0.1", 12345)
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA))
+
+	// Retarget the ring at real 1 only; the pinned flow must stay on
+	// real 0 while a new flow lands on real 1.
+	require.NoError(t, service.UpdateRing([]uint32{1}))
+
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA),
+		"an existing session must keep its real across a ring update")
+	require.Equal(t, "172.16.0.11", outerDstOf(packetOf("10.0.0.2", 54321)),
+		"a new session must follow the updated ring")
 }

@@ -34,8 +34,6 @@ l3b_handle_packets(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	(void)dp_worker;
-
 	struct module_config *config = container_of(
 		ADDR_OF(&module_ectx->cp_module),
 		struct module_config,
@@ -149,7 +147,7 @@ l3b_handle_packets(
 			}
 
 			int result = l3b_virtual_service_process(
-				virtual_service, packet
+				dp_worker, virtual_service, packet
 			);
 			if (result == 0) {
 				packet_front_output(packet_front, packet);

@@ -11,6 +11,8 @@
 #include "lib/errors/errors.h"
 
 struct agent;
+struct cp_object;
+struct l3b_session_table_object;
 
 // Shared-memory object type under which virtual services are registered.
 #define L3B_VIRTUAL_SERVICE_OBJECT_TYPE "l3b_virtual_service"
@@ -85,7 +87,9 @@ struct real_ring {
  * A virtual service exposed to clients.
  *
  * Incoming traffic that matches one of the per-family filters is dispatched
- * to a real server chosen through real_ring by a hash-derived scheduler.
+ * to a real server: the session table first pins each client flow to a real,
+ * and only flows without a live session go through the hash-derived
+ * real_ring scheduler.
  *
  * Contract: the controlplane must filter_init both filter_ip4 and filter_ip6
  * before publishing a virtual service; the dataplane queries them directly
@@ -106,6 +110,10 @@ struct virtual_service {
 	// Per-family classification of incoming packets.
 	struct filter filter_ip6;
 	struct filter filter_ip4;
+
+	// Hash index of client flows pinned to real servers; created and
+	// owned together with the service object.
+	struct l3b_session_table_object *session_table;
 };
 
 /*
@@ -169,24 +177,33 @@ struct l3b_virtual_service {
 	// Capacity of the real server ring; set at configuration time. The ring
 	// starts empty and is populated via l3b_virtual_service_update_ring.
 	uint32_t ring_capacity;
+
+	// Hash index size of the service's session table; zero selects the
+	// default.
+	uint32_t session_index_size;
 };
 
-// Allocate a named virtual service object in the agent's shared memory from
-// its control-plane descriptor. The object is registered under
-// (L3B_VIRTUAL_SERVICE_OBJECT_TYPE, name) and is published to the dataplane
-// through agent_update_objects; module configurations reference it by name
-// via cp_module_link_object.
+// Allocate a named virtual service object together with its session table
+// object from the control-plane descriptor. Both objects are registered under
+// the given name (service and session-table types) and are published to the
+// dataplane through agent_update_objects; module configurations reference the
+// service by name via cp_module_link_object. worker_count must cover every
+// worker that will pin sessions; *session_table receives the table's
+// cp_object for publishing.
 struct cp_object *
 l3b_virtual_service_create(
 	struct agent *agent,
 	const char *name,
+	uint16_t worker_count,
 	const struct l3b_virtual_service *virtual_service,
+	struct cp_object **session_table,
 	yanet_error **err
 );
 
-// Destroy the virtual service object when it is dangling — referenced by no
-// live configuration generation. A refused destroy is reported through err
-// and the caller must retry later.
+// Destroy the virtual service object and its session table object once both
+// are dangling — referenced by no live configuration generation. A refused
+// destroy of either is reported through err and the caller must retry later;
+// both objects stay intact until then.
 int
 l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err);
 

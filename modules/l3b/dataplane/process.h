@@ -6,7 +6,12 @@
 
 #include <rte_ether.h>
 #include <rte_ip.h>
+#include <rte_tcp.h>
+#include <rte_udp.h>
 
+#include "lib/dataplane/worker/worker.h"
+
+#include "objects/l3b/api/l3b_session_table_object.h"
 #include "objects/l3b/api/l3b_virtual_service_object.h"
 
 #include "common/network.h"
@@ -176,17 +181,112 @@ l3b_real_ring_select(
 }
 
 /*
+ * Build the session key of a packet: its source address and source port.
+ *
+ * The family byte plus the zero-padded address keep IPv4 and IPv6 flows
+ * apart within one table; both port fields are stored little-endian.
+ */
+static inline void
+l3b_session_key_of(struct packet *packet, struct l3b_session_key *key) {
+	memset(key, 0, sizeof(*key));
+
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	uint16_t src_port = 0;
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+		src_port = rte_be_to_cpu_16(tcp_hdr->src_port);
+	} else {
+		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_udp_hdr *,
+			packet->transport_header.offset
+		);
+		src_port = rte_be_to_cpu_16(udp_hdr->src_port);
+	}
+	key->src_port = src_port;
+
+	if (packet->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
+		);
+		key->family = 4;
+		memcpy(key->src_addr, &ipv4_hdr->src_addr, NET4_LEN);
+	} else {
+		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		key->family = 6;
+		memcpy(key->src_addr, ipv6_hdr->src_addr, NET6_LEN);
+	}
+}
+
+/*
+ * Whether the real server at the index can take traffic.
+ */
+static inline bool
+l3b_real_is_ready(
+	const struct virtual_service *virtual_service, uint32_t real_index
+) {
+	if (real_index >= virtual_service->real_server_count) {
+		return false;
+	}
+
+	struct real_server *real_servers =
+		ADDR_OF(&virtual_service->real_servers);
+	return real_servers[real_index].state == real_state_enabled;
+}
+
+/*
+ * Pick the real server for a flow through the scheduler ring.
+ *
+ * Returns 0 and stores the index on success, -1 when no server is ready.
+ */
+static inline int
+l3b_schedule_real(
+	struct virtual_service *virtual_service,
+	struct packet *packet,
+	uint32_t *real_index
+) {
+	uint32_t value = packet->hash & virtual_service->scheduler_hash_mask;
+	value &= virtual_service->scheduler_index_mask;
+
+	if (l3b_real_ring_select(
+		    &virtual_service->real_ring, value, real_index
+	    ) < 0) {
+		return -1;
+	}
+
+	if (!l3b_real_is_ready(virtual_service, *real_index)) {
+		return -1;
+	}
+	return 0;
+}
+
+/*
  * Process a single packet through a virtual service.
  *
- * The per-family filter is queried first; a non-match aborts with -1. The
- * packet hash is then reduced by the scheduler masks to pick a real server
- * from the ring, which performs the encapsulation.
+ * The per-family filter is queried first; a non-match aborts with -1. A live
+ * session record then pins the flow to its real server; only flows without
+ * one go through the hash-derived scheduler, and the choice is written back
+ * as a new session record. The chosen real performs the encapsulation.
  *
  * Returns 0 on success, -1 on failure.
  */
 static inline int
 l3b_virtual_service_process(
-	struct virtual_service *virtual_service, struct packet *packet
+	struct dp_worker *dp_worker,
+	struct virtual_service *virtual_service,
+	struct packet *packet
 ) {
 	uint16_t type = packet->network_header.type;
 	const struct filter_query *query;
@@ -209,18 +309,40 @@ l3b_virtual_service_process(
 		return -1;
 	}
 
-	uint32_t value = packet->hash & virtual_service->scheduler_hash_mask;
-	value &= virtual_service->scheduler_index_mask;
-
+	// An existing session keeps its real server; a session whose real
+	// went away or was disabled falls through to the scheduler and
+	// re-pins.
 	uint32_t real_index;
-	if (l3b_real_ring_select(
-		    &virtual_service->real_ring, value, &real_index
-	    ) < 0) {
+	struct l3b_session_key key;
+	l3b_session_key_of(packet, &key);
+
+	struct l3b_session_table_object *session_table =
+		ADDR_OF(&virtual_service->session_table);
+	if (session_table != NULL &&
+	    l3b_session_table_lookup(
+		    session_table, dp_worker->current_time, &key, &real_index
+	    ) == 0 &&
+	    l3b_real_is_ready(virtual_service, real_index)) {
+		struct real_server *real_servers =
+			ADDR_OF(&virtual_service->real_servers);
+		return l3b_real_server_process(
+			&real_servers[real_index], packet
+		);
+	}
+
+	if (l3b_schedule_real(virtual_service, packet, &real_index) < 0) {
 		return -1;
 	}
 
-	if (real_index >= virtual_service->real_server_count) {
-		return -1;
+	if (session_table != NULL) {
+		l3b_session_table_insert(
+			session_table,
+			dp_worker->idx,
+			dp_worker->current_time,
+			L3B_SESSION_TTL_SECONDS * 1000000000ull,
+			&key,
+			real_index
+		);
 	}
 
 	struct real_server *real_servers =

@@ -222,7 +222,10 @@ func (m *backend) publishService(
 		return nil, nil, err
 	}
 
-	object, err := cl3bobject.CreateVirtualService(m.agent, name, config)
+	// The session table's per-worker sizing must cover every worker.
+	workerCount := m.agent.DPConfig().WorkerCount()
+
+	object, err := cl3bobject.CreateVirtualService(m.agent, name, uint16(workerCount), config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
@@ -541,5 +544,6 @@ func buildVirtualServiceConfig(
 		HashMask:          service.GetHashMask(),
 		IndexMask:         service.GetIndexMask(),
 		RingCapacity:      uint32(len(realServers)) * maxRealServerWeight,
+		SessionIndexSize:  service.GetSessionIndexSize(),
 	}, nil
 }

@@ -6,6 +6,8 @@
 
 #include <lib/filter/compiler.h>
 
+#include "l3b_session_table_object.h"
+
 #include "common/container_of.h"
 #include "common/strutils.h"
 #include "lib/controlplane/agent/agent.h"
@@ -132,7 +134,9 @@ struct cp_object *
 l3b_virtual_service_create(
 	struct agent *agent,
 	const char *name,
+	uint16_t worker_count,
 	const struct l3b_virtual_service *virtual_service,
+	struct cp_object **session_table,
 	yanet_error **err
 ) {
 	struct l3b_virtual_service_object *object =
@@ -230,7 +234,35 @@ l3b_virtual_service_create(
 		goto error_ring;
 	}
 
+	// Session table: born with the service, under the same name and its
+	// own object type, and reached from the service through the embedded
+	// relative pointer.
+	struct cp_object *table = l3b_session_table_object_create(
+		agent,
+		name,
+		worker_count,
+		virtual_service->session_index_size,
+		0,
+		err
+	);
+	if (table == NULL) {
+		yanet_error_add(err, "failed to create session table object");
+		goto error_filters;
+	}
+	SET_OFFSET_OF(
+		&vs->session_table,
+		container_of(table, struct l3b_session_table_object, cp_object)
+	);
+
+	if (session_table != NULL) {
+		*session_table = table;
+	}
+
 	return &object->cp_object;
+
+error_filters:
+	filter_free(&vs->filter_ip4, L3B_SOURCE_FILTER_IP4_TAG);
+	filter_free(&vs->filter_ip6, L3B_SOURCE_FILTER_IP6_TAG);
 
 error_ring:
 	if (vs->real_ring.capacity > 0) {
@@ -300,6 +332,21 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 
 int
 l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
+	// Both objects must be dangling; a refusal leaves the pair intact for
+	// a later retry.
+	struct l3b_virtual_service_object *object = container_of(
+		cp_object, struct l3b_virtual_service_object, cp_object
+	);
+	struct l3b_session_table_object *table =
+		ADDR_OF(&object->virtual_service.session_table);
+	if (table != NULL) {
+		if (cp_object_try_destroy(&table->cp_object, err)) {
+			return -1;
+		}
+		l3b_session_table_object_destroy(&table->cp_object);
+		SET_OFFSET_OF(&object->virtual_service.session_table, NULL);
+	}
+
 	if (cp_object_try_destroy(cp_object, err)) {
 		return -1;
 	}

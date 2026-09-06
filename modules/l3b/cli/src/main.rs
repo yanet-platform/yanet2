@@ -145,6 +145,10 @@ struct ServiceDocument {
     real_servers: Vec<RealServerDoc>,
     /// Source-side match rules for incoming traffic.
     source_filter_rules: Vec<SourceFilterRuleDoc>,
+    /// Hash index size of the service's session table; the default when
+    /// omitted.
+    #[serde(default)]
+    session_index_size: u32,
 }
 
 /// One real server tunnel endpoint.
@@ -396,6 +400,7 @@ impl L3BService {
             let document: ServiceDocument = load_document(path, "create-service", self)?;
             service.real_servers = document.real_servers.iter().map(Into::into).collect();
             service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
+            service.session_index_size = document.session_index_size;
         }
 
         Ok(service)

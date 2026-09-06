@@ -8,6 +8,7 @@ package cl3bobject
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
+//#include "objects/l3b/api/l3b_session_table_object.h"
 //#include "objects/l3b/api/l3b_virtual_service_object.h"
 import "C"
 
@@ -58,17 +59,27 @@ type VirtualServiceConfig struct {
 	HashMask          uint32
 	IndexMask         uint32
 	RingCapacity      uint32
+	// Hash index size of the service's session table; zero selects the
+	// default.
+	SessionIndexSize uint32
 }
 
 // VirtualServiceObjectType is the registered shared-memory object type of a
 // virtual service.
 const VirtualServiceObjectType = C.L3B_VIRTUAL_SERVICE_OBJECT_TYPE
 
-// VirtualServiceObject is an opaque handle to a named virtual service
-// published as a standalone cp_object in shared memory.
+// SessionTableObjectType is the registered shared-memory object type of a
+// virtual service's session table.
+const SessionTableObjectType = C.L3B_SESSION_TABLE_OBJECT_TYPE
+
+// VirtualServiceObject is an opaque handle to a named virtual service and
+// its session table, published as standalone cp_objects in shared memory.
 type VirtualServiceObject struct {
 	name string
 	ptr  *C.struct_cp_object
+	// The session table object born with the service; published and
+	// destroyed together with it.
+	sessionTable *C.struct_cp_object
 }
 
 func (m *VirtualServiceObject) asRawPtr() *C.struct_cp_object {
@@ -80,14 +91,16 @@ func (m *VirtualServiceObject) Name() string {
 	return m.name
 }
 
-// CreateVirtualService allocates a named virtual service object in the agent's
-// shared memory from its descriptor.
+// CreateVirtualService allocates a named virtual service object together with
+// its session table object in the agent's shared memory, from its descriptor.
+// workerCount must cover every worker that will pin sessions.
 //
 // The returned object is not yet visible to the dataplane; call Publish to
 // install it into a configuration generation.
 func CreateVirtualService(
 	agent *ffi.Agent,
 	name string,
+	workerCount uint16,
 	config VirtualServiceConfig,
 ) (*VirtualServiceObject, error) {
 	pinner := &runtime.Pinner{}
@@ -99,10 +112,13 @@ func CreateVirtualService(
 	cConfig := config.cBuild(pinner)
 
 	var cErr *C.yanet_error
+	var sessionTable *C.struct_cp_object
 	ptr := C.l3b_virtual_service_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
+		C.uint16_t(workerCount),
 		&cConfig,
+		&sessionTable,
 		&cErr,
 	)
 	if ptr == nil {
@@ -111,7 +127,7 @@ func CreateVirtualService(
 			cerrors.FromC(unsafe.Pointer(cErr)),
 		)
 	}
-	return &VirtualServiceObject{name: name, ptr: ptr}, nil
+	return &VirtualServiceObject{name: name, ptr: ptr, sessionTable: sessionTable}, nil
 }
 
 // Publish upserts the object into a new dataplane configuration generation
@@ -124,6 +140,9 @@ func (m *VirtualServiceObject) Publish(agent *ffi.Agent) error {
 	}
 
 	objects := []*C.struct_cp_object{m.ptr}
+	if m.sessionTable != nil {
+		objects = append(objects, m.sessionTable)
+	}
 	var cErr *C.yanet_error
 	rc := C.agent_update_objects(
 		(*C.struct_agent)(agent.AsRawPtr()),
@@ -169,28 +188,32 @@ func (m *VirtualServiceObject) Free() error {
 	)
 }
 
-// DeleteVirtualService removes the named service object from the agent's
-// registry; a replacement generation published afterwards drops it from the
-// dataplane. The caller remains the object's owner and must still free its
-// handle separately.
+// DeleteVirtualService removes the named service object and its session table
+// from the agent's registry; a replacement generation published afterwards
+// drops them from the dataplane. The caller remains the objects' owner and
+// must still free its handle separately.
 func DeleteVirtualService(agent *ffi.Agent, name string) error {
-	cType := C.CString(VirtualServiceObjectType)
-	defer C.free(unsafe.Pointer(cType))
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	var cErr *C.yanet_error
-	rc := C.agent_delete_object(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		cType,
-		cName,
-		&cErr,
-	)
-	if rc != 0 {
-		return fmt.Errorf(
-			"failed to delete virtual service object: %w",
-			cerrors.FromC(unsafe.Pointer(cErr)),
+	for _, objectType := range []string{VirtualServiceObjectType, SessionTableObjectType} {
+		cType := C.CString(objectType)
+
+		var cErr *C.yanet_error
+		rc := C.agent_delete_object(
+			(*C.struct_agent)(agent.AsRawPtr()),
+			cType,
+			cName,
+			&cErr,
 		)
+		C.free(unsafe.Pointer(cType))
+		if rc != 0 {
+			return fmt.Errorf(
+				"failed to delete %s object: %w",
+				objectType,
+				cerrors.FromC(unsafe.Pointer(cErr)),
+			)
+		}
 	}
 	return nil
 }
@@ -295,9 +318,10 @@ func (m *VirtualServiceConfig) cBuild(
 	pinner *runtime.Pinner,
 ) C.struct_l3b_virtual_service {
 	c := C.struct_l3b_virtual_service{
-		hash_mask:     C.uint32_t(m.HashMask),
-		index_mask:    C.uint32_t(m.IndexMask),
-		ring_capacity: C.uint32_t(m.RingCapacity),
+		hash_mask:          C.uint32_t(m.HashMask),
+		index_mask:         C.uint32_t(m.IndexMask),
+		ring_capacity:      C.uint32_t(m.RingCapacity),
+		session_index_size: C.uint32_t(m.SessionIndexSize),
 	}
 
 	if len(m.SourceFilterRules) > 0 {

@@ -42,6 +42,7 @@ typedef enum {
 	FWMAP_PROMOTE_VALUE_FWSTATE,
 	FWMAP_KEY_EQUAL_FW4,
 	FWMAP_KEY_EQUAL_FW6,
+	FWMAP_PROMOTE_VALUE_KEEP_OLD,
 	FWMAP_FUNC_COUNT
 } fwmap_func_id_t;
 // NOLINTEND(readability-identifier-naming)
@@ -286,6 +287,16 @@ fwmap_default_promote_value(
 	(void)dst, (void)old_value, (void)new_value, (void)size;
 	// nop
 	return;
+}
+
+// First write wins: a fresh layer entry inherits the value the deeper
+// layer already carries, ignoring the value this insert proposed.
+static inline void
+fwmap_promote_value_keep_old(
+	void *dst, const void *old_value, const void *new_value, size_t size
+) {
+	(void)new_value;
+	memcpy(dst, old_value, size);
 }
 
 // Helper function to set default function IDs for uninitialized fields
@@ -1314,5 +1325,6 @@ static void *fwmap_func_registry[FWMAP_FUNC_COUNT] = {
 	[FWMAP_UPDATE_VALUE_FWSTATE] = (void *)fwmap_update_value_fwstate,
 	[FWMAP_PROMOTE_VALUE_FWSTATE] = (void *)fwmap_promote_value_fwstate,
 	[FWMAP_KEY_EQUAL_FW4] = (void *)fwmap_fw4_key_equal,
-	[FWMAP_KEY_EQUAL_FW6] = (void *)fwmap_fw6_key_equal
+	[FWMAP_KEY_EQUAL_FW6] = (void *)fwmap_fw6_key_equal,
+	[FWMAP_PROMOTE_VALUE_KEEP_OLD] = (void *)fwmap_promote_value_keep_old
 };

@@ -71,6 +71,8 @@ message VirtualService {
   repeated RealServer real_servers = 3;
   uint32 hash_mask = 4;
   uint32 index_mask = 5;
+  // Hash index size of the service's session table; zero selects the default.
+  uint32 session_index_size = 6;
 }
 
 // ModuleConfig describes a named module configuration. The virtual services
