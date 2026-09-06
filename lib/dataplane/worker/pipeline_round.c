@@ -51,8 +51,11 @@ worker_pipeline_round(
 			config_gen_ectx->schedule_active ^ 1;
 
 		struct device_ectx *device_ectx =
-			ADDR_OF(&device_entry_ectx->device_ectx);
+			device_entry_ectx->abs_device_ectx;
 		struct packet_front *schedule = &device_entry_ectx->schedule;
+		if (schedule->input_count == 0) {
+			continue;
+		}
 
 		// Detach the batch so redirects land in the reusable
 		// inbox.

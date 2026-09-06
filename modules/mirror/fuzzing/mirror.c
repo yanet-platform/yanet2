@@ -163,6 +163,7 @@ mirror_test_config(struct cp_module **cp_module, yanet_error **err) {
 	mc_index[1] = LPM_VALUE_INVALID;
 	fuzz_params.module_ectx.mc_index_size = 2;
 	SET_OFFSET_OF(&fuzz_params.module_ectx.mc_index, mc_index);
+	fuzz_params.module_ectx.abs_mc_index = mc_index;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;

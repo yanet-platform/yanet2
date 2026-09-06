@@ -169,7 +169,7 @@ acl_handle_packets(
 			module_ectx, acl_config->v4_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct object_ectx *oectx = link->abs_object_ectx;
 			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
 			fw4table = fwstate_map_v4_object_table(cp_obj);
 		}
@@ -179,14 +179,14 @@ acl_handle_packets(
 			module_ectx, acl_config->v6_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct object_ectx *oectx = link->abs_object_ectx;
 			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
 			fw6table = fwstate_map_v6_object_table(cp_obj);
 		}
 	}
 
 	struct counter_storage *counter_storage =
-		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+		module_ectx->abs_counter_storage;
 
 	struct counter_storage *rules_storage = module_ectx_counter_storage(
 		module_ectx, acl_config->rules_registry_idx

@@ -262,10 +262,8 @@ test_recirc_drop_counts_full_packet(struct rte_mempool *pool) {
 	};
 	struct device_entry_ectx entry = {0};
 	uint64_t counters[2] = {0, 0};
-	SET_OFFSET_OF(
-		&entry.counter_packet_recirc_drop,
-		(struct counter_value_handle *)counters
-	);
+	entry.counter_packet_recirc_drop =
+		(struct counter_value_handle *)counters;
 
 	device_entry_ectx_count_recirc_drop(&entry, &packet);
 
