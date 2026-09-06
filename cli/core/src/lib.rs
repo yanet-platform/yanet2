@@ -21,6 +21,7 @@ pub mod output;
 pub mod timeout;
 
 mod signal;
+mod transport;
 
 /// Initialise the logger and selected output backend.
 ///

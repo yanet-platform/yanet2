@@ -24,8 +24,10 @@ tonic = { version = "0.14", features = ["gzip", "tls-aws-lc", "tls-native-roots"
 tonic-prost = "0.14"
 ynpb = { path = "../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
 commonpb = { path = "../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
-tower = "0.5"
+tower = { version = "0.5", features = ["util"] }
 http = "1"
+hyper-util = { version = "0.1", features = ["client-legacy", "tokio"] }
+socket2 = "0.6"
 ssh-key = "0.6"
 byteorder = "1"
 base64 = "0.23"
@@ -41,8 +43,6 @@ humantime = "2"
 libc = "0.2"
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["macros", "test-util"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic-health = "0.14"
-socket2 = "0.6"

@@ -43,6 +43,7 @@ use crate::{
     config::{self, Settings},
     errors::{Error, root_cause},
     timeout::{TimeoutLayer, TimeoutService},
+    transport,
 };
 
 /// Channel type with all interceptors applied.
@@ -234,7 +235,9 @@ async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionErro
     let resolved_auth = settings.resolved_auth()?;
 
     let attempt = async {
-        let channel = build_endpoint(settings)?.connect().await?;
+        let endpoint = build_endpoint(settings)?;
+        let unix_path = settings.endpoint.value.strip_prefix("unix://");
+        let channel = transport::connect(endpoint, unix_path).await?;
         let auth = auth::create_layer(resolved_auth).await?;
 
         Ok::<_, ConnectionError>(auth.layer(channel))
