@@ -3384,8 +3384,9 @@ version = "0.1.0"
 dependencies = [
  "bytesize",
  "clap",
- "ptree",
  "tonic",
+ "unicode-segmentation",
+ "unicode-width",
  "yanet-cli",
  "yanet-ynpb",
 ]
