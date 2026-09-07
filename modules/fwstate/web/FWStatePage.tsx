@@ -1052,6 +1052,7 @@ interface MapNameFieldProps {
     /** Every known map's family keyed by name, scoping existence checks. */
     mapKinds: Record<string, MapKind>;
     busy: boolean;
+    error?: string;
     placeholder: string;
     onUpdate: (value: string) => void;
     onCreate: (name: string, kind: MapKind) => void;
@@ -1072,6 +1073,7 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
     familyMapNames,
     mapKinds,
     busy,
+    error,
     placeholder,
     onUpdate,
     onCreate,
@@ -1109,6 +1111,7 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
                         controlProps={{ list: datalistId }}
                         value={value}
                         onUpdate={onUpdate}
+                        error={error}
                         placeholder={placeholder}
                     />
                     <datalist id={datalistId}>
@@ -1404,6 +1407,8 @@ const FWStatePage: React.FC = () => {
         const multicastConfigured = current.dstAddrMulticast.trim() !== '' || current.portMulticast !== 0;
         const unicastConfigured = current.dstAddrUnicast.trim() !== '' || current.portUnicast !== 0;
         const endpointConfigured = multicastConfigured || unicastConfigured;
+        if (currentServerMapNames?.v4 && !current.mapNameV4.trim()) return false;
+        if (currentServerMapNames?.v6 && !current.mapNameV6.trim()) return false;
         if (!isValidPort(current.portMulticast) || !isValidPort(current.portUnicast)) return false;
         if (current.srcAddr.trim() !== '' && !isValidIPv6Address(current.srcAddr)) return false;
         if (current.dstEther.trim() !== '' && !parseMACToBytes(current.dstEther)) return false;
@@ -1675,6 +1680,8 @@ const FWStatePage: React.FC = () => {
         const multicastConfigured = current.dstAddrMulticast.trim() !== '' || current.portMulticast !== 0;
         const unicastConfigured = current.dstAddrUnicast.trim() !== '' || current.portUnicast !== 0;
         const endpointConfigured = multicastConfigured || unicastConfigured;
+        const mapNameV4Error = currentServerMapNames?.v4 && !current.mapNameV4.trim() ? 'Linked map cannot be cleared' : undefined;
+        const mapNameV6Error = currentServerMapNames?.v6 && !current.mapNameV6.trim() ? 'Linked map cannot be cleared' : undefined;
         const sourceAddrError = endpointConfigured
             ? !isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined
             : current.srcAddr.trim() !== '' && !isValidIPv6Address(current.srcAddr) ? 'IPv6 required' : undefined;
@@ -1703,6 +1710,7 @@ const FWStatePage: React.FC = () => {
                                 familyMapNames={mapNames.filter((name) => mapKinds[name] === MapKind.V4)}
                                 mapKinds={mapKinds}
                                 busy={mapMutationBusy}
+                                error={mapNameV4Error}
                                 placeholder="fwstate-map-v4"
                                 onUpdate={(mapNameV4) => updateCurrent({ mapNameV4 })}
                                 onCreate={handleCreateMap}
@@ -1717,6 +1725,7 @@ const FWStatePage: React.FC = () => {
                                 familyMapNames={mapNames.filter((name) => mapKinds[name] === MapKind.V6)}
                                 mapKinds={mapKinds}
                                 busy={mapMutationBusy}
+                                error={mapNameV6Error}
                                 placeholder="fwstate-map-v6"
                                 onUpdate={(mapNameV6) => updateCurrent({ mapNameV6 })}
                                 onCreate={handleCreateMap}
@@ -1728,7 +1737,8 @@ const FWStatePage: React.FC = () => {
                             Maps can be provisioned from this page — type a new name and use the create
                             button next to the field, existing names appear as suggestions — or via{' '}
                             <code>yanet-cli-fwstatemap</code>. New maps are created with the service default
-                            sizing; a map cannot be deleted while a published module config still links it.
+                            sizing; a linked map can be replaced but not detached, and it cannot be deleted
+                            while a published module config still links it.
                         </p>
                     </div>
 
