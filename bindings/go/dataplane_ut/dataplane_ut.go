@@ -408,6 +408,17 @@ func (m *Harness) SharedMemory() *ffi.SharedMemory {
 	return ffi.NewSharedMemoryFromRaw(unsafe.Pointer(shm))
 }
 
+// ResetWorkerGenerations restores every worker's generation to the initial
+// high-water mark.
+//
+// Call between rounds when a test installs a newer configuration generation
+// (object or module publishes) after the previous round: the publish's wait
+// for the workers would otherwise never complete, since harness workers only
+// advance their generation inside rounds.
+func (m *Harness) ResetWorkerGenerations() {
+	C.dataplane_ut_reset_worker_gens(m.ptr)
+}
+
 // SetCurrentTime installs a deterministic wall-clock value used by the next
 // HandlePackets call.
 func (m *Harness) SetCurrentTime(t time.Time) {

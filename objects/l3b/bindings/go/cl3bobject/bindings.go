@@ -94,7 +94,10 @@ func (m *VirtualServiceObject) Name() string {
 
 // CreateVirtualService allocates a named virtual service object together with
 // its session table object in the agent's shared memory, from its descriptor.
-// workerCount must cover every worker that will pin sessions.
+// workerCount must cover every worker that will pin sessions. A non-nil
+// previous makes the new service adopt that handle's session table, so every
+// pinned flow keeps its real server across the update; the previous handle
+// must then be retired through RetireService, not freed.
 //
 // The returned object is not yet visible to the dataplane; call Publish to
 // install it into a configuration generation.
@@ -103,6 +106,7 @@ func CreateVirtualService(
 	name string,
 	workerCount uint16,
 	config VirtualServiceConfig,
+	previous *VirtualServiceObject,
 ) (*VirtualServiceObject, error) {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
@@ -111,17 +115,27 @@ func CreateVirtualService(
 	defer C.free(unsafe.Pointer(cName))
 
 	cConfig := config.cBuild(pinner)
+	// The creation config embeds a pointer to the descriptor, so the
+	// descriptor itself must live in pinned memory for the call.
+	pinner.Pin(&cConfig)
+
+	var adopt *C.struct_cp_object
+	if previous != nil {
+		adopt = previous.sessionTable
+	}
+
+	cCreate := C.struct_l3b_virtual_service_create_config{
+		agent:               (*C.struct_agent)(agent.AsRawPtr()),
+		name:                cName,
+		worker_count:        C.uint16_t(workerCount),
+		adopt_session_table: adopt,
+		virtual_service:     &cConfig,
+	}
+	pinner.Pin(&cCreate)
 
 	var cErr *C.yanet_error
 	var sessionTable *C.struct_cp_object
-	ptr := C.l3b_virtual_service_create(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		cName,
-		C.uint16_t(workerCount),
-		&cConfig,
-		&sessionTable,
-		&cErr,
-	)
+	ptr := C.l3b_virtual_service_create(&cCreate, &sessionTable, &cErr)
 	if ptr == nil {
 		return nil, fmt.Errorf(
 			"failed to create virtual service: %w",
@@ -160,13 +174,14 @@ func (m *VirtualServiceObject) Publish(agent *ffi.Agent) error {
 	return nil
 }
 
-// Free destroys the virtual service object when it is dangling — referenced
-// by no live configuration generation — and reports nil. While a live
-// generation still references it the free is refused with
-// ffi.ErrStillReferenced and the handle stays usable: the caller must
-// remember it and free it again once the generations holding it drain.
-// Safe to call multiple times: subsequent calls are no-ops reporting nil.
-func (m *VirtualServiceObject) Free() error {
+// RetireService destroys only the service object, once it is dangling —
+// referenced by no live configuration generation — and reports nil. The
+// session table is deliberately left alive: it survives service updates, and
+// an updating caller passes its handle to CreateVirtualService as previous.
+// While a live generation still references the service the free is refused
+// with ffi.ErrStillReferenced. Safe to call multiple times: subsequent calls
+// are no-ops reporting nil.
+func (m *VirtualServiceObject) RetireService() error {
 	ptr := m.asRawPtr()
 	if ptr == nil {
 		return nil
@@ -185,6 +200,36 @@ func (m *VirtualServiceObject) Free() error {
 	}
 	return fmt.Errorf(
 		"failed to free virtual service object: %w",
+		cerrors.FromC(unsafe.Pointer(cErr)),
+	)
+}
+
+// Free destroys the service object and its session table once both are
+// dangling — referenced by no live configuration generation — and reports
+// nil. While a live generation still references either object the free stops
+// at the refusal with ffi.ErrStillReferenced and the caller must retry: the
+// already-destroyed part stays destroyed. Safe to call multiple times:
+// subsequent calls are no-ops reporting nil.
+func (m *VirtualServiceObject) Free() error {
+	if err := m.RetireService(); err != nil {
+		return err
+	}
+
+	if m.sessionTable == nil {
+		return nil
+	}
+	var cErr *C.yanet_error
+	rc, errno := C.l3b_session_table_object_free(m.sessionTable, &cErr)
+	if rc == 0 {
+		m.sessionTable = nil
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		C.yanet_error_free(cErr)
+		return ffi.ErrStillReferenced
+	}
+	return fmt.Errorf(
+		"failed to free session table object: %w",
 		cerrors.FromC(unsafe.Pointer(cErr)),
 	)
 }

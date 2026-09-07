@@ -573,6 +573,23 @@ dataplane_ut_set_worker_counter(
 }
 
 void
+dataplane_ut_reset_worker_gens(struct dataplane_ut *ut) {
+	// A round snapshots each worker's generation down from the high-water
+	// mark, so a control-plane publish that installs a newer generation
+	// after the last round would block forever waiting for a round that
+	// never comes. Restoring the high-water mark lets such a publish
+	// complete; object reclamation stays safe through the registry's
+	// reference counting rather than the generation wait.
+	struct dp_worker *const *workers = ADDR_OF(&ut->dp_config->workers);
+	for (uint64_t idx = 0; idx < ut->dp_config->worker_count; ++idx) {
+		struct dp_worker *dp_worker = ADDR_OF(workers + idx);
+		__atomic_store_n(
+			&dp_worker->gen, DATAPLANE_UT_HIGH_GEN, __ATOMIC_RELEASE
+		);
+	}
+}
+
+void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
 	size_t worker_idx,

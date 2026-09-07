@@ -183,27 +183,43 @@ struct l3b_virtual_service {
 	uint32_t session_index_size;
 };
 
-// Allocate a named virtual service object together with its session table
-// object from the control-plane descriptor. Both objects are registered under
-// the given name (service and session-table types) and are published to the
-// dataplane through agent_update_objects; module configurations reference the
-// service by name via cp_module_link_object. worker_count must cover every
-// worker that will pin sessions; *session_table receives the table's
-// cp_object for publishing.
+/*
+ * Creation parameters of a virtual service object.
+ *
+ * adopt_session_table names the table object of the service being replaced:
+ * the new service points at it, so every pinned flow survives the update with
+ * its real server. NULL creates a fresh, empty table; the descriptor's
+ * session_index_size then sizes it (and is ignored on adoption).
+ */
+struct l3b_virtual_service_create_config {
+	struct agent *agent;
+	const char *name;
+	// Worker count covering every worker that will pin sessions.
+	uint16_t worker_count;
+	// Session table to adopt on an update; NULL for a fresh one.
+	struct cp_object *adopt_session_table;
+	// Control-plane descriptor of the service.
+	const struct l3b_virtual_service *virtual_service;
+};
+
+// Allocate a named virtual service object from the creation parameters.
+//
+// The service (and, when created, its session table) are registered under the
+// given name and published to the dataplane through agent_update_objects;
+// module configurations reference the service by name via
+// cp_module_link_object. *session_table receives the table's cp_object for
+// publishing — the table the service adopted on an update, or the fresh one.
 struct cp_object *
 l3b_virtual_service_create(
-	struct agent *agent,
-	const char *name,
-	uint16_t worker_count,
-	const struct l3b_virtual_service *virtual_service,
+	const struct l3b_virtual_service_create_config *config,
 	struct cp_object **session_table,
 	yanet_error **err
 );
 
-// Destroy the virtual service object and its session table object once both
-// are dangling — referenced by no live configuration generation. A refused
-// destroy of either is reported through err and the caller must retry later;
-// both objects stay intact until then.
+// Destroy the virtual service object once it is dangling — referenced by no
+// live configuration generation. The session table is left alone: it is owned
+// by the caller's handle, survives service updates and is destroyed through
+// l3b_session_table_object_free when the service is deleted.
 int
 l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err);
 

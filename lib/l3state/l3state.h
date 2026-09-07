@@ -1,7 +1,9 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "lib/statemap/fwmap.h"
 #include "lib/statemap/fwtable.h"
@@ -32,10 +34,33 @@ struct l3s_key {
 	uint8_t src_addr[16];
 };
 
-// The real server index a flow is pinned to.
+/*
+ * The identity of the real server a flow is pinned to.
+ *
+ * Sessions outlive service updates, and a positional index would silently
+ * denote a different backend after the real server list changes; the
+ * destination address resolves against whatever list the current service
+ * object carries, so a pinned flow keeps its backend or, when the backend is
+ * gone or disabled, re-schedules and re-pins.
+ */
 struct l3s_value {
-	uint32_t real_index;
+	// Address family of the pinned real server: 4 or 6.
+	uint8_t family;
+	uint8_t reserved;
+	// Destination address of the pinned real server; IPv4 uses the first
+	// 4 bytes, zero-padded.
+	uint8_t destination[16];
 };
+
+// Record the identity of a real server. addr carries 4 bytes for family 4
+// and 16 bytes for family 6.
+static inline void
+l3s_value_of(uint8_t family, const uint8_t *addr, struct l3s_value *value) {
+	memset(value, 0, sizeof(*value));
+	value->family = family;
+	size_t width = family == 4 ? 4 : 16;
+	memcpy(value->destination, addr, width);
+}
 
 /*
  * Fill a layer configuration for an l3 state table.
@@ -75,15 +100,16 @@ l3s_default_ttl(void) {
 /*
  * Look up the real server a flow is pinned to.
  *
- * Returns 0 and stores the real index on hit, or -1 when the table has no
- * live record for the key. Entries past their deadline count as absent.
+ * Returns 0 and copies the pinned real server's identity on hit, or -1 when
+ * the table has no live record for the key. Entries past their deadline count
+ * as absent.
  */
 static inline int
 l3s_table_lookup(
 	fwtable_t *table,
 	uint64_t now,
 	const struct l3s_key *key,
-	uint32_t *real_index
+	struct l3s_value *pinned
 ) {
 	struct l3s_value *value = NULL;
 	rwlock_t *lock = NULL;
@@ -99,12 +125,12 @@ l3s_table_lookup(
 		return -1;
 	}
 
-	uint32_t candidate = value->real_index;
+	struct l3s_value candidate = *value;
 	if (lock != NULL) {
 		rwlock_read_unlock(lock);
 	}
 
-	*real_index = candidate;
+	*pinned = candidate;
 	return 0;
 }
 
@@ -113,7 +139,7 @@ l3s_table_lookup(
  *
  * Inserts the record into the active layer with the given time-to-live; an
  * existing record in a deeper layer is promoted first-write-wins, so a flow
- * keeps the real it was pinned to across layer rotations. Returns 0 on
+ * keeps the backend it was pinned to across layer rotations. Returns 0 on
  * success, -1 when the active layer is full.
  */
 static inline int
@@ -123,13 +149,12 @@ l3s_table_insert(
 	uint64_t now,
 	uint64_t ttl,
 	const struct l3s_key *key,
-	uint32_t real_index
+	const struct l3s_value *value
 ) {
-	const struct l3s_value value = {.real_index = real_index};
 	rwlock_t *lock = NULL;
 
 	int64_t result =
-		fwtable_insert(table, worker_idx, now, ttl, key, &value, &lock);
+		fwtable_insert(table, worker_idx, now, ttl, key, value, &lock);
 
 	if (lock != NULL) {
 		rwlock_write_unlock(lock);

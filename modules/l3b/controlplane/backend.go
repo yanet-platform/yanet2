@@ -70,9 +70,26 @@ func (m *managedService) Replace(
 	}
 }
 
-// Retire returns the currently published object for deferred destruction.
-func (m *managedService) Retire() freeable {
+// serviceFreeable retires only the service object of a handle, leaving its
+// session table alive for the handle that adopted it.
+type serviceFreeable struct {
+	object *cl3bobject.VirtualServiceObject
+}
+
+// Free implements the deferred-handle contract.
+func (m serviceFreeable) Free() error {
+	return m.object.RetireService()
+}
+
+// PublishTarget returns the handle whose session table an update adopts.
+func (m *managedService) PublishTarget() *cl3bobject.VirtualServiceObject {
 	return m.object
+}
+
+// Retire returns the currently published service for deferred destruction;
+// its session table stays alive, adopted by the replacement handle.
+func (m *managedService) Retire() freeable {
+	return serviceFreeable{object: m.object}
 }
 
 // SetRealServerState enables or disables a single real server of the
@@ -179,7 +196,7 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 
 	m.reclaimDeferred()
 
-	object, weights, err := m.publishService(service, name)
+	object, weights, err := m.publishService(service, name, nil)
 	if err != nil {
 		return err
 	}
@@ -203,13 +220,16 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 
 	m.reclaimDeferred()
 
-	object, weights, err := m.publishService(service, name)
+	// The replacement adopts the published session table, so pinned flows
+	// keep their real servers across the update.
+	object, weights, err := m.publishService(service, name, existing.PublishTarget())
 	if err != nil {
 		return err
 	}
 
 	// The upsert swapped the registry slot atomically; the superseded
-	// object stays alive until its generations drain.
+	// service object stays alive until its generations drain, while its
+	// session table lives on in the replacement handle.
 	m.deferOrFree(existing.Retire())
 
 	existing.Replace(object, weights)
@@ -217,11 +237,14 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 }
 
 // publishService builds a fresh virtual service object under the given name,
-// installs its default scheduler ring and upserts it into the dataplane. The
-// caller must hold the backend mutex.
+// installs its default scheduler ring and upserts it into the dataplane. On an
+// update (previous non-nil) the new service adopts the existing session
+// table, so every pinned flow keeps its real server. The caller must hold the
+// backend mutex.
 func (m *backend) publishService(
 	service *l3bpb.VirtualService,
 	name string,
+	previous *cl3bobject.VirtualServiceObject,
 ) (*cl3bobject.VirtualServiceObject, []uint32, error) {
 	config, err := buildVirtualServiceConfig(service)
 	if err != nil {
@@ -231,7 +254,7 @@ func (m *backend) publishService(
 	// The session table's per-worker sizing must cover every worker.
 	workerCount := m.agent.DPConfig().WorkerCount()
 
-	object, err := cl3bobject.CreateVirtualService(m.agent, name, uint16(workerCount), config)
+	object, err := cl3bobject.CreateVirtualService(m.agent, name, uint16(workerCount), config, previous)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}

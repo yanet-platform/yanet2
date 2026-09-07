@@ -132,13 +132,13 @@ out:
 
 struct cp_object *
 l3b_virtual_service_create(
-	struct agent *agent,
-	const char *name,
-	uint16_t worker_count,
-	const struct l3b_virtual_service *virtual_service,
+	const struct l3b_virtual_service_create_config *config,
 	struct cp_object **session_table,
 	yanet_error **err
 ) {
+	struct agent *agent = config->agent;
+	const struct l3b_virtual_service *virtual_service =
+		config->virtual_service;
 	struct l3b_virtual_service_object *object =
 		(struct l3b_virtual_service_object *)memory_balloc(
 			&agent->memory_context,
@@ -155,7 +155,7 @@ l3b_virtual_service_create(
 		    &object->cp_object,
 		    agent,
 		    L3B_VIRTUAL_SERVICE_OBJECT_TYPE,
-		    name,
+		    config->name,
 		    err
 	    )) {
 		yanet_error_add(err, "failed to init virtual service object");
@@ -234,20 +234,26 @@ l3b_virtual_service_create(
 		goto error_ring;
 	}
 
-	// Session table: born with the service, under the same name and its
-	// own object type, and reached from the service through the embedded
-	// relative pointer.
-	struct cp_object *table = l3b_session_table_object_create(
-		agent,
-		name,
-		worker_count,
-		virtual_service->session_index_size,
-		0,
-		err
-	);
+	// Session table: adopted from the service being replaced so every
+	// pinned flow keeps its real server across the update, or created
+	// fresh under the service's name and own object type. Either way the
+	// dataplane reaches it through the embedded relative pointer.
+	struct cp_object *table = config->adopt_session_table;
 	if (table == NULL) {
-		yanet_error_add(err, "failed to create session table object");
-		goto error_filters;
+		table = l3b_session_table_object_create(
+			agent,
+			config->name,
+			config->worker_count,
+			virtual_service->session_index_size,
+			0,
+			err
+		);
+		if (table == NULL) {
+			yanet_error_add(
+				err, "failed to create session table object"
+			);
+			goto error_filters;
+		}
 	}
 	SET_OFFSET_OF(
 		&vs->session_table,
@@ -332,25 +338,12 @@ l3b_virtual_service_object_destroy(struct cp_object *cp_object) {
 
 int
 l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
-	// Both objects must be dangling; a refusal leaves the pair intact for
-	// a later retry.
-	struct l3b_virtual_service_object *object = container_of(
-		cp_object, struct l3b_virtual_service_object, cp_object
-	);
-	struct l3b_session_table_object *table =
-		ADDR_OF(&object->virtual_service.session_table);
-	if (table != NULL) {
-		if (cp_object_try_destroy(&table->cp_object, err)) {
-			return -1;
-		}
-		l3b_session_table_object_destroy(&table->cp_object);
-		SET_OFFSET_OF(&object->virtual_service.session_table, NULL);
-	}
-
 	if (cp_object_try_destroy(cp_object, err)) {
 		return -1;
 	}
 
+	// The session table is deliberately not touched: it survives service
+	// updates and is destroyed by its owner once the service is deleted.
 	l3b_virtual_service_object_destroy(cp_object);
 	return 0;
 }

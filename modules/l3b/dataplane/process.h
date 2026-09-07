@@ -206,6 +206,66 @@ l3b_real_is_ready(
 }
 
 /*
+ * Resolve the real server a session is pinned to against the service's
+ * current list.
+ *
+ * Matching is by destination address, not position: a session recorded
+ * before an update keeps its backend as long as that backend is still listed
+ * and enabled. Returns 0 and stores the index when found and ready, -1
+ * otherwise.
+ */
+static inline int
+l3b_real_by_destination(
+	const struct virtual_service *virtual_service,
+	const struct l3s_value *pinned
+) {
+	struct real_server *real_servers =
+		ADDR_OF(&virtual_service->real_servers);
+
+	for (uint32_t real_index = 0;
+	     real_index < virtual_service->real_server_count;
+	     ++real_index) {
+		const struct real_server *real = &real_servers[real_index];
+
+		bool family_matches =
+			(pinned->family == 4 && real->type == ip_family_ip4) ||
+			(pinned->family == 6 && real->type == ip_family_ip6);
+		if (!family_matches) {
+			continue;
+		}
+
+		const uint8_t *destination =
+			pinned->family == 4 ? real->destination_addr.v4.bytes
+					    : real->destination_addr.v6.bytes;
+		size_t width = pinned->family == 4 ? 4 : 16;
+		if (memcmp(destination, pinned->destination, width) != 0) {
+			continue;
+		}
+
+		if (!l3b_real_is_ready(virtual_service, real_index)) {
+			return -1;
+		}
+		return (int)real_index;
+	}
+
+	return -1;
+}
+
+/*
+ * Record the identity of a chosen real server into a session value.
+ */
+static inline void
+l3b_session_value_of_real(
+	const struct real_server *real, struct l3s_value *value
+) {
+	if (real->type == ip_family_ip4) {
+		l3s_value_of(4, real->destination_addr.v4.bytes, value);
+	} else {
+		l3s_value_of(6, real->destination_addr.v6.bytes, value);
+	}
+}
+
+/*
  * Pick the real server for a flow through the scheduler ring.
  *
  * Returns 0 and stores the index on success, -1 when no server is ready.
@@ -268,28 +328,33 @@ l3b_virtual_service_process(
 		return -1;
 	}
 
-	// An existing session keeps its real server; a session whose real
-	// went away or was disabled falls through to the scheduler and
-	// re-pins.
+	struct real_server *real_servers =
+		ADDR_OF(&virtual_service->real_servers);
+
+	// An existing session keeps its backend while that backend is still
+	// listed and enabled — matched by address, so the session survives
+	// service updates that reorder or replace the list. Anything else
+	// falls through to the scheduler and re-pins.
 	uint32_t real_index;
 	struct l3s_key key;
 	l3s_key_of_packet(packet, &key);
+	struct l3s_value pinned;
 
 	struct l3b_session_table_object *session_table =
 		ADDR_OF(&virtual_service->session_table);
-	if (session_table != NULL &&
-	    l3s_table_lookup(
-		    &session_table->table,
-		    dp_worker->current_time,
-		    &key,
-		    &real_index
-	    ) == 0 &&
-	    l3b_real_is_ready(virtual_service, real_index)) {
-		struct real_server *real_servers =
-			ADDR_OF(&virtual_service->real_servers);
-		return l3b_real_server_process(
-			&real_servers[real_index], packet
-		);
+	if (session_table != NULL && l3s_table_lookup(
+					     &session_table->table,
+					     dp_worker->current_time,
+					     &key,
+					     &pinned
+				     ) == 0) {
+		int pinned_index =
+			l3b_real_by_destination(virtual_service, &pinned);
+		if (pinned_index >= 0) {
+			return l3b_real_server_process(
+				&real_servers[pinned_index], packet
+			);
+		}
 	}
 
 	if (l3b_schedule_real(virtual_service, packet, &real_index) < 0) {
@@ -297,17 +362,16 @@ l3b_virtual_service_process(
 	}
 
 	if (session_table != NULL) {
+		l3b_session_value_of_real(&real_servers[real_index], &pinned);
 		l3s_table_insert(
 			&session_table->table,
 			dp_worker->idx,
 			dp_worker->current_time,
 			l3s_default_ttl(),
 			&key,
-			real_index
+			&pinned
 		);
 	}
 
-	struct real_server *real_servers =
-		ADDR_OF(&virtual_service->real_servers);
 	return l3b_real_server_process(&real_servers[real_index], packet);
 }

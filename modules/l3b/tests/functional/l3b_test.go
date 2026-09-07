@@ -247,7 +247,7 @@ func publishVirtualService(
 		SessionIndexSize: 4096,
 	}
 
-	object, err := cl3bobject.CreateVirtualService(agent, name, 1, serviceConfig)
+	object, err := cl3bobject.CreateVirtualService(agent, name, 1, serviceConfig, nil)
 	require.NoError(t, err)
 
 	require.NoError(t, object.UpdateRing([]uint32{0}))
@@ -409,7 +409,7 @@ func TestL3b_SessionSticksFlowToReal(t *testing.T) {
 		SessionIndexSize: 4096,
 	}
 
-	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig)
+	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = service.Free() })
 	require.NoError(t, service.UpdateRing([]uint32{0}))
@@ -464,4 +464,126 @@ func TestL3b_SessionSticksFlowToReal(t *testing.T) {
 		"an existing session must keep its real across a ring update")
 	require.Equal(t, "172.16.0.11", outerDstOf(packetOf("10.0.0.2", 54321)),
 		"a new session must follow the updated ring")
+}
+
+// TestL3b_SessionSurvivesServiceUpdate verifies that replacing a virtual
+// service object keeps its session table: flows pinned before the update keep
+// their real servers while new flows follow the replacement's ring.
+func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
+	h, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+
+	serviceConfig := cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
+		}},
+		RealServers: []cl3bobject.RealServer{
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.10")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
+			{
+				Type:               cl3bobject.IPv4,
+				DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.11")),
+				SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+			},
+		},
+		HashMask:         0,
+		IndexMask:        0,
+		RingCapacity:     2 * 1000,
+		SessionIndexSize: 4096,
+	}
+
+	service, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = service.Free() })
+	require.NoError(t, service.UpdateRing([]uint32{0}))
+	require.NoError(t, service.Publish(agent))
+
+	module := publishModuleConfig(t, agent, "test", "svc")
+	t.Cleanup(func() { _ = module.Free() })
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	packetOf := func(srcIP string, srcPort uint16) gopacket.Packet {
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP(srcIP),
+			DstIP:    net.ParseIP("192.168.1.1"),
+		}
+		tcp := layers.TCP{
+			SrcPort: layers.TCPPort(srcPort),
+			DstPort: 80,
+			Seq:     1,
+			Window:  1024,
+		}
+		tcp.SetNetworkLayerForChecksum(&ip4)
+		return xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+	}
+	outerDstOf := func(packet gopacket.Packet) string {
+		result, err := h.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Empty(t, result.Drop)
+		require.Len(t, result.Output, 1)
+		info, err := framework.NewPacketParser().ParsePacket(result.Output[0].RawData)
+		require.NoError(t, err)
+		require.True(t, info.IsTunneled)
+		return info.DstIP.String()
+	}
+
+	// Pin the first flow to real 0 by the initial ring.
+	flowA := packetOf("10.0.0.1", 12345)
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA))
+
+	// Replace the service under the same name, adopting the session table
+	// and retargeting the ring at real 1. Harness workers only advance
+	// their generation inside rounds, so the publish's wait for them is
+	// released by restoring the high-water generations.
+	h.ResetWorkerGenerations()
+	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", 1, serviceConfig, service)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = replacement.Free() })
+	require.NoError(t, replacement.UpdateRing([]uint32{1}))
+	require.NoError(t, replacement.Publish(agent))
+	require.NoError(t, service.RetireService())
+
+	require.Equal(t, "172.16.0.10", outerDstOf(flowA),
+		"a session pinned before the update must keep its real")
+	require.Equal(t, "172.16.0.11", outerDstOf(packetOf("10.0.0.2", 54321)),
+		"a new session must follow the replacement's ring")
+
+	// Replace the service again with a different real server list: the
+	// pinned backend is gone, so the flow must re-pin onto the new ring
+	// instead of landing on whatever now sits at its old position.
+	replacementConfig := serviceConfig
+	replacementConfig.RealServers = []cl3bobject.RealServer{
+		{
+			Type:               cl3bobject.IPv4,
+			DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.20")),
+			SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+		},
+		{
+			Type:               cl3bobject.IPv4,
+			DestinationAddress: xerror.Unwrap(netip.ParseAddr("172.16.0.21")),
+			SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+		},
+	}
+
+	h.ResetWorkerGenerations()
+	relisted, err := cl3bobject.CreateVirtualService(agent, "svc", 1, replacementConfig, replacement)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = relisted.Free() })
+	require.NoError(t, relisted.UpdateRing([]uint32{0}))
+	require.NoError(t, relisted.Publish(agent))
+	require.NoError(t, replacement.RetireService())
+
+	require.Equal(t, "172.16.0.20", outerDstOf(flowA),
+		"a session whose backend left the list must re-pin onto the new ring")
 }

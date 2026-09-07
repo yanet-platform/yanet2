@@ -120,6 +120,16 @@ dataplane_ut_set_worker_counter(
 	uint64_t value
 );
 
+// Restore every worker's generation to the initial high-water mark.
+//
+// Call between rounds when a test installs a newer configuration
+// generation (agent_update_objects and friends) without needing the
+// workers to have observed the previous one: the publish's wait for the
+// workers would otherwise never complete, since harness workers only
+// advance their generation inside rounds.
+void
+dataplane_ut_reset_worker_gens(struct dataplane_ut *ut);
+
 // Run one pipeline round on worker_idx with the given input.
 //
 // input is drained to empty on return; result->output and result->drop
