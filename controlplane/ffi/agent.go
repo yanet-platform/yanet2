@@ -296,6 +296,19 @@ func (m *Agent) DeletePipeline(name string) error {
 	return nil
 }
 
+func (m *Agent) DeleteDevice(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	rc := C.agent_delete_device(m.ptr, cName, &cErr)
+	if rc != 0 {
+		return fmt.Errorf("failed to delete device %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return nil
+}
+
 func (m *Agent) DeleteModuleConfig(moduleType, configName string) error {
 	cTypeName := C.CString(moduleType)
 	defer C.free(unsafe.Pointer(cTypeName))

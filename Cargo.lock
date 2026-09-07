@@ -3230,6 +3230,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-device-delete"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "tonic",
+ "yanet-cli",
+ "yanet-ynpb",
+]
+
+[[package]]
 name = "yanet-cli-device-list"
 version = "0.1.0"
 dependencies = [
