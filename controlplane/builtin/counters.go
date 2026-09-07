@@ -234,7 +234,7 @@ func (m *Counters) Ports(
 	return response, nil
 }
 
-// Collect returns a generic metrics snapshot for port and worker counters.
+// Collect returns a generic metrics snapshot for worker counters.
 //
 // A family that fails to collect is omitted from the snapshot, so a
 // consumer sees a gap for that scrape rather than stale values.
@@ -242,12 +242,6 @@ func (m *Counters) Collect() []*commonpb.Metric {
 	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	metrics := make([]*commonpb.Metric, 0)
-
-	if ports, err := dpConfig.PortCounters(); err == nil {
-		metrics = append(metrics, portMetrics(ports)...)
-	} else {
-		m.log.Warn("failed to collect port counters", zap.Error(err))
-	}
 
 	if workers, err := dpConfig.WorkerCounters(); err == nil {
 		metrics = append(metrics, workerMetrics(workers, m.instanceID)...)
@@ -258,7 +252,28 @@ func (m *Counters) Collect() []*commonpb.Metric {
 	return metrics
 }
 
-func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
+// CollectPortMetrics returns a metrics snapshot of the hardware port
+// counters, which describe the ports themselves and read the same from
+// every instance.
+//
+// A snapshot that fails to collect comes back empty, so a consumer sees a
+// gap for that scrape rather than stale values.
+func (m *Counters) CollectPortMetrics() []*commonpb.Metric {
+	dpConfig := m.shm.DPConfig(m.instanceID)
+
+	metrics := make([]*commonpb.Metric, 0)
+
+	if ports, err := dpConfig.PortCounters(); err == nil {
+		metrics = append(metrics, PortMetrics(ports)...)
+	} else {
+		m.log.Warn("failed to collect port counters", zap.Error(err))
+	}
+
+	return metrics
+}
+
+// PortMetrics converts a port counter snapshot into cumulative counters.
+func PortMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
 	metrics := make([]*commonpb.Metric, 0)
 	for _, port := range ports {
 		portID := strconv.FormatUint(uint64(port.PortID), 10)

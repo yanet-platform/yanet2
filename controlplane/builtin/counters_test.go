@@ -16,8 +16,14 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/builtin"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
+
+// The gateway picks the services that report port metrics out of the ones
+// it hosts by their method set alone, so a rename on either side would
+// drop the port counters from that snapshot unnoticed.
+var _ = gateway.NewPortMetricsService((*builtin.Counters)(nil))
 
 // newCountersHarness builds a one-instance in-process dataplane harness
 // with the given worker count and registers its teardown. Worker pool
