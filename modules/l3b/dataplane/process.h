@@ -170,7 +170,9 @@ l3b_real_ring_select(
 		}
 
 		uint32_t *server_indexes = ADDR_OF(&ring->server_indexes);
-		uint32_t candidate = server_indexes[value % count];
+		uint32_t candidate = __atomic_load_n(
+			&server_indexes[value % count], __ATOMIC_RELAXED
+		);
 
 		if (__atomic_load_n(&ring->sequence, __ATOMIC_ACQUIRE) ==
 		    sequence) {
@@ -195,7 +197,12 @@ l3b_real_is_ready(
 
 	struct real_server *real_servers =
 		ADDR_OF(&virtual_service->real_servers);
-	return real_servers[real_index].state == real_state_enabled;
+	// Acquire load pairs with the controlplane's release store of a state
+	// change.
+	enum real_state state = __atomic_load_n(
+		&real_servers[real_index].state, __ATOMIC_ACQUIRE
+	);
+	return state == real_state_enabled;
 }
 
 /*

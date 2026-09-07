@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sort"
 	"sync"
 
 	"github.com/yanet-platform/xnetip"
@@ -49,18 +50,24 @@ type freeable interface {
 
 type managedService struct {
 	object *cl3bobject.VirtualServiceObject
-	// weights[i] is the current weight of real server i; the scheduler ring
-	// is rebuilt whenever a weight changes.
+	// weights[i] is the configured weight of real server i.
 	weights []uint32
+	// enabled[i] is whether real server i takes traffic; disabled servers
+	// leave the scheduler ring so their share shifts to the enabled ones.
+	enabled []bool
 }
 
-// Replace swaps in the object and weights of an updated service.
+// Replace swaps in the object, weights and states of an updated service.
 func (m *managedService) Replace(
 	object *cl3bobject.VirtualServiceObject,
 	weights []uint32,
 ) {
 	m.object = object
 	m.weights = weights
+	m.enabled = make([]bool, len(weights))
+	for idx := range m.enabled {
+		m.enabled[idx] = true
+	}
 }
 
 // Retire returns the currently published object for deferred destruction.
@@ -177,10 +184,9 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 		return err
 	}
 
-	m.services[name] = &managedService{
-		object:  object,
-		weights: weights,
-	}
+	managed := &managedService{}
+	managed.Replace(object, weights)
+	m.services[name] = managed
 	return nil
 }
 
@@ -274,6 +280,7 @@ func (m *backend) ListServices() []string {
 	for name := range m.services {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -359,6 +366,7 @@ func (m *backend) ListModuleConfigs() []string {
 	for name := range m.configs {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 

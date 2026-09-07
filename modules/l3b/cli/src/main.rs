@@ -187,6 +187,17 @@ struct ModuleConfigDocument {
     destination_filter_rules: Vec<DestinationRuleDoc>,
 }
 
+impl ModuleConfigDocument {
+    /// Converts the document into the wire rules, rejecting protocols the
+    /// dataplane never classifies.
+    fn try_rules(&self) -> Result<Vec<l3bpb::DestinationFilterRule>, String> {
+        self.destination_filter_rules
+            .iter()
+            .map(l3bpb::DestinationFilterRule::try_from)
+            .collect()
+    }
+}
+
 /// One destination-side classification rule.
 #[derive(Debug, Deserialize)]
 struct DestinationRuleDoc {
@@ -245,19 +256,32 @@ impl From<&RangeDoc> for filterpb::pb::PortRange {
     }
 }
 
-impl From<&ProtoRangeDoc> for filterpb::pb::ProtoRange {
-    fn from(range: &ProtoRangeDoc) -> Self {
+/// Protocols the dataplane submits to the destination classifier; a document
+/// naming anything else installs a rule that can never match.
+const fn classified_protocol(proto: u8) -> bool {
+    matches!(proto, 6 | 17)
+}
+
+impl TryFrom<&ProtoRangeDoc> for filterpb::pb::ProtoRange {
+    type Error = String;
+
+    fn try_from(range: &ProtoRangeDoc) -> Result<Self, String> {
         let proto = match range.proto {
             ProtocolDoc::Named(NamedProtocol::Tcp) => 6,
             ProtocolDoc::Named(NamedProtocol::Udp) => 17,
             ProtocolDoc::Number(number) => number,
         };
+        if !classified_protocol(proto) {
+            return Err(format!(
+                "protocol {proto} is not classified by the module: only tcp and udp can match"
+            ));
+        }
         let subtype_from = u32::from(range.subtype_from.unwrap_or(0));
         let subtype_to = u32::from(range.subtype_to.unwrap_or(u8::MAX));
-        Self {
+        Ok(Self {
             from: (u32::from(proto) << 8) | subtype_from,
             to: (u32::from(proto) << 8) | subtype_to,
-        }
+        })
     }
 }
 
@@ -284,14 +308,20 @@ impl From<&SourceFilterRuleDoc> for l3bpb::SourceFilterRule {
     }
 }
 
-impl From<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
-    fn from(rule: &DestinationRuleDoc) -> Self {
-        Self {
+impl TryFrom<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
+    type Error = String;
+
+    fn try_from(rule: &DestinationRuleDoc) -> Result<Self, String> {
+        let mut proto_ranges = Vec::with_capacity(rule.proto_ranges.len());
+        for range in &rule.proto_ranges {
+            proto_ranges.push(filterpb::pb::ProtoRange::try_from(range)?);
+        }
+        Ok(Self {
             net6s: rule.net6s.clone(),
             net4s: rule.net4s.clone(),
-            proto_ranges: rule.proto_ranges.iter().map(Into::into).collect(),
+            proto_ranges,
             service: rule.service.clone(),
-        }
+        })
     }
 }
 
@@ -361,7 +391,7 @@ impl L3BService {
     }
 
     pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = self.virtual_service(&cmd).await?;
+        let service = self.virtual_service(&cmd, "create-service").await?;
         let request = CreateServiceRequest { service: Some(service) };
         log::trace!("create service request: {request:?}");
         self.service
@@ -374,7 +404,7 @@ impl L3BService {
     }
 
     pub async fn update_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = self.virtual_service(&cmd).await?;
+        let service = self.virtual_service(&cmd, "update-service").await?;
         let request = UpdateServiceRequest { service: Some(service) };
         log::trace!("update service request: {request:?}");
         self.service
@@ -388,7 +418,8 @@ impl L3BService {
 
     /// Builds a virtual service request from the flags, populating the real
     /// servers and source filter rules from the document when one is given.
-    async fn virtual_service(&mut self, cmd: &ServiceCmd) -> Result<VirtualService, Error> {
+    /// Errors attribute to the given verb.
+    async fn virtual_service(&mut self, cmd: &ServiceCmd, verb: &'static str) -> Result<VirtualService, Error> {
         let mut service = VirtualService {
             name: cmd.name.clone(),
             hash_mask: cmd.hash_mask,
@@ -397,7 +428,7 @@ impl L3BService {
         };
 
         if let Some(path) = &cmd.file {
-            let document: ServiceDocument = load_document(path, "create-service", self)?;
+            let document: ServiceDocument = load_document(path, verb, self)?;
             service.real_servers = document.real_servers.iter().map(Into::into).collect();
             service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
             service.session_index_size = document.session_index_size;
@@ -454,7 +485,9 @@ impl L3BService {
 
         if let Some(path) = &cmd.file {
             let document: ModuleConfigDocument = load_document(path, "update-module-config", self)?;
-            config.destination_filter_rules = document.destination_filter_rules.iter().map(Into::into).collect();
+            config.destination_filter_rules = document
+                .try_rules()
+                .map_err(|err| self.invalid("update-module-config", err))?;
         }
 
         let request = UpdateModuleConfigRequest { config: Some(config) };

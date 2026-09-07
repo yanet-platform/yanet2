@@ -392,9 +392,16 @@ l3b_virtual_service_update_ring(
 	uint32_t sequence = __atomic_load_n(&ring->sequence, __ATOMIC_RELAXED);
 	__atomic_store_n(&ring->sequence, sequence + 1, __ATOMIC_RELEASE);
 
+	// Relaxed atomic stores: readers access the entries under the seqlock
+	// with matching relaxed atomic loads, keeping the guarded data accesses
+	// race-free in the C memory model.
 	uint32_t *ring_indexes = ADDR_OF(&ring->server_indexes);
 	for (uint32_t idx = 0; idx < server_index_count; ++idx) {
-		ring_indexes[idx] = server_indexes[idx];
+		__atomic_store_n(
+			&ring_indexes[idx],
+			server_indexes[idx],
+			__ATOMIC_RELAXED
+		);
 	}
 
 	__atomic_store_n(&ring->count, server_index_count, __ATOMIC_RELEASE);
@@ -417,10 +424,16 @@ l3b_virtual_service_set_real_server_state(
 		return -1;
 	}
 
+	// Release store pairs with the dataplane's acquire load, so a worker
+	// that observes the new state also observes everything published
+	// before the change.
 	struct real_server *real_servers =
 		ADDR_OF(&virtual_service->real_servers);
-	real_servers[real_server_index].state =
-		enabled ? real_state_enabled : real_state_disabled;
+	__atomic_store_n(
+		&real_servers[real_server_index].state,
+		enabled ? real_state_enabled : real_state_disabled,
+		__ATOMIC_RELEASE
+	);
 	return 0;
 }
 

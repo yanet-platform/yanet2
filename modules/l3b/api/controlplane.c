@@ -131,8 +131,6 @@ make_filter_rule_ptrs(
 	return ptrs;
 }
 
-// Compile both per-family source filters of a virtual service. On failure any
-// partially built filter is released.
 // Compile both per-family destination filters of the module config. On failure
 // any partially built filter is released.
 static int
