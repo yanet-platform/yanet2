@@ -11,8 +11,8 @@
 #include "lib/filter2/filter.h"
 #include "lib/filter2/query.h"
 
-FILTER_COMPILER_DECLARE(sign_compile, device, vlan, ipfrag);
-FILTER_QUERY_DECLARE(sign_query, ipfrag);
+FILTER_COMPILER_DECLARE(sign_compile, device, vlan, ip_frag);
+FILTER_QUERY_DECLARE(sign_query, ip_frag);
 
 int
 main(void) {

@@ -3,7 +3,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include <lib/filter/query.h>
+#include <lib/filter2/query.h>
 
 #include "lib/controlplane/config/econtext.h"
 

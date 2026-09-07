@@ -15,6 +15,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 #include "filter.h"
 #include "query/attribute.h"
@@ -46,10 +47,15 @@ filter_lookup(
 	uint32_t *results,
 	uint32_t packet_count
 ) {
-	if (packet_count == 0)
+	if (packet_count == 0) {
 		return;
+	}
 	uint32_t joint_count = attr_handler_count - 1;
-	uint32_t values[packet_count * (attr_handler_count + joint_count)];
+	uint32_t single = attr_handler_count == 1;
+	joint_count += single;
+	uint32_t
+		values[packet_count *
+		       (attr_handler_count + joint_count + single)];
 	uint32_t values_pos = 0;
 
 	struct filter_query_attr **attrs = ADDR_OF(&filter->attrs);
@@ -67,6 +73,13 @@ filter_lookup(
 			packet_count
 		);
 
+		values_pos += packet_count;
+	}
+
+	if (single) {
+		// The single attribute filter ends with a join against a
+		// constant zero, so the second input row is all zeroes.
+		memset(values + values_pos, 0, sizeof(uint32_t) * packet_count);
 		values_pos += packet_count;
 	}
 

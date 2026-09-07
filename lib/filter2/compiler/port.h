@@ -46,11 +46,16 @@ filter_compile_attr_port_create(
 	attr->query_attr = (struct filter_query_attr_port *)memory_balloc(
 		memory_context, sizeof(struct filter_query_attr_port)
 	);
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_free;
+	}
 
 	if (value_table_init(
-		    &attr->query_attr->value_table, memory_context, 1, 65536
+		    &attr->query_attr->value_table,
+		    memory_context,
+		    "filter:port",
+		    1,
+		    65536
 	    )) {
 		goto error_free_attr;
 	}
@@ -93,14 +98,16 @@ filter_compile_attr_port_iter(
 	struct filter_query_attr_port *query_attr =
 		port_ranges_attr->query_attr;
 
-	for (uint32_t idx = 0; idx < 65536; ++idx)
+	for (uint32_t idx = 0; idx < 65536; ++idx) {
 		if (iter_cb_func(
 			    value_table_get_ptr(
 				    &query_attr->value_table, 0, idx
 			    ),
 			    cb_func_data
-		    ))
+		    ) < 0) {
 			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -130,9 +137,11 @@ filter_compile_attr_port_rule_iter(
 	struct filter_compile_attr *attr,
 	const struct filter_compile_attr_handlers *attr_handlers,
 	const struct filter_rule *rule,
+	uint32_t rule_idx,
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
+	(void)rule_idx;
 	struct filter_compile_attr_port_handlers *port_ranges_handlers =
 		container_of(
 			attr_handlers,
@@ -161,7 +170,7 @@ filter_compile_attr_port_rule_iter(
 					    &query_attr->value_table, 0, port
 				    ),
 				    cb_func_data
-			    )) {
+			    ) < 0) {
 				return -1;
 			}
 		}
@@ -210,18 +219,6 @@ filter_compile_attr_port_commit(
 	return &query_attr->attr;
 }
 
-static const struct filter_compile_attr_handlers
-	filter_compile_attr_port_handlers = {
-		.create = filter_compile_attr_port_create,
-		.size = filter_compile_attr_port_size,
-		.iter = filter_compile_attr_port_iter,
-		.rule_is_any = filter_compile_attr_port_rule_is_any,
-		.rule_iter = filter_compile_attr_port_rule_iter,
-		.commit = filter_compile_attr_port_commit,
-		.free_compile = filter_compile_attr_port_free,
-		.free_query = filter_query_attr_port_free,
-};
-
 static inline void
 filter_rule_get_port_ranges_src(
 	const struct filter_rule *rule, struct filter_port_ranges *port_ranges
@@ -238,14 +235,32 @@ filter_rule_get_port_ranges_dst(
 	port_ranges->items = rule->transport.dsts;
 }
 
+FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(port_src, filter_compile_attr_port)
+FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(port_dst, filter_compile_attr_port)
+
+static const struct filter_compile_attr_handlers
+	filter_compile_port_src_handlers = {
+		.build = filter_compile_attr_port_src_build,
+		.free_query = filter_query_attr_port_free,
+};
+
+static const struct filter_compile_attr_handlers
+	filter_compile_port_dst_handlers = {
+		.build = filter_compile_attr_port_dst_build,
+		.free_query = filter_query_attr_port_free,
+};
+
 static const struct filter_compile_attr_port_handlers
 	filter_compile_attr_port_src = {
-		.attr_handlers = filter_compile_attr_port_handlers,
+		.attr_handlers = filter_compile_port_src_handlers,
 		.get_port_ranges = filter_rule_get_port_ranges_src,
 };
 
 static const struct filter_compile_attr_port_handlers
 	filter_compile_attr_port_dst = {
-		.attr_handlers = filter_compile_attr_port_handlers,
+		.attr_handlers = filter_compile_port_dst_handlers,
 		.get_port_ranges = filter_rule_get_port_ranges_dst,
 };
+
+FILTER_COMPILE_ATTR_BUILD_AS(port_src, filter_compile_attr_port)
+FILTER_COMPILE_ATTR_BUILD_AS(port_dst, filter_compile_attr_port)

@@ -5,8 +5,6 @@
 
 #include "lib/filter2/filter.h"
 
-#include "segments.h"
-
 struct filter_query_attr_proto_range {
 	struct filter_query_attr attr;
 	struct value_table value_table;

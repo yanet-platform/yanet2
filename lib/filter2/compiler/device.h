@@ -53,14 +53,16 @@ filter_compile_attr_device_create(
 		memory_context, sizeof(struct filter_query_attr_device)
 	);
 
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_free;
+	}
 
 	uint32_t max_device_id = 0;
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
-		if (rule == NULL)
+		if (rule == NULL) {
 			continue;
+		}
 
 		struct filter_devices devices;
 		device_handlers->get_devices(rule, &devices);
@@ -75,6 +77,7 @@ filter_compile_attr_device_create(
 	if (value_table_init(
 		    &attr->query_attr->value_table,
 		    memory_context,
+		    "filter:device",
 		    1,
 		    max_device_id + 1
 	    )) {
@@ -128,7 +131,7 @@ filter_compile_attr_device_iter(
 				    &query_attr->value_table, 0, h_idx
 			    ),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}
@@ -161,9 +164,11 @@ filter_compile_attr_device_rule_iter(
 	struct filter_compile_attr *attr,
 	const struct filter_compile_attr_handlers *attr_handlers,
 	const struct filter_rule *rule,
+	uint32_t rule_idx,
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
+	(void)rule_idx;
 	struct filter_compile_attr_device_handlers *device_handlers =
 		container_of(
 			attr_handlers,
@@ -187,7 +192,7 @@ filter_compile_attr_device_rule_iter(
 				    devices.items[idx].id
 			    ),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}
@@ -233,14 +238,10 @@ filter_compile_attr_device_commit(
 	return &query_attr->attr;
 }
 
+FILTER_COMPILE_ATTR_BUILD_DECLARE(device)
+
 static const struct filter_compile_attr_handlers filter_compile_get_devices = {
-	.create = filter_compile_attr_device_create,
-	.size = filter_compile_attr_device_size,
-	.iter = filter_compile_attr_device_iter,
-	.rule_iter = filter_compile_attr_device_rule_iter,
-	.rule_is_any = filter_compile_attr_device_rule_is_any,
-	.commit = filter_compile_attr_device_commit,
-	.free_compile = filter_compile_attr_device_free,
+	.build = filter_compile_attr_device_build,
 	.free_query = filter_query_attr_device_free,
 };
 
@@ -257,3 +258,5 @@ static const struct filter_compile_attr_device_handlers
 		.attr_handlers = filter_compile_get_devices,
 		.get_devices = filter_rule_get_devices,
 };
+
+FILTER_COMPILE_ATTR_BUILD(device)

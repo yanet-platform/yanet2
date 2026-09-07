@@ -19,7 +19,7 @@
 
 struct filter_compile_attr_ipfrag {
 	struct filter_compile_attr attr;
-	struct filter_query_attr_ipfrag *query_attr;
+	struct filter_query_attr_ip_frag *query_attr;
 };
 
 static inline struct filter_compile_attr *
@@ -42,8 +42,8 @@ filter_compile_attr_ipfrag_create(
 		return NULL;
 	}
 
-	attr->query_attr = (struct filter_query_attr_ipfrag *)memory_balloc(
-		memory_context, sizeof(struct filter_query_attr_ipfrag)
+	attr->query_attr = (struct filter_query_attr_ip_frag *)memory_balloc(
+		memory_context, sizeof(struct filter_query_attr_ip_frag)
 	);
 	if (attr->query_attr == NULL) {
 		goto error_free;
@@ -52,6 +52,7 @@ filter_compile_attr_ipfrag_create(
 	if (value_table_init(
 		    &attr->query_attr->value_table,
 		    memory_context,
+		    "filter:ipfrag",
 		    1,
 		    FILTER_IPFRAG_REGION_COUNT
 	    )) {
@@ -64,7 +65,7 @@ error_free_attr:
 	memory_bfree(
 		memory_context,
 		attr->query_attr,
-		sizeof(struct filter_query_attr_ipfrag)
+		sizeof(struct filter_query_attr_ip_frag)
 	);
 
 error_free:
@@ -93,7 +94,7 @@ filter_compile_attr_ipfrag_iter(
 	struct filter_compile_attr_ipfrag *ipfrag_attr =
 		container_of(attr, struct filter_compile_attr_ipfrag, attr);
 
-	struct filter_query_attr_ipfrag *query_attr = ipfrag_attr->query_attr;
+	struct filter_query_attr_ip_frag *query_attr = ipfrag_attr->query_attr;
 
 	for (uint32_t idx = 0; idx < FILTER_IPFRAG_REGION_COUNT; ++idx) {
 		if (iter_cb_func(
@@ -101,7 +102,7 @@ filter_compile_attr_ipfrag_iter(
 				    &query_attr->value_table, 0, idx
 			    ),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 	}
@@ -124,28 +125,30 @@ filter_compile_attr_ipfrag_rule_iter(
 	struct filter_compile_attr *attr,
 	const struct filter_compile_attr_handlers *attr_handlers,
 	const struct filter_rule *rule,
+	uint32_t rule_idx,
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
+	(void)rule_idx;
 	(void)attr_handlers;
 
 	struct filter_compile_attr_ipfrag *ipfrag_attr =
 		container_of(attr, struct filter_compile_attr_ipfrag, attr);
 
-	struct filter_query_attr_ipfrag *query_attr = ipfrag_attr->query_attr;
+	struct filter_query_attr_ip_frag *query_attr = ipfrag_attr->query_attr;
 
 	switch (rule->fragment) {
 	case FILTER_IP_FRAG_ANY:
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 0),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 1),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		break;
@@ -153,7 +156,7 @@ filter_compile_attr_ipfrag_rule_iter(
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 0),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		break;
@@ -161,7 +164,7 @@ filter_compile_attr_ipfrag_rule_iter(
 		if (iter_cb_func(
 			    value_table_get_ptr(&query_attr->value_table, 0, 1),
 			    cb_func_data
-		    )) {
+		    ) < 0) {
 			return -1;
 		}
 		break;
@@ -182,7 +185,7 @@ filter_compile_attr_ipfrag_free(
 		memory_bfree(
 			memory_context,
 			ipfrag_attr->query_attr,
-			sizeof(struct filter_query_attr_ipfrag)
+			sizeof(struct filter_query_attr_ip_frag)
 		);
 	}
 
@@ -200,7 +203,7 @@ filter_compile_attr_ipfrag_commit(
 	struct filter_compile_attr_ipfrag *ipfrag_attr =
 		container_of(attr, struct filter_compile_attr_ipfrag, attr);
 
-	struct filter_query_attr_ipfrag *query_attr = ipfrag_attr->query_attr;
+	struct filter_query_attr_ip_frag *query_attr = ipfrag_attr->query_attr;
 	ipfrag_attr->query_attr = NULL;
 
 	filter_compile_attr_ipfrag_free(memory_context, attr);
@@ -208,25 +211,24 @@ filter_compile_attr_ipfrag_commit(
 	return &query_attr->attr;
 }
 
+FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(ip_frag, filter_compile_attr_ipfrag)
+
 static const struct filter_compile_attr_handlers
 	filter_compile_attr_ipfrag_handlers = {
-		.create = filter_compile_attr_ipfrag_create,
-		.size = filter_compile_attr_ipfrag_size,
-		.iter = filter_compile_attr_ipfrag_iter,
-		.rule_is_any = filter_compile_attr_ipfrag_rule_is_any,
-		.rule_iter = filter_compile_attr_ipfrag_rule_iter,
-		.commit = filter_compile_attr_ipfrag_commit,
-		.free_compile = filter_compile_attr_ipfrag_free,
-		.free_query = filter_query_attr_ipfrag_free,
+		.build = filter_compile_attr_ip_frag_build,
+		.free_query = filter_query_attr_ip_frag_free,
 };
 
-// Wrapper so FILTER_ATTR_COMPILE can reference filter_compile_attr_ipfrag via
-// its attr_handlers member, matching the other attributes' instance shape.
+// Wrapper so FILTER_ATTR_COMPILE can reference filter_compile_attr_ip_frag
+// via its attr_handlers member, matching the other attributes' instance
+// shape.
 struct filter_compile_attr_ipfrag_handlers {
 	struct filter_compile_attr_handlers attr_handlers;
 };
 
 static const struct filter_compile_attr_ipfrag_handlers
-	filter_compile_attr_ipfrag = {
+	filter_compile_attr_ip_frag = {
 		.attr_handlers = filter_compile_attr_ipfrag_handlers,
 };
+
+FILTER_COMPILE_ATTR_BUILD_AS(ip_frag, filter_compile_attr_ipfrag)
