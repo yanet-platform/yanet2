@@ -36,6 +36,9 @@ const (
 	Busy Kind = C.YANET_ERROR_BUSY
 	// InvalidArgument: the request is wrong regardless of the system state.
 	InvalidArgument Kind = C.YANET_ERROR_INVALID_ARGUMENT
+	// ResourceExhausted: the pool the operation draws from has no room
+	// left for the request.
+	ResourceExhausted Kind = C.YANET_ERROR_RESOURCE_EXHAUSTED
 )
 
 func (m Kind) Error() string {
@@ -48,6 +51,8 @@ func (m Kind) Error() string {
 		return "busy"
 	case InvalidArgument:
 		return "invalid argument"
+	case ResourceExhausted:
+		return "resource exhausted"
 	}
 	return "unknown error kind"
 }

@@ -29,4 +29,7 @@ const (
 	// ErrInvalidArgument: the request is wrong regardless of the system
 	// state.
 	ErrInvalidArgument = cerrors.InvalidArgument
+	// ErrResourceExhausted: the pool the operation draws from has no room
+	// left for the request.
+	ErrResourceExhausted = cerrors.ResourceExhausted
 )

@@ -4,14 +4,17 @@ package controlplane.ynpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
 
-// MemoryService reports per-agent shared-memory arena utilization.
-//
-// It is the read side of a planned arena grow/shrink API: the sizing
-// decisions that API will make depend on the occupancy this service
-// already exposes.
+// MemoryService reports per-agent shared-memory arena utilization and
+// grows an agent's arena on demand.
 service MemoryService {
   // ListArenas returns arena utilization for every agent generation.
   rpc ListArenas(ListArenasRequest) returns (ListArenasResponse);
+  // ExtendAgent grows the arena of a live agent.
+  //
+  // The request carries an increment rather than a target, so calling it
+  // twice grows twice. A caller that retries after a timeout must read
+  // the arena back before deciding to repeat itself.
+  rpc ExtendAgent(ExtendAgentRequest) returns (ExtendAgentResponse);
 }
 
 message ListArenasRequest {}
@@ -30,4 +33,19 @@ message ArenaInfo {
   uint64 free_bytes = 5;
   // retired is true for a superseded generation still holding its arena.
   bool retired = 6;
+}
+
+// ExtendAgentRequest asks for more arena space for one live agent.
+message ExtendAgentRequest {
+  string agent = 1;
+  // size is the number of bytes to add, rounded up to the allocator's
+  // granularity.
+  uint64 size = 2;
+}
+
+// ExtendAgentResponse reports the agent's arena after the growth.
+message ExtendAgentResponse {
+  // memory_limit is the arena size the agent holds now, which may exceed
+  // what was asked for once the rounding is applied.
+  uint64 memory_limit = 1;
 }
