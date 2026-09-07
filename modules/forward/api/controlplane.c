@@ -4,7 +4,7 @@
 
 #include "config.h"
 
-#include <lib/filter/compiler.h>
+#include <lib/filter2/compiler.h>
 
 #include "common/container_of.h"
 #include "lib/errors/errors.h"
@@ -206,9 +206,7 @@ forward_module_init_l2(
 		FWD_FILTER_VLAN_TAG,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context,
-		"filter_vlan",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_vlan");
@@ -242,9 +240,7 @@ forward_module_init_ip4(
 		FWD_FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context,
-		"filter_ip4",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_ip4");
@@ -278,9 +274,7 @@ forward_module_init_ip6(
 		FWD_FILTER_IP6_TAG,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context,
-		"filter_ip6",
-		err
+		&cp_module->memory_context
 	);
 	if (rc) {
 		yanet_error_add(err, "failed to init filter_ip6");

@@ -48,11 +48,16 @@ filter_compile_attr_proto_create(
 			memory_context,
 			sizeof(struct filter_query_attr_proto_range)
 		);
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_free;
+	}
 
 	if (value_table_init(
-		    &attr->query_attr->value_table, memory_context, 1, 65536
+		    &attr->query_attr->value_table,
+		    memory_context,
+		    "filter:proto_range",
+		    1,
+		    65536
 	    )) {
 		goto error_free_attr;
 	}
@@ -95,14 +100,16 @@ filter_compile_attr_proto_iter(
 	struct filter_query_attr_proto_range *query_attr =
 		proto_ranges_attr->query_attr;
 
-	for (uint32_t idx = 0; idx < 65536; ++idx)
+	for (uint32_t idx = 0; idx < 65536; ++idx) {
 		if (iter_cb_func(
 			    value_table_get_ptr(
 				    &query_attr->value_table, 0, idx
 			    ),
 			    cb_func_data
-		    ))
+		    ) < 0) {
 			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -132,9 +139,11 @@ filter_compile_attr_proto_rule_iter(
 	struct filter_compile_attr *attr,
 	const struct filter_compile_attr_handlers *attr_handlers,
 	const struct filter_rule *rule,
+	uint32_t rule_idx,
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
+	(void)rule_idx;
 	struct filter_compile_attr_proto_handlers *proto_ranges_handlers =
 		container_of(
 			attr_handlers,
@@ -164,7 +173,7 @@ filter_compile_attr_proto_rule_iter(
 					    &query_attr->value_table, 0, proto
 				    ),
 				    cb_func_data
-			    )) {
+			    ) < 0) {
 				return -1;
 			}
 		}
@@ -213,18 +222,6 @@ filter_compile_attr_proto_commit(
 	return &query_attr->attr;
 }
 
-static const struct filter_compile_attr_handlers
-	filter_compile_attr_proto_handlers = {
-		.create = filter_compile_attr_proto_create,
-		.size = filter_compile_attr_proto_size,
-		.iter = filter_compile_attr_proto_iter,
-		.rule_is_any = filter_compile_attr_proto_rule_is_any,
-		.rule_iter = filter_compile_attr_proto_rule_iter,
-		.commit = filter_compile_attr_proto_commit,
-		.free_compile = filter_compile_attr_proto_free,
-		.free_query = filter_query_attr_proto_range_free,
-};
-
 static inline void
 filter_rule_get_proto_ranges(
 	const struct filter_rule *rule, struct filter_proto_ranges *proto_ranges
@@ -233,8 +230,18 @@ filter_rule_get_proto_ranges(
 	proto_ranges->items = rule->transport.protos;
 }
 
+FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(proto_range, filter_compile_attr_proto)
+
+static const struct filter_compile_attr_handlers
+	filter_compile_proto_range_handlers = {
+		.build = filter_compile_attr_proto_range_build,
+		.free_query = filter_query_attr_proto_range_free,
+};
+
 static const struct filter_compile_attr_proto_handlers
 	filter_compile_attr_proto_range = {
-		.attr_handlers = filter_compile_attr_proto_handlers,
+		.attr_handlers = filter_compile_proto_range_handlers,
 		.get_proto_ranges = filter_rule_get_proto_ranges,
 };
+
+FILTER_COMPILE_ATTR_BUILD_AS(proto_range, filter_compile_attr_proto)

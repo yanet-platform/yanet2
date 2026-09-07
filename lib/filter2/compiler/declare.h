@@ -3,6 +3,8 @@
 #include "common/registry.h"
 #include "common/remap.h"
 
+#include "lib/filter2/filter.h"
+
 #include "common/for_each.h"
 
 #define FILTER_ATTR_COMPILE(name) &filter_compile_attr_##name.attr_handlers
@@ -106,6 +108,7 @@ typedef int (*filter_compile_attr_rule_iter_func)(
 	struct filter_compile_attr *attr,
 	const struct filter_compile_attr_handlers *handlers,
 	const struct filter_rule *rule,
+	uint32_t rule_idx,
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 );
@@ -135,15 +138,22 @@ typedef void (*filter_compile_attr_free_query_func)(
  * Compilation attribute virtual table. The table may be incorporated into
  * a structure providing additional routines, for example obtaining specific
  * conditions - networks, protocols and etc
+ *
+ * build is the compound entry point generated per attribute by
+ * FILTER_COMPILE_ATTR_BUILD: it runs the whole region-enumeration pipeline
+ * by calling the attribute's own handlers directly, so they get inlined
+ * instead of dispatched through the remaining function pointers (which are
+ * kept for the single-attribute path in filter_compile_single_attr).
  */
+typedef struct filter_query_attr *(*filter_compile_attr_build_func)(
+	struct value_registry *registry,
+	const struct filter_rule **rules,
+	uint32_t rule_count,
+	struct memory_context *memory_context
+);
+
 struct filter_compile_attr_handlers {
-	filter_compile_attr_create_func create;
-	filter_compile_attr_size_func size;
-	filter_compile_attr_rule_is_any_func rule_is_any;
-	filter_compile_attr_rule_iter_func rule_iter;
-	filter_compile_attr_iter_func iter;
-	filter_compile_attr_commit_func commit;
-	filter_compile_attr_free_compile_func free_compile;
+	filter_compile_attr_build_func build;
 	filter_compile_attr_free_query_func free_query;
 };
 
@@ -153,7 +163,10 @@ filter_compile_attr_touch(uint32_t *value, void *data) {
 	return remap_table_touch(remap_table, *value, value);
 }
 
-static inline int
+// Always-inlined at the direct call sites the generated builders emit;
+// the out-of-line copy exists only because the iteration interface takes
+// the callback by pointer.
+__attribute__((always_inline)) static inline int
 filter_compile_attr_collect(uint32_t *value, void *data) {
 	struct value_registry *value_registry = (struct value_registry *)data;
 	return value_registry_collect(value_registry, *value);
@@ -167,132 +180,123 @@ filter_compile_attr_compact(uint32_t *value, void *data) {
 }
 
 /*
- * The routine provides the backward compatibility with the current
- * compilation procedure and defined attributes.
+ * Compound per-attribute compile builder.
+ *
+ * Each attribute instantiates these to produce a dedicated build routine
+ * that runs the region-enumeration pipeline by calling the attribute's own
+ * static inline handlers directly, so they are inlined at the call site
+ * instead of dispatched through the vtable function pointers.
+ *
+ * The _AS form lets variants of one kind (source/destination halves and
+ * alike) share a single family of handler functions: the builder is named
+ * after the variant while the pipeline calls the shared family prefixed
+ * handlers. The plain form is the common case where the variant name is
+ * the family prefix.
+ *
+ * The _DECLARE forms must precede the attribute's vtable instance (which
+ * references the builder via the build pointer), and the definitions must
+ * follow the instance (the builder reads it).
  */
-static inline struct filter_query_attr *
-filter_compile_attr_build(
-	const struct filter_compile_attr_handlers *attr_handlers,
-	struct value_registry *registry,
-	const struct filter_rule **rules,
-	size_t rule_count,
-	struct memory_context *memory_context
-) {
-	/*
-	 * Splits the definition area int regions and initialize all of them
-	 * with zero values.
-	 */
-	struct filter_compile_attr *attr = attr_handlers->create(
-		memory_context, attr_handlers, rules, rule_count
+#define FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(variant, prefix)                  \
+	static inline struct filter_query_attr *                               \
+	filter_compile_attr_##variant##_build(                                 \
+		struct value_registry *registry,                               \
+		const struct filter_rule **rules,                              \
+		uint32_t rule_count,                                           \
+		struct memory_context *memory_context                          \
 	);
-	if (attr == NULL)
-		return NULL;
 
-	/*
-	 * `remap_table is used to enumerate regions - each rule touch its
-	 * regions so each region gains a value specific to matching set of
-	 * rules.
-	 */
-	struct remap_table remap_table;
-	if (remap_table_init(
-		    &remap_table, memory_context, attr_handlers->size(attr)
-	    )) {
-		goto error;
+#define FILTER_COMPILE_ATTR_BUILD_AS(variant, prefix)                          \
+	static inline struct filter_query_attr *                               \
+	filter_compile_attr_##variant##_build(                                 \
+		struct value_registry *registry,                               \
+		const struct filter_rule **rules,                              \
+		uint32_t rule_count,                                           \
+		struct memory_context *memory_context                          \
+	) {                                                                    \
+		const struct filter_compile_attr_handlers *attr_handlers =     \
+			&filter_compile_attr_##variant.attr_handlers;          \
+		struct filter_compile_attr *attr = prefix##_create(            \
+			memory_context, attr_handlers, rules, rule_count       \
+		);                                                             \
+		if (attr == NULL)                                              \
+			return NULL;                                           \
+		struct remap_table remap_table;                                \
+		if (remap_table_init(                                          \
+			    &remap_table, memory_context, prefix##_size(attr)  \
+		    )) {                                                       \
+			goto error;                                            \
+		}                                                              \
+		for (uint32_t idx = 0; idx < rule_count; ++idx) {              \
+			if (rules[idx] == NULL)                                \
+				continue;                                      \
+			if (prefix##_rule_is_any(                              \
+				    attr, attr_handlers, rules[idx]            \
+			    ))                                                 \
+				continue;                                      \
+			remap_table_new_gen(&remap_table);                     \
+			if (prefix##_rule_iter(                                \
+				    attr,                                      \
+				    attr_handlers,                             \
+				    rules[idx],                                \
+				    idx,                                       \
+				    filter_compile_attr_touch,                 \
+				    &remap_table                               \
+			    )) {                                               \
+				remap_table_free(&remap_table);                \
+				goto error;                                    \
+			}                                                      \
+		}                                                              \
+		remap_table_compact(&remap_table);                             \
+		if (prefix##_iter(                                             \
+			    attr,                                              \
+			    attr_handlers,                                     \
+			    filter_compile_attr_compact,                       \
+			    &remap_table                                       \
+		    )) {                                                       \
+			remap_table_free(&remap_table);                        \
+			goto error;                                            \
+		}                                                              \
+		remap_table_free(&remap_table);                                \
+		for (uint32_t idx = 0; idx < rule_count; ++idx) {              \
+			if (value_registry_start(registry))                    \
+				goto error;                                    \
+			if (rules[idx] == NULL)                                \
+				continue;                                      \
+			if (prefix##_rule_is_any(                              \
+				    attr, attr_handlers, rules[idx]            \
+			    )) {                                               \
+				if (prefix##_iter(                             \
+					    attr,                              \
+					    attr_handlers,                     \
+					    filter_compile_attr_collect,       \
+					    registry                           \
+				    ))                                         \
+					goto error;                            \
+			} else {                                               \
+				if (prefix##_rule_iter(                        \
+					    attr,                              \
+					    attr_handlers,                     \
+					    rules[idx],                        \
+					    idx,                               \
+					    filter_compile_attr_collect,       \
+					    registry                           \
+				    ))                                         \
+					goto error;                            \
+			}                                                      \
+		}                                                              \
+		struct filter_query_attr *query_attr =                         \
+			prefix##_commit(memory_context, attr);                 \
+		if (query_attr == NULL)                                        \
+			goto error;                                            \
+		return query_attr;                                             \
+	error:                                                                 \
+		prefix##_free(memory_context, attr);                           \
+		return NULL;                                                   \
 	}
 
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		if (rules[idx] == NULL)
-			continue;
-		/*
-		 * If a rule covers the whole area there is no meaning to
-		 * touch values - all of them just gain update without any
-		 * distinction result.
-		 */
-		if (attr_handlers->rule_is_any(attr, attr_handlers, rules[idx]))
-			continue;
+#define FILTER_COMPILE_ATTR_BUILD_DECLARE(name)                                \
+	FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(name, filter_compile_attr_##name)
 
-		remap_table_new_gen(&remap_table);
-
-		// Touch the rule matching values
-		if (attr_handlers->rule_iter(
-			    attr,
-			    attr_handlers,
-			    rules[idx],
-			    filter_compile_attr_touch,
-			    &remap_table
-		    )) {
-			remap_table_free(&remap_table);
-			goto error;
-		}
-	}
-
-	/*
-	 * Remap table compaction removes gaps of unused values and makes the
-	 * resulting set of values smaller
-	 */
-
-	remap_table_compact(&remap_table);
-
-	/*
-	 * Now reassign compacted values to each region defined for the
-	 * attribute.
-	 */
-
-	if (attr_handlers->iter(
-		    attr,
-		    attr_handlers,
-		    filter_compile_attr_compact,
-		    &remap_table
-	    )) {
-		remap_table_free(&remap_table);
-		goto error;
-	}
-
-	remap_table_free(&remap_table);
-
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		if (value_registry_start(registry))
-			goto error;
-		if (rules[idx] == NULL)
-			continue;
-		/*
-		 * Collect rule matching values - there are two options:
-		 *  - collect all known values in case if rule is matching any
-		 *  - collect rule specific attributes
-		 * In the first case we could collect all the values only
-		 * once which is the subject of further investigation.
-		 */
-		if (attr_handlers->rule_is_any(
-			    attr, attr_handlers, rules[idx]
-		    )) {
-			if (attr_handlers->iter(
-				    attr,
-				    attr_handlers,
-				    filter_compile_attr_collect,
-				    registry
-			    ))
-				goto error;
-
-		} else {
-			if (attr_handlers->rule_iter(
-				    attr,
-				    attr_handlers,
-				    rules[idx],
-				    filter_compile_attr_collect,
-				    registry
-			    ))
-				goto error;
-		}
-	}
-
-	struct filter_query_attr *query_attr =
-		attr_handlers->commit(memory_context, attr);
-	if (query_attr == NULL)
-		goto error;
-
-	return query_attr;
-
-error:
-	attr_handlers->free_compile(memory_context, attr);
-	return NULL;
-}
+#define FILTER_COMPILE_ATTR_BUILD(name)                                        \
+	FILTER_COMPILE_ATTR_BUILD_AS(name, filter_compile_attr_##name)

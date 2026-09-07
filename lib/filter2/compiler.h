@@ -19,8 +19,9 @@ filter_set_cb(uint32_t *value, void *data) {
 
 static inline int
 filter_set_rule_cb(uint32_t *value, void *data) {
-	if (*value != FILTER_RULE_INVALID)
+	if (*value != FILTER_RULE_INVALID) {
 		return 0;
+	}
 
 	uint32_t *rule_idx = (uint32_t *)data;
 	*value = *rule_idx;
@@ -44,77 +45,6 @@ static inline int
 filter_collect_cb(uint32_t *value, void *data) {
 	struct value_registry *registry = (struct value_registry *)data;
 	return value_registry_collect(registry, *value);
-}
-
-/*
- * Special handler for single attribute filter, the case implies the attribute
- * range lookup returns the rule index instead of identifier of a rule
- * combination.
- */
-static inline int
-filter_compile_single_attr(
-	struct filter *filter,
-	struct memory_context *memory_context,
-	const struct filter_rule **rules,
-	uint32_t rule_count,
-	const struct filter_compile_attr_handlers *attr_handlers
-) {
-	struct filter_query_attr **query_attrs =
-		(struct filter_query_attr **)memory_balloc(
-			memory_context, sizeof(struct filter_query_attr *)
-		);
-	if (query_attrs == NULL)
-		return -1;
-	memset(query_attrs, 0, sizeof(struct filter_query_attr *));
-	SET_OFFSET_OF(&filter->attrs, query_attrs);
-
-	struct filter_compile_attr *attr = attr_handlers->create(
-		memory_context, attr_handlers, rules, rule_count
-	);
-
-	if (attr == NULL) {
-		goto error_free_attrs;
-	}
-
-	/*
-	 * Set default value for all existing ranges in the attribute
-	 * definition are.
-	 */
-	uint32_t invalid = FILTER_RULE_INVALID;
-	attr_handlers->iter(attr, attr_handlers, filter_set_cb, &invalid);
-
-	/*
-	 * Iterate over all rules and set rule index for each corresponding
-	 * to a rule regions.
-	 */
-	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
-		const struct filter_rule *rule = rules[rule_idx];
-		if (rule == NULL)
-			continue;
-
-		attr_handlers->rule_iter(
-			attr, attr_handlers, rule, filter_set_rule_cb, &rule_idx
-		);
-	}
-
-	struct filter_query_attr *query_attr =
-		attr_handlers->commit(memory_context, attr);
-
-	if (query_attr == NULL) {
-		attr_handlers->free_compile(memory_context, attr);
-		goto error_free_attrs;
-	}
-	SET_OFFSET_OF(query_attrs, query_attr);
-
-	return 0;
-
-error_free_attrs:
-	memory_bfree(
-		memory_context, query_attrs, sizeof(struct filter_query_attr *)
-	);
-	SET_OFFSET_OF(&filter->attrs, NULL);
-
-	return -1;
 }
 
 /*
@@ -162,29 +92,25 @@ filter_compile(
 	SET_OFFSET_OF(&filter->attrs, NULL);
 	SET_OFFSET_OF(&filter->joints, NULL);
 
-	if (attr_handler_count == 1)
-		return filter_compile_single_attr(
-			filter,
-			memory_context,
-			rules,
-			rule_count,
-			attr_handlers[0]
-		);
-
 	struct filter_query_attr **query_attrs =
 		(struct filter_query_attr **)memory_balloc(
 			memory_context,
 			sizeof(struct filter_query_attr *) * attr_handler_count
 		);
-	if (query_attrs == NULL)
+	if (query_attrs == NULL) {
 		goto error;
+	}
 	memset(query_attrs,
 	       0,
 	       sizeof(struct filter_query_attr *) * attr_handler_count);
 	SET_OFFSET_OF(&filter->attrs, query_attrs);
 
 	uint32_t joint_count = attr_handler_count - 1;
-	uint32_t registry_count = attr_handler_count + joint_count - 1;
+	// A single attribute joins with a one valued dummy registry, so its
+	// final mapping is produced by the same merge as every other stage.
+	uint32_t single = attr_handler_count == 1;
+	joint_count += single;
+	uint32_t registry_count = attr_handler_count + joint_count - 1 + single;
 	struct value_registry *registries =
 		(struct value_registry *)memory_balloc(
 			memory_context,
@@ -193,10 +119,14 @@ filter_compile(
 	memset(registries, 0, sizeof(struct value_registry) * registry_count);
 
 	/*
-	 * Initialize all registries.
+	 * Only the attribute registries are initialized here; every
+	 * derivative registry is owned and initialized by the merge stage
+	 * that produces it.
 	 */
-	for (uint32_t idx = 0; idx < registry_count; ++idx) {
-		if (value_registry_init(registries + idx, memory_context)) {
+	for (uint32_t idx = 0; idx < attr_handler_count; ++idx) {
+		if (value_registry_init(
+			    registries + idx, memory_context, "filter:registry"
+		    )) {
 			goto error_free_registries;
 		}
 	}
@@ -210,19 +140,43 @@ filter_compile(
 	memset(joints, 0, sizeof(struct value_table) * joint_count);
 	SET_OFFSET_OF(&filter->joints, joints);
 
+	if (single) {
+		/*
+		 * The dummy registry carries one range per rule holding
+		 * the single value zero; joining it with the attribute
+		 * registry maps each class to the lowest rule covering it.
+		 */
+		struct value_registry *dummy = registries + attr_handler_count;
+		if (value_registry_init(
+			    dummy, memory_context, "filter:dummy"
+		    )) {
+			goto error_free_registries;
+		}
+		for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+			if (value_registry_start(dummy)) {
+				goto error_free_registries;
+			}
+			if (value_registry_collect(dummy, 0)) {
+				goto error_free_registries;
+			}
+		}
+	}
+
 	/*
 	 * Process all the attributes assigned to the filter.
 	 */
 	for (uint32_t attr_idx = 0; attr_idx < attr_handler_count; ++attr_idx) {
 		struct filter_query_attr *query_attr =
-			filter_compile_attr_build(
-				attr_handlers[attr_idx],
+			attr_handlers[attr_idx]->build(
 				registries + attr_idx,
 				rules,
 				rule_count,
 				memory_context
 			);
 		if (query_attr == NULL) {
+			fprintf(stderr,
+				"DBG compile: attr %u build failed\n",
+				attr_idx);
 			goto error_free_attrs;
 		}
 		SET_OFFSET_OF(query_attrs + attr_idx, query_attr);
@@ -234,13 +188,16 @@ filter_compile(
 			 * Join the rule values pair and produce a new set
 			 * of derivative values
 			 */
-			if (merge_and_collect_registry(
+			if (filter2_merge_and_collect_registry(
 				    memory_context,
 				    registries + joint_idx * 2,
 				    registries + joint_idx * 2 + 1,
 				    joints + joint_idx,
 				    registries + attr_handler_count + joint_idx
 			    )) {
+				fprintf(stderr,
+					"DBG compile: merge %u failed\n",
+					joint_idx);
 				goto error_free_attrs;
 			}
 		} else {
@@ -248,19 +205,23 @@ filter_compile(
 			 * The last stage - set rule index for the last one
 			 * pair of values.
 			 */
-			if (merge_and_set_registry_values(
+			if (filter2_merge_and_set_registry_values(
 				    memory_context,
 				    registries + joint_idx * 2,
 				    registries + joint_idx * 2 + 1,
 				    joints + joint_idx
 			    )) {
+				fprintf(stderr,
+					"DBG compile: set %u failed\n",
+					joint_idx);
 				goto error_free_attrs;
 			}
 		}
 	}
 
-	for (uint32_t idx = 0; idx < registry_count; ++idx)
+	for (uint32_t idx = 0; idx < registry_count; ++idx) {
 		value_registry_fini(registries + idx);
+	}
 
 	memory_bfree(
 		memory_context,
@@ -274,8 +235,9 @@ error_free_attrs:
 	for (uint32_t attr_idx = 0; attr_idx < attr_handler_count; ++attr_idx) {
 		struct filter_query_attr *query_attr =
 			ADDR_OF(query_attrs + attr_idx);
-		if (query_attr == NULL)
+		if (query_attr == NULL) {
 			continue;
+		}
 		attr_handlers[attr_idx]->free_query(memory_context, query_attr);
 	}
 
@@ -288,8 +250,9 @@ error_free_attrs:
 	);
 
 error_free_registries:
-	for (uint32_t idx = 0; idx < registry_count; ++idx)
+	for (uint32_t idx = 0; idx < registry_count; ++idx) {
 		value_registry_fini(registries + idx);
+	}
 	memory_bfree(
 		memory_context,
 		registries,
@@ -324,8 +287,9 @@ filter_destroy(
 		     ++attr_idx) {
 			struct filter_query_attr *query_attr =
 				ADDR_OF(query_attrs + attr_idx);
-			if (query_attr == NULL)
+			if (query_attr == NULL) {
 				continue;
+			}
 			attr_handlers[attr_idx]->free_query(
 				memory_context, query_attr
 			);
@@ -338,6 +302,9 @@ filter_destroy(
 	}
 
 	uint32_t joint_count = attr_handler_count - 1;
+	if (attr_handler_count == 1) {
+		joint_count = 1;
+	}
 	struct value_table *joints = ADDR_OF(&filter->joints);
 	if (joints != NULL) {
 		for (uint32_t joint_idx = 0; joint_idx < joint_count;

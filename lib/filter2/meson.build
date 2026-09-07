@@ -4,7 +4,6 @@ lib_filter2_query_dep = declare_dependency(
 
 compiler_sources = files(
   'compiler/helper.c',
-  'compiler/segments.c',
 )
 
 lib_filter2_compiler = static_library(

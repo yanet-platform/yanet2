@@ -46,11 +46,16 @@ filter_compile_attr_vlan_create(
 	attr->query_attr = (struct filter_query_attr_vlan *)memory_balloc(
 		memory_context, sizeof(struct filter_query_attr_vlan)
 	);
-	if (attr->query_attr == NULL)
+	if (attr->query_attr == NULL) {
 		goto error_free;
+	}
 
 	if (value_table_init(
-		    &attr->query_attr->value_table, memory_context, 1, 4096
+		    &attr->query_attr->value_table,
+		    memory_context,
+		    "filter:vlan",
+		    1,
+		    4096
 	    )) {
 		goto error_free_attr;
 	}
@@ -93,14 +98,16 @@ filter_compile_attr_vlan_iter(
 	struct filter_query_attr_vlan *query_attr =
 		vlan_ranges_attr->query_attr;
 
-	for (uint32_t idx = 0; idx < 4096; ++idx)
+	for (uint32_t idx = 0; idx < 4096; ++idx) {
 		if (iter_cb_func(
 			    value_table_get_ptr(
 				    &query_attr->value_table, 0, idx
 			    ),
 			    cb_func_data
-		    ))
+		    ) < 0) {
 			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -130,9 +137,11 @@ filter_compile_attr_vlan_rule_iter(
 	struct filter_compile_attr *attr,
 	const struct filter_compile_attr_handlers *attr_handlers,
 	const struct filter_rule *rule,
+	uint32_t rule_idx,
 	filter_compile_attr_iter_cb_func iter_cb_func,
 	void *cb_func_data
 ) {
+	(void)rule_idx;
 	struct filter_compile_attr_vlan_handlers *vlan_ranges_handlers =
 		container_of(
 			attr_handlers,
@@ -161,7 +170,7 @@ filter_compile_attr_vlan_rule_iter(
 					    &query_attr->value_table, 0, vlan
 				    ),
 				    cb_func_data
-			    )) {
+			    ) < 0) {
 				return -1;
 			}
 		}
@@ -210,15 +219,11 @@ filter_compile_attr_vlan_commit(
 	return &query_attr->attr;
 }
 
+FILTER_COMPILE_ATTR_BUILD_DECLARE(vlan)
+
 static const struct filter_compile_attr_handlers
 	filter_compile_attr_vlan_handlers = {
-		.create = filter_compile_attr_vlan_create,
-		.size = filter_compile_attr_vlan_size,
-		.iter = filter_compile_attr_vlan_iter,
-		.rule_is_any = filter_compile_attr_vlan_rule_is_any,
-		.rule_iter = filter_compile_attr_vlan_rule_iter,
-		.commit = filter_compile_attr_vlan_commit,
-		.free_compile = filter_compile_attr_vlan_free,
+		.build = filter_compile_attr_vlan_build,
 		.free_query = filter_query_attr_vlan_free,
 };
 
@@ -235,3 +240,5 @@ static const struct filter_compile_attr_vlan_handlers filter_compile_attr_vlan =
 		.attr_handlers = filter_compile_attr_vlan_handlers,
 		.get_vlan_ranges = filter_rule_get_vlan_ranges,
 };
+
+FILTER_COMPILE_ATTR_BUILD(vlan)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <lib/filter/filter.h>
+#include <lib/filter2/filter.h>
 
 #include "lib/controlplane/config/cp_module.h"
 

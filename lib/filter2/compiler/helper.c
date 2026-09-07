@@ -2,29 +2,34 @@
 #include "common/registry.h"
 #include "lib/filter2/filter.h"
 
-int
-init_dummy_registry(
-	struct memory_context *memory_context,
-	uint32_t actions,
-	struct value_registry *registry
-) {
-	int res = value_registry_init(registry, memory_context);
-	if (res < 0) {
-		return res;
-	}
-	for (uint32_t i = 0; i < actions; ++i) {
-		res = value_registry_start(registry);
-		if (res < 0) {
-			value_registry_fini(registry);
-			return res;
-		}
-		res = value_registry_collect(registry, 0);
-		if (res < 0) {
-			value_registry_fini(registry);
-			return res;
-		}
-	}
-	return 0;
+#include <endian.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
+// A fixed-width mask is a contiguous prefix when its inverse is a run of low
+// bits, so incrementing that inverse carries all the way out and clears it.
+static bool
+mask_is_prefix64(uint64_t mask) {
+	uint64_t inv = ~mask;
+	return (inv & (inv + 1)) == 0;
+}
+
+bool
+filter2_net4_mask_is_valid(const uint8_t mask[NET4_LEN]) {
+	uint32_t bits;
+	memcpy(&bits, mask, sizeof(bits));
+	uint32_t inv = ~be32toh(bits);
+	return (inv & (inv + 1)) == 0;
+}
+
+bool
+filter2_net6_mask_is_valid(const uint8_t mask[NET6_LEN]) {
+	uint64_t hi, lo;
+	memcpy(&hi, mask, sizeof(hi));
+	memcpy(&lo, mask + 8, sizeof(lo));
+	return mask_is_prefix64(be64toh(hi)) && mask_is_prefix64(be64toh(lo));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,15 +42,16 @@ static int
 value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct value_set_ctx *set_ctx = (struct value_set_ctx *)data;
 	uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
-	if (*value != FILTER_RULE_INVALID)
+	if (*value != FILTER_RULE_INVALID) {
 		return 0;
+	}
 	*value = idx;
 
 	return 0;
 }
 
 int
-merge_and_set_registry_values(
+filter2_merge_and_set_registry_values(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
@@ -54,9 +60,13 @@ merge_and_set_registry_values(
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    "filter:joint",
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
+		fprintf(stderr, "DBG set: table init cap=%u x %u\n",
+		       (unsigned)value_registry_capacity(registry1),
+		       (unsigned)value_registry_capacity(registry2));
 		return -1;
 	}
 
@@ -81,8 +91,12 @@ merge_and_set_registry_values(
 			    range_idx,
 			    value_table_set_action,
 			    &set_ctx
-		    ))
+		    )) {
+			fprintf(stderr, "DBG set: join range %u/%lu failed\n",
+			       range_idx,
+			       (unsigned long)registry1->range_count);
 			goto error_join;
+		}
 	}
 
 	return 0;
@@ -104,8 +118,9 @@ value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct collect_ctx *collect_ctx = (struct collect_ctx *)data;
 
 	uint32_t *value = value_table_get_ptr(collect_ctx->value_table, v1, v2);
-	if (remap_table_touch(&collect_ctx->remap_table, *value, value))
+	if (remap_table_touch(&collect_ctx->remap_table, *value, value) < 0) {
 		return -1;
+	}
 	return 0;
 }
 
@@ -119,6 +134,7 @@ merge_registry_values(
 	if (value_table_init(
 		    table,
 		    memory_context,
+		    "filter:joint",
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -139,13 +155,15 @@ merge_registry_values(
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
 		remap_table_new_gen(&collect_ctx.remap_table);
-		value_registry_join_range(
-			registry1,
-			registry2,
-			range_idx,
-			value_table_touch_action,
-			&collect_ctx
-		);
+		if (value_registry_join_range(
+			    registry1,
+			    registry2,
+			    range_idx,
+			    value_table_touch_action,
+			    &collect_ctx
+		    )) {
+			goto error_join;
+		}
 	}
 
 	remap_table_compact(&collect_ctx.remap_table);
@@ -153,6 +171,9 @@ merge_registry_values(
 	remap_table_free(&collect_ctx.remap_table);
 
 	return 0;
+
+error_join:
+	remap_table_free(&collect_ctx.remap_table);
 
 error_remap_table:
 	value_table_free(table);
@@ -186,7 +207,7 @@ collect_registry_values(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_registry_init(registry, memory_context)) {
+	if (value_registry_init(registry, memory_context, "filter:joint")) {
 		return -1;
 	}
 
@@ -196,21 +217,29 @@ collect_registry_values(
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		value_registry_start(registry);
-		value_registry_join_range(
-			registry1,
-			registry2,
-			range_idx,
-			value_table_collect_action,
-			&collect_ctx
-		);
+		if (value_registry_start(registry)) {
+			goto error;
+		}
+		if (value_registry_join_range(
+			    registry1,
+			    registry2,
+			    range_idx,
+			    value_table_collect_action,
+			    &collect_ctx
+		    )) {
+			goto error;
+		}
 	}
 
 	return 0;
+
+error:
+	value_registry_fini(registry);
+	return -1;
 }
 
 int
-merge_and_collect_registry(
+filter2_merge_and_collect_registry(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,

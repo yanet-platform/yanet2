@@ -40,7 +40,9 @@ filter_query_attr_net4_lookup(
 
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint8_t *addr = net4_handlers->get_net4(packets[idx]);
-		results[idx] = lpm4_lookup(&attr_net4->lpm, addr);
+		results[idx] = value_table_get(
+			&attr_net4->value_table, 0, lpm4_lookup(&attr_net4->lpm, addr)
+		);
 	}
 }
 
