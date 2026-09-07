@@ -4,11 +4,15 @@ package controlplane.ynpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
 
-// DeviceService provides information about network devices configured
-// in the dataplane.
+// DeviceService lists and deletes network devices configured in the
+// dataplane.
 service DeviceService {
   // List returns all configured devices.
   rpc List(ListDevicesRequest) returns (ListDevicesResponse);
+  // Delete removes the device with the given name.
+  //
+  // Predefined topology devices cannot be deleted.
+  rpc Delete(DeleteDeviceRequest) returns (DeleteDeviceResponse);
 }
 
 message ListDevicesRequest {}
@@ -21,3 +25,12 @@ message DeviceId {
   // Device registry index.
   uint32 index = 3;
 }
+
+// DeleteDeviceRequest specifies which device to delete.
+message DeleteDeviceRequest {
+  // Name of the device to delete.
+  string name = 1;
+}
+
+// DeleteDeviceResponse is returned after successful deletion.
+message DeleteDeviceResponse {}
