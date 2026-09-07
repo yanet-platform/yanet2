@@ -44,3 +44,24 @@ static inline int
 rlist_empty(struct rlist *head) {
 	return head->next == head;
 }
+
+// Move every item of one list onto the tail of another.
+//
+// The source head is left empty and neither list is walked, so the
+// move costs the same regardless of lengths.
+static inline void
+rlist_concat(struct rlist *dst, struct rlist *src) {
+	if (rlist_empty(src)) {
+		return;
+	}
+
+	struct rlist *first = src->next;
+	struct rlist *last = src->prev;
+
+	dst->prev->next = first;
+	first->prev = dst->prev;
+	last->next = dst;
+	dst->prev = last;
+
+	rlist_init(src);
+}

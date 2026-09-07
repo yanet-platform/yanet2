@@ -43,8 +43,9 @@ worker_round_prepare(struct dp_worker *dp_worker, uint64_t current_time_ns) {
 	__atomic_store_n(&dp_worker->gen, acknowledged_gen, __ATOMIC_RELEASE);
 	*dp_worker->iterations += 1;
 
-	// Flip or first-build the worklists before any packet of this tick
-	// is scheduled onto them.
+	// First-build the worklists before any packet is scheduled onto
+	// them; later preparations do nothing, the round drains the
+	// worklists itself.
 	if (round.config_gen_ectx != NULL) {
 		config_gen_ectx_schedules_prepare(round.config_gen_ectx);
 	}
