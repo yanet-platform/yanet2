@@ -2,8 +2,12 @@ package builtin
 
 import (
 	"context"
+	"errors"
 
+	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -11,7 +15,7 @@ import (
 )
 
 // Memory is an in-process gRPC service for reporting per-agent
-// shared-memory arena utilization.
+// shared-memory arena utilization and for growing an agent's arena.
 type Memory struct {
 	ynpb.UnimplementedMemoryServiceServer
 
@@ -64,6 +68,43 @@ func (m *Memory) ListArenas(
 	}
 
 	return &ynpb.ListArenasResponse{Arenas: arenas}, nil
+}
+
+// ExtendAgent grows the arena of a live agent by the requested size.
+//
+// The size is a lower bound: the allocator rounds it up to its own
+// granularity, so the reported limit may exceed what was asked for.
+func (m *Memory) ExtendAgent(
+	ctx context.Context,
+	request *ynpb.ExtendAgentRequest,
+) (*ynpb.ExtendAgentResponse, error) {
+	name := request.GetAgent()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent name is required")
+	}
+
+	size := datasize.ByteSize(request.GetSize())
+	if size == 0 {
+		return nil, status.Error(codes.InvalidArgument, "size must be positive")
+	}
+
+	if !m.shm.DataplaneReady(m.instanceID) {
+		return nil, status.Error(codes.Unavailable, "dataplane instance is not ready")
+	}
+
+	memoryLimit, err := m.shm.ExtendAgent(m.instanceID, name, size)
+	switch {
+	case errors.Is(err, ffi.ErrAgentNotFound):
+		return nil, status.Errorf(codes.NotFound, "agent %q is not attached", name)
+	case errors.Is(err, ffi.ErrResourceExhausted):
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
+	case err != nil:
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &ynpb.ExtendAgentResponse{
+		MemoryLimit: uint64(memoryLimit),
+	}, nil
 }
 
 // Collect returns arena occupancy and memory-context attribution gauges

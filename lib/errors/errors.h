@@ -31,6 +31,8 @@ enum yanet_error_kind {
 	YANET_ERROR_BUSY,
 	// The request is wrong regardless of the system state.
 	YANET_ERROR_INVALID_ARGUMENT,
+	// The pool the operation draws from has no room left for the request.
+	YANET_ERROR_RESOURCE_EXHAUSTED,
 };
 
 // Frees the whole chain.

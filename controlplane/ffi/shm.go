@@ -14,6 +14,7 @@ package ffi
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"iter"
 	"unsafe"
@@ -112,6 +113,50 @@ func (m *SharedMemory) AgentAttach(
 	}
 
 	return &Agent{name: name, ptr: ptr}, nil
+}
+
+// ErrAgentNotFound reports that no agent is attached under the requested
+// name.
+var ErrAgentNotFound = errors.New("agent is not attached")
+
+// ExtendAgent grows the shared memory of the agent attached under the given
+// name and reports the size it holds afterwards.
+//
+// The size is a lower bound, because the allocator rounds it up to its own
+// granularity. Finding the agent and growing it happen under one hold of the
+// configuration lock, so a re-attach of the same name cannot retire the agent
+// midway. Reports ErrAgentNotFound when no agent goes by that name.
+func (m *SharedMemory) ExtendAgent(
+	instanceIdx uint32,
+	name string,
+	size datasize.ByteSize,
+) (datasize.ByteSize, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var memoryLimit C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_shm_extend_agent(
+		m.ptr,
+		C.uint32_t(instanceIdx),
+		cName,
+		C.uint64_t(size),
+		&memoryLimit,
+		&cErr,
+	)
+	switch {
+	case rc > 0:
+		return 0, ErrAgentNotFound
+	case rc < 0:
+		return 0, fmt.Errorf(
+			"failed to extend agent %q by %s: %w",
+			name,
+			size,
+			cerrors.FromC(unsafe.Pointer(cErr)),
+		)
+	}
+
+	return datasize.ByteSize(memoryLimit), nil
 }
 
 // DPConfig represents a handle to dataplane configuration.
