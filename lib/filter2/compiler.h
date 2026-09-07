@@ -174,9 +174,6 @@ filter_compile(
 				memory_context
 			);
 		if (query_attr == NULL) {
-			fprintf(stderr,
-				"DBG compile: attr %u build failed\n",
-				attr_idx);
 			goto error_free_attrs;
 		}
 		SET_OFFSET_OF(query_attrs + attr_idx, query_attr);
@@ -195,9 +192,6 @@ filter_compile(
 				    joints + joint_idx,
 				    registries + attr_handler_count + joint_idx
 			    )) {
-				fprintf(stderr,
-					"DBG compile: merge %u failed\n",
-					joint_idx);
 				goto error_free_attrs;
 			}
 		} else {

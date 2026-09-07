@@ -37,11 +37,20 @@ filter_query_attr_net6_lookup(
 	struct filter_query_attr_net6 *attr_net6 =
 		container_of(attr, struct filter_query_attr_net6, attr);
 
+	uint32_t *row_scalar = ADDR_OF(&attr_net6->row_scalar);
+	uint32_t *row_index = ADDR_OF(&attr_net6->row_index);
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint8_t *addr = net6_handlers->get_net6(packets[idx]);
 		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
-		uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);
-		results[idx] = *value_table_get_ptr(&attr_net6->comb, hi, lo);
+		uint32_t scalar = row_scalar[hi];
+		if (scalar != FILTER_NET6_ROW_2D) {
+			results[idx] = scalar;
+		} else {
+			uint32_t lo = lpm8_lookup(&attr_net6->lo, addr + 8);
+			results[idx] = value_table_get(
+				&attr_net6->comb, row_index[hi], lo
+			);
+		}
 	}
 }
 

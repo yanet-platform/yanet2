@@ -17,6 +17,9 @@ typedef void (*filter_rule_get_net6s_func)(
 struct filter_compile_net6s_attr {
 	struct filter_compile_attr attr;
 	struct filter_query_attr_net6 *query_attr;
+	// Count of non uniform comb rows; the dense rebuild before commit
+	// packs exactly these into the final comb.
+	uint32_t dense_pending;
 
 	struct range_index ri_hi;
 	struct range_index ri_lo;
@@ -299,6 +302,29 @@ filter_compile_attr_net6s_commit(
 	struct memory_context *memory_context, struct filter_compile_attr *attr
 );
 
+// Copies the non uniform comb rows into the dense table. Returns -1 on
+// allocation failure with the dense table already released.
+static inline int
+net6_copy_dense_rows(
+	struct value_table *dense,
+	const struct value_table *comb,
+	const uint32_t *row_scalar,
+	const uint32_t *row_index,
+	uint32_t hi_count
+) {
+	for (uint32_t hi = 0; hi < hi_count; ++hi) {
+		if (row_scalar[hi] != FILTER_NET6_ROW_2D) {
+			continue;
+		}
+		uint32_t dense_row = row_index[hi];
+		for (uint32_t lo = 0; lo < comb->h_dim; ++lo) {
+			*value_table_get_ptr(dense, dense_row, lo) =
+				value_table_get(comb, hi, lo);
+		}
+	}
+	return 0;
+}
+
 static inline struct filter_query_attr *
 filter_compile_attr_net6s_build_dedup(
 	filter_rule_get_net6s_func get_net6s,
@@ -562,6 +588,65 @@ filter_compile_attr_net6s_build_dedup(
 	remap_table_free(&remap);
 
 	/*
+	 * Rows uniform across all lo values carry their result directly:
+	 * the lo trie walk and the comb load are skipped for them at query
+	 * time.
+	 */
+	{
+		uint32_t hi_count = comb->v_dim;
+		uint32_t *row_scalar = memory_balloc(
+			memory_context, sizeof(uint32_t) * hi_count
+		);
+		uint32_t *row_index = memory_balloc(
+			memory_context, sizeof(uint32_t) * hi_count
+		);
+		if (row_scalar == NULL || row_index == NULL) {
+			memory_bfree(
+				memory_context,
+				row_scalar,
+				sizeof(uint32_t) * hi_count
+			);
+			memory_bfree(
+				memory_context,
+				row_index,
+				sizeof(uint32_t) * hi_count
+			);
+			goto error_host;
+		}
+
+		/*
+		 * Classify rows: a row whose every cell reads the same
+		 * class carries it directly (the lo lookup is skipped at
+		 * query time); the remaining rows pack densely into a
+		 * rebuilt comb.
+		 */
+		uint32_t dense_count = 0;
+		for (uint32_t hi = 0; hi < hi_count; ++hi) {
+			uint32_t first = value_table_get(comb, hi, 0);
+			uint32_t lo = 1;
+			for (; lo < comb->h_dim; ++lo) {
+				if (value_table_get(comb, hi, lo) != first) {
+					break;
+				}
+			}
+			if (lo == comb->h_dim) {
+				row_scalar[hi] = first;
+				row_index[hi] = 0;
+			} else {
+				row_scalar[hi] = FILTER_NET6_ROW_2D;
+				row_index[hi] = dense_count++;
+			}
+		}
+
+		// The dense rebuild happens after the registry ranges are
+		// replayed: those still index the comb by original row.
+		attr->dense_pending = dense_count;
+		SET_OFFSET_OF(&attr->query_attr->row_scalar, row_scalar);
+		SET_OFFSET_OF(&attr->query_attr->row_index, row_index);
+		attr->query_attr->row_count = hi_count;
+	}
+
+	/*
 	 * Registry ranges: one per rule in order, replayed from per group
 	 * class lists. Each group is walked once and its distinct classes
 	 * recorded; a rule replays the lists of its groups without walking
@@ -730,6 +815,54 @@ filter_compile_attr_net6s_build_dedup(
 	free(dedup.keys);
 	free(dedup.by_id);
 	free(dedup.ids);
+
+	/*
+	 * Rebuild the comb over the non uniform rows only: those rows were
+	 * fully walked for the uniformity verdict, so dropping the uniform
+	 * ones frees the bulk of the materialized chunks.
+	 */
+	{
+		struct value_table *comb = &attr->query_attr->comb;
+		uint32_t hi_count = attr->query_attr->row_count;
+		uint32_t *row_scalar = ADDR_OF(&attr->query_attr->row_scalar);
+		uint32_t *row_index = ADDR_OF(&attr->query_attr->row_index);
+		if (attr->dense_pending != 0) {
+			struct value_table dense;
+			if (value_table_init(
+				    &dense,
+				    memory_context,
+				    "filter:net6",
+				    attr->dense_pending,
+				    comb->h_dim
+			    ) ||
+			    net6_copy_dense_rows(
+				    &dense,
+				    comb,
+				    row_scalar,
+				    row_index,
+				    hi_count
+			    )) {
+				// The host arrays and registries are already
+				// released on this tail; unwind locally and
+				// hand the failure to the caller as a plain
+				// attribute error.
+				filter_compile_attr_net6s_free(
+					memory_context, &attr->attr
+				);
+				return NULL;
+			}
+			value_table_free(comb);
+			// Field by field: the table carries relative pointers
+			// that a struct copy would strand.
+			comb->v_dim = dense.v_dim;
+			comb->h_dim = dense.h_dim;
+			SET_OFFSET_OF(&comb->values, ADDR_OF(&dense.values));
+			SET_OFFSET_OF(
+				&comb->memory_context,
+				ADDR_OF(&dense.memory_context)
+			);
+		}
+	}
 
 	return filter_compile_attr_net6s_commit(memory_context, &attr->attr);
 
