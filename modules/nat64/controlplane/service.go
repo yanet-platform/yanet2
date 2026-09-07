@@ -215,6 +215,9 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
+	if slices.ContainsFunc(inst.Config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
+		return &nat64pb.AddPrefixResponse{}, nil
+	}
 	inst.Config.Prefixes = append(inst.Config.Prefixes, prefix)
 
 	if err := m.updateModuleConfig(name, inst); err != nil {
@@ -295,6 +298,7 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 			len(inst.Config.Prefixes),
 		)
 	}
+	inst.Config.Mappings = slices.DeleteFunc(inst.Config.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
 	inst.Config.Mappings = append(inst.Config.Mappings, Mapping{
 		IPv4:        ipv4,
 		IPv6:        ipv6,
