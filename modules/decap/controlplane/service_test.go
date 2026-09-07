@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -154,6 +155,25 @@ func (m *flakyBackend) UpdateModule(
 }
 
 func (m *flakyBackend) DeleteModule(name string) error {
+	return nil
+}
+
+// blockingBackend stalls every module publish until released.
+type blockingBackend struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingBackend) UpdateModule(
+	name string,
+	prefixes []netip.Prefix,
+) (ModuleHandle, error) {
+	close(m.started)
+	<-m.release
+	return &mockModuleHandle{}, nil
+}
+
+func (m *blockingBackend) DeleteModule(name string) error {
 	return nil
 }
 
@@ -476,5 +496,122 @@ func Test_DecapService_ConcurrentAccess(t *testing.T) {
 		})
 	}
 
+	require.NoError(t, g.Wait())
+}
+
+// Test_DecapService_ListDuringStalledUpdate verifies that listing configs
+// completes while another goroutine's update is still stalled inside the
+// backend publish.
+func Test_DecapService_ListDuringStalledUpdate(t *testing.T) {
+	backend := &blockingBackend{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := NewDecapService(backend)
+
+	g, ctx := errgroup.WithContext(t.Context())
+	g.Go(func() error {
+		_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{Name: "decap0"})
+		return err
+	})
+
+	<-backend.started
+
+	listed := make(chan struct{})
+	go func() {
+		defer close(listed)
+		_, _ = svc.ListConfigs(t.Context(), &decappb.ListConfigsRequest{})
+	}()
+
+	select {
+	case <-listed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("listing configs blocked behind a stalled module publish")
+	}
+
+	close(backend.release)
+	require.NoError(t, g.Wait())
+}
+
+// stallingReclaimHandle refuses its first free, which parks it, and
+// stalls the second until released.
+type stallingReclaimHandle struct {
+	numCalls atomic.Int64
+	started  chan struct{}
+	release  chan struct{}
+}
+
+func (m *stallingReclaimHandle) Free() error {
+	if m.numCalls.Add(1) == 1 {
+		return ffi.ErrStillReferenced
+	}
+	close(m.started)
+	<-m.release
+	return nil
+}
+
+// stallingReclaimBackend mints the stalling handle on its first publish
+// and plain handles thereafter.
+type stallingReclaimBackend struct {
+	numCalls atomic.Int64
+	handle   stallingReclaimHandle
+}
+
+// newStallingReclaimBackend returns a backend that mints the stalling
+// reclaim handle on the first publish; the handle's started channel
+// fires once its deferred destruction is inside the stall.
+func newStallingReclaimBackend() *stallingReclaimBackend {
+	return &stallingReclaimBackend{
+		handle: stallingReclaimHandle{
+			started: make(chan struct{}),
+			release: make(chan struct{}),
+		},
+	}
+}
+
+func (m *stallingReclaimBackend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error) {
+	if m.numCalls.Add(1) == 1 {
+		return &m.handle, nil
+	}
+	return &mockModuleHandle{}, nil
+}
+
+func (m *stallingReclaimBackend) DeleteModule(name string) error {
+	return nil
+}
+
+// Test_DecapService_ListDuringStalledReclaim verifies that listing configs
+// completes while a superseded handle's deferred destruction is stalled
+// inside the backend.
+func Test_DecapService_ListDuringStalledReclaim(t *testing.T) {
+	backend := newStallingReclaimBackend()
+	svc := NewDecapService(backend)
+
+	_, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{Name: "decap0", Prefixes4: mustPrefixes4(t, "10.0.0.0/24")})
+	require.NoError(t, err)
+	_, err = svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{Name: "decap0", Prefixes4: mustPrefixes4(t, "10.0.0.0/24")})
+	require.NoError(t, err)
+
+	g, _ := errgroup.WithContext(t.Context())
+	g.Go(func() error {
+		svc.ReclaimDeferred()
+		return nil
+	})
+
+	<-backend.handle.started
+
+	listed := make(chan struct{})
+	go func() {
+		defer close(listed)
+		_, _ = svc.ListConfigs(t.Context(), &decappb.ListConfigsRequest{})
+	}()
+
+	select {
+	case <-listed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("listing configs blocked behind a stalled deferred handle destruction")
+	}
+
+	close(backend.handle.release)
 	require.NoError(t, g.Wait())
 }

@@ -5,8 +5,10 @@ import (
 	"net/netip"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -611,4 +613,140 @@ func Test_NAT64Service_Remove_NotFound(t *testing.T) {
 			})
 		}
 	}
+}
+
+// blockingBackend stalls every module publish until released.
+type blockingBackend struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
+	close(m.started)
+	<-m.release
+	return &mockHandle{}, nil
+}
+
+func (m *blockingBackend) DeleteModule(name string) error {
+	return nil
+}
+
+// Test_NAT64Service_ListDuringStalledUpdate verifies that listing configs
+// completes while another goroutine's update is still stalled inside the
+// backend publish.
+func Test_NAT64Service_ListDuringStalledUpdate(t *testing.T) {
+	backend := &blockingBackend{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	service := NewNAT64Service(backend)
+
+	g, ctx := errgroup.WithContext(t.Context())
+	g.Go(func() error {
+		_, err := service.AddPrefix(ctx, &nat64pb.AddPrefixRequest{
+			Name:   "nat64-0",
+			Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+		})
+		return err
+	})
+
+	<-backend.started
+
+	listed := make(chan struct{})
+	go func() {
+		defer close(listed)
+		_, _ = service.ListConfigs(t.Context(), &nat64pb.ListConfigsRequest{})
+	}()
+
+	select {
+	case <-listed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("listing configs blocked behind a stalled module publish")
+	}
+
+	close(backend.release)
+	require.NoError(t, g.Wait())
+}
+
+// stallingReclaimHandle refuses its first free, which parks it, and
+// stalls the second until released.
+type stallingReclaimHandle struct {
+	numCalls atomic.Int64
+	started  chan struct{}
+	release  chan struct{}
+}
+
+func (m *stallingReclaimHandle) Free() error {
+	if m.numCalls.Add(1) == 1 {
+		return ffi.ErrStillReferenced
+	}
+	close(m.started)
+	<-m.release
+	return nil
+}
+
+// stallingReclaimBackend mints the stalling handle on its first publish
+// and plain handles thereafter.
+type stallingReclaimBackend struct {
+	numCalls atomic.Int64
+	handle   stallingReclaimHandle
+}
+
+// newStallingReclaimBackend returns a backend that mints the stalling
+// reclaim handle on the first publish; the handle's started channel
+// fires once its deferred destruction is inside the stall.
+func newStallingReclaimBackend() *stallingReclaimBackend {
+	return &stallingReclaimBackend{
+		handle: stallingReclaimHandle{
+			started: make(chan struct{}),
+			release: make(chan struct{}),
+		},
+	}
+}
+
+func (m *stallingReclaimBackend) UpdateModule(name string, cfg *NAT64Config) (ModuleHandle, error) {
+	if m.numCalls.Add(1) == 1 {
+		return &m.handle, nil
+	}
+	return &mockHandle{}, nil
+}
+
+func (m *stallingReclaimBackend) DeleteModule(name string) error {
+	return nil
+}
+
+// Test_NAT64Service_ListDuringStalledReclaim verifies that listing configs
+// completes while a superseded handle's deferred destruction is stalled
+// inside the backend.
+func Test_NAT64Service_ListDuringStalledReclaim(t *testing.T) {
+	backend := newStallingReclaimBackend()
+	service := NewNAT64Service(backend)
+
+	_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{Name: "nat64-0", Prefix: mustIPv6Prefix(t, "64:ff9b::/96")})
+	require.NoError(t, err)
+	_, err = service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{Name: "nat64-0", Prefix: mustIPv6Prefix(t, "2001:db8::/96")})
+	require.NoError(t, err)
+
+	g, _ := errgroup.WithContext(t.Context())
+	g.Go(func() error {
+		service.ReclaimDeferred()
+		return nil
+	})
+
+	<-backend.handle.started
+
+	listed := make(chan struct{})
+	go func() {
+		defer close(listed)
+		_, _ = service.ListConfigs(t.Context(), &nat64pb.ListConfigsRequest{})
+	}()
+
+	select {
+	case <-listed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("listing configs blocked behind a stalled deferred handle destruction")
+	}
+
+	close(backend.handle.release)
+	require.NoError(t, g.Wait())
 }
