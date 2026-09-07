@@ -184,6 +184,129 @@ func Test_NAT64Service_AddPrefixDefaultMTU(t *testing.T) {
 	require.Equal(t, MTUConfig{IPv4MTU: 1450, IPv6MTU: 1280}, backend.configs[0].MTU)
 }
 
+// Test_NAT64Service_AddPrefix_ExistingIsNoop verifies that adding a prefix
+// already in the config does not duplicate it or republish the module.
+func Test_NAT64Service_AddPrefix_ExistingIsNoop(t *testing.T) {
+	backend := &mockBackend{}
+	service := NewNAT64Service(backend)
+	prefix := mustIPv6Prefix(t, "64:ff9b::/96")
+
+	_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: prefix,
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: prefix,
+	})
+	require.NoError(t, err)
+
+	show, err := service.ShowConfig(t.Context(), &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+	require.NoError(t, err)
+	require.Len(t, show.GetConfig().GetPrefixes(), 1)
+	require.Equal(t, prefix, show.GetConfig().GetPrefixes()[0])
+	require.Len(t, backend.configs, 1)
+}
+
+// Test_NAT64Service_AddMapping_ExistingIPv4Replaced verifies that adding a
+// mapping for an already mapped IPv4 replaces the entry instead of adding one.
+func Test_NAT64Service_AddMapping_ExistingIPv4Replaced(t *testing.T) {
+	backend := &mockBackend{}
+	service := NewNAT64Service(backend)
+	ipv4 := netip.MustParseAddr("192.0.2.1")
+	ipv6First := netip.MustParseAddr("2001:db8::1")
+	ipv6Second := netip.MustParseAddr("2001:db8::2")
+
+	_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+	})
+	require.NoError(t, err)
+	_, err = service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: mustIPv6Prefix(t, "2001:db8::/96"),
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
+		Name:        "nat64-0",
+		Ipv4:        commonpb.NewIPv4Address(ipv4.As4()),
+		Ipv6:        commonpb.NewIPv6Address(ipv6First.As16()),
+		PrefixIndex: 0,
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
+		Name:        "nat64-0",
+		Ipv4:        commonpb.NewIPv4Address(ipv4.As4()),
+		Ipv6:        commonpb.NewIPv6Address(ipv6Second.As16()),
+		PrefixIndex: 1,
+	})
+	require.NoError(t, err)
+
+	show, err := service.ShowConfig(t.Context(), &nat64pb.ShowConfigRequest{Name: "nat64-0"})
+	require.NoError(t, err)
+	require.Len(t, show.GetConfig().GetMappings(), 1)
+	require.Equal(t, commonpb.NewIPv4Address(ipv4.As4()), show.GetConfig().GetMappings()[0].GetIpv4())
+	require.Equal(t, commonpb.NewIPv6Address(ipv6Second.As16()), show.GetConfig().GetMappings()[0].GetIpv6())
+	require.Equal(t, uint32(1), show.GetConfig().GetMappings()[0].GetPrefixIndex())
+
+	last := backend.configs[len(backend.configs)-1]
+	require.Len(t, last.Mappings, 1)
+	require.Equal(t, ipv4, last.Mappings[0].IPv4)
+	require.Equal(t, ipv6Second, last.Mappings[0].IPv6)
+	require.Equal(t, uint32(1), last.Mappings[0].PrefixIndex)
+}
+
+// Test_NAT64Service_AddMapping_UpsertPublishedLast verifies that an upserted
+// mapping is published last, so a shared IPv6 resolves to the newest mapping.
+func Test_NAT64Service_AddMapping_UpsertPublishedLast(t *testing.T) {
+	backend := &mockBackend{}
+	service := NewNAT64Service(backend)
+	ipv4First := netip.MustParseAddr("192.0.2.1")
+	ipv4Second := netip.MustParseAddr("192.0.2.2")
+	ipv6First := netip.MustParseAddr("2001:db8::1")
+	ipv6Second := netip.MustParseAddr("2001:db8::2")
+
+	_, err := service.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+		Name:   "nat64-0",
+		Prefix: mustIPv6Prefix(t, "64:ff9b::/96"),
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
+		Name:        "nat64-0",
+		Ipv4:        commonpb.NewIPv4Address(ipv4First.As4()),
+		Ipv6:        commonpb.NewIPv6Address(ipv6First.As16()),
+		PrefixIndex: 0,
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
+		Name:        "nat64-0",
+		Ipv4:        commonpb.NewIPv4Address(ipv4Second.As4()),
+		Ipv6:        commonpb.NewIPv6Address(ipv6Second.As16()),
+		PrefixIndex: 0,
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
+		Name:        "nat64-0",
+		Ipv4:        commonpb.NewIPv4Address(ipv4First.As4()),
+		Ipv6:        commonpb.NewIPv6Address(ipv6Second.As16()),
+		PrefixIndex: 0,
+	})
+	require.NoError(t, err)
+
+	last := backend.configs[len(backend.configs)-1]
+	require.Equal(t, []Mapping{
+		{IPv4: ipv4Second, IPv6: ipv6Second, PrefixIndex: 0},
+		{IPv4: ipv4First, IPv6: ipv6Second, PrefixIndex: 0},
+	}, last.Mappings)
+}
+
 // Test_NAT64Service_PrefixMutation_Invalid verifies that both mutations reject
 // missing, malformed, and non-/96 prefixes.
 func Test_NAT64Service_PrefixMutation_Invalid(t *testing.T) {
