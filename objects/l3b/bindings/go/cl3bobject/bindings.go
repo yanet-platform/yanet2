@@ -6,11 +6,36 @@ package cl3bobject
 //#cgo LDFLAGS: -L../../../../../build/objects/l3b/api -ll3b_objects
 //#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
+//#cgo LDFLAGS: -L../../../../../build/lib/l3state -ll3state
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
+//#include "lib/l3state/l3state.h"
 //#include "objects/l3b/api/l3b_session_table_object.h"
 //#include "objects/l3b/api/l3b_virtual_service_object.h"
+//
+//// cl3bobject_sessions_read resolves the service's session table and pages
+//// its records through the l3state cursor.
+//static inline int
+//cl3bobject_sessions_read(
+//	struct cp_object *service,
+//	uint64_t now,
+//	uint64_t *cursor,
+//	struct l3s_session *sessions,
+//	uint32_t capacity
+//) {
+//	struct l3b_session_table_object *table =
+//		l3b_virtual_service_session_table(service);
+//	if (table == NULL) {
+//		return -1;
+//	}
+//	l3s_cursor_t l3s_cursor = {.token = *cursor};
+//	uint32_t count = l3s_table_read(
+//		&table->table, now, &l3s_cursor, sessions, capacity
+//	);
+//	*cursor = l3s_cursor.token;
+//	return (int)count;
+//}
 import "C"
 
 import (
@@ -232,6 +257,99 @@ func (m *VirtualServiceObject) Free() error {
 		"failed to free session table object: %w",
 		cerrors.FromC(unsafe.Pointer(cErr)),
 	)
+}
+
+// Session is one decoded session record of a service's table.
+type Session struct {
+	// SourceAddress is the client flow's source address.
+	SourceAddress netip.Addr
+	// SourcePort is the client flow's source port.
+	SourcePort uint16
+	// RealAddress is the destination address of the pinned real server.
+	RealAddress netip.Addr
+	// ExpiresAt is the record's absolute deadline in nanoseconds since
+	// the epoch.
+	ExpiresAt uint64
+}
+
+// ReadSessions pages through the session records of the service's table.
+//
+// cursor continues a previous listing (0 starts from the beginning); limit
+// bounds the page size. Returns the page and the continuation token for the
+// next one — 0 when the listing is complete. The returned nowNs is the
+// dataplane's current time, the reference point of the records' deadlines.
+func (m *VirtualServiceObject) ReadSessions(
+	agent *ffi.Agent,
+	cursor uint64,
+	limit uint32,
+) ([]Session, uint64, uint64, error) {
+	if m.ptr == nil {
+		return nil, 0, 0, fmt.Errorf("virtual service object is nil")
+	}
+	if limit == 0 {
+		limit = 1
+	}
+
+	nowNs, ok := agent.DPConfig().CurrentTime()
+	if !ok {
+		return nil, 0, 0, fmt.Errorf("failed to read dataplane time")
+	}
+
+	sessions := make([]C.struct_l3s_session, limit)
+	cCursor := C.uint64_t(cursor)
+	count, errno := C.cl3bobject_sessions_read(
+		m.ptr,
+		C.uint64_t(nowNs),
+		&cCursor,
+		&sessions[0],
+		C.uint32_t(limit),
+	)
+	_ = errno
+	if count < 0 {
+		return nil, 0, 0, fmt.Errorf("failed to read sessions: the service carries no session table")
+	}
+
+	out := make([]Session, 0, count)
+	for idx := uint32(0); idx < uint32(count); idx++ {
+		key := sessions[idx].key
+		value := sessions[idx].value
+
+		var sourceAddress netip.Addr
+		var realAddress netip.Addr
+		var sourceBytes [16]byte
+		var realBytes [16]byte
+		for idx := range sourceBytes {
+			sourceBytes[idx] = byte(key.src_addr[idx])
+			realBytes[idx] = byte(value.destination[idx])
+		}
+		if key.family == 4 {
+			sourceAddress = netip.AddrFrom4(
+				[4]byte(sourceBytes[0:4]),
+			)
+		} else {
+			sourceAddress = netip.AddrFrom16(sourceBytes)
+		}
+		if value.family == 4 {
+			realAddress = netip.AddrFrom4(
+				[4]byte(realBytes[0:4]),
+			)
+		} else {
+			realAddress = netip.AddrFrom16(realBytes)
+		}
+
+		out = append(out, Session{
+			SourceAddress: sourceAddress,
+			SourcePort:    uint16(key.src_port),
+			RealAddress:   realAddress,
+			ExpiresAt:     uint64(value.expires_at),
+		})
+	}
+
+	next := uint64(cCursor)
+	if next == C.L3S_CURSOR_DONE {
+		next = 0
+	}
+	return out, next, nowNs, nil
 }
 
 // DeleteVirtualService removes the named service object and its session table

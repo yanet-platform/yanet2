@@ -1,6 +1,7 @@
 package l3b_test
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,11 +10,13 @@ import (
 
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
+	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
 type mockBackend struct {
 	services        map[string]*l3bpb.VirtualService
 	moduleConfigs   map[string]*l3bpb.ModuleConfig
+	sessions        []cl3bobject.Session
 	createErr       error
 	createCallCount int
 }
@@ -81,6 +84,20 @@ func (m *mockBackend) UpdateRealServerState(service string, realServerIndex uint
 		return errNotFound
 	}
 	return nil
+}
+
+func (m *mockBackend) ListSessions(
+	service string,
+	cursor uint64,
+	limit uint32,
+) ([]cl3bobject.Session, uint64, uint64, error) {
+	if _, ok := m.services[service]; !ok {
+		return nil, 0, 0, errNotFound
+	}
+	if m.sessions == nil {
+		return nil, 0, 0, nil
+	}
+	return m.sessions, 0, 0, nil
 }
 
 func (m *mockBackend) UpdateRealServerWeight(service string, realServerIndex uint32, weight uint32) error {
@@ -213,4 +230,32 @@ func Test_RingFromWeights_EqualWeightsRoundRobin(t *testing.T) {
 
 func Test_RingFromWeights_AllZeroIsEmpty(t *testing.T) {
 	require.Nil(t, controlplane.RingFromWeights([]uint32{0, 0}))
+}
+
+func Test_L3BService_ListSessions(t *testing.T) {
+	svc, backend := newTestService(t)
+
+	_, err := svc.CreateService(t.Context(), &l3bpb.CreateServiceRequest{Service: sampleService("vs0")})
+	require.NoError(t, err)
+
+	backend.sessions = []cl3bobject.Session{{
+		SourceAddress: netip.MustParseAddr("10.0.0.1"),
+		SourcePort:    12345,
+		RealAddress:   netip.MustParseAddr("172.16.0.10"),
+		ExpiresAt:     42,
+	}}
+
+	resp, err := svc.ListSessions(t.Context(), &l3bpb.ListSessionsRequest{Service: "vs0"})
+	require.NoError(t, err)
+	require.Len(t, resp.Sessions, 1)
+	require.EqualValues(t, 12345, resp.Sessions[0].SourcePort)
+	expectedSource := netip.MustParseAddr("10.0.0.1").As4()
+	expectedReal := netip.MustParseAddr("172.16.0.10").As4()
+	require.Equal(t, expectedSource[:], resp.Sessions[0].SourceAddress)
+	require.Equal(t, expectedReal[:], resp.Sessions[0].RealAddress)
+	require.EqualValues(t, 42, resp.Sessions[0].ExpiresAt)
+	require.Zero(t, resp.NextCursor)
+
+	_, err = svc.ListSessions(t.Context(), &l3bpb.ListSessionsRequest{Service: "absent"})
+	require.Equal(t, codes.NotFound, status.Code(err))
 }

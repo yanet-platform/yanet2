@@ -192,3 +192,56 @@ func (m *L3BService) UpdateRealServerWeight(
 
 	return &l3bpb.UpdateRealServerWeightResponse{}, nil
 }
+
+// ListSessions pages through the session records of a named virtual service.
+func (m *L3BService) ListSessions(
+	ctx context.Context,
+	req *l3bpb.ListSessionsRequest,
+) (*l3bpb.ListSessionsResponse, error) {
+	service := req.GetService()
+	if err := validateName("service", service); err != nil {
+		return nil, err
+	}
+
+	sessions, nextCursor, nowNs, err := m.backend.ListSessions(
+		service,
+		req.GetCursor(),
+		req.GetLimit(),
+	)
+	if err != nil {
+		return nil, backendError(err)
+	}
+
+	records := make([]*l3bpb.SessionRecord, 0, len(sessions))
+	for _, session := range sessions {
+		var sourceBytes []byte
+		var realBytes []byte
+		if session.SourceAddress.Is4() {
+			octets := session.SourceAddress.As4()
+			sourceBytes = octets[:]
+		} else {
+			octets := session.SourceAddress.As16()
+			sourceBytes = octets[:]
+		}
+		if session.RealAddress.Is4() {
+			octets := session.RealAddress.As4()
+			realBytes = octets[:]
+		} else {
+			octets := session.RealAddress.As16()
+			realBytes = octets[:]
+		}
+
+		records = append(records, &l3bpb.SessionRecord{
+			SourceAddress: sourceBytes,
+			SourcePort:    uint32(session.SourcePort),
+			RealAddress:   realBytes,
+			ExpiresAt:     session.ExpiresAt,
+		})
+	}
+
+	return &l3bpb.ListSessionsResponse{
+		Sessions:   records,
+		NextCursor: nextCursor,
+		NowNs:      nowNs,
+	}, nil
+}

@@ -44,9 +44,13 @@ struct l3s_key {
  * gone or disabled, re-schedules and re-pins.
  */
 struct l3s_value {
-	// Address family of the pinned real server: 4 or 6.
+	// Address family of the pinned real server: 4 or 6. Any other value
+	// marks an unoccupied slot.
 	uint8_t family;
 	uint8_t reserved;
+	// Absolute record deadline in nanoseconds; stamped by the insert from
+	// its time-to-live and carried along on promotion.
+	uint64_t expires_at;
 	// Destination address of the pinned real server; IPv4 uses the first
 	// 4 bytes, zero-padded.
 	uint8_t destination[16];
@@ -151,13 +155,109 @@ l3s_table_insert(
 	const struct l3s_key *key,
 	const struct l3s_value *value
 ) {
+	// Stamp the record's absolute deadline so readers can report it
+	// without reaching into the map's bucket metadata; a promoted record
+	// keeps the deadline of the value it inherits.
+	struct l3s_value stamped = *value;
+	stamped.expires_at = now + ttl;
+
 	rwlock_t *lock = NULL;
 
-	int64_t result =
-		fwtable_insert(table, worker_idx, now, ttl, key, value, &lock);
+	int64_t result = fwtable_insert(
+		table, worker_idx, now, ttl, key, &stamped, &lock
+	);
 
 	if (lock != NULL) {
 		rwlock_write_unlock(lock);
 	}
 	return result < 0 ? -1 : 0;
+}
+
+/*
+ * Cursor over the records of a layered table.
+ *
+ * The token packs (layer << 32) | slot, ascending; L3S_CURSOR_DONE marks an
+ * exhausted listing.
+ */
+typedef struct l3s_cursor {
+	uint64_t token;
+} l3s_cursor_t;
+
+#define L3S_CURSOR_DONE 0xffffffffffffffff
+
+/*
+ * One decoded session record.
+ */
+struct l3s_session {
+	struct l3s_key key;
+	struct l3s_value value;
+};
+
+/*
+ * Read up to capacity session records starting at the cursor, skipping empty
+ * and expired slots, and advance the cursor past the last record read.
+ *
+ * Reads are unsynchronized slot reads taken while the dataplane may be
+ * writing: a record can be moments out of date, which observability traffic
+ * tolerates. Returns the number of records read; the cursor is left at
+ * L3S_CURSOR_DONE when the table is exhausted.
+ */
+static inline uint32_t
+l3s_table_read(
+	const fwtable_t *table,
+	uint64_t now,
+	l3s_cursor_t *cursor,
+	struct l3s_session *sessions,
+	uint32_t capacity
+) {
+	uint32_t collected = 0;
+	uint32_t layer_idx = (uint32_t)(cursor->token >> 32);
+	if (cursor->token == L3S_CURSOR_DONE) {
+		return 0;
+	}
+	uint32_t slot = (uint32_t)(cursor->token & 0xffffffffull);
+
+	fwmap_t *layer = ATOMIC_ADDR_OF(&((fwtable_t *)table)->head);
+	for (uint32_t idx = 0; layer != NULL;
+	     ++idx, layer = (fwmap_t *)ATOMIC_ADDR_OF(&layer->next)) {
+		if (idx < layer_idx) {
+			continue;
+		}
+
+		uint32_t key_limit =
+			__atomic_load_n(&layer->key_cursor, __ATOMIC_RELAXED);
+		for (; slot < key_limit && collected < capacity; ++slot) {
+			const struct l3s_value *value = (struct l3s_value *)
+				fwmap_get_value(layer, slot);
+			if (value == NULL ||
+			    (value->family != 4 && value->family != 6)) {
+				continue;
+			}
+			if (value->expires_at <= now) {
+				continue;
+			}
+
+			const struct l3s_key *key =
+				(struct l3s_key *)fwmap_get_key(layer, slot);
+			if (key == NULL) {
+				continue;
+			}
+
+			sessions[collected].key = *key;
+			sessions[collected].value = *value;
+			collected += 1;
+		}
+
+		if (collected == capacity) {
+			cursor->token =
+				((uint64_t)(idx) << 32) | (uint64_t)slot;
+			return collected;
+		}
+
+		layer_idx = idx + 1;
+		slot = 0;
+	}
+
+	cursor->token = L3S_CURSOR_DONE;
+	return collected;
 }

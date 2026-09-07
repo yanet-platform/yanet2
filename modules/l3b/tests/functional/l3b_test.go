@@ -2,6 +2,7 @@ package l3b_test
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"net/netip"
 	"testing"
@@ -558,6 +559,22 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 		"a session pinned before the update must keep its real")
 	require.Equal(t, "172.16.0.11", outerDstOf(packetOf("10.0.0.2", 54321)),
 		"a new session must follow the replacement's ring")
+
+	// Both pinned flows must be visible through the session listing.
+	sessions, next, _, err := replacement.ReadSessions(agent, 0, 100)
+	require.NoError(t, err)
+	require.Zero(t, next, "the listing must be complete")
+	require.Len(t, sessions, 2)
+
+	bySource := map[string]string{}
+	for _, session := range sessions {
+		bySource[fmt.Sprintf("%s:%d", session.SourceAddress, session.SourcePort)] =
+			session.RealAddress.String()
+	}
+	require.Equal(t, map[string]string{
+		"10.0.0.1:12345": "172.16.0.10",
+		"10.0.0.2:54321": "172.16.0.11",
+	}, bySource)
 
 	// Replace the service again with a different real server list: the
 	// pinned backend is gone, so the flow must re-pin onto the new ring

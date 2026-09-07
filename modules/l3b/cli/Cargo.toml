@@ -21,6 +21,7 @@ tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
 
 [build-dependencies]
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

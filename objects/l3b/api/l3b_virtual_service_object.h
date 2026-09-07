@@ -216,6 +216,11 @@ l3b_virtual_service_create(
 	yanet_error **err
 );
 
+// Return the session table the service reads and writes, or NULL while the
+// service carries none.
+struct l3b_session_table_object *
+l3b_virtual_service_session_table(const struct cp_object *cp_object);
+
 // Destroy the virtual service object once it is dangling — referenced by no
 // live configuration generation. The session table is left alone: it is owned
 // by the caller's handle, survives service updates and is destroyed through

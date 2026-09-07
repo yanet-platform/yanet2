@@ -40,6 +40,14 @@ type Backend interface {
 	// UpdateRealServerWeight sets the weight of a real server within a named
 	// virtual service and rebuilds its scheduler ring.
 	UpdateRealServerWeight(service string, realServerIndex uint32, weight uint32) error
+	// ListSessions pages through the session records of a named virtual
+	// service. Returns the page, the continuation token (0 when complete)
+	// and the dataplane time the deadlines are relative to.
+	ListSessions(
+		service string,
+		cursor uint64,
+		limit uint32,
+	) ([]cl3bobject.Session, uint64, uint64, error)
 }
 
 // freeable is anything this backend owns whose destruction a live
@@ -442,6 +450,29 @@ func familyLabel(address netip.Addr) string {
 	}
 	return "IPv6"
 }
+
+func (m *backend) ListSessions(
+	service string,
+	cursor uint64,
+	limit uint32,
+) ([]cl3bobject.Session, uint64, uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.services[service]
+	if !ok {
+		return nil, 0, 0, status.Errorf(codes.NotFound, "virtual service %q not found", service)
+	}
+
+	if limit == 0 {
+		limit = defaultSessionPageLimit
+	}
+	return existing.PublishTarget().ReadSessions(m.agent, cursor, limit)
+}
+
+// defaultSessionPageLimit bounds a ListSessions page when the caller asks
+// for no explicit limit.
+const defaultSessionPageLimit = 1000
 
 // maxRealServerWeight is the upper bound on a real server weight; the per-ring
 // capacity is sized so every server could max out at once.

@@ -37,6 +37,10 @@ service L3bService {
   // named virtual service; the scheduler rebuilds the ring so that a server
   // appears as many times as its weight.
   rpc UpdateRealServerWeight(UpdateRealServerWeightRequest) returns (UpdateRealServerWeightResponse);
+
+  // ListSessions pages through the session records of a named virtual
+  // service.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
 }
 
 // RealServer is a backend reached through an IP-in-IP tunnel. The address
@@ -121,3 +125,33 @@ message UpdateRealServerWeightRequest {
 }
 
 message UpdateRealServerWeightResponse {}
+
+// SessionRecord is one client flow pinned to a real server.
+message SessionRecord {
+  // Source address of the client flow; 4 or 16 bytes.
+  bytes source_address = 1;
+  // Source port of the client flow.
+  uint32 source_port = 2;
+  // Destination address of the pinned real server; 4 or 16 bytes.
+  bytes real_address = 3;
+  // Absolute record deadline in nanoseconds since the epoch.
+  uint64 expires_at = 4;
+}
+
+message ListSessionsRequest {
+  // Name of the virtual service whose sessions are listed.
+  string service = 1;
+  // Continuation token from a previous response; 0 starts from the
+  // beginning.
+  uint64 cursor = 2;
+  // Maximum number of records to return; 0 selects a server default.
+  uint32 limit = 3;
+}
+
+message ListSessionsResponse {
+  repeated SessionRecord sessions = 1;
+  // Continuation token for the next page; 0 when the listing is complete.
+  uint64 next_cursor = 2;
+  // Dataplane time in nanoseconds, the reference point of expires_at.
+  uint64 now_ns = 3;
+}

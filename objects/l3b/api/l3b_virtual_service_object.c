@@ -348,6 +348,14 @@ l3b_virtual_service_free(struct cp_object *cp_object, yanet_error **err) {
 	return 0;
 }
 
+struct l3b_session_table_object *
+l3b_virtual_service_session_table(const struct cp_object *cp_object) {
+	struct l3b_virtual_service_object *object = container_of(
+		cp_object, struct l3b_virtual_service_object, cp_object
+	);
+	return ADDR_OF(&object->virtual_service.session_table);
+}
+
 static struct virtual_service *
 l3b_virtual_service_of(struct cp_object *cp_object) {
 	return &container_of(

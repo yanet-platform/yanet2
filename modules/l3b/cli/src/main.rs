@@ -1,17 +1,19 @@
-use core::net::IpAddr;
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use l3bpb::{
-    CreateServiceRequest, DeleteServiceRequest, ListModuleConfigsRequest, ListServicesRequest, ModuleConfig,
-    UpdateModuleConfigRequest, UpdateRealServerStateRequest, UpdateRealServerWeightRequest, UpdateServiceRequest,
-    VirtualService, l3b_service_client::L3bServiceClient,
+    CreateServiceRequest, DeleteServiceRequest, ListModuleConfigsRequest, ListServicesRequest, ListSessionsRequest,
+    ModuleConfig, UpdateModuleConfigRequest, UpdateRealServerStateRequest, UpdateRealServerWeightRequest,
+    UpdateServiceRequest, VirtualService, l3b_service_client::L3bServiceClient,
 };
 use serde::Deserialize;
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -57,6 +59,8 @@ pub enum ModeCmd {
     UpdateRealServerState(RealServerCmd),
     /// Set the weight of a real server within a named virtual service.
     UpdateRealServerWeight(WeightCmd),
+    /// Page through the session records of a virtual service.
+    ListSessions(SessionsCmd),
 }
 
 impl ModeCmd {
@@ -70,6 +74,7 @@ impl ModeCmd {
             Self::ListModuleConfigs => "list-module-configs",
             Self::UpdateRealServerState(..) => "update-real-server-state",
             Self::UpdateRealServerWeight(..) => "update-real-server-weight",
+            Self::ListSessions(..) => "list-sessions",
         }
     }
 }
@@ -119,6 +124,20 @@ pub struct RealServerCmd {
     /// Whether the real server is enabled.
     #[arg(long)]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct SessionsCmd {
+    /// Virtual service name.
+    #[arg(long = "name", short = 'n')]
+    pub service: String,
+    /// Continuation token from a previous run; omit to start from the
+    /// beginning.
+    #[arg(long)]
+    pub cursor: Option<u64>,
+    /// Maximum number of records to return.
+    #[arg(long, default_value_t = 100)]
+    pub limit: u32,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -339,6 +358,54 @@ fn load_document<T: for<'de> Deserialize<'de>>(
         .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))
 }
 
+/// One rendered session row: the client flow and its pinned backend.
+#[derive(Tabled)]
+struct SessionRow {
+    #[tabled(rename = "SOURCE")]
+    source: String,
+    #[tabled(rename = "REAL")]
+    real: String,
+    #[tabled(rename = "EXPIRES IN")]
+    expires_in: String,
+}
+
+impl SessionRow {
+    /// Render a record against the response's dataplane time.
+    fn of(record: &l3bpb::SessionRecord, now_ns: u64) -> Self {
+        let source = match ip_address(&record.source_address) {
+            Some(address) => format!("[{address}]:{}", record.source_port),
+            None => format!("[?]:{}", record.source_port),
+        };
+        let real = ip_address(&record.real_address)
+            .map(|address| address.to_string())
+            .unwrap_or_else(|| "?".to_string());
+
+        let remaining = record.expires_at.saturating_sub(now_ns);
+        let expires_in = if remaining == 0 {
+            "now".to_string()
+        } else {
+            format!("{}s", remaining / 1_000_000_000)
+        };
+
+        Self { source, real, expires_in }
+    }
+}
+
+/// Decode a 4- or 16-byte wire address.
+fn ip_address(bytes: &[u8]) -> Option<IpAddr> {
+    match bytes.len() {
+        4 => {
+            let octets: [u8; 4] = bytes.try_into().expect("length checked");
+            Some(IpAddr::V4(Ipv4Addr::from(octets)))
+        }
+        16 => {
+            let octets: [u8; 16] = bytes.try_into().expect("length checked");
+            Some(IpAddr::V6(Ipv6Addr::from(octets)))
+        }
+        _ => None,
+    }
+}
+
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.l3b.controlplane.l3bpb.v1.L3bService";
 
@@ -367,6 +434,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::ListModuleConfigs => service.list_module_configs().await,
         ModeCmd::UpdateRealServerState(cmd) => service.update_real_server_state(cmd).await,
         ModeCmd::UpdateRealServerWeight(cmd) => service.update_real_server_weight(cmd).await,
+        ModeCmd::ListSessions(cmd) => service.list_sessions(cmd).await,
     }
 }
 
@@ -551,6 +619,47 @@ impl L3BService {
                 cmd.real_server_index, cmd.service, cmd.enabled
             ),
         );
+        Ok(())
+    }
+
+    pub async fn list_sessions(&mut self, cmd: SessionsCmd) -> Result<(), Error> {
+        let request = ListSessionsRequest {
+            service: cmd.service.clone(),
+            cursor: cmd.cursor.unwrap_or(0),
+            limit: cmd.limit,
+        };
+        log::trace!("list sessions request: {request:?}");
+        let response = self
+            .service
+            .client()
+            .list_sessions(request)
+            .await
+            .map_err(self.service.status("list-sessions"))?
+            .into_inner();
+        log::debug!("list sessions response: {response:?}");
+
+        output::data(
+            || &response,
+            || {
+                if response.sessions.is_empty() {
+                    output::empty(format_args!("no sessions for {}", cmd.service));
+                    return;
+                }
+                let rows: Vec<SessionRow> = response
+                    .sessions
+                    .iter()
+                    .map(|record| SessionRow::of(record, response.now_ns))
+                    .collect();
+                display::print_table_from_entries(rows);
+                if response.next_cursor != 0 {
+                    output::empty(format_args!(
+                        "more sessions available: rerun with --cursor {}",
+                        response.next_cursor
+                    ));
+                }
+            },
+        );
+
         Ok(())
     }
 
