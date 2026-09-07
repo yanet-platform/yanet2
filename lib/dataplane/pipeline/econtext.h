@@ -257,6 +257,17 @@ enum device_entry_direction {
 	device_entry_direction_output,
 };
 
+// Worklist state of a device entry, for the owning worker only.
+//
+// The ready state rides the generation's ready list and the home
+// state its home list. The scheduling path moves an entry to ready
+// from the home list, and the round works every ready entry back
+// home.
+enum device_entry_schedule_state {
+	device_entry_schedule_ready = 0,
+	device_entry_schedule_home = 1,
+};
+
 struct device_entry_ectx {
 	device_handler handler;
 
@@ -371,20 +382,23 @@ struct config_gen_ectx {
 	// instead of reinitializing a fresh front on each iteration.
 	struct packet_front packet_front;
 
-	// Two device-entry worklists whose roles swap every tick; the
-	// active one is the to-execute list.
+	// The device-entry home list.
 	//
-	// Every entry is linked into exactly one: the active list holds
-	// entries still to execute this tick, the other the processed
-	// ones. Tick start flips the roles, turning the whole processed
-	// list back into the to-execute list at constant cost, so every
-	// entry still runs at least once per tick; a packet routed to a
-	// processed entry moves it back so it runs again within the tick.
-	// Links are raw pointers built only by the owning worker, which
-	// also raises the ready flag on first build; the control plane
-	// leaves all three fields zeroed.
-	struct rlist schedule_lists[2];
-	uint8_t schedule_active;
+	// At rest every entry is linked onto it. The first build links
+	// each device's input entry before its output one; a round that
+	// runs entries leaves them parked in run order instead. A
+	// round drains the list onto its local untouched list and works
+	// entries back home through the ready list, so the home list is
+	// empty while a round runs. Links are raw pointers built only by
+	// the owning worker, which also raises the ready flag on first
+	// build; the control plane leaves these fields zeroed.
+	struct rlist entry_list;
+	// The queue of entries a packet was scheduled onto.
+	//
+	// Filled by the scheduling path and drained by the round, which
+	// moves each processed entry back to the home list; empty
+	// between rounds. Shares the link contract of the home list.
+	struct rlist ready_list;
 	uint8_t schedules_ready;
 
 	// Offset pointer to an array of per-slot offset pointers to the
