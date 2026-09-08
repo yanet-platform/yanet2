@@ -1,15 +1,15 @@
 package neighbour
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"net"
+	"maps"
 	"net/netip"
 	"sort"
 
 	vnetlink "github.com/vishvananda/netlink"
 
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
@@ -23,17 +23,10 @@ type Backend interface {
 // NeighbourState is the kernel neighbour-unreachability-detection state.
 type NeighbourState int
 
-// HardwareRoute identifies the Layer 2 route used to reach a next hop.
-type HardwareRoute struct {
-	SourceMAC      [6]byte
-	DestinationMAC [6]byte
-	Device         string
-}
-
 // Entry is a discovered neighbour ready for gateway publication.
 type Entry struct {
 	NextHop       netip.Addr
-	HardwareRoute HardwareRoute
+	HardwareRoute hwroute.HardwareRoute
 	State         NeighbourState
 }
 
@@ -86,13 +79,13 @@ func Discover(
 	if err != nil {
 		return nil, err
 	}
-	if !sameLinkRoutes(linksByIndex, revalidatedByIndex) {
+	if !maps.Equal(linksByIndex, revalidatedByIndex) {
 		return nil, errors.New("discover neighbours: managed links changed during dump")
 	}
 
 	type entryKey struct {
 		nextHop       netip.Addr
-		hardwareRoute HardwareRoute
+		hardwareRoute hwroute.HardwareRoute
 		state         NeighbourState
 	}
 	seen := map[entryKey]struct{}{}
@@ -110,14 +103,14 @@ func Discover(
 		if !valid {
 			continue
 		}
-		destinationMAC, usable := usableEUI48(kernelNeighbour.HardwareAddr)
+		destinationMAC, usable := hwroute.ParseMAC(kernelNeighbour.HardwareAddr)
 		if !usable {
 			continue
 		}
 
 		entry := Entry{
 			NextHop: nextHop,
-			HardwareRoute: HardwareRoute{
+			HardwareRoute: hwroute.HardwareRoute{
 				SourceMAC:      link.SourceMAC,
 				DestinationMAC: destinationMAC,
 				Device:         devicesByLink[link.Name],
@@ -141,16 +134,7 @@ func Discover(
 		if left.HardwareRoute.Device != right.HardwareRoute.Device {
 			return left.HardwareRoute.Device < right.HardwareRoute.Device
 		}
-		if comparison := bytes.Compare(
-			left.HardwareRoute.SourceMAC[:],
-			right.HardwareRoute.SourceMAC[:],
-		); comparison != 0 {
-			return comparison < 0
-		}
-		if comparison := bytes.Compare(
-			left.HardwareRoute.DestinationMAC[:],
-			right.HardwareRoute.DestinationMAC[:],
-		); comparison != 0 {
+		if comparison := left.HardwareRoute.Compare(right.HardwareRoute); comparison != 0 {
 			return comparison < 0
 		}
 		return left.State < right.State
@@ -241,7 +225,7 @@ func indexManagedLinks(
 				attributes.Index,
 			)
 		}
-		sourceMAC, usable := usableEUI48(attributes.HardwareAddr)
+		sourceMAC, usable := hwroute.ParseMAC(attributes.HardwareAddr)
 		if !usable {
 			return nil, fmt.Errorf(
 				"discover neighbours: managed link %q has unusable hardware address",
@@ -318,18 +302,6 @@ func indexManagedLinks(
 	return linksByIndex, nil
 }
 
-func sameLinkRoutes(first, second map[int]linkRoute) bool {
-	if len(first) != len(second) {
-		return false
-	}
-	for index, route := range first {
-		if second[index] != route {
-			return false
-		}
-	}
-	return true
-}
-
 func usableNeighbourState(state int) bool {
 	switch state {
 	case vnetlink.NUD_REACHABLE,
@@ -342,18 +314,4 @@ func usableNeighbourState(state int) bool {
 	default:
 		return false
 	}
-}
-
-func usableEUI48(address net.HardwareAddr) ([6]byte, bool) {
-	if len(address) != 6 {
-		return [6]byte{}, false
-	}
-
-	result := [6]byte(address)
-	for _, octet := range result {
-		if octet != 0 {
-			return result, true
-		}
-	}
-	return [6]byte{}, false
 }

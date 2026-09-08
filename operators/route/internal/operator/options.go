@@ -144,17 +144,40 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 }
 
 type neighbourServiceOptions struct {
-	OnChanged func()
+	OnChanged         func()
+	ReplacementLimits NeighbourReplacementLimits
 }
 
 func newNeighbourServiceOptions() *neighbourServiceOptions {
 	return &neighbourServiceOptions{
 		OnChanged: func() {},
+		ReplacementLimits: NeighbourReplacementLimits{
+			MaxEntries:           1_000_000,
+			MaxBytes:             128 * 1024 * 1024,
+			MaxConcurrentStreams: 4,
+		},
 	}
 }
 
 // NeighbourServiceOption configures NewNeighbourService.
 type NeighbourServiceOption func(*neighbourServiceOptions)
+
+// WithNeighbourReplacementLimits overrides positive staging limits.
+//
+// Nonpositive fields keep their defaults.
+func WithNeighbourReplacementLimits(limits NeighbourReplacementLimits) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) {
+		if limits.MaxEntries > 0 {
+			options.ReplacementLimits.MaxEntries = limits.MaxEntries
+		}
+		if limits.MaxBytes > 0 {
+			options.ReplacementLimits.MaxBytes = limits.MaxBytes
+		}
+		if limits.MaxConcurrentStreams > 0 {
+			options.ReplacementLimits.MaxConcurrentStreams = limits.MaxConcurrentStreams
+		}
+	}
+}
 
 // WithNeighbourServiceOnChanged registers a callback fired whenever
 // neighbour state mutates so the reconcile loop can wake up.

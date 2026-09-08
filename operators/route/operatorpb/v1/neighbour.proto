@@ -26,6 +26,14 @@ service NeighbourService {
   rpc UpdateNeighbours(UpdateNeighboursRequest) returns (UpdateNeighboursResponse);
   // RemoveNeighbours deletes one or more neighbour entries.
   rpc RemoveNeighbours(RemoveNeighboursRequest) returns (RemoveNeighboursResponse);
+
+  // ReplaceNeighbours atomically creates or replaces a user-defined table.
+  //
+  // Only clean EOF commits entries and default priority together. Invalid or
+  // interrupted streams leave both unchanged. Concurrent replacements commit
+  // in completion order; the last complete snapshot wins. Built-ins are refused.
+  // Equivalent replacements preserve timestamps and do not wake reconciliation.
+  rpc ReplaceNeighbours(stream ReplaceNeighboursRequest) returns (ReplaceNeighboursResponse);
 }
 
 // ListNeighboursRequest is the request to list neighbors.
@@ -109,3 +117,25 @@ message RemoveNeighboursRequest {
 }
 
 message RemoveNeighboursResponse {}
+
+// ReplaceNeighboursRequest carries one bounded chunk of a complete snapshot.
+//
+// Repeat identical table and default_priority in every chunk. Send exactly one
+// empty chunk to clear a table; an empty stream or mixed empty/nonempty chunks
+// are invalid. Limits are 1,000 entries and 256 KiB serialized per chunk, with
+// defaults of 1,000,000 entries, 128 MiB total serialized data and four staged
+// streams per service. Resource exhaustion never commits a partial snapshot.
+message ReplaceNeighboursRequest {
+  // Table is 1..128 ASCII letters, digits, dots, underscores or hyphens, starting
+  // with a letter or digit. It has no implicit default or built-in namespace.
+  string table = 1;
+  uint32 default_priority = 2;
+  // Entries have unique next hops across the entire stream. IP addresses must
+  // contain 4 or 16 bytes and both MAC addresses must be present EUI-48 values.
+  // Device is at most 128 bytes. Source and updated_at must be unset; the server
+  // owns them and normalizes state to permanent, like unary updates. Zero entry
+  // priority inherits the table default.
+  repeated NeighbourEntry entries = 3;
+}
+
+message ReplaceNeighboursResponse {}

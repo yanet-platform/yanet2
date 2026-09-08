@@ -128,19 +128,23 @@ network:
 	}
 }
 
-// Test_Parse_RejectsNegativeMTU verifies that negative YAML sizes are rejected
-// with the affected managed link identified in the error.
-func Test_Parse_RejectsNegativeMTU(t *testing.T) {
-	_, err := netplan.Parse([]byte(`
+// Test_Parse_RejectsUndersizedMTU verifies that invalid and IPv6-disabling sizes
+// are rejected with the affected managed link identified in the error.
+func Test_Parse_RejectsUndersizedMTU(t *testing.T) {
+	for _, mtu := range []int{-1, 1200} {
+		t.Run(strconv.Itoa(mtu), func(t *testing.T) {
+			_, err := netplan.Parse(fmt.Appendf(nil, `
 network:
   version: 2
   ethernets:
     kni0:
-      mtu: -1
+      mtu: %d
   vlans: {}
-`))
+`, mtu))
 
-	require.ErrorContains(t, err, `link "kni0": MTU must be within`)
+			require.ErrorContains(t, err, `link "kni0": MTU must be within`)
+		})
+	}
 }
 
 // Test_Parse_RejectsOversizedMTU verifies that a YAML size above the signed
@@ -283,18 +287,29 @@ func Test_Parse_RejectsDHCP(t *testing.T) {
 	}
 }
 
-// Test_Parse_RejectsMalformedManagedAddress verifies that a bad managed CIDR
-// reports both its link and list position.
-func Test_Parse_RejectsMalformedManagedAddress(t *testing.T) {
-	_, err := netplan.Parse([]byte(`
+// Test_Parse_RejectsInvalidManagedAddresses verifies that malformed CIDRs and
+// conflicting IPv6 prefix lengths are rejected at the configuration boundary.
+func Test_Parse_RejectsInvalidManagedAddresses(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		addresses string
+		want      string
+	}{
+		{name: "malformed CIDR", addresses: "192.0.2.3/24, broken", want: `link "kni3": address 1 "broken"`},
+		{name: "conflicting IPv6 prefixes", addresses: "2001:db8::1/64, 2001:db8::1/128", want: "conflicting prefix lengths"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := netplan.Parse(fmt.Appendf(nil, `
 network:
   version: 2
   ethernets:
     kni3:
-      addresses: [192.0.2.3/24, broken]
+      addresses: [%s]
   vlans: {}
-`))
-	require.ErrorContains(t, err, `link "kni3": address 1 "broken"`)
+`, test.addresses))
+			require.ErrorContains(t, err, test.want)
+		})
+	}
 }
 
 // Test_Parse_RejectsBadVLANID verifies that managed VLAN identifiers must be

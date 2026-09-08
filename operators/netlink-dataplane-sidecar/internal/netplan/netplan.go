@@ -9,14 +9,11 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 var managedEthernetName = regexp.MustCompile(`^kni[0-9]+$`)
-
-const maxLinuxMTU = 1<<31 - 1
 
 // State is the managed network state described by a netplan document.
 //
@@ -108,7 +105,7 @@ func Parse(data []byte) (State, error) {
 		if !managedEthernetName.MatchString(name) {
 			continue
 		}
-		if err := validateInterfaceName(name); err != nil {
+		if err := ValidateInterfaceName(name); err != nil {
 			return State{}, fmt.Errorf("ethernet %q: %w", name, err)
 		}
 
@@ -132,7 +129,7 @@ func Parse(data []byte) (State, error) {
 		if _, managed := managedParents[parent.Link]; !managed {
 			continue
 		}
-		if err := validateInterfaceName(name); err != nil {
+		if err := ValidateInterfaceName(name); err != nil {
 			return State{}, fmt.Errorf("vlan %q: %w", name, err)
 		}
 		if _, duplicate := managedNames[name]; duplicate {
@@ -204,13 +201,8 @@ func linkFromConfig(name, parent string, vlanID int, config linkConfig) (Link, e
 	if config.DHCP6 {
 		return Link{}, fmt.Errorf("link %q: dhcp6 must be disabled", name)
 	}
-	if config.MTU < 0 || config.MTU > maxLinuxMTU {
-		return Link{}, fmt.Errorf(
-			"link %q: MTU must be within 0..%d, got %d",
-			name,
-			maxLinuxMTU,
-			config.MTU,
-		)
+	if err := ValidateMTU(config.MTU); err != nil {
+		return Link{}, fmt.Errorf("link %q: %w", name, err)
 	}
 
 	addresses := make([]netip.Prefix, 0, len(config.Addresses))
@@ -220,6 +212,9 @@ func linkFromConfig(name, parent string, vlanID int, config linkConfig) (Link, e
 			return Link{}, fmt.Errorf("link %q: address %d %q: %w", name, idx, address, err)
 		}
 		addresses = append(addresses, prefix)
+	}
+	if err := ValidateAddresses(addresses); err != nil {
+		return Link{}, fmt.Errorf("link %q: %w", name, err)
 	}
 
 	configuredLinkLocal := []string{"ipv6"}
@@ -254,20 +249,4 @@ func linkFromConfig(name, parent string, vlanID int, config linkConfig) (Link, e
 		AcceptRA:  acceptRA,
 		LinkLocal: linkLocal,
 	}, nil
-}
-
-func validateInterfaceName(name string) error {
-	if name == "" {
-		return errors.New("interface name is empty")
-	}
-	if len(name) > 15 {
-		return errors.New("interface name exceeds Linux IFNAMSIZ")
-	}
-	if name == "." || name == ".." || name == "all" || name == "default" {
-		return errors.New("interface name is reserved")
-	}
-	if strings.ContainsAny(name, "/:\x00 \t\n\v\f\r") {
-		return errors.New("interface name contains a character rejected by Linux")
-	}
-	return nil
 }

@@ -37,10 +37,12 @@ type ReconcilerConfig struct {
 const MaxKernelRouteValue = uint64(^uint32(0))
 
 const (
+	// Singleton dumps place nexthop status in the route header.
 	kernelManagedRouteFlags = unix.RTM_F_CLONED |
 		unix.RTM_F_OFFLOAD |
 		unix.RTM_F_TRAP |
-		unix.RTM_F_OFFLOAD_FAILED
+		unix.RTM_F_OFFLOAD_FAILED |
+		kernelManagedNexthopFlags
 	kernelManagedNexthopFlags = unix.RTNH_F_DEAD |
 		unix.RTNH_F_OFFLOAD |
 		unix.RTNH_F_LINKDOWN |
@@ -143,7 +145,7 @@ func IsSharedRouteProtocol(protocol int) bool {
 
 // Apply reconciles desired routes while preserving every foreign route.
 //
-// Both kernel snapshots and all collision checks complete before the first
+// The complete table dump and all collision checks finish before the first
 // mutation. Stale owned routes are deleted only after every update succeeds.
 func (m *Reconciler) Apply(
 	ctx context.Context,
@@ -178,7 +180,6 @@ func (m *Reconciler) Apply(
 		interfaceNames = append(interfaceNames, name)
 	}
 	sort.Strings(interfaceNames)
-	linkIndexes := map[string]int{}
 	resolvedLinks := map[string]vnetlink.Link{}
 	for _, name := range interfaceNames {
 		if err := checkContext(ctx, fmt.Sprintf("resolve interface %q", name)); err != nil {
@@ -212,13 +213,12 @@ func (m *Reconciler) Apply(
 				link.Attrs().Index,
 			)
 		}
-		linkIndexes[name] = link.Attrs().Index
 		resolvedLinks[name] = link
 	}
 
 	desired := buildDesiredRoutes(
 		routes,
-		linkIndexes,
+		resolvedLinks,
 		m.table,
 		m.protocol,
 		m.priority,
@@ -243,26 +243,16 @@ func (m *Reconciler) Apply(
 			err,
 		)
 	}
-	if err := checkContext(ctx, "list owned routes"); err != nil {
-		return err
-	}
-	ownedRoutes, err := m.backend.RouteListFiltered(
-		vnetlink.FAMILY_ALL,
-		&vnetlink.Route{Table: m.table, Protocol: m.protocol},
-		vnetlink.RT_FILTER_TABLE|vnetlink.RT_FILTER_PROTOCOL,
-	)
-	if err != nil {
-		return fmt.Errorf(
-			"reconcile static routes: list routes in table %d with protocol %d: %w",
-			m.table,
-			m.protocol,
-			err,
-		)
-	}
-	if err := checkContext(ctx, "validate route dumps"); err != nil {
+	if err := checkContext(ctx, "validate route dump"); err != nil {
 		return err
 	}
 
+	type staleRoute struct {
+		Prefix netip.Prefix
+		Route  vnetlink.Route
+	}
+	stale := []staleRoute{}
+	currentRoutes := map[netip.Prefix][]vnetlink.Route{}
 	for idx, kernelRoute := range allRoutes {
 		prefix, isIPRoute, convertErr := prefixFromKernelRoute(kernelRoute)
 		if convertErr != nil {
@@ -275,44 +265,19 @@ func (m *Reconciler) Apply(
 		if !isIPRoute {
 			continue
 		}
-		if _, wanted := desiredPrefixes[prefix]; !wanted {
-			continue
-		}
-		if kernelRoute.Table != m.table || kernelRoute.Priority != m.priority {
-			continue
-		}
+		_, wanted := desiredPrefixes[prefix]
 		if !m.owns(kernelRoute) {
-			return fmt.Errorf(
-				"reconcile static routes: destination %q at priority %d collides with foreign route protocol %d",
-				prefix,
-				m.priority,
-				kernelRoute.Protocol,
-			)
-		}
-	}
-
-	type staleRoute struct {
-		Prefix netip.Prefix
-		Route  vnetlink.Route
-	}
-	stale := []staleRoute{}
-	currentRoutes := map[netip.Prefix][]vnetlink.Route{}
-	for idx, kernelRoute := range ownedRoutes {
-		if !m.owns(kernelRoute) {
+			if wanted && kernelRoute.Table == m.table && kernelRoute.Priority == m.priority {
+				return fmt.Errorf(
+					"reconcile static routes: destination %q at priority %d collides with foreign route protocol %d",
+					prefix,
+					m.priority,
+					kernelRoute.Protocol,
+				)
+			}
 			continue
 		}
-		prefix, isIPRoute, convertErr := prefixFromKernelRoute(kernelRoute)
-		if convertErr != nil {
-			return fmt.Errorf(
-				"reconcile static routes: convert owned route %d: %w",
-				idx,
-				convertErr,
-			)
-		}
-		if !isIPRoute {
-			continue
-		}
-		if _, wanted := desiredPrefixes[prefix]; wanted {
+		if wanted {
 			currentRoutes[prefix] = append(currentRoutes[prefix], kernelRoute)
 			continue
 		}
@@ -454,7 +419,7 @@ type desiredRoute struct {
 
 func buildDesiredRoutes(
 	routes []Route,
-	linkIndexes map[string]int,
+	resolvedLinks map[string]vnetlink.Link,
 	table int,
 	protocol vnetlink.RouteProtocol,
 	priority int,
@@ -487,7 +452,7 @@ func buildDesiredRoutes(
 		interfaceSet := map[string]struct{}{}
 		for _, nexthop := range nexthops {
 			multipath = append(multipath, &vnetlink.NexthopInfo{
-				LinkIndex: linkIndexes[nexthop.Interface],
+				LinkIndex: resolvedLinks[nexthop.Interface].Attrs().Index,
 				Gw:        net.IP(nexthop.Nexthop.AsSlice()),
 			})
 			interfaceSet[nexthop.Interface] = struct{}{}
@@ -654,6 +619,7 @@ func (m *Reconciler) rollbackOperations(
 			action = "remove added route"
 			err = m.backend.RouteDel(&rollbackRoute)
 		} else {
+			rollbackRoute = routeForRestore(rollbackRoute)
 			err = m.backend.RouteAdd(&rollbackRoute)
 		}
 		if err != nil {
@@ -782,6 +748,22 @@ func routeForDelete(kernelRoute vnetlink.Route, prefix netip.Prefix) vnetlink.Ro
 	kernelRoute.Dst = &net.IPNet{
 		IP:   net.IP(prefix.Addr().AsSlice()),
 		Mask: net.CIDRMask(prefix.Bits(), addressBits),
+	}
+	return kernelRoute
+}
+
+// routeForRestore removes dump-only status without altering the saved route's
+// configurable attributes or the original deletion request.
+func routeForRestore(kernelRoute vnetlink.Route) vnetlink.Route {
+	kernelRoute.Flags &^= kernelManagedRouteFlags
+	kernelRoute.MultiPath = slices.Clone(kernelRoute.MultiPath)
+	for idx, nexthop := range kernelRoute.MultiPath {
+		if nexthop == nil {
+			continue
+		}
+		restored := *nexthop
+		restored.Flags &^= kernelManagedNexthopFlags
+		kernelRoute.MultiPath[idx] = &restored
 	}
 	return kernelRoute
 }

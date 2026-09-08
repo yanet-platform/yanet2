@@ -188,12 +188,16 @@ func Test_Reconciler_RejectsForeignIPv6PrefixConflict(t *testing.T) {
 // Test_Reconciler_ReplacesIPv4Primary verifies that desired addresses survive
 // withdrawing their primary even when Linux would delete its secondaries.
 func Test_Reconciler_ReplacesIPv4Primary(t *testing.T) {
-	for _, retainSecondary := range []bool{false, true} {
-		name := "new address in the same subnet"
-		if retainSecondary {
-			name = "retained secondary in the same subnet"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		owned   bool
+		foreign bool
+	}{
+		{name: "new address in the same subnet"},
+		{name: "retained owned secondary", owned: true},
+		{name: "newly desired foreign secondary", foreign: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			backend := newFakeBackend()
 			backend.addLink(dummy("kni0", 10, ""))
 			reconciler := netreconcile.NewReconciler(backend, &fakeSysctl{})
@@ -201,10 +205,15 @@ func Test_Reconciler_ReplacesIPv4Primary(t *testing.T) {
 				Name:      "kni0",
 				Addresses: []netip.Prefix{netip.MustParsePrefix("192.0.2.1/24")},
 			}}}
-			if retainSecondary {
+			if test.owned {
 				state.Links[0].Addresses = append(state.Links[0].Addresses, netip.MustParsePrefix("192.0.2.2/24"))
 			}
 			require.NoError(t, reconciler.Apply(t.Context(), state))
+			if test.foreign {
+				secondary := mustAddr("192.0.2.2/24")
+				require.NoError(t, backend.AddrReplace(backend.links["kni0"], &secondary))
+				require.NotZero(t, backend.addresses["kni0"][1].Flags&unix.IFA_F_SECONDARY)
+			}
 			state.Links[0].Addresses = []netip.Prefix{netip.MustParsePrefix("192.0.2.2/24")}
 
 			for range 2 {
