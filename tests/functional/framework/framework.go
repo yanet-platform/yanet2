@@ -2,6 +2,7 @@ package framework
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +17,10 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"go.uber.org/zap"
 )
+
+// ErrCaptureTimeout indicates that packet transmission succeeded but no packet
+// was captured before the receive deadline.
+var ErrCaptureTimeout = errors.New("packet capture timed out")
 
 const (
 	// MAC addresses used in test framework
@@ -330,8 +335,9 @@ type FrameworkOption func(*TestFramework) error
 // Config contains essential configuration parameters for initializing the test framework.
 // It specifies the QEMU virtual machine image and working directory for test execution.
 type Config struct {
-	Name      string
-	QEMUImage string // Path to the QEMU virtual machine image file
+	Name        string
+	QEMUImage   string // Path to the QEMU virtual machine image file
+	ProjectRoot string // Canonical project root for build and target paths
 }
 
 // New creates and initializes a new Framework instance with the specified configuration
@@ -385,7 +391,7 @@ func New(config *Config, opts ...FrameworkOption) (*Framework, error) {
 
 	if fw.qemu == nil {
 		// Initialize QEMU manager
-		qemu, err := NewQEMUManager(config.Name, config.QEMUImage, fw.log)
+		qemu, err := newQEMUManager(config.Name, config.QEMUImage, fw.log, config.ProjectRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create QEMU manager: %w", err)
 		}
@@ -631,6 +637,16 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 
 // SendPacketAndCaptureAll sends a network packet and captures all response packets.
 func (f *TestFramework) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+	return f.sendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout, false)
+}
+
+// SendPacketAndCaptureAllUnfiltered captures every packet observed on the
+// selected egress during timeout.
+func (f *TestFramework) SendPacketAndCaptureAllUnfiltered(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+	return f.sendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout, true)
+}
+
+func (f *TestFramework) sendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration, unfiltered bool) ([][]byte, error) {
 	inputClient, err := f.GetSocketClient(inputIfaceIndex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get input socket client: %w", err)
@@ -651,10 +667,19 @@ func (f *TestFramework) SendPacketAndCaptureAll(inputIfaceIndex int, outputIface
 		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
 	}
 
+	if unfiltered {
+		if _, err := outputClient.ReceiveAllPacketsUnfiltered(50*time.Millisecond, outputDumpPath); err != nil {
+			return nil, fmt.Errorf("failed to drain output socket: %w", err)
+		}
+	}
+
 	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
 		return nil, fmt.Errorf("failed to send packet: %w", err)
 	}
 
+	if unfiltered {
+		return outputClient.ReceiveAllPacketsUnfiltered(timeout, outputDumpPath)
+	}
 	return outputClient.ReceiveAllPackets(timeout, outputDumpPath)
 }
 
@@ -878,6 +903,16 @@ func (f *TestFramework) ResetConnections() {
 //	})
 func (f *TestFramework) ExecuteCommand(command string) (string, error) {
 	return f.cli.ExecuteCommand(f.resolveCLIPaths(command))
+}
+
+// SSHPort returns the loopback port forwarded to the guest SSH server.
+func (f *TestFramework) SSHPort() int {
+	return f.qemu.SSHPort()
+}
+
+// AttachSerial gives a caller exclusive access to the guest serial console.
+func (f *TestFramework) AttachSerial() (net.Conn, func() error, error) {
+	return f.qemu.AttachSerial()
 }
 
 // ExecuteCommandWithTimeout executes a single CLI command with a custom
@@ -1210,7 +1245,8 @@ func (f *TestFramework) CreateConfigFile(name string, config string) error {
 // on the serial terminal.
 func (f *TestFramework) createGuestFile(guestPath string, content string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	cmd := fmt.Sprintf("echo '%s' | base64 -d > %s", encoded, guestPath)
+	quoted := "'" + strings.ReplaceAll(guestPath, "'", "'\"'\"'") + "'"
+	cmd := fmt.Sprintf("echo '%s' | base64 -d > %s", encoded, quoted)
 	if _, err := f.ExecuteCommand(cmd); err != nil {
 		return fmt.Errorf("failed to write guest file %s: %w", guestPath, err)
 	}
@@ -1228,6 +1264,24 @@ func (f *TestFramework) CreateForwardConfig(config string) error {
 	}
 	// 9P mode: write to host filesystem, accessible via 9P mount.
 	return f.CreateConfigFile("forward.yaml", config)
+}
+
+// WriteGuestFile writes a file into the guest filesystem.
+func (f *TestFramework) WriteGuestFile(path string, contents string) error {
+	return f.createGuestFile(path, contents)
+}
+
+// AbortGuestSerial closes the guest serial connection so in-flight
+// ExecuteCommand calls fail. The caller must reconnect before issuing further
+// guest commands.
+func (f *TestFramework) AbortGuestSerial() {
+	f.qemu.AbortSerial()
+}
+
+// RestartGuestSerial reconnects the serial console and restarts the reader
+// goroutine after an AbortGuestSerial call.
+func (f *TestFramework) RestartGuestSerial() error {
+	return f.qemu.RestartSerial()
 }
 
 // createConfigFiles creates YANET configuration files in the host filesystem
@@ -1377,8 +1431,8 @@ func (f *TestFramework) Unmount9P() error {
 		f.log.Debug("9P mounts already unmounted, skipping")
 		return nil
 	}
-	// Batch all umounts into a single command to avoid 6 round-trips
-	// through the serial console (~600ms → ~100ms).
+	// Batch all umounts into a single command to avoid six round-trips
+	// through the serial console (~600ms -> ~100ms).
 	var cmd strings.Builder
 	cmd.WriteString("umount")
 	for _, mp := range guest9PMountPoints {
@@ -1578,18 +1632,34 @@ func (f *TestFramework) SaveSnapshotKeepUnmounted(name string) error {
 	return nil
 }
 
-// ExportCurrentOverlay copies the VM's current qcow2 overlay to dst. This is
-// used to cache prepared template overlays (for example a prebuilt baseline)
+// ExportCurrentOverlay copies the VM's current qcow2 overlay to dst.
+//
+// A successful export leaves the VM paused. Callers must stop it or explicitly
+// resume it before further use. This is used to cache prepared template overlays
 // and start future pool VMs from the same snapshot source.
 func (f *TestFramework) ExportCurrentOverlay(dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return fmt.Errorf("create overlay cache dir: %w", err)
 	}
 	src := filepath.Join(f.qemu.WorkDir, "overlay.qcow2")
-	if err := copyFile(src, dst); err != nil {
-		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
+	if err := exportOverlay(f.qemu.SendMonitorCommand, copyFile, src, dst); err != nil {
+		return err
 	}
 	f.log.Infof("Exported current overlay to %s", dst)
+	return nil
+}
+
+func exportOverlay(sendMonitorCommand func(string) (string, error), copyOverlay func(string, string) error, src, dst string) error {
+	response, err := sendMonitorCommand("stop")
+	if err != nil {
+		return fmt.Errorf("pause VM before overlay export: %w", err)
+	}
+	if response != "" {
+		return fmt.Errorf("pause VM before overlay export returned unexpected output: %s", response)
+	}
+	if err := copyOverlay(src, dst); err != nil {
+		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
+	}
 	return nil
 }
 
@@ -1615,7 +1685,7 @@ func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
 	f.qemu.setVMReady(false)
 	f.qemu.readySignal = make(chan bool, 1)
 	f.qemu.resetSerialBuffer()
-	go f.qemu.readSerial()
+	f.qemu.startSerialReader()
 
 	stdin := f.qemu.GetStdin()
 	if stdin == nil {

@@ -1,9 +1,17 @@
 package framework
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -258,22 +266,34 @@ entries:
 // project root. The YAML fields default to the Default*/DataplaneConfig
 // builders when left empty.
 type HarnessConfig struct {
-	PoolName     string
-	BaselineTag  string
-	QEMUImage    string
-	Dataplane    string
-	Controlplane string
-	Forward      string
-	Route        string
+	PoolName         string
+	PoolSize         int
+	BaselineTag      string
+	QEMUImage        string
+	ProjectRoot      string
+	Dataplane        string
+	Controlplane     string
+	Forward          string
+	Route            string
+	EnableSSHForward bool
+	Prepare          func(*TestFramework) error
+	AfterStart       func(*TestFramework) error
+	ProfileReady     func(*TestFramework) error
+	FingerprintFiles []string
+	SkipCommonConfig bool
+	ForceStop        bool
 }
 
 // Harness owns a booted, baseline-configured VM pool shared by the tests of
 // one functional-test package, together with the YANET configuration used to
 // restore a VM to that baseline.
 type Harness struct {
-	pool         *VMPool
-	dataplane    string
-	controlplane string
+	pool             *VMPool
+	dataplane        string
+	controlplane     string
+	afterStart       func(*TestFramework) error
+	profileReady     func(*TestFramework) error
+	skipCommonConfig bool
 }
 
 // Pool returns the underlying VM pool.
@@ -288,18 +308,17 @@ func (m *Harness) Shutdown() error {
 
 // resolveQEMUImage returns the configured QEMU image, or the shared
 // functional-test image resolved from the project root when unset.
-func resolveQEMUImage(configured string) (string, error) {
+func resolveQEMUImage(configured, projectRoot string) (string, error) {
 	if configured != "" {
 		return configured, nil
 	}
 	if env := os.Getenv("YANET_QEMU_IMAGE"); env != "" {
 		return env, nil
 	}
-	root, err := findProjectRoot()
-	if err != nil {
-		return "", fmt.Errorf("failed to locate project root for QEMU image: %w", err)
+	if projectRoot == "" {
+		return "", fmt.Errorf("project root is required to resolve the QEMU image")
 	}
-	return filepath.Join(root, "tests", "functional", "yanet-test.qcow2"), nil
+	return filepath.Join(projectRoot, "tests", "functional", "yanet-test.qcow2"), nil
 }
 
 // newHarnessLogger builds the logger a harness runs with, mirroring the
@@ -337,14 +356,24 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 		}
 	}()
 
-	qemuImage, err := resolveQEMUImage(config.QEMUImage)
+	projectRoot := config.ProjectRoot
+	if projectRoot == "" {
+		projectRoot, err = findProjectRoot()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to locate project root for harness: %w", err)
+		}
+	}
+	qemuImage, err := resolveQEMUImage(config.QEMUImage, projectRoot)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// A custom YAML must not reuse the shared "baseline" cache silently.
 	customConfig := config.Dataplane != "" || config.Controlplane != "" ||
-		config.Forward != "" || config.Route != ""
+		config.Forward != "" || config.Route != "" || config.Prepare != nil ||
+		config.AfterStart != nil || config.ProfileReady != nil ||
+		config.SkipCommonConfig ||
+		len(config.FingerprintFiles) != 0
 	if config.BaselineTag == "" && customConfig {
 		return nil, nil, fmt.Errorf("failed to set up harness: a custom YAML configuration requires a non-empty BaselineTag so it does not reuse the shared baseline cache")
 	}
@@ -372,30 +401,48 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	}
 
 	bootedTemplate := BootedImagePath(qemuImage)
-	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag)
+	fingerprint, err := baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route, config.FingerprintFiles, config.SkipCommonConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fingerprint baseline: %w", err)
+	}
+	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag+"-"+fingerprint[:16])
 
 	baseline := &baselineSetup{
-		dataplane:    dataplane,
-		controlplane: controlplane,
-		forward:      forward,
-		route:        route,
-		poolName:     config.PoolName,
-		log:          logger,
+		dataplane:        dataplane,
+		controlplane:     controlplane,
+		forward:          forward,
+		route:            route,
+		poolName:         config.PoolName,
+		fingerprint:      fingerprint,
+		projectRoot:      projectRoot,
+		log:              logger,
+		prepare:          config.Prepare,
+		afterStart:       config.AfterStart,
+		profileReady:     config.ProfileReady,
+		skipCommonConfig: config.SkipCommonConfig,
+		forceStop:        config.ForceStop,
 	}
-	if err = baseline.ensureTemplate(qemuImage, bootedTemplate, baselineTemplate); err != nil {
+	if err = baseline.ensureTemplate(qemuImage, bootedTemplate, baselineTemplate, baselineTag); err != nil {
 		return nil, nil, fmt.Errorf("failed to prepare baseline template: %w", err)
 	}
 	MarkBaselineSaved()
 
+	poolSize := config.PoolSize
+	if poolSize < 1 {
+		poolSize = PoolSize()
+	}
 	logger.Infof("Starting VM pool %q with size %d (baseline template: %s)",
-		config.PoolName, PoolSize(), baselineTemplate)
+		config.PoolName, poolSize, baselineTemplate)
 
-	pool, err := NewVMPool(
-		PoolSize(), config.PoolName, qemuImage,
-		bootedTemplate, baselineTemplate, baselineSnapshotName, logger,
+	pool, err := newVMPool(
+		poolSize, config.PoolName, qemuImage,
+		bootedTemplate, baselineTemplate, baselineSnapshotName, config.EnableSSHForward, logger, projectRoot,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create VM pool: %w", err)
+	}
+	if config.ForceStop {
+		pool.ForceStop()
 	}
 
 	defer func() {
@@ -405,6 +452,9 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	}()
 
 	if err = pool.StartAll(); err != nil {
+		if invalidateErr := invalidateFingerprint(baselineTemplate); invalidateErr != nil {
+			return nil, nil, fmt.Errorf("failed to start VM pool: %w; invalidate baseline fingerprint: %v", err, invalidateErr)
+		}
 		return nil, nil, fmt.Errorf("failed to start VM pool: %w", err)
 	}
 	if err = pool.WaitAllReady(VMReadyTimeout()); err != nil {
@@ -418,9 +468,12 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 	pool.StopAllCPU()
 
 	harness := &Harness{
-		pool:         pool,
-		dataplane:    dataplane,
-		controlplane: controlplane,
+		pool:             pool,
+		dataplane:        dataplane,
+		controlplane:     controlplane,
+		afterStart:       config.AfterStart,
+		profileReady:     config.ProfileReady,
+		skipCommonConfig: config.SkipCommonConfig,
 	}
 	return harness, syncLog, nil
 }
@@ -445,65 +498,119 @@ func (m *Harness) WithBootedVM(t *testing.T, fn func(fw *TestFramework)) {
 // StartYANET) only when the baseline restore fails.
 func (m *Harness) RestoreBooted(t *testing.T, fw *TestFramework) {
 	t.Helper()
-
-	fw.AdoptRunningConfig(m.dataplane, m.controlplane)
-
-	err := fw.RestoreAndReconnect("baseline")
-	if err == nil {
-		return
+	if err := m.Restore(fw); err != nil {
+		t.Fatalf("failed to restore VM to a working YANET baseline: %v", err)
 	}
+}
 
-	t.Logf("baseline restore failed, falling back to preyanet + fresh StartYANET: %v", err)
+// Restore restores fw to a working YANET baseline without depending on the
+// testing package. Lab tools use this method to get the same fast-path and
+// fallback behavior as functional tests.
+//
+// The fast path restores the "baseline" snapshot via RestoreClean, resets
+// connections, and checks datapath readiness. The fallback restores the
+// "preyanet" snapshot and starts YANET from scratch. Functional tests that
+// pass no hooks get a fast path that differs from the older RestoreBooted
+// contract (which used RestoreAndReconnect); the fallback path is unchanged.
+func (m *Harness) Restore(fw *TestFramework) error {
+	fw.AdoptRunningConfig(m.dataplane, m.controlplane)
+	if err := fw.RestoreClean("baseline"); err == nil {
+		fw.ResetConnections()
+		if m.profileReady != nil {
+			if err := m.profileReady(fw); err == nil {
+				return nil
+			} else {
+				log.Printf("harness: fast-path profileReady failed, falling back: %v", err)
+			}
+		} else if err := fw.WaitForDatapathReady(15 * time.Second); err == nil {
+			return nil
+		} else {
+			log.Printf("harness: fast-path datapath ready failed, falling back: %v", err)
+		}
+	} else {
+		log.Printf("harness: fast-path baseline restore failed, falling back: %v", err)
+	}
 
 	if err := fw.RestoreClean("preyanet"); err != nil {
-		t.Fatalf("failed to restore VM to preyanet: %v", err)
+		return fmt.Errorf("restore VM to preyanet: %w", err)
 	}
 	if err := fw.StartYANET(m.dataplane, m.controlplane); err != nil {
-		t.Fatalf("failed to start YANET: %v", err)
+		return fmt.Errorf("start YANET: %w", err)
 	}
-	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
-		t.Fatalf("failed to configure YANET: %v", err)
+	if !m.skipCommonConfig {
+		if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+			return fmt.Errorf("configure YANET: %w", err)
+		}
 	}
 
 	fw.ResetConnections()
 
 	const dpTimeout = 15 * time.Second
 	if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-		t.Logf("dataplane not ready after %v, restarting YANET...", dpTimeout)
-		if restartErr := fw.RestartYANET(); restartErr != nil {
-			t.Fatalf("YANET restart failed: %v", restartErr)
+		if err := fw.RestartYANET(); err != nil {
+			return fmt.Errorf("restart YANET: %w", err)
 		}
 		fw.ResetConnections()
 		if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-			t.Fatalf("dataplane not ready after preyanet restore + restart: %v", err)
+			return fmt.Errorf("wait for dataplane after restart: %w", err)
 		}
 	}
+	return runProfileHooks(fw, m.afterStart, m.profileReady)
+}
+
+func runProfileHooks(fw *TestFramework, afterStart, profileReady func(*TestFramework) error) error {
+	if afterStart != nil {
+		if err := afterStart(fw); err != nil {
+			return fmt.Errorf("start profile: %w", err)
+		}
+	}
+	if profileReady != nil {
+		if err := profileReady(fw); err != nil {
+			return fmt.Errorf("wait for profile readiness: %w", err)
+		}
+	}
+	return nil
 }
 
 // baselineSetup captures the YANET configuration used while baking a baseline
 // template overlay.
 type baselineSetup struct {
-	dataplane    string
-	controlplane string
-	forward      string
-	route        string
-	poolName     string
-	log          *zap.SugaredLogger
+	dataplane        string
+	controlplane     string
+	forward          string
+	route            string
+	poolName         string
+	fingerprint      string
+	log              *zap.SugaredLogger
+	prepare          func(*TestFramework) error
+	afterStart       func(*TestFramework) error
+	profileReady     func(*TestFramework) error
+	skipCommonConfig bool
+	forceStop        bool
+	projectRoot      string
 }
 
 // ensureTemplate makes sure baselineTemplate holds a "baseline" snapshot,
 // bootstrapping it from the booted template when the cache is cold.
-func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTemplate string) error {
-	if OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) {
+func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTemplate, baselineTag string) error {
+	lock, err := acquireBaselineLock(baselineTemplate)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) && fingerprintMatches(baselineTemplate, m.fingerprint) {
 		m.log.Infof("Using cached baseline template: %s", baselineTemplate)
 		return nil
 	}
 
 	m.log.Infof("Baseline template %s not found; bootstrapping from booted template", baselineTemplate)
 
-	prepPool, err := NewVMPool(1, "baseline-prep-"+m.poolName, qemuImage, bootedTemplate, "", "", m.log)
+	prepPool, err := newVMPool(1, "baseline-prep-"+m.poolName, qemuImage, bootedTemplate, "", "", false, m.log, m.projectRoot)
 	if err != nil {
 		return fmt.Errorf("failed to create baseline prep pool: %w", err)
+	}
+	if m.forceStop {
+		prepPool.ForceStop()
 	}
 	defer func() {
 		if err := prepPool.Shutdown(); err != nil {
@@ -524,6 +631,11 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	if err := prepFW.PrepareLocalStorage(); err != nil {
 		return fmt.Errorf("failed to prepare local storage: %w", err)
 	}
+	if m.prepare != nil {
+		if err := m.prepare(prepFW); err != nil {
+			return fmt.Errorf("failed to prepare profile: %w", err)
+		}
+	}
 	if err := m.configure(prepFW); err != nil {
 		m.dumpMemoryDiagnostics(prepFW)
 		return fmt.Errorf("failed to configure baseline: %w", err)
@@ -533,15 +645,136 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	}
 	m.log.Info("Baseline snapshot saved successfully")
 
-	if err := prepFW.ExportCurrentOverlay(baselineTemplate); err != nil {
+	temporary := baselineTemplate + ".tmp.qcow2"
+	_ = os.Remove(temporary)
+	if err := prepFW.ExportCurrentOverlay(temporary); err != nil {
 		return fmt.Errorf("failed to export baseline template: %w", err)
 	}
-	if !OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) {
-		return fmt.Errorf("exported baseline template %s is missing snapshot %q", baselineTemplate, baselineSnapshotName)
+	defer os.Remove(temporary)
+	if !OverlayHasSnapshot(temporary, baselineSnapshotName) {
+		return fmt.Errorf("exported baseline template %s is missing snapshot %q", temporary, baselineSnapshotName)
+	}
+	if err := os.Rename(temporary, baselineTemplate); err != nil {
+		return fmt.Errorf("replace baseline template: %w", err)
+	}
+	if err := writeFingerprint(baselineTemplate, m.fingerprint); err != nil {
+		return fmt.Errorf("write baseline fingerprint: %w", err)
 	}
 
 	m.log.Infof("Baseline template cached at %s", baselineTemplate)
+
+	// Prune superseded fingerprinted templates with the same baseline tag
+	// to avoid unbounded overlay accumulation.
+	dir := filepath.Dir(baselineTemplate)
+	base := filepath.Base(baselineTemplate)
+	prefix := strings.TrimSuffix(base, "-"+m.fingerprint[:16]+"-"+baselineTemplateVersion+".qcow2")
+	if prefix != base {
+		matches, err := filepath.Glob(filepath.Join(dir, prefix+"-*-"+baselineTemplateVersion+".qcow2"))
+		if err != nil {
+			return nil
+		}
+		for _, old := range matches {
+			if old != baselineTemplate {
+				_ = os.Remove(old)
+				_ = os.Remove(old + ".sha256")
+				m.log.Infof("Pruned stale baseline template %s", old)
+			}
+		}
+	}
 	return nil
+}
+
+func acquireBaselineLock(baselineTemplate string) (*os.File, error) {
+	lock, err := os.OpenFile(baselineTemplate+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return lock, nil
+}
+
+func baselineFingerprint(projectRoot, qemuImage, dataplane, controlplane, forward, route string, extraFiles []string, skipCommonConfig bool) (string, error) {
+	hash := sha256.New()
+	for _, value := range []string{"dataplane", dataplane, "controlplane", controlplane, "forward", forward, "route", route, "skipCommonConfig", strconv.FormatBool(skipCommonConfig)} {
+		_, _ = io.WriteString(hash, value)
+		_, _ = io.WriteString(hash, "\x00")
+	}
+
+	image, err := os.Stat(qemuImage)
+	if err != nil {
+		return "", err
+	}
+	imagePath, err := filepath.EvalSymlinks(qemuImage)
+	if err != nil {
+		return "", err
+	}
+	_, _ = io.WriteString(hash, imagePath)
+	_, _ = io.WriteString(hash, fmt.Sprintf("\x00%d\x00%d", image.Size(), image.ModTime().UnixNano()))
+
+	paths := []string{
+		filepath.Join(projectRoot, "build", "dataplane", "yanet-dataplane"),
+		filepath.Join(projectRoot, "build", "controlplane", "yanet-controlplane"),
+		filepath.Join(projectRoot, "subprojects", "dpdk", "usertools", "dpdk-devbind.py"),
+	}
+	for _, path := range extraFiles {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(projectRoot, path)
+		}
+		paths = append(paths, path)
+	}
+	for _, name := range CLIBinaryNames {
+		paths = append(paths, filepath.Join(projectRoot, "target", "release", name))
+	}
+	plugins, err := filepath.Glob(filepath.Join(projectRoot, "build", "modules", "*", "dataplane", "*_dp_plugin.so"))
+	if err != nil {
+		return "", err
+	}
+	paths = append(paths, plugins...)
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := statFingerprint(hash, path); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// statFingerprint records path, size, and mtime for O(1) fingerprint cost.
+// Meson/cargo rebuilds update both size and mtime, so fingerprints change
+// naturally. A manual same-size same-mtime replacement (for example `cp -p`
+// of a binary) is not detected — rerun `meson compile` or delete the cached
+// template to force re-baselining.
+func statFingerprint(hash io.Writer, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(hash, "%s\x00%d\x00%d", path, info.Size(), info.ModTime().UnixNano())
+	return nil
+}
+
+func fingerprintMatches(baselineTemplate, want string) bool {
+	data, err := os.ReadFile(baselineTemplate + ".sha256")
+	return err == nil && string(data) == want
+}
+
+func invalidateFingerprint(baselineTemplate string) error {
+	err := os.Remove(baselineTemplate + ".sha256")
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func writeFingerprint(baselineTemplate, value string) error {
+	temporary := baselineTemplate + ".sha256.tmp"
+	if err := os.WriteFile(temporary, []byte(value), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, baselineTemplate+".sha256")
 }
 
 // configure writes the baseline config files, captures a "preyanet" fallback
@@ -575,7 +808,12 @@ func (m *baselineSetup) configure(fw *TestFramework) error {
 
 	m.dumpMemoryDiagnostics(fw)
 
-	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+	if !m.skipCommonConfig {
+		if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+			return err
+		}
+	}
+	if err := runProfileHooks(fw, m.afterStart, m.profileReady); err != nil {
 		return err
 	}
 

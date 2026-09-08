@@ -106,11 +106,26 @@ meson test -C build
 
 ### Running in a Virtual Environment
 
-YANET includes QEMU virtualization support for development and testing without physical hardware:
+For repeatable local experiments, use the reusable QEMU lab:
 
-1. Configure QEMU VM with virtual network interfaces.
-2. Set up shared folder for code access.
-3. Follow detailed instructions in the documentation.
+```bash
+make -C tests/functional prepare-vm
+just lab doctor
+just lab up
+just lab scenario run forward-route
+just lab down
+```
+
+Run `make all` in a Linux build environment before `just lab doctor`; the Linux
+guest requires x86_64 ELF dataplane, control-plane, operator, and CLI artifacts.
+Prepare the functional-test image with `make -C tests/functional prepare-vm`.
+On macOS, native Mach-O outputs are not usable lab artifacts. The doctor
+command also checks the QEMU image and all artifacts required by the lab
+baseline.
+Running `just lab` without a subcommand only prints help.
+
+See the [YANET2 Lab guide](docs/lab.md) for manifests, packet probes,
+troubleshooting, and the built-in forward/route, decap, and NAT64 scenarios.
 
 ## 📄 License
 

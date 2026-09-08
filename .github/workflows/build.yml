@@ -16,6 +16,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "Justfile"
+      - "lab/**"
+      - "docs/lab.md"
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
@@ -42,6 +45,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "Justfile"
+      - "lab/**"
+      - "docs/lab.md"
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
@@ -269,6 +275,18 @@ jobs:
               exit 1
           fi
 
+      - name: Stage operator binaries
+        run: |
+          set -euo pipefail
+          for path in \
+            build/operators/route/yanet-route-operator \
+            build/operators/generic/yanet-generic-operator \
+            build/operators/pipeline/yanet-pipeline-operator \
+            build/operators/bird-adapter/yanet-bird-adapter; do
+            test -x "$path"
+            cp "$path" "$(basename "$path")"
+          done
+
       - name: Upload YANET binaries
         uses: actions/upload-artifact@v5
         with:
@@ -277,6 +295,8 @@ jobs:
             build/dataplane/yanet-dataplane
             build/controlplane/yanet-controlplane
             target/release/yanet-cli*
+            yanet-*-operator
+            yanet-bird-adapter
 
   functional-tests:
     name: Run Functional Tests
@@ -288,6 +308,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: true
+          persist-credentials: false
 
       - name: Clean any pre-existing build artifacts
         run: |
@@ -304,7 +325,7 @@ jobs:
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev
+          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev just
 
       - name: Configure system for QEMU
         run: |
@@ -378,6 +399,11 @@ jobs:
           if ls ./yanet-cli* 1>/dev/null 2>&1; then
               mv -f ./yanet-cli-* target/release/
           fi
+          mkdir -p build/operators/{route,generic,pipeline,bird-adapter}
+          mv -f ./yanet-route-operator build/operators/route/
+          mv -f ./yanet-generic-operator build/operators/generic/
+          mv -f ./yanet-pipeline-operator build/operators/pipeline/
+          mv -f ./yanet-bird-adapter build/operators/bird-adapter/
           chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
           chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
           chmod +x target/release/yanet-cli* 2>/dev/null || true
@@ -451,6 +477,16 @@ jobs:
           exit $ret
         timeout-minutes: 45
 
+      - name: Run reusable lab scenarios
+        run: |
+          set -euo pipefail
+          trap 'go run ./cmd/yanet-lab down || true' EXIT
+          go run ./cmd/yanet-lab up
+          for scenario in forward-route decap nat64; do
+            go run ./cmd/yanet-lab reset
+            go run ./cmd/yanet-lab scenario run "$scenario"
+          done
+
       - name: Upload functional test logs
         uses: actions/upload-artifact@v5
         if: always()
@@ -458,3 +494,6 @@ jobs:
           name: functional-test-logs
           path: |
             tests/functional/main/test.log
+            tests/functional/converted/test.log
+            /tmp/yanet2-lab-*/**/supervisor.log
+            /tmp/yanet2-lab-*/**/last-report.json

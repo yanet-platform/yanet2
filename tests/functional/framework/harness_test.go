@@ -1,8 +1,15 @@
 package framework
 
 import (
+	"crypto/sha256"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBaselineTemplatePath(t *testing.T) {
@@ -65,5 +72,109 @@ func TestDefaultRouteConfig(t *testing.T) {
 	}
 	if !strings.Contains(config, `end: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"`) {
 		t.Errorf("DefaultRouteConfig() missing IPv6 default range end: %s", config)
+	}
+}
+
+func TestStatFingerprintDetectsChangedSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact")
+	stamp := time.Unix(1, 0)
+
+	if err := os.WriteFile(path, []byte("small"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	first := sha256.New()
+	if err := statFingerprint(first, path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte("large!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	second := sha256.New()
+	if err := statFingerprint(second, path); err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Sum(nil)) == string(second.Sum(nil)) {
+		t.Fatal("different-size artifact did not change fingerprint")
+	}
+}
+
+func TestStatFingerprintDetectsChangedMtime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact")
+	if err := os.WriteFile(path, []byte("same-size"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := sha256.New()
+	if err := statFingerprint(first, path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chtimes(path, time.Unix(2, 0), time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	second := sha256.New()
+	if err := statFingerprint(second, path); err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Sum(nil)) == string(second.Sum(nil)) {
+		t.Fatal("same-size artifact with fresh mtime did not change fingerprint")
+	}
+}
+
+// Test_InvalidateFingerprint_MakesCachedBaselineInvalid verifies that a failed
+// preferred-template startup forces the next run to rebuild the baseline.
+func Test_InvalidateFingerprint_MakesCachedBaselineInvalid(t *testing.T) {
+	baselineTemplate := filepath.Join(t.TempDir(), "baseline.qcow2")
+	require.NoError(t, writeFingerprint(baselineTemplate, "fingerprint"))
+	require.True(t, fingerprintMatches(baselineTemplate, "fingerprint"))
+
+	require.NoError(t, invalidateFingerprint(baselineTemplate))
+	require.False(t, fingerprintMatches(baselineTemplate, "fingerprint"))
+	require.NoError(t, invalidateFingerprint(baselineTemplate))
+}
+
+func TestRunProfileHooks(t *testing.T) {
+	startError := errors.New("start failed")
+	readyError := errors.New("not ready")
+	testCases := []struct {
+		name       string
+		startError error
+		readyError error
+		wantCalls  []string
+		wantError  string
+	}{
+		{name: "success", wantCalls: []string{"start", "ready"}},
+		{name: "start failure", startError: startError, wantCalls: []string{"start"}, wantError: "start profile: start failed"},
+		{name: "readiness failure", readyError: readyError, wantCalls: []string{"start", "ready"}, wantError: "wait for profile readiness: not ready"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var calls []string
+			err := runProfileHooks(
+				&TestFramework{},
+				func(*TestFramework) error {
+					calls = append(calls, "start")
+					return testCase.startError
+				},
+				func(*TestFramework) error {
+					calls = append(calls, "ready")
+					return testCase.readyError
+				},
+			)
+
+			require.Equal(t, testCase.wantCalls, calls)
+			if testCase.wantError == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, testCase.wantError)
+			}
+		})
 	}
 }
