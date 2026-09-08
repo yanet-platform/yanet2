@@ -6,6 +6,16 @@
 
 #include "lib/filter2/rule.h"
 
+#include <stdbool.h>
+
+// True when the mask is a contiguous address prefix.
+bool
+filter2_net4_mask_is_valid(const uint8_t mask[NET4_LEN]);
+
+// True when both halves of the mask are contiguous prefixes.
+bool
+filter2_net6_mask_is_valid(const uint8_t mask[NET6_LEN]);
+
 int
 filter2_merge_and_collect_registry(
 	struct memory_context *memory_context,

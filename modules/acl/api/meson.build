@@ -1,12 +1,11 @@
 cp_dependencies = [
   lib_common_dep,
   lib_errors_dep,
-  lib_filter_compiler_dep,
-  lib_logging_dep,
-  lib_packet_dp_dep,
+  lib_filter2_compiler_dep,
   lib_config_cp_dep,
   lib_counters_dep,
   lib_fwstate_objects_dep,
+  lib_packet_dp_dep,
   libdpdk_inc_dep,
 ]
 
@@ -27,6 +26,6 @@ lib_acl_cp = static_library(
 )
 
 lib_acl_cp_dep = declare_dependency(
-  link_with: [lib_acl_cp, lib_filter_compiler],
-  dependencies: [lib_filter_compiler_dep]
+  link_with: lib_acl_cp,
+  dependencies: [lib_filter2_compiler_dep]
 )

@@ -2,7 +2,7 @@ package cacl
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/modules/acl/api -lacl_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
+//#cgo LDFLAGS: -L../../../../../build/lib/filter2 -lfilter2_compiler
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
 //#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
 //

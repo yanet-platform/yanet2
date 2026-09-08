@@ -9,6 +9,7 @@
 #include "common/registry.h"
 #include "common/value.h"
 #include <assert.h>
+#include <stdbool.h>
 
 static inline int
 filter_set_cb(uint32_t *value, void *data) {
@@ -47,6 +48,63 @@ filter_collect_cb(uint32_t *value, void *data) {
 	return value_registry_collect(registry, *value);
 }
 
+static inline bool
+filter2_net4s_masks_valid(const struct net4 *nets, uint32_t count) {
+	for (uint32_t net_idx = 0; net_idx < count; ++net_idx) {
+		if (!filter2_net4_mask_is_valid(nets[net_idx].mask)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static inline bool
+filter2_net6s_masks_valid(const struct net6 *nets, uint32_t count) {
+	for (uint32_t net_idx = 0; net_idx < count; ++net_idx) {
+		if (!filter2_net6_mask_is_valid(nets[net_idx].mask)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+ * Every network mask of a ruleset must be an address prefix before the
+ * ruleset may be compiled.
+ *
+ * The region walk derives its bounds from the mask, so a mask with
+ * holes would walk outside the collected regions and corrupt memory;
+ * both compile entries reject such rulesets up front, mirroring the
+ * legacy filter contract of failing the whole compile.
+ */
+static inline bool
+filter2_rules_masks_valid(
+	const struct filter_rule **rules, uint32_t rule_count
+) {
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL) {
+			continue;
+		}
+
+		if (!filter2_net4s_masks_valid(
+			    rule->net4.srcs, rule->net4.src_count
+		    ) ||
+		    !filter2_net4s_masks_valid(
+			    rule->net4.dsts, rule->net4.dst_count
+		    ) ||
+		    !filter2_net6s_masks_valid(
+			    rule->net6.srcs, rule->net6.src_count
+		    ) ||
+		    !filter2_net6s_masks_valid(
+			    rule->net6.dsts, rule->net6.dst_count
+		    )) {
+			return false;
+		}
+	}
+	return true;
+}
+
 /*
  * Filter compilation routine.
  *
@@ -82,6 +140,10 @@ filter_compile(
 	uint32_t attr_handler_count
 
 ) {
+	if (!filter2_rules_masks_valid(rules, rule_count)) {
+		return -1;
+	}
+
 	if (memory_context_init_from(
 		    &filter->memory_context, memory_context, "filter"
 	    )) {
@@ -205,9 +267,6 @@ filter_compile(
 				    registries + joint_idx * 2 + 1,
 				    joints + joint_idx
 			    )) {
-				fprintf(stderr,
-					"DBG compile: set %u failed\n",
-					joint_idx);
 				goto error_free_attrs;
 			}
 		}
@@ -316,8 +375,8 @@ filter_destroy(
 
 #define filter_init(filter, sign, rules, count, mctx)                          \
 	filter_compile(                                                        \
-		filter, mctx, rules, count, sign, sizeof(sign) / sizeof(*sign) \
+		filter, mctx, rules, count, sign, FILTER_SIGN_COUNT(sign)      \
 	)
 
 #define filter_free(filter, sign)                                              \
-	filter_destroy(filter, sign, sizeof(sign) / sizeof(*sign))
+	filter_destroy(filter, sign, FILTER_SIGN_COUNT(sign))
