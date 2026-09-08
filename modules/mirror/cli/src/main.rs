@@ -27,7 +27,7 @@ pub mod mirrorpb {
     tonic::include_proto!("modules.mirror.controlplane.mirrorpb.v1");
 }
 
-/// Mirror module.
+/// Manages mirror module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -39,16 +39,20 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Delete a config.
     Delete(DeleteCmd),
+    /// Create or replace a config.
     Update(UpdateCmd),
+    /// Show a config.
     Show(ShowCmd),
+    /// List configs.
     List,
 }
 
@@ -337,7 +341,7 @@ impl MirrorService {
             .await
             .map_err(self.service.status("delete"))?;
 
-        output::success("delete", format_args!("Deleted mirror config {}.", cmd.config));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
         Ok(())
     }
@@ -354,7 +358,7 @@ impl MirrorService {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated mirror config {}.", cmd.config));
+        output::success("update", format_args!("Updated config '{}'.", cmd.config));
 
         Ok(())
     }

@@ -22,7 +22,7 @@ pub mod trafgenpb {
     tonic::include_proto!("devices.trafgen.controlplane.trafgenpb.v1");
 }
 
-/// Traffic generator device CLI.
+/// Manages trafgen devices.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -34,7 +34,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -151,7 +151,7 @@ impl TrafgenService {
             .map_err(self.service.status("update"))?
             .into_inner();
 
-        output::success("update", format_args!("Updated device {}.", cmd.config_name));
+        output::success("update", format_args!("Updated device '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -171,7 +171,9 @@ impl TrafgenService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No trafgen configurations found."),
-                        format_args!("create one with 'yanet-cli-device-trafgen update --name <name>'"),
+                        format_args!(
+                            "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
+                        ),
                     );
                     return;
                 }
@@ -221,7 +223,7 @@ impl TrafgenService {
             .map_err(self.service.status("upload"))?
             .into_inner();
 
-        output::success("upload", format_args!("Uploaded pcap to {}.", cmd.config_name));
+        output::success("upload", format_args!("Uploaded pcap to device '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -240,7 +242,7 @@ impl TrafgenService {
 
         output::success(
             "rate",
-            format_args!("Set rate of {} to {} pps.", cmd.config_name, cmd.rate),
+            format_args!("Set rate on device '{}' to {} pps.", cmd.config_name, cmd.rate),
         );
 
         Ok(())

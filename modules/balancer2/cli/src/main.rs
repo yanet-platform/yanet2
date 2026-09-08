@@ -23,7 +23,7 @@ pub mod balancerpb {
     tonic::include_proto!("modules.balancer2.controlplane.balancerpb.v1");
 }
 
-/// Balancer2 module CLI.
+/// Manages balancer2 module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -35,7 +35,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }

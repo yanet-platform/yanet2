@@ -15,7 +15,7 @@ pub mod vlanpb {
     tonic::include_proto!("devices.vlan.controlplane.vlanpb.v1");
 }
 
-/// DeviceVlan module.
+/// Manages vlan devices.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -27,25 +27,26 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Create or replace a device.
     Update(UpdateCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// The name of the device
+    /// The name of the device.
     #[arg(long, short = 'n')]
     pub name: String,
-    /// Pipeline assignments in format "pipeline_name:weight"
+    /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'i')]
     pub input: Vec<String>,
-    /// Pipeline assignments in format "pipeline_name:weight"
+    /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'o')]
     pub output: Vec<String>,
     /// VLAN id in 0..=4094, where 0 makes the device emit untagged frames.
@@ -98,7 +99,7 @@ impl DeviceVlanService {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated device {}.", cmd.name));
+        output::success("update", format_args!("Updated device '{}'.", cmd.name));
 
         Ok(())
     }

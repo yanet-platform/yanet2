@@ -17,7 +17,7 @@ const SERVICE_NAME: &str = "controlplane.ynpb.v1.DeviceService";
 /// Maps a genuine "device not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "device");
 
-/// Device delete module - removes a configured device.
+/// Deletes a configured device.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]

@@ -11,7 +11,7 @@ use ynpb::pb::{UpdateLevelRequest, logging_client::LoggingClient};
 
 const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
 
-/// Common functionality.
+/// Manages the log level of the control plane.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -23,21 +23,21 @@ struct Cmd {
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[arg(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Subcommand)]
 enum ModeCmd {
-    /// Logging service.
+    /// Manage the logging service.
     #[clap(subcommand)]
     Logging(LoggingCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
 enum LoggingCmd {
-    /// Sets the new minimum log level.
+    /// Set the new minimum log level.
     SetLevel(SetLogLevelCmd),
 }
 
@@ -99,7 +99,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 .await
                 .map_err(service.status(action))?;
 
-            output::success(action, format_args!("Set log level to {:?}.", cmd.level));
+            let level_name = cmd.level.to_possible_value().expect("no skipped variants");
+            output::success(action, format_args!("Set log level to '{}'.", level_name.get_name()));
         }
     }
 

@@ -88,7 +88,8 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `remove`; scalars `set-<x>`; the whole object `flush`. A rename keeps the old
   spelling as a hidden `alias` for a release.
 - Every command and argument has a one-sentence doc comment ending in a
-  period; `about` comes from the `Cmd` doc.
+  period; `about` comes from the `Cmd` doc, one sentence, verb first, saying
+  what the binary manages.
 - An argument naming an existing object carries `add =
   ArgValueCandidates::new(<fn>)`, the function built on
   `completion::candidates(Cmd::command, build, async move |mut client| …)` (a
@@ -118,7 +119,9 @@ no `--yes`, no `--dry-run`.
   `output::empty_with_hint(…, "create one with '<full command>'")` and an
   early return; never bare printing or a call-site guard. The primitive owns
   the marker and stays silent under JSON and on a non-TTY stdout.
-- Mutations: `output::success("<verb>", format_args!("<Sentence>."))`.
+- Mutations: `output::success("<verb>", format_args!("<Sentence>."))`, the
+  sentence `<Verb-ed> <kind> '<name>'.` (name quoted, `config` for a module
+  CLI's kind).
 - Colour and glyphs only via `output::is_colored()`, `output::dim`,
   `output::paint_dim`; no `colored` dependency in a CLI crate (#2377).
 - An unusable derived JSON shape (an enum as a number) is fixed on the wire

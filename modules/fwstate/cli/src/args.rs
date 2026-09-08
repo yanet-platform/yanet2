@@ -26,13 +26,13 @@ fn parse_sync_endpoint(value: &str) -> Result<SocketAddrV6, String> {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// List all fwstate configurations
+    /// List all fwstate configurations.
     List,
-    /// Delete a fwstate configuration
+    /// Delete a fwstate configuration.
     Delete(DeleteCmd),
-    /// Update fwstate configuration (map and sync settings)
+    /// Update fwstate configuration (map and sync settings).
     Update(UpdateCmd),
-    /// Show fwstate configuration
+    /// Show fwstate configuration.
     Show(ShowCmd),
 }
 
@@ -49,33 +49,33 @@ impl ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
-    /// The name of the fwstate config to delete
+    /// The name of the fwstate config to delete.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
-    /// FWState config name to show
+    /// FWState config name to show.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// FWState config name to operate on
+    /// FWState config name to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// Name of the published fwstate-map (kind V4) object to link
+    /// Name of the published fwstate-map (kind V4) object to link.
     #[arg(long)]
     pub map_name_v4: Option<String>,
 
-    /// Name of the published fwstate-map (kind V6) object to link
+    /// Name of the published fwstate-map (kind V6) object to link.
     #[arg(long)]
     pub map_name_v6: Option<String>,
 
-    /// Source IPv6 address (e.g., "2001:db8::1")
+    /// Source IPv6 address (e.g., "2001:db8::1").
     #[arg(long)]
     pub src_addr: Option<Ipv6Addr>,
 
@@ -128,27 +128,27 @@ pub struct UpdateCmd {
     #[arg(long, conflicts_with_all = ["unicast", "dst_addr_unicast", "port_unicast"])]
     pub no_unicast: bool,
 
-    /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h")
+    /// TCP SYN-ACK timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]
     pub tcp_syn_ack: Option<Duration>,
 
-    /// TCP SYN timeout (e.g., "60s", "5m", "1h")
+    /// TCP SYN timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]
     pub tcp_syn: Option<Duration>,
 
-    /// TCP FIN timeout (e.g., "60s", "5m", "1h")
+    /// TCP FIN timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]
     pub tcp_fin: Option<Duration>,
 
-    /// TCP established timeout (e.g., "60s", "5m", "1h")
+    /// TCP established timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]
     pub tcp: Option<Duration>,
 
-    /// UDP timeout (e.g., "60s", "5m", "1h")
+    /// UDP timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]
     pub udp: Option<Duration>,
 
-    /// Default timeout (e.g., "60s", "5m", "1h")
+    /// Default timeout (e.g., "60s", "5m", "1h").
     #[arg(long, value_parser = parse_duration)]
     pub default: Option<Duration>,
 

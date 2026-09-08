@@ -18,7 +18,7 @@ use ynpb::pb::{
 const FUNCTION_SERVICE: &str = "controlplane.ynpb.v1.FunctionService";
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(FUNCTION_SERVICE, "requested function");
 
-/// Function module.
+/// Manages functions.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -30,7 +30,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -124,7 +124,9 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                     if function.chains.is_empty() {
                         output::empty_with_hint(
                             format_args!("No chains found for '{}'.", show.name),
-                            format_args!("create one with 'yanet-cli function update --name <name> --chains <chain>'"),
+                            format_args!(
+                                "create one with 'yanet-cli function update --name <name> --chains <name:weight=type:name>'"
+                            ),
                         );
                     }
                 },

@@ -123,7 +123,7 @@ const SERVICE_NAME: &str = "<proto package>.<X>Service";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "config");
 
-/// <X> CLI.
+/// Manages <x> module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 #[command(flatten_help = true)]
@@ -282,7 +282,7 @@ impl <X>Service {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated config {}.", cmd.config_name));
+        output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -296,7 +296,7 @@ impl <X>Service {
             .await
             .map_err(|status| NOT_FOUND.map(status, "delete", self.service.endpoint(), Some(&cmd.config_name)))?;
 
-        output::success("delete", format_args!("Deleted config {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }

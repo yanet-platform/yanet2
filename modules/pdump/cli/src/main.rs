@@ -33,7 +33,7 @@ pub mod pdumppb {
     tonic::include_proto!("modules.pdump.controlplane.pdumppb.v1");
 }
 
-/// Pdump - packet dump module
+/// Manages pdump module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -45,7 +45,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -188,7 +188,7 @@ impl PdumpService {
             .await
             .map_err(self.service.status("set"))?;
 
-        output::success("set", format_args!("Set pdump config {}.", cmd.config_name));
+        output::success("set", format_args!("Updated config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -202,7 +202,7 @@ impl PdumpService {
             .await
             .map_err(self.service.status("delete"))?;
 
-        output::success("delete", format_args!("Deleted pdump config {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }

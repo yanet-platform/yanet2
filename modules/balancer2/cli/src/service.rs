@@ -84,7 +84,7 @@ impl Balancer2Service {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated balancer {}.", cmd.name));
+        output::success("update", format_args!("Updated config '{}'.", cmd.name));
 
         Ok(())
     }
@@ -309,7 +309,7 @@ impl Balancer2Service {
 
         output::success(
             "sessions update",
-            format_args!("Updated sessions state {} (capacity: {}).", cmd.name, cmd.capacity),
+            format_args!("Updated sessions state '{}' (capacity: {}).", cmd.name, cmd.capacity),
         );
 
         Ok(())
@@ -375,7 +375,7 @@ impl Balancer2Service {
             .await
             .map_err(self.service.status(action))?;
 
-        output::success(action, format_args!("Updated reals for balancer {config_name}."));
+        output::success(action, format_args!("Updated reals of config '{config_name}'."));
 
         Ok(())
     }

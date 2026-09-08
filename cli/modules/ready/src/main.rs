@@ -30,7 +30,7 @@ const NO_SERVICES: &str = "no readiness services are registered with the gateway
 /// Trailing segment of every readiness service's fully-qualified name.
 const READINESS_SERVICE: &str = "ReadinessService";
 
-/// Generic readiness probe — calls `Ready` on any `ReadinessService`.
+/// Probes readiness of the gateway services.
 ///
 /// Connects to the gateway and invokes `/<FQN>/Ready` using tonic's low-level
 /// dynamic dispatcher with the shared `readinesspb` message types. No

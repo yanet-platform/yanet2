@@ -224,7 +224,7 @@ struct ShowConfig {
     fwtable_name_v6: Option<String>,
 }
 
-/// ACL module CLI.
+/// Manages acl module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 pub struct Cmd {
@@ -232,9 +232,10 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -350,7 +351,7 @@ impl ACLService {
             .map_err(self.service.status("delete"))?
             .into_inner();
 
-        output::success("delete", format_args!("Deleted {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -397,7 +398,7 @@ impl ACLService {
 
         output::success(
             "update",
-            format_args!("Updated {} ({} rules).", cmd.config_name, rule_count),
+            format_args!("Updated config '{}' ({} rules).", cmd.config_name, rule_count),
         );
 
         Ok(())

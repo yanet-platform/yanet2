@@ -113,7 +113,7 @@ impl FibConfig {
     }
 }
 
-/// Route module CLI.
+/// Manages route module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -122,9 +122,10 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -162,7 +163,7 @@ pub enum FibAction {
     Show(FibShowCmd),
     /// Replace the FIB atomically with entries from a YAML file.
     Update(FibUpdateCmd),
-    /// Delete a route module config.
+    /// Delete a config.
     Delete(FibDeleteCmd),
 }
 
@@ -267,7 +268,7 @@ impl RouteService {
 
         output::success(
             "update",
-            format_args!("Updated FIB '{}' ({} entries).", cmd.config_name, entry_count),
+            format_args!("Updated config '{}' ({} entries).", cmd.config_name, entry_count),
         );
         Ok(())
     }
@@ -284,7 +285,7 @@ impl RouteService {
             )
         })?;
 
-        output::success("delete", format_args!("Deleted FIB '{}'.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
         Ok(())
     }
 

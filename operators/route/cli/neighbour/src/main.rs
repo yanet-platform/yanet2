@@ -42,7 +42,7 @@ const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
 /// Maps a genuine "table not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested table");
 
-/// Neighbour operator CLI (neighbour table management).
+/// Manages the neighbour tables of the route operator.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -54,7 +54,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -67,7 +67,7 @@ pub enum ModeCmd {
     Add(AddCmd),
     /// Remove one or more neighbour entries.
     Remove(RemoveCmd),
-    /// Neighbour table operations.
+    /// Manage neighbour tables.
     Table(TableCmd),
 }
 
@@ -148,7 +148,6 @@ pub struct RemoveCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct CreateTableCmd {
     /// Neighbour table name.
-    #[arg(add = ArgValueCandidates::new(table_candidates))]
     pub name: String,
     /// Default priority for entries in this table.
     #[arg(long)]
@@ -274,7 +273,7 @@ impl NeighbourService {
         output::success(
             "add",
             format_args!(
-                "Added neighbour {} ({}) to table {}.",
+                "Added neighbour {} ({}) to table '{}'.",
                 cmd.next_hop, cmd.link_addr, table
             ),
         );
@@ -302,7 +301,7 @@ impl NeighbourService {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        output::success("remove", format_args!("Removed {next_hops} from table {table}."));
+        output::success("remove", format_args!("Removed {next_hops} from table '{table}'."));
 
         Ok(())
     }
@@ -349,7 +348,7 @@ impl NeighbourService {
             .await
             .map_err(self.service.status("create table"))?;
 
-        output::success("create table", format_args!("Created neighbour table {}.", cmd.name));
+        output::success("create table", format_args!("Created table '{}'.", cmd.name));
 
         Ok(())
     }
@@ -369,7 +368,7 @@ impl NeighbourService {
         output::success(
             "update table",
             format_args!(
-                "Updated neighbour table {} (default priority {}).",
+                "Updated table '{}' (default priority {}).",
                 cmd.name, cmd.default_priority
             ),
         );
@@ -386,7 +385,7 @@ impl NeighbourService {
             .await
             .map_err(self.service.status("remove table"))?;
 
-        output::success("remove table", format_args!("Removed neighbour table {}.", cmd.name));
+        output::success("remove table", format_args!("Removed table '{}'.", cmd.name));
 
         Ok(())
     }
