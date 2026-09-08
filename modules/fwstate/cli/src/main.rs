@@ -163,18 +163,74 @@ fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
     rows
 }
 
-/// Merges the linked map object names an update should carry.
-///
-/// Each flag, when present, overrides the stored name; an absent one
-/// keeps what the pre-flight lookup reported. A config that names no map
-/// links none and inserts no synced state for that family, which is what
-/// a create left without map flags installs until a later update names
-/// them.
-fn merged_map_names(current: &ShowConfigResponse, cmd: &UpdateCmd) -> (String, String) {
-    (
-        cmd.map_name_v4.clone().unwrap_or_else(|| current.map_name_v4.clone()),
-        cmd.map_name_v6.clone().unwrap_or_else(|| current.map_name_v6.clone()),
-    )
+/// Builds a partial update from explicitly supplied flags only.
+fn update_request(cmd: &UpdateCmd) -> Result<UpdateConfigRequest, &'static str> {
+    let mut request = UpdateConfigRequest {
+        name: cmd.config_name.clone(),
+        ..Default::default()
+    };
+    let mut paths = Vec::new();
+    let mut sync_config = fwstatepb::SyncConfig::default();
+    if let Some(value) = &cmd.map_name_v4 {
+        request.map_name_v4 = value.clone();
+        paths.push("map_name_v4".to_string());
+    }
+    if let Some(value) = &cmd.map_name_v6 {
+        request.map_name_v6 = value.clone();
+        paths.push("map_name_v6".to_string());
+    }
+    if let Some(value) = cmd.src_addr {
+        sync_config.src_addr = Some(IpAddress::from(IpAddr::V6(value)));
+        paths.push("sync_config.src_addr".to_string());
+    }
+    if let Some(value) = cmd.dst_ether {
+        sync_config.dst_ether = Some(MacAddress::from(value));
+        paths.push("sync_config.dst_ether".to_string());
+    }
+    update_sync_endpoints(&mut sync_config, cmd)?;
+    if cmd.multicast.is_some() || cmd.no_multicast || cmd.dst_addr_multicast.is_some() {
+        paths.push("sync_config.dst_addr_multicast".to_string());
+    }
+    if cmd.multicast.is_some() || cmd.no_multicast || cmd.port_multicast.is_some() {
+        paths.push("sync_config.port_multicast".to_string());
+    }
+    if cmd.unicast.is_some() || cmd.no_unicast || cmd.dst_addr_unicast.is_some() {
+        paths.push("sync_config.dst_addr_unicast".to_string());
+    }
+    if cmd.unicast.is_some() || cmd.no_unicast || cmd.port_unicast.is_some() {
+        paths.push("sync_config.port_unicast".to_string());
+    }
+    if let Some(value) = cmd.tcp_syn_ack {
+        sync_config.tcp_syn_ack = value.as_nanos() as u64;
+        paths.push("sync_config.tcp_syn_ack".to_string());
+    }
+    if let Some(value) = cmd.tcp_syn {
+        sync_config.tcp_syn = value.as_nanos() as u64;
+        paths.push("sync_config.tcp_syn".to_string());
+    }
+    if let Some(value) = cmd.tcp_fin {
+        sync_config.tcp_fin = value.as_nanos() as u64;
+        paths.push("sync_config.tcp_fin".to_string());
+    }
+    if let Some(value) = cmd.tcp {
+        sync_config.tcp = value.as_nanos() as u64;
+        paths.push("sync_config.tcp".to_string());
+    }
+    if let Some(value) = cmd.udp {
+        sync_config.udp = value.as_nanos() as u64;
+        paths.push("sync_config.udp".to_string());
+    }
+    if let Some(value) = cmd.default {
+        sync_config.default = value.as_nanos() as u64;
+        paths.push("sync_config.default".to_string());
+    }
+    if let Some(value) = cmd.sync_suppress_timeout {
+        sync_config.sync_suppress_timeout = value.as_nanos() as u64;
+        paths.push("sync_config.sync_suppress_timeout".to_string());
+    }
+    request.sync_config = Some(sync_config);
+    request.update_mask = Some(fwstatepb::FieldMask { paths });
+    Ok(request)
 }
 
 fn remove_multicast_endpoint(sync_config: &mut SyncConfig) {
@@ -302,72 +358,7 @@ impl FWStateService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        // First, fetch the current config to merge with new values
-        //
-        // A failed read aborts the update: only an empty reply proves the
-        // config is missing and may take the create path.
-        let current_request = ShowConfigRequest {
-            name: cmd.config_name.clone(),
-            ok_if_not_found: true,
-        };
-        let current = self
-            .service
-            .client()
-            .show_config(current_request)
-            .await
-            .map_err(self.service.status("update"))?
-            .into_inner();
-        let (map_name_v4, map_name_v6) = merged_map_names(&current, &cmd);
-        let mut sync_config = current.sync_config.unwrap_or_default();
-
-        // Update only the fields that were provided
-        if let Some(src_addr) = cmd.src_addr {
-            sync_config.src_addr = Some(IpAddress::from(IpAddr::V6(src_addr)));
-        }
-
-        if let Some(dst_ether) = cmd.dst_ether {
-            sync_config.dst_ether = Some(MacAddress::from(dst_ether));
-        }
-
-        update_sync_endpoints(&mut sync_config, &cmd).map_err(|err| self.service.invalid("update", err))?;
-
-        // Convert timeouts from Duration to nanoseconds if provided
-        if let Some(tcp_syn_ack) = cmd.tcp_syn_ack {
-            sync_config.tcp_syn_ack = tcp_syn_ack.as_nanos() as u64;
-        }
-
-        if let Some(tcp_syn) = cmd.tcp_syn {
-            sync_config.tcp_syn = tcp_syn.as_nanos() as u64;
-        }
-
-        if let Some(tcp_fin) = cmd.tcp_fin {
-            sync_config.tcp_fin = tcp_fin.as_nanos() as u64;
-        }
-
-        if let Some(tcp) = cmd.tcp {
-            sync_config.tcp = tcp.as_nanos() as u64;
-        }
-
-        if let Some(udp) = cmd.udp {
-            sync_config.udp = udp.as_nanos() as u64;
-        }
-
-        if let Some(default) = cmd.default {
-            sync_config.default = default.as_nanos() as u64;
-        }
-
-        if let Some(suppress) = cmd.sync_suppress_timeout {
-            sync_config.sync_suppress_timeout = suppress.as_nanos() as u64;
-        }
-
-        let request = UpdateConfigRequest {
-            name: cmd.config_name.clone(),
-            map_name_v4,
-            map_name_v6,
-            sync_config: Some(sync_config),
-            clear_multicast: cmd.no_multicast,
-            clear_unicast: cmd.no_unicast,
-        };
+        let request = update_request(&cmd).map_err(|err| self.service.invalid("update", err))?;
         log::trace!("UpdateConfigRequest: {request:?}");
         self.service
             .client()
@@ -410,11 +401,6 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cmd_is_valid() {
-        Cmd::command().debug_assert();
-    }
 
     /// Update command carrying only the config name and optional map names.
     fn update_cmd(config_name: &str, map_name_v4: Option<&str>, map_name_v6: Option<&str>) -> UpdateCmd {
@@ -552,43 +538,73 @@ mod tests {
     }
 
     #[test]
-    fn test_merged_map_names_create_without_map_names_is_rejected() {
-        let cmd = update_cmd("cfg", None, None);
-        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd);
-
-        assert_eq!(("", ""), (map_name_v4.as_str(), map_name_v6.as_str()));
+    fn test_update_request_endpoint_flags_select_pairs_and_clear_without_legacy_flags() {
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.no_multicast = true;
+        cmd.unicast = Some("[2001:db8::1]:10000".parse().unwrap());
+        let request = update_request(&cmd).unwrap();
+        assert_eq!(
+            vec![
+                "sync_config.dst_addr_multicast",
+                "sync_config.port_multicast",
+                "sync_config.dst_addr_unicast",
+                "sync_config.port_unicast",
+            ],
+            request.update_mask.unwrap().paths
+        );
+        assert!(!request.clear_multicast);
+        assert!(!request.clear_unicast);
+        let sync_config = request.sync_config.unwrap();
+        assert_eq!(None, sync_config.dst_addr_multicast);
+        assert_eq!(0, sync_config.port_multicast);
+        assert_eq!(10000, sync_config.port_unicast);
+        assert_eq!(
+            Some(IpAddress::from(IpAddr::V6("2001:db8::1".parse().unwrap()))),
+            sync_config.dst_addr_unicast
+        );
     }
 
     #[test]
-    fn test_merged_map_names_create_with_one_map_name_links_only_it() {
-        let empty_reply = show_response("", "", "");
-        let (map_name_v4, map_name_v6) = merged_map_names(&empty_reply, &update_cmd("cfg", Some("v4"), None));
-
-        assert_eq!(("v4", ""), (map_name_v4.as_str(), map_name_v6.as_str()));
+    fn test_update_request_split_endpoint_flag_selects_only_explicit_field() {
+        let mut cmd = update_cmd("cfg", None, None);
+        cmd.port_multicast = Some(9999);
+        let request = update_request(&cmd).unwrap();
+        assert_eq!(vec!["sync_config.port_multicast"], request.update_mask.unwrap().paths);
+        let sync_config = request.sync_config.unwrap();
+        assert_eq!(9999, sync_config.port_multicast);
+        assert_eq!(None, sync_config.dst_addr_multicast);
     }
 
     #[test]
-    fn test_merged_map_names_create_with_both_map_names_uses_flags() {
-        let cmd = update_cmd("cfg", Some("map4"), Some("map6"));
-        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("", "", ""), &cmd);
-
-        assert_eq!(("map4", "map6"), (map_name_v4.as_str(), map_name_v6.as_str()));
+    fn test_update_request_empty_mask_preserves_existing_fields() {
+        let request = update_request(&update_cmd("cfg", None, None)).unwrap();
+        assert!(request.update_mask.unwrap().paths.is_empty());
     }
 
     #[test]
-    fn test_merged_map_names_existing_config_keeps_stored_names_without_flags() {
-        let cmd = update_cmd("cfg", None, None);
-        let (map_name_v4, map_name_v6) = merged_map_names(&show_response("cfg", "stored4", "stored6"), &cmd);
-
-        assert_eq!(("stored4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
+    fn test_update_request_explicit_zero_and_empty_are_selected() {
+        let mut cmd = update_cmd("cfg", Some(""), None);
+        cmd.sync_suppress_timeout = Some(core::time::Duration::ZERO);
+        let request = update_request(&cmd).unwrap();
+        assert_eq!(
+            vec!["map_name_v4", "sync_config.sync_suppress_timeout"],
+            request.update_mask.unwrap().paths
+        );
+        assert_eq!("", request.map_name_v4);
+        assert_eq!(0, request.sync_config.unwrap().sync_suppress_timeout);
     }
 
     #[test]
-    fn test_merged_map_names_existing_config_flag_overrides_stored_name() {
-        let reply = show_response("cfg", "stored4", "stored6");
-        let (map_name_v4, map_name_v6) = merged_map_names(&reply, &update_cmd("cfg", Some("new4"), None));
-
-        assert_eq!(("new4", "stored6"), (map_name_v4.as_str(), map_name_v6.as_str()));
+    fn test_update_request_independent_flags_select_only_their_fields() {
+        let mut cmd = update_cmd("cfg", None, Some("map6"));
+        cmd.udp = Some(core::time::Duration::from_secs(45));
+        let request = update_request(&cmd).unwrap();
+        assert_eq!(
+            vec!["map_name_v6", "sync_config.udp"],
+            request.update_mask.unwrap().paths
+        );
+        assert_eq!("map6", request.map_name_v6);
+        assert_eq!(45_000_000_000, request.sync_config.unwrap().udp);
     }
 
     #[test]

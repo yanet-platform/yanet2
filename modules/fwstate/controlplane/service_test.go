@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -12,6 +13,224 @@ import (
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
+
+// Test_FWStateService_UpdateConfig_MaskSetsAllFieldsAndClearsSync verifies
+// that every supported path installs its value and an absent selected
+// destination clears synchronization.
+func Test_FWStateService_UpdateConfig_MaskSetsAllFieldsAndClearsSync(t *testing.T) {
+	const name = "masked-all"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	maps := newFWStateTestMaps(t, agent, name, 1024)
+	service := fwstate.NewFWStateService(agent)
+	syncConfig := &fwstatepb.SyncConfig{
+		SrcAddr: syncTestAddr(), DstAddrMulticast: syncTestAddr(),
+		DstEther:       &commonpb.MACAddress{Addr: 0x333300000001},
+		DstAddrUnicast: syncTestAddr(), PortUnicast: 10000,
+		PortMulticast: 9999, TcpSynAck: 11, TcpSyn: 12, TcpFin: 13,
+		Tcp: 14, Udp: 15, Default: 16, SyncSuppressTimeout: 17,
+	}
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name, MapNameV4: maps.v4Name(), MapNameV6: maps.v6Name(),
+		SyncConfig: syncConfig,
+		UpdateMask: &fwstatepb.FieldMask{Paths: []string{
+			"map_name_v4", "map_name_v6", "sync_config.src_addr",
+			"sync_config.dst_ether", "sync_config.dst_addr_unicast", "sync_config.port_unicast",
+			"sync_config.dst_addr_multicast", "sync_config.port_multicast",
+			"sync_config.tcp_syn_ack", "sync_config.tcp_syn", "sync_config.tcp_fin",
+			"sync_config.tcp", "sync_config.udp", "sync_config.default",
+			"sync_config.sync_suppress_timeout",
+		}},
+	})
+	stored := showConfig(t, service, name)
+	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
+	require.Equal(t, maps.v6Name(), stored.GetMapNameV6())
+	require.Equal(t, syncConfig, stored.GetSyncConfig())
+
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name,
+		UpdateMask: &fwstatepb.FieldMask{Paths: []string{
+			"sync_config.src_addr", "sync_config.dst_addr_multicast",
+			"sync_config.port_multicast", "map_name_v6",
+			"sync_config.dst_ether", "sync_config.dst_addr_unicast", "sync_config.port_unicast",
+		}},
+	})
+	stored = showConfig(t, service, name)
+	require.Empty(t, stored.GetMapNameV6())
+	require.Equal(t, maps.v4Name(), stored.GetMapNameV4())
+	require.Zero(t, stored.GetSyncConfig().GetPortMulticast())
+	require.Equal(t, make([]byte, 16), stored.GetSyncConfig().GetSrcAddr().GetAddr())
+	require.Nil(t, stored.GetSyncConfig().GetDstAddrMulticast())
+	require.Nil(t, stored.GetSyncConfig().GetDstAddrUnicast())
+	require.Zero(t, stored.GetSyncConfig().GetPortUnicast())
+	require.Zero(t, stored.GetSyncConfig().GetDstEther().GetAddr())
+	require.Equal(t, syncConfig.GetTcp(), stored.GetSyncConfig().GetTcp())
+}
+
+// Test_FWStateService_UpdateConfig_MaskedConcurrentWritesPreserveBothChanges
+// verifies that stale unselected values cannot revert another writer.
+func Test_FWStateService_UpdateConfig_MaskedConcurrentWritesPreserveBothChanges(t *testing.T) {
+	const name = "masked-concurrent"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	service := fwstate.NewFWStateService(agent)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name:       name,
+		SyncConfig: &fwstatepb.SyncConfig{Tcp: 60e9, Udp: 30e9},
+	})
+
+	requests := []*fwstatepb.UpdateConfigRequest{
+		{
+			Name:       name,
+			SyncConfig: &fwstatepb.SyncConfig{Tcp: 120e9, Udp: 30e9},
+			UpdateMask: &fwstatepb.FieldMask{Paths: []string{"sync_config.tcp"}},
+		},
+		{
+			Name:       name,
+			SyncConfig: &fwstatepb.SyncConfig{Tcp: 60e9, Udp: 45e9},
+			UpdateMask: &fwstatepb.FieldMask{Paths: []string{"sync_config.udp"}},
+		},
+	}
+	start := make(chan struct{})
+	var writers errgroup.Group
+	for _, request := range requests {
+		writers.Go(func() error {
+			<-start
+			_, err := service.UpdateConfig(t.Context(), request)
+			return err
+		})
+	}
+	close(start)
+	require.NoError(t, writers.Wait())
+	stored := showConfig(t, service, name).GetSyncConfig()
+	require.EqualValues(t, 120e9, stored.GetTcp())
+	require.EqualValues(t, 45e9, stored.GetUdp())
+}
+
+// Test_FWStateService_UpdateConfig_MaskClearsValuesAndPreservesUnselectedFields
+// verifies that explicit zero and empty values survive construction.
+func Test_FWStateService_UpdateConfig_MaskClearsValuesAndPreservesUnselectedFields(t *testing.T) {
+	const name = "masked-clear"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	maps := newFWStateTestMaps(t, agent, name, 1024)
+	service := fwstate.NewFWStateService(agent)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name:       name,
+		MapNameV4:  maps.v4Name(),
+		MapNameV6:  maps.v6Name(),
+		SyncConfig: &fwstatepb.SyncConfig{SyncSuppressTimeout: 8e9},
+	})
+	before := showConfig(t, service, name)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name,
+		// Unselected invalid values must not affect the update.
+		MapNameV6:  "not-a-published-map",
+		SyncConfig: &fwstatepb.SyncConfig{PortMulticast: 65536},
+		UpdateMask: &fwstatepb.FieldMask{Paths: []string{
+			"map_name_v4", "sync_config.sync_suppress_timeout", "sync_config.udp",
+		}},
+	})
+	stored := showConfig(t, service, name)
+	require.Empty(t, stored.GetMapNameV4())
+	require.Equal(t, before.GetMapNameV6(), stored.GetMapNameV6())
+	require.Zero(t, stored.GetSyncConfig().GetSyncSuppressTimeout())
+	require.Zero(t, stored.GetSyncConfig().GetUdp())
+	require.Equal(t, before.GetSyncConfig().GetTcp(), stored.GetSyncConfig().GetTcp())
+
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name:       name,
+		MapNameV4:  maps.v4Name(),
+		SyncConfig: &fwstatepb.SyncConfig{Udp: 99e9},
+		UpdateMask: &fwstatepb.FieldMask{},
+	})
+	require.Equal(t, stored, showConfig(t, service, name))
+}
+
+// Test_FWStateService_UpdateConfig_InvalidMaskDoesNotPublish verifies that
+// a bad path or selected value leaves the published configuration intact.
+func Test_FWStateService_UpdateConfig_InvalidMaskDoesNotPublish(t *testing.T) {
+	const name = "masked-invalid"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	service := fwstate.NewFWStateService(agent)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name, UpdateMask: &fwstatepb.FieldMask{},
+	})
+	before := showConfig(t, service, name)
+	for _, tc := range []struct {
+		name       string
+		path       string
+		syncConfig *fwstatepb.SyncConfig
+	}{
+		{"unknown field", "unknown", nil},
+		{"whole sync config", "sync_config", nil},
+		{"unknown sync field", "sync_config.unknown", nil},
+		{"unicast port overflow", "sync_config.port_unicast", &fwstatepb.SyncConfig{PortUnicast: 65536}},
+		{"MAC overflow", "sync_config.dst_ether", &fwstatepb.SyncConfig{DstEther: &commonpb.MACAddress{Addr: 1 << 48}}},
+		{"empty path", "", nil},
+		{"port overflow", "sync_config.port_multicast", &fwstatepb.SyncConfig{PortMulticast: 65536}},
+		{"partial sync destination", "sync_config.port_multicast", &fwstatepb.SyncConfig{PortMulticast: 9999}},
+		{"timeout overflow", "sync_config.udp", &fwstatepb.SyncConfig{Udp: 1 << 48}},
+		{"invalid address width", "sync_config.src_addr", &fwstatepb.SyncConfig{SrcAddr: &commonpb.IPAddress{Addr: []byte{1}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.UpdateConfig(t.Context(), &fwstatepb.UpdateConfigRequest{
+				Name: name, SyncConfig: tc.syncConfig,
+				UpdateMask: &fwstatepb.FieldMask{Paths: []string{"sync_config.tcp", tc.path}},
+			})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Equal(t, before, showConfig(t, service, name))
+		})
+	}
+}
+
+// Test_FWStateService_UpdateConfig_MaskedEndpointsPreserveOtherDestination
+// verifies that editing one endpoint leaves the other active, including clears.
+func Test_FWStateService_UpdateConfig_MaskedEndpointsPreserveOtherDestination(t *testing.T) {
+	const name = "masked-endpoints"
+	_, agent := newDeleteTestHarness(t, []string{"fwstate"}, name)
+	service := fwstate.NewFWStateService(agent)
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name,
+		SyncConfig: &fwstatepb.SyncConfig{
+			SrcAddr: syncTestAddr(), DstEther: &commonpb.MACAddress{Addr: 0x333300000001},
+			DstAddrMulticast: syncTestAddr(), PortMulticast: 9999,
+			DstAddrUnicast: syncTestAddr(), PortUnicast: 10000,
+		},
+	})
+	before := showConfig(t, service, name).GetSyncConfig()
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name, SyncConfig: &fwstatepb.SyncConfig{PortUnicast: 10001},
+		UpdateMask: &fwstatepb.FieldMask{Paths: []string{"sync_config.port_unicast"}},
+	})
+	stored := showConfig(t, service, name).GetSyncConfig()
+	require.EqualValues(t, 10001, stored.GetPortUnicast())
+	require.Equal(t, before.GetDstAddrUnicast(), stored.GetDstAddrUnicast())
+	require.Equal(t, before.GetDstAddrMulticast(), stored.GetDstAddrMulticast())
+	require.Equal(t, before.GetPortMulticast(), stored.GetPortMulticast())
+
+	publishConfig(t, service, &fwstatepb.UpdateConfigRequest{
+		Name: name,
+		UpdateMask: &fwstatepb.FieldMask{Paths: []string{
+			"sync_config.dst_addr_multicast", "sync_config.port_multicast",
+		}},
+	})
+	stored = showConfig(t, service, name).GetSyncConfig()
+	require.Nil(t, stored.GetDstAddrMulticast())
+	require.Zero(t, stored.GetPortMulticast())
+	require.Equal(t, before.GetDstAddrUnicast(), stored.GetDstAddrUnicast())
+	require.EqualValues(t, 10001, stored.GetPortUnicast())
+}
+
+// Test_FWStateService_UpdateConfig_RejectsMaskWithEndpointClearFlags verifies
+// that mixing the two update contracts never publishes a partial change.
+func Test_FWStateService_UpdateConfig_RejectsMaskWithEndpointClearFlags(t *testing.T) {
+	service := fwstate.NewFWStateService(nil)
+	for _, request := range []*fwstatepb.UpdateConfigRequest{
+		{Name: "cfg", ClearMulticast: true, UpdateMask: &fwstatepb.FieldMask{}},
+		{Name: "cfg", ClearUnicast: true, UpdateMask: &fwstatepb.FieldMask{}},
+	} {
+		_, err := service.UpdateConfig(t.Context(), request)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+	}
+}
 
 // Test_SyncConfig_ValidateFields verifies that explicit values which would be
 // lost or truncated by the C representation are rejected before merging.
