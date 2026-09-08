@@ -198,22 +198,22 @@ filter_compile_attr_compact(uint32_t *value, void *data) {
  * follow the instance (the builder reads it).
  */
 #define FILTER_COMPILE_ATTR_BUILD_AS_DECLARE(variant, prefix)                  \
-	static inline struct filter_query_attr *                               \
-	filter_compile_attr_##variant##_build(                                 \
-		struct value_registry *registry,                               \
-		const struct filter_rule **rules,                              \
-		uint32_t rule_count,                                           \
-		struct memory_context *memory_context                          \
-	);
+	static inline struct filter_query_attr                                 \
+		*filter_compile_attr_##variant##_build(                        \
+			struct value_registry *registry,                       \
+			const struct filter_rule **rules,                      \
+			uint32_t rule_count,                                   \
+			struct memory_context *memory_context                  \
+		);
 
 #define FILTER_COMPILE_ATTR_BUILD_AS(variant, prefix)                          \
-	static inline struct filter_query_attr *                               \
-	filter_compile_attr_##variant##_build(                                 \
-		struct value_registry *registry,                               \
-		const struct filter_rule **rules,                              \
-		uint32_t rule_count,                                           \
-		struct memory_context *memory_context                          \
-	) {                                                                    \
+	static inline struct filter_query_attr                                 \
+		*filter_compile_attr_##variant##_build(                        \
+			struct value_registry *registry,                       \
+			const struct filter_rule **rules,                      \
+			uint32_t rule_count,                                   \
+			struct memory_context *memory_context                  \
+		) {                                                            \
 		const struct filter_compile_attr_handlers *attr_handlers =     \
 			&filter_compile_attr_##variant.attr_handlers;          \
 		struct filter_compile_attr *attr = prefix##_create(            \

@@ -19,7 +19,7 @@ struct filter_compile_net_attr {
 	struct filter_query_attr_net4 *query_attr;
 
 	struct range_index range_index;
-	struct value_table value_table;
+	struct vline line;
 };
 
 struct filter_compile_attr_net4_handlers {
@@ -44,7 +44,7 @@ filter_compile_attr_net_free(
 	}
 
 	range_index_free(&net_attr->range_index);
-	value_table_free(&net_attr->value_table);
+	vline_free(&net_attr->line);
 
 	memory_bfree(
 		memory_context, attr, sizeof(struct filter_compile_net_attr)
@@ -66,17 +66,15 @@ filter_compile_attr_net_commit(
 	 * fields are moved one by one because the table carries relative
 	 * pointers that a struct copy would strand.
 	 */
-	query_attr->value_table.v_dim = net_attr->value_table.v_dim;
-	query_attr->value_table.h_dim = net_attr->value_table.h_dim;
+	query_attr->line.size = net_attr->line.size;
 	SET_OFFSET_OF(
-		&query_attr->value_table.values,
-		ADDR_OF(&net_attr->value_table.values)
+		&query_attr->line.values, ADDR_OF(&net_attr->line.values)
 	);
 	SET_OFFSET_OF(
-		&query_attr->value_table.memory_context,
-		ADDR_OF(&net_attr->value_table.memory_context)
+		&query_attr->line.memory_context,
+		ADDR_OF(&net_attr->line.memory_context)
 	);
-	memset(&net_attr->value_table, 0, sizeof(net_attr->value_table));
+	memset(&net_attr->line, 0, sizeof(net_attr->line));
 
 	net_attr->query_attr = NULL;
 
@@ -335,12 +333,8 @@ filter_compile_attr_net4_build_dedup(
 	    )) {
 		goto error_collect;
 	}
-	if (value_table_init(
-		    &attr->value_table,
-		    memory_context,
-		    "filter:net4",
-		    1,
-		    collector.count
+	if (vline_init(
+		    &attr->line, memory_context, "filter:net4", collector.count
 	    )) {
 		goto error_collect;
 	}
@@ -476,11 +470,9 @@ filter_compile_attr_net4_build_dedup(
 	 * Refine the region table: one generation per group, every distinct
 	 * network walked once through its cached bounds.
 	 */
-	struct value_table *table = &attr->value_table;
+	struct vline *table = &attr->line;
 	struct remap_table remap;
-	if (remap_table_init(
-		    &remap, memory_context, table->v_dim * table->h_dim
-	    )) {
+	if (remap_table_init(&remap, memory_context, table->size)) {
 		free(bounds);
 		goto error_spans;
 	}
@@ -493,15 +485,15 @@ filter_compile_attr_net4_build_dedup(
 			for (uint32_t ridx = bounds[net_id * 2];
 			     ridx < bounds[net_id * 2 + 1];
 			     ++ridx) {
-				uint32_t *cell = value_table_get_ptr(
-					table, 0, range_index_values[ridx]
+				uint32_t *cell = vline_get_ptr(
+					table, range_index_values[ridx]
 				);
 				remap_table_touch(&remap, *cell, cell);
 			}
 		}
 	}
 	remap_table_compact(&remap);
-	value_table_compact(table, &remap);
+	vline_compact(table, &remap);
 	uint32_t class_bound = remap.count + 1;
 	remap_table_free(&remap);
 
@@ -526,8 +518,8 @@ filter_compile_attr_net4_build_dedup(
 			for (uint32_t ridx = bounds[net_id * 2];
 			     ridx < bounds[net_id * 2 + 1];
 			     ++ridx) {
-				uint32_t value = value_table_get(
-					table, 0, range_index_values[ridx]
+				uint32_t value = vline_get(
+					table, range_index_values[ridx]
 				);
 				if (value < class_bound) {
 					bitmap[value >> 6] |= 1ull
@@ -567,8 +559,8 @@ filter_compile_attr_net4_build_dedup(
 	}
 	if (need_whole) {
 		memset(bitmap, 0, bitmap_words * 8);
-		for (uint32_t idx = 0; idx < table->h_dim; ++idx) {
-			uint32_t value = value_table_get(table, 0, idx);
+		for (uint32_t idx = 0; idx < table->size; ++idx) {
+			uint32_t value = vline_get(table, idx);
 			if (value < class_bound) {
 				bitmap[value >> 6] |= 1ull << (value & 63);
 			}

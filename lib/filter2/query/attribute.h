@@ -14,5 +14,5 @@ typedef void (*filter_attr_query_func)(
 );
 
 struct filter_attr_query {
-	filter_attr_query_func query;
+	const filter_attr_query_func query;
 };

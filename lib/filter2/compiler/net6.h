@@ -699,9 +699,8 @@ filter_compile_attr_net6s_build_dedup(
 	}
 	struct net6_bitmap_ctx bitmap_ctx = {
 		.comb = comb,
-		.bitmap = &(struct net6_bitmap){
-			.words = bitmap, .bound = class_bound
-		},
+		.bitmap = &(struct net6_bitmap){.words = bitmap,
+						.bound = class_bound},
 	};
 	for (uint32_t g = 0; g < group_count; ++g) {
 		memset(bitmap, 0, bitmap_words * 8);

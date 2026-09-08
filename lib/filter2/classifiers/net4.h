@@ -16,7 +16,7 @@
 struct filter_query_attr_net4 {
 	struct filter_query_attr attr;
 	struct lpm lpm;
-	struct value_table value_table;
+	struct vline line;
 };
 
 static inline void
@@ -27,7 +27,7 @@ filter_query_attr_net4_free(
 		container_of(attr, struct filter_query_attr_net4, attr);
 
 	lpm_free(&net4_attr->lpm);
-	value_table_free(&net4_attr->value_table);
+	vline_free(&net4_attr->line);
 	memory_bfree(
 		memory_context, net4_attr, sizeof(struct filter_query_attr_net4)
 	);

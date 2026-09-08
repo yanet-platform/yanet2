@@ -8,7 +8,7 @@
 
 struct filter_query_attr_device {
 	struct filter_query_attr attr;
-	struct value_table value_table;
+	struct vline line;
 };
 
 static inline void
@@ -18,7 +18,7 @@ filter_query_attr_device_free(
 	struct filter_query_attr_device *device_attr =
 		container_of(attr, struct filter_query_attr_device, attr);
 
-	value_table_free(&device_attr->value_table);
+	vline_free(&device_attr->line);
 	memory_bfree(
 		memory_context,
 		device_attr,
