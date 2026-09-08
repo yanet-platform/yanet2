@@ -49,11 +49,10 @@ filter_compile_attr_ipfrag_create(
 		goto error_free;
 	}
 
-	if (value_table_init(
-		    &attr->query_attr->value_table,
+	if (vline_init(
+		    &attr->query_attr->line,
 		    memory_context,
 		    "filter:ipfrag",
-		    1,
 		    FILTER_IPFRAG_REGION_COUNT
 	    )) {
 		goto error_free_attr;
@@ -98,10 +97,7 @@ filter_compile_attr_ipfrag_iter(
 
 	for (uint32_t idx = 0; idx < FILTER_IPFRAG_REGION_COUNT; ++idx) {
 		if (iter_cb_func(
-			    value_table_get_ptr(
-				    &query_attr->value_table, 0, idx
-			    ),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, idx), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
@@ -140,30 +136,26 @@ filter_compile_attr_ipfrag_rule_iter(
 	switch (rule->fragment) {
 	case FILTER_IP_FRAG_ANY:
 		if (iter_cb_func(
-			    value_table_get_ptr(&query_attr->value_table, 0, 0),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, 0), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
 		if (iter_cb_func(
-			    value_table_get_ptr(&query_attr->value_table, 0, 1),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, 1), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
 		break;
 	case FILTER_IP_FRAG_NONE:
 		if (iter_cb_func(
-			    value_table_get_ptr(&query_attr->value_table, 0, 0),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, 0), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
 		break;
 	case FILTER_IP_FRAG_FRAG:
 		if (iter_cb_func(
-			    value_table_get_ptr(&query_attr->value_table, 0, 1),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, 1), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
@@ -181,7 +173,7 @@ filter_compile_attr_ipfrag_free(
 		container_of(attr, struct filter_compile_attr_ipfrag, attr);
 
 	if (ipfrag_attr->query_attr != NULL) {
-		value_table_free(&ipfrag_attr->query_attr->value_table);
+		vline_free(&ipfrag_attr->query_attr->line);
 		memory_bfree(
 			memory_context,
 			ipfrag_attr->query_attr,

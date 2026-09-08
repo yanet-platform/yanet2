@@ -23,8 +23,7 @@ filter_query_attr_ip_frag_lookup(
 
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint32_t id = packets[idx]->fragment_offset > 0 ? 1 : 0;
-		results[idx] =
-			value_table_get(&ipfrag_attr->value_table, 0, id);
+		results[idx] = vline_get(&ipfrag_attr->line, id);
 	}
 }
 
@@ -38,7 +37,7 @@ struct filter_query_attr_ip_frag_handlers {
 	struct filter_query_attr_handlers attr_handlers;
 };
 
-static const struct filter_query_attr_ip_frag_handlers filter_query_attr_ip_frag =
-	{
+static const struct filter_query_attr_ip_frag_handlers
+	filter_query_attr_ip_frag = {
 		.attr_handlers = filter_query_ipfrag_handlers,
 };

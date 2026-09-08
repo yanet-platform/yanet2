@@ -13,8 +13,8 @@
 typedef uint32_t (*packet_get_device_func)(const struct packet *packet);
 
 struct filter_query_attr_device_handlers {
-	struct filter_query_attr_handlers attr_handlers;
-	packet_get_device_func get_device;
+	const struct filter_query_attr_handlers attr_handlers;
+	const packet_get_device_func get_device;
 };
 
 static inline void
@@ -28,20 +28,19 @@ filter_query_attr_device_lookup(
 	const struct filter_query_attr_device_handlers *device_handlers =
 		container_of(
 			attr_handlers,
-			struct filter_query_attr_device_handlers,
+			const struct filter_query_attr_device_handlers,
 			attr_handlers
 		);
 
 	const struct filter_query_attr_device *device_attr =
-		container_of(attr, struct filter_query_attr_device, attr);
+		container_of(attr, const struct filter_query_attr_device, attr);
 
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		uint32_t device_id = device_handlers->get_device(packets[idx]);
-		if (device_id >= device_attr->value_table.h_dim)
+		if (device_id >= device_attr->line.size) {
 			device_id = 0;
-		results[idx] = value_table_get(
-			&device_attr->value_table, 0, device_id
-		);
+		}
+		results[idx] = vline_get(&device_attr->line, device_id);
 	}
 }
 

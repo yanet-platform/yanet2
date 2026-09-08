@@ -50,12 +50,8 @@ filter_compile_attr_vlan_create(
 		goto error_free;
 	}
 
-	if (value_table_init(
-		    &attr->query_attr->value_table,
-		    memory_context,
-		    "filter:vlan",
-		    1,
-		    4096
+	if (vline_init(
+		    &attr->query_attr->line, memory_context, "filter:vlan", 4096
 	    )) {
 		goto error_free_attr;
 	}
@@ -100,10 +96,7 @@ filter_compile_attr_vlan_iter(
 
 	for (uint32_t idx = 0; idx < 4096; ++idx) {
 		if (iter_cb_func(
-			    value_table_get_ptr(
-				    &query_attr->value_table, 0, idx
-			    ),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, idx), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
@@ -166,9 +159,7 @@ filter_compile_attr_vlan_rule_iter(
 		for (uint32_t vlan = vlan_range->from; vlan <= vlan_range->to;
 		     ++vlan) {
 			if (iter_cb_func(
-				    value_table_get_ptr(
-					    &query_attr->value_table, 0, vlan
-				    ),
+				    vline_get_ptr(&query_attr->line, vlan),
 				    cb_func_data
 			    ) < 0) {
 				return -1;
@@ -187,7 +178,7 @@ filter_compile_attr_vlan_free(
 		container_of(attr, struct filter_compile_attr_vlan, attr);
 
 	if (vlan_ranges_attr->query_attr != NULL) {
-		value_table_free(&vlan_ranges_attr->query_attr->value_table);
+		vline_free(&vlan_ranges_attr->query_attr->line);
 
 		memory_bfree(
 			memory_context,

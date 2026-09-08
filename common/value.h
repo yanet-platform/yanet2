@@ -235,16 +235,19 @@ vline_init(
 }
 
 static inline uint32_t *
-vline_get_ptr(struct vline *vline, uint32_t idx) {
+vline_get_ptr(const struct vline *vline, uint32_t idx) {
+	// Cast away const for the offset-pointer access: lookup is a
+	// read-only operation and the line is immutable after compilation.
+	struct vline *line = (struct vline *)vline;
 	// The values chunk is set at init and cleared only by vline_free,
 	// which never races a lookup, so on the query path it is never
 	// NULL.
-	uint32_t *values = ADDR_OF_NONNULL(&vline->values);
+	uint32_t *values = ADDR_OF_NONNULL(&line->values);
 	return values + idx;
 }
 
 static inline uint32_t
-vline_get(struct vline *vline, uint32_t idx) {
+vline_get(const struct vline *vline, uint32_t idx) {
 	return *vline_get_ptr(vline, idx);
 }
 

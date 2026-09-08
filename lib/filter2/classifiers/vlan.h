@@ -6,7 +6,7 @@
 
 struct filter_query_attr_vlan {
 	struct filter_query_attr attr;
-	struct value_table value_table;
+	struct vline line;
 };
 
 static inline void
@@ -16,7 +16,7 @@ filter_query_attr_vlan_free(
 	struct filter_query_attr_vlan *vlan_attr =
 		container_of(attr, struct filter_query_attr_vlan, attr);
 
-	value_table_free(&vlan_attr->value_table);
+	vline_free(&vlan_attr->line);
 	memory_bfree(
 		memory_context, vlan_attr, sizeof(struct filter_query_attr_vlan)
 	);

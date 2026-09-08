@@ -10,7 +10,7 @@
 #include <rte_tcp.h>
 
 struct filter_query_attr_proto_range_handlers {
-	struct filter_query_attr_handlers attr_handlers;
+	const struct filter_query_attr_handlers attr_handlers;
 };
 
 static inline uint16_t
@@ -59,9 +59,7 @@ filter_query_attr_proto_range_lookup(
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint16_t proto_range =
 			filter_packet_get_proto_range(packets[idx]);
-		results[idx] = *value_table_get_ptr(
-			&proto_range_attr->value_table, 0, proto_range
-		);
+		results[idx] = vline_get(&proto_range_attr->line, proto_range);
 	}
 }
 

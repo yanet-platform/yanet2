@@ -15,8 +15,8 @@
 typedef const uint8_t *(*packet_get_net6_func)(const struct packet *packet);
 
 struct filter_query_attr_net6_handlers {
-	struct filter_query_attr_handlers attr_handlers;
-	packet_get_net6_func get_net6;
+	const struct filter_query_attr_handlers attr_handlers;
+	const packet_get_net6_func get_net6;
 };
 
 static inline void
@@ -30,17 +30,19 @@ filter_query_attr_net6_lookup(
 	const struct filter_query_attr_net6_handlers *net6_handlers =
 		container_of(
 			attr_handlers,
-			struct filter_query_attr_net6_handlers,
+			const struct filter_query_attr_net6_handlers,
 			attr_handlers
 		);
 
-	struct filter_query_attr_net6 *attr_net6 =
-		container_of(attr, struct filter_query_attr_net6, attr);
+	const struct filter_query_attr_net6 *attr_net6 =
+		container_of(attr, const struct filter_query_attr_net6, attr);
+
+	packet_get_net6_func get_net6 = net6_handlers->get_net6;
 
 	uint32_t *row_scalar = ADDR_OF(&attr_net6->row_scalar);
 	uint32_t *row_index = ADDR_OF(&attr_net6->row_index);
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
-		const uint8_t *addr = net6_handlers->get_net6(packets[idx]);
+		const uint8_t *addr = get_net6(packets[idx]);
 		uint32_t hi = lpm8_lookup(&attr_net6->hi, addr);
 		uint32_t scalar = row_scalar[hi];
 		if (scalar != FILTER_NET6_ROW_2D) {

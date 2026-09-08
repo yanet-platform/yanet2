@@ -52,11 +52,10 @@ filter_compile_attr_proto_create(
 		goto error_free;
 	}
 
-	if (value_table_init(
-		    &attr->query_attr->value_table,
+	if (vline_init(
+		    &attr->query_attr->line,
 		    memory_context,
 		    "filter:proto_range",
-		    1,
 		    65536
 	    )) {
 		goto error_free_attr;
@@ -102,10 +101,7 @@ filter_compile_attr_proto_iter(
 
 	for (uint32_t idx = 0; idx < 65536; ++idx) {
 		if (iter_cb_func(
-			    value_table_get_ptr(
-				    &query_attr->value_table, 0, idx
-			    ),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, idx), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
@@ -169,9 +165,7 @@ filter_compile_attr_proto_rule_iter(
 		     proto <= proto_range->to;
 		     ++proto) {
 			if (iter_cb_func(
-				    value_table_get_ptr(
-					    &query_attr->value_table, 0, proto
-				    ),
+				    vline_get_ptr(&query_attr->line, proto),
 				    cb_func_data
 			    ) < 0) {
 				return -1;
@@ -190,7 +184,7 @@ filter_compile_attr_proto_free(
 		container_of(attr, struct filter_compile_attr_proto, attr);
 
 	if (proto_ranges_attr->query_attr != NULL) {
-		value_table_free(&proto_ranges_attr->query_attr->value_table);
+		vline_free(&proto_ranges_attr->query_attr->line);
 
 		memory_bfree(
 			memory_context,

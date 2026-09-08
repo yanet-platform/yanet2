@@ -63,8 +63,8 @@ packet_dst_port(const struct packet *packet) {
 typedef uint16_t (*packet_get_port_func)(const struct packet *packet);
 
 struct filter_query_attr_port_handlers {
-	struct filter_query_attr_handlers attr_handlers;
-	packet_get_port_func get_port;
+	const struct filter_query_attr_handlers attr_handlers;
+	const packet_get_port_func get_port;
 };
 
 static inline void
@@ -78,17 +78,16 @@ filter_query_attr_port_lookup(
 	const struct filter_query_attr_port_handlers *port_handlers =
 		container_of(
 			attr_handlers,
-			struct filter_query_attr_port_handlers,
+			const struct filter_query_attr_port_handlers,
 			attr_handlers
 		);
 
 	const struct filter_query_attr_port *port_attr =
-		container_of(attr, struct filter_query_attr_port, attr);
+		container_of(attr, const struct filter_query_attr_port, attr);
 
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint16_t port = port_handlers->get_port(packets[idx]);
-		results[idx] =
-			*value_table_get_ptr(&port_attr->value_table, 0, port);
+		results[idx] = vline_get(&port_attr->line, port);
 	}
 }
 

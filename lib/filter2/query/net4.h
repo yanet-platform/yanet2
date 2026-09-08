@@ -16,8 +16,8 @@
 typedef const uint8_t *(*packet_get_net4_func)(const struct packet *packet);
 
 struct filter_query_attr_net4_handlers {
-	struct filter_query_attr_handlers attr_handlers;
-	packet_get_net4_func get_net4;
+	const struct filter_query_attr_handlers attr_handlers;
+	const packet_get_net4_func get_net4;
 };
 
 static inline void
@@ -31,17 +31,17 @@ filter_query_attr_net4_lookup(
 	const struct filter_query_attr_net4_handlers *net4_handlers =
 		container_of(
 			attr_handlers,
-			struct filter_query_attr_net4_handlers,
+			const struct filter_query_attr_net4_handlers,
 			attr_handlers
 		);
 
 	const struct filter_query_attr_net4 *attr_net4 =
-		container_of(attr, struct filter_query_attr_net4, attr);
+		container_of(attr, const struct filter_query_attr_net4, attr);
 
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
 		const uint8_t *addr = net4_handlers->get_net4(packets[idx]);
-		results[idx] = value_table_get(
-			&attr_net4->value_table, 0, lpm4_lookup(&attr_net4->lpm, addr)
+		results[idx] = vline_get(
+			&attr_net4->line, lpm4_lookup(&attr_net4->lpm, addr)
 		);
 	}
 }

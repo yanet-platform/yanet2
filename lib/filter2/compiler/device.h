@@ -74,11 +74,10 @@ filter_compile_attr_device_create(
 		}
 	}
 
-	if (value_table_init(
-		    &attr->query_attr->value_table,
+	if (vline_init(
+		    &attr->query_attr->line,
 		    memory_context,
 		    "filter:device",
-		    1,
 		    max_device_id + 1
 	    )) {
 		goto error_free_attr;
@@ -106,8 +105,7 @@ filter_compile_attr_device_size(const struct filter_compile_attr *attr) {
 	struct filter_compile_device_attr *device_attr =
 		container_of(attr, struct filter_compile_device_attr, attr);
 
-	return device_attr->query_attr->value_table.h_dim *
-	       device_attr->query_attr->value_table.v_dim;
+	return device_attr->query_attr->line.size;
 }
 
 static inline int
@@ -124,12 +122,9 @@ filter_compile_attr_device_iter(
 
 	struct filter_query_attr_device *query_attr = device_attr->query_attr;
 
-	for (uint32_t h_idx = 0; h_idx < query_attr->value_table.h_dim;
-	     ++h_idx) {
+	for (uint32_t h_idx = 0; h_idx < query_attr->line.size; ++h_idx) {
 		if (iter_cb_func(
-			    value_table_get_ptr(
-				    &query_attr->value_table, 0, h_idx
-			    ),
+			    vline_get_ptr(&query_attr->line, h_idx),
 			    cb_func_data
 		    ) < 0) {
 			return -1;
@@ -186,10 +181,8 @@ filter_compile_attr_device_rule_iter(
 
 	for (uint32_t idx = 0; idx < devices.count; ++idx) {
 		if (iter_cb_func(
-			    value_table_get_ptr(
-				    &query_attr->value_table,
-				    0,
-				    devices.items[idx].id
+			    vline_get_ptr(
+				    &query_attr->line, devices.items[idx].id
 			    ),
 			    cb_func_data
 		    ) < 0) {
@@ -208,7 +201,7 @@ filter_compile_attr_device_free(
 		container_of(attr, struct filter_compile_device_attr, attr);
 
 	if (device_attr->query_attr != NULL) {
-		value_table_free(&device_attr->query_attr->value_table);
+		vline_free(&device_attr->query_attr->line);
 		memory_bfree(
 			memory_context,
 			device_attr->query_attr,

@@ -288,10 +288,8 @@ acl_handle_packets(
 				}
 				++ip4_port_idx;
 			}
-		} else if (
-			packet->network_header.type ==
-			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
-		) {
+		} else if (packet->network_header.type ==
+			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			state_table = fw6table;
 
 			if (ip6_result[ip6_idx] < action) {

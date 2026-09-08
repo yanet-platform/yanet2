@@ -10,7 +10,7 @@
 // (non-fragment / fragment) to their rule-set identifiers.
 struct filter_query_attr_ip_frag {
 	struct filter_query_attr attr;
-	struct value_table value_table;
+	struct vline line;
 };
 
 static inline void
@@ -20,7 +20,7 @@ filter_query_attr_ip_frag_free(
 	struct filter_query_attr_ip_frag *ipfrag_attr =
 		container_of(attr, struct filter_query_attr_ip_frag, attr);
 
-	value_table_free(&ipfrag_attr->value_table);
+	vline_free(&ipfrag_attr->line);
 	memory_bfree(
 		memory_context,
 		ipfrag_attr,

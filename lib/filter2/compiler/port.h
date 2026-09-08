@@ -50,11 +50,10 @@ filter_compile_attr_port_create(
 		goto error_free;
 	}
 
-	if (value_table_init(
-		    &attr->query_attr->value_table,
+	if (vline_init(
+		    &attr->query_attr->line,
 		    memory_context,
 		    "filter:port",
-		    1,
 		    65536
 	    )) {
 		goto error_free_attr;
@@ -100,10 +99,7 @@ filter_compile_attr_port_iter(
 
 	for (uint32_t idx = 0; idx < 65536; ++idx) {
 		if (iter_cb_func(
-			    value_table_get_ptr(
-				    &query_attr->value_table, 0, idx
-			    ),
-			    cb_func_data
+			    vline_get_ptr(&query_attr->line, idx), cb_func_data
 		    ) < 0) {
 			return -1;
 		}
@@ -166,9 +162,7 @@ filter_compile_attr_port_rule_iter(
 		for (uint32_t port = port_range->from; port <= port_range->to;
 		     ++port) {
 			if (iter_cb_func(
-				    value_table_get_ptr(
-					    &query_attr->value_table, 0, port
-				    ),
+				    vline_get_ptr(&query_attr->line, port),
 				    cb_func_data
 			    ) < 0) {
 				return -1;
@@ -187,7 +181,7 @@ filter_compile_attr_port_free(
 		container_of(attr, struct filter_compile_attr_port, attr);
 
 	if (port_ranges_attr->query_attr != NULL) {
-		value_table_free(&port_ranges_attr->query_attr->value_table);
+		vline_free(&port_ranges_attr->query_attr->line);
 
 		memory_bfree(
 			memory_context,
