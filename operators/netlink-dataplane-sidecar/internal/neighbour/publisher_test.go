@@ -3,815 +3,347 @@ package neighbour_test
 import (
 	"context"
 	"errors"
+	"io"
+	"maps"
+	"net"
 	"net/netip"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	vnetlink "github.com/vishvananda/netlink"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
-const testOwnedTable = "netlink-dataplane-kernel"
-
-type fakeClient struct {
-	listTablesResponse  *operatorpb.ListNeighbourTablesResponse
-	listTablesError     error
-	listResponse        *operatorpb.ListNeighboursResponse
-	listError           error
-	createResponse      *operatorpb.CreateNeighbourTableResponse
-	createError         error
-	updateTableResponse *operatorpb.UpdateNeighbourTableResponse
-	updateTableError    error
-	removeTableResponse *operatorpb.RemoveNeighbourTableResponse
-	removeTableError    error
-	updateResponse      *operatorpb.UpdateNeighboursResponse
-	updateError         error
-	removeResponse      *operatorpb.RemoveNeighboursResponse
-	removeError         error
-
-	operations          []string
-	createRequests      []*operatorpb.CreateNeighbourTableRequest
-	updateTableRequests []*operatorpb.UpdateNeighbourTableRequest
-	removeTableRequests []*operatorpb.RemoveNeighbourTableRequest
-	listRequests        []*operatorpb.ListNeighboursRequest
-	updateRequests      []*operatorpb.UpdateNeighboursRequest
-	removeRequests      []*operatorpb.RemoveNeighboursRequest
+type publicationCall struct {
+	Method  string
+	Table   string
+	Context context.Context
+	Chunk   *operatorpb.ReplaceNeighboursRequest
 }
 
-// RemoveTable returns the configured result and records obsolete table cleanup.
-func (m *fakeClient) RemoveTable(
-	ctx context.Context,
-	request *operatorpb.RemoveNeighbourTableRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.RemoveNeighbourTableResponse, error) {
-	m.operations = append(m.operations, "remove_table")
-	m.removeTableRequests = append(m.removeTableRequests, request)
-	if m.removeTableError == nil && m.removeTableResponse != nil {
-		remaining := m.listTablesResponse.Tables[:0]
-		for _, table := range m.listTablesResponse.Tables {
-			if table.GetName() != request.GetName() {
-				remaining = append(remaining, table)
-			}
+type publicationTable struct {
+	Priority uint32
+	BuiltIn  bool
+	Entries  []*operatorpb.NeighbourEntry
+}
+
+// publicationService exposes only replacement and cleanup over real transport.
+//
+// The route operator has its own internal-package boundary and tests the real
+// commit implementation there. This shared fixture records transport and stores
+// complete snapshots without emulating the removed neighbour CRUD path.
+type publicationService struct {
+	operatorpb.UnimplementedNeighbourServiceServer
+	mu     sync.Mutex
+	tables map[string]publicationTable
+	calls  []publicationCall
+	hook   func(publicationCall) error
+}
+
+// newPublicationService uses default gRPC message limits for every scenario.
+func newPublicationService(t *testing.T) (*publicationService, operatorpb.NeighbourServiceClient) {
+	t.Helper()
+	service := &publicationService{tables: map[string]publicationTable{}}
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	operatorpb.RegisterNeighbourServiceServer(server, service)
+	var group errgroup.Group
+	group.Go(func() error {
+		err := server.Serve(listener)
+		if errors.Is(err, grpc.ErrServerStopped) {
+			return nil
 		}
-		m.listTablesResponse.Tables = remaining
-	}
-	return m.removeTableResponse, m.removeTableError
-}
-
-// ListTables returns configured table metadata and records the RPC attempt.
-func (m *fakeClient) ListTables(
-	ctx context.Context,
-	request *operatorpb.ListNeighbourTablesRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.ListNeighbourTablesResponse, error) {
-	m.operations = append(m.operations, "list_tables")
-	return m.listTablesResponse, m.listTablesError
-}
-
-// CreateTable returns the configured result and records the requested table.
-func (m *fakeClient) CreateTable(
-	ctx context.Context,
-	request *operatorpb.CreateNeighbourTableRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.CreateNeighbourTableResponse, error) {
-	m.operations = append(m.operations, "create_table")
-	m.createRequests = append(m.createRequests, request)
-	return m.createResponse, m.createError
-}
-
-// UpdateTable returns the configured result and records the metadata update.
-func (m *fakeClient) UpdateTable(
-	ctx context.Context,
-	request *operatorpb.UpdateNeighbourTableRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.UpdateNeighbourTableResponse, error) {
-	m.operations = append(m.operations, "update_table")
-	m.updateTableRequests = append(m.updateTableRequests, request)
-	return m.updateTableResponse, m.updateTableError
-}
-
-// List returns the configured table snapshot and records the table name.
-func (m *fakeClient) List(
-	ctx context.Context,
-	request *operatorpb.ListNeighboursRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.ListNeighboursResponse, error) {
-	m.operations = append(m.operations, "list")
-	m.listRequests = append(m.listRequests, request)
-	return m.listResponse, m.listError
-}
-
-// UpdateNeighbours returns the configured result and records exact upserts.
-func (m *fakeClient) UpdateNeighbours(
-	ctx context.Context,
-	request *operatorpb.UpdateNeighboursRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.UpdateNeighboursResponse, error) {
-	m.operations = append(m.operations, "update_neighbours")
-	m.updateRequests = append(m.updateRequests, request)
-	return m.updateResponse, m.updateError
-}
-
-// RemoveNeighbours returns the configured result and records exact removals.
-func (m *fakeClient) RemoveNeighbours(
-	ctx context.Context,
-	request *operatorpb.RemoveNeighboursRequest,
-	options ...grpc.CallOption,
-) (*operatorpb.RemoveNeighboursResponse, error) {
-	m.operations = append(m.operations, "remove_neighbours")
-	m.removeRequests = append(m.removeRequests, request)
-	return m.removeResponse, m.removeError
-}
-
-// Test_Publish_FiltersEachGatewayByOwnedDevices verifies that equal next hops
-// on disjoint devices are independently scoped before collision validation.
-func Test_Publish_FiltersEachGatewayByOwnedDevices(t *testing.T) {
-	firstClient := newFakeClient("netlink-dataplane-first", 100)
-	secondClient := newFakeClient("netlink-dataplane-second", 100)
-	firstEntry := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-a",
-		1,
-		11,
-		vnetlink.NUD_REACHABLE,
-	)
-	secondEntry := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-b",
-		2,
-		22,
-		vnetlink.NUD_STALE,
-	)
-
-	err := neighbour.Publish(t.Context(), []neighbour.Entry{
-		secondEntry,
-		firstEntry,
-	}, []neighbour.GatewayTarget{
-		{
-			Name:            "first",
-			TableName:       "netlink-dataplane-first",
-			DefaultPriority: 100,
-			Devices:         []string{"dataplane-a"},
-			Client:          firstClient,
-		},
-		{
-			Name:            "second",
-			TableName:       "netlink-dataplane-second",
-			DefaultPriority: 100,
-			Devices:         []string{"dataplane-b"},
-			Client:          secondClient,
-		},
+		return err
 	})
-	require.NoError(t, err)
-	require.Equal(t, []*operatorpb.UpdateNeighboursRequest{{
-		Table:   "netlink-dataplane-first",
-		Entries: []*operatorpb.NeighbourEntry{wireEntry(firstEntry)},
-	}}, firstClient.updateRequests)
-	require.Equal(t, []*operatorpb.UpdateNeighboursRequest{{
-		Table:   "netlink-dataplane-second",
-		Entries: []*operatorpb.NeighbourEntry{wireEntry(secondEntry)},
-	}}, secondClient.updateRequests)
-}
-
-// Test_Publish_CreatesAndUpdatesOwnedTables verifies that prefixed absent
-// tables are created and existing owned tables are updated before listing.
-func Test_Publish_CreatesAndUpdatesOwnedTables(t *testing.T) {
-	createClient := newFakeClient("", 0)
-	updateClient := newFakeClient("netlink-dataplane-existing", 10)
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{
-		{
-			Name:            "create",
-			TableName:       "netlink-dataplane-new",
-			DefaultPriority: 20,
-			Devices:         []string{"dataplane-a"},
-			Client:          createClient,
-		},
-		{
-			Name:            "update",
-			TableName:       "netlink-dataplane-existing",
-			DefaultPriority: 30,
-			Devices:         []string{"dataplane-b"},
-			Client:          updateClient,
-		},
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+		require.NoError(t, group.Wait())
 	})
+	connection, err := grpc.NewClient("passthrough:///publication",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+			return listener.DialContext(ctx)
+		}),
+	)
 	require.NoError(t, err)
-	require.Equal(t, []string{"list_tables", "create_table", "list"}, createClient.operations)
-	require.Equal(t, []*operatorpb.CreateNeighbourTableRequest{{
-		Name:            "netlink-dataplane-new",
-		DefaultPriority: 20,
-	}}, createClient.createRequests)
-	require.Equal(t, []string{"list_tables", "update_table", "list"}, updateClient.operations)
-	require.Equal(t, []*operatorpb.UpdateNeighbourTableRequest{{
-		Name:            "netlink-dataplane-existing",
-		DefaultPriority: 30,
-	}}, updateClient.updateTableRequests)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	return service, operatorpb.NewNeighbourServiceClient(connection)
 }
 
-// Test_Publish_ExactUpsertAndRemovalDiff verifies that server-owned metadata
-// is ignored while forwarding changes, priority changes, and stale hops diff.
-func Test_Publish_ExactUpsertAndRemovalDiff(t *testing.T) {
-	client := newFakeClient(testOwnedTable, 50)
-	unchanged := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-a",
-		1,
-		11,
-		vnetlink.NUD_REACHABLE,
-	)
-	changed := testDesiredEntry(
-		"192.0.2.2",
-		"dataplane-a",
-		1,
-		22,
-		vnetlink.NUD_STALE,
-	)
-	added := testDesiredEntry(
-		"192.0.2.3",
-		"dataplane-a",
-		1,
-		33,
-		vnetlink.NUD_DELAY,
-	)
-	reprioritized := testDesiredEntry(
-		"192.0.2.5",
-		"dataplane-a",
-		1,
-		55,
-		vnetlink.NUD_PROBE,
-	)
-	oldChanged := testDesiredEntry(
-		"192.0.2.2",
-		"dataplane-a",
-		1,
-		99,
-		vnetlink.NUD_PERMANENT,
-	)
-	stale := testDesiredEntry(
-		"192.0.2.4",
-		"dataplane-a",
-		1,
-		44,
-		vnetlink.NUD_PERMANENT,
-	)
-	client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-		wireCurrentEntry(stale, 50),
-		wireCurrentEntry(reprioritized, 40),
-		wireCurrentEntry(oldChanged, 50),
-		wireCurrentEntry(unchanged, 50),
+// SetHook injects a failure or cancellation at a recorded transport boundary.
+func (m *publicationService) SetHook(hook func(publicationCall) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hook = hook
+}
+
+// Store atomically seeds or commits one fixture table.
+func (m *publicationService) Store(name string, table publicationTable) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tables[name] = table
+}
+
+// Tables returns read-only snapshots; commits replace rather than mutate entries.
+func (m *publicationService) Tables() map[string]publicationTable {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return maps.Clone(m.tables)
+}
+
+// Calls returns read-only requests from completed receives.
+func (m *publicationService) Calls() []publicationCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]publicationCall(nil), m.calls...)
+}
+
+// record captures requests before calling a potentially blocking hook unlocked.
+func (m *publicationService) record(call publicationCall) error {
+	hook := m.appendCall(call)
+	if hook != nil {
+		if err := hook(call); err != nil {
+			return err
+		}
 	}
-
-	err := neighbour.Publish(
-		t.Context(),
-		[]neighbour.Entry{reprioritized, added, unchanged, changed},
-		[]neighbour.GatewayTarget{{
-			Name:            "gateway",
-			TableName:       testOwnedTable,
-			DefaultPriority: 50,
-			Client:          client,
-		}},
-	)
-	require.NoError(t, err)
-	require.Equal(t, []string{
-		"list_tables",
-		"list",
-		"update_neighbours",
-		"remove_neighbours",
-	}, client.operations)
-	require.Equal(t, []*operatorpb.UpdateNeighboursRequest{{
-		Table: testOwnedTable,
-		Entries: []*operatorpb.NeighbourEntry{
-			wireEntry(changed),
-			wireEntry(added),
-			wireEntry(reprioritized),
-		},
-	}}, client.updateRequests)
-	require.Equal(t, []*operatorpb.RemoveNeighboursRequest{{
-		Table: testOwnedTable,
-		NextHops: []*commonpb.IPAddress{
-			commonpb.NewIPAddressFromAddr(stale.NextHop),
-		},
-	}}, client.removeRequests)
+	return status.FromContextError(call.Context.Err()).Err()
 }
 
-// Test_Publish_EmptySnapshotClearsTable verifies that no desired entries
-// produces one deterministic stale-hop removal and no empty update call.
-func Test_Publish_EmptySnapshotClearsTable(t *testing.T) {
-	client := newFakeClient(testOwnedTable, 100)
-	first := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-a",
-		1,
-		11,
-		vnetlink.NUD_PERMANENT,
-	)
-	second := testDesiredEntry(
-		"192.0.2.2",
-		"dataplane-a",
-		1,
-		22,
-		vnetlink.NUD_PERMANENT,
-	)
-	client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-		wireCurrentEntry(second, 100),
-		wireCurrentEntry(first, 100),
+// appendCall serializes history and returns the current failure hook.
+func (m *publicationService) appendCall(call publicationCall) func(publicationCall) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, call)
+	return m.hook
+}
+
+// ReplaceNeighbours stores only streams that reach a successful commit boundary.
+func (m *publicationService) ReplaceNeighbours(
+	stream grpc.ClientStreamingServer[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse],
+) error {
+	var first *operatorpb.ReplaceNeighboursRequest
+	var entries []*operatorpb.NeighbourEntry
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if first == nil {
+			first = chunk
+		}
+		if err := m.record(publicationCall{Method: "chunk", Table: chunk.GetTable(), Context: stream.Context(), Chunk: chunk}); err != nil {
+			return err
+		}
+		entries = append(entries, chunk.GetEntries()...)
 	}
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{{
-		Name:            "gateway",
-		TableName:       testOwnedTable,
-		DefaultPriority: 100,
-		Client:          client,
-	}})
-	require.NoError(t, err)
-	require.Empty(t, client.updateRequests)
-	require.Equal(t, []*operatorpb.RemoveNeighboursRequest{{
-		Table: testOwnedTable,
-		NextHops: []*commonpb.IPAddress{
-			commonpb.NewIPAddressFromAddr(first.NextHop),
-			commonpb.NewIPAddressFromAddr(second.NextHop),
-		},
-	}}, client.removeRequests)
-}
-
-// Test_Publish_RemovesObsoleteOwnedTablesAfterCurrentTableReconciles verifies that
-// stale owned tables are deleted in name order only after current table reads.
-func Test_Publish_RemovesObsoleteOwnedTablesAfterCurrentTableReconciles(t *testing.T) {
-	client := newFakeClient(testOwnedTable, 100)
-	client.listTablesResponse.Tables = append(client.listTablesResponse.Tables,
-		&operatorpb.NeighbourTableInfo{Name: "netlink-dataplane-z-old"},
-		&operatorpb.NeighbourTableInfo{Name: "static"},
-		&operatorpb.NeighbourTableInfo{Name: "netlink-dataplane-a-old"},
-	)
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{{
-		Name:            "gateway",
-		TableName:       testOwnedTable,
-		DefaultPriority: 100,
-		Client:          client,
-	}})
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"list_tables", "list", "remove_table", "remove_table"}, client.operations)
-	require.Equal(t, []*operatorpb.RemoveNeighbourTableRequest{
-		{Name: "netlink-dataplane-a-old"},
-		{Name: "netlink-dataplane-z-old"},
-	}, client.removeTableRequests)
-}
-
-// Test_Publish_PreservesAllConfiguredTablesOnSharedEndpoint verifies that one
-// target's cleanup preserves its peer's configured table and foreign tables.
-func Test_Publish_PreservesAllConfiguredTablesOnSharedEndpoint(t *testing.T) {
-	const (
-		firstTable  = "netlink-dataplane-first"
-		secondTable = "netlink-dataplane-second"
-	)
-	tables := []*operatorpb.NeighbourTableInfo{
-		{Name: firstTable, DefaultPriority: 100},
-		{Name: secondTable, DefaultPriority: 100},
-		{Name: "netlink-dataplane-obsolete", DefaultPriority: 100},
-		{Name: "static", DefaultPriority: 100},
+	if first == nil {
+		return status.Error(codes.InvalidArgument, "missing snapshot")
 	}
-	client := newFakeClient("", 100)
-	client.listTablesResponse.Tables = tables
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{
-		{
-			Name:            "first",
-			TableName:       firstTable,
-			DefaultPriority: 100,
-			Devices:         []string{"dataplane-a"},
-			Client:          client,
-		},
-		{
-			Name:            "second",
-			TableName:       secondTable,
-			DefaultPriority: 100,
-			Devices:         []string{"dataplane-b"},
-			Client:          client,
-		},
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, []*operatorpb.RemoveNeighbourTableRequest{{
-		Name: "netlink-dataplane-obsolete",
-	}}, client.removeTableRequests)
-}
-
-// Test_Publish_DoesNotRemoveObsoleteBuiltInTable verifies that an owned-looking
-// name cannot authorize deletion of a table protected as built in.
-func Test_Publish_DoesNotRemoveObsoleteBuiltInTable(t *testing.T) {
-	client := newFakeClient(testOwnedTable, 100)
-	client.listTablesResponse.Tables = append(client.listTablesResponse.Tables,
-		&operatorpb.NeighbourTableInfo{
-			Name:    "netlink-dataplane-built-in",
-			BuiltIn: true,
-		},
-	)
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{{
-		Name:            "gateway",
-		TableName:       testOwnedTable,
-		DefaultPriority: 100,
-		Client:          client,
-	}})
-
-	require.ErrorContains(t, err, `obsolete neighbour table "netlink-dataplane-built-in" is built in`)
-	require.Empty(t, client.removeTableRequests)
-}
-
-// Test_Publish_NoRemovalAfterListOrUpdateFailure verifies that stale entries
-// remain untouched whenever the prerequisite snapshot or upsert is uncertain.
-func Test_Publish_NoRemovalAfterListOrUpdateFailure(t *testing.T) {
-	failure := errors.New("injected failure")
-	desired := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-a",
-		1,
-		11,
-		vnetlink.NUD_REACHABLE,
-	)
-	stale := testDesiredEntry(
-		"192.0.2.2",
-		"dataplane-a",
-		1,
-		22,
-		vnetlink.NUD_PERMANENT,
-	)
-	tests := []struct {
-		name            string
-		configure       func(*fakeClient)
-		wantUpdateCount int
-		wantRemoveCount int
-	}{
-		{
-			name: "failed list with partial response",
-			configure: func(client *fakeClient) {
-				client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-					wireCurrentEntry(stale, 100),
-				}
-				client.listError = failure
-			},
-		},
-		{
-			name: "incomplete list response",
-			configure: func(client *fakeClient) {
-				client.listResponse = nil
-			},
-		},
-		{
-			name: "failed update",
-			configure: func(client *fakeClient) {
-				client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-					wireCurrentEntry(stale, 100),
-				}
-				client.updateError = failure
-			},
-			wantUpdateCount: 1,
-		},
-		{
-			name: "incomplete update response",
-			configure: func(client *fakeClient) {
-				client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-					wireCurrentEntry(stale, 100),
-				}
-				client.updateResponse = nil
-			},
-			wantUpdateCount: 1,
-		},
-		{
-			name: "failed removal",
-			configure: func(client *fakeClient) {
-				client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-					wireCurrentEntry(stale, 100),
-				}
-				client.removeError = failure
-			},
-			wantUpdateCount: 1,
-			wantRemoveCount: 1,
-		},
-		{
-			name: "incomplete removal response",
-			configure: func(client *fakeClient) {
-				client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-					wireCurrentEntry(stale, 100),
-				}
-				client.removeResponse = nil
-			},
-			wantUpdateCount: 1,
-			wantRemoveCount: 1,
-		},
+	if err := m.record(publicationCall{Method: "commit", Table: first.GetTable(), Context: stream.Context()}); err != nil {
+		return err
 	}
+	m.Store(first.GetTable(), publicationTable{Priority: first.GetDefaultPriority(), Entries: entries})
+	return stream.SendAndClose(&operatorpb.ReplaceNeighboursResponse{})
+}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			client := newFakeClient(testOwnedTable, 100)
-			client.listTablesResponse.Tables = append(
-				client.listTablesResponse.Tables,
-				&operatorpb.NeighbourTableInfo{Name: "netlink-dataplane-obsolete"},
-			)
-			test.configure(client)
-			err := neighbour.Publish(
-				t.Context(),
-				[]neighbour.Entry{desired},
-				[]neighbour.GatewayTarget{{
-					Name:            "gateway",
-					TableName:       testOwnedTable,
-					DefaultPriority: 100,
-					Client:          client,
-				}},
-			)
-			require.Error(t, err)
-			require.Len(t, client.updateRequests, test.wantUpdateCount)
-			require.Len(t, client.removeRequests, test.wantRemoveCount)
-			require.Empty(t, client.removeTableRequests)
+// ListTables returns only bounded metadata, never neighbouring addresses.
+func (m *publicationService) ListTables(ctx context.Context, request *operatorpb.ListNeighbourTablesRequest) (*operatorpb.ListNeighbourTablesResponse, error) {
+	if err := m.record(publicationCall{Method: "list_tables", Context: ctx}); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	response := &operatorpb.ListNeighbourTablesResponse{}
+	for name, table := range m.tables {
+		response.Tables = append(response.Tables, &operatorpb.NeighbourTableInfo{
+			Name: name, DefaultPriority: table.Priority, BuiltIn: table.BuiltIn, EntryCount: int64(len(table.Entries)),
 		})
 	}
+	return response, nil
 }
 
-// Test_Publish_RejectsDuplicateNextHopWithinTarget verifies that ambiguous
-// desired forwarding identities cannot mutate a gateway-owned table.
-func Test_Publish_RejectsDuplicateNextHopWithinTarget(t *testing.T) {
-	client := newFakeClient(testOwnedTable, 100)
-	first := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-a",
-		1,
-		11,
-		vnetlink.NUD_REACHABLE,
-	)
-	second := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-b",
-		2,
-		22,
-		vnetlink.NUD_STALE,
-	)
-
-	err := neighbour.Publish(t.Context(), []neighbour.Entry{
-		first,
-		second,
-	}, []neighbour.GatewayTarget{{
-		Name:            "gateway",
-		TableName:       testOwnedTable,
-		DefaultPriority: 100,
-		Devices:         []string{"dataplane-a", "dataplane-b"},
-		Client:          client,
-	}})
-	require.ErrorContains(t, err, "duplicate desired next hop")
-	require.Empty(t, client.operations)
-}
-
-// Test_Publish_RejectsDeviceWithoutGatewayOwnerBeforeRPC verifies that a desired
-// neighbour on an unassigned device prevents calls to every gateway.
-func Test_Publish_RejectsDeviceWithoutGatewayOwnerBeforeRPC(t *testing.T) {
-	firstClient := newFakeClient("netlink-dataplane-first", 100)
-	secondClient := newFakeClient("netlink-dataplane-second", 100)
-	entry := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-c",
-		1,
-		11,
-		vnetlink.NUD_REACHABLE,
-	)
-
-	err := neighbour.Publish(t.Context(), []neighbour.Entry{entry}, []neighbour.GatewayTarget{
-		{
-			Name:      "first",
-			TableName: "netlink-dataplane-first",
-			Devices:   []string{"dataplane-a"},
-			Client:    firstClient,
-		},
-		{
-			Name:      "second",
-			TableName: "netlink-dataplane-second",
-			Devices:   []string{"dataplane-b"},
-			Client:    secondClient,
-		},
-	})
-	require.ErrorContains(t, err, `device "dataplane-c" has no gateway owner`)
-	require.Empty(t, firstClient.operations)
-	require.Empty(t, secondClient.operations)
-}
-
-// Test_ValidateManagedDeviceOwnership_RejectsUnownedLink verifies that every
-// managed link needs a gateway owner even without any discovered neighbours.
-func Test_ValidateManagedDeviceOwnership_RejectsUnownedLink(t *testing.T) {
-	firstClient := newFakeClient("netlink-dataplane-first", 100)
-	secondClient := newFakeClient("netlink-dataplane-second", 100)
-
-	err := neighbour.ValidateManagedDeviceOwnership(
-		netplan.State{Links: []netplan.Link{{Name: "kni0"}, {Name: "kni1"}}},
-		map[string]string{"kni0": "logical0"},
-		[]neighbour.GatewayTarget{
-			{
-				Name:      "first",
-				TableName: "netlink-dataplane-first",
-				Devices:   []string{"logical0"},
-				Client:    firstClient,
-			},
-			{
-				Name:      "second",
-				TableName: "netlink-dataplane-second",
-				Devices:   []string{"logical1"},
-				Client:    secondClient,
-			},
-		},
-	)
-
-	require.ErrorContains(t, err, `managed link "kni1" logical device "kni1" has no gateway owner`)
-	require.Empty(t, firstClient.operations)
-	require.Empty(t, secondClient.operations)
-}
-
-// Test_Publish_RejectsDuplicateDeviceOwnershipBeforeRPC verifies that an empty
-// snapshot cannot bypass exclusive device ownership across gateways.
-func Test_Publish_RejectsDuplicateDeviceOwnershipBeforeRPC(t *testing.T) {
-	firstClient := newFakeClient("netlink-dataplane-first", 100)
-	secondClient := newFakeClient("netlink-dataplane-second", 100)
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{
-		{
-			Name:      "first",
-			TableName: "netlink-dataplane-first",
-			Devices:   []string{"dataplane-a"},
-			Client:    firstClient,
-		},
-		{
-			Name:      "second",
-			TableName: "netlink-dataplane-second",
-			Devices:   []string{"dataplane-a"},
-			Client:    secondClient,
-		},
-	})
-	require.ErrorContains(t, err, `device "dataplane-a" is already owned by "first"`)
-	require.Empty(t, firstClient.operations)
-	require.Empty(t, secondClient.operations)
-}
-
-// Test_Publish_ContinuesAndJoinsGatewayErrors verifies that all gateways are
-// attempted and independently wrapped failures remain discoverable.
-func Test_Publish_ContinuesAndJoinsGatewayErrors(t *testing.T) {
-	firstError := errors.New("first gateway failed")
-	secondError := errors.New("second gateway failed")
-	firstClient := newFakeClient("netlink-dataplane-first", 100)
-	firstClient.listTablesError = firstError
-	secondClient := newFakeClient("netlink-dataplane-second", 100)
-	secondClient.listTablesError = secondError
-	thirdClient := newFakeClient("netlink-dataplane-third", 100)
-	thirdEntry := testDesiredEntry(
-		"192.0.2.3",
-		"dataplane-c",
-		3,
-		33,
-		vnetlink.NUD_REACHABLE,
-	)
-
-	err := neighbour.Publish(
-		t.Context(),
-		[]neighbour.Entry{thirdEntry},
-		[]neighbour.GatewayTarget{
-			{
-				Name:            "first",
-				TableName:       "netlink-dataplane-first",
-				DefaultPriority: 100,
-				Devices:         []string{"dataplane-a"},
-				Client:          firstClient,
-			},
-			{
-				Name:            "second",
-				TableName:       "netlink-dataplane-second",
-				DefaultPriority: 100,
-				Devices:         []string{"dataplane-b"},
-				Client:          secondClient,
-			},
-			{
-				Name:            "third",
-				TableName:       "netlink-dataplane-third",
-				DefaultPriority: 100,
-				Devices:         []string{"dataplane-c"},
-				Client:          thirdClient,
-			},
-		},
-	)
-	require.ErrorIs(t, err, firstError)
-	require.ErrorIs(t, err, secondError)
-	require.Equal(t, []string{"list_tables"}, firstClient.operations)
-	require.Equal(t, []string{"list_tables"}, secondClient.operations)
-	require.Equal(t, []string{
-		"list_tables",
-		"list",
-		"update_neighbours",
-	}, thirdClient.operations)
-}
-
-// Test_Publish_RejectsUnownedTableBeforeRPC verifies that an existing generic
-// user table cannot be adopted or cleared by an empty sidecar snapshot.
-func Test_Publish_RejectsUnownedTableBeforeRPC(t *testing.T) {
-	const userTable = "user-neighbours"
-	client := newFakeClient(userTable, 100)
-	stale := testDesiredEntry(
-		"192.0.2.1",
-		"dataplane-a",
-		1,
-		11,
-		vnetlink.NUD_PERMANENT,
-	)
-	client.listResponse.Neighbours = []*operatorpb.NeighbourEntry{
-		wireCurrentEntry(stale, 100),
+// RemoveTable deletes only the requested table after its transport hook succeeds.
+func (m *publicationService) RemoveTable(ctx context.Context, request *operatorpb.RemoveNeighbourTableRequest) (*operatorpb.RemoveNeighbourTableResponse, error) {
+	if err := m.record(publicationCall{Method: "remove_table", Table: request.GetName(), Context: ctx}); err != nil {
+		return nil, err
 	}
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{{
-		Name:            "gateway",
-		TableName:       userTable,
-		DefaultPriority: 100,
-		Client:          client,
-	}})
-	require.ErrorContains(t, err, `outside reserved "netlink-dataplane-" namespace`)
-	require.Empty(t, client.operations)
-	require.Empty(t, client.updateTableRequests)
-	require.Empty(t, client.removeRequests)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.tables, request.GetName())
+	return &operatorpb.RemoveNeighbourTableResponse{}, nil
 }
 
-// Test_Publish_RejectsBuiltInTable verifies that publication never claims a
-// route-operator-owned source whose lifecycle is reserved by the server.
-func Test_Publish_RejectsBuiltInTable(t *testing.T) {
-	client := newFakeClient(testOwnedTable, 100)
-	client.listTablesResponse.Tables[0].BuiltIn = true
-
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{{
-		Name:            "gateway",
-		TableName:       testOwnedTable,
-		DefaultPriority: 100,
-		Client:          client,
-	}})
-	require.ErrorContains(t, err, "is built in")
-	require.Equal(t, []string{"list_tables"}, client.operations)
+// newPublisherTarget assigns one logical device to a sidecar-owned table.
+func newPublisherTarget(name, device string, client neighbour.Client) neighbour.GatewayTarget {
+	return neighbour.GatewayTarget{Name: name, TableName: "netlink-dataplane-" + name, DefaultPriority: 100, Devices: []string{device}, Client: client}
 }
 
-// newFakeClient returns a successful client with an empty current table.
-func newFakeClient(tableName string, defaultPriority uint32) *fakeClient {
-	tables := []*operatorpb.NeighbourTableInfo{}
-	if tableName != "" {
-		tables = append(tables, &operatorpb.NeighbourTableInfo{
-			Name:            tableName,
-			DefaultPriority: defaultPriority,
-		})
-	}
-	return &fakeClient{
-		listTablesResponse:  &operatorpb.ListNeighbourTablesResponse{Tables: tables},
-		listResponse:        &operatorpb.ListNeighboursResponse{},
-		createResponse:      &operatorpb.CreateNeighbourTableResponse{},
-		updateTableResponse: &operatorpb.UpdateNeighbourTableResponse{},
-		removeTableResponse: &operatorpb.RemoveNeighbourTableResponse{},
-		updateResponse:      &operatorpb.UpdateNeighboursResponse{},
-		removeResponse:      &operatorpb.RemoveNeighboursResponse{},
-	}
-}
-
-// testDesiredEntry returns one complete typed neighbour entry.
-func testDesiredEntry(
-	nextHop string,
-	device string,
-	sourceByte byte,
-	destinationByte byte,
-	state int,
-) neighbour.Entry {
+// testDesiredEntry returns a complete forwarding identity without a local alias.
+func testDesiredEntry(nextHop, device string) neighbour.Entry {
 	return neighbour.Entry{
 		NextHop: netip.MustParseAddr(nextHop),
-		HardwareRoute: neighbour.HardwareRoute{
-			SourceMAC:      testMACArray(sourceByte),
-			DestinationMAC: testMACArray(destinationByte),
-			Device:         device,
+		HardwareRoute: hwroute.HardwareRoute{
+			SourceMAC: [6]byte{2, 0, 0, 0, 0, 1}, DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2}, Device: device,
 		},
-		State: neighbour.NeighbourState(state),
+		State: neighbour.NeighbourState(operatorpb.NeighbourState_NUD_REACHABLE),
 	}
 }
 
-// wireEntry returns the expected route operator update representation.
+// wireEntry describes the exact publication payload, excluding server metadata.
 func wireEntry(entry neighbour.Entry) *operatorpb.NeighbourEntry {
 	return &operatorpb.NeighbourEntry{
 		NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
-		LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
 		HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
-		State:        operatorpb.NeighbourState(entry.State),
-		Device:       entry.HardwareRoute.Device,
+		LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
+		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState(entry.State),
 	}
 }
 
-// wireCurrentEntry returns server-normalized metadata around a test entry.
-func wireCurrentEntry(entry neighbour.Entry, priority uint32) *operatorpb.NeighbourEntry {
-	result := wireEntry(entry)
-	result.State = operatorpb.NeighbourState_NUD_PERMANENT
-	result.UpdatedAt = 123
-	result.Source = "server-owned"
-	result.Priority = priority
-	return result
+// callMethods extracts ordered RPC boundaries without comparing gRPC contexts.
+func callMethods(calls []publicationCall) []string {
+	var methods []string
+	for _, call := range calls {
+		methods = append(methods, call.Method)
+	}
+	return methods
 }
 
-var _ neighbour.Client = (*fakeClient)(nil)
+// Test_Publish_FilteringAndCleanup verifies that shared link-local next hops
+// survive per-device filtering and all configured tables are globally protected.
+func Test_Publish_FilteringAndCleanup(t *testing.T) {
+	service, client := newPublicationService(t)
+	first := newPublisherTarget("first", "logical0", client)
+	second := newPublisherTarget("second", "logical1", client)
+	second.DefaultPriority = 200
+	for _, name := range []string{"netlink-dataplane-old-z", "netlink-dataplane-old-a", "static", "foreign"} {
+		service.Store(name, publicationTable{})
+	}
+	firstEntry := testDesiredEntry("fe80::1", "logical0")
+	secondEntry := testDesiredEntry("fe80::1", "logical1")
+	secondEntry.HardwareRoute.DestinationMAC[5] = 3
+	entries := []neighbour.Entry{secondEntry, firstEntry, testDesiredEntry("192.0.2.1", "logical0")}
+	require.NoError(t, neighbour.Publish(t.Context(), entries, []neighbour.GatewayTarget{first, second}))
+	tables := service.Tables()
+	require.Len(t, tables, 4)
+	require.Contains(t, tables, "static")
+	require.Contains(t, tables, "foreign")
+	require.Equal(t, uint32(200), tables[second.TableName].Priority)
+	require.True(t, proto.Equal(wireEntry(secondEntry), tables[second.TableName].Entries[0]))
+	require.True(t, proto.Equal(wireEntry(entries[2]), tables[first.TableName].Entries[0]))
+	require.True(t, proto.Equal(wireEntry(firstEntry), tables[first.TableName].Entries[1]))
+	calls := service.Calls()
+	require.Equal(t, []string{"chunk", "commit", "chunk", "commit", "list_tables", "remove_table", "remove_table"}, callMethods(calls))
+	require.Equal(t, "netlink-dataplane-old-a", calls[5].Table)
+	require.Equal(t, "netlink-dataplane-old-z", calls[6].Table)
+}
+
+// Test_Publish_InvalidOwnership verifies that malformed desired ownership and
+// unbounded fields are rejected before any table can be changed.
+func Test_Publish_InvalidOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		configure func([]neighbour.GatewayTarget, []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry)
+	}{
+		{name: "no targets", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			return nil, entries
+		}},
+		{name: "foreign namespace", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[0].TableName = "static"
+			return targets, entries
+		}},
+		{name: "overlong table", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[0].TableName += strings.Repeat("x", 128)
+			return targets, entries
+		}},
+		{name: "invalid table characters", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[0].TableName += "/bad"
+			return targets, entries
+		}},
+		{name: "missing client", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[0].Client = nil
+			return targets, entries
+		}},
+		{name: "duplicate table", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[1].TableName = targets[0].TableName
+			return targets, entries
+		}},
+		{name: "duplicate device", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[1].Devices = targets[0].Devices
+			return targets, entries
+		}},
+		{name: "missing devices with multiple targets", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[0].Devices = nil
+			return targets, entries
+		}},
+		{name: "unowned device", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			entries[0].HardwareRoute.Device = "foreign"
+			return targets, entries
+		}},
+		{name: "duplicate next hop", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			return targets[:1], append(entries, entries[0])
+		}},
+		{name: "zoned next hop", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			entries[0].NextHop = netip.MustParseAddr("fe80::1%logical0")
+			return targets[:1], entries
+		}},
+		{name: "missing next hop", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			entries[0].NextHop = netip.Addr{}
+			return targets[:1], entries
+		}},
+		{name: "unbounded device with wildcard target", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
+			targets[0].Devices = nil
+			entries[0].HardwareRoute.Device = strings.Repeat("x", 129)
+			return targets[:1], entries
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, client := newPublicationService(t)
+			targets, entries := test.configure([]neighbour.GatewayTarget{
+				newPublisherTarget("first", "logical0", client), newPublisherTarget("second", "logical1", client),
+			}, []neighbour.Entry{testDesiredEntry("192.0.2.1", "logical0")})
+			require.Error(t, neighbour.Publish(t.Context(), entries, targets))
+			require.Empty(t, service.Calls())
+		})
+	}
+}
+
+// Test_ValidateManagedDeviceOwnership_UnownedLink verifies that a managed link
+// requires an owner even before any neighbours have been discovered.
+func Test_ValidateManagedDeviceOwnership_UnownedLink(t *testing.T) {
+	service, client := newPublicationService(t)
+	err := neighbour.ValidateManagedDeviceOwnership(
+		netplan.State{Links: []netplan.Link{{Name: "kni0"}, {Name: "kni1"}}},
+		map[string]string{"kni0": "logical0"},
+		[]neighbour.GatewayTarget{newPublisherTarget("first", "logical0", client)},
+	)
+	require.ErrorContains(t, err, `managed link "kni1" logical device "kni1" has no gateway owner`)
+	require.Empty(t, service.Calls())
+}
+
+// Test_Publish_ObsoleteBuiltIn verifies that reserved-looking names never
+// authorize deleting a source protected by the route operator.
+func Test_Publish_ObsoleteBuiltIn(t *testing.T) {
+	service, client := newPublicationService(t)
+	service.Store("netlink-dataplane-builtin", publicationTable{BuiltIn: true})
+	service.Store("netlink-dataplane-old", publicationTable{})
+	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{newPublisherTarget("first", "logical0", client)})
+	require.ErrorContains(t, err, "is built in")
+	require.Equal(t, []string{"chunk", "commit", "list_tables"}, callMethods(service.Calls()))
+}

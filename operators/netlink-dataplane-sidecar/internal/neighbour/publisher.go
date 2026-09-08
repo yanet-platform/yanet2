@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"sort"
 	"strings"
@@ -19,70 +20,50 @@ import (
 const (
 	ownedTablePrefix      = "netlink-dataplane-"
 	gatewayAttemptTimeout = 5 * time.Second
+	publicationChunkSize  = 1000
 )
 
-// ValidateTableName checks that a neighbour table is in the namespace owned by
-// the netlink dataplane sidecar.
+// ValidateTableName checks the bounded namespace owned by the sidecar.
 func ValidateTableName(tableName string) error {
-	if tableName == "" {
-		return errors.New("neighbour table name is empty")
-	}
 	if !strings.HasPrefix(tableName, ownedTablePrefix) {
-		return fmt.Errorf(
-			"neighbour table %q is outside reserved %q namespace",
-			tableName,
-			ownedTablePrefix,
-		)
+		return fmt.Errorf("neighbour table %q is outside reserved %q namespace", tableName, ownedTablePrefix)
+	}
+	if len(tableName) <= len(ownedTablePrefix) || len(tableName) > 128 {
+		return errors.New("neighbour table name requires a suffix and at most 128 bytes")
+	}
+	for _, character := range tableName {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' || character == '.' || character == '_' || character == '-' {
+			continue
+		}
+		return errors.New("neighbour table name contains an invalid character")
 	}
 	return nil
 }
 
 // Client is the route operator surface needed to publish neighbours.
 type Client interface {
+	ReplaceNeighbours(
+		context.Context,
+		...grpc.CallOption,
+	) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], error)
 	ListTables(
 		context.Context,
 		*operatorpb.ListNeighbourTablesRequest,
 		...grpc.CallOption,
 	) (*operatorpb.ListNeighbourTablesResponse, error)
-	CreateTable(
-		context.Context,
-		*operatorpb.CreateNeighbourTableRequest,
-		...grpc.CallOption,
-	) (*operatorpb.CreateNeighbourTableResponse, error)
-	UpdateTable(
-		context.Context,
-		*operatorpb.UpdateNeighbourTableRequest,
-		...grpc.CallOption,
-	) (*operatorpb.UpdateNeighbourTableResponse, error)
 	RemoveTable(
 		context.Context,
 		*operatorpb.RemoveNeighbourTableRequest,
 		...grpc.CallOption,
 	) (*operatorpb.RemoveNeighbourTableResponse, error)
-	List(
-		context.Context,
-		*operatorpb.ListNeighboursRequest,
-		...grpc.CallOption,
-	) (*operatorpb.ListNeighboursResponse, error)
-	UpdateNeighbours(
-		context.Context,
-		*operatorpb.UpdateNeighboursRequest,
-		...grpc.CallOption,
-	) (*operatorpb.UpdateNeighboursResponse, error)
-	RemoveNeighbours(
-		context.Context,
-		*operatorpb.RemoveNeighboursRequest,
-		...grpc.CallOption,
-	) (*operatorpb.RemoveNeighboursResponse, error)
 }
 
 // GatewayTarget describes one independently managed neighbour table.
 //
-// TableName must start with "netlink-dataplane-". Configuring a table in this
-// namespace declares the table sidecar-owned: reconciliation may create it,
-// change its priority, remove absent entries, and delete obsolete prefixed
-// tables that are not configured by any target. An empty device list owns all
-// logical devices in the snapshot.
+// The sidecar owns prefixed tables: it replaces their entries and priority,
+// then deletes obsolete prefixed tables not configured by any target. An empty
+// device list owns all logical devices in the snapshot.
 type GatewayTarget struct {
 	Name            string
 	TableName       string
@@ -108,8 +89,7 @@ func ValidateManagedDeviceOwnership(
 	if len(targets) == 1 && len(targets[0].Devices) == 0 {
 		return nil
 	}
-
-	deviceOwners := make(map[string]struct{}, len(devicesByLink))
+	deviceOwners := map[string]struct{}{}
 	for _, target := range targets {
 		for _, device := range target.Devices {
 			deviceOwners[device] = struct{}{}
@@ -123,11 +103,7 @@ func ValidateManagedDeviceOwnership(
 	for _, linkName := range linkNames {
 		device := devicesByLink[linkName]
 		if _, owned := deviceOwners[device]; !owned {
-			return fmt.Errorf(
-				"managed link %q logical device %q has no gateway owner",
-				linkName,
-				device,
-			)
+			return fmt.Errorf("managed link %q logical device %q has no gateway owner", linkName, device)
 		}
 	}
 	return nil
@@ -146,30 +122,22 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget) erro
 	if err := validateOwnership(entries, targets); err != nil {
 		return err
 	}
-	protectedTables := make(map[string]struct{}, len(targets))
+	protectedTables := map[string]struct{}{}
 	for _, target := range targets {
 		protectedTables[target.TableName] = struct{}{}
 	}
-
-	var tables []*operatorpb.NeighbourTableInfo
 	var joinedError error
 	for idx, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(joinedError, err)
 		}
-		targetTables, err := publishTarget(ctx, entries, target)
-		if err != nil {
+		if err := publishTarget(ctx, entries, target); err != nil {
 			name := target.Name
 			if name == "" {
 				name = fmt.Sprintf("target[%d]", idx)
 			}
-			joinedError = errors.Join(
-				joinedError,
-				fmt.Errorf("publish neighbours to gateway %q: %w", name, err),
-			)
-			continue
+			joinedError = errors.Join(joinedError, fmt.Errorf("publish neighbours to gateway %q: %w", name, err))
 		}
-		tables = targetTables
 	}
 	if err := ctx.Err(); err != nil {
 		return errors.Join(joinedError, err)
@@ -177,7 +145,7 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget) erro
 	if joinedError != nil {
 		return joinedError
 	}
-	if err := removeStaleTables(ctx, targets[len(targets)-1], tables, protectedTables); err != nil {
+	if err := removeStaleTables(ctx, targets[len(targets)-1], protectedTables); err != nil {
 		return fmt.Errorf("clean up shared neighbour tables: %w", err)
 	}
 	return nil
@@ -188,10 +156,15 @@ func validateOwnership(entries []Entry, targets []GatewayTarget) error {
 		return errors.New("at least one gateway target is required")
 	}
 	deviceOwners := map[string]string{}
+	tables := map[string]struct{}{}
 	for idx, target := range targets {
 		if err := ValidateTableName(target.TableName); err != nil {
 			return fmt.Errorf("validate target %d: %w", idx, err)
 		}
+		if _, duplicate := tables[target.TableName]; duplicate {
+			return fmt.Errorf("validate target %d: duplicate table %q", idx, target.TableName)
+		}
+		tables[target.TableName] = struct{}{}
 		if target.Client == nil {
 			return fmt.Errorf("validate target %d: route neighbour client is nil", idx)
 		}
@@ -199,151 +172,92 @@ func validateOwnership(entries []Entry, targets []GatewayTarget) error {
 			return fmt.Errorf("validate target %d: devices are required with multiple targets", idx)
 		}
 		for _, device := range target.Devices {
-			if device == "" {
-				return fmt.Errorf("validate target %d: device name is empty", idx)
+			if device == "" || len(device) > 128 {
+				return fmt.Errorf("validate target %d: device name must contain 1..128 bytes", idx)
 			}
 			name := target.Name
 			if name == "" {
 				name = fmt.Sprintf("target[%d]", idx)
 			}
 			if previous, duplicate := deviceOwners[device]; duplicate {
-				return fmt.Errorf(
-					"validate target %d: device %q is already owned by %q",
-					idx,
-					device,
-					previous,
-				)
+				return fmt.Errorf("validate target %d: device %q is already owned by %q", idx, device, previous)
 			}
 			deviceOwners[device] = name
 		}
 	}
-
 	if len(targets) == 1 && len(targets[0].Devices) == 0 {
 		return nil
 	}
 	for idx, entry := range entries {
 		if _, owned := deviceOwners[entry.HardwareRoute.Device]; !owned {
-			return fmt.Errorf(
-				"desired neighbour %d device %q has no gateway owner",
-				idx,
-				entry.HardwareRoute.Device,
-			)
+			return fmt.Errorf("desired neighbour %d device %q has no gateway owner", idx, entry.HardwareRoute.Device)
 		}
 	}
 	return nil
 }
 
-func publishTarget(
-	ctx context.Context,
-	entries []Entry,
-	target GatewayTarget,
-) ([]*operatorpb.NeighbourTableInfo, error) {
+func publishTarget(ctx context.Context, entries []Entry, target GatewayTarget) error {
 	ctx, cancel := context.WithTimeout(ctx, gatewayAttemptTimeout)
 	defer cancel()
 
 	desired, err := filterEntries(entries, target.Devices)
 	if err != nil {
-		return nil, err
-	}
-	tables, err := ensureTable(ctx, target)
-	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
-
-	response, err := target.Client.List(
-		ctx,
-		&operatorpb.ListNeighboursRequest{Table: target.TableName},
-	)
+	stream, err := target.Client.ReplaceNeighbours(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list table %q: %w", target.TableName, err)
+		return err
+	}
+	if stream == nil {
+		return errors.New("replace neighbours: incomplete stream")
+	}
+	// Fixed-width addresses and bounded names keep these chunks below 256 KiB.
+	// An empty snapshot still sends metadata before the clean half-close.
+	for start := 0; ; {
+		end := min(start+publicationChunkSize, len(desired))
+		request := &operatorpb.ReplaceNeighboursRequest{
+			Table: target.TableName, DefaultPriority: target.DefaultPriority,
+			Entries: make([]*operatorpb.NeighbourEntry, 0, end-start),
+		}
+		for _, entry := range desired[start:end] {
+			request.Entries = append(request.Entries, entryToProto(entry))
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(request); err != nil {
+			if errors.Is(err, io.EOF) {
+				_, resultError := stream.CloseAndRecv()
+				if resultError != nil {
+					return resultError
+				}
+				return fmt.Errorf("replace neighbours: stream closed before snapshot completed: %w", err)
+			}
+			return err
+		}
+		if end == len(desired) {
+			break
+		}
+		start = end
+	}
+	response, err := stream.CloseAndRecv()
+	if err != nil {
+		return err
 	}
 	if response == nil {
-		return nil, fmt.Errorf("list table %q: incomplete response", target.TableName)
+		return errors.New("replace neighbours: incomplete response")
 	}
-	current, err := parseCurrentEntries(response.GetNeighbours())
-	if err != nil {
-		return nil, fmt.Errorf("list table %q: %w", target.TableName, err)
-	}
-
-	upserts := make([]Entry, 0, len(desired))
-	desiredNextHops := map[netip.Addr]struct{}{}
-	for _, entry := range desired {
-		desiredNextHops[entry.NextHop] = struct{}{}
-		existing, found := current[entry.NextHop]
-		if !found || !matchesCurrent(entry, existing, target.DefaultPriority) {
-			upserts = append(upserts, entry)
-		}
-	}
-
-	removals := make([]netip.Addr, 0, len(current))
-	for nextHop := range current {
-		if _, wanted := desiredNextHops[nextHop]; !wanted {
-			removals = append(removals, nextHop)
-		}
-	}
-	sort.Slice(removals, func(first, second int) bool {
-		return removals[first].Compare(removals[second]) < 0
-	})
-
-	if len(upserts) != 0 {
-		wireEntries := make([]*operatorpb.NeighbourEntry, 0, len(upserts))
-		for _, entry := range upserts {
-			wireEntries = append(wireEntries, entryToProto(entry))
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		updateResponse, err := target.Client.UpdateNeighbours(
-			ctx,
-			&operatorpb.UpdateNeighboursRequest{
-				Table:   target.TableName,
-				Entries: wireEntries,
-			},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("update table %q: %w", target.TableName, err)
-		}
-		if updateResponse == nil {
-			return nil, fmt.Errorf("update table %q: incomplete response", target.TableName)
-		}
-	}
-
-	if len(removals) != 0 {
-		nextHops := make([]*commonpb.IPAddress, 0, len(removals))
-		for _, nextHop := range removals {
-			nextHops = append(nextHops, commonpb.NewIPAddressFromAddr(nextHop))
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		removeResponse, err := target.Client.RemoveNeighbours(
-			ctx,
-			&operatorpb.RemoveNeighboursRequest{
-				Table:    target.TableName,
-				NextHops: nextHops,
-			},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("remove from table %q: %w", target.TableName, err)
-		}
-		if removeResponse == nil {
-			return nil, fmt.Errorf("remove from table %q: incomplete response", target.TableName)
-		}
-	}
-	return tables, ctx.Err()
+	return ctx.Err()
 }
 
 func filterEntries(entries []Entry, devices []string) ([]Entry, error) {
 	deviceSet := map[string]struct{}{}
 	for _, device := range devices {
-		if device != "" {
-			deviceSet[device] = struct{}{}
-		}
+		deviceSet[device] = struct{}{}
 	}
-
 	filtered := make([]Entry, 0, len(entries))
 	seen := map[netip.Addr]struct{}{}
 	for _, entry := range entries {
@@ -354,6 +268,9 @@ func filterEntries(entries []Entry, devices []string) ([]Entry, error) {
 		}
 		if !entry.NextHop.IsValid() || entry.NextHop.Zone() != "" {
 			return nil, fmt.Errorf("desired next hop %q is invalid", entry.NextHop)
+		}
+		if len(entry.HardwareRoute.Device) > 128 {
+			return nil, errors.New("desired device exceeds 128 bytes")
 		}
 		if _, duplicate := seen[entry.NextHop]; duplicate {
 			return nil, fmt.Errorf("duplicate desired next hop %q", entry.NextHop)
@@ -367,102 +284,25 @@ func filterEntries(entries []Entry, devices []string) ([]Entry, error) {
 	return filtered, nil
 }
 
-func ensureTable(
-	ctx context.Context,
-	target GatewayTarget,
-) ([]*operatorpb.NeighbourTableInfo, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	response, err := target.Client.ListTables(
-		ctx,
-		&operatorpb.ListNeighbourTablesRequest{},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list neighbour tables: %w", err)
-	}
-	if response == nil {
-		return nil, errors.New("list neighbour tables: incomplete response")
-	}
-	tables := response.GetTables()
-
-	var existing *operatorpb.NeighbourTableInfo
-	for idx, table := range tables {
-		if table == nil {
-			return nil, fmt.Errorf("list neighbour tables: entry %d is nil", idx)
-		}
-		if table.GetName() != target.TableName {
-			continue
-		}
-		if existing != nil {
-			return nil, fmt.Errorf("list neighbour tables: duplicate table %q", target.TableName)
-		}
-		existing = table
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	if existing == nil {
-		created, err := target.Client.CreateTable(
-			ctx,
-			&operatorpb.CreateNeighbourTableRequest{
-				Name:            target.TableName,
-				DefaultPriority: target.DefaultPriority,
-			},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("create neighbour table %q: %w", target.TableName, err)
-		}
-		if created == nil {
-			return nil, fmt.Errorf(
-				"create neighbour table %q: incomplete response",
-				target.TableName,
-			)
-		}
-		return tables, nil
-	}
-
-	if existing.GetBuiltIn() {
-		return nil, fmt.Errorf("neighbour table %q is built in", target.TableName)
-	}
-	if existing.GetDefaultPriority() == target.DefaultPriority {
-		return tables, nil
-	}
-
-	updated, err := target.Client.UpdateTable(
-		ctx,
-		&operatorpb.UpdateNeighbourTableRequest{
-			Name:            target.TableName,
-			DefaultPriority: target.DefaultPriority,
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("update neighbour table %q: %w", target.TableName, err)
-	}
-	if updated == nil {
-		return nil, fmt.Errorf(
-			"update neighbour table %q: incomplete response",
-			target.TableName,
-		)
-	}
-	return tables, nil
-}
-
-func removeStaleTables(
-	ctx context.Context,
-	target GatewayTarget,
-	tables []*operatorpb.NeighbourTableInfo,
-	protectedTables map[string]struct{},
-) error {
+func removeStaleTables(ctx context.Context, target GatewayTarget, protectedTables map[string]struct{}) error {
 	ctx, cancel := context.WithTimeout(ctx, gatewayAttemptTimeout)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	stale := make([]*operatorpb.NeighbourTableInfo, 0, len(tables))
-	seen := make(map[string]struct{}, len(tables))
-	for _, table := range tables {
+	response, err := target.Client.ListTables(ctx, &operatorpb.ListNeighbourTablesRequest{})
+	if err != nil {
+		return fmt.Errorf("list neighbour tables: %w", err)
+	}
+	if response == nil {
+		return errors.New("list neighbour tables: incomplete response")
+	}
+	stale := []string{}
+	seen := map[string]struct{}{}
+	for _, table := range response.GetTables() {
+		if table == nil {
+			return errors.New("list neighbour tables: nil table")
+		}
 		name := table.GetName()
 		if _, duplicate := seen[name]; duplicate {
 			return fmt.Errorf("list neighbour tables: duplicate table %q", name)
@@ -477,20 +317,14 @@ func removeStaleTables(
 		if table.GetBuiltIn() {
 			return fmt.Errorf("obsolete neighbour table %q is built in", name)
 		}
-		stale = append(stale, table)
+		stale = append(stale, name)
 	}
-	sort.Slice(stale, func(first, second int) bool {
-		return stale[first].GetName() < stale[second].GetName()
-	})
-	for _, table := range stale {
+	sort.Strings(stale)
+	for _, name := range stale {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		name := table.GetName()
-		response, err := target.Client.RemoveTable(
-			ctx,
-			&operatorpb.RemoveNeighbourTableRequest{Name: name},
-		)
+		response, err := target.Client.RemoveTable(ctx, &operatorpb.RemoveNeighbourTableRequest{Name: name})
 		if err != nil {
 			return fmt.Errorf("remove obsolete neighbour table %q: %w", name, err)
 		}
@@ -499,70 +333,6 @@ func removeStaleTables(
 		}
 	}
 	return ctx.Err()
-}
-
-type currentEntry struct {
-	HardwareRoute HardwareRoute
-	Priority      uint32
-}
-
-func parseCurrentEntries(
-	entries []*operatorpb.NeighbourEntry,
-) (map[netip.Addr]currentEntry, error) {
-	current := map[netip.Addr]currentEntry{}
-	for idx, entry := range entries {
-		if entry == nil {
-			return nil, fmt.Errorf("neighbour entry %d is nil", idx)
-		}
-		if entry.GetNextHop() == nil {
-			return nil, fmt.Errorf("neighbour entry %d has no next hop", idx)
-		}
-		nextHop, err := entry.GetNextHop().ToAddr()
-		if err != nil {
-			return nil, fmt.Errorf("neighbour entry %d has invalid next hop: %w", idx, err)
-		}
-		if _, duplicate := current[nextHop]; duplicate {
-			return nil, fmt.Errorf("duplicate current next hop %q", nextHop)
-		}
-
-		sourceMAC, err := macFromProto(entry.GetHardwareAddr())
-		if err != nil {
-			return nil, fmt.Errorf("neighbour entry %q has invalid source MAC: %w", nextHop, err)
-		}
-		destinationMAC, err := macFromProto(entry.GetLinkAddr())
-		if err != nil {
-			return nil, fmt.Errorf(
-				"neighbour entry %q has invalid destination MAC: %w",
-				nextHop,
-				err,
-			)
-		}
-		current[nextHop] = currentEntry{
-			HardwareRoute: HardwareRoute{
-				SourceMAC:      sourceMAC,
-				DestinationMAC: destinationMAC,
-				Device:         entry.GetDevice(),
-			},
-			Priority: entry.GetPriority(),
-		}
-	}
-	return current, nil
-}
-
-func macFromProto(address *commonpb.MACAddress) ([6]byte, error) {
-	if address == nil {
-		return [6]byte{}, errors.New("address is missing")
-	}
-	if address.GetAddr()>>48 != 0 {
-		return [6]byte{}, errors.New("upper 16 bits are set")
-	}
-	return address.EUI48(), nil
-}
-
-func matchesCurrent(entry Entry, current currentEntry, defaultPriority uint32) bool {
-	// The server normalizes updates to permanent state and owns timestamps and
-	// source metadata, so only forwarding identity and effective priority diff.
-	return entry.HardwareRoute == current.HardwareRoute && current.Priority == defaultPriority
 }
 
 func entryToProto(entry Entry) *operatorpb.NeighbourEntry {

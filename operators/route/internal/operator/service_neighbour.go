@@ -2,11 +2,15 @@ package operator
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/netip"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
@@ -15,6 +19,16 @@ import (
 
 const defaultStaticTable = "static"
 
+// NeighbourReplacementLimits bounds memory retained by incomplete snapshots.
+//
+// Defaults are one million entries, 128 MiB of serialized requests per stream,
+// and four staged streams. Chunk limits remain 1,000 entries and 256 KiB.
+type NeighbourReplacementLimits struct {
+	MaxEntries           int
+	MaxBytes             int
+	MaxConcurrentStreams int
+}
+
 // NeighbourService implements the operator-owned NeighbourService
 // surface. Mutations wake the reconcile loop.
 type NeighbourService struct {
@@ -22,6 +36,8 @@ type NeighbourService struct {
 
 	neighTable *neigh.NeighTable
 	onChanged  func()
+	limits     NeighbourReplacementLimits
+	staged     chan struct{}
 }
 
 // NewNeighbourService constructs a NeighbourService bound to the
@@ -38,7 +54,91 @@ func NewNeighbourService(
 	return &NeighbourService{
 		neighTable: neighTable,
 		onChanged:  opts.OnChanged,
+		limits:     opts.ReplacementLimits,
+		staged:     make(chan struct{}, opts.ReplacementLimits.MaxConcurrentStreams),
 	}
+}
+
+// ReplaceNeighbours stages a bounded snapshot until a clean client half-close.
+func (m *NeighbourService) ReplaceNeighbours(
+	stream grpc.ClientStreamingServer[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse],
+) error {
+	ctx := stream.Context()
+	if err := ctx.Err(); err != nil {
+		return status.FromContextError(err).Err()
+	}
+	select {
+	case m.staged <- struct{}{}:
+		defer func() { <-m.staged }()
+	default:
+		return status.Error(codes.ResourceExhausted, "too many staged neighbour replacements")
+	}
+	var table string
+	var priority uint32
+	totalBytes := 0
+	entries := map[netip.Addr]neigh.NeighbourEntry{}
+	for {
+		request, err := stream.Recv()
+		if contextError := ctx.Err(); contextError != nil {
+			return status.FromContextError(contextError).Err()
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return status.FromContextError(err).Err()
+			}
+			return err
+		}
+		chunkBytes := proto.Size(request)
+		if len(request.GetEntries()) > 1000 || chunkBytes > 256*1024 ||
+			chunkBytes > m.limits.MaxBytes-totalBytes ||
+			len(request.GetEntries()) > m.limits.MaxEntries-len(entries) {
+			return status.Error(codes.ResourceExhausted, "neighbour replacement exceeds entry or byte limit")
+		}
+		totalBytes += chunkBytes
+		if table == "" {
+			if err := neigh.ValidateSourceName(request.GetTable()); err != nil {
+				return status.Error(codes.InvalidArgument, err.Error())
+			}
+			table, priority = request.GetTable(), request.GetDefaultPriority()
+		} else if table != request.GetTable() || priority != request.GetDefaultPriority() {
+			return status.Error(codes.InvalidArgument, "replacement metadata must match across chunks")
+		} else if len(entries) == 0 || len(request.GetEntries()) == 0 {
+			return status.Error(codes.InvalidArgument, "empty snapshot must contain exactly one chunk")
+		}
+		for _, wireEntry := range request.GetEntries() {
+			if wireEntry.GetSource() != "" || wireEntry.GetUpdatedAt() != 0 {
+				return status.Error(codes.InvalidArgument, "source and updated_at are server-owned")
+			}
+			entry, err := parseNeighbourEntry(wireEntry)
+			if err != nil {
+				return err
+			}
+			if _, duplicate := entries[entry.NextHop]; duplicate {
+				return status.Errorf(codes.InvalidArgument, "duplicate next hop %q", entry.NextHop)
+			}
+			entries[entry.NextHop] = entry
+		}
+	}
+	if table == "" {
+		return status.Error(codes.InvalidArgument, "replacement requires at least one chunk")
+	}
+	changed, err := m.neighTable.ReplaceSource(ctx, table, priority, entries)
+	if err != nil {
+		if errors.Is(err, neigh.ErrBuiltInSource) {
+			return status.Error(codes.FailedPrecondition, err.Error())
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return status.FromContextError(err).Err()
+		}
+		return status.Errorf(codes.Internal, "failed to replace neighbour table: %v", err)
+	}
+	if changed {
+		m.onChanged()
+	}
+	return stream.SendAndClose(&operatorpb.ReplaceNeighboursResponse{})
 }
 
 func (m *NeighbourService) List(
@@ -152,28 +252,11 @@ func (m *NeighbourService) UpdateNeighbours(
 
 	entries := make([]neigh.NeighbourEntry, 0, len(req.GetEntries()))
 	for _, e := range req.GetEntries() {
-		addr, err := e.GetNextHop().ToAddr()
+		entry, err := parseNeighbourEntry(e)
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop (bytes=%x): %v", e.GetNextHop().GetAddr(), err)
+			return nil, err
 		}
-		if e.GetHardwareAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing hardware_addr", addr)
-		}
-		if e.GetLinkAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing link_addr", addr)
-		}
-
-		entries = append(entries, neigh.NeighbourEntry{
-			NextHop: addr,
-			HardwareRoute: neigh.HardwareRoute{
-				SourceMAC:      e.GetHardwareAddr().EUI48(),
-				DestinationMAC: e.GetLinkAddr().EUI48(),
-				Device:         e.GetDevice(),
-			},
-			UpdatedAt: time.Now(),
-			State:     neigh.NeighbourStatePermanent,
-			Priority:  e.GetPriority(),
-		})
+		entries = append(entries, entry)
 	}
 
 	if err := m.neighTable.Add(table, entries); err != nil {
@@ -182,6 +265,31 @@ func (m *NeighbourService) UpdateNeighbours(
 
 	m.onChanged()
 	return &operatorpb.UpdateNeighboursResponse{}, nil
+}
+
+func parseNeighbourEntry(entry *operatorpb.NeighbourEntry) (neigh.NeighbourEntry, error) {
+	address, err := entry.GetNextHop().ToAddr()
+	if err != nil {
+		return neigh.NeighbourEntry{}, status.Errorf(codes.InvalidArgument, "invalid next hop: %v", err)
+	}
+	if entry.GetHardwareAddr() == nil || entry.GetLinkAddr() == nil ||
+		entry.GetHardwareAddr().GetAddr()>>48 != 0 || entry.GetLinkAddr().GetAddr()>>48 != 0 {
+		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, "both MAC addresses must be present EUI-48 values")
+	}
+	if len(entry.GetDevice()) > 128 {
+		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, "device exceeds 128 bytes")
+	}
+	return neigh.NeighbourEntry{
+		NextHop: address,
+		HardwareRoute: neigh.HardwareRoute{
+			SourceMAC:      entry.GetHardwareAddr().EUI48(),
+			DestinationMAC: entry.GetLinkAddr().EUI48(),
+			Device:         entry.GetDevice(),
+		},
+		UpdatedAt: time.Now(),
+		State:     neigh.NeighbourStatePermanent,
+		Priority:  entry.GetPriority(),
+	}, nil
 }
 
 func (m *NeighbourService) RemoveNeighbours(

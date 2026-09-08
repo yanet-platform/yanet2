@@ -31,6 +31,15 @@ type HardwareRoute struct {
 	Device string
 }
 
+// ParseMAC converts a nonzero Ethernet address into forwarding identity.
+func ParseMAC(address net.HardwareAddr) ([6]byte, bool) {
+	if len(address) != 6 {
+		return [6]byte{}, false
+	}
+	value := [6]byte(address)
+	return value, value != [6]byte{}
+}
+
 // String renders the route as "<source MAC> -> <destination MAC>"; the
 // device is left out.
 func (m HardwareRoute) String() string {

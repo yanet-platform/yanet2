@@ -1,11 +1,16 @@
 package neigh
 
 import (
+	"context"
+	"fmt"
+	"maps"
 	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sync/errgroup"
 )
 
 func makeEntry(ip string, mac [6]byte, priority uint32) NeighbourEntry {
@@ -336,4 +341,169 @@ func TestNeighTableListSources(t *testing.T) {
 	require.True(t, sourceMap["static"].BuiltIn)
 	require.Equal(t, 2, sourceMap["kernel"].EntryCount)
 	require.True(t, sourceMap["kernel"].BuiltIn)
+}
+
+// Test_NeighTable_ReplaceSourceCopiesAndRetainsSnapshots verifies that input
+// mutation and later replacements cannot alter previously published views.
+func Test_NeighTable_ReplaceSourceCopiesAndRetainsSnapshots(t *testing.T) {
+	table := NewNeighTable()
+	address := netip.MustParseAddr("192.0.2.1")
+	entry := makeEntry("192.0.2.99", [6]byte{2, 0, 0, 0, 0, 1}, 0)
+	entry.Source = "client-owned"
+	entry.UpdatedAt = time.Unix(1, 0)
+	input := map[netip.Addr]NeighbourEntry{address: entry}
+	changed, err := table.ReplaceSource(t.Context(), "snapshot", 50, input)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, entry, input[address])
+	previous, found := table.SourceView("snapshot")
+	require.True(t, found)
+	oldMerged := table.View()
+	oldSnapshot := table.Snapshot()
+	stored, found := previous.Lookup(address)
+	require.True(t, found)
+	require.Equal(t, address, stored.NextHop)
+	require.Empty(t, stored.Source)
+	require.Equal(t, uint32(50), stored.Priority)
+	require.True(t, stored.UpdatedAt.After(entry.UpdatedAt))
+	clear(input)
+	actual, found := table.View().Lookup(address)
+	require.True(t, found)
+	require.Equal(t, stored.HardwareRoute, actual.HardwareRoute)
+
+	changed, err = table.ReplaceSource(t.Context(), "snapshot", 50, map[netip.Addr]NeighbourEntry{address: entry})
+	require.NoError(t, err)
+	require.False(t, changed)
+	current, found := table.SourceView("snapshot")
+	require.True(t, found)
+	actual, found = current.Lookup(address)
+	require.True(t, found)
+	require.Equal(t, stored, actual)
+
+	entry.HardwareRoute.Device = "another-device"
+	changed, err = table.ReplaceSource(t.Context(), "snapshot", 100, map[netip.Addr]NeighbourEntry{address: entry})
+	require.NoError(t, err)
+	require.True(t, changed)
+	actual, found = table.View().Lookup(address)
+	require.True(t, found)
+	require.Equal(t, "another-device", actual.HardwareRoute.Device)
+	require.Equal(t, uint32(100), actual.Priority)
+	for _, view := range []NexthopCacheView{previous, oldMerged, oldSnapshot.ViewByDevices(nil)} {
+		actual, found := view.Lookup(address)
+		require.True(t, found)
+		require.Equal(t, stored.HardwareRoute, actual.HardwareRoute)
+		require.Equal(t, stored.UpdatedAt, actual.UpdatedAt)
+		require.Equal(t, stored.Priority, actual.Priority)
+	}
+}
+
+// Test_NeighTable_ReplaceSourceSemanticChanges verifies that only changed
+// entries receive new timestamps, including inherited but not explicit priority.
+func Test_NeighTable_ReplaceSourceSemanticChanges(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		mutate   func(*NeighbourEntry)
+		priority uint32
+	}{
+		{name: "source MAC", priority: 100, mutate: func(entry *NeighbourEntry) { entry.HardwareRoute.SourceMAC[5]++ }},
+		{name: "destination MAC", priority: 100, mutate: func(entry *NeighbourEntry) { entry.HardwareRoute.DestinationMAC[5]++ }},
+		{name: "device", priority: 100, mutate: func(entry *NeighbourEntry) { entry.HardwareRoute.Device = "another-device" }},
+		{name: "state", priority: 100, mutate: func(entry *NeighbourEntry) { entry.State = NeighbourState(netlink.NUD_REACHABLE) }},
+		{name: "explicit priority", priority: 100, mutate: func(entry *NeighbourEntry) { entry.Priority = 20 }},
+		{name: "inherited priority", priority: 200, mutate: func(entry *NeighbourEntry) {}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			table := NewNeighTable()
+			first := makeEntry("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, 0)
+			second := makeEntry("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 2}, 7)
+			input := map[netip.Addr]NeighbourEntry{first.NextHop: first, second.NextHop: second}
+			changed, err := table.ReplaceSource(t.Context(), "snapshot", 100, input)
+			require.NoError(t, err)
+			require.True(t, changed)
+			old := table.View()
+			test.mutate(&first)
+			input[first.NextHop] = first
+			changed, err = table.ReplaceSource(t.Context(), "snapshot", test.priority, input)
+			require.NoError(t, err)
+			require.True(t, changed)
+			prior, _ := old.Lookup(first.NextHop)
+			current, _ := table.View().Lookup(first.NextHop)
+			require.True(t, current.UpdatedAt.After(prior.UpdatedAt))
+			prior, _ = old.Lookup(second.NextHop)
+			current, _ = table.View().Lookup(second.NextHop)
+			require.Equal(t, prior, current)
+			changed, err = table.ReplaceSource(t.Context(), "snapshot", test.priority, input)
+			require.NoError(t, err)
+			require.False(t, changed)
+		})
+	}
+}
+
+// Test_NeighTable_ReplaceSourceCancellation verifies that a canceled caller
+// cannot create, clear, replace, or acknowledge an equivalent snapshot.
+func Test_NeighTable_ReplaceSourceCancellation(t *testing.T) {
+	table := NewNeighTable()
+	entry := makeEntry("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, 0)
+	input := map[netip.Addr]NeighbourEntry{entry.NextHop: entry}
+	changed, err := table.ReplaceSource(t.Context(), "snapshot", 100, input)
+	require.NoError(t, err)
+	require.True(t, changed)
+	before := table.ListSources()
+	oldEntries, _ := table.View().All()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, name := range []string{"snapshot", "absent"} {
+		for _, entries := range []map[netip.Addr]NeighbourEntry{nil, input} {
+			changed, err := table.ReplaceSource(ctx, name, 100, entries)
+			require.ErrorIs(t, err, context.Canceled)
+			require.False(t, changed)
+			require.Equal(t, before, table.ListSources())
+			currentEntries, _ := table.View().All()
+			require.Equal(t, maps.Collect(oldEntries), maps.Collect(currentEntries))
+		}
+	}
+}
+
+// Test_NeighTable_ReplaceSourceConcurrentReaders verifies that each source view,
+// merged view, and metadata response remains internally consistent at commit.
+func Test_NeighTable_ReplaceSourceConcurrentReaders(t *testing.T) {
+	table := NewNeighTable()
+	first := makeEntry("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, 0)
+	second := makeEntry("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 2}, 0)
+	snapshots := []map[netip.Addr]NeighbourEntry{
+		{first.NextHop: first},
+		{first.NextHop: first, second.NextHop: second},
+	}
+	_, err := table.ReplaceSource(t.Context(), "snapshot", 1, snapshots[0])
+	require.NoError(t, err)
+	var group errgroup.Group
+	group.Go(func() error {
+		for idx := range 100 {
+			entries := snapshots[idx%len(snapshots)]
+			if _, err := table.ReplaceSource(t.Context(), "snapshot", uint32(len(entries)), entries); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	group.Go(func() error {
+		for range 500 {
+			source, _ := table.SourceView("snapshot")
+			for _, view := range []NexthopCacheView{source, table.View()} {
+				entries, count := view.Entries()
+				for entry := range entries {
+					if entry.Priority != uint32(count) {
+						return fmt.Errorf("entry priority %d disagrees with snapshot size %d", entry.Priority, count)
+					}
+				}
+			}
+			for _, source := range table.ListSources() {
+				if source.DefaultPriority != uint32(source.EntryCount) {
+					return fmt.Errorf("source priority %d disagrees with entry count %d", source.DefaultPriority, source.EntryCount)
+				}
+			}
+		}
+		return nil
+	})
+	require.NoError(t, group.Wait())
 }

@@ -315,7 +315,7 @@ func Test_Reconciler_RequiresOwnershipHandoff(t *testing.T) {
 	err := reconciler.Apply(t.Context(), state)
 
 	require.ErrorContains(t, err, "requires explicit ownership handoff")
-	require.Empty(t, backend.aliasChanges)
+	require.Empty(t, backend.links["tenant.100"].Attrs().Alias)
 	require.Empty(t, backend.deleted)
 }
 
@@ -360,7 +360,7 @@ func Test_Reconciler_RejectsForeignOwnedVLAN(t *testing.T) {
 		{Name: "tenant.100", Parent: "kni0", VLANID: 100},
 	}})
 	require.ErrorContains(t, err, `link alias "foreign-owner" belongs to another owner`)
-	require.Empty(t, backend.aliasChanges)
+	require.Equal(t, "foreign-owner", backend.links["tenant.100"].Attrs().Alias)
 	require.Empty(t, backend.deleted)
 	require.Empty(t, backend.up)
 }
@@ -393,7 +393,7 @@ func Test_Reconciler_RejectsMismatchedExistingVLAN(t *testing.T) {
 			require.ErrorContains(t, err, tt.want)
 			require.Empty(t, backend.added)
 			require.Empty(t, backend.deleted)
-			require.Empty(t, backend.aliasChanges)
+			require.Empty(t, backend.links["tenant.100"].Attrs().Alias)
 			require.Empty(t, backend.up)
 			require.Empty(t, backend.replacedAddresses)
 			require.Empty(t, backend.deletedAddresses)
@@ -571,7 +571,7 @@ func Test_Reconciler_PreservesVLANAfterIncompleteDump(t *testing.T) {
 	require.Same(t, original, backend.links["tenant.100"])
 	require.Empty(t, backend.deleted)
 	require.Empty(t, backend.added)
-	require.Empty(t, backend.aliasChanges)
+	require.Equal(t, ownedAlias, backend.links["tenant.100"].Attrs().Alias)
 	require.Empty(t, backend.up)
 }
 
@@ -665,7 +665,6 @@ func Test_Reconciler_ValidatesNewlyCreatedVLAN(t *testing.T) {
 	}})
 
 	require.ErrorContains(t, err, "validate newly created VLAN")
-	require.Empty(t, backend.aliasChanges)
 	require.Equal(t, "foreign-owner", backend.links["tenant.100"].Attrs().Alias)
 }
 
@@ -1235,12 +1234,10 @@ type fakeBackend struct {
 	addrReplaceErr    map[string]error
 	linkAddErr        map[string]error
 	mtuErr            map[string]error
-	aliasErr          map[string]error
 	linkListErr       error
 	nextIndex         int
 	added             []string
 	deleted           []string
-	aliasChanges      []string
 	up                []string
 	replacedAddresses []string
 	deletedAddresses  []string
@@ -1262,7 +1259,6 @@ func newFakeBackend() *fakeBackend {
 		addrReplaceErr:  map[string]error{},
 		linkAddErr:      map[string]error{},
 		mtuErr:          map[string]error{},
-		aliasErr:        map[string]error{},
 		linkByNameCalls: map[string]int{},
 		addrListCalls:   map[string]int{},
 		nextIndex:       100,
@@ -1349,15 +1345,6 @@ func (m *fakeBackend) LinkDel(link vnetlink.Link) error {
 	delete(m.links, link.Attrs().Name)
 	delete(m.addresses, link.Attrs().Name)
 	m.deleted = append(m.deleted, link.Attrs().Name)
-	return nil
-}
-
-func (m *fakeBackend) LinkSetAlias(link vnetlink.Link, alias string) error {
-	if err := m.aliasErr[link.Attrs().Name]; err != nil {
-		return err
-	}
-	link.Attrs().Alias = alias
-	m.aliasChanges = append(m.aliasChanges, link.Attrs().Name+"="+alias)
 	return nil
 }
 

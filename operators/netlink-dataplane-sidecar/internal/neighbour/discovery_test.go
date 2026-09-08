@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
 
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
@@ -77,7 +78,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 	require.Equal(t, []neighbour.Entry{
 		{
 			NextHop: netip.MustParseAddr("192.0.2.10"),
-			HardwareRoute: neighbour.HardwareRoute{
+			HardwareRoute: hwroute.HardwareRoute{
 				SourceMAC:      testMACArray(1),
 				DestinationMAC: testMACArray(10),
 				Device:         "kni0",
@@ -86,7 +87,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 		},
 		{
 			NextHop: netip.MustParseAddr("192.0.2.20"),
-			HardwareRoute: neighbour.HardwareRoute{
+			HardwareRoute: hwroute.HardwareRoute{
 				SourceMAC:      testMACArray(2),
 				DestinationMAC: testMACArray(20),
 				Device:         "dataplane-vlan",
@@ -169,7 +170,7 @@ func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []neighbour.Entry{{
 		NextHop: netip.MustParseAddr("192.0.2.1"),
-		HardwareRoute: neighbour.HardwareRoute{
+		HardwareRoute: hwroute.HardwareRoute{
 			SourceMAC:      testMACArray(1),
 			DestinationMAC: testMACArray(1),
 			Device:         "kni0",
@@ -337,7 +338,7 @@ func Test_Discover_FiltersNUDStates(t *testing.T) {
 			}
 			require.Equal(t, []neighbour.Entry{{
 				NextHop: netip.MustParseAddr("192.0.2.1"),
-				HardwareRoute: neighbour.HardwareRoute{
+				HardwareRoute: hwroute.HardwareRoute{
 					SourceMAC:      testMACArray(1),
 					DestinationMAC: testMACArray(2),
 					Device:         "kni0",

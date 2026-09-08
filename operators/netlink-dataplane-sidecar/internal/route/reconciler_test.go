@@ -38,7 +38,6 @@ func Test_Reconciler_RejectsUnmanagedInterfaceBeforeNetlinkAccess(t *testing.T) 
 	require.Empty(t, backend.linkCalls)
 	require.Empty(t, backend.listCalls)
 	require.Empty(t, backend.addAttempts)
-	require.Empty(t, backend.replaceAttempts)
 	require.Empty(t, backend.deleted)
 }
 
@@ -61,7 +60,6 @@ func Test_Reconciler_GroupsECMPAndResolvesInterfacesEachPass(t *testing.T) {
 
 	require.NoError(t, reconciler.Apply(t.Context(), routes, state))
 	require.Len(t, backend.added, 1)
-	require.Empty(t, backend.replaced)
 	require.Equal(t, testPriority, backend.added[0].Priority)
 	require.Equal(t, []int{10, 20, 20}, multipathIndexes(backend.added[0]))
 	require.Equal(t, []string{
@@ -71,12 +69,10 @@ func Test_Reconciler_GroupsECMPAndResolvesInterfacesEachPass(t *testing.T) {
 	}, multipathGateways(backend.added[0]))
 
 	backend.allRoutes = nil
-	backend.ownedRoutes = nil
 	backend.links["kni0"] = testLink("kni0", 110)
 	backend.links["tenant.100"] = testLink("tenant.100", 120)
 	require.NoError(t, reconciler.Apply(t.Context(), routes, state))
 	require.Len(t, backend.added, 2)
-	require.Empty(t, backend.replaced)
 	require.Equal(t, testPriority, backend.added[1].Priority)
 	require.Equal(t, []int{110, 120, 120}, multipathIndexes(backend.added[1]))
 	require.Empty(t, backend.deleted)
@@ -92,10 +88,10 @@ func Test_Reconciler_GroupsECMPAndResolvesInterfacesEachPass(t *testing.T) {
 	}, backend.linkCalls)
 
 	backend.allRoutes = []vnetlink.Route{backend.added[1]}
-	backend.ownedRoutes = []vnetlink.Route{backend.added[1]}
 	require.NoError(t, reconciler.Apply(t.Context(), routes, state))
 	require.Len(t, backend.added, 2)
 	require.Empty(t, backend.deleted)
+	require.Len(t, backend.listCalls, 3, "each pass uses one complete table dump")
 }
 
 // Test_Reconciler_ForeignCollisionPreventsMutation verifies that an existing
@@ -104,25 +100,27 @@ func Test_Reconciler_ForeignCollisionPreventsMutation(t *testing.T) {
 	backend := newFakeRouteBackend()
 	backend.links["kni0"] = testLink("kni0", 10)
 	foreign := testKernelRoute("192.0.2.0/24", testTable, 99, testPriority)
+	current := testKernelRoute("192.0.1.0/24", testTable, testProtocol, testPriority)
 	stale := testKernelRoute(
 		"198.51.100.0/24",
 		testTable,
 		testProtocol,
 		testPriority,
 	)
-	backend.allRoutes = []vnetlink.Route{foreign, stale}
-	backend.ownedRoutes = []vnetlink.Route{stale}
+	backend.allRoutes = []vnetlink.Route{current, stale, foreign}
 	reconciler := newTestReconciler(t, backend)
 
 	err := reconciler.Apply(
 		t.Context(),
-		[]route.Route{testRoute("192.0.2.0/24", "192.0.2.1", "kni0")},
+		[]route.Route{
+			testRoute("192.0.1.0/24", "192.0.2.1", "kni0"),
+			testRoute("192.0.2.0/24", "192.0.2.1", "kni0"),
+		},
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 	)
 	require.ErrorContains(t, err, "collides with foreign route")
-	require.Len(t, backend.listCalls, 2)
+	require.Len(t, backend.listCalls, 1)
 	require.Empty(t, backend.addAttempts)
-	require.Empty(t, backend.replaceAttempts)
 	require.Empty(t, backend.deleted)
 }
 
@@ -144,7 +142,6 @@ func Test_Reconciler_ForeignOtherPriorityIsPreserved(t *testing.T) {
 		testPriority,
 	)
 	backend.allRoutes = []vnetlink.Route{foreign, stale}
-	backend.ownedRoutes = []vnetlink.Route{foreign, stale}
 	reconciler := newTestReconciler(t, backend)
 
 	require.NoError(t, reconciler.Apply(
@@ -153,7 +150,6 @@ func Test_Reconciler_ForeignOtherPriorityIsPreserved(t *testing.T) {
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 	))
 	require.Len(t, backend.added, 1)
-	require.Empty(t, backend.replaced)
 	require.Len(t, backend.deleted, 1)
 	require.Equal(t, capturedPrefix(stale), capturedPrefix(backend.deleted[0]))
 	require.Equal(t, testPriority, backend.deleted[0].Priority)
@@ -172,7 +168,6 @@ func Test_Reconciler_RouteAddRaceSkipsCleanup(t *testing.T) {
 		testPriority,
 	)
 	backend.allRoutes = []vnetlink.Route{stale}
-	backend.ownedRoutes = []vnetlink.Route{stale}
 	backend.addErrorAt = 0
 	backend.addError = unix.EEXIST
 	reconciler := newTestReconciler(t, backend)
@@ -186,7 +181,6 @@ func Test_Reconciler_RouteAddRaceSkipsCleanup(t *testing.T) {
 	require.ErrorContains(t, err, "add destination")
 	require.Len(t, backend.addAttempts, 1)
 	require.Empty(t, backend.added)
-	require.Empty(t, backend.replaceAttempts)
 	require.Empty(t, backend.deleted)
 }
 
@@ -222,6 +216,15 @@ func Test_Reconciler_ReplacesOwnedRouteWithUnexpectedAttributes(t *testing.T) {
 			},
 		},
 		{
+			name: "singleton onlink flag",
+			mutate: func(kernelRoute *vnetlink.Route) {
+				kernelRoute.LinkIndex = kernelRoute.MultiPath[0].LinkIndex
+				kernelRoute.Gw = kernelRoute.MultiPath[0].Gw
+				kernelRoute.MultiPath = nil
+				kernelRoute.Flags = int(vnetlink.FLAG_ONLINK)
+			},
+		},
+		{
 			name: "multipath via",
 			mutate: func(kernelRoute *vnetlink.Route) {
 				kernelRoute.MultiPath[0].Via = &vnetlink.Via{
@@ -252,7 +255,6 @@ func Test_Reconciler_ReplacesOwnedRouteWithUnexpectedAttributes(t *testing.T) {
 			drifted := cloneKernelRoute(canonical)
 			test.mutate(&drifted)
 			backend.allRoutes = []vnetlink.Route{drifted}
-			backend.ownedRoutes = []vnetlink.Route{drifted}
 			backend.added = nil
 			backend.deleted = nil
 
@@ -275,7 +277,6 @@ func Test_Reconciler_EquivalentRouteRevalidatesEachInterfaceOnce(t *testing.T) {
 
 	canonical := backend.added[0]
 	backend.allRoutes = []vnetlink.Route{canonical}
-	backend.ownedRoutes = []vnetlink.Route{canonical}
 	backend.linkByNameCalls = map[string]int{}
 	backend.linkCalls = nil
 
@@ -306,7 +307,6 @@ func Test_Reconciler_IgnoresKernelMaintainedRouteFlags(t *testing.T) {
 		unix.RTNH_F_TRAP
 	kernelRoute.MultiPath[0].Flags = kernelNexthopFlags
 	backend.allRoutes = []vnetlink.Route{kernelRoute}
-	backend.ownedRoutes = []vnetlink.Route{kernelRoute}
 	backend.added = nil
 	backend.deleted = nil
 
@@ -322,7 +322,6 @@ func Test_Reconciler_RollsBackChangedRouteWhenReplacementAddFails(t *testing.T) 
 	backend.links["kni0"] = testLink("kni0", 10)
 	current := testKernelRoute("192.0.2.0/24", testTable, testProtocol, testPriority)
 	backend.allRoutes = []vnetlink.Route{current}
-	backend.ownedRoutes = []vnetlink.Route{current}
 	backend.addErrorAt = 0
 	backend.addError = unix.EIO
 	reconciler := newTestReconciler(t, backend)
@@ -352,7 +351,6 @@ func Test_Reconciler_RollsBackRouteOnDifferentOldInterface(t *testing.T) {
 		Gw:        net.ParseIP("192.0.2.9").To4(),
 	}}
 	backend.allRoutes = []vnetlink.Route{current}
-	backend.ownedRoutes = []vnetlink.Route{current}
 	backend.addErrorAt = 0
 	backend.addError = unix.EIO
 	reconciler := newTestReconciler(t, backend)
@@ -379,7 +377,6 @@ func Test_Reconciler_RollsBackEarlierDeleteWhenLaterDeleteFails(t *testing.T) {
 	second := first
 	second.Tos = 16
 	backend.allRoutes = []vnetlink.Route{first, second}
-	backend.ownedRoutes = []vnetlink.Route{first, second}
 	backend.deleteErrorAt = 1
 	backend.deleteError = unix.ESRCH
 	reconciler := newTestReconciler(t, backend)
@@ -422,7 +419,6 @@ func Test_Reconciler_SamePrefixVariantsAreReplacedSafely(t *testing.T) {
 	)
 	otherType.Type = unix.RTN_BLACKHOLE
 	backend.allRoutes = []vnetlink.Route{otherPriority, otherTOS, otherType}
-	backend.ownedRoutes = []vnetlink.Route{otherPriority, otherTOS, otherType}
 	reconciler := newTestReconciler(t, backend)
 
 	require.NoError(t, reconciler.Apply(
@@ -431,7 +427,6 @@ func Test_Reconciler_SamePrefixVariantsAreReplacedSafely(t *testing.T) {
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 	))
 	require.Len(t, backend.added, 1)
-	require.Empty(t, backend.replaced)
 	require.Equal(t, testPriority, backend.added[0].Priority)
 	require.Zero(t, backend.added[0].Tos)
 	require.Equal(t, unix.RTN_UNICAST, backend.added[0].Type)
@@ -443,7 +438,6 @@ func Test_Reconciler_SamePrefixVariantsAreReplacedSafely(t *testing.T) {
 	require.Equal(t, []string{
 		"link:kni0",
 		"dump:all",
-		"dump:owned",
 		"link:kni0",
 		"delete",
 		"delete",
@@ -470,12 +464,10 @@ func Test_Reconciler_EmptySnapshotDeletesOnlyExactOwner(t *testing.T) {
 	)
 	foreign := testKernelRoute("203.0.113.0/24", testTable, 99, testPriority)
 	backend.allRoutes = []vnetlink.Route{owned, otherPriority, foreign}
-	backend.ownedRoutes = []vnetlink.Route{owned, otherPriority}
 	reconciler := newTestReconciler(t, backend)
 
 	require.NoError(t, reconciler.Apply(t.Context(), nil, netplan.State{}))
 	require.Empty(t, backend.addAttempts)
-	require.Empty(t, backend.replaceAttempts)
 	require.Len(t, backend.deleted, 1)
 	require.Equal(t, owned, backend.deleted[0])
 }
@@ -487,7 +479,6 @@ func Test_Reconciler_DeletesOwnedDefaultRouteWithExplicitZeroPrefix(t *testing.T
 	owned := testKernelRoute("0.0.0.0/0", testTable, testProtocol, testPriority)
 	require.Nil(t, owned.Dst)
 	backend.allRoutes = []vnetlink.Route{owned}
-	backend.ownedRoutes = []vnetlink.Route{owned}
 	reconciler := newTestReconciler(t, backend)
 
 	require.NoError(t, reconciler.Apply(t.Context(), nil, netplan.State{}))
@@ -517,7 +508,6 @@ func Test_Reconciler_ChangesOwnedAndDeletesOnlyStaleOwned(t *testing.T) {
 	variant.Tos = 8
 	foreign := testKernelRoute("203.0.113.0/24", testTable, 99, testPriority)
 	backend.allRoutes = []vnetlink.Route{foreign, stale, variant, current}
-	backend.ownedRoutes = []vnetlink.Route{stale, variant, current}
 	reconciler := newTestReconciler(t, backend)
 
 	require.NoError(t, reconciler.Apply(
@@ -526,7 +516,6 @@ func Test_Reconciler_ChangesOwnedAndDeletesOnlyStaleOwned(t *testing.T) {
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 	))
 	require.Len(t, backend.added, 1)
-	require.Empty(t, backend.replaced)
 	require.Equal(t, netip.MustParsePrefix("192.0.2.0/24"), capturedPrefix(backend.added[0]))
 	require.Equal(t, testTable, backend.added[0].Table)
 	require.Equal(t, vnetlink.RouteProtocol(testProtocol), backend.added[0].Protocol)
@@ -539,7 +528,6 @@ func Test_Reconciler_ChangesOwnedAndDeletesOnlyStaleOwned(t *testing.T) {
 	require.Equal(t, []string{
 		"link:kni0",
 		"dump:all",
-		"dump:owned",
 		"link:kni0",
 		"delete",
 		"delete",
@@ -553,36 +541,24 @@ func Test_Reconciler_ChangesOwnedAndDeletesOnlyStaleOwned(t *testing.T) {
 			filter: vnetlink.Route{Table: testTable},
 			mask:   vnetlink.RT_FILTER_TABLE,
 		},
-		{
-			family: vnetlink.FAMILY_ALL,
-			filter: vnetlink.Route{
-				Table:    testTable,
-				Protocol: vnetlink.RouteProtocol(testProtocol),
-			},
-			mask: vnetlink.RT_FILTER_TABLE | vnetlink.RT_FILTER_PROTOCOL,
-		},
 	}, backend.listCalls)
 }
 
 // Test_Reconciler_DumpFailurePreventsMutation verifies that partial results
-// from either required dump are discarded before any route operation.
+// from an interrupted or failed table dump are discarded before any mutation.
 func Test_Reconciler_DumpFailurePreventsMutation(t *testing.T) {
 	dumpError := errors.New("dump failed")
 	tests := []struct {
-		name             string
-		allRoutesError   error
-		ownedRoutesError error
-		wantedError      error
+		name        string
+		wantedError error
 	}{
 		{
-			name:           "interrupted all-route dump",
-			allRoutesError: vnetlink.ErrDumpInterrupted,
-			wantedError:    vnetlink.ErrDumpInterrupted,
+			name:        "interrupted table dump",
+			wantedError: vnetlink.ErrDumpInterrupted,
 		},
 		{
-			name:             "failed owned-route dump",
-			ownedRoutesError: dumpError,
-			wantedError:      dumpError,
+			name:        "failed table dump",
+			wantedError: dumpError,
 		},
 	}
 
@@ -597,8 +573,6 @@ func Test_Reconciler_DumpFailurePreventsMutation(t *testing.T) {
 					testProtocol,
 					testPriority,
 				),
-			}
-			backend.ownedRoutes = []vnetlink.Route{
 				testKernelRoute(
 					"198.51.100.0/24",
 					testTable,
@@ -606,8 +580,7 @@ func Test_Reconciler_DumpFailurePreventsMutation(t *testing.T) {
 					testPriority,
 				),
 			}
-			backend.allRoutesError = test.allRoutesError
-			backend.ownedRoutesError = test.ownedRoutesError
+			backend.allRoutesError = test.wantedError
 			reconciler := newTestReconciler(t, backend)
 
 			err := reconciler.Apply(
@@ -616,8 +589,8 @@ func Test_Reconciler_DumpFailurePreventsMutation(t *testing.T) {
 				netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 			)
 			require.ErrorIs(t, err, test.wantedError)
+			require.Len(t, backend.listCalls, 1)
 			require.Empty(t, backend.addAttempts)
-			require.Empty(t, backend.replaceAttempts)
 			require.Empty(t, backend.deleted)
 		})
 	}
@@ -630,7 +603,6 @@ func Test_Reconciler_LinkReplacementAfterDumpPreventsRouteMutation(t *testing.T)
 	backend.links["kni0"] = testLink("kni0", 10)
 	current := testKernelRoute("192.0.2.0/24", testTable, testProtocol, testPriority)
 	backend.allRoutes = []vnetlink.Route{current}
-	backend.ownedRoutes = []vnetlink.Route{current}
 	backend.beforeLinkByName = func(name string, call int) {
 		if name == "kni0" && call == 2 {
 			backend.links[name] = testLink(name, 11)
@@ -660,7 +632,6 @@ func Test_Reconciler_LinkReplacementDuringDeletePreventsAddAndUnsafeRollback(t *
 		Gw:        net.ParseIP("192.0.2.9").To4(),
 	}}
 	backend.allRoutes = []vnetlink.Route{current}
-	backend.ownedRoutes = []vnetlink.Route{current}
 	replaced := false
 	backend.afterMutation = func() {
 		if !replaced {
@@ -706,7 +677,6 @@ func Test_Reconciler_ChangedRouteDeleteFailureRollsBackEarlierChanges(t *testing
 		testPriority,
 	)
 	backend.allRoutes = []vnetlink.Route{first, second, stale}
-	backend.ownedRoutes = []vnetlink.Route{first, second, stale}
 	backend.deleteErrorAt = 1
 	backend.deleteError = unix.ESRCH
 	reconciler := newTestReconciler(t, backend)
@@ -723,7 +693,6 @@ func Test_Reconciler_ChangedRouteDeleteFailureRollsBackEarlierChanges(t *testing
 	require.ErrorContains(t, err, "delete changed destination")
 	require.Len(t, backend.added, 2)
 	require.Equal(t, first, backend.added[1])
-	require.Empty(t, backend.replaceAttempts)
 	require.Len(t, backend.deleteAttempts, 3)
 	require.Len(t, backend.deleted, 2)
 	require.Equal(t, backend.added[0], backend.deleted[1])
@@ -738,7 +707,6 @@ func Test_Reconciler_StaleDeleteFailureRollsBackWholePass(t *testing.T) {
 	firstStale := testKernelRoute("198.51.100.0/24", testTable, testProtocol, testPriority)
 	secondStale := testKernelRoute("203.0.113.0/24", testTable, testProtocol, testPriority)
 	backend.allRoutes = []vnetlink.Route{current, firstStale, secondStale}
-	backend.ownedRoutes = []vnetlink.Route{current, firstStale, secondStale}
 	backend.deleteErrorAt = 2
 	backend.deleteError = unix.EIO
 	reconciler := newTestReconciler(t, backend)
@@ -777,7 +745,6 @@ func Test_Reconciler_HandlesBothFamiliesAndDefaultPrefixes(t *testing.T) {
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 	))
 	require.Len(t, backend.added, 4)
-	require.Empty(t, backend.replaced)
 	families := map[netip.Prefix]int{}
 	gateways := map[netip.Prefix]string{}
 	for _, kernelRoute := range backend.added {
@@ -806,7 +773,6 @@ func Test_Reconciler_ContextCancellationRollsBackBeforeCleanup(t *testing.T) {
 		testPriority,
 	)
 	backend.allRoutes = []vnetlink.Route{stale}
-	backend.ownedRoutes = []vnetlink.Route{stale}
 	ctx, cancel := context.WithCancel(t.Context())
 	backend.afterMutation = cancel
 	reconciler := newTestReconciler(t, backend)
@@ -821,7 +787,6 @@ func Test_Reconciler_ContextCancellationRollsBackBeforeCleanup(t *testing.T) {
 	)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, backend.added, 1)
-	require.Empty(t, backend.replaceAttempts)
 	require.Len(t, backend.deleted, 1)
 	require.Equal(t, backend.added[0], backend.deleted[0])
 }
@@ -838,7 +803,6 @@ func Test_Reconciler_CancellationDuringChangeRestoresOriginalRoute(t *testing.T)
 		testPriority,
 	)
 	backend.allRoutes = []vnetlink.Route{current}
-	backend.ownedRoutes = []vnetlink.Route{current}
 	ctx, cancel := context.WithCancel(t.Context())
 	backend.afterMutation = cancel
 	reconciler := newTestReconciler(t, backend)
@@ -862,7 +826,6 @@ func Test_Reconciler_CancellationStopsRemainingChangedRouteDeletes(t *testing.T)
 	second := cloneKernelRoute(first)
 	second.Realm = 42
 	backend.allRoutes = []vnetlink.Route{first, second}
-	backend.ownedRoutes = []vnetlink.Route{first, second}
 	ctx, cancel := context.WithCancel(t.Context())
 	backend.afterMutation = cancel
 	reconciler := newTestReconciler(t, backend)
@@ -1044,13 +1007,9 @@ type fakeRouteBackend struct {
 	links            map[string]vnetlink.Link
 	linkErrors       map[string]error
 	allRoutes        []vnetlink.Route
-	ownedRoutes      []vnetlink.Route
 	allRoutesError   error
-	ownedRoutesError error
 	addErrorAt       int
 	addError         error
-	replaceErrorAt   int
-	replaceError     error
 	deleteErrorAt    int
 	deleteError      error
 	afterMutation    func()
@@ -1060,8 +1019,6 @@ type fakeRouteBackend struct {
 	listCalls        []routeListCall
 	addAttempts      []vnetlink.Route
 	added            []vnetlink.Route
-	replaceAttempts  []vnetlink.Route
-	replaced         []vnetlink.Route
 	deleteAttempts   []vnetlink.Route
 	deleted          []vnetlink.Route
 	operations       []string
@@ -1074,7 +1031,6 @@ func newFakeRouteBackend() *fakeRouteBackend {
 		linkErrors:      map[string]error{},
 		linkByNameCalls: map[string]int{},
 		addErrorAt:      -1,
-		replaceErrorAt:  -1,
 		deleteErrorAt:   -1,
 	}
 }
@@ -1121,9 +1077,6 @@ func (m *fakeRouteBackend) RouteListFiltered(
 	case vnetlink.RT_FILTER_TABLE:
 		m.operations = append(m.operations, "dump:all")
 		return cloneKernelRoutes(m.allRoutes), m.allRoutesError
-	case vnetlink.RT_FILTER_TABLE | vnetlink.RT_FILTER_PROTOCOL:
-		m.operations = append(m.operations, "dump:owned")
-		return cloneKernelRoutes(m.ownedRoutes), m.ownedRoutesError
 	default:
 		return nil, fmt.Errorf("unexpected route filter mask %d", mask)
 	}
@@ -1137,20 +1090,6 @@ func (m *fakeRouteBackend) RouteAdd(kernelRoute *vnetlink.Route) error {
 		return m.addError
 	}
 	m.added = append(m.added, cloneKernelRoute(*kernelRoute))
-	if m.afterMutation != nil {
-		m.afterMutation()
-	}
-	return nil
-}
-
-// RouteReplace records attempts and applies the configured indexed failure.
-func (m *fakeRouteBackend) RouteReplace(kernelRoute *vnetlink.Route) error {
-	m.operations = append(m.operations, "replace")
-	m.replaceAttempts = append(m.replaceAttempts, cloneKernelRoute(*kernelRoute))
-	if len(m.replaceAttempts)-1 == m.replaceErrorAt {
-		return m.replaceError
-	}
-	m.replaced = append(m.replaced, cloneKernelRoute(*kernelRoute))
 	if m.afterMutation != nil {
 		m.afterMutation()
 	}

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/netip"
 	"slices"
-	"strings"
 
 	vnetlink "github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -24,7 +23,6 @@ const ManagedAlias = "yanet-netlink-dataplane-sidecar"
 const (
 	managedAlias        = ManagedAlias
 	managedVLANProtocol = vnetlink.VLAN_PROTOCOL_8021Q
-	maxLinuxMTU         = 1<<31 - 1
 )
 
 // Backend is the subset of a netlink handle used by Reconciler.
@@ -113,17 +111,17 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 	desired := make(map[string]netplan.Link, len(state.Links))
 	desiredVLANs := make(map[vlanIdentity]string, len(state.Links))
 	for _, link := range state.Links {
-		if err := validateInterfaceName(link.Name); err != nil {
+		if err := netplan.ValidateInterfaceName(link.Name); err != nil {
 			return applyError(fmt.Sprintf("validate link %q", link.Name), err)
 		}
-		if link.MTU < 0 || link.MTU > maxLinuxMTU {
-			return applyError(
-				fmt.Sprintf("validate link %q", link.Name),
-				fmt.Errorf("MTU must be within 0..%d, got %d", maxLinuxMTU, link.MTU),
-			)
+		if err := netplan.ValidateMTU(link.MTU); err != nil {
+			return applyError(fmt.Sprintf("validate link %q", link.Name), err)
+		}
+		if err := netplan.ValidateAddresses(link.Addresses); err != nil {
+			return applyError(fmt.Sprintf("validate link %q", link.Name), err)
 		}
 		if link.Parent != "" {
-			if err := validateInterfaceName(link.Parent); err != nil {
+			if err := netplan.ValidateInterfaceName(link.Parent); err != nil {
 				return applyError(fmt.Sprintf("validate parent of link %q", link.Name), err)
 			}
 		}
@@ -221,6 +219,11 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 					errors.New("base KNI link is unexpectedly a VLAN"),
 				)
 			}
+			if wanted.MTU == 0 {
+				if err := netplan.ValidateMTU(base.Attrs().MTU); err != nil {
+					return applyError(fmt.Sprintf("validate effective MTU of link %q", wanted.Name), err)
+				}
+			}
 			continue
 		}
 
@@ -290,6 +293,9 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 			} else {
 				effectiveMTU = parentMTU
 			}
+		}
+		if err := netplan.ValidateMTU(effectiveMTU); err != nil {
+			return applyError(fmt.Sprintf("validate effective MTU of VLAN %q", child.Name), err)
 		}
 		creationMTUs[child.Name] = effectiveMTU
 		if effectiveMTU != 0 && parentMTU != 0 && effectiveMTU > parentMTU {
@@ -590,11 +596,11 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 
 	for _, wanted := range state.Links {
 		link := managed[wanted.Name]
-		desiredAddresses := make(map[string]struct{}, len(wanted.Addresses))
+		desiredAddresses := make(map[string]vnetlink.Addr, len(wanted.Addresses))
 		addresses := make([]vnetlink.Addr, 0, len(wanted.Addresses))
 		for _, prefix := range wanted.Addresses {
 			address := addrFromPrefix(prefix)
-			desiredAddresses[addrKey(address)] = struct{}{}
+			desiredAddresses[addrKey(address)] = address
 			addresses = append(addresses, address)
 		}
 		m.forgetMissingAddresses(link, addressSnapshots[wanted.Name])
@@ -614,28 +620,35 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 			}) {
 				continue
 			}
+			// A desired secondary must be claimed successfully before primary
+			// withdrawal can authorize its cascading deletion and reinstall.
+			for _, secondary := range addressSnapshots[wanted.Name] {
+				secondaryKey := addrKey(secondary)
+				desired, keep := desiredAddresses[secondaryKey]
+				if !keep || m.ownsAddress(link, secondaryKey) ||
+					secondary.Flags&unix.IFA_F_SECONDARY == 0 || !sameIPv4Subnet(address, secondary) {
+					continue
+				}
+				link, err = m.replaceAddress(ctx, link, wanted, existing, desired)
+				if err != nil {
+					return err
+				}
+			}
 			link, err = m.deleteAddress(ctx, link, wanted, existing, key, false)
 			if err != nil {
 				return err
 			}
 		}
 
-		for idx, prefix := range wanted.Addresses {
-			if err := checkContext(ctx, fmt.Sprintf("replace address on link %q", wanted.Name)); err != nil {
-				return err
-			}
-			link, err = m.revalidateConfiguredLink(
-				ctx,
-				link,
-				wanted,
-				existing,
-				fmt.Sprintf("replace address on link %q", wanted.Name),
-			)
-			if err != nil {
-				return err
-			}
-			address := addresses[idx]
+		for _, address := range addresses {
 			if address.IP.To4() == nil {
+				link, err = m.revalidateConfiguredLink(
+					ctx, link, wanted, existing,
+					fmt.Sprintf("replace address on link %q", wanted.Name),
+				)
+				if err != nil {
+					return err
+				}
 				currentAddresses, err := m.backend.AddrList(link, vnetlink.FAMILY_V6)
 				if err != nil {
 					return applyError(fmt.Sprintf("revalidate IPv6 addresses on link %q", wanted.Name), err)
@@ -657,21 +670,11 @@ func (m *Reconciler) Apply(ctx context.Context, state netplan.State) error {
 						return err
 					}
 				}
-				link, err = m.revalidateConfiguredLink(
-					ctx, link, wanted, existing,
-					fmt.Sprintf("replace address on link %q", wanted.Name),
-				)
-				if err != nil {
-					return err
-				}
 			}
-			if err := m.backend.AddrReplace(link, &address); err != nil {
-				return applyError(
-					fmt.Sprintf("replace address %q on link %q", prefix, wanted.Name),
-					err,
-				)
+			link, err = m.replaceAddress(ctx, link, wanted, existing, address)
+			if err != nil {
+				return err
 			}
-			m.rememberAddress(link, addrKey(address))
 		}
 
 		linkLocalEnabled := slices.Contains(wanted.LinkLocal, "ipv6")
@@ -780,6 +783,25 @@ func (m *Reconciler) cleanupStaleOwnedAddresses(
 		}
 	}
 	return nil
+}
+
+func (m *Reconciler) replaceAddress(
+	ctx context.Context,
+	expected vnetlink.Link,
+	wanted netplan.Link,
+	existing map[string]vnetlink.Link,
+	address vnetlink.Addr,
+) (vnetlink.Link, error) {
+	operation := fmt.Sprintf("replace address %q on link %q", addrKey(address), wanted.Name)
+	current, err := m.revalidateConfiguredLink(ctx, expected, wanted, existing, operation)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.backend.AddrReplace(current, &address); err != nil {
+		return nil, applyError(operation, err)
+	}
+	m.rememberAddress(current, addrKey(address))
+	return current, nil
 }
 
 func (m *Reconciler) deleteAddress(
@@ -1194,22 +1216,6 @@ func isIPv6LinkLocal(address vnetlink.Addr) bool {
 		return false
 	}
 	return address.IPNet.IP.IsLinkLocalUnicast()
-}
-
-func validateInterfaceName(name string) error {
-	if name == "" {
-		return errors.New("interface name is empty")
-	}
-	if len(name) > 15 {
-		return errors.New("interface name exceeds Linux IFNAMSIZ")
-	}
-	if name == "." || name == ".." || name == "all" || name == "default" {
-		return errors.New("interface name is reserved")
-	}
-	if strings.ContainsAny(name, "/:\x00 \t\n\v\f\r") {
-		return errors.New("interface name contains a character rejected by Linux")
-	}
-	return nil
 }
 
 func checkContext(ctx context.Context, operation string) error {
