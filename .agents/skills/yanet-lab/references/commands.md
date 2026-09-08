@@ -1,7 +1,8 @@
 # Command and manifest reference
 
-The canonical entry point is `just lab <command>`. Bare `just lab` prints help
-without starting a VM.
+The canonical entry point is `just lab [--session NAME] [--json] <command>`.
+Bare `just lab` prints help without starting a VM. `up` and `status` also accept
+the session name positionally: `just lab up NAME` and `just lab status NAME`.
 
 - Lifecycle: `doctor`, `up`, `status`, `reset`, `down`.
 - Guest access: `exec -- COMMAND ARG...`, `shell`, `serial` (press `Ctrl-]` to detach).
@@ -15,3 +16,8 @@ file and PCAP paths must be relative and remain inside the manifest directory.
 Only interfaces `0` and `1` exist in the initial topology. Probe expectations
 are either `pcap: path` or `drop: true`, never both. Fixture files are limited
 to 64 KiB, and packet captures use Ethernet framing.
+
+JSON commands write one JSON value to stdout on success or failure. Failure
+commands leave stderr empty and exit non-zero. The supervisor accepts one
+operation at a time; concurrent commands return `lab is busy` instead of being
+queued.

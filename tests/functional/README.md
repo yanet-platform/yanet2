@@ -1,421 +1,260 @@
 # YANET Functional Testing Framework
 
-Framework for functional testing of YANET in an isolated environment using QEMU **without SSH dependencies** - all communication happens through serial console with autologin.
+`tests/functional/framework` provides the QEMU, serial-console, packet-socket,
+and snapshot primitives used by the functional test packages. The preferred
+test lifecycle is `SetupHarness`: it prepares a cached baseline template,
+starts a reusable VM pool, and restores a clean booted VM for each test.
 
-## Overview
-
-The framework allows:
-- Running YANET (Data Plane and Control Plane) in an isolated QEMU VM
-- Configuring modules through serial console (without SSH)
-- Sending and receiving packets through TCP socket connections with QEMU
-- Checking packet processing correctness in a real network environment
-- Automatic system login through cloud-init
-
-## Key Features
-
-- **No SSH**: All communication through serial console with autologin
-- **Cross-platform**: Works on macOS and Linux
-- **Socket Networking**: Real packet testing through QEMU socket networking
-- **PTY-based**: Reliable communication through PTY devices
-- **Test Isolation**: Automatic socket reset prevents packet leakage between tests
+This document covers framework tests. For an interactive reusable VM, custom
+manifests, or built-in packet scenarios, see [`docs/lab.md`](../../docs/lab.md).
 
 ## Requirements
 
-- Go 1.21 or newer
-- QEMU (qemu-system-x86_64)
-- genisoimage (Linux) or hdiutil (macOS)
-- wget
-- YANET dependencies for building and running
+- Go version required by the repository.
+- QEMU with `qemu-system-x86_64` and `qemu-img`.
+- `hdiutil` on macOS or `mkisofs` on Linux for the cloud-init image.
+- A prepared functional-test image and Linux x86_64 guest artifacts.
+- YANET dataplane, controlplane, operator, and CLI binaries built before the
+  VM starts.
 
-## Structure
+The guest is Linux x86_64. A macOS host uses QEMU TCG because KVM is not
+available; TCG is slower and may need a larger `YANET_VM_READY_TIMEOUT`.
+Native macOS Mach-O binaries cannot run inside the guest, so build guest
+artifacts in a Linux x86_64 environment.
 
-```
-tests/functional/
-├── framework/             # Framework library (not a test package)
-│   ├── framework.go       # Main framework: F, GlobalFramework, Run, RunWith
-│   ├── qemu.go            # QEMU VM management, snapshot save/restore
-│   ├── cli.go             # CLI command execution via serial console
-│   ├── socket_client.go   # Unix socket client for packet injection/capture
-│   ├── packet_parser.go   # Packet parsing with gopacket
-│   ├── packet_builder.go  # Shared packet creation helpers (CreateTCPIPv4Packet, etc.)
-│   ├── packet_dsl.go      # Scapy-like layer builder DSL (NewPacket, Ether, IPv4, ...)
-│   ├── cmp_options.go     # CmpStdOpts for cmp.Diff packet comparison
-│   ├── pool.go            # VM pool for parallel test execution
-│   └── utils.go           # Utility functions
-├── main/                  # Primary functional test suite
-│   ├── framework_test.go  # TestMain + TestFramework (VM/YANET boot)
-│   ├── acl_test.go        # ACL module tests
-│   ├── balancer_test.go   # Balancer module tests
-│   ├── decap_test.go      # Decap module tests
-│   ├── forward_test.go    # Forward module tests
-│   ├── fwstate_test.go    # Firewall state module tests
-│   ├── isolation_test.go  # Test isolation verification
-│   ├── nat64_test.go      # NAT64 module tests
-│   ├── pipeline_test.go   # Empty pipeline (no-forward) tests
-│   ├── route_test.go      # Route module tests
-│   └── route_mpls_test.go # Route MPLS module tests
-│   └── 0*_test.go         # Tests migrated from yanet1
-├── testdata/              # YAML config files for tests
-├── Makefile               # VM image creation and test targets
-├── cloud-init-user-data.yaml  # Cloud-init configuration
-├── meta-data              # Cloud-init metadata
-└── README.md
-```
-
-## Usage
-
-### Quick Start
+Prepare the image and artifacts from the repository root:
 
 ```bash
-# 1. Check dependencies
-make check-deps
-
-# 2. Prepare test environment with autologin
-make prepare-vm
-
-# 3. Run all tests
-make test
+make all
+make -C tests/functional prepare-vm
+make -C tests/functional test
 ```
 
-### Running Tests
+`make -C tests/functional check-deps` checks the host tools. The test target
+runs `go test -count=1 -v ./main/...` after preparing the image.
 
-```bash
-# Run all functional tests
-make test
+## Minimal Test Package
 
-# Run specific test
-make test-run TEST=TestFramework
+Use one `Harness` for the package. `SetupHarness` owns preparation and starts
+the pool; the caller must call `Harness.Shutdown` and the returned cleanup
+function when the package finishes.
 
-# Run with Go directly
-go test -v ./...
-
-# Run with increased timeout
-go test -v -timeout 10m ./...
-
-# Run from project root directory
-just test-functional   # qemu
-```
-
-### Debugging and Diagnostics
-
-```bash
-# Show help for all commands
-make help
-
-# Run VM in debug mode with serial console
-make debug-vm
-# Use Ctrl+A, X to exit QEMU
-
-# Enable debug logging for tests and preserve test artifacts
-export YANET_TEST_DEBUG=1
-# Keep VM running after test for manual debugging (also enables debug logging and preserves artifacts)
-export YANET_KEEP_VM_ALIVE=1
-go test -v ./...
-
-# Clean test artifacts
-make clean
-
-# Full cleanup (including downloaded images)
-make clean-all
-```
-
-#### Debug Logging
-
-By default, tests use minimal logging level (ErrorLevel).
-To enable verbose debug output, set the environment variable:
-
-```bash
-# Enable verbose logging
-export YANET_TEST_DEBUG=1
-
-# Run tests with debug output
-go test -v ./...
-
-# Or in a single command
-YANET_TEST_DEBUG=1 go test -v ./...
-```
-
-When `YANET_TEST_DEBUG` is set, the framework will use zap's Development
-configuration with detailed output of all framework operations.
-- Keep the VM working directory with all configuration files
-- Preserve QEMU logs and output files
-- Log the location of preserved artifacts
-
-### Writing Tests
-
-1. Create a new `*_test.go` file
-2. Import necessary packages:
 ```go
+package functional
+
 import (
-    "testing"
-    "github.com/yanet-platform/yanet2/tests/functional/framework"
-    "github.com/stretchr/testify/require"
+	"fmt"
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
-```
 
-3. Create test function:
-```go
+var harness *framework.Harness
+
+func TestMain(m *testing.M) {
+	h, cleanup, err := framework.SetupHarness(framework.HarnessConfig{
+		PoolName:    "example",
+		BaselineTag: "example",
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to set up harness: %v\n", err)
+		os.Exit(1)
+	}
+	harness = h
+	code := m.Run()
+	if err := h.Shutdown(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to shut down harness: %v\n", err)
+		code = 1
+	}
+	cleanup()
+	os.Exit(code)
+}
+
 func TestExample(t *testing.T) {
-    // Framework initialization
-    fw, err := framework.New(&framework.Config{
-        QEMUImage: "yanet-test.qcow2",
-    })
-    require.NoError(t, err)
-    defer fw.Stop()
-
-    // Start test environment
-    require.NoError(t, fw.Start())
-
-    // Wait for VM to be ready
-    require.NoError(t, fw.WaitForReady())
-
-    // Execute basic commands
-    output, err := fw.ExecuteCommand("whoami")
-    require.NoError(t, err)
-    t.Logf("Current user: %s", strings.TrimSpace(output))
-
+	harness.WithBootedVM(t, func(fw *framework.TestFramework) {
+		fw.Run("guest-command", func(fw *framework.TestFramework, t *testing.T) {
+			output, err := fw.ExecuteCommand("uname -s")
+			require.NoError(t, err)
+			require.Contains(t, output, "Linux")
+		})
+	})
 }
 ```
 
-## Debugging
+`Harness.WithBootedVM` acquires a pool slot, restores the booted snapshot,
+runs the callback, and releases the slot through `t.Cleanup`. It does not start
+one new VM for each test. Set `YANET_VM_POOL_SIZE` to increase the number of
+long-lived slots; the default is `1`.
 
-### QEMU Logs
+The reference package is
+[`tests/functional/main/framework_test.go`](main/framework_test.go). It shows
+how to add package-specific `Dataplane` options and readiness hooks.
 
-QEMU VM logs are available in the `yanet-test-vm.log` file in the test working directory.
-To access logs after test run, preserve artifacts with settings env
-`export YANET_TEST_DEBUG=1` - logs are then available in
-`/tmp/yanet-vm-<name>-<pid>-<timestamp>/` directory.
+## Harness Configuration
 
-### VM Access
+`framework.SetupHarness(framework.HarnessConfig{...})` accepts:
 
-VM uses autologin through serial console - SSH is not required:
+- `PoolName`: name used for VM instances and logs.
+- `PoolSize`: number of VM slots; zero uses `YANET_VM_POOL_SIZE`.
+- `BaselineTag`: cache namespace for the baseline snapshot. It is required for
+  custom YAML, hooks, or extra fingerprint files.
+- `QEMUImage`: image path; empty uses `YANET_QEMU_IMAGE` or the standard test
+  image under `tests/functional`.
+- `ProjectRoot`: canonical repository root; empty uses the current project.
+- `Dataplane`, `Controlplane`, `Forward`, `Route`: custom YAML strings. Empty
+  values use the framework defaults.
+- `Prepare`, `AfterStart`, `ProfileReady`: hooks for custom baseline setup and
+  readiness checks.
+- `FingerprintFiles`: extra files included in baseline cache invalidation.
+- `SkipCommonConfig`: omit the standard kni0, forwarding, route, and pipeline
+  setup when the test supplies its own setup.
+- `EnableSSHForward`: reserve a host port forwarding to guest SSH for manual
+  debugging.
+- `ForceStop`: stop VMs even when `YANET_KEEP_VM_ALIVE` is set.
 
-```bash
-# Run VM in debug mode with serial console output
-make debug-vm
-
-# Logs are available in files:
-# - qemu.log - QEMU startup and configuration
-# - test_output*.log - test execution logs
-# - /tmp/yanet-test-vm/ - VM working directory
-```
-
-When `YANET_KEEP_VM_ALIVE` is set, the framework will:
-- Enable debug logging and preserve test artifacts(same as `YANET_TEST_DEBUG`)
-- Keep the VM process running after test completion
-- Enable SSH port forwarding on a random free port for manual debugging
-- Log SSH connection details and serial console socket path
-
-To connect to a running VM's serial console when `YANET_KEEP_VM_ALIVE` is set, find the VM
-process with `pgrep -af qemu` (look for the VM name), locate the working directory in the
-command line, and connect using `socat - UNIX-CONNECT:/tmp/yanet-vm-<instance-id>/serial.sock`.
-
-```bash
-# Example: Find running VM and connect to serial console
-pgrep -af qemu  # Find VM process and locate workdir path
-# rlwrap is optional but very helpful
-rlwrap socat - UNIX-CONNECT:/tmp/yanet-vm-main-1058482-1766597152887221542/serial.sock
-```
-
-### Network Traffic Monitoring
-
-To view packets passing through Unix domain sockets, you can monitor socket files:
-
-```bash
-# Check socket files
-ls -la /tmp/yanetvm_sockdev_*.sock
-
-# Monitor socket activity
-lsof /tmp/yanetvm_sockdev_*.sock
-```
-
-### Packet Dump Files
-
-When `YANET_TEST_DEBUG=1` is enabled, the framework automatically records all socket traffic to dump files for each test:
-
-```bash
-# Enable debug mode to record packet dumps
-export YANET_TEST_DEBUG=1
-go test -v ./...
-
-# Dump files are created in the VM working directory:
-# /tmp/yanet-vm-<name>-<pid>-<timestamp>/<Test/SubTestName>.in.dump   # Input packets
-# /tmp/yanet-vm-<name>-<pid>-<timestamp>/<Test/SubTestName>.out.dump  # Output packets
-```
-
-Each dump file contains raw socket data in the QEMU socket protocol format:
-- 4-byte length prefix (big-endian)
-- Packet data
-
-#### Replaying Packets from Dump Files
-
-To manually replay packets from a dump file to a socket:
-
-```bash
-# Find the socket path (usually in /tmp/)
-ls -la /tmp/yanetvm_*_sockdev_*.sock
-
-# Replay packets from dump file to socket
-socat -u FILE:/tmp/yanet-vm-main-123-456/TestDecap.in.dump UNIX-CONNECT:/tmp/yanetvm_main_123_456_sockdev_0.sock > response.dump
-```
-
-## Limitations
-
-1. Each test runs in a separate VM for isolation
-2. Test startup time is increased due to VM startup overhead
-3. Requires sufficient resources to run QEMU
-
-## Network Architecture
-
-The framework uses **Unix domain sockets** for communication with QEMU VM:
-
-- **QEMU starts** with `-netdev stream` using Unix domain sockets
-- **Socket devices** at `/tmp/yanetvm_sockdev_*.sock` for network interfaces
-- **Packets are transmitted** as raw bytes through socket connections
-- **Packet processing** happens in the real YANET network stack
-
-This provides:
-- ✅ **Real network environment** without emulation
-- ✅ **High performance** through Unix domain sockets
-- ✅ **Easy debugging** through standard network tools
-- ✅ **Reliability** and low latency communication
+The baseline cache is fingerprinted from the image, generated YAML, binaries,
+plugins, and configured extra files. Use a distinct `BaselineTag` when two
+packages intentionally need different captured guest state.
 
 ## Test Isolation
 
-The framework includes automatic **socket connection reset** to prevent packet leakage between tests:
+`ForTest(t)` creates a test-scoped framework with the full test name and logger.
+`Harness.WithBootedVM` already returns such a scope for the acquired VM.
 
-### Problem Solved
-In CI environments, tests can fail when packets from previous tests remain in socket buffers:
-1. Test A sends packets, some timeout (100ms)
-2. Unconsumed packets stay in buffer
-3. Test B receives packets from Test A → FAIL
+`fw.Run(name, fn)` creates a Go subtest and resets packet-socket connections
+before calling `fn`. Use it for subtests that intentionally build on the state
+left by earlier subtests while keeping each socket stream clean.
 
-### Solution
-Automatic socket connection reset before each test:
-1. Test A sends packets
-2. **Socket connections closed and reopened** before Test B
-3. Any buffered data is discarded with the old connection
-4. Test B starts with a clean stream → PASS
+`fw.RunWith(snapshot, name, fn)` restores a named VM snapshot, reconnects the
+serial console and sockets, then runs the subtest. Use it when a subtest needs
+the exact state captured by that snapshot. `fw.RestoreBooted()` is the direct
+restore primitive for the booted template; `Harness.Restore` also provides a
+baseline fast path and a pre-YANET fallback for non-test callers.
 
-### Usage
+The framework unmounts 9P shares before snapshot operations and remounts them
+afterward. Baseline templates copy YANET files to guest tmpfs so running
+processes do not hold 9P files open during `loadvm`.
 
-**Automatic (Recommended):**
+## Guest Paths and Commands
+
+`fw.Paths` describes paths inside the guest:
+
+- `DefaultGuestPaths` uses 9P mounts such as `/mnt/target/release`,
+  `/mnt/build`, `/mnt/config`, and `/mnt/logs`.
+- `LocalGuestPaths` uses guest tmpfs paths such as `/tmp/yanet/cli`,
+  `/tmp/yanet/build`, `/tmp/yanet/config`, and `/tmp/yanet/logs`.
+
+Use `fw.Paths.CLI("yanet-cli-route")` instead of hard-coding a guest CLI path.
+The framework exposes:
+
+- `ExecuteCommand(command)` for the default serial command timeout.
+- `ExecuteCommandWithTimeout(command, timeout)` for a bounded custom timeout.
+- `ExecuteCommands(commands...)` for fail-fast sequential commands.
+- `ExecuteCommandsSeparately(commands...)` when every command result is needed.
+- `ResetConnections()` to close stale packet sockets after a snapshot restore.
+
+Commands are executed in the guest through the serial console. They are shell
+commands inside the guest; host-side arguments should be quoted or passed
+through the manifest `argv` rules instead of interpolating untrusted input.
+
+## Packet APIs
+
+The default topology exposes packet interfaces `0` and `1`. Socket clients are
+created lazily by `GetSocketClient(index)` and are reset between `Run` calls.
+
+- `SendPacketAndCapture` sends one raw packet and captures one response packet.
+- `SendPacketAndCaptureAll` captures all matching response packets until the
+  timeout.
+- `SendPacketAndCaptureAllUnfiltered` captures every packet observed on the
+  selected egress, including packets that are not matched as responses.
+- `SendPacketAndParse` returns parsed input and output `PacketInfo` values.
+- `SendPacketAndParseAll` and `SendPacketsAndParseAll` parse multiple outputs.
+
+Packet helpers in `packet_builder.go` and the DSL in `packet_dsl.go` build
+Ethernet/IP/TCP/UDP fixtures. Use `cmp_options.go` when comparing packet
+structures and `packet_parser.go` when raw bytes need structured inspection.
+
+Example packet assertion:
+
+The example assumes the test package imports `time` and defines the packet
+fixture and expected bytes.
+
 ```go
-fw.Run("MyTest", func(fw *F, t *testing.T) {
-    // Socket connections automatically reset before this runs
-    client, _ := fw.GetSocketClient(0)
-    // ... test code
+fw.Run("forwards-udp", func(fw *framework.TestFramework, t *testing.T) {
+	input := buildPacket()
+	output, err := fw.SendPacketAndCapture(0, 0, input, 2*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, expectedPacket, output)
 })
 ```
 
-**Manual:**
-```go
-client, _ := fw.GetSocketClient(0)
-client.ResetConnection() // Close and reconnect
-```
+Use `SendPacketAndCaptureAllUnfiltered` when the assertion is about a drop or
+when unrelated packets on the egress must be observed rather than filtered.
 
-### Monitoring
+## Snapshots and Custom Setup
 
-Enable debug logging to see reset operations:
-```bash
-export YANET_TEST_DEBUG=1
-go test -v ./...
-```
+`SetupHarness` captures a reusable `baseline` template after its prepare and
+configuration hooks complete. For a custom package:
 
-Look for messages like:
-```
-DEBUG Resetting socket connections before test 'TestExample'
-DEBUG Reset connection for interface 0
-DEBUG Reset connection for interface 1
-```
+1. Set a unique `BaselineTag`.
+2. Provide custom YAML or hooks in `HarnessConfig`.
+3. Use `WithBootedVM` for tests that can start from the captured template.
+4. Use `Restore` when the package needs the baseline fast path and fallback.
+5. Use `PrepareLocalStorage`, `SaveSnapshot`, and `RestoreAndReconnect` only
+   when the test owns an additional snapshot lifecycle.
 
-## Build Dependencies
+`SaveSnapshot` captures full VM state. 9P shares must be unmounted before a
+manual save; the framework handles this for its standard snapshot helpers.
 
-**Important:** Functional tests require pre-built YANET components:
+## Debugging
 
-```bash
-# Build necessary components before testing
-just dbuild                    # Docker build (recommended)
-just build                     # Local build
+Environment variables:
 
-# Or using meson directly
-meson compile -C build          # Builds dataplane and modules
-```
+- `YANET_QEMU_IMAGE` overrides the base image path.
+- `YANET_VM_POOL_SIZE` sets the number of pool slots.
+- `YANET_VM_READY_TIMEOUT` overrides readiness timeout with a Go duration such
+  as `5m`.
+- `YANET_TEST_DEBUG=1` enables verbose framework logging and packet dumps.
+- `YANET_KEEP_VM_ALIVE=1` keeps QEMU running after tests for investigation and
+  also enables debug logging; `ForceStop` overrides it for a harness.
 
-Tests use **QEMU 9P filesystem** for access to built binary files:
-- `build/` directory is mounted in VM as shared filesystem
-- `target/` directory for CLI binaries
-- VM runs real YANET processes from built binaries
-- This ensures full end-to-end testing
-
-## VM Snapshots and Test Isolation
-
-The framework supports QEMU VM snapshots (`savevm`/`loadvm`) for per-test
-state isolation. This eliminates state leakage between tests (YANET config,
-kernel state, filesystem changes) by reverting the VM to a known-good state
-before each test.
-
-### Snapshot Workflow
-
-In `TestMain`, after starting YANET and configuring the baseline:
-
-```go
-// Save baseline snapshot after initial setup.
-gfw.SaveSnapshot("baseline")
-```
-
-In individual tests, use `RunWith` to restore the snapshot before each subtest:
-
-```go
-fw.RunWith("baseline", "MyTest", func(fw *F, t *testing.T) {
-    // VM state is exactly as it was when "baseline" was saved.
-    // No contamination from previous tests.
-})
-```
-
-Use `Run()` (without snapshot) for subtests that intentionally build on the
-state left by previous subtests.
-
-### QCOW2 Overlay
-
-The framework creates a QCOW2 overlay on top of the base image instead of
-using QEMU's `-snapshot` flag. This ensures `savevm`/`loadvm` work correctly
-with a writable disk. The overlay is ephemeral and removed when the VM stops.
-
-## Parallel Test Execution
-
-The framework includes a `VMPool` for running tests in parallel across
-multiple QEMU VMs. Each VM in the pool has its own baseline snapshots.
-
-### Configuration
-
-Set `YANET_VM_POOL_SIZE` to control the number of parallel VMs:
+Use the Makefile targets from `tests/functional`:
 
 ```bash
-# Sequential execution (default)
-YANET_VM_POOL_SIZE=1 go test -v ./main/...
-
-# Parallel with 4 VMs (requires ~20GB RAM, 8 CPUs)
-YANET_VM_POOL_SIZE=4 go test -v ./main/...
+make check-deps
+make prepare-vm
+make test-run TEST=TestFramework
+make debug-vm
+make clean
 ```
 
-### Writing Parallel Tests
+The standard test run uses serial access and does not require SSH. SSH host
+forwarding is optional and is enabled only when `EnableSSHForward` or the
+keep-alive debugging mode requests it.
 
-Tests opt into parallel execution with `t.Parallel()`:
+When debugging a failed run, preserve artifacts with `YANET_TEST_DEBUG=1` and
+inspect the QEMU working directory, serial log, QEMU log, and packet dumps.
+Use `docs/lab.md` for the reusable Lab supervisor's `report`, `exec`, `shell`,
+and `serial` commands.
 
-```go
-func TestRoute(t *testing.T) {
-    t.Parallel()  // marks test as parallelizable
-    fw := pool.Acquire()
-    defer pool.Release(fw)
+## Layout
 
-    fw.RestoreAndReconnect("baseline")
-    // ... test code
-}
+```text
+tests/functional/
+├── framework/       QEMU, harness, pool, serial, socket, packet, and snapshot APIs
+├── main/             primary functional test package and TestMain reference
+├── testdata/         YAML and packet fixtures
+├── Makefile          image, test, debug, and cleanup targets
+└── README.md         this document
 ```
 
-## Future Development
-2. Improve VM readiness waiting mechanism
-3. Add VM snapshot support for faster tests
-4. Expand test suite for load balancer
-5. Add network performance metrics
+Related code references:
+
+- `tests/functional/framework/harness.go` - `HarnessConfig`, setup, pool, and
+  restore lifecycle.
+- `tests/functional/framework/framework.go` - test scope, command, packet, and
+  snapshot methods.
+- `tests/functional/framework/pool.go` - pool sizing and template startup.
+- `tests/functional/main/framework_test.go` - package-level TestMain example.

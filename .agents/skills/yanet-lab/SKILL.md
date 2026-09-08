@@ -11,7 +11,7 @@ and QEMU lifecycle; do not reproduce those mechanics in ad-hoc scripts.
 ## Workflow
 
 1. Run `just lab doctor` before booting when host readiness is unknown.
-2. Run `just lab up`, then `just lab status`.
+2. Run `just lab up [SESSION]`, then `just lab status [SESSION]`.
 3. Prefer a built-in scenario when it covers the request:
    `just lab scenario list` and `just lab scenario run <name>`.
 4. For a custom manifest, run `just lab manifest validate <path>` before
@@ -19,8 +19,8 @@ and QEMU lifecycle; do not reproduce those mechanics in ad-hoc scripts.
 5. On failure, collect `just lab report` and inspect the supervisor log path
    printed by `up`. Use `just lab exec -- <command> [args...]` for focused
    guest diagnostics.
-6. Use `just lab reset` before an unrelated experiment. Run `just lab down`
-   when the user no longer needs the VM.
+6. Use `just lab [--session SESSION] reset` before an unrelated experiment. Run
+   `just lab [--session SESSION] down` when the user no longer needs the VM.
 
 ## Guardrails
 
@@ -30,7 +30,10 @@ and QEMU lifecycle; do not reproduce those mechanics in ad-hoc scripts.
   interpolation.
 - Put scenario paths and packet fixtures beside the scenario manifest.
 - Validate a manifest after every edit.
-- Use `--json` when another tool needs structured output.
+- Use `--json` when another tool needs structured output; failures emit one
+  JSON value on stdout, no stderr diagnostics, and a non-zero exit status.
+- Treat `lab is busy` as a single-flight rejection and retry only after the
+  active operation or serial detach has completed.
 
 ## Reference
 

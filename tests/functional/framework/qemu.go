@@ -661,7 +661,8 @@ func (q *QEMUManager) EnableSSHForward() {
 
 // AttachSerial gives a caller exclusive access to the serial console.
 //
-// The returned release function restores the framework's serial reader.
+// The returned release function restores the framework's serial reader and
+// waits for a fresh prompt before another framed command can run.
 func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 	q.stopSerialReader()
 	if err := q.connectToSerial(); err != nil {
@@ -677,15 +678,28 @@ func (q *QEMUManager) AttachSerial() (net.Conn, func() error, error) {
 			q.serialConn = nil
 		}
 		q.serialMutex.Unlock()
+		q.setVMReady(false)
+		q.resetSerialBuffer()
 		var lastErr error
 		for range 3 {
+			q.readySignal = make(chan bool, 1)
 			if err := q.connectToSerial(); err != nil {
 				lastErr = err
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 			q.startSerialReader()
-			return nil
+			stdin := q.GetStdin()
+			if stdin != nil {
+				_, lastErr = stdin.Write([]byte("\n"))
+			}
+			if lastErr == nil {
+				lastErr = q.WaitForReady(min(VMReadyTimeout(), 20*time.Second))
+			}
+			if lastErr == nil {
+				return nil
+			}
+			q.stopSerialReader()
 		}
 		return fmt.Errorf("restore serial reader after 3 attempts: %w", lastErr)
 	}

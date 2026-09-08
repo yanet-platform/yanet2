@@ -36,8 +36,10 @@ supervisor; inspect it with `status`, `report`, or `down`.
 - `doctor` checks Go, Just, QEMU tooling (`qemu-system-x86_64`, `qemu-img`), SSH
   tooling (`ssh`, `ssh-keygen`), the disk image, required host artifacts, and
   optional Linux KVM.
-- `up` starts or reuses a named session; `--session NAME` selects another one.
-- `status` runs the pinned Operator Profile check read-only and prints the
+- `up [SESSION]` starts or reuses a named session; `--session NAME` selects
+  another one. The positional form is useful in scripts that use one session
+  per experiment.
+- `status [SESSION]` runs the pinned Operator Profile check read-only and prints the
   overall `READY` or `NOT_READY` verdict plus any failing scope. `--json` lists
   every scope with its `state`, plus `reason` on failing scopes. A Supervisor
   whose protocol version differs from the CLI's is reported as a `protocol
@@ -52,8 +54,11 @@ supervisor; inspect it with `status`, `report`, or `down`.
 - `scenario list|run` discovers and runs the built-in guided scenarios.
 - `manifest validate|run` checks or executes a custom manifest.
 
-Add `--json` to commands intended for scripts. Exit status is non-zero when an
-environment check, manifest validation, command, or packet probe fails.
+Add the global `--json` and `--session NAME` flags to commands intended for
+scripts or separate experiments. In JSON mode, any failure writes exactly one
+JSON value to stdout, leaves stderr empty, and exits non-zero. Exit status is
+also non-zero when an environment check, manifest validation, command, or
+packet probe fails.
 
 ## Manifests
 
@@ -141,9 +146,11 @@ completion and show the guest paths for CLI binaries, configuration, logs, and
 build artifacts. `shell` is the normal choice because it has a native SSH TTY;
 use `serial` to inspect the QEMU console directly. While any supervisor
 operation is active, other VM commands report `lab is busy` and exit non-zero
-without queueing. `down` closes the serial attachment and waits for the active
-operation to finish before it shuts the VM down; `reset` restores the guest
-snapshot and reapplies this shell setup.
+without queueing. Detaching `serial` with `Ctrl-]` leaves the VM running and
+waits for a fresh shell prompt before the next framed command is accepted.
+`down` closes the serial attachment and waits for the active operation to
+finish before it shuts the VM down; `reset` restores the guest snapshot and
+reapplies this shell setup.
 
 ## Troubleshooting
 

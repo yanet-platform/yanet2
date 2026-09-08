@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/binary"
@@ -26,6 +27,23 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"golang.org/x/sync/errgroup"
 )
+
+type recordingManifestRuntime struct {
+	lab.ManifestRuntime
+	captureTimeout time.Duration
+	captureCalls   int
+}
+
+func (m *recordingManifestRuntime) SendPacketAndCaptureAllUnfiltered(
+	_ int,
+	_ int,
+	_ []byte,
+	timeout time.Duration,
+) ([][]byte, error) {
+	m.captureCalls++
+	m.captureTimeout = timeout
+	return nil, nil
+}
 
 func TestValidSessionName(t *testing.T) {
 	for _, name := range []string{"default", "experiment-1", "lab.v2"} {
@@ -559,6 +577,68 @@ func TestRequestTimeoutMatchesActionBudget(t *testing.T) {
 	assert.Equal(t, supervisorShutdownTimeout, requestTimeout("down"))
 }
 
+// Test_DeadlineManifestRuntime_LongCaptureUsesRemainingBudget verifies that a
+// packet capture cannot outlive the server-side manifest deadline.
+func Test_DeadlineManifestRuntime_LongCaptureUsesRemainingBudget(t *testing.T) {
+	recordingRuntime := &recordingManifestRuntime{}
+	deadline := time.Now().Add(time.Hour)
+	runtime := &deadlineManifestRuntime{
+		ManifestRuntime: recordingRuntime,
+		deadline:        deadline,
+	}
+
+	beforeCapture := time.Now()
+	_, err := runtime.SendPacketAndCaptureAllUnfiltered(0, 1, nil, 2*time.Hour)
+	afterCapture := time.Now()
+	require.NoError(t, err)
+	require.Equal(t, 1, recordingRuntime.captureCalls)
+	require.GreaterOrEqual(t, recordingRuntime.captureTimeout, deadline.Sub(afterCapture))
+	require.LessOrEqual(t, recordingRuntime.captureTimeout, deadline.Sub(beforeCapture))
+}
+
+// Test_DeadlineManifestRuntime_ExpiredCaptureDoesNotDelegate verifies that an
+// exhausted manifest budget fails before packet capture reaches the framework.
+func Test_DeadlineManifestRuntime_ExpiredCaptureDoesNotDelegate(t *testing.T) {
+	recordingRuntime := &recordingManifestRuntime{}
+	runtime := &deadlineManifestRuntime{
+		ManifestRuntime: recordingRuntime,
+		deadline:        time.Now().Add(-time.Second),
+	}
+
+	_, err := runtime.SendPacketAndCaptureAllUnfiltered(0, 1, nil, time.Hour)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Zero(t, recordingRuntime.captureCalls)
+}
+
+// Test_HandleConnection_ManifestUsesDeadlineRuntime verifies that supervisor
+// execution applies the server deadline before running a manifest.
+func Test_HandleConnection_ManifestUsesDeadlineRuntime(t *testing.T) {
+	original := runManifest
+	t.Cleanup(func() { runManifest = original })
+	runtimeSeen := make(chan lab.ManifestRuntime, 1)
+	runManifest = func(runtime lab.ManifestRuntime, _ string) lab.RunReport {
+		runtimeSeen <- runtime
+		return lab.RunReport{Success: true}
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, &supervisor{}, nil, nil, func() {})
+		return nil
+	})
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "manifest", Manifest: "unused"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, handlers.Wait())
+
+	runtime, ok := (<-runtimeSeen).(*deadlineManifestRuntime)
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(supervisorManifestTimeout), runtime.deadline, time.Second)
+}
+
 // Test_HandleConnection_ExecUsesActionBudget verifies that exec requests pass
 // the full guest action budget while retaining time to return the reply.
 func Test_HandleConnection_ExecUsesActionBudget(t *testing.T) {
@@ -583,6 +663,41 @@ func Test_HandleConnection_ExecUsesActionBudget(t *testing.T) {
 	require.Equal(t, "'sleep' '31'", command)
 	require.Equal(t, supervisorExecTimeout, timeout)
 	require.Equal(t, "complete", reply.Output)
+}
+
+// Test_HandleConnection_ReportUsesFullProcessPatterns verifies that report
+// captures full command lines for both long YANET process names.
+func Test_HandleConnection_ReportUsesFullProcessPatterns(t *testing.T) {
+	original := executeSupervisorCommand
+	t.Cleanup(func() { executeSupervisorCommand = original })
+
+	var command string
+	var timeout time.Duration
+	executeSupervisorCommand = func(_ *framework.TestFramework, value string, valueTimeout time.Duration) (string, error) {
+		command = value
+		timeout = valueTimeout
+		return "123 /tmp/yanet-dataplane\n456 /tmp/yanet-controlplane\nkni0 UP", nil
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	directory := t.TempDir()
+	var handlers errgroup.Group
+	handlers.Go(func() error {
+		handleConnection(server, nil, directory, &supervisor{}, nil, nil, func() {})
+		return nil
+	})
+	require.NoError(t, json.NewEncoder(client).Encode(request{Action: "report"}))
+	var reply response
+	require.NoError(t, json.NewDecoder(client).Decode(&reply))
+	require.NoError(t, handlers.Wait())
+
+	require.True(t, reply.OK)
+	require.Equal(t, supervisorStatusTimeout, timeout)
+	require.Equal(t, "pgrep -af '[y]anet-dataplane'; pgrep -af '[y]anet-controlplane'; ip -brief address show kni0", command)
+	report, err := os.ReadFile(reply.Output)
+	require.NoError(t, err)
+	require.Equal(t, "123 /tmp/yanet-dataplane\n456 /tmp/yanet-controlplane\nkni0 UP", string(report))
 }
 
 func TestWriteReportOverwritesLastReport(t *testing.T) {
@@ -1563,7 +1678,9 @@ func TestStatusCommandAcceptsPositionalSession(t *testing.T) {
 	require.Error(t, command.Execute())
 }
 
-func TestSelectSessionAssignsPositional(t *testing.T) {
+// Test_ApplicationSelectSession_PositionalOverrideAndEmptyArgsPreserveSelection verifies that
+// a positional session overrides the default and an empty argument list keeps it.
+func Test_ApplicationSelectSession_PositionalOverrideAndEmptyArgsPreserveSelection(t *testing.T) {
 	application := newApplication()
 	require.Equal(t, defaultSession, application.session)
 	application.selectSession([]string{"my-session"})
@@ -1637,6 +1754,75 @@ func TestPrintResponseStampsCLIProtocol(t *testing.T) {
 	})
 }
 
+// Test_ApplicationRun_JSONPreRenderFailureWritesOneStdoutDocument verifies
+// that setup failures use stdout once and leave stderr empty in JSON mode.
+func Test_ApplicationRun_JSONPreRenderFailureWritesOneStdoutDocument(t *testing.T) {
+	originalArguments := os.Args
+	t.Cleanup(func() { os.Args = originalArguments })
+	os.Args = []string{"yanet-lab", "--json", "manifest", "validate", filepath.Join(t.TempDir(), "missing.yaml")}
+
+	stdout, stderr, exitCode := captureApplicationOutput(t, newApplication().Run)
+	require.Equal(t, 1, exitCode)
+	require.Empty(t, stderr)
+	var decoded response
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.NotEmpty(t, decoded.Error)
+	require.Equal(t, cliProtocolVersion, decoded.Protocol)
+}
+
+// Test_ApplicationRun_JSONRenderedFailureWritesOneStdoutDocument verifies that
+// a rendered command failure is not followed by a top-level error envelope.
+func Test_ApplicationRun_JSONRenderedFailureWritesOneStdoutDocument(t *testing.T) {
+	stubCallAndServe(t, func(*application, request) (*response, error) {
+		return &response{
+			OK:                        false,
+			Error:                     "lab stopped",
+			SupervisorProtocolVersion: supervisorProtocolVersion,
+		}, nil
+	}, nil)
+	originalArguments := os.Args
+	t.Cleanup(func() { os.Args = originalArguments })
+	os.Args = []string{"yanet-lab", "--json", "down"}
+
+	stdout, stderr, exitCode := captureApplicationOutput(t, newApplication().Run)
+	require.Equal(t, 1, exitCode)
+	require.Empty(t, stderr)
+	var decoded response
+	require.NoError(t, json.Unmarshal(stdout, &decoded))
+	require.Equal(t, "lab stopped", decoded.Error)
+	require.Equal(t, cliProtocolVersion, decoded.Protocol)
+}
+
+// Test_ApplicationRun_JSONEncodingFailureDoesNotRenderFallback verifies that
+// a failed stdout write is not followed by another output attempt or stderr.
+func Test_ApplicationRun_JSONEncodingFailureDoesNotRenderFallback(t *testing.T) {
+	originalArguments := os.Args
+	t.Cleanup(func() { os.Args = originalArguments })
+	os.Args = []string{"yanet-lab", "--json", "scenario", "list"}
+
+	originalStdout, originalStderr := os.Stdout, os.Stderr
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	require.NoError(t, err)
+	require.NoError(t, stdoutRead.Close())
+	stderrRead, stderrWrite, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout, os.Stderr = stdoutWrite, stderrWrite
+	t.Cleanup(func() {
+		os.Stdout, os.Stderr = originalStdout, originalStderr
+		_ = stdoutWrite.Close()
+		_ = stderrRead.Close()
+		_ = stderrWrite.Close()
+	})
+
+	application := newApplication()
+	require.Equal(t, 1, application.Run())
+	require.Equal(t, 1, application.jsonOutputAttempts)
+	require.NoError(t, stderrWrite.Close())
+	stderr, err := io.ReadAll(stderrRead)
+	require.NoError(t, err)
+	require.Empty(t, stderr)
+}
+
 func TestAnnotateReplacementOnlyFiresOnStaleTeardown(t *testing.T) {
 	resp := &response{Output: "VM: running"}
 	annotateReplacement(resp, noStaleTeardown)
@@ -1667,6 +1853,34 @@ func captureStdout(t *testing.T, fn func() error) ([]byte, error) {
 	require.NoError(t, writeEnd.Close())
 	data, readErr := io.ReadAll(readEnd)
 	return data, errors.Join(runErr, readErr)
+}
+
+// captureApplicationOutput returns both process streams and the application
+// exit code without starting a subprocess.
+func captureApplicationOutput(t *testing.T, fn func() int) ([]byte, []byte, int) {
+	t.Helper()
+	originalStdout, originalStderr := os.Stdout, os.Stderr
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	require.NoError(t, err)
+	stderrRead, stderrWrite, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout, os.Stderr = stdoutWrite, stderrWrite
+	defer func() {
+		os.Stdout, os.Stderr = originalStdout, originalStderr
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
+		_ = stderrRead.Close()
+		_ = stderrWrite.Close()
+	}()
+
+	exitCode := fn()
+	require.NoError(t, stdoutWrite.Close())
+	require.NoError(t, stderrWrite.Close())
+	stdout, err := io.ReadAll(stdoutRead)
+	require.NoError(t, err)
+	stderr, err := io.ReadAll(stderrRead)
+	require.NoError(t, err)
+	return stdout, stderr, exitCode
 }
 
 // stubCallAndServe swaps the package-level callSupervisor and serveRunner

@@ -2,14 +2,66 @@ package framework
 
 import (
 	"errors"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+// Test_QEMUManager_AttachSerial_ReleaseWaitsForFreshPrompt verifies that an
+// immediate interactive detach cannot race the next framed command.
+func Test_QEMUManager_AttachSerial_ReleaseWaitsForFreshPrompt(t *testing.T) {
+	manager, err := newQEMUManager("serial-release", "unused", zap.NewNop().Sugar(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		manager.stopSerialReader()
+		require.NoError(t, os.RemoveAll(manager.WorkDir))
+	})
+
+	listener, err := net.Listen("unix", manager.SerialPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, listener.Close()) })
+
+	_, release, err := manager.AttachSerial()
+	require.NoError(t, err)
+	attached, err := listener.Accept()
+	require.NoError(t, err)
+	require.NoError(t, attached.Close())
+
+	releaseDone := make(chan error, 1)
+	go func() { releaseDone <- release() }()
+	restored, err := listener.Accept()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, restored.Close()) })
+
+	select {
+	case err := <-releaseDone:
+		t.Fatalf("release returned before a fresh prompt: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	require.NoError(t, restored.SetReadDeadline(time.Now().Add(time.Second)))
+	poke := make([]byte, 1)
+	_, err = io.ReadFull(restored, poke)
+	require.NoError(t, err)
+	require.Equal(t, []byte{'\n'}, poke)
+	require.NoError(t, restored.SetReadDeadline(time.Time{}))
+	_, err = restored.Write([]byte(shellPromptMarker))
+	require.NoError(t, err)
+
+	select {
+	case err := <-releaseDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("release did not return after the fresh prompt")
+	}
+}
 
 // qemuCmdline returns a representative argv slice for pgrep -f to scan. The
 // fake runner pretends pgrep appended the matching PID line; the test only

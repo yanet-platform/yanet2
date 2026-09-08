@@ -121,8 +121,9 @@ type response struct {
 }
 
 type application struct {
-	session string
-	json    bool
+	session            string
+	json               bool
+	jsonOutputAttempts int
 }
 
 type supervisor struct {
@@ -140,6 +141,26 @@ type sessionRuntime struct {
 	Restore     func() error
 	Shutdown    func() error
 	Interrupted *atomic.Bool
+}
+
+type deadlineManifestRuntime struct {
+	lab.ManifestRuntime
+	deadline time.Time
+}
+
+func (m *deadlineManifestRuntime) SendPacketAndCaptureAllUnfiltered(
+	ingress, egress int,
+	packet []byte,
+	timeout time.Duration,
+) ([][]byte, error) {
+	remaining := time.Until(m.deadline)
+	if remaining <= 0 {
+		return nil, context.DeadlineExceeded
+	}
+	if timeout > remaining {
+		timeout = remaining
+	}
+	return m.ManifestRuntime.SendPacketAndCaptureAllUnfiltered(ingress, egress, packet, timeout)
 }
 
 func (m *supervisor) TryOperation() bool {
@@ -245,7 +266,9 @@ func (m *application) Run() int {
 	root := m.command()
 	if err := root.Execute(); err != nil {
 		if m.json {
-			_ = json.NewEncoder(os.Stderr).Encode(response{Error: err.Error(), Protocol: cliProtocolVersion})
+			if m.jsonOutputAttempts == 0 {
+				_ = m.writeJSON(response{Error: err.Error(), Protocol: cliProtocolVersion})
+			}
 		} else {
 			fmt.Fprintln(os.Stderr, "yanet-lab:", err)
 		}
@@ -258,13 +281,19 @@ func (m *application) Run() int {
 	return 0
 }
 
+func (m *application) writeJSON(value any) error {
+	m.jsonOutputAttempts++
+	return json.NewEncoder(os.Stdout).Encode(value)
+}
+
 func (m *application) command() *cobra.Command {
 	root := &cobra.Command{
-		Use:          "yanet-lab",
-		Short:        "Operate a reusable local YANET2 QEMU lab",
-		Long:         "Use 'yanet-lab up' to start the lab, then 'status', 'reset', 'scenario', or 'down'.",
-		RunE:         func(command *cobra.Command, _ []string) error { return command.Help() },
-		SilenceUsage: true,
+		Use:           "yanet-lab",
+		Short:         "Operate a reusable local YANET2 QEMU lab",
+		Long:          "Use 'yanet-lab up' to start the lab, then 'status', 'reset', 'scenario', or 'down'.",
+		RunE:          func(command *cobra.Command, _ []string) error { return command.Help() },
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 	root.PersistentFlags().StringVar(&m.session, "session", defaultSession, "lab session name")
 	root.PersistentFlags().BoolVar(&m.json, "json", false, "emit machine-readable JSON")
@@ -454,7 +483,7 @@ func (m *application) scenarioCommand() *cobra.Command {
 			}
 			sort.Strings(names)
 			if m.json {
-				return json.NewEncoder(os.Stdout).Encode(names)
+				return m.writeJSON(names)
 			}
 			for _, name := range names {
 				fmt.Println(name)
@@ -505,7 +534,9 @@ func (m *application) doctor() error {
 		KVMAvailable: framework.KVMAvailable,
 	})
 	if m.json {
-		_ = json.NewEncoder(os.Stdout).Encode(report)
+		if err := m.writeJSON(report); err != nil {
+			return err
+		}
 	} else {
 		for _, check := range report.Checks {
 			fmt.Printf("%-8s %-52s %s\n", strings.ToUpper(check.Status), check.Name, check.Reason)
@@ -1126,6 +1157,7 @@ var callSupervisor = func(m *application, value request) (*response, error) {
 }
 
 var executeSupervisorCommand = (*framework.TestFramework).ExecuteCommandWithTimeout
+var runManifest = lab.RunManifest
 
 func requestTimeout(action string) time.Duration {
 	switch action {
@@ -1177,7 +1209,9 @@ func (m *application) printResponse(value *response) error {
 	if m.json {
 		encoded := *value
 		encoded.Protocol = cliProtocolVersion
-		_ = json.NewEncoder(os.Stdout).Encode(&encoded)
+		if err := m.writeJSON(&encoded); err != nil {
+			return err
+		}
 	} else if value.Report != nil {
 		for _, result := range value.Report.Results {
 			marker := "PASS"
@@ -1215,7 +1249,7 @@ func (m *application) printResponse(value *response) error {
 
 func (m *application) printValue(value any) error {
 	if m.json {
-		return json.NewEncoder(os.Stdout).Encode(value)
+		return m.writeJSON(value)
 	}
 	fmt.Println("manifest is valid")
 	return nil
@@ -1443,9 +1477,11 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			reply.Output = "baseline restored"
 		}
 	case "manifest":
+		deadline := time.Now().Add(supervisorManifestTimeout)
+		manifestRuntime := &deadlineManifestRuntime{ManifestRuntime: fw, deadline: deadline}
 		manifestDone := make(chan lab.RunReport, 1)
-		go func() { manifestDone <- lab.RunManifest(fw, value.Manifest) }()
-		timer := time.NewTimer(supervisorManifestTimeout)
+		go func() { manifestDone <- runManifest(manifestRuntime, value.Manifest) }()
+		timer := time.NewTimer(time.Until(deadline))
 		var report lab.RunReport
 		select {
 		case report = <-manifestDone:
@@ -1488,7 +1524,7 @@ func handleConnection(connection net.Conn, fw *framework.TestFramework, dir stri
 			setError(&reply, writeFile(filepath.Join(dir, "last-report.json"), data))
 		}
 	case "report":
-		status, statusErr := fw.ExecuteCommand("pgrep -a yanet-dataplane; pgrep -a yanet-controlplane; ip -brief address show kni0")
+		status, statusErr := executeSupervisorCommand(fw, "pgrep -af '[y]anet-dataplane'; pgrep -af '[y]anet-controlplane'; ip -brief address show kni0", supervisorStatusTimeout)
 		reportPath, writeErr := writeReport(dir, []byte(status))
 		if writeErr != nil {
 			setError(&reply, writeErr)
