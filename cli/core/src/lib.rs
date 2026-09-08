@@ -19,6 +19,7 @@ pub mod logging;
 pub mod metrics;
 pub mod output;
 pub mod timeout;
+pub mod yaml;
 
 mod signal;
 

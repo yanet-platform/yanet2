@@ -22,7 +22,7 @@ use tokio::{sync::mpsc, task::AbortHandle};
 use ync::{client::Connection, discovery, errors::Error, output};
 
 use crate::{
-    Cmd, READINESS_SERVICE, ServiceReport, print_report, probe,
+    Cmd, READINESS, ServiceReport, print_report, probe,
     render::{self, ServiceColumn, Transition},
 };
 
@@ -70,7 +70,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// observed at startup.
 pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
     let connection = Arc::new(Connection::connect_for(&cmd.connection, "ready").await?);
-    let services = discovery::list_services(&connection, READINESS_SERVICE).await?;
+    let services = READINESS.list(&connection).await?;
 
     let mut reports = Vec::with_capacity(services.len());
     for service in &services {
@@ -504,7 +504,7 @@ async fn rediscover(
     loop {
         tokio::time::sleep(REDISCOVER_INTERVAL).await;
 
-        let sweep = discovery::list_services(&connection, READINESS_SERVICE);
+        let sweep = READINESS.list(&connection);
         let Ok(Ok(services)) = tokio::time::timeout(REDISCOVER_INTERVAL, sweep).await else {
             continue;
         };

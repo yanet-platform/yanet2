@@ -34,10 +34,15 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
 - `run(cmd)` determines the action, builds the service object once and matches
   `cmd.mode`; every handler returns `Result<(), Error>`.
 - `const SERVICE_NAME: &str = "<proto package>.<Service>";` with the doc
-  `/// The fully-qualified gRPC service name used in error messages.`. One
-  service: `Service::connect_for(&cmd.connection, action, SERVICE_NAME,
-  |channel| Client::new(channel).send_compressed(Gzip)
-  .accept_compressed(Gzip)).await?`. Several:
+  `/// The fully-qualified gRPC service name used in error messages.`. A crate
+  that builds its client at a single site keeps the builder inline:
+  `|channel| <X>ServiceClient::new(channel).send_compressed(Gzip)
+  .accept_compressed(Gzip)`. Once the crate builds it at more than one site,
+  pull it into `fn client(channel: LayeredChannel) ->
+  <X>ServiceClient<LayeredChannel>`, named `<x>_client` only when the crate
+  imports the `ync::client` module under that name. One service:
+  `Service::connect_for(&cmd.connection, action, SERVICE_NAME,
+  client).await?`, reused unchanged by completion. Several:
   `Connection::connect_for(&cmd.connection, action).await?` once, then
   `Service::new(&connection, NAME, build)` per client. The action is the same
   user-facing verb passed to the command's RPC error mapping.
@@ -61,18 +66,21 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
 - Type ladder, in order: `core`/`std` (`IpAddr`, `Ipv4Addr`, `Ipv6Addr`, `u16`
   for ports, `PathBuf`), then `netip` (`IpNetwork`, `Contiguous<IpNetwork>` for
   prefixes, `MacAddr`), then `common/rust` types with `FromStr`
-  (`commonpb::pb::DevicePipeline`). Inside a crate only `ValueEnum` enums and
-  clap arg groups. A `value_parser = <fn>` that constrains an existing type (a
-  range, a fixed prefix length) is fine. A new `FromStr` type anywhere, in the
-  crate or in `common/rust`, is a decision for the owner: stop and ask before
-  writing it.
+  (`commonpb::pb::DevicePipeline`, `Vec<DevicePipeline>` on `-i`/`-o`). Inside
+  a crate only `ValueEnum` enums and clap arg groups. A `value_parser = <fn>`
+  that constrains an existing type (a range, a fixed prefix length) is fine.
+  A new `FromStr` type anywhere, in the crate or in `common/rust`, is a
+  decision for the owner: stop and ask before writing it.
 - Wire values are built with `From` when the request is made
   (`IpAddress::from(addr)`), never parsed from text there.
 - Positional arguments carry the key of an element (`insert <prefix>
   --via …`, `remove <next-hop>…`, `table create <name>`), the file a
   command consumes (`update -n <name> <path>`, `upload -n <name>
   <path>`) or a filter pattern (`counters [PATTERN]…`); everything else
-  is a flag. A file never has a flag.
+  is a flag. A file never has a flag. A YAML file positional loads with
+  `ync::yaml::load::<T>(&path)`, its error already naming the path, mapped
+  with `self.service.invalid("<verb>", err.to_string())`; no private `load`
+  that opens and parses on its own.
 - Flags: `--name/-n` names the object the binary manages (a config, a map,
   a sessions state) and nothing else; `-4/-6` family filters, mutually
   exclusive (nat64's address pair excepted); `--endpoint` and `--auth`
@@ -92,9 +100,14 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   what the binary manages.
 - An argument naming an existing object carries `add =
   ArgValueCandidates::new(<fn>)`, the function built on
-  `completion::candidates(Cmd::command, build, async move |mut client| …)` (a
-  genuine `async move` closure). Never on a `value_delimiter` argument, never
-  on the new name of a `create`.
+  `completion::candidates(Cmd::command, client, async move |mut client| …)`,
+  the named builder from `SERVICE_NAME`'s bullet (a genuine `async move`
+  closure). Never on a `value_delimiter` argument, never on the new name of a
+  `create`. A positional naming a service of a family (readiness, metrics)
+  declares `const <FAMILY>: Family = Family::new("<Suffix>Service", "<verb>",
+  "<noun>")` and uses `<FAMILY>.candidates(Cmd::command)` for completion,
+  `.require_name`, `.resolve` and `.suggest` for the probe, never a private
+  alias resolver.
 
 ## Boundary with the service
 
@@ -124,10 +137,13 @@ no `--yes`, no `--dry-run`.
   CLI's kind).
 - Colour and glyphs only via `output::is_colored()`, `output::dim`,
   `output::paint_dim`; no `colored` dependency in a CLI crate (#2377).
+  `ync::init`, called by `entrypoint`, decides colour once for the process; a
+  crate never calls `colored::control` outside its tests.
 - An unusable derived JSON shape (an enum as a number) is fixed on the wire
   type: `field_attribute` in `build.rs` adds `#[serde(serialize_with = "…")]`,
   the function lives in `main.rs`, the exception is owner-approved.
-- Ages, durations, sizes: `ync::humanfmt`; metrics: `ync::metrics`.
+- Ages, durations, sizes: `ync::humanfmt`; metrics: `ync::metrics`, its
+  `format_number` the one thousands-separator formatter.
 
 ## Errors and exit codes
 
@@ -160,3 +176,5 @@ test_<what>_<case>` in `mod test`.
 - `CompleteEnv` inside a tokio runtime.
 - Swallow a stream or writer error and exit 0.
 - Heuristics over a library error: take the root of the `source()` chain.
+- A private copy of a ync helper (alias resolver, YAML loader, client
+  builder closure repeated per site).

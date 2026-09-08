@@ -123,6 +123,12 @@ const SERVICE_NAME: &str = "<proto package>.<X>Service";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "config");
 
+fn client(channel: LayeredChannel) -> <X>ServiceClient<LayeredChannel> {
+    <X>ServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 /// Manages <x> module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -209,12 +215,7 @@ pub struct <X>Service {
 
 impl <X>Service {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            <X>ServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -324,11 +325,7 @@ impl Tabled for Config {
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(
         Cmd::command,
-        |channel| {
-            <X>ServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
+        client,
         async move |mut client| {
             Ok(client
                 .list_configs(ListConfigsRequest {})
