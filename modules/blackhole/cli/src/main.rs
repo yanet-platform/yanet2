@@ -83,6 +83,12 @@ pub struct DeleteConfigCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService";
 
+fn client(channel: LayeredChannel) -> BlackholeServiceClient<LayeredChannel> {
+    BlackholeServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
@@ -105,12 +111,7 @@ pub struct BlackholeService {
 
 impl BlackholeService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            BlackholeServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -209,13 +210,7 @@ impl BlackholeService {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            BlackholeServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }

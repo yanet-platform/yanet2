@@ -1,5 +1,5 @@
 use clap::{ArgAction, Parser};
-use commonpb::pb::Device;
+use commonpb::pb::{Device, DevicePipeline};
 use plainpb::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -45,10 +45,10 @@ pub struct UpdateCmd {
     pub name: String,
     /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'i')]
-    pub input: Vec<String>,
+    pub input: Vec<DevicePipeline>,
     /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'o')]
-    pub output: Vec<String>,
+    pub output: Vec<DevicePipeline>,
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -71,22 +71,9 @@ impl DevicePlainService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let input = cmd
-            .input
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-        let output = cmd
-            .output
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-
         let request = UpdateDevicePlainRequest {
             name: cmd.name.clone(),
-            device: Some(Device { input, output }),
+            device: Some(Device { input: cmd.input, output: cmd.output }),
         };
 
         self.service

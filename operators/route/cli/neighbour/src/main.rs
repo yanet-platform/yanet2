@@ -42,6 +42,12 @@ const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
 /// Maps a genuine "table not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested table");
 
+fn client(channel: LayeredChannel) -> NeighbourServiceClient<LayeredChannel> {
+    NeighbourServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 /// Manages the neighbour tables of the route operator.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
@@ -198,12 +204,7 @@ pub struct NeighbourService {
 
 impl NeighbourService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            NeighbourServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -477,24 +478,16 @@ impl Tabled for NeighbourTableInfo {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn table_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            NeighbourServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| {
-            Ok(client
-                .list_tables(ListNeighbourTablesRequest {})
-                .await?
-                .into_inner()
-                .tables
-                .into_iter()
-                .map(|table| table.name)
-                .collect())
-        },
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client
+            .list_tables(ListNeighbourTablesRequest {})
+            .await?
+            .into_inner()
+            .tables
+            .into_iter()
+            .map(|table| table.name)
+            .collect())
+    })
 }
 
 #[cfg(test)]

@@ -1,8 +1,5 @@
 use core::{error::Error as StdError, net::IpAddr};
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -19,6 +16,7 @@ use ync::{
     completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
+    yaml,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
@@ -133,15 +131,6 @@ pub struct UnrdupConfig {
     pub services: Vec<ServiceConfig>,
 }
 
-impl UnrdupConfig {
-    pub fn load(path: &Path) -> Result<Self, Box<dyn StdError>> {
-        let file = File::open(path)?;
-        let config = serde_yaml::from_reader(file)?;
-
-        Ok(config)
-    }
-}
-
 impl From<UnrdupConfig> for Config {
     fn from(value: UnrdupConfig) -> Self {
         Self {
@@ -242,6 +231,12 @@ const SERVICE_NAME: &str = "modules.unrdup.controlplane.unrduppb.v1.UnrdupServic
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
+fn client(channel: LayeredChannel) -> UnrdupServiceClient<LayeredChannel> {
+    UnrdupServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
@@ -264,12 +259,7 @@ pub struct UnrdupService {
 
 impl UnrdupService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = GrpcService::connect_for(connection, action, SERVICE_NAME, |channel| {
-            UnrdupServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = GrpcService::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -339,7 +329,8 @@ impl UnrdupService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
-        let config = UnrdupConfig::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
+        let config: UnrdupConfig =
+            yaml::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
@@ -386,15 +377,9 @@ impl UnrdupService {
 }
 
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            UnrdupServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]

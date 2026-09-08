@@ -18,6 +18,12 @@ use ynpb::pb::{
 const FUNCTION_SERVICE: &str = "controlplane.ynpb.v1.FunctionService";
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(FUNCTION_SERVICE, "requested function");
 
+fn client(channel: LayeredChannel) -> FunctionServiceClient<LayeredChannel> {
+    FunctionServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 /// Manages functions.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
@@ -153,12 +159,7 @@ pub struct FunctionService {
 
 impl FunctionService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, FUNCTION_SERVICE, |channel| {
-            FunctionServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, FUNCTION_SERVICE, client).await?;
 
         Ok(Self { service })
     }
@@ -255,22 +256,14 @@ impl FunctionService {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn function_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            FunctionServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| {
-            Ok(client
-                .list(ListFunctionsRequest {})
-                .await?
-                .into_inner()
-                .ids
-                .into_iter()
-                .map(|id| id.name)
-                .collect())
-        },
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client
+            .list(ListFunctionsRequest {})
+            .await?
+            .into_inner()
+            .ids
+            .into_iter()
+            .map(|id| id.name)
+            .collect())
+    })
 }

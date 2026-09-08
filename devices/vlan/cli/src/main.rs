@@ -1,5 +1,5 @@
 use clap::{ArgAction, Parser, value_parser};
-use commonpb::pb::Device;
+use commonpb::pb::{Device, DevicePipeline};
 use tonic::codec::CompressionEncoding;
 use vlanpb::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use ync::{
@@ -45,10 +45,10 @@ pub struct UpdateCmd {
     pub name: String,
     /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'i')]
-    pub input: Vec<String>,
+    pub input: Vec<DevicePipeline>,
     /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'o')]
-    pub output: Vec<String>,
+    pub output: Vec<DevicePipeline>,
     /// VLAN id in 0..=4094, where 0 makes the device emit untagged frames.
     #[arg(long, value_parser = value_parser!(u16).range(0..=4094))]
     pub vlan: u16,
@@ -74,22 +74,9 @@ impl DeviceVlanService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let input = cmd
-            .input
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-        let output = cmd
-            .output
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-
         let request = UpdateDeviceVlanRequest {
             name: cmd.name.clone(),
-            device: Some(Device { input, output }),
+            device: Some(Device { input: cmd.input, output: cmd.output }),
             vlan: cmd.vlan as u32,
         };
 

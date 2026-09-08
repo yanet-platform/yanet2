@@ -250,6 +250,10 @@ impl Error {
         &self.message
     }
 
+    pub fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
+    }
+
     /// Process exit code for this error.
     pub fn exit_code(&self) -> i32 {
         self.kind.exit_code()

@@ -29,6 +29,12 @@ const SERVICE_NAME: &str = "modules.nat64.controlplane.nat64pb.v1.NAT64Service";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
+fn client(channel: LayeredChannel) -> Nat64ServiceClient<LayeredChannel> {
+    Nat64ServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 /// Manages nat64 module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
@@ -220,12 +226,7 @@ pub struct NAT64Service {
 
 impl NAT64Service {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            Nat64ServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -522,15 +523,9 @@ fn parse_prefix(value: &str) -> Result<Contiguous<Ipv6Network>, String> {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            Nat64ServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]

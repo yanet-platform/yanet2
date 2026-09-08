@@ -29,6 +29,12 @@ pub mod fwstatemappb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "objects.fwstate.controlplane.fwstatemappb.v1.FWStateMapService";
 
+fn client(channel: LayeredChannel) -> FwStateMapServiceClient<LayeredChannel> {
+    FwStateMapServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 /// Manages fwstate-map objects that fwstate and acl configs link by name.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
@@ -91,11 +97,7 @@ impl DumpState {
 impl FWStateMapService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, |channel| {
-            FwStateMapServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
+        let service = Service::new(&conn, SERVICE_NAME, client);
 
         Ok(Self { service })
     }
@@ -455,15 +457,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn map_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            FwStateMapServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_maps(ListMapsRequest {}).await?.into_inner().maps),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_maps(ListMapsRequest {}).await?.into_inner().maps)
+    })
 }
 
 #[cfg(test)]

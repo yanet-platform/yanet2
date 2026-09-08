@@ -9,9 +9,8 @@ use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use serde::Serialize;
 use ync::{
     client::{self, Connection, ConnectionArgs},
-    completion,
-    discovery::{self, Resolution},
-    errors::{Error, ErrorKind},
+    discovery::Family,
+    errors::Error,
     output::{self, CommonFormat},
 };
 
@@ -21,14 +20,8 @@ mod watch;
 /// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
 const EXIT_NOT_READY: u8 = 2;
 
-/// Caption of the hint that lists every discovered readiness service.
-const AVAILABLE_SERVICES: &str = "available readiness services:";
-
-/// Message used in place of the hint when no readiness service is registered.
-const NO_SERVICES: &str = "no readiness services are registered with the gateway";
-
-/// Trailing segment of every readiness service's fully-qualified name.
-const READINESS_SERVICE: &str = "ReadinessService";
+/// The family of readiness services this CLI probes and discovers.
+const READINESS: Family = Family::new("ReadinessService", "ready", "readiness");
 
 /// Probes readiness of the gateway services.
 ///
@@ -127,21 +120,11 @@ async fn run(cmd: Cmd) -> Result<ExitCode, Error> {
     } else {
         let name = cmd.name.clone().expect("a non-aggregate command names a service");
 
-        if is_blank(&name) {
-            return Err(Error::invalid_argument(
-                "ready",
-                client::resolve_label(&cmd.connection, "ready")?,
-                "service name must not be empty",
-            ));
-        }
+        READINESS.require_name(&client::resolve_label(&cmd.connection, "ready")?, &name)?;
 
         let connection = Connection::connect_for(&cmd.connection, "ready").await?;
 
-        let name = if name.contains('.') {
-            name
-        } else {
-            resolve_alias(&connection, &name).await?
-        };
+        let name = READINESS.resolve(&connection, &name).await?;
 
         run_service(&cmd, &connection, &name).await?
     };
@@ -151,18 +134,6 @@ async fn run(cmd: Cmd) -> Result<ExitCode, Error> {
     } else {
         ExitCode::from(EXIT_NOT_READY)
     })
-}
-
-/// Whether a service name is empty or whitespace only.
-///
-/// An empty name is a substring of every service, so as an alias it matches
-/// them all — and with a single readiness service registered it would resolve
-/// to that one and hand its readiness to the caller as the exit code of a probe
-/// they never asked for. `yanet-cli ready "$SERVICE"` on an unset variable is
-/// bad input rather than a registry condition, so it is rejected as such, and
-/// before anything is discovered.
-fn is_blank(name: &str) -> bool {
-    name.trim().is_empty()
 }
 
 /// Probes one service, one-shot or streaming, and suggests the services that
@@ -176,7 +147,7 @@ async fn run_service(cmd: &Cmd, connection: &Connection, name: &str) -> Result<b
 
     match result {
         Ok(ready) => Ok(ready),
-        Err(err) => Err(suggest_services(connection, err).await),
+        Err(err) => Err(READINESS.suggest(connection, err).await),
     }
 }
 
@@ -303,7 +274,7 @@ async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
     }
 
     let connection = Connection::connect_for(&cmd.connection, "ready").await?;
-    let services = discovery::list_services(&connection, READINESS_SERVICE).await?;
+    let services = READINESS.list(&connection).await?;
 
     let mut reports = Vec::with_capacity(services.len());
     for service in services {
@@ -414,73 +385,10 @@ fn print_missing(missing: &[&str]) {
     }
 }
 
-/// Resolves a short alias against the services the gateway knows.
-///
-/// An alias that matches nothing describes the same operational condition as a
-/// fully-qualified name the gateway does not know — that readiness service is
-/// not registered, its operator down or not yet up — because the alias is
-/// resolved against the live registry. It therefore carries the same kind the
-/// gateway's own answer would map to, so that a monitoring script gets one exit
-/// code for both spellings of the condition. An ambiguous alias, in contrast,
-/// really is bad input.
-async fn resolve_alias(connection: &Connection, alias: &str) -> Result<String, Error> {
-    let services = discovery::list_services(connection, READINESS_SERVICE).await?;
-    let endpoint = connection.endpoint();
-
-    match discovery::resolve_alias(alias, &services) {
-        Resolution::Resolved(name) => Ok(name),
-        Resolution::Ambiguous(candidates) => {
-            let message = format!("service name \"{alias}\" is ambiguous");
-
-            Err(
-                Error::invalid_argument("ready", endpoint, message).with_hint(discovery::services_hint(
-                    "matching readiness services:",
-                    NO_SERVICES,
-                    &candidates,
-                )),
-            )
-        }
-        Resolution::Unknown => {
-            let message = format!("unknown readiness service \"{alias}\"");
-
-            Err(Error::new(ErrorKind::ServiceUnregistered, "ready", endpoint, message)
-                .with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)))
-        }
-    }
-}
-
-/// Adds the discovered services to `err`'s hint when it reads like the named
-/// service is simply not registered.
-///
-/// Best-effort: a failed discovery leaves `err` exactly as it was, so a
-/// gateway that is down still surfaces the original probe error rather than a
-/// second, more confusing one.
-async fn suggest_services(connection: &Connection, err: Error) -> Error {
-    if !matches!(err.kind(), ErrorKind::ServiceUnregistered | ErrorKind::NotFound) {
-        return err;
-    }
-
-    match discovery::list_services(connection, READINESS_SERVICE).await {
-        Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
-        Err(..) => err,
-    }
-}
-
 /// Completion candidates for the service positional: the readiness services
 /// the gateway currently knows.
-///
-/// Strictly best-effort — a tab-completion must never print an error nor hang
-/// — so a gateway that is down, slow or refusing us auth yields no candidates
-/// at all, `discovery::DISCOVERY_TIMEOUT` covering the slow case. The
-/// endpoint is recovered from the connection flags the user has actually
-/// typed so far, `YANET_ENDPOINT` included as the fallback.
 fn service_candidates() -> Vec<CompletionCandidate> {
-    let connection = completion::connection_args(Cmd::command);
-
-    discovery::candidates(&connection, READINESS_SERVICE, discovery::DISCOVERY_TIMEOUT)
-        .into_iter()
-        .map(CompletionCandidate::new)
-        .collect()
+    READINESS.candidates(Cmd::command)
 }
 
 #[cfg(test)]
@@ -544,21 +452,6 @@ mod test {
     #[test]
     fn not_ready_without_any_discovered_service() {
         assert!(!all_ready(&[]));
-    }
-
-    #[test]
-    fn an_empty_service_name_is_blank() {
-        assert!(is_blank(""));
-    }
-
-    #[test]
-    fn a_whitespace_only_service_name_is_blank() {
-        assert!(is_blank("  \t "));
-    }
-
-    #[test]
-    fn a_named_service_is_not_blank() {
-        assert!(!is_blank("route"));
     }
 
     #[test]

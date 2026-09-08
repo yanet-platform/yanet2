@@ -37,6 +37,12 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
 
+fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
+    RouteServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 /// Manages the RIB of the route operator.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
@@ -175,15 +181,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            RouteServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 /// Run the requested subcommand.
@@ -211,11 +211,7 @@ pub struct RouteService {
 impl RouteService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, |channel| {
-            RouteServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
+        let service = Service::new(&conn, SERVICE_NAME, client);
 
         Ok(Self { service })
     }

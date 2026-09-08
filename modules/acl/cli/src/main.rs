@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::File, path::Path};
+use std::collections::HashMap;
 
 use aclpb::{
     DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest,
@@ -16,6 +16,7 @@ use ync::{
     errors::Error,
     metrics,
     output::{self, CommonFormat},
+    yaml,
 };
 
 mod args;
@@ -200,18 +201,6 @@ pub struct ACLConfig {
     fwtable_name_v6: Option<String>,
 }
 
-impl ACLConfig {
-    pub fn load<P>(path: P) -> Result<Self, Box<dyn core::error::Error>>
-    where
-        P: AsRef<Path>,
-    {
-        let file = File::open(path)?;
-        let config = serde_yaml::from_reader(file)?;
-
-        Ok(config)
-    }
-}
-
 /// Display view of an ACL config returned by the show command.
 ///
 /// Map names are omitted when absent.
@@ -244,6 +233,22 @@ pub struct Cmd {
 const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
 const METRICS_SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.MetricsService";
 
+fn client(channel: LayeredChannel) -> AclServiceClient<LayeredChannel> {
+    AclServiceClient::new(channel)
+        .max_decoding_message_size(256 * 1024 * 1024)
+        .max_encoding_message_size(256 * 1024 * 1024)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+fn metrics_client(channel: LayeredChannel) -> MetricsServiceClient<LayeredChannel> {
+    MetricsServiceClient::new(channel)
+        .max_decoding_message_size(256 * 1024 * 1024)
+        .max_encoding_message_size(256 * 1024 * 1024)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 pub struct ACLService {
     service: Service<AclServiceClient<LayeredChannel>>,
     metrics: Service<MetricsServiceClient<LayeredChannel>>,
@@ -252,20 +257,8 @@ pub struct ACLService {
 impl ACLService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, |channel| {
-            AclServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
-        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, |channel| {
-            MetricsServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
+        let service = Service::new(&conn, SERVICE_NAME, client);
+        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, metrics_client);
 
         Ok(Self { service, metrics })
     }
@@ -357,12 +350,7 @@ impl ACLService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config = ACLConfig::load(&cmd.file).map_err(|err| {
-            self.service.invalid(
-                "update",
-                format!("failed to load rules from {}: {err}", cmd.file.display()),
-            )
-        })?;
+        let config: ACLConfig = yaml::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
         let rule_count = config.rules.len();
 
         // A flag wins for that field whenever it is passed, even as an
@@ -529,17 +517,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            AclServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]
