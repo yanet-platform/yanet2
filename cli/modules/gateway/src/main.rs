@@ -15,7 +15,7 @@ use ynpb::pb::{BackendKind, ListServicesRequest, RegisteredBackend, gateway_clie
 
 const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
 
-/// Gateway - inspects the gateway service registry.
+/// Inspects the gateway service registry.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -27,7 +27,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }

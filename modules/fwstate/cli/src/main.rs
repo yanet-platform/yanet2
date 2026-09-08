@@ -29,7 +29,7 @@ pub mod fwstatepb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
 
-/// FWState module CLI.
+/// Manages fwstate module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -41,7 +41,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -251,7 +251,9 @@ impl FWStateService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No FWState configurations found."),
-                        format_args!("create one with 'yanet-cli-fwstate update --name <name>'"),
+                        format_args!(
+                            "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
+                        ),
                     );
                     return;
                 }
@@ -292,7 +294,7 @@ impl FWStateService {
             .await
             .map_err(self.service.status("delete"))?;
 
-        output::success("delete", format_args!("Deleted fwstate config {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -371,7 +373,7 @@ impl FWStateService {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated fwstate config {}.", cmd.config_name));
+        output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
         Ok(())
     }

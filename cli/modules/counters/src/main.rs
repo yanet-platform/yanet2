@@ -17,7 +17,7 @@ use ynpb::pb::{
 
 const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
 
-/// Counters module - displays counters information.
+/// Displays dataplane counters.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -31,7 +31,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }

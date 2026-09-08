@@ -22,7 +22,7 @@ pub mod decappb {
     tonic::include_proto!("modules.decap.controlplane.decappb.v1");
 }
 
-/// Decap module.
+/// Manages decap module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -34,17 +34,20 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// List configs.
     List,
+    /// Show a config.
     Show(ShowConfigCmd),
+    /// Create or replace a config.
     Update(UpdateConfigCmd),
-    /// Delete a decap module config.
+    /// Delete a config.
     Delete(DeleteConfigCmd),
 }
 
@@ -202,7 +205,7 @@ impl DecapService {
             .into_inner();
         log::debug!("update config response: {response:?}");
 
-        output::success("update", format_args!("Updated decap {}.", cmd.config_name));
+        output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -226,7 +229,7 @@ impl DecapService {
             .into_inner();
         log::debug!("delete config response: {response:?}");
 
-        output::success("delete", format_args!("Deleted decap {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }

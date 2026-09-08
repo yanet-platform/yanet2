@@ -27,15 +27,15 @@ pub const ALL: pdump_mode = mode::pdump_mode_PDUMP_ALL;
 #[derive(Args, Debug, Clone, Copy)]
 #[group(required = false, multiple = true)]
 pub struct Mode {
-    /// Capture input packets
+    /// Capture input packets.
     #[arg(long)]
     pub input: bool,
 
-    /// Capture dropped packets
+    /// Capture dropped packets.
     #[arg(long)]
     pub drops: bool,
 
-    /// Capture all packets (input and drops)
+    /// Capture all packets (input and drops).
     #[arg(long)]
     pub all: bool,
 }

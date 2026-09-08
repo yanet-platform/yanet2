@@ -21,7 +21,7 @@ const AVAILABLE_SERVICES: &str = "available metrics services:";
 /// Message used in place of the hint when no metrics service is registered.
 const NO_SERVICES: &str = "no metrics services are registered with the gateway";
 
-/// Generic metrics probe — calls `GetMetrics` on any `MetricsService`.
+/// Reads metrics of the gateway services.
 ///
 /// Connects to the gateway and invokes `/<FQN>/GetMetrics` using tonic's
 /// low-level dynamic dispatcher with the shared `commonpb` message types. No

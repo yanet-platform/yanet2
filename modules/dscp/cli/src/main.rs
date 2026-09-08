@@ -24,7 +24,7 @@ pub mod dscppb {
     tonic::include_proto!("modules.dscp.controlplane.dscppb.v1");
 }
 
-/// DSCP module for packet marking.
+/// Manages dscp module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -36,19 +36,24 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// List configs.
     List,
+    /// Show a config.
     Show(ShowConfigCmd),
+    /// Add prefixes to the input filter of a config.
     PrefixAdd(AddPrefixesCmd),
+    /// Remove prefixes from the input filter of a config.
     PrefixRemove(RemovePrefixesCmd),
+    /// Set the DSCP marking of a config.
     SetMarking(SetDscpMarkingCmd),
-    /// Delete a dscp module config.
+    /// Delete a config.
     Delete(DeleteConfigCmd),
 }
 
@@ -256,7 +261,7 @@ impl DscpService {
 
         output::success(
             "prefix-add",
-            format_args!("Added {} prefix(es) to {}.", cmd.prefix.len(), cmd.config_name),
+            format_args!("Added {} prefix(es) to config '{}'.", cmd.prefix.len(), cmd.config_name),
         );
 
         Ok(())
@@ -281,7 +286,11 @@ impl DscpService {
 
         output::success(
             "prefix-remove",
-            format_args!("Removed {} prefix(es) from {}.", cmd.prefix.len(), cmd.config_name),
+            format_args!(
+                "Removed {} prefix(es) from config '{}'.",
+                cmd.prefix.len(),
+                cmd.config_name
+            ),
         );
 
         Ok(())
@@ -305,7 +314,10 @@ impl DscpService {
             .into_inner();
         log::debug!("SetDscpMarkingResponse: {response:?}");
 
-        output::success("set-marking", format_args!("Set DSCP marking on {}.", cmd.config_name));
+        output::success(
+            "set-marking",
+            format_args!("Set marking on config '{}'.", cmd.config_name),
+        );
 
         Ok(())
     }
@@ -329,7 +341,7 @@ impl DscpService {
             .into_inner();
         log::debug!("DeleteConfigResponse: {response:?}");
 
-        output::success("delete", format_args!("Deleted dscp {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }

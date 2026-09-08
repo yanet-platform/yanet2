@@ -6,10 +6,15 @@ use clap_complete::engine::ArgValueCandidates;
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// List configs.
     List,
+    /// Show a config.
     Show(ShowConfigCmd),
+    /// Create or replace a config.
     Set(SetConfigCmd),
+    /// Delete a config.
     Delete(DeleteCmd),
+    /// Read the packet dump stream of a config.
     Read(ReadCmd),
 }
 
@@ -45,7 +50,7 @@ pub struct SetConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// Filter represents a pcap-style filter expression
+    /// Filter represents a pcap-style filter expression.
     #[arg(long)]
     pub filter: Option<String>,
 
@@ -57,7 +62,7 @@ pub struct SetConfigCmd {
     #[arg(long = "snaplen", short_alias = 's')]
     pub snaplen: Option<u32>,
 
-    /// Per-worker ring buffer size
+    /// Per-worker ring buffer size.
     #[arg(long = "ring-size")]
     pub ring_size: Option<RingBufferSize>,
 }
@@ -133,13 +138,14 @@ impl FromStr for RingBufferSize {
 /// Dump Output format options.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum DumpOutputFormat {
-    /// Simple one-line human-readable output of the packet metadata and content
+    /// Simple one-line human-readable output of the packet metadata and
+    /// content.
     Text,
     /// Pretty multi-line human-readable output of the packet metadata and
-    /// content
+    /// content.
     Pretty,
-    /// PCAP Capture File Format
+    /// PCAP Capture File Format.
     Pcap,
-    /// PCAP Next Generation (pcapng) Capture File Format
+    /// PCAP Next Generation (pcapng) Capture File Format.
     PcapNg,
 }

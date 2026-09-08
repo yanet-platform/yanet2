@@ -37,7 +37,7 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
 
-/// Route operator CLI (RIB management).
+/// Manages the RIB of the route operator.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -46,6 +46,7 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
     /// Be verbose: shows debug log lines and raw gRPC error details.
@@ -341,7 +342,7 @@ impl RouteService {
         output::success(
             "insert",
             format_args!(
-                "Inserted {} via {} in {} (source: {}).",
+                "Inserted {} via {} in config '{}' (source: {}).",
                 cmd.prefix,
                 via,
                 cmd.name,
@@ -379,7 +380,7 @@ impl RouteService {
         output::success(
             "remove",
             format_args!(
-                "Removed {} via {} from {} (source: {}).",
+                "Removed {} via {} from config '{}' (source: {}).",
                 cmd.prefix,
                 via,
                 cmd.name,
@@ -399,7 +400,7 @@ impl RouteService {
             .await
             .map_err(self.service.status("flush"))?;
 
-        output::success("flush", format_args!("Flushed {}.", cmd.name));
+        output::success("flush", format_args!("Flushed config '{}'.", cmd.name));
 
         Ok(())
     }

@@ -15,7 +15,7 @@ use ynpb::pb::{InspectRequest, InspectResponse, inspect_service_client::InspectS
 /// The fully-qualified gRPC service name used in error messages.
 const INSPECT_SERVICE: &str = "controlplane.ynpb.v1.InspectService";
 
-/// Inspect module - displays system introspection information.
+/// Displays the dataplane introspection report.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
