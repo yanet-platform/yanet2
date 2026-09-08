@@ -117,7 +117,10 @@ get_net6s_dst(const struct filter_rule *rule, struct filter_net6s *net6s) {
 
 // Half space region bounds of a normalized network, with the wrap case
 // of an upper bound past the last collected boundary mapped to the end.
-static inline void
+//
+// A mask with holes makes the upper bound escape the collected regions;
+// that is reported as a failure instead of being walked.
+static inline int
 net6_half_bounds(
 	const struct range_index *ri,
 	const uint8_t *addr,
@@ -134,11 +137,15 @@ net6_half_bounds(
 	filter_key_inc(8, to);
 	*start = radix_lookup(&ri->radix, 8, from);
 	*stop = radix_lookup(&ri->radix, 8, to);
+	if (*stop == RADIX_VALUE_INVALID) {
+		return -1;
+	}
 	if (*stop == 0) {
 		// The only chance to read zero is the key past the last
 		// collected boundary.
 		*stop = ri->count;
 	}
+	return 0;
 }
 
 // Host side open addressing map from a 32 byte network to an id.
@@ -350,17 +357,38 @@ filter_compile_attr_net6s_build_dedup(
 	memset(attr->query_attr, 0, sizeof(struct filter_query_attr_net6));
 
 	/*
+	 * The dedup arrays are sized from the instance count — one
+	 * instance per rule and network pair — not from the rule count.
+	 *
+	 * A single rule may carry an unbounded network list, so a per rule
+	 * constant overflows the dense view on the first wide rule. The
+	 * distinct network count never exceeds the instance count, and the
+	 * doubled open addressing capacity keeps a free slot to terminate
+	 * the probe.
+	 */
+	struct filter_net6s nets;
+	uint32_t instance_total = 0;
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL) {
+			continue;
+		}
+		get_net6s(rule, &nets);
+		instance_total += nets.count;
+	}
+
+	/*
 	 * One pass over the rule instances: normalize, index each distinct
 	 * network, and record (network, rule) pairs. Everything downstream
 	 * works from the pairs and the distinct network list.
 	 */
 	uint32_t dedup_cap = 16;
-	while (dedup_cap < rule_count * 4 + 16) {
+	while (dedup_cap < instance_total * 2) {
 		dedup_cap <<= 1;
 	}
 	struct net6_dedup dedup = {
 		.keys = calloc(dedup_cap, 32),
-		.by_id = calloc(rule_count * 4 + 8, 32),
+		.by_id = calloc(instance_total + 1, 32),
 		.ids = calloc(dedup_cap, 4),
 		.cap = dedup_cap,
 		.count = 0,
@@ -389,7 +417,6 @@ filter_compile_attr_net6s_build_dedup(
 		goto error_host;
 	}
 
-	struct filter_net6s nets;
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
 		if (rule == NULL) {
@@ -456,20 +483,22 @@ filter_compile_attr_net6s_build_dedup(
 	}
 	for (uint32_t net_id = 0; net_id < net_total; ++net_id) {
 		const uint8_t *key = dedup.by_id + net_id * 32;
-		net6_half_bounds(
-			&attr->ri_hi,
-			key,
-			key + 16,
-			&bounds[net_id * 4],
-			&bounds[net_id * 4 + 1]
-		);
-		net6_half_bounds(
-			&attr->ri_lo,
-			key + 8,
-			key + 24,
-			&bounds[net_id * 4 + 2],
-			&bounds[net_id * 4 + 3]
-		);
+		if (net6_half_bounds(
+			    &attr->ri_hi,
+			    key,
+			    key + 16,
+			    &bounds[net_id * 4],
+			    &bounds[net_id * 4 + 1]
+		    ) ||
+		    net6_half_bounds(
+			    &attr->ri_lo,
+			    key + 8,
+			    key + 24,
+			    &bounds[net_id * 4 + 2],
+			    &bounds[net_id * 4 + 3]
+		    )) {
+			goto error_host;
+		}
 	}
 
 	occ = calloc(net_total + 1, 4);
@@ -892,6 +921,7 @@ error_host:
 	free(span_off);
 	free(occ);
 	free(dedup.keys);
+	free(dedup.by_id);
 	free(dedup.ids);
 error:
 	filter_compile_attr_net6s_free(memory_context, &attr->attr);

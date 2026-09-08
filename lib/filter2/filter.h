@@ -34,6 +34,11 @@
 
 #define FILTER_RULE_INVALID (uint32_t)0xffffffff
 
+// Attribute count of a FILTER_COMPILER_DECLARE / FILTER_QUERY_DECLARE
+// signature array; valid only where the argument is still an array, not
+// a decayed function parameter.
+#define FILTER_SIGN_COUNT(sign) (sizeof(sign) / sizeof(*sign))
+
 struct filter_query_attr {};
 
 struct filter {

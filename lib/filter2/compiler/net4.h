@@ -227,18 +227,39 @@ filter_compile_attr_net4_build_dedup(
 	}
 	memset(attr, 0, sizeof(struct filter_compile_net_attr));
 
+	/*
+	 * The dedup arrays are sized from the instance count — one
+	 * instance per rule and network pair — not from the rule count.
+	 *
+	 * A single rule may carry an unbounded network list, so a per rule
+	 * constant overflows the dense view on the first wide rule. The
+	 * distinct network count never exceeds the instance count, and the
+	 * doubled open addressing capacity keeps a free slot to terminate
+	 * the probe.
+	 */
+	struct filter_net4s nets;
+	uint32_t instance_total = 0;
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL) {
+			continue;
+		}
+		get_net4s(rule, &nets);
+		instance_total += nets.count;
+	}
+
 	// One pass over the instances: normalize, index, record pairs.
 	uint32_t pair_cap = 64;
 	uint32_t pair_len = 0;
 	uint32_t *pair_net = malloc(pair_cap * 4);
 	uint32_t *pair_rule = malloc(pair_cap * 4);
 	uint32_t dedup_cap = 16;
-	while (dedup_cap < rule_count * 4 + 16) {
+	while (dedup_cap < instance_total * 2) {
 		dedup_cap <<= 1;
 	}
 	struct net4_dedup dedup = {
 		.keys = calloc(dedup_cap, 8),
-		.by_id = calloc(rule_count * 4 + 8, 8),
+		.by_id = calloc(instance_total + 1, 8),
 		.ids = calloc(dedup_cap, 4),
 		.cap = dedup_cap,
 		.count = 0,
@@ -248,7 +269,6 @@ filter_compile_attr_net4_build_dedup(
 		goto error_host;
 	}
 
-	struct filter_net4s nets;
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct filter_rule *rule = rules[rule_idx];
 		if (rule == NULL) {
@@ -344,6 +364,13 @@ filter_compile_attr_net4_build_dedup(
 		uint32_t start =
 			radix_lookup(&attr->range_index.radix, 4, from);
 		uint32_t stop = radix_lookup(&attr->range_index.radix, 4, to);
+		if (stop == RADIX_VALUE_INVALID) {
+			// Only a mask with holes escapes the collected
+			// regions; fail the compile instead of walking out
+			// of bounds.
+			free(bounds);
+			goto error_query;
+		}
 		if (stop == 0) {
 			// The only chance to read zero is the key past the
 			// last collected boundary.

@@ -19,3 +19,15 @@ filter2_smoke = executable(
 )
 
 test('filter2_smoke', filter2_smoke, suite: ['filter'])
+
+filter2_regression = executable(
+  'filter2_regression',
+  ['regression.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c',
+  include_directories: yanet_rootdir,
+)
+
+test('filter2_regression', filter2_regression, suite: ['filter'])
