@@ -26,10 +26,49 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/operator"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
+
+// Test_NeighbourService_RemoteRemoval verifies that incremental deletion cannot
+// mutate complete remote input while explicit and implicit static edits work.
+func Test_NeighbourService_RemoteRemoval(t *testing.T) {
+	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
+	input := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
+	fixture := newNeighbourServiceFixture(t,
+		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0"}),
+		operator.WithNeighbourServiceOnSnapshotReceived(input.OnSnapshotReceived),
+	)
+	chunk := replacementChunk("remote", 100, "192.0.2.1")
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunk))
+	before := sourceEntries(t, fixture.Table, "remote")
+	generation, available := input.Generation()
+	require.True(t, available)
+	changes := fixture.Changes.Load()
+	_, err := fixture.Client.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
+		Table: "remote", NextHops: []*commonpb.IPAddress{chunk.Entries[0].NextHop},
+	})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+	require.Equal(t, changes, fixture.Changes.Load())
+	current, available := input.Generation()
+	require.True(t, available)
+	require.Equal(t, generation, current)
+	_, err = fixture.Table.CreateSource("static", 10, true)
+	require.NoError(t, err)
+	for _, table := range []string{"static", ""} {
+		_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: table, Entries: chunk.Entries})
+		require.NoError(t, err)
+		_, err = fixture.Client.RemoveNeighbours(t.Context(), &operatorpb.RemoveNeighboursRequest{
+			Table: table, NextHops: []*commonpb.IPAddress{chunk.Entries[0].NextHop},
+		})
+		require.NoError(t, err)
+		require.Empty(t, sourceEntries(t, fixture.Table, "static"))
+	}
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+}
 
 type replacementProgress struct {
 	Chunks   int

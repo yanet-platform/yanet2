@@ -26,6 +26,7 @@ type RouteSnapshot struct {
 	// before equal next hops are merged.
 	Neighbours           neigh.TableSnapshot
 	NeighbourScopeSource string
+	NeighbourGeneration  uint64
 }
 
 // RouteSource is the operator.StateSource[RouteSnapshot] used by the route
@@ -111,7 +112,10 @@ func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
 	for name, ribRef := range ribs {
 		dumps[name] = ribRef.DumpRoutes()
 	}
-	return RouteSnapshot{RIBs: dumps, Neighbours: neighbours, NeighbourScopeSource: m.scopeSource}, true
+	return RouteSnapshot{
+		RIBs: dumps, Neighbours: neighbours,
+		NeighbourScopeSource: m.scopeSource, NeighbourGeneration: generation,
+	}, true
 }
 
 func (m *RouteSource) Wake() <-chan struct{} {
