@@ -774,48 +774,56 @@ func doctorAccelerationCheck(platform string, kvmAvailable func() bool) doctorCh
 }
 
 func (m *application) up() error {
-	dir, _, err := sessionPaths(m.session)
+	response, err := m.startSession()
 	if err != nil {
 		return err
 	}
+	return m.printResponse(response)
+}
+
+func (m *application) startSession() (*response, error) {
+	dir, _, err := sessionPaths(m.session)
+	if err != nil {
+		return nil, err
+	}
 	if err := ensureSessionDirectory(dir); err != nil {
-		return err
+		return nil, err
 	}
 	logPath := filepath.Join(dir, "supervisor.log")
 	if err := shutdownMarkerCheck(dir); err != nil {
-		return err
+		return nil, err
 	}
 	reuse, replacedFrom, err := m.shutdownStaleSupervisor()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if reuse != nil {
 		if !reuse.OK {
 			if reuse.Error == labBusyError {
-				return errLabBusy
+				return nil, errLabBusy
 			}
-			return sessionUnhealthy(reuse.Error, logPath)
+			return nil, sessionUnhealthy(reuse.Error, logPath)
 		}
-		return m.printResponse(reuse)
+		return reuse, nil
 	}
 	if err := probeSessionLock(dir); err != nil {
 		if errors.Is(err, errLabBusy) {
-			return errLabBusy
+			return nil, errLabBusy
 		}
-		return sessionUnhealthy(err.Error(), logPath)
+		return nil, sessionUnhealthy(err.Error(), logPath)
 	}
 	// Re-check the shutdown marker immediately before spawning serve so a
 	// concurrent `down` that wrote the marker between the initial check and
 	// the spawn still blocks `up` instead of clobbering the failed session.
 	if err := shutdownMarkerCheck(dir); err != nil {
-		return err
+		return nil, err
 	}
 	response, err := serveRunner(m, logPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	annotateReplacement(response, replacedFrom)
-	return m.printResponse(response)
+	return response, nil
 }
 
 // sessionUnhealthy wraps the exact AC2 error form: a non-zero prefix naming
@@ -954,7 +962,17 @@ func exitedDuringStartupError(directory string, directoryErr error, processErr e
 }
 
 func (m *application) ensureUp() error {
-	return m.up()
+	if !m.json {
+		return m.up()
+	}
+	response, err := m.startSession()
+	if err != nil {
+		return err
+	}
+	if !response.OK {
+		return errors.New(response.Error)
+	}
+	return nil
 }
 
 type staleSupervisorDecision int
