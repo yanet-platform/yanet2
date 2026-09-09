@@ -631,7 +631,8 @@ dataplane_ut_run(
 	}
 
 	// Feed input straight onto each packet's target device input entry,
-	// the same way worker_read deposits RX into the pipeline.
+	// the same way the worker deposits its staged RX batch into the
+	// pipeline.
 	struct packet *packet;
 	while ((packet = packet_list_pop(input)) != NULL) {
 		struct device_ectx *device_ectx = config_gen_ectx_get_device(
