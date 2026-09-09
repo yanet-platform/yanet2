@@ -50,12 +50,11 @@ type Operator struct {
 
 // NewOperator constructs an Operator from the supplied configuration.
 func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
-	if cfg.NetlinkSidecar.Enabled {
+	if cfg.Readiness.RemoteNeighbourTable != "" {
 		if err := cfg.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid sidecar-enabled route configuration: %w", err)
+			return nil, err
 		}
 	}
-
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
@@ -85,9 +84,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	// Propagate the neighbours scope based on netlink monitor config, and
 	// construct the monitor itself only when it is enabled.
 	var neighMonitor *neigh.NeighMonitor
-	if cfg.NetlinkMonitor.Disabled {
+	if cfg.NetlinkMonitor.Disabled && cfg.Readiness.RemoteNeighbourTable == "" {
 		tracker.Set("neighbours", readinesspb.State_STATE_READY)
-	} else {
+	} else if !cfg.NetlinkMonitor.Disabled {
 		// Seed the neighbours scope at NOT_READY(SYNCING) before the monitor starts.
 		tracker.SetWithReason("neighbours",
 			readinesspb.State_STATE_NOT_READY,
@@ -123,7 +122,13 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighMonitor = monitor
 	}
 
-	source := NewRouteSource(neighTable, routeRIBStore)
+	var remoteInput *NeighbourReadiness
+	scopeSource := cfg.NetlinkMonitor.TableName
+	if cfg.Readiness.RemoteNeighbourTable != "" {
+		scopeSource = cfg.Readiness.RemoteNeighbourTable
+		remoteInput = NewNeighbourReadiness(scopeSource, cfg.Readiness.RemoteNeighbourMaxAge, tracker)
+	}
+	source := NewRouteSource(neighTable, routeRIBStore, WithRouteSourceNeighbours(scopeSource, remoteInput))
 	wake := source.WakeFunc()
 	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, withRIBReadinessLog(log))
 
@@ -148,17 +153,30 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		}),
 	)
 
-	neighbourSvc := NewNeighbourService(
-		neighTable,
-		WithNeighbourServiceOnChanged(wake),
-	)
+	neighbourOptions := []NeighbourServiceOption{WithNeighbourServiceOnChanged(wake)}
+	if remoteInput != nil {
+		devices := []string{}
+		for _, gateway := range cfg.Gateways {
+			devices = append(devices, cfg.GatewayDevices[gateway.Name]...)
+		}
+		neighbourOptions = append(neighbourOptions,
+			WithNeighbourServiceRemoteSource(scopeSource, devices),
+			WithNeighbourServiceOnTableRemoved(remoteInput.OnTableRemoved),
+			WithNeighbourServiceOnSnapshotReceived(func(table string) {
+				remoteInput.OnSnapshotReceived(table)
+				if table == scopeSource {
+					wake()
+				}
+			}),
+		)
+	}
+	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)
 	metricsSvc := NewMetricsService(
 		WithMetricsServiceCollector(metrics),
 	)
 	operatorSvc := NewRouteOperatorService()
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
-	gatewayActuators := make([]*GatewayActuator, 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
 		gatewayMetrics := metrics.Gateway(gw.Name)
 
@@ -167,12 +185,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorFunction(cfg.Function),
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
-		}
-		if cfg.NetlinkSidecar.Enabled {
-			actuatorOptions = append(
-				actuatorOptions,
-				WithGatewayActuatorNetlinkSidecar(),
-			)
 		}
 		actuator, err := NewGatewayActuator(gw, actuatorOptions...)
 		if err != nil {
@@ -187,7 +199,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		metered := newMeteredActuator(actuator, gatewayMetrics)
 		observed := operator.NewObservedActuator(metered, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
 		actuators = append(actuators, observed)
-		gatewayActuators = append(gatewayActuators, actuator)
 	}
 
 	fanOut := operator.NewFanOutActuator(
@@ -231,25 +242,12 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	if !cfg.NetlinkMonitor.Disabled {
 		workers = append(workers, neighMonitor.Run)
 	}
-
-	var actuator Actuator = fanOut
-	if cfg.NetlinkSidecar.Enabled {
-		sidecarActuator, err := NewNetlinkSidecarActuator(
-			fanOut,
-			cfg.Static.Routes,
-			cfg.NetlinkSidecar.UpdateTimeout,
-			neighTable.Snapshot,
-			gatewayActuators...,
-		)
-		if err != nil {
-			_ = fanOut.Close()
-			return nil, err
-		}
-		actuator = operator.NewObservedActuator(sidecarActuator, "reconcile", tracker.Observe)
+	if remoteInput != nil {
+		workers = append(workers, remoteInput.Run)
 	}
 
 	app := operator.NewOperator(
-		actuator,
+		fanOut,
 		source,
 		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithLog(log),
@@ -350,21 +348,6 @@ func applyStaticSeed(
 		}
 
 		holder := routeSvc.getOrCreateRib(module)
-		if cfg.NetlinkSidecar.Enabled {
-			device := route.Interface
-			if mapped, ok := cfg.LinkMap[device]; ok {
-				device = mapped
-			}
-			holder.Update(rib.Route{
-				Prefix:    prefix,
-				NextHop:   nexthop,
-				Peer:      netip.IPv6Unspecified(),
-				SourceID:  rib.RouteSourceStatic,
-				Device:    device,
-				UpdatedAt: time.Now(),
-			})
-			continue
-		}
 		if err := holder.AddUnicastRoute(prefix, nexthop, rib.RouteSourceStatic); err != nil {
 			return fmt.Errorf("failed to seed static route %s via %s: %w", prefix, nexthop, err)
 		}
@@ -436,12 +419,6 @@ func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
 	for _, gw := range cfg.Gateways {
 		specs = append(specs, readiness.ScopeSpec{
 			Name:                        fmt.Sprintf("fib:%s:%s", gw.Name, moduleName),
-			ExpectedObservationInterval: fibInterval,
-		})
-	}
-	if cfg.NetlinkSidecar.Enabled {
-		specs = append(specs, readiness.ScopeSpec{
-			Name:                        "reconcile",
 			ExpectedObservationInterval: fibInterval,
 		})
 	}

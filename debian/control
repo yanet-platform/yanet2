@@ -119,7 +119,9 @@ Package: yanet2-netlink-dataplane-sidecar
 Architecture: amd64 arm64
 Depends: ${shlibs:Depends}
  , ${misc:Depends}
+ , ca-certificates
 Description: YANET2 netlink dataplane sidecar
- Kubernetes-native sidecar that synchronizes Linux netlink state with YANET2.
+ Restores interfaces from an immutable Netplan snapshot and publishes observed
+ Linux neighbours to the YANET2 route operator.
  .
  This package contains the sidecar binary and its default configuration.

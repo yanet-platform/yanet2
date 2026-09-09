@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 type options struct {
@@ -144,17 +145,23 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 }
 
 type neighbourServiceOptions struct {
-	OnChanged         func()
-	ReplacementLimits NeighbourReplacementLimits
+	OnChanged          func()
+	OnSnapshotReceived func(string)
+	OnTableRemoved     func(string)
+	RemoteTable        string
+	RemoteDevices      []string
+	ReplacementLimits  NeighbourReplacementLimits
 }
 
 func newNeighbourServiceOptions() *neighbourServiceOptions {
 	return &neighbourServiceOptions{
-		OnChanged: func() {},
+		OnChanged:          func() {},
+		OnSnapshotReceived: func(string) {},
+		OnTableRemoved:     func(string) {},
 		ReplacementLimits: NeighbourReplacementLimits{
-			MaxEntries:           1_000_000,
-			MaxBytes:             128 * 1024 * 1024,
-			MaxConcurrentStreams: 4,
+			MaxEntries:           operatorpb.NeighbourSnapshotEntries,
+			MaxBytes:             operatorpb.NeighbourSnapshotBytes,
+			MaxConcurrentStreams: operatorpb.NeighbourConcurrentStreams,
 		},
 	}
 }
@@ -184,6 +191,24 @@ func WithNeighbourReplacementLimits(limits NeighbourReplacementLimits) Neighbour
 func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
 	return func(o *neighbourServiceOptions) {
 		o.OnChanged = fn
+	}
+}
+
+// WithNeighbourServiceOnSnapshotReceived observes successful full replacements.
+func WithNeighbourServiceOnSnapshotReceived(callback func(string)) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) { options.OnSnapshotReceived = callback }
+}
+
+// WithNeighbourServiceOnTableRemoved invalidates freshness before table recreation.
+func WithNeighbourServiceOnTableRemoved(callback func(string)) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) { options.OnTableRemoved = callback }
+}
+
+// WithNeighbourServiceRemoteSource restricts the expected source to known devices.
+func WithNeighbourServiceRemoteSource(table string, devices []string) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) {
+		options.RemoteTable = table
+		options.RemoteDevices = append([]string(nil), devices...)
 	}
 }
 
@@ -227,18 +252,10 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function              FunctionConfig
-	Devices               []string
-	NetlinkSidecarEnabled bool
-	OnFIBBuilt            func(module string, stats FIBBuildStats)
-	Log                   *zap.Logger
-}
-
-// WithGatewayActuatorNetlinkSidecar enables static-route snapshot publication.
-func WithGatewayActuatorNetlinkSidecar() GatewayActuatorOption {
-	return func(o *gatewayActuatorOptions) {
-		o.NetlinkSidecarEnabled = true
-	}
+	Function   FunctionConfig
+	Devices    []string
+	OnFIBBuilt func(module string, stats FIBBuildStats)
+	Log        *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {

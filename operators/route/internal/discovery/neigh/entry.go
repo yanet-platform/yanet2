@@ -14,6 +14,8 @@ type NeighbourEntry struct {
 	NextHop netip.Addr
 	// HardwareRoute represents a route in the Layer 2 (L2) networking stack.
 	HardwareRoute HardwareRoute
+	// Ifindex belongs to the publisher namespace; zero leaves scope unspecified.
+	Ifindex uint32
 	// UpdatedAt is the timestamp when this entry was last updated.
 	UpdatedAt time.Time
 	// State is the state of the neighbor entry.
@@ -22,7 +24,7 @@ type NeighbourEntry struct {
 	//
 	// It is set during merge and is empty inside individual source caches.
 	Source string
-	// Priority determines which entry wins when the same IP exists in multiple
+	// Priority determines which entry wins when the same IP/device pair exists in multiple
 	// tables.
 	//
 	// Lower value means higher priority.
@@ -35,3 +37,19 @@ type NeighbourEntry struct {
 // It aliases the route module's leaf type so that both sides share one
 // definition without the operator linking the route control plane.
 type HardwareRoute = hwroute.HardwareRoute
+
+// Key preserves interface scope for equal next-hop addresses.
+type Key struct {
+	NextHop netip.Addr
+	Device  string
+}
+
+// NewKey normalizes both IPv4 representations to one neighbour identity.
+func NewKey(nextHop netip.Addr, device string) Key {
+	return Key{NextHop: nextHop.Unmap(), Device: device}
+}
+
+// Key returns the canonical identity of the neighbour entry.
+func (m NeighbourEntry) Key() Key {
+	return NewKey(m.NextHop, m.HardwareRoute.Device)
+}

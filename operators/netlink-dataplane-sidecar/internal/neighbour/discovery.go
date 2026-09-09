@@ -12,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 // Backend is the netlink surface needed to discover kernel neighbours.
@@ -28,16 +29,12 @@ type Entry struct {
 	NextHop       netip.Addr
 	HardwareRoute hwroute.HardwareRoute
 	State         NeighbourState
+	Ifindex       uint32
 }
 
 type linkRoute struct {
-	Name         string
-	SourceMAC    [6]byte
-	LinkType     string
-	Alias        string
-	ParentIndex  int
-	VLANID       int
-	VLANProtocol vnetlink.VlanProtocol
+	netreconcile.LinkIdentity
+	SourceMAC [6]byte
 }
 
 // Discover returns a complete, deterministically ordered kernel snapshot.
@@ -109,7 +106,8 @@ func Discover(
 		}
 
 		entry := Entry{
-			NextHop: nextHop,
+			NextHop: nextHop.Unmap(),
+			Ifindex: uint32(kernelNeighbour.LinkIndex),
 			HardwareRoute: hwroute.HardwareRoute{
 				SourceMAC:      link.SourceMAC,
 				DestinationMAC: destinationMAC,
@@ -149,7 +147,12 @@ func managedLinkConfiguration(
 	managedLinks := make(map[string]netplan.Link, len(state.Links))
 	devicesByLink := make(map[string]string, len(state.Links))
 	linksByDevice := make(map[string]string, len(state.Links))
+	loopbacks := map[string]bool{}
 	for _, link := range state.Links {
+		if !link.IsEgress() {
+			loopbacks[link.Name] = true
+			continue
+		}
 		if _, duplicate := managedLinks[link.Name]; duplicate {
 			return nil, nil, fmt.Errorf("managed link %q is configured more than once", link.Name)
 		}
@@ -159,8 +162,8 @@ func managedLinkConfiguration(
 		if mapped, found := linkMap[link.Name]; found {
 			device = mapped
 		}
-		if device == "" {
-			return nil, nil, fmt.Errorf("managed link %q maps to an empty logical device", link.Name)
+		if err := operatorpb.ValidateNeighbourDevice(device); err != nil {
+			return nil, nil, fmt.Errorf("managed link %q: %w", link.Name, err)
 		}
 		if previous, duplicate := linksByDevice[device]; duplicate {
 			return nil, nil, fmt.Errorf(
@@ -179,6 +182,9 @@ func managedLinkConfiguration(
 	}
 	sort.Strings(mappedLinks)
 	for _, linkName := range mappedLinks {
+		if loopbacks[linkName] {
+			continue
+		}
 		if _, managed := managedLinks[linkName]; !managed {
 			return nil, nil, fmt.Errorf("link_map entry %q is not a managed netplan link", linkName)
 		}
@@ -233,62 +239,14 @@ func indexManagedLinks(
 			)
 		}
 
-		candidate := linkRoute{
-			Name:        attributes.Name,
-			SourceMAC:   sourceMAC,
-			LinkType:    link.Type(),
-			Alias:       attributes.Alias,
-			ParentIndex: attributes.ParentIndex,
+		if err := netreconcile.ValidateLink(wanted, link, linksByName[wanted.Parent]); err != nil {
+			return nil, fmt.Errorf("discover neighbours: %w", err)
 		}
-		if wanted.Parent == "" {
-			if _, vlan := link.(*vnetlink.Vlan); vlan {
-				return nil, fmt.Errorf(
-					"discover neighbours: managed base link %q is unexpectedly a VLAN",
-					attributes.Name,
-				)
-			}
-		} else {
-			vlan, ok := link.(*vnetlink.Vlan)
-			if !ok {
-				return nil, fmt.Errorf(
-					"discover neighbours: managed link %q is not a VLAN",
-					attributes.Name,
-				)
-			}
-			if attributes.Alias != netreconcile.ManagedAlias {
-				return nil, fmt.Errorf(
-					"discover neighbours: managed VLAN %q has ownership alias %q",
-					attributes.Name,
-					attributes.Alias,
-				)
-			}
-			if vlan.VlanId != wanted.VLANID {
-				return nil, fmt.Errorf(
-					"discover neighbours: managed VLAN %q has ID %d, want %d",
-					attributes.Name,
-					vlan.VlanId,
-					wanted.VLANID,
-				)
-			}
-			if vlan.VlanProtocol != vnetlink.VLAN_PROTOCOL_8021Q {
-				return nil, fmt.Errorf(
-					"discover neighbours: managed VLAN %q has protocol %s, want %s",
-					attributes.Name,
-					vlan.VlanProtocol,
-					vnetlink.VLAN_PROTOCOL_8021Q,
-				)
-			}
-			parent, found := linksByName[wanted.Parent]
-			if !found || parent.Attrs() == nil || vlan.ParentIndex != parent.Attrs().Index {
-				return nil, fmt.Errorf(
-					"discover neighbours: managed VLAN %q has invalid parent %q",
-					attributes.Name,
-					wanted.Parent,
-				)
-			}
-			candidate.VLANID = vlan.VlanId
-			candidate.VLANProtocol = vlan.VlanProtocol
+		identity, err := netreconcile.IdentifyLink(link)
+		if err != nil {
+			return nil, err
 		}
+		candidate := linkRoute{LinkIdentity: identity, SourceMAC: sourceMAC}
 		if existing, found := linksByIndex[attributes.Index]; found {
 			return nil, fmt.Errorf(
 				"discover neighbours: managed links %q and %q share index %d",

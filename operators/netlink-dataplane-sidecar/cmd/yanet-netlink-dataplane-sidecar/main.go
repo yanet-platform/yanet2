@@ -14,7 +14,7 @@ import (
 func main() {
 	err := operator.Run(
 		"yanet-netlink-dataplane-sidecar",
-		"YANET host-network netlink dataplane sidecar",
+		"YANET interface restoration and neighbour publication sidecar",
 		factory,
 	)
 	if err != nil {

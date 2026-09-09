@@ -1,40 +1,38 @@
 package operator
 
-import "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
+import "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 
-// State is one reconcile pass's static-route state. Initialized distinguishes
-// startup from an explicitly empty complete snapshot.
-type State struct {
-	Routes      []route.Route
-	Initialized bool
-	RouteUpdate *route.Update
-}
+// State is the immutable interface configuration restored on each pass.
+type State = netplan.State
 
-// Source exposes the route store as a steady-state common operator source.
+// Source retains startup configuration and coalesces reconciliation wakes.
 type Source struct {
-	store *route.Store
+	state State
+	wake  chan struct{}
 }
 
-// NewSource creates a source backed by store.
-func NewSource(store *route.Store) *Source {
-	return &Source{store: store}
+// NewSource takes a defensive copy of the startup configuration.
+func NewSource(state State) *Source {
+	return &Source{state: state.Clone(), wake: make(chan struct{}, 1)}
 }
 
-// Snapshot always requests a pass so links and neighbours receive periodic
-// full reconciliation even before the first route stream completes.
+// Snapshot requests periodic restoration of the original configuration.
 func (m *Source) Snapshot() (State, bool) {
-	routes, initialized, update := m.store.SnapshotUpdate()
-	return State{
-		Routes:      routes,
-		Initialized: initialized,
-		RouteUpdate: update,
-	}, true
+	return m.state.Clone(), true
 }
 
-// Wake forwards the store's coalescing notification channel.
+// Wake returns the coalescing notification channel.
 func (m *Source) Wake() <-chan struct{} {
-	return m.store.Wake()
+	return m.wake
 }
 
-// Advance is a no-op because the store holds a persistent latest snapshot.
+// Notify requests a pass without blocking the event subscriber.
+func (m *Source) Notify() {
+	select {
+	case m.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Advance preserves the startup configuration after every pass.
 func (m *Source) Advance(State) {}

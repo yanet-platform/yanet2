@@ -39,7 +39,7 @@ gateways:
 # nexthops on its devices. An empty or unlisted gateway gets the full FIB.
 #
 #   gateway_devices:
-#     numa0: [kni0, eth0]
+#     numa0: [kni0, kni1]
 gateway_devices: {}
 
 # Heartbeat interval for self-registration with each gateway's module
@@ -73,17 +73,14 @@ static:
   routes:
     - prefix: 2a02:6b8:c00::/40
       nexthop_addr: fe80::1
-      # interface: eth0  # Required only when netlink_sidecar is enabled.
     - prefix: 2a02:6b8:fc00::/40
       nexthop_addr: fe80::1
-      # interface: eth0  # Required only when netlink_sidecar is enabled.
   # Static neighbour entries seeded into operator-managed tables.
   neighbours: []
 
 # Mapping from OS interface names to logical dataplane device names.
 #
-# With sidecar publication enabled, use the same mapping as the sidecar so
-# configured static interfaces resolve against the published neighbour devices.
+# This mapping applies to local kernel discovery.
 link_map: {}
 
 # RIB session TTL — stale FeedRIB sessions are garbage-collected
@@ -98,17 +95,6 @@ netlink_monitor:
   table_name: kernel
   default_priority: 100
 
-# Publish the configured static-route snapshot to the host netlink sidecar,
-# trying gateway connections in order until one succeeds. Disabled preserves
-# legacy RIB-only seeding.
-#
-# Static interfaces also constrain dataplane egress after link-name mapping.
-# One prefix and next-hop pair cannot use multiple interfaces. Readiness
-# consumers must include the whole-pass "reconcile" scope when this is enabled.
-netlink_sidecar:
-  enabled: false
-  update_timeout: 30s
-
 # Readiness probes reported to the gateway.
 #
 # expect_bird: set to true when a BIRD adapter is expected; the rib scope
@@ -116,6 +102,11 @@ netlink_sidecar:
 # becomes READY for the duration of the session. Set false for static-only
 # deployments; rib scope is driven by route presence only.
 readiness:
+  # Remote mode also requires disabled local monitoring and explicit gateway_devices.
+  # Set the table to the sidecar's neighbour_table. The age budget must exceed
+  # its publication cadence plus transport/retry time; empty table retains local mode.
+  remote_neighbour_table: ""
+  remote_neighbour_max_age: 2m
   expect_bird: false
   # rate_threshold: maximum RIB updates/sec below which the bulk-load
   # gate starts counting toward the stability window.

@@ -81,6 +81,8 @@ func Test_NetlinkDataplaneSidecarDebianPackage_InstallsBinaryAndConfig(t *testin
 		regexp.MustCompile(`(?m)^Package: `+regexp.QuoteMeta(netlinkDataplaneSidecarPackage)+`$`),
 		string(control),
 	)
+	section := regexp.MustCompile(`(?ms)^Package: ` + regexp.QuoteMeta(netlinkDataplaneSidecarPackage) + `\n.*?(?:\n\n|\z)`).FindString(string(control))
+	require.Regexp(t, `(?m)^ , ca-certificates$`, section)
 
 	manifest, err := os.ReadFile("../../debian/" + netlinkDataplaneSidecarPackage + ".install")
 	require.NoError(t, err)
@@ -95,6 +97,7 @@ func Test_NetlinkDataplaneSidecarDebianPackage_InstallsBinaryAndConfig(t *testin
 func Test_NetlinkDataplaneSidecarDockerfile_UsesDedicatedPackageAndConfig(t *testing.T) {
 	data, err := os.ReadFile("../../deploy/yanet-netlink-dataplane-sidecar.Dockerfile")
 	require.NoError(t, err)
+	instructions := activeDockerInstructions(string(data))
 
 	for _, expected := range []struct {
 		name string
@@ -114,9 +117,37 @@ func Test_NetlinkDataplaneSidecarDockerfile_UsesDedicatedPackageAndConfig(t *tes
 		},
 	} {
 		t.Run(expected.name, func(t *testing.T) {
-			require.Contains(t, string(data), expected.line)
+			require.Contains(t, instructions, expected.line)
 		})
 	}
+}
+
+// Test_Dockerfile_CommentsAreNotInstructions verifies that expected artifact
+// text in comments cannot satisfy the active image-instruction checks.
+func Test_Dockerfile_CommentsAreNotInstructions(t *testing.T) {
+	data := "# COPY deploy/packages/example.deb /tmp/\n" +
+		"  # ENTRYPOINT [\"example\"]\n" +
+		"FROM ubuntu:24.04\nRUN first \\\n  # skipped comment\n && second\n"
+	require.Equal(t, []string{"FROM ubuntu:24.04", "RUN first  && second"}, activeDockerInstructions(data))
+}
+
+// activeDockerInstructions joins continuations while excluding comment-only lines.
+func activeDockerInstructions(data string) []string {
+	var instructions []string
+	pending := ""
+	for line := range strings.SplitSeq(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if continued, found := strings.CutSuffix(line, "\\"); found {
+			pending += continued + " "
+			continue
+		}
+		instructions = append(instructions, strings.TrimSpace(pending+line))
+		pending = ""
+	}
+	return instructions
 }
 
 // collectEtcYanet2Values walks node's mapping and sequence structure and

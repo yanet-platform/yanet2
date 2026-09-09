@@ -10,7 +10,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
-	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
@@ -52,7 +51,7 @@ func (m fakeBackend) NeighList(linkIndex, family int) ([]vnetlink.Neigh, error) 
 func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 	state := netplan.State{Links: []netplan.Link{
 		{Name: "kni0"},
-		{Name: "tenant.100", Parent: "kni0", VLANID: 100},
+		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 	backend := fakeBackend{
 		links: []vnetlink.Link{
@@ -83,7 +82,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 				DestinationMAC: testMACArray(10),
 				Device:         "kni0",
 			},
-			State: neighbour.NeighbourState(vnetlink.NUD_REACHABLE),
+			State: neighbour.NeighbourState(vnetlink.NUD_REACHABLE), Ifindex: 1,
 		},
 		{
 			NextHop: netip.MustParseAddr("192.0.2.20"),
@@ -92,7 +91,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 				DestinationMAC: testMACArray(20),
 				Device:         "dataplane-vlan",
 			},
-			State: neighbour.NeighbourState(vnetlink.NUD_STALE),
+			State: neighbour.NeighbourState(vnetlink.NUD_STALE), Ifindex: 2,
 		},
 	}, entries)
 }
@@ -175,7 +174,7 @@ func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
 			DestinationMAC: testMACArray(1),
 			Device:         "kni0",
 		},
-		State: neighbour.NeighbourState(vnetlink.NUD_REACHABLE),
+		State: neighbour.NeighbourState(vnetlink.NUD_REACHABLE), Ifindex: 1,
 	}}, entries)
 }
 
@@ -235,7 +234,7 @@ func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
 }
 
 // Test_Discover_RejectsInvalidManagedVLANIdentity verifies that a VLAN's type,
-// owner, tag, protocol, and parent must match before publishing neighbours.
+// tag, protocol, and parent must match before publishing neighbours.
 func Test_Discover_RejectsInvalidManagedVLANIdentity(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -245,26 +244,12 @@ func Test_Discover_RejectsInvalidManagedVLANIdentity(t *testing.T) {
 		{
 			name:          "wrong type",
 			link:          testLink(2, "tenant.100", 2),
-			errorContains: "is not a VLAN",
-		},
-		{
-			name: "foreign alias",
-			link: &vnetlink.Vlan{
-				LinkAttrs: vnetlink.LinkAttrs{
-					Index:        2,
-					Name:         "tenant.100",
-					ParentIndex:  1,
-					Alias:        "foreign-owner",
-					HardwareAddr: testMAC(2),
-				},
-				VlanId: 100,
-			},
-			errorContains: "ownership alias",
+			errorContains: "incompatible",
 		},
 		{
 			name:          "wrong VLAN ID",
 			link:          testVLAN(2, "tenant.100", 1, 200, 2),
-			errorContains: "has ID 200, want 100",
+			errorContains: "incompatible",
 		},
 		{
 			name: "wrong VLAN protocol",
@@ -273,23 +258,23 @@ func Test_Discover_RejectsInvalidManagedVLANIdentity(t *testing.T) {
 					Index:        2,
 					Name:         "tenant.100",
 					ParentIndex:  1,
-					Alias:        netreconcile.ManagedAlias,
+					Alias:        "existing-alias",
 					HardwareAddr: testMAC(2),
 				},
 				VlanId:       100,
 				VlanProtocol: vnetlink.VLAN_PROTOCOL_8021AD,
 			},
-			errorContains: "has protocol 802.1ad, want 802.1q",
+			errorContains: "incompatible",
 		},
 		{
 			name:          "wrong parent",
 			link:          testVLAN(2, "tenant.100", 99, 100, 2),
-			errorContains: "invalid parent",
+			errorContains: "incompatible",
 		},
 	}
 	state := netplan.State{Links: []netplan.Link{
 		{Name: "kni0"},
-		{Name: "tenant.100", Parent: "kni0", VLANID: 100},
+		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 
 	for _, test := range tests {
@@ -343,7 +328,7 @@ func Test_Discover_FiltersNUDStates(t *testing.T) {
 					DestinationMAC: testMACArray(2),
 					Device:         "kni0",
 				},
-				State: neighbour.NeighbourState(test.state),
+				State: neighbour.NeighbourState(test.state), Ifindex: 1,
 			}}, entries)
 		})
 	}
@@ -427,7 +412,7 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 	thirdNeighbour := testKernelNeighbour(1, "192.0.2.3", 3, vnetlink.NUD_DELAY)
 	state := netplan.State{Links: []netplan.Link{
 		{Name: "kni0"},
-		{Name: "tenant.100", Parent: "kni0", VLANID: 100},
+		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 
 	first, err := neighbour.Discover(fakeBackend{
@@ -487,13 +472,14 @@ func testLink(index int, name string, addressByte byte) vnetlink.Link {
 	}}
 }
 
+// testVLAN preserves the parent/tag identity with a usable source MAC.
 func testVLAN(index int, name string, parentIndex, vlanID int, addressByte byte) vnetlink.Link {
 	return &vnetlink.Vlan{
 		LinkAttrs: vnetlink.LinkAttrs{
 			Index:        index,
 			Name:         name,
 			ParentIndex:  parentIndex,
-			Alias:        netreconcile.ManagedAlias,
+			Alias:        "existing-alias",
 			HardwareAddr: testMAC(addressByte),
 		},
 		VlanId:       vlanID,
@@ -533,4 +519,25 @@ func entryNextHops(entries []neighbour.Entry) []netip.Addr {
 		nextHops = append(nextHops, entry.NextHop)
 	}
 	return nextHops
+}
+
+// Test_Discover_ExcludesLoopbacks verifies that dummy MACs and irrelevant
+// loopback mappings cannot enter or invalidate an egress snapshot.
+func Test_Discover_ExcludesLoopbacks(t *testing.T) {
+	entries, err := neighbour.Discover(fakeBackend{
+		links: []vnetlink.Link{
+			testLink(1, "kni0", 1),
+			&vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{Name: "lo", Index: 2, Flags: net.FlagLoopback}},
+			&vnetlink.Dummy{LinkAttrs: vnetlink.LinkAttrs{Name: "loop1", Index: 3, HardwareAddr: testMAC(3)}},
+		},
+		neighbours: []vnetlink.Neigh{
+			testKernelNeighbour(1, "fe80::1", 2, vnetlink.NUD_REACHABLE),
+			testKernelNeighbour(3, "fe80::2", 4, vnetlink.NUD_REACHABLE),
+		},
+	}, netplan.State{Links: []netplan.Link{
+		{Name: "kni0"}, {Name: "lo", Kind: netplan.LinkKindLoopback}, {Name: "loop1", Kind: netplan.LinkKindDummy},
+	}}, map[string]string{"lo": "", "loop1": "kni0"})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, "kni0", entries[0].HardwareRoute.Device)
 }

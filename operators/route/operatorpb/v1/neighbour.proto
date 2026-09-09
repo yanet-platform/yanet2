@@ -71,6 +71,8 @@ message NeighbourEntry {
   string source = 6;
   uint32 priority = 7;
   string device = 8;
+  // Observed interface index in the publisher's namespace; zero is unspecified.
+  uint32 ifindex = 9;
 }
 
 // CreateNeighbourTableRequest is the request to create a new neighbour
@@ -130,7 +132,8 @@ message ReplaceNeighboursRequest {
   // with a letter or digit. It has no implicit default or built-in namespace.
   string table = 1;
   uint32 default_priority = 2;
-  // Entries have unique next hops across the entire stream. IP addresses must
+  // Entries have unique (canonical IP, device) pairs across the entire stream.
+  // IPv4-mapped IPv6 addresses are normalized to IPv4. IP addresses must
   // contain 4 or 16 bytes and both MAC addresses must be present EUI-48 values.
   // Device is at most 128 bytes. Source and updated_at must be unset; the server
   // owns them and normalizes state to permanent, like unary updates. Zero entry

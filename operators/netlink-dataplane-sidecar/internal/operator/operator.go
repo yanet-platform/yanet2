@@ -7,12 +7,10 @@ import (
 	"slices"
 	"time"
 
-	vnetlink "github.com/vishvananda/netlink"
-
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
@@ -39,6 +37,17 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 	if err := validateDependencies(opts); err != nil {
 		return nil, err
 	}
+	state, err := opts.LoadNetplan(cfg.NetplanPath.Unwrap())
+	if err != nil {
+		return nil, fmt.Errorf("load startup netplan: %w", err)
+	}
+	if err := state.Validate(); err != nil {
+		return nil, fmt.Errorf("validate startup netplan: %w", err)
+	}
+	if err := neighbour.ValidateManagedDevices(state, cfg.LinkMap); err != nil {
+		return nil, fmt.Errorf("validate startup logical devices: %w", err)
+	}
+	source := NewSource(state)
 
 	handle, err := opts.NewNetlinkHandle()
 	if err != nil {
@@ -63,21 +72,8 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 		return nil, fmt.Errorf("configure netlink socket timeout: %w", err)
 	}
 	linkReconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
-	routeReconciler, err := route.NewReconciler(handle, route.ReconcilerConfig{
-		Table:    cfg.Route.Table,
-		Protocol: cfg.Route.Protocol,
-		Priority: cfg.Route.Priority,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create route reconciler: %w", err)
-	}
-	store := route.NewStore()
-	service, err := route.NewService(store, route.ServiceConfig{MaxRoutes: cfg.Route.MaxRoutes})
-	if err != nil {
-		return nil, fmt.Errorf("create route service: %w", err)
-	}
 
-	commonGateways := cfg.OperatorGateways()
+	commonGateways := cfg.Gateways
 	targets := make([]neighbour.GatewayTarget, 0, len(cfg.Gateways))
 	for idx, gateway := range cfg.Gateways {
 		connection, dialErr := opts.DialGateway(commonGateways[idx])
@@ -92,37 +88,39 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 		}
 
 		targets = append(targets, neighbour.GatewayTarget{
-			Name:            gateway.Name,
-			TableName:       gateway.NeighbourTable,
-			DefaultPriority: gateway.NeighbourPriority,
-			Devices:         append([]string(nil), gateway.Devices...),
-			Client:          operatorpb.NewNeighbourServiceClient(connection),
+			Name:   gateway.Name,
+			Client: operatorpb.NewNeighbourServiceClient(connection),
 		})
 	}
 
 	actuator := NewActuator(
-		cfg.NetplanPath.Unwrap(),
 		linkReconciler,
-		routeReconciler,
 		handle,
 		targets,
 		cfg.LinkMap,
+		cfg.PublicationConfig(),
 	)
 	actuator.SetRuntimeResources(connections, handle)
 
-	source := NewSource(store)
 	eventWorker := NewNeighbourEventWorker(
-		store,
-		vnetlink.NeighSubscribeWithOptions,
+		source.Notify,
+		opts.SubscribeNeighbours,
 		cfg.Reconcile.MaxBackoff.Unwrap(),
 		WithNeighbourEventWorkerLog(opts.Log),
+	)
+	metrics := commonoperator.NewReconcilerMetrics(
+		"generic_operator",
+		commonpb.NewLabel("operator", "netlink-dataplane-sidecar"),
 	)
 	app := commonoperator.NewOperator(
 		actuator,
 		source,
-		commonoperator.WithGRPCServer(cfg.Server, service.Register),
+		commonoperator.WithGRPCServer(cfg.Server,
+			commonoperator.NewMetricsServiceRegistrar("netlink-dataplane-sidecar", metrics),
+		),
 		commonoperator.WithGateways(cfg.Register, commonGateways...),
 		commonoperator.WithReconcile(cfg.Reconcile),
+		commonoperator.WithMetrics(metrics),
 		commonoperator.WithWorkers(eventWorker.Run),
 		commonoperator.WithLog(opts.Log),
 	)
@@ -149,6 +147,8 @@ func validateDependencies(options *options) error {
 		{Name: "logger", Missing: options.Log == nil},
 		{Name: "netlink handle factory", Missing: options.NewNetlinkHandle == nil},
 		{Name: "gateway dialer", Missing: options.DialGateway == nil},
+		{Name: "netplan loader", Missing: options.LoadNetplan == nil},
+		{Name: "neighbour subscriber", Missing: options.SubscribeNeighbours == nil},
 	}
 	for _, dependency := range dependencies {
 		if dependency.Missing {

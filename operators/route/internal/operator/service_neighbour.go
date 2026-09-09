@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/netip"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -34,10 +35,15 @@ type NeighbourReplacementLimits struct {
 type NeighbourService struct {
 	operatorpb.UnimplementedNeighbourServiceServer
 
-	neighTable *neigh.NeighTable
-	onChanged  func()
-	limits     NeighbourReplacementLimits
-	staged     chan struct{}
+	neighTable         *neigh.NeighTable
+	onChanged          func()
+	limits             NeighbourReplacementLimits
+	staged             chan struct{}
+	onSnapshotReceived func(string)
+	onTableRemoved     func(string)
+	commitMu           sync.Mutex
+	remoteTable        string
+	remoteDevices      map[string]bool
 }
 
 // NewNeighbourService constructs a NeighbourService bound to the
@@ -51,11 +57,19 @@ func NewNeighbourService(
 		o(opts)
 	}
 
+	devices := map[string]bool{}
+	for _, device := range opts.RemoteDevices {
+		devices[device] = true
+	}
 	return &NeighbourService{
-		neighTable: neighTable,
-		onChanged:  opts.OnChanged,
-		limits:     opts.ReplacementLimits,
-		staged:     make(chan struct{}, opts.ReplacementLimits.MaxConcurrentStreams),
+		neighTable:         neighTable,
+		onChanged:          opts.OnChanged,
+		limits:             opts.ReplacementLimits,
+		staged:             make(chan struct{}, opts.ReplacementLimits.MaxConcurrentStreams),
+		onSnapshotReceived: opts.OnSnapshotReceived,
+		onTableRemoved:     opts.OnTableRemoved,
+		remoteTable:        opts.RemoteTable,
+		remoteDevices:      devices,
 	}
 }
 
@@ -76,7 +90,7 @@ func (m *NeighbourService) ReplaceNeighbours(
 	var table string
 	var priority uint32
 	totalBytes := 0
-	entries := map[netip.Addr]neigh.NeighbourEntry{}
+	entries := map[neigh.Key]neigh.NeighbourEntry{}
 	for {
 		request, err := stream.Recv()
 		if contextError := ctx.Err(); contextError != nil {
@@ -92,7 +106,7 @@ func (m *NeighbourService) ReplaceNeighbours(
 			return err
 		}
 		chunkBytes := proto.Size(request)
-		if len(request.GetEntries()) > 1000 || chunkBytes > 256*1024 ||
+		if len(request.GetEntries()) > operatorpb.NeighbourChunkEntries || chunkBytes > operatorpb.NeighbourChunkBytes ||
 			chunkBytes > m.limits.MaxBytes-totalBytes ||
 			len(request.GetEntries()) > m.limits.MaxEntries-len(entries) {
 			return status.Error(codes.ResourceExhausted, "neighbour replacement exceeds entry or byte limit")
@@ -116,16 +130,21 @@ func (m *NeighbourService) ReplaceNeighbours(
 			if err != nil {
 				return err
 			}
-			if _, duplicate := entries[entry.NextHop]; duplicate {
-				return status.Errorf(codes.InvalidArgument, "duplicate next hop %q", entry.NextHop)
+			if _, duplicate := entries[entry.Key()]; duplicate {
+				return status.Errorf(codes.InvalidArgument, "duplicate next hop/device %s/%s", entry.NextHop, entry.HardwareRoute.Device)
 			}
-			entries[entry.NextHop] = entry
+			entries[entry.Key()] = entry
 		}
 	}
 	if table == "" {
 		return status.Error(codes.InvalidArgument, "replacement requires at least one chunk")
 	}
-	changed, err := m.neighTable.ReplaceSource(ctx, table, priority, entries)
+	if table == m.remoteTable {
+		if err := m.validateRemoteSnapshot(entries); err != nil {
+			return err
+		}
+	}
+	changed, err := m.replaceSnapshot(ctx, table, priority, entries)
 	if err != nil {
 		if errors.Is(err, neigh.ErrBuiltInSource) {
 			return status.Error(codes.FailedPrecondition, err.Error())
@@ -139,6 +158,41 @@ func (m *NeighbourService) ReplaceNeighbours(
 		m.onChanged()
 	}
 	return stream.SendAndClose(&operatorpb.ReplaceNeighboursResponse{})
+}
+
+func (m *NeighbourService) replaceSnapshot(ctx context.Context, table string, priority uint32, entries map[neigh.Key]neigh.NeighbourEntry) (bool, error) {
+	m.commitMu.Lock()
+	defer m.commitMu.Unlock()
+	changed, err := m.neighTable.ReplaceSource(ctx, table, priority, entries)
+	if err == nil {
+		m.onSnapshotReceived(table)
+	}
+	return changed, err
+}
+
+func (m *NeighbourService) validateRemoteSnapshot(entries map[neigh.Key]neigh.NeighbourEntry) error {
+	byIndex := map[uint32]string{}
+	byDevice := map[string]uint32{}
+	for _, entry := range entries {
+		device := entry.HardwareRoute.Device
+		if err := operatorpb.ValidateNeighbourDevice(device); err != nil {
+			return status.Error(codes.InvalidArgument, err.Error())
+		}
+		if !m.remoteDevices[device] {
+			return status.Errorf(codes.InvalidArgument, "unknown remote device %q", device)
+		}
+		if entry.Ifindex == 0 {
+			continue
+		}
+		if previous, present := byIndex[entry.Ifindex]; present && previous != device {
+			return status.Error(codes.InvalidArgument, "remote ifindex maps to multiple devices")
+		}
+		if previous, present := byDevice[device]; present && previous != entry.Ifindex {
+			return status.Error(codes.InvalidArgument, "remote device maps to multiple ifindices")
+		}
+		byIndex[entry.Ifindex], byDevice[device] = device, entry.Ifindex
+	}
+	return nil
 }
 
 func (m *NeighbourService) List(
@@ -178,6 +232,7 @@ func (m *NeighbourService) List(
 				Source:       source,
 				Priority:     entry.Priority,
 				Device:       entry.HardwareRoute.Device,
+				Ifindex:      entry.Ifindex,
 			},
 		)
 	}
@@ -191,6 +246,8 @@ func (m *NeighbourService) CreateTable(
 	ctx context.Context,
 	req *operatorpb.CreateNeighbourTableRequest,
 ) (*operatorpb.CreateNeighbourTableResponse, error) {
+	m.commitMu.Lock()
+	defer m.commitMu.Unlock()
 	if _, err := m.neighTable.CreateSource(req.GetName(), req.GetDefaultPriority(), false); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create neighbour table: %v", err)
 	}
@@ -213,9 +270,12 @@ func (m *NeighbourService) RemoveTable(
 	ctx context.Context,
 	req *operatorpb.RemoveNeighbourTableRequest,
 ) (*operatorpb.RemoveNeighbourTableResponse, error) {
+	m.commitMu.Lock()
+	defer m.commitMu.Unlock()
 	if err := m.neighTable.DeleteSource(req.GetName()); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to remove neighbour table: %v", err)
 	}
+	m.onTableRemoved(req.GetName())
 	m.onChanged()
 	return &operatorpb.RemoveNeighbourTableResponse{}, nil
 }
@@ -249,6 +309,9 @@ func (m *NeighbourService) UpdateNeighbours(
 	if table == "" {
 		table = defaultStaticTable
 	}
+	if table == m.remoteTable {
+		return nil, status.Error(codes.FailedPrecondition, "configured remote source requires complete replacements")
+	}
 
 	entries := make([]neigh.NeighbourEntry, 0, len(req.GetEntries()))
 	for _, e := range req.GetEntries() {
@@ -276,11 +339,12 @@ func parseNeighbourEntry(entry *operatorpb.NeighbourEntry) (neigh.NeighbourEntry
 		entry.GetHardwareAddr().GetAddr()>>48 != 0 || entry.GetLinkAddr().GetAddr()>>48 != 0 {
 		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, "both MAC addresses must be present EUI-48 values")
 	}
-	if len(entry.GetDevice()) > 128 {
+	if len(entry.GetDevice()) > operatorpb.NeighbourNameBytes {
 		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, "device exceeds 128 bytes")
 	}
 	return neigh.NeighbourEntry{
-		NextHop: address,
+		NextHop: address.Unmap(),
+		Ifindex: entry.GetIfindex(),
 		HardwareRoute: neigh.HardwareRoute{
 			SourceMAC:      entry.GetHardwareAddr().EUI48(),
 			DestinationMAC: entry.GetLinkAddr().EUI48(),
