@@ -62,6 +62,10 @@ configuration must enforce this relationship.
 
 Required missing/stale input prevents new FIB snapshots; the dataplane retains
 its last applied table. Valid empty input may withdraw unresolved routes.
+Each new FIB write, including retries, checks the captured remote generation
+and its freshness. Superseded or expired snapshots cannot start new writes;
+already in-flight RPCs may complete. Incremental additions and removals are
+rejected for the configured remote table.
 An RPC acknowledgement confirms receiver commit, independently of FIB apply.
 For explicit route ifindices, the selected source retains the publisher's
 device binding beneath higher-priority static neighbour overrides. BIRD and

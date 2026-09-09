@@ -252,10 +252,18 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function   FunctionConfig
-	Devices    []string
-	OnFIBBuilt func(module string, stats FIBBuildStats)
-	Log        *zap.Logger
+	Function    FunctionConfig
+	Devices     []string
+	RemoteInput neighbourGeneration
+	OnFIBBuilt  func(module string, stats FIBBuildStats)
+	Log         *zap.Logger
+}
+
+// WithGatewayActuatorRemoteInput requires current input before each FIB write.
+func WithGatewayActuatorRemoteInput(input neighbourGeneration) GatewayActuatorOption {
+	return func(options *gatewayActuatorOptions) {
+		options.RemoteInput = input
+	}
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {

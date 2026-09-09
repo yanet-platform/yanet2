@@ -186,6 +186,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
 		}
+		if remoteInput != nil {
+			actuatorOptions = append(actuatorOptions, WithGatewayActuatorRemoteInput(remoteInput))
+		}
 		actuator, err := NewGatewayActuator(gw, actuatorOptions...)
 		if err != nil {
 			for _, a := range actuators {

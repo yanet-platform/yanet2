@@ -94,6 +94,12 @@ func (m *fakeBackend) LinkSetMTU(link vnetlink.Link, mtu int) error {
 	if err := m.Failures["mtu:"+link.Attrs().Name]; err != nil {
 		return err
 	}
+	if link.Type() == "vlan" {
+		parent := m.linkByIndex(link.Attrs().ParentIndex)
+		if parent == nil || mtu > parent.Attrs().MTU {
+			return errors.New("VLAN MTU exceeds parent")
+		}
+	}
 	for _, child := range m.Links {
 		if child.Attrs().ParentIndex == link.Attrs().Index && child.Attrs().MTU > mtu {
 			return errors.New("parent MTU is smaller than child")
@@ -225,8 +231,8 @@ func fixtureNamespace(t *testing.T) (*fakeBackend, netplan.State) {
 	return backend, state
 }
 
-// Test_Reconciler_RestoresImmutableTopology verifies recovery from link,
-// address, MTU, administrative-state and sysctl drift using the same snapshot.
+// Test_Reconciler_RestoresImmutableTopology verifies that the same snapshot
+// restores links, addresses, MTU, administrative state and sysctls after drift.
 func Test_Reconciler_RestoresImmutableTopology(t *testing.T) {
 	for _, mutation := range []string{"idempotent", "missing VLAN", "missing dummy", "recreated KNI", "configuration drift"} {
 		t.Run(mutation, func(t *testing.T) {
@@ -279,8 +285,8 @@ func Test_Reconciler_RestoresImmutableTopology(t *testing.T) {
 	}
 }
 
-// Test_Reconciler_ParentOrdering verifies parent activation and both MTU
-// directions when the child sorts before its parent by name.
+// Test_Reconciler_ParentOrdering verifies that parent activation and both MTU
+// directions work when the child sorts before its parent by name.
 func Test_Reconciler_ParentOrdering(t *testing.T) {
 	for _, initialMTU := range []int{1500, 9200} {
 		t.Run(fmt.Sprint(initialMTU), func(t *testing.T) {
@@ -294,6 +300,12 @@ func Test_Reconciler_ParentOrdering(t *testing.T) {
 					VlanId:    0, VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
 				}
 			}
+			if initialMTU < 9000 {
+				backend.Links["aaa"] = &vnetlink.Vlan{
+					LinkAttrs: vnetlink.LinkAttrs{Name: "aaa", Index: 2, ParentIndex: 1, MTU: initialMTU},
+					VlanId:    0, VlanProtocol: vnetlink.VLAN_PROTOCOL_8021Q,
+				}
+			}
 			state := netplan.State{Links: []netplan.Link{
 				{Name: "aaa", Kind: netplan.LinkKindVLAN, Parent: "kni0", MTU: 9000},
 				{Name: "kni0", MTU: 9000},
@@ -301,6 +313,15 @@ func Test_Reconciler_ParentOrdering(t *testing.T) {
 			require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
 			require.Equal(t, 9000, parent.MTU)
 			require.Equal(t, 9000, backend.Links["aaa"].Attrs().MTU)
+			parentChange := slices.Index(backend.Operations, "mtu:kni0")
+			childChange := slices.Index(backend.Operations, "mtu:aaa")
+			require.NotEqual(t, -1, parentChange)
+			require.NotEqual(t, -1, childChange)
+			if initialMTU < 9000 {
+				require.Less(t, parentChange, childChange)
+			} else {
+				require.Less(t, childChange, parentChange)
+			}
 		})
 	}
 }

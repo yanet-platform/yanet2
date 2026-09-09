@@ -364,6 +364,9 @@ func (m *NeighbourService) RemoveNeighbours(
 	if table == "" {
 		table = defaultStaticTable
 	}
+	if table == m.remoteTable {
+		return nil, status.Error(codes.FailedPrecondition, "configured remote source requires complete replacements")
+	}
 
 	addrs := make([]netip.Addr, 0, len(req.GetNextHops()))
 	for _, hop := range req.GetNextHops() {

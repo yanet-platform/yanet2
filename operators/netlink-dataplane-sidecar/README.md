@@ -26,6 +26,13 @@ behaviour. Routing remains BIRD export -> bird-adapter FeedRIB -> route-operator
 RIB/FIB -> dataplane. Existing route-operator static APIs and BIRD static exports
 remain available independently of sidecar routing RPCs.
 
+Explicit MTUs are restored, with parent increases before VLAN increases and
+parent decreases after child decreases. An omitted MTU preserves an existing
+link's value. A new VLAN inherits its parent's configured MTU, or the observed
+parent MTU when unspecified. An oversized existing child with no explicit MTU
+blocks a parent decrease; it is not silently resized. Unmanaged dependent links
+also block incompatible decreases. MTUs below 1280 are rejected to preserve IPv6.
+
 ## Configuration
 
 The installed example is `/etc/yanet2/yanet-netlink-dataplane-sidecar-default.yaml`.
@@ -64,6 +71,11 @@ Missing/stale required input prevents new FIB snapshots and preserves last-good
 dataplane state. Valid empty and unchanged replacements refresh input readiness;
 entry modification timestamps do not measure stream freshness. Receiver commit
 acknowledgement is independent of subsequent dataplane apply success.
+
+Every new FIB write, including a retry, requires the captured remote generation
+to remain current and fresh. Already in-flight RPCs may complete. Incremental
+additions and removals are rejected for the configured remote table; static
+tables retain their ordinary editing APIs.
 
 Scoped BIRD routes require BIRD and sidecar to share a namespace. The configured
 source binds observed ifindex to device before static neighbour priority is
