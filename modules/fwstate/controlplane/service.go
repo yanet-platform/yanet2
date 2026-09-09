@@ -194,29 +194,6 @@ func (m *FWStateService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	// A named map must round-trip through the fixed-size C object
-	// registry, which silently truncates a longer name.
-	//
-	// A truncated name could link an entirely different map than the one
-	// reported back. An unnamed map asks for no change to that family's
-	// link.
-	if req.GetMapNameV4() != "" {
-		if err := fwstatemap.ValidateMapName(req.GetMapNameV4()); err != nil {
-			return nil, err
-		}
-	}
-	if req.GetMapNameV6() != "" {
-		if err := fwstatemap.ValidateMapName(req.GetMapNameV6()); err != nil {
-			return nil, err
-		}
-	}
-	if err := req.GetSyncConfig().ValidateFields(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
-	}
-	if err := req.ValidateEndpointClears(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid sync endpoint update: %v", err)
-	}
-
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
 	err := m.withMutation("update", func() error {
@@ -271,33 +248,54 @@ func (m *FWStateService) prepareUpdate(
 
 	oldConfig := m.configs[name]
 
+	if req.UpdateMask != nil {
+		merged, err := maskedUpdate(oldConfig, req)
+		if err != nil {
+			return nil, nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		req = merged
+	} else {
+		// Validate before conversion can narrow a legacy numeric value.
+		if err := req.GetSyncConfig().ValidateFields(); err != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+		}
+		if err := req.ValidateEndpointClears(); err != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync endpoint update: %v", err)
+		}
+		mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
+		req = &fwstatepb.UpdateConfigRequest{
+			MapNameV4:  mapNameV4,
+			MapNameV6:  mapNameV6,
+			SyncConfig: mergedSyncConfigWithClears(oldConfig, req.SyncConfig, req.GetClearMulticast(), req.GetClearUnicast()),
+		}
+	}
+	for _, mapName := range []string{req.MapNameV4, req.MapNameV6} {
+		if mapName != "" {
+			if err := fwstatemap.ValidateMapName(mapName); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	if err := req.SyncConfig.ValidateFields(); err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
 	// Validate the merged sync config before any C state is touched.
-	syncConfig := mergedSyncConfigWithClears(
-		oldConfig,
-		req.SyncConfig,
-		req.GetClearMulticast(),
-		req.GetClearUnicast(),
-	)
+	syncConfig := req.SyncConfig
 	if err := syncConfig.Validate(); err != nil {
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}
 
-	mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
-
 	// The construction only allocates and initializes the replacement
 	// and declares the map-name links: the names resolve against
 	// published objects when the new generation installs, so an unknown
 	// name surfaces from the publish, not from here.
-	newConfig, err := NewFWStateModuleConfigWithEndpointClears(
+	newConfig, err := newFWStateModuleConfig(
 		m.agent,
 		name,
-		oldConfig,
-		req.SyncConfig,
-		req.GetClearMulticast(),
-		req.GetClearUnicast(),
-		mapNameV4,
-		mapNameV6,
+		syncConfig.ToC(),
+		req.MapNameV4,
+		req.MapNameV6,
 	)
 	if err != nil {
 		m.log.Error("failed to build fwstate config", zap.String("config", name), zap.Error(err))

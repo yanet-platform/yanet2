@@ -68,15 +68,11 @@ func (m *SyncConfig) ValidateTimeouts() error {
 	return nil
 }
 
-// ValidateFields rejects sync values stated in a form the config cannot
-// store, before they are merged over the values they update.
+// ValidateFields rejects sync values stated in a form the config cannot store.
 //
-// A request carrying no destination pair leaves the current pairs unchanged;
-// supplying a pair replaces the destination set, disabling any other omitted
-// pair. Only a stated value that cannot be stored fails here: a port too wide
-// for the stored field, or an address of any width other than an IPv6 one.
-// Whether the merged result names a usable destination is decided against the
-// config it replaces, not here.
+// Empty endpoints are representable. Whether they preserve existing values
+// or clear them depends on the update contract. A stated destination address
+// requires a port; the merged configuration must also be usable.
 func (m *SyncConfig) ValidateFields() error {
 	if m == nil {
 		return nil
@@ -107,10 +103,8 @@ func (m *SyncConfig) ValidateFields() error {
 		return fmt.Errorf("dst_ether must be an EUI-48 address")
 	}
 
-	// A non-empty destination address is an explicit update, so it must be
-	// accompanied by its port. A non-zero port without an address is checked
-	// after merging, where replacement semantics make the resulting pair
-	// explicit.
+	// A supplied destination address needs a port. Masked requests reach
+	// this check after merging, so the port may come from the stored config.
 	if len(m.GetDstAddrMulticast().GetAddr()) != 0 && m.GetPortMulticast() == 0 {
 		return fmt.Errorf("port_multicast is required with dst_addr_multicast")
 	}
@@ -228,8 +222,7 @@ func (m *SyncConfig) Validate() error {
 
 const macAddrMask uint64 = (1 << 48) - 1
 
-// validateAddrWidth rejects an address stated at a width the config
-// cannot store; an absent one asks for no change and passes.
+// validateAddrWidth accepts empty addresses and full-width IPv6 addresses.
 func validateAddrWidth(field string, addr []byte) error {
 	if len(addr) == 0 || len(addr) == syncAddrLen {
 		return nil

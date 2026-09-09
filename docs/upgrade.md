@@ -3,6 +3,27 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## FWState CLI partial updates
+
+Upgrade the fwstate control plane before using the new CLI. The CLI now sends
+only explicitly supplied settings with an update mask, without reading the
+stored configuration first. The service merges these settings under its
+mutation lock, so updates to different fields preserve each other; writes to
+the same field use the last successfully published value.
+
+An omitted flag preserves its field. An explicit zero timeout writes zero;
+an empty map-name flag unlinks that family. The resulting configuration must
+still pass validation. A present empty mask preserves every field and creates
+a missing configuration with defaults.
+
+Requests without a mask retain their legacy merging, destination-set replacement
+and endpoint-clear flags. Masked updates preserve the unselected endpoint;
+the CLI encodes `--no-multicast` and `--no-unicast` as masked clears.
+Do not combine a mask with the legacy endpoint-clear flags.
+Older servers ignore the new mask, so clears and endpoint updates can behave
+incorrectly. Older clients and the web configuration editor still send stored
+values and do not gain protection against stale-document overwrites.
+
 ## Controlplane systemd unit became a template
 
 `yanet2-controlplane.service` is replaced by the template

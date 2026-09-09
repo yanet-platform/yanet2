@@ -30,7 +30,7 @@ pub enum ModeCmd {
     List,
     /// Delete a fwstate configuration.
     Delete(DeleteCmd),
-    /// Update fwstate configuration (map and sync settings).
+    /// Create or update only the supplied map and sync settings.
     Update(UpdateCmd),
     /// Show fwstate configuration.
     Show(ShowCmd),
@@ -67,11 +67,11 @@ pub struct UpdateCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
-    /// Name of the published fwstate-map (kind V4) object to link.
+    /// Name of the published V4 fwstate-map to link; empty unlinks it.
     #[arg(long)]
     pub map_name_v4: Option<String>,
 
-    /// Name of the published fwstate-map (kind V6) object to link.
+    /// Name of the published V6 fwstate-map to link; empty unlinks it.
     #[arg(long)]
     pub map_name_v6: Option<String>,
 
@@ -154,7 +154,8 @@ pub struct UpdateCmd {
 
     /// Sync suppression window: skip redundant state-sync refreshes whose
     /// new expiry lands within this window of the current one (e.g., "8s").
-    /// Omitted or zero keeps the currently configured window.
+    ///
+    /// Omitted keeps the current window; zero disables suppression.
     #[arg(long, value_parser = parse_duration)]
     pub sync_suppress_timeout: Option<Duration>,
 }
