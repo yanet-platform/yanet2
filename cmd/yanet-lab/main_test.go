@@ -2424,3 +2424,63 @@ func TestDownRemovesPriorMarkerOnSuccess(t *testing.T) {
 	_, err = os.Stat(filepath.Join(directory, shutdownMarkerName))
 	require.True(t, os.IsNotExist(err), "prior marker should be gone after successful down, got err=%v", err)
 }
+
+// Test_ApplicationRun_JSONManifestEmitsOnlyFinalResult verifies that automatic
+// startup never adds a second JSON document or masks a later transport error.
+func Test_ApplicationRun_JSONManifestEmitsOnlyFinalResult(t *testing.T) {
+	for _, command := range []string{"manifest", "scenario"} {
+		for _, running := range []bool{false, true} {
+			for _, outcome := range []string{"success", "manifest failure", "transport failure"} {
+				t.Run(fmt.Sprintf("%s/running=%t/%s", command, running, outcome), func(t *testing.T) {
+					_, cleanup := tempUp(t, "json-manifest")
+					defer cleanup()
+					path := filepath.Join("lab", "scenarios", "example", "manifest.yaml")
+					require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+					require.NoError(t, os.WriteFile(path, []byte("version: 1\nname: example\nsteps:\n  - name: inspect\n    argv: [/bin/true]\n"), 0o644))
+					ready := &response{OK: true, Status: statusReady, SupervisorProtocolVersion: supervisorProtocolVersion}
+					stubCallAndServe(t, func(_ *application, value request) (*response, error) {
+						if value.Action == "status" {
+							if !running {
+								return nil, errors.New("not running")
+							}
+							return ready, nil
+						}
+						require.Equal(t, "manifest", value.Action)
+						if outcome == "transport failure" {
+							return nil, errors.New(outcome)
+						}
+						result := &response{OK: outcome == "success", Report: &lab.RunReport{Success: outcome == "success"}}
+						if !result.OK {
+							result.Error = outcome
+						}
+						return result, nil
+					}, func(*application, string) (*response, error) {
+						require.False(t, running)
+						return ready, nil
+					})
+					argument := path
+					if command == "scenario" {
+						argument = "example"
+					}
+					originalArguments := os.Args
+					t.Cleanup(func() { os.Args = originalArguments })
+					os.Args = []string{"yanet-lab", "--json", "--session", "json-manifest", command, "run", argument}
+					stdout, stderr, exitCode := captureApplicationOutput(t, newApplication().Run)
+					require.Empty(t, stderr)
+					var decoded response
+					require.NoError(t, json.Unmarshal(stdout, &decoded))
+					require.Equal(t, cliProtocolVersion, decoded.Protocol)
+					if outcome == "success" {
+						require.Zero(t, exitCode)
+						require.True(t, decoded.OK)
+						require.NotNil(t, decoded.Report)
+					} else {
+						require.Equal(t, 1, exitCode)
+						require.False(t, decoded.OK)
+						require.Equal(t, outcome, decoded.Error)
+					}
+				})
+			}
+		}
+	}
+}
