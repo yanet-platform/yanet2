@@ -12,6 +12,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             ".controlplane.ynpb.v1.RegisteredBackend.kind",
             "#[serde(serialize_with = \"crate::serialize_backend_kind\")]",
         )
+        .field_attribute(
+            ".controlplane.ynpb.v1.GetLevelResponse.level",
+            "#[serde(serialize_with = \"crate::serialize_log_level\")]",
+        )
         .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .compile_protos(
             &[
