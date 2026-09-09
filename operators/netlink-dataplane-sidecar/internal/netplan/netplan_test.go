@@ -3,9 +3,6 @@ package netplan_test
 import (
 	"fmt"
 	"net/netip"
-	"os"
-	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,542 +10,154 @@ import (
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
-// Test_Parse_IPv4AndIPv6State verifies that managed base and VLAN settings are
-// converted to typed links while address host bits remain intact.
-func Test_Parse_IPv4AndIPv6State(t *testing.T) {
-	state, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni0:
-      mtu: 9000
-      addresses:
-        - 192.0.2.10/24
-        - 2001:db8::10/64
-      accept-ra: true
-      link-local: [ipv6, ipv4]
-  vlans:
-    tenant.100:
-      link: kni0
-      id: 100
-      mtu: 8900
-      addresses: [198.51.100.7/25, 2001:db8:1::7/64]
-      accept-ra: false
-      link-local: []
-`))
+// Test_Parse_DataplaneFixture verifies that only the two KNI, eight VLANs and
+// existing loopback are managed, including explicitly configured IPv6LL.
+func Test_Parse_DataplaneFixture(t *testing.T) {
+	state, err := netplan.ParseFile("testdata/dataplane.yaml")
 	require.NoError(t, err)
-	require.Equal(t, netplan.State{Links: []netplan.Link{
-		{
-			Name: "kni0",
-			MTU:  9000,
-			Addresses: []netip.Prefix{
-				netip.MustParsePrefix("192.0.2.10/24"),
-				netip.MustParsePrefix("2001:db8::10/64"),
-			},
-			AcceptRA: boolPointer(true),
-			LinkLocal: []string{
-				"ipv6",
-				"ipv4",
-			},
-		},
-		{
-			Name:   "tenant.100",
-			Parent: "kni0",
-			VLANID: 100,
-			MTU:    8900,
-			Addresses: []netip.Prefix{
-				netip.MustParsePrefix("198.51.100.7/25"),
-				netip.MustParsePrefix("2001:db8:1::7/64"),
-			},
-			AcceptRA:  boolPointer(false),
-			LinkLocal: []string{},
-		},
-	}}, state)
+	require.Len(t, state.Links, 11)
+	counts := map[netplan.LinkKind]int{}
+	for _, link := range state.Links {
+		counts[link.Kind]++
+		require.Equal(t, 9000, link.MTU)
+		require.NotContains(t, []string{"eth0", "eth1"}, link.Name)
+		if link.Kind == netplan.LinkKindVLAN {
+			require.Contains(t, []int{1600, 1619, 2000, 802}, link.VLANID)
+			require.Empty(t, link.LinkLocal)
+			expected := "fe80::f1/64"
+			if link.Parent == "kni1" {
+				expected = "fe80::1f1/64"
+			}
+			require.Contains(t, link.Addresses, netip.MustParsePrefix(expected))
+		}
+	}
+	require.Equal(t, map[netplan.LinkKind]int{
+		netplan.LinkKindKNI: 2, netplan.LinkKindVLAN: 8, netplan.LinkKindLoopback: 1,
+	}, counts)
 }
 
-// Test_Parse_RejectsNullManagedStanza verifies that incomplete managed entries
-// cannot become authoritative empty address configurations.
-func Test_Parse_RejectsNullManagedStanza(t *testing.T) {
+// Test_Parse_ManagedBoundary verifies that unsupported managed input fails
+// while omitted sections, aliases and unrelated host configuration are accepted.
+func Test_Parse_ManagedBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		value string
+		yaml  string
+		valid bool
 	}{
-		{name: "bare managed key", value: ""},
-		{name: "explicit null", value: "null"},
-		{name: "null shorthand", value: "~"},
-		{name: "alias to null", value: "*empty"},
+		{name: "omitted sections", yaml: "network: {version: 2}", valid: true},
+		{name: "explicit empty sections", yaml: "network: {version: 2, ethernets: {}, vlans: {}, dummy-devices: {}}", valid: true},
+		{name: "aliases and empty lists", yaml: "defaults: &empty {addresses: [], link-local: []}\nnetwork: {version: 2, ethernets: {kni0: *empty}}", valid: true},
+		{name: "merged fields", yaml: "defaults: &base {mtu: 9000}\nnetwork: {version: 2, ethernets: {kni0: {<<: *base, addresses: []}}}", valid: true},
+		{name: "missing network", yaml: "other: {}"},
+		{name: "null network", yaml: "network: null"},
+		{name: "missing version", yaml: "network: {}"},
+		{name: "unsupported version", yaml: "network: {version: 1}"},
+		{name: "fractional version", yaml: "network: {version: 2.0}"},
+		{name: "string version", yaml: "network: {version: '2'}"},
+		{name: "null ethernets", yaml: "network: {version: 2, ethernets: null}"},
+		{name: "sequence VLANs", yaml: "network: {version: 2, vlans: []}"},
+		{name: "null dummy section", yaml: "network: {version: 2, dummy-devices: null}"},
+		{name: "null managed link", yaml: "network: {version: 2, ethernets: {kni0: null}}"},
+		{name: "null addresses", yaml: "network: {version: 2, ethernets: {kni0: {addresses: null}}}"},
+		{name: "invalid address", yaml: "network: {version: 2, ethernets: {kni0: {addresses: [invalid]}}}"},
+		{name: "IPv6 prefix conflict", yaml: "network: {version: 2, ethernets: {kni0: {addresses: ['fe80::1/64', 'fe80::1/128']}}}"},
+		{name: "DHCP4 enabled", yaml: "network: {version: 2, ethernets: {kni0: {dhcp4: true}}}"},
+		{name: "DHCP6 enabled", yaml: "network: {version: 2, dummy-devices: {loop1: {dhcp6: true}}}"},
+		{name: "IPv4LL enabled", yaml: "network: {version: 2, ethernets: {kni0: {link-local: [ipv4]}}}"},
+		{name: "unknown address family", yaml: "network: {version: 2, ethernets: {kni0: {link-local: [ipx]}}}"},
+		{name: "activation disabled", yaml: "network: {version: 2, ethernets: {kni0: {activation-mode: off}}}"},
+		{name: "unknown managed setting", yaml: "network: {version: 2, ethernets: {kni0: {typo: 1}}}"},
+		{name: "null RA", yaml: "network: {version: 2, ethernets: {kni0: {accept-ra: null}}}"},
+		{name: "undersized MTU", yaml: "network: {version: 2, ethernets: {kni0: {mtu: 1200}}}"},
+		{name: "negative MTU", yaml: "network: {version: 2, ethernets: {kni0: {mtu: -1}}}"},
+		{name: "oversized MTU", yaml: "network: {version: 2, ethernets: {kni0: {mtu: 2147483648}}}"},
+		{name: "invalid dummy name", yaml: "network: {version: 2, dummy-devices: {'../x': {}}}"},
+		{name: "global sysctl name", yaml: "network: {version: 2, dummy-devices: {all: {}}}"},
+		{name: "dummy cannot create KNI", yaml: "network: {version: 2, dummy-devices: {kni0: {}}}"},
+		{name: "missing VLAN parent", yaml: "network: {version: 2, vlans: {v100: {id: 100}}}"},
+		{name: "unknown VLAN parent", yaml: "network: {version: 2, vlans: {v100: {id: 100, link: unknown}}}"},
+		{name: "stacked VLAN", yaml: "network: {version: 2, ethernets: {kni0: {}}, vlans: {v100: {id: 100, link: kni0}, v200: {id: 200, link: v100}}}"},
+		{name: "duplicate name", yaml: "network: {version: 2, ethernets: {kni0: {}}, vlans: {kni0: {id: 100, link: kni0}}}"},
+		{name: "duplicate VLAN identity", yaml: "network: {version: 2, ethernets: {kni0: {}}, vlans: {a: {id: 100, link: kni0}, b: {id: 100, link: kni0}}}"},
+		{name: "invalid YAML", yaml: "network: ["},
+		{name: "multiple documents", yaml: "network: {version: 2}\n---\nnetwork: {version: 2}"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			data := fmt.Sprintf(`
-defaults: &empty null
-network:
-  version: 2
-  vlans: {}
-  ethernets:
-    kni0: %s
-`, test.value)
-
-			state, err := netplan.Parse([]byte(data))
-
-			require.ErrorContains(t, err, `link "kni0": configuration mapping is required`)
-			require.Equal(t, netplan.State{}, state)
-		})
-	}
-}
-
-// Test_Parse_AcceptsExplicitEmptyManagedStanza verifies that intentionally
-// empty mappings, including aliases, retain their normal clearing semantics.
-func Test_Parse_AcceptsExplicitEmptyManagedStanza(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		value string
-	}{
-		{name: "empty mapping", value: "{}"},
-		{name: "alias to empty mapping", value: "*empty"},
-		{name: "explicit empty addresses", value: "{addresses: []}"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			data := fmt.Sprintf(`
-defaults: &empty {}
-network:
-  version: 2
-  vlans: {}
-  ethernets:
-    management0: null
-    kni0: %s
-`, test.value)
-
-			state, err := netplan.Parse([]byte(data))
-
-			require.NoError(t, err)
-			require.Len(t, state.Links, 1)
-			require.Equal(t, "kni0", state.Links[0].Name)
-			require.Empty(t, state.Links[0].Addresses)
-		})
-	}
-}
-
-// Test_Parse_RejectsUndersizedMTU verifies that invalid and IPv6-disabling sizes
-// are rejected with the affected managed link identified in the error.
-func Test_Parse_RejectsUndersizedMTU(t *testing.T) {
-	for _, mtu := range []int{-1, 1200} {
-		t.Run(strconv.Itoa(mtu), func(t *testing.T) {
-			_, err := netplan.Parse(fmt.Appendf(nil, `
-network:
-  version: 2
-  ethernets:
-    kni0:
-      mtu: %d
-  vlans: {}
-`, mtu))
-
-			require.ErrorContains(t, err, `link "kni0": MTU must be within`)
-		})
-	}
-}
-
-// Test_Parse_RejectsOversizedMTU verifies that a YAML size above the signed
-// kernel limit is rejected even when the host integer can represent it.
-func Test_Parse_RejectsOversizedMTU(t *testing.T) {
-	if strconv.IntSize < 64 {
-		t.Skip("int cannot represent an MTU above MaxInt32")
-	}
-	data := fmt.Sprintf(`
-network:
-  version: 2
-  ethernets:
-    kni0:
-      mtu: %d
-  vlans: {}
-`, uint64(1)<<31)
-
-	_, err := netplan.Parse([]byte(data))
-
-	require.ErrorContains(t, err, `link "kni0": MTU must be within`)
-}
-
-// Test_Parse_RejectsKernelInvalidManagedVLANName verifies that a quoted YAML
-// name cannot bypass Linux's prohibition on colons in interface names.
-func Test_Parse_RejectsKernelInvalidManagedVLANName(t *testing.T) {
-	_, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni0: {}
-  vlans:
-    "tenant:100":
-      link: kni0
-      id: 100
-`))
-
-	require.ErrorContains(t, err, `vlan "tenant:100": interface name contains`)
-}
-
-// Test_Parse_RejectsDuplicateManagedVLANIdentity verifies that distinct YAML
-// names cannot request the same VLAN tag on the same managed parent.
-func Test_Parse_RejectsDuplicateManagedVLANIdentity(t *testing.T) {
-	_, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni0: {}
-  vlans:
-    first.100:
-      link: kni0
-      id: 100
-    second.100:
-      link: kni0
-      id: 100
-`))
-
-	require.ErrorContains(t, err, `parent "kni0" ID 100 is already used`)
-}
-
-// Test_Parse_IgnoresUnmanagedContent verifies that unsupported values outside
-// the managed KNI hierarchy cannot invalidate the resulting state.
-func Test_Parse_IgnoresUnmanagedContent(t *testing.T) {
-	state, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni1:
-      addresses: [203.0.113.9/24]
-    management0:
-      dhcp4: definitely
-      addresses: [not-a-prefix]
-    cni0:
-      mtu: invalid
-    lo: ignored
-    dummy0:
-      link-local: [invalid]
-  bonds:
-    bond0:
-      interfaces: [management0]
-      unsupported: {invalid: [still, ignored]}
-  bridges:
-    bridge0:
-      interfaces: [bond0]
-  routing-policy:
-    - from: invalid
-  vlans:
-    management.200:
-      link: management0
-      id: invalid
-      addresses: invalid
-    managed.10:
-      link: kni1
-      id: 10
-      routes:
-        - to: invalid
-      routing-policy: invalid
-`))
-	require.NoError(t, err)
-	require.Equal(t, []netplan.Link{
-		{
-			Name:      "kni1",
-			Addresses: []netip.Prefix{netip.MustParsePrefix("203.0.113.9/24")},
-			LinkLocal: []string{"ipv6"},
-		},
-		{
-			Name:      "managed.10",
-			Parent:    "kni1",
-			VLANID:    10,
-			Addresses: []netip.Prefix{},
-			LinkLocal: []string{"ipv6"},
-		},
-	}, state.Links)
-}
-
-// Test_Parse_RejectsDHCP verifies that either DHCP family is rejected on a
-// managed base link or VLAN.
-func Test_Parse_RejectsDHCP(t *testing.T) {
-	tests := []struct {
-		name string
-		yaml string
-		want string
-	}{
-		{
-			name: "rejects IPv4 DHCP on a base link",
-			yaml: "network:\n  version: 2\n  ethernets:\n    kni0:\n      dhcp4: true\n  vlans: {}\n",
-			want: `link "kni0": dhcp4 must be disabled`,
-		},
-		{
-			name: "rejects IPv6 DHCP on a VLAN",
-			yaml: "network:\n  version: 2\n  ethernets:\n    kni0: {}\n  vlans:\n    vlan20:\n      link: kni0\n      id: 20\n      dhcp6: true\n",
-			want: `link "vlan20": dhcp6 must be disabled`,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := netplan.Parse([]byte(test.yaml))
-			require.EqualError(t, err, test.want)
-		})
-	}
-}
-
-// Test_Parse_RejectsInvalidManagedAddresses verifies that malformed CIDRs and
-// conflicting IPv6 prefix lengths are rejected at the configuration boundary.
-func Test_Parse_RejectsInvalidManagedAddresses(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		addresses string
-		want      string
-	}{
-		{name: "malformed CIDR", addresses: "192.0.2.3/24, broken", want: `link "kni3": address 1 "broken"`},
-		{name: "conflicting IPv6 prefixes", addresses: "2001:db8::1/64, 2001:db8::1/128", want: "conflicting prefix lengths"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := netplan.Parse(fmt.Appendf(nil, `
-network:
-  version: 2
-  ethernets:
-    kni3:
-      addresses: [%s]
-  vlans: {}
-`, test.addresses))
-			require.ErrorContains(t, err, test.want)
-		})
-	}
-}
-
-// Test_Parse_RejectsBadVLANID verifies that managed VLAN identifiers must be
-// inside the netplan VLAN range.
-func Test_Parse_RejectsBadVLANID(t *testing.T) {
-	for _, vlanID := range []int{0, 4095} {
-		t.Run(strconv.Itoa(vlanID), func(t *testing.T) {
-			yaml := []byte("network:\n  version: 2\n  ethernets:\n    kni0: {}\n  vlans:\n    vlan:\n      link: kni0\n      id: " +
-				strconv.Itoa(vlanID) + "\n")
-			_, err := netplan.Parse(yaml)
-			require.EqualError(
-				t,
-				err,
-				fmt.Sprintf(`vlan "vlan": ID %d is outside 1..4094`, vlanID),
-			)
-		})
-	}
-}
-
-// Test_Parse_RejectsMissingVLANParent verifies that a VLAN without a parent is
-// rejected rather than silently omitted from managed state.
-func Test_Parse_RejectsMissingVLANParent(t *testing.T) {
-	_, err := netplan.Parse([]byte("network:\n  version: 2\n  ethernets: {}\n  vlans:\n    orphan:\n      id: 10\n"))
-	require.EqualError(t, err, `vlan "orphan": parent link is required`)
-}
-
-// Test_Parse_IgnoresUnmanagedVLANParent verifies that a VLAN attached outside
-// the managed KNI set is unrelated state even when its other fields are bad.
-func Test_Parse_IgnoresUnmanagedVLANParent(t *testing.T) {
-	state, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni0: {}
-  vlans:
-    management.10:
-      link: management0
-      id: invalid
-      addresses: [invalid]
-`))
-	require.NoError(t, err)
-	require.Equal(t, []netplan.Link{{
-		Name:      "kni0",
-		Addresses: []netip.Prefix{},
-		LinkLocal: []string{"ipv6"},
-	}}, state.Links)
-}
-
-// Test_Parse_RejectsDuplicateManagedName verifies that a base link and its
-// child VLAN cannot occupy the same reconciliation key.
-func Test_Parse_RejectsDuplicateManagedName(t *testing.T) {
-	_, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni0: {}
-  vlans:
-    kni0:
-      link: kni0
-      id: 100
-`))
-	require.EqualError(t, err, `duplicate managed link name "kni0"`)
-}
-
-// Test_Parse_DeterministicOrdering verifies that YAML mapping order does not
-// affect the lexicographic managed-link order.
-func Test_Parse_DeterministicOrdering(t *testing.T) {
-	first, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni2: {}
-    kni10: {}
-  vlans:
-    z-vlan: {link: kni2, id: 20}
-    a-vlan: {link: kni10, id: 10}
-`))
-	require.NoError(t, err)
-
-	second, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  vlans:
-    a-vlan: {id: 10, link: kni10}
-    z-vlan: {id: 20, link: kni2}
-  ethernets:
-    kni10: {}
-    kni2: {}
-`))
-	require.NoError(t, err)
-	require.Equal(t, first, second)
-	require.Equal(t, []string{"a-vlan", "kni10", "kni2", "z-vlan"}, linkNames(first.Links))
-}
-
-// Test_Parse_RejectsInvalidLinkLocal verifies that managed link-local families
-// are limited to values supported by netplan.
-func Test_Parse_RejectsInvalidLinkLocal(t *testing.T) {
-	_, err := netplan.Parse([]byte(`
-network:
-  version: 2
-  ethernets:
-    kni0:
-      link-local: [ipv4, ipx]
-  vlans: {}
-`))
-	require.EqualError(
-		t,
-		err,
-		`link "kni0": link-local value 1 "ipx" is invalid; want ipv4 or ipv6`,
-	)
-}
-
-// Test_Parse_RequiresCompleteGeneratedRoot verifies that valid YAML fragments
-// cannot masquerade as an authoritative empty generated configuration.
-func Test_Parse_RequiresCompleteGeneratedRoot(t *testing.T) {
-	tests := []struct {
-		name          string
-		yaml          string
-		errorContains string
-	}{
-		{
-			name:          "missing network",
-			yaml:          "unrelated: {}\n",
-			errorContains: "network mapping is required",
-		},
-		{
-			name:          "null network",
-			yaml:          "network: null\n",
-			errorContains: "network mapping is required",
-		},
-		{
-			name:          "missing version",
-			yaml:          "network:\n  ethernets: {}\n  vlans: {}\n",
-			errorContains: "network.version must be 2",
-		},
-		{
-			name:          "null version",
-			yaml:          "network:\n  version: null\n  ethernets: {}\n  vlans: {}\n",
-			errorContains: "network.version must be 2",
-		},
-		{
-			name:          "unsupported version",
-			yaml:          "network:\n  version: 1\n  ethernets: {}\n  vlans: {}\n",
-			errorContains: "network.version must be 2",
-		},
-		{
-			name:          "fractional version",
-			yaml:          "network:\n  version: 2.0\n  ethernets: {}\n  vlans: {}\n",
-			errorContains: "network.version must be 2",
-		},
-		{
-			name:          "string version",
-			yaml:          "network:\n  version: \"2\"\n  ethernets: {}\n  vlans: {}\n",
-			errorContains: "network.version must be 2",
-		},
-		{
-			name:          "missing ethernets",
-			yaml:          "network:\n  version: 2\n  vlans: {}\n",
-			errorContains: "network.ethernets mapping is required",
-		},
-		{
-			name:          "null ethernets",
-			yaml:          "network:\n  version: 2\n  ethernets: null\n  vlans: {}\n",
-			errorContains: "network.ethernets mapping is required",
-		},
-		{
-			name:          "malformed ethernets",
-			yaml:          "network:\n  version: 2\n  ethernets: []\n  vlans: {}\n",
-			errorContains: "decode netplan YAML",
-		},
-		{
-			name:          "truncated after ethernets",
-			yaml:          "network:\n  version: 2\n  ethernets: {}\n",
-			errorContains: "network.vlans mapping is required",
-		},
-		{
-			name:          "null vlans",
-			yaml:          "network:\n  version: 2\n  ethernets: {}\n  vlans: null\n",
-			errorContains: "network.vlans mapping is required",
-		},
-		{
-			name:          "malformed vlans",
-			yaml:          "network:\n  version: 2\n  ethernets: {}\n  vlans: []\n",
-			errorContains: "decode netplan YAML",
-		},
-	}
-
-	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			state, err := netplan.Parse([]byte(test.yaml))
-			require.ErrorContains(t, err, test.errorContains)
-			require.Equal(t, netplan.State{}, state)
+			if test.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Equal(t, netplan.State{}, state)
+			}
 		})
 	}
 }
 
-// Test_Parse_AcceptsCompleteEmptyGeneratedRoot verifies that an explicitly
-// empty generated configuration remains authoritative and can request teardown.
-func Test_Parse_AcceptsCompleteEmptyGeneratedRoot(t *testing.T) {
+// Test_Parse_DecimalVLANGrammar verifies that zero and leading decimal zeros
+// are accepted, while omitted IDs and nondecimal syntax cannot become VLAN zero.
+func Test_Parse_DecimalVLANGrammar(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		field      string
+		identifier int
+		valid      bool
+	}{
+		{name: "zero", field: "id: 0", valid: true},
+		{name: "maximum", field: "id: 4094", identifier: 4094, valid: true},
+		{name: "quoted", field: "id: '802'", identifier: 802, valid: true},
+		{name: "leading zeros", field: "id: 0010", identifier: 10, valid: true},
+		{name: "quoted leading zeros", field: "id: '0802'", identifier: 802, valid: true},
+		{name: "missing", field: ""},
+		{name: "null", field: "id: null"},
+		{name: "empty", field: "id: ''"},
+		{name: "negative", field: "id: -1"},
+		{name: "too large", field: "id: 4095"},
+		{name: "overflow", field: "id: 999999999999999999999"},
+		{name: "hex", field: "id: 0x10"},
+		{name: "plus sign", field: "id: +10"},
+		{name: "fraction", field: "id: 10.0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state, err := netplan.Parse(fmt.Appendf(nil,
+				"network:\n  version: 2\n  ethernets: {kni0: {}}\n  vlans:\n    v0:\n      link: kni0\n      %s\n",
+				test.field,
+			))
+			if test.valid {
+				require.NoError(t, err)
+				require.Equal(t, test.identifier, state.Links[1].VLANID)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
+// Test_Parse_HostRoutingAndLoopbacks verifies that host interfaces and routing
+// fields do not affect the managed topology or loopback egress eligibility.
+func Test_Parse_HostRoutingAndLoopbacks(t *testing.T) {
 	state, err := netplan.Parse([]byte(`
 network:
   version: 2
-  ethernets: {}
-  vlans: {}
+  ethernets:
+    eth0: {dhcp4: true, addresses: [invalid]}
+    eth1: null
+    kni0:
+      addresses: [192.0.2.7/24, '2001:db8::7/64']
+      routes: [{to: default, via: invalid, table: invalid}]
+      routing-policy: invalid
+    lo: {addresses: ['2001:db8::1/128']}
+  dummy-devices:
+    loop1: {addresses: [198.51.100.1/32]}
+  vlans:
+    host.1: {link: eth0, id: invalid}
 `))
 	require.NoError(t, err)
-	require.Equal(t, netplan.State{Links: []netplan.Link{}}, state)
-}
-
-// Test_Parse_RejectsMalformedYAML verifies that syntax failures retain YAML
-// decoder context for callers.
-func Test_Parse_RejectsMalformedYAML(t *testing.T) {
-	_, err := netplan.Parse([]byte("network:\n  version: 2\n  ethernets: [\n"))
-	require.ErrorContains(t, err, "decode netplan YAML")
-}
-
-// Test_ParseFile_ReadsState verifies that file parsing has the same typed
-// result as parsing the file contents directly.
-func Test_ParseFile_ReadsState(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "50-yanet.yaml")
-	data := []byte("network:\n  version: 2\n  ethernets:\n    kni7:\n      addresses: [192.0.2.7/32]\n  vlans: {}\n")
-	require.NoError(t, os.WriteFile(path, data, 0o600))
-
-	want, err := netplan.Parse(data)
-	require.NoError(t, err)
-	got, err := netplan.ParseFile(path)
-	require.NoError(t, err)
-	require.Equal(t, want, got)
-}
-
-// linkNames returns reconciliation keys in their current order.
-func linkNames(links []netplan.Link) []string {
-	names := make([]string, 0, len(links))
-	for _, link := range links {
-		names = append(names, link.Name)
-	}
-	return names
-}
-
-func boolPointer(value bool) *bool {
-	return &value
+	require.Len(t, state.Links, 3)
+	require.True(t, state.Links[0].IsEgress())
+	require.Equal(t, netip.MustParsePrefix("192.0.2.7/24"), state.Links[0].Addresses[0])
+	require.Equal(t, netplan.LinkKindLoopback, state.Links[1].Kind)
+	require.Equal(t, netplan.LinkKindDummy, state.Links[2].Kind)
+	require.False(t, state.Links[1].IsEgress())
+	require.False(t, state.Links[2].IsEgress())
 }

@@ -201,7 +201,7 @@ func sendNeighbourSnapshot(ctx context.Context, client operatorpb.NeighbourServi
 }
 
 // sourceEntries copies a published view for timestamp and alias assertions.
-func sourceEntries(t *testing.T, table *neigh.NeighTable, name string) map[netip.Addr]neigh.NeighbourEntry {
+func sourceEntries(t *testing.T, table *neigh.NeighTable, name string) map[neigh.Key]neigh.NeighbourEntry {
 	t.Helper()
 	view, found := table.SourceView(name)
 	require.True(t, found)
@@ -232,7 +232,7 @@ func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 				fixture.WaitStaged(t, identity, idx+1)
 				require.Equal(t, before, fixture.Table.ListSources())
 				require.Equal(t, changes, fixture.Changes.Load())
-				_, found := fixture.Table.View().Lookup(netip.MustParseAddr("192.0.2.2"))
+				_, found := fixture.Table.View().Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0"))
 				require.False(t, found)
 			}
 			_, err := stream.CloseAndRecv()
@@ -240,15 +240,15 @@ func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 			require.Equal(t, changes+1, fixture.Changes.Load())
 			require.Equal(t, []neigh.SourceInfo{{Name: "snapshot", DefaultPriority: 200, EntryCount: 2}}, fixture.Table.ListSources())
 			entries := sourceEntries(t, fixture.Table, "snapshot")
-			require.Equal(t, uint32(200), entries[netip.MustParseAddr("192.0.2.2")].Priority)
-			require.Equal(t, uint32(7), entries[netip.MustParseAddr("2001:db8::1")].Priority)
+			require.Equal(t, uint32(200), entries[neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0")].Priority)
+			require.Equal(t, uint32(7), entries[neigh.NewKey(netip.MustParseAddr("2001:db8::1"), "logical0")].Priority)
 			for _, entry := range entries {
 				require.Equal(t, neigh.NeighbourStatePermanent, entry.State)
 				require.False(t, entry.UpdatedAt.IsZero())
 			}
-			_, found := oldMerged.Lookup(netip.MustParseAddr("192.0.2.2"))
+			_, found := oldMerged.Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0"))
 			require.False(t, found)
-			_, found = fixture.Table.View().Lookup(netip.MustParseAddr("192.0.2.1"))
+			_, found = fixture.Table.View().Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical0"))
 			require.False(t, found)
 
 			for range 3 {
@@ -264,6 +264,25 @@ func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_NeighbourService_PairIdentity verifies that equal IPs on distinct devices
+// retain their scope and mapped IPv4 duplicates cannot replace last-good data.
+func Test_NeighbourService_PairIdentity(t *testing.T) {
+	fixture := newNeighbourServiceFixture(t)
+	first := replacementChunk("snapshot", 100, "192.0.2.1")
+	first.Entries[0].Ifindex = 10
+	second := replacementChunk("snapshot", 100, "192.0.2.1")
+	second.Entries[0].Device = "logical1"
+	second.Entries[0].Ifindex = 20
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first, second))
+	before := sourceEntries(t, fixture.Table, "snapshot")
+	require.Len(t, before, 2)
+	require.Equal(t, uint32(10), before[neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical0")].Ifindex)
+	require.Equal(t, uint32(20), before[neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical1")].Ifindex)
+	duplicate := replacementChunk("snapshot", 100, "::ffff:192.0.2.1")
+	require.Equal(t, codes.InvalidArgument, status.Code(sendNeighbourSnapshot(t.Context(), fixture.Client, first, duplicate)))
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
 }
 
 // Test_NeighbourService_InvalidReplacement verifies that malformed later chunks
@@ -539,7 +558,7 @@ func Test_NeighbourService_ConcurrencyAndCompletionOrder(t *testing.T) {
 		if idx == 1 || idx == 0 {
 			entries := sourceEntries(t, fixture.Table, "snapshot")
 			require.Len(t, entries, 1)
-			require.Equal(t, uint32(100+idx), entries[netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", idx+1))].Priority)
+			require.Equal(t, uint32(100+idx), entries[neigh.NewKey(netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", idx+1)), "logical0")].Priority)
 		}
 	}
 	require.Equal(t, int64(4), fixture.Changes.Load())
@@ -569,7 +588,7 @@ func Test_NeighbourService_LargeSnapshotLifecycle(t *testing.T) {
 		chunks[idx] = chunk
 	}
 	require.Greater(t, totalBytes, 4*1024*1024)
-	var initial map[netip.Addr]neigh.NeighbourEntry
+	var initial map[neigh.Key]neigh.NeighbourEntry
 	for _, desired := range [][]*operatorpb.ReplaceNeighboursRequest{chunks, chunks, {replacementChunk(table, 100)}, {replacementChunk(table, 100)}} {
 		require.NoError(t, sendNeighbourSnapshot(ctx, fixture.Client, desired...))
 		count := 60_000

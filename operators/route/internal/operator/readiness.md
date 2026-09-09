@@ -2,7 +2,7 @@
 
 The route operator exposes readiness dimensions as separate scopes:
 FIB programming per gateway, kernel neighbour resolution, the RIB content, and
-(optionally) the BIRD FeedRIB transport session and sidecar-enabled reconciliation.
+(optionally) the BIRD FeedRIB transport session.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
 - Service implementation: `readiness_service.go` (`ReadinessService`).
@@ -14,7 +14,6 @@ FIB programming per gateway, kernel neighbour resolution, the RIB content, and
 | Scope                    | Meaning                                              |
 | ------------------------ | --------------------------------------------------- |
 | `fib:<gateway>:<module>` | Per-gateway FIB apply outcome into the dataplane module. |
-| `reconcile`              | Complete sidecar publication and gateway fan-out outcome (only when `netlink_sidecar.enabled`). |
 | `neighbours`             | Kernel neighbour (ARP/ND) resolution state.          |
 | `rib`                    | Routing information base content readiness.          |
 | `bird-session`           | BIRD FeedRIB transport liveness (only when `readiness.expect_bird`). |
@@ -32,20 +31,6 @@ Driven by the apply outcome recorded through `Observe` (via
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
 - Apply failed, never applied: `STATE_NOT_READY` (`APPLY_FAILED`).
 
-### `reconcile`
-
-When sidecar publication is enabled, consumers must include this scope when
-evaluating readiness. It observes the entire reconcile pass, including a failed
-prerequisite that prevents gateway FIB updates from being attempted. Success is
-READY; failure is NOT_READY before the first successful pass and DEGRADED after
-one, with reason `APPLY_FAILED`. Recovery returns it to READY.
-
-Per-gateway FIB scopes still describe only actual gateway attempts. A failed
-prerequisite leaves those scopes untouched, and a failed gateway does not
-overwrite another gateway's successful observation. The whole-pass scope
-publishes the reconcile interval as its freshness contract and is observed on
-every completed attempt, including prerequisite failures.
-
 ### `neighbours`
 
 Driven by the netlink neighbour monitor. When the monitor is enabled
@@ -58,8 +43,30 @@ Driven by the netlink neighbour monitor. When the monitor is enabled
 - Resync after an error episode: `STATE_READY`.
 - Refresh error: `STATE_DEGRADED`, reason `RESYNC`.
 
-When the monitor is disabled (`netlink_monitor.disabled: true`), the scope is
-latched to `STATE_READY` once at construction and never updated again.
+When the monitor is disabled and `readiness.remote_neighbour_table` is empty,
+the scope is latched to `STATE_READY` once at construction.
+
+Remote input mode requires disabled local monitoring and explicit
+`gateway_devices` for every gateway. Set `readiness.remote_neighbour_table` to
+the sidecar's single table and `readiness.remote_neighbour_max_age` to a positive
+budget greater than the sidecar publication cadence, including transport/retry
+time. The receiver cannot infer the cadence of another process; deployment
+configuration must enforce this relationship.
+
+- Cold start: `STATE_NOT_READY`, reason `SYNCING`.
+- A complete expected-table replacement: `STATE_READY`, including unchanged and
+  empty snapshots. Entry modification timestamps do not determine freshness.
+- No complete replacement within the budget: `STATE_NOT_READY`, reason `STALE`.
+- Invalid device/scope or incomplete replacement: last-good data and input age
+  are preserved. A new valid replacement recovers readiness.
+
+Required missing/stale input prevents new FIB snapshots; the dataplane retains
+its last applied table. Valid empty input may withdraw unresolved routes.
+An RPC acknowledgement confirms receiver commit, independently of FIB apply.
+For explicit route ifindices, the selected source retains the publisher's
+device binding beneath higher-priority static neighbour overrides. BIRD and
+sidecar must share a namespace. Missing explicit scope and ambiguous unscoped
+next hops stay unresolved; the receiver does not look up remote kernel indices.
 
 ### `rib`
 
@@ -102,7 +109,7 @@ During normal operation it never reaches `STATE_NOT_READY`; only the shutdown
 drain forces it there.
 
 On shutdown `Drain` flips every route scope to `STATE_NOT_READY` with reason
-`SHUTTING_DOWN`, including `fib`, `reconcile`, `neighbours`, `rib`, and `bird-session`.
+`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`.
 This is best-effort: the operator tracker is not drain-latched, so an apply in
 flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
 reconciler stops.
@@ -123,7 +130,6 @@ without changing state.
 ### `fib:<gateway>:<module>`
 
 Advances on every gateway apply attempt via `Observe`, regardless of success.
-When a sidecar prerequisite fails, only the `reconcile` scope is observed.
 
 Config parameters (under `reconcile:`):
 
@@ -163,7 +169,7 @@ A quiet network therefore shows up to ~5min of age. The scope publishes that
 5min periodic interval; a multiplier of 2-3 gives a 10-15min threshold. An
 active network stays near-real-time.
 
-When the monitor is disabled, the scope is set READY once and never refreshed,
+When the monitor is disabled with no remote table, the scope is set READY once and never refreshed,
 so a staleness check is **not applicable** (treat READY as fresh regardless of
 `observed_at`, as for the gateway scope).
 

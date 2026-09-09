@@ -2,28 +2,18 @@ package operator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"sync"
 
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 )
 
 // LinkReconciler applies the managed netplan links.
 type LinkReconciler interface {
 	Apply(context.Context, netplan.State) error
 }
-
-// RouteReconciler applies a complete route snapshot to managed links.
-type RouteReconciler interface {
-	Apply(context.Context, []route.Route, netplan.State) error
-}
-
-// NetplanLoader reads the current netplan document for a reconcile pass.
-type NetplanLoader func(string) (netplan.State, error)
 
 // NeighbourDiscoverer takes a complete managed kernel-neighbour snapshot.
 type NeighbourDiscoverer func(
@@ -37,17 +27,16 @@ type NeighbourPublisher func(
 	context.Context,
 	[]neighbour.Entry,
 	[]neighbour.GatewayTarget,
+	neighbour.PublicationConfig,
 ) error
 
 type actuatorOptions struct {
-	LoadNetplan        NetplanLoader
 	DiscoverNeighbours NeighbourDiscoverer
 	PublishNeighbours  NeighbourPublisher
 }
 
 func newActuatorOptions() *actuatorOptions {
 	return &actuatorOptions{
-		LoadNetplan:        netplan.ParseFile,
 		DiscoverNeighbours: neighbour.Discover,
 		PublishNeighbours:  neighbour.Publish,
 	}
@@ -55,13 +44,6 @@ func newActuatorOptions() *actuatorOptions {
 
 // ActuatorOption configures an Actuator's external operations.
 type ActuatorOption func(*actuatorOptions)
-
-// WithActuatorNetplanLoader replaces filesystem-backed netplan loading.
-func WithActuatorNetplanLoader(loader NetplanLoader) ActuatorOption {
-	return func(options *actuatorOptions) {
-		options.LoadNetplan = loader
-	}
-}
 
 // WithActuatorNeighbourDiscoverer replaces netlink neighbour discovery.
 func WithActuatorNeighbourDiscoverer(discoverer NeighbourDiscoverer) ActuatorOption {
@@ -77,16 +59,15 @@ func WithActuatorNeighbourPublisher(publisher NeighbourPublisher) ActuatorOption
 	}
 }
 
-// Actuator reconciles host links, routes, and discovered neighbours.
+// Actuator restores managed interfaces and publishes observed neighbours.
 type Actuator struct {
-	netplanPath string
 	links       LinkReconciler
-	routes      RouteReconciler
 	backend     neighbour.Backend
 	targets     []neighbour.GatewayTarget
 	linkMap     map[string]string
+	publication neighbour.PublicationConfig
+	applySlot   chan struct{}
 
-	loadNetplan        NetplanLoader
 	discoverNeighbours NeighbourDiscoverer
 	publishNeighbours  NeighbourPublisher
 
@@ -98,12 +79,11 @@ type Actuator struct {
 
 // NewActuator constructs an actuator from independently injectable operations.
 func NewActuator(
-	netplanPath string,
 	links LinkReconciler,
-	routes RouteReconciler,
 	backend neighbour.Backend,
 	targets []neighbour.GatewayTarget,
 	linkMap map[string]string,
+	publication neighbour.PublicationConfig,
 	options ...ActuatorOption,
 ) *Actuator {
 	opts := newActuatorOptions()
@@ -116,13 +96,12 @@ func NewActuator(
 	maps.Copy(copiedLinkMap, linkMap)
 
 	return &Actuator{
-		netplanPath:        netplanPath,
 		links:              links,
-		routes:             routes,
 		backend:            backend,
 		targets:            copiedTargets,
 		linkMap:            copiedLinkMap,
-		loadNetplan:        opts.LoadNetplan,
+		publication:        publication,
+		applySlot:          make(chan struct{}, 1),
 		discoverNeighbours: opts.DiscoverNeighbours,
 		publishNeighbours:  opts.PublishNeighbours,
 	}
@@ -134,54 +113,39 @@ func (m *Actuator) SetRuntimeResources(connections []GatewayConnection, handle N
 	m.handle = handle
 }
 
-// Apply reads the latest netplan and reconciles links before dependent state.
-func (m *Actuator) Apply(ctx context.Context, snapshot State) (applyErr error) {
-	routesApplied := false
-	if snapshot.Initialized {
-		defer func() {
-			if routesApplied {
-				snapshot.RouteUpdate.Complete(nil)
-			} else {
-				snapshot.RouteUpdate.Complete(applyErr)
-			}
-		}()
+// Apply publishes only after successful restoration and complete discovery.
+func (m *Actuator) Apply(ctx context.Context, snapshot State) error {
+	select {
+	case m.applySlot <- struct{}{}:
+		defer func() { <-m.applySlot }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	netplanState, err := m.loadNetplan(m.netplanPath)
-	if err != nil {
-		return fmt.Errorf("load netplan state: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if len(m.targets) != 0 {
-		if err := neighbour.ValidateManagedDeviceOwnership(netplanState, m.linkMap, m.targets); err != nil {
-			return fmt.Errorf("validate managed neighbour devices: %w", err)
-		}
+	if err := neighbour.ValidateManagedDevices(snapshot, m.linkMap); err != nil {
+		return fmt.Errorf("validate managed neighbour devices: %w", err)
 	}
-	if err := m.links.Apply(ctx, netplanState); err != nil {
+	if err := m.links.Apply(ctx, snapshot); err != nil {
 		return fmt.Errorf("reconcile links: %w", err)
 	}
 
-	if snapshot.Initialized {
-		if err := m.routes.Apply(ctx, snapshot.Routes, netplanState); err != nil {
-			applyErr = errors.Join(applyErr, fmt.Errorf("reconcile routes: %w", err))
-		} else {
-			routesApplied = true
-		}
-	}
 	if err := ctx.Err(); err != nil {
-		return errors.Join(applyErr, err)
+		return err
 	}
 
-	entries, err := m.discoverNeighbours(m.backend, netplanState, m.linkMap)
+	entries, err := m.discoverNeighbours(m.backend, snapshot, m.linkMap)
 	if err != nil {
-		return errors.Join(applyErr, fmt.Errorf("discover neighbours: %w", err))
+		return fmt.Errorf("discover neighbours: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return errors.Join(applyErr, err)
+		return err
 	}
-	if err := m.publishNeighbours(ctx, entries, m.targets); err != nil {
-		applyErr = errors.Join(applyErr, fmt.Errorf("publish neighbours: %w", err))
+	if err := m.publishNeighbours(ctx, entries, m.targets, m.publication); err != nil {
+		return fmt.Errorf("publish neighbours: %w", err)
 	}
-	return applyErr
+	return nil
 }
 
 // Close releases every gateway connection and the shared netlink handle.

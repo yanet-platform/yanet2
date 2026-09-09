@@ -21,7 +21,6 @@ if not get_option('fuzzing').enabled()
       build_by_default: true,
       build_always_stale: true,
       depends: [
-          netlink_dataplane_sidecar_protoc_gen,
           route_operator_protoc_gen,
           ynpb_gen,
           common_protoc_gen,

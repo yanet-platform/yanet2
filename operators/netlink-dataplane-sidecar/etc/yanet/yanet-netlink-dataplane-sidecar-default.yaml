@@ -3,15 +3,10 @@
 logging:
   level: info
 
-# One entry per neighbour table. Entries may share a dataplane gateway endpoint.
-# With a single gateway, an empty devices list owns every logical device.
-# Multiple gateways must list disjoint ownership.
+# Alternate transport paths to the same route operator.
 gateways:
   - name: numa0
     endpoint: "[::1]:8080"
-    neighbour_table: netlink-dataplane-numa0
-    neighbour_priority: 100
-    devices: []
     # TLS is optional. When present, an empty block uses system roots.
     # tls:
     #   ca_file: /etc/yanet2/tls/ca.pem
@@ -19,7 +14,7 @@ gateways:
     #   key_file: /etc/yanet2/tls/sidecar.key
     #   server_name: gateway.numa0
 
-# The embedded route-snapshot gRPC service. Port zero selects a free port; set
+# The operational metrics gRPC service. Port zero selects a free port; set
 # advertise_endpoint when gateways cannot reach the bound loopback address.
 server:
   endpoint: "[::1]:0"
@@ -28,22 +23,20 @@ server:
 register:
   interval: 30s
 
-# This interval also provides periodic full link, route, and neighbour resync.
+# This interval provides periodic full interface and neighbour resync.
 reconcile:
   interval: 30s
   initial_backoff: 500ms
   max_backoff: 30s
 
+# Read once at startup. A changed configuration requires a new Pod namespace.
 netplan_path: /etc/netplan/00-interfaces.yaml
 
-# Maps host interface names from netplan to logical dataplane device names.
-# An omitted entry keeps the host interface name.
-link_map: {}
+# One stable source per sidecar namespace, shared by every transport attempt.
+neighbour_table: netlink-dataplane-default
+neighbour_priority: 100
+neighbour_publish_timeout: 5s
 
-route:
-  table: 254
-  # Dedicated ownership markers. Protocol 242 is outside the standard Linux
-  # route-origin assignments; priority 1 keeps static routes preferred.
-  protocol: 242
-  priority: 1
-  max_routes: 1000000
+# Maps managed Pod interface names to logical dataplane device names.
+# An omitted entry keeps the managed interface name.
+link_map: {}

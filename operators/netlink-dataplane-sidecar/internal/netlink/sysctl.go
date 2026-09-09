@@ -35,11 +35,14 @@ func (m *ProcSysctl) SetIPv6(
 	if err := netplan.ValidateInterfaceName(interfaceName); err != nil {
 		return fmt.Errorf("invalid interface name %q: %w", interfaceName, err)
 	}
-	if setting != "accept_ra" && setting != "addr_gen_mode" {
+	if setting != "accept_ra" && setting != "addr_gen_mode" && setting != "disable_ipv6" {
 		return fmt.Errorf("unsupported IPv6 sysctl %q", setting)
 	}
 	if value != "0" && value != "1" && value != "2" {
 		return fmt.Errorf("invalid IPv6 sysctl value %q", value)
+	}
+	if setting == "disable_ipv6" && value != "0" {
+		return errors.New("disabling IPv6 is unsupported")
 	}
 	file, err := os.OpenFile(filepath.Join(m.Root, interfaceName, setting), os.O_WRONLY, 0)
 	if err != nil {

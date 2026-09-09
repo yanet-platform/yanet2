@@ -22,10 +22,13 @@ func Test_Publish_LargeSnapshotBatching(t *testing.T) {
 		entries[idx] = entry
 		entry.NextHop = entry.NextHop.Next()
 	}
-	target := newPublisherTarget(strings.Repeat("t", 128-len("netlink-dataplane-")), entry.HardwareRoute.Device, client)
+	target := newPublisherTarget("first", client)
+	config := publicationConfig()
+	config.TableName = "netlink-dataplane-" + strings.Repeat("t", 128-len("netlink-dataplane-"))
+	config.Timeout = 30 * time.Second
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	require.NoError(t, neighbour.Publish(ctx, entries, []neighbour.GatewayTarget{target}))
+	require.NoError(t, neighbour.Publish(ctx, entries, []neighbour.GatewayTarget{target}, config))
 	chunks := 0
 	published := 0
 	for _, call := range service.Calls() {
@@ -35,8 +38,8 @@ func Test_Publish_LargeSnapshotBatching(t *testing.T) {
 		chunks++
 		require.LessOrEqual(t, len(call.Chunk.GetEntries()), 1000)
 		require.LessOrEqual(t, proto.Size(call.Chunk), 256*1024)
-		require.Equal(t, target.TableName, call.Chunk.GetTable())
-		require.Equal(t, target.DefaultPriority, call.Chunk.GetDefaultPriority())
+		require.Equal(t, config.TableName, call.Chunk.GetTable())
+		require.Equal(t, config.DefaultPriority, call.Chunk.GetDefaultPriority())
 		for _, wire := range call.Chunk.GetEntries() {
 			require.True(t, proto.Equal(wireEntry(entries[published]), wire))
 			published++

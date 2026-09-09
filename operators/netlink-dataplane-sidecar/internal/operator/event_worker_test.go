@@ -12,7 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	sidecaroperator "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/operator"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 )
 
 // activeSubscription exposes a fake event stream without opening kernel sockets.
@@ -27,10 +26,10 @@ type activeSubscription struct {
 // Test_NeighbourEventWorker_WakesAndCancels verifies that throttled events are
 // consumed continuously and cancellation drains the subscription.
 func Test_NeighbourEventWorker_WakesAndCancels(t *testing.T) {
-	store := route.NewStore()
+	store := sidecaroperator.NewSource(sidecaroperator.State{})
 	ready := make(chan activeSubscription, 1)
 	worker := sidecaroperator.NewNeighbourEventWorker(
-		store,
+		store.Notify,
 		func(
 			updates chan<- vnetlink.NeighUpdate,
 			done <-chan struct{},
@@ -89,10 +88,10 @@ func Test_NeighbourEventWorker_WakesAndCancels(t *testing.T) {
 // Test_NeighbourEventWorker_EmitsTrailingWake verifies that the final event in
 // a throttled burst still produces a later full reconciliation.
 func Test_NeighbourEventWorker_EmitsTrailingWake(t *testing.T) {
-	store := route.NewStore()
+	store := sidecaroperator.NewSource(sidecaroperator.State{})
 	ready := make(chan activeSubscription, 1)
 	worker := sidecaroperator.NewNeighbourEventWorker(
-		store,
+		store.Notify,
 		func(
 			updates chan<- vnetlink.NeighUpdate,
 			done <-chan struct{},
@@ -133,11 +132,42 @@ func Test_NeighbourEventWorker_EmitsTrailingWake(t *testing.T) {
 	waitNeighbourWorkerStopped(t, result)
 }
 
+// Test_NeighbourEventWorker_FlushesBeforeRetry verifies that pending events wake
+// reconciliation even when subscription recovery is delayed by its backoff.
+func Test_NeighbourEventWorker_FlushesBeforeRetry(t *testing.T) {
+	wakes := make(chan struct{}, 16)
+	ready := make(chan activeSubscription, 1)
+	worker := sidecaroperator.NewNeighbourEventWorker(func() { wakes <- struct{}{} },
+		func(updates chan<- vnetlink.NeighUpdate, done <-chan struct{}, options vnetlink.NeighSubscribeOptions) error {
+			ready <- activeSubscription{Updates: updates, Callback: options.ErrorCallback}
+			go func() { <-done; close(updates) }()
+			return nil
+		}, time.Hour,
+	)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- worker.Run(ctx) }()
+	t.Cleanup(func() { cancel(); waitNeighbourWorkerStopped(t, result) })
+	subscription := <-ready
+	<-wakes
+	subscription.Updates <- vnetlink.NeighUpdate{}
+	<-wakes
+	subscription.Updates <- vnetlink.NeighUpdate{}
+	subscription.Updates <- vnetlink.NeighUpdate{}
+	subscription.Callback(unix.ENOBUFS)
+	select {
+	case <-wakes:
+	case <-time.After(time.Second):
+		t.Fatal("pending neighbour event was lost before retry")
+	}
+}
+
 // Test_NeighbourEventWorker_RejectsInvalidInterval verifies that invalid timing
 // is rejected before attempting to open a subscription.
 func Test_NeighbourEventWorker_RejectsInvalidInterval(t *testing.T) {
 	worker := sidecaroperator.NewNeighbourEventWorker(
-		route.NewStore(),
+		sidecaroperator.NewSource(sidecaroperator.State{}).Notify,
 		func(
 			chan<- vnetlink.NeighUpdate,
 			<-chan struct{},
@@ -155,11 +185,11 @@ func Test_NeighbourEventWorker_RejectsInvalidInterval(t *testing.T) {
 // Test_NeighbourEventWorker_RetriesFailedSubscription verifies that an initial
 // setup failure is retried and recovery requests a full snapshot without events.
 func Test_NeighbourEventWorker_RetriesFailedSubscription(t *testing.T) {
-	store := route.NewStore()
+	store := sidecaroperator.NewSource(sidecaroperator.State{})
 	attempts := 0
 	var firstDone <-chan struct{}
 	worker := sidecaroperator.NewNeighbourEventWorker(
-		store,
+		store.Notify,
 		func(
 			updates chan<- vnetlink.NeighUpdate,
 			done <-chan struct{},
@@ -199,14 +229,12 @@ func Test_NeighbourEventWorker_RetriesFailedSubscription(t *testing.T) {
 func Test_NeighbourEventWorker_ResubscribesAfterLoss(t *testing.T) {
 	for _, failure := range []string{"callback error", "channel closure"} {
 		t.Run(failure, func(t *testing.T) {
-			store := route.NewStore()
-			require.NoError(t, store.Replace(nil))
-			<-store.Wake()
+			store := sidecaroperator.NewSource(sidecaroperator.State{})
 			ready := make(chan activeSubscription, 2)
 			overlap := make(chan struct{}, 1)
 			var previous activeSubscription
 			worker := sidecaroperator.NewNeighbourEventWorker(
-				store,
+				store.Notify,
 				func(
 					updates chan<- vnetlink.NeighUpdate,
 					done <-chan struct{},
@@ -263,7 +291,6 @@ func Test_NeighbourEventWorker_ResubscribesAfterLoss(t *testing.T) {
 			}
 			second := waitNeighbourSubscription(t, ready)
 			waitNeighbourWake(t, store)
-			require.True(t, store.Initialized())
 			second.Updates <- vnetlink.NeighUpdate{}
 			waitNeighbourWake(t, store)
 			cancel()
@@ -281,7 +308,7 @@ func Test_NeighbourEventWorker_CancelsRetry(t *testing.T) {
 			core, logs := observer.New(zap.WarnLevel)
 			attempts := 0
 			worker := sidecaroperator.NewNeighbourEventWorker(
-				route.NewStore(),
+				sidecaroperator.NewSource(sidecaroperator.State{}).Notify,
 				func(
 					updates chan<- vnetlink.NeighUpdate,
 					done <-chan struct{},
@@ -315,7 +342,7 @@ func Test_NeighbourEventWorker_CancelsRetry(t *testing.T) {
 }
 
 // waitNeighbourWake bounds a full-reconciliation notification wait.
-func waitNeighbourWake(t *testing.T, store *route.Store) {
+func waitNeighbourWake(t *testing.T, store *sidecaroperator.Source) {
 	t.Helper()
 	select {
 	case <-store.Wake():

@@ -2,167 +2,133 @@ package neighbour_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
+	"google.golang.org/protobuf/proto"
 )
 
-// Test_Publish_IndependentDeadlines verifies that a blocked replacement cannot
-// exhaust the next target's attempt or trigger cleanup of last-good tables.
-func Test_Publish_IndependentDeadlines(t *testing.T) {
+// unavailableClient fails one transport without accessing the receiver table.
+type unavailableClient struct{ Calls int }
+
+func (m *unavailableClient) ReplaceNeighbours(ctx context.Context, options ...grpc.CallOption) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], error) {
+	m.Calls++
+	return nil, status.Error(codes.Unavailable, "transport unavailable")
+}
+
+// Test_Publish_FallbackAndLostResponse verifies that an unknown commit outcome
+// can retry the same complete snapshot and stops after the first acknowledged success.
+func Test_Publish_FallbackAndLostResponse(t *testing.T) {
 	service, client := newPublicationService(t)
-	first := newPublisherTarget("first", "logical0", client)
-	second := newPublisherTarget("second", "logical1", client)
-	service.Store("netlink-dataplane-old", publicationTable{})
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	parentDeadline, _ := ctx.Deadline()
+	failed := &unavailableClient{}
+	unused := &unavailableClient{}
+	config := publicationConfig()
+	entries := []neighbour.Entry{testDesiredEntry("fe80::1", "logical0"), testDesiredEntry("fe80::1", "logical1")}
 	service.SetHook(func(call publicationCall) error {
-		deadline, present := call.Context.Deadline()
-		if !present || !deadline.Before(parentDeadline) {
-			return errors.New("missing independent deadline")
-		}
-		if call.Table == first.TableName {
-			<-call.Context.Done()
-			return status.FromContextError(call.Context.Err()).Err()
+		if call.Method == "response" {
+			service.SetHook(nil)
+			return status.Error(codes.Unavailable, "response lost after commit")
 		}
 		return nil
 	})
-	err := neighbour.Publish(ctx, []neighbour.Entry{testDesiredEntry("fe80::1", "logical1")}, []neighbour.GatewayTarget{first, second})
-	require.ErrorContains(t, err, "DeadlineExceeded")
-	require.NoError(t, ctx.Err())
-	tables := service.Tables()
-	require.NotContains(t, tables, first.TableName)
-	require.Len(t, tables[second.TableName].Entries, 1)
-	require.Contains(t, tables, "netlink-dataplane-old")
-	require.Equal(t, []string{"chunk", "chunk", "commit"}, callMethods(service.Calls()))
-	for _, call := range service.Calls() {
-		require.Eventually(t, func() bool { return call.Context.Err() != nil }, time.Second, time.Millisecond)
-	}
+	targets := []neighbour.GatewayTarget{newPublisherTarget("unavailable", failed), newPublisherTarget("lost-response", client), newPublisherTarget("retry", client), newPublisherTarget("unused", unused)}
+	require.NoError(t, neighbour.Publish(t.Context(), entries, targets, config))
+	require.Equal(t, 1, failed.Calls)
+	require.Zero(t, unused.Calls)
+	calls := service.Calls()
+	require.Len(t, calls, 6)
+	require.True(t, proto.Equal(calls[0].Chunk, calls[3].Chunk))
+	require.Len(t, service.Tables()[config.TableName].Entries, 2)
 }
 
-// Test_Publish_ReplacementFailureAndRecovery verifies that failed streams keep
-// old snapshots and cleanup waits for all independent targets to succeed.
-func Test_Publish_ReplacementFailureAndRecovery(t *testing.T) {
+// Test_Publish_FailureKeepsSnapshot verifies that interrupted and refused streams
+// preserve last-good data and a later complete replacement recovers the table.
+func Test_Publish_FailureKeepsSnapshot(t *testing.T) {
 	for _, method := range []string{"chunk", "commit"} {
 		t.Run(method, func(t *testing.T) {
 			service, client := newPublicationService(t)
-			first := newPublisherTarget("first", "logical0", client)
-			second := newPublisherTarget("second", "logical1", client)
-			third := newPublisherTarget("third", "logical2", client)
-			service.Store("netlink-dataplane-old", publicationTable{Priority: 7})
-			service.Store(second.TableName, publicationTable{Priority: 8})
+			config := publicationConfig()
+			service.Store(config.TableName, publicationTable{Priority: 7})
 			service.SetHook(func(call publicationCall) error {
-				if call.Method == method && call.Table != third.TableName {
-					return status.Error(codes.Unavailable, call.Table+" failed")
+				if call.Method == method {
+					return status.Error(codes.Unavailable, "interrupted")
 				}
 				return nil
 			})
-			targets := []neighbour.GatewayTarget{first, second, third}
-			err := neighbour.Publish(t.Context(), nil, targets)
-			require.ErrorContains(t, err, first.TableName+" failed")
-			require.ErrorContains(t, err, second.TableName+" failed")
-			require.Equal(t, uint32(8), service.Tables()[second.TableName].Priority)
-			require.Contains(t, service.Tables(), third.TableName)
-			require.Contains(t, service.Tables(), "netlink-dataplane-old")
-			require.NotContains(t, callMethods(service.Calls()), "list_tables")
+			targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("second", client)}
+			require.Error(t, neighbour.Publish(t.Context(), nil, targets, config))
+			require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
 			service.SetHook(nil)
-			require.NoError(t, neighbour.Publish(t.Context(), nil, targets))
-			require.Len(t, service.Tables(), 3)
-			require.Equal(t, uint32(100), service.Tables()[second.TableName].Priority)
+			require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
+			require.Equal(t, config.DefaultPriority, service.Tables()[config.TableName].Priority)
 		})
 	}
 }
 
-// Test_Publish_CancellationBoundaries verifies that parent cancellation stops
-// later chunks, gateway attempts, and obsolete table deletions.
-func Test_Publish_CancellationBoundaries(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		method string
-		table  string
-		want   []string
-	}{
-		{name: "before publication"},
-		{name: "during first chunk", method: "chunk", table: "netlink-dataplane-first", want: []string{"chunk"}},
-		{name: "at first commit", method: "commit", table: "netlink-dataplane-first", want: []string{"chunk", "commit"}},
-		{name: "before shared cleanup", method: "commit", table: "netlink-dataplane-second", want: []string{"chunk", "commit", "chunk", "commit"}},
-		{name: "after metadata listing", method: "list_tables", want: []string{"chunk", "commit", "chunk", "commit", "list_tables"}},
-		{name: "between stale deletions", method: "remove_table", table: "netlink-dataplane-old-a", want: []string{"chunk", "commit", "chunk", "commit", "list_tables", "remove_table"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+// Test_Publish_DeadlineFallback verifies that each attempt has its own deadline
+// and expiration leaves enough parent budget to retry the same table.
+func Test_Publish_DeadlineFallback(t *testing.T) {
+	service, client := newPublicationService(t)
+	service.SetHook(func(call publicationCall) error {
+		service.SetHook(nil)
+		<-call.Context.Done()
+		return status.FromContextError(call.Context.Err()).Err()
+	})
+	config := publicationConfig()
+	config.Timeout = 100 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, neighbour.Publish(ctx, nil, []neighbour.GatewayTarget{newPublisherTarget("timeout", client), newPublisherTarget("retry", client)}, config))
+	require.NoError(t, ctx.Err())
+	require.Contains(t, service.Tables(), config.TableName)
+}
+
+// Test_Publish_ConfiguredDeadline verifies that a larger configured timeout
+// reaches the server instead of being capped by a hard-coded default.
+func Test_Publish_ConfiguredDeadline(t *testing.T) {
+	service, client := newPublicationService(t)
+	remaining := make(chan time.Duration, 3)
+	service.SetHook(func(call publicationCall) error {
+		deadline, _ := call.Context.Deadline()
+		remaining <- time.Until(deadline)
+		return nil
+	})
+	config := publicationConfig()
+	config.Timeout = 15 * time.Second
+	require.NoError(t, neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{newPublisherTarget("first", client)}, config))
+	require.Greater(t, <-remaining, 10*time.Second)
+}
+
+// Test_Publish_Cancellation verifies that cancellation prevents further attempts
+// and cannot turn an incomplete stream into a committed empty snapshot.
+func Test_Publish_Cancellation(t *testing.T) {
+	for _, method := range []string{"before", "chunk", "commit"} {
+		t.Run(method, func(t *testing.T) {
 			service, client := newPublicationService(t)
-			service.Store("netlink-dataplane-old-a", publicationTable{})
-			service.Store("netlink-dataplane-old-z", publicationTable{})
+			config := publicationConfig()
+			service.Store(config.TableName, publicationTable{Priority: 7})
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			service.SetHook(func(call publicationCall) error {
-				if call.Method == test.method && call.Table == test.table {
+				if call.Method == method {
 					cancel()
 					<-call.Context.Done()
 				}
 				return nil
 			})
-			if test.method == "" {
+			if method == "before" {
 				cancel()
 			}
-			err := neighbour.Publish(ctx, nil, []neighbour.GatewayTarget{
-				newPublisherTarget("first", "logical0", client), newPublisherTarget("second", "logical1", client),
-			})
-			require.Error(t, err)
-			require.ErrorIs(t, ctx.Err(), context.Canceled)
-			require.Equal(t, test.want, callMethods(service.Calls()))
-			require.Contains(t, service.Tables(), "netlink-dataplane-old-z")
+			unused := &unavailableClient{}
+			require.Error(t, neighbour.Publish(ctx, nil, []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unused", unused)}, config))
+			require.Zero(t, unused.Calls)
+			require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
 		})
 	}
-}
-
-// Test_Publish_CleanupFailure verifies that cleanup errors are surfaced without
-// undoing complete replacements or deleting later obsolete tables.
-func Test_Publish_CleanupFailure(t *testing.T) {
-	for _, method := range []string{"list_tables", "remove_table"} {
-		t.Run(method, func(t *testing.T) {
-			service, client := newPublicationService(t)
-			service.Store("netlink-dataplane-old", publicationTable{})
-			service.SetHook(func(call publicationCall) error {
-				if call.Method == method {
-					return status.Error(codes.Unavailable, "cleanup failed")
-				}
-				return nil
-			})
-			target := newPublisherTarget("first", "logical0", client)
-			require.ErrorContains(t, neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{target}), "cleanup failed")
-			require.Contains(t, service.Tables(), target.TableName)
-			require.Contains(t, service.Tables(), "netlink-dataplane-old")
-		})
-	}
-}
-
-// Test_Publish_UnsupportedReplacement verifies that a refused streaming API
-// remains a failed target, without cleanup or attempts to emulate publication.
-func Test_Publish_UnsupportedReplacement(t *testing.T) {
-	service, client := newPublicationService(t)
-	first := newPublisherTarget("first", "logical0", client)
-	second := newPublisherTarget("second", "logical1", client)
-	service.Store(first.TableName, publicationTable{Priority: 7})
-	service.Store("netlink-dataplane-old", publicationTable{})
-	service.SetHook(func(call publicationCall) error {
-		if call.Table == first.TableName {
-			return status.Error(codes.Unimplemented, "replacement not supported")
-		}
-		return nil
-	})
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{first, second})
-	require.Equal(t, codes.Unimplemented, status.Code(err))
-	require.Equal(t, []string{"chunk", "chunk", "commit"}, callMethods(service.Calls()))
-	tables := service.Tables()
-	require.Equal(t, uint32(7), tables[first.TableName].Priority)
-	require.Equal(t, second.DefaultPriority, tables[second.TableName].Priority)
-	require.Contains(t, tables, "netlink-dataplane-old")
 }

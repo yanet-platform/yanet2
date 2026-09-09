@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/xbackoff"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
 )
 
 const subscriptionDrainTimeout = time.Second
@@ -44,7 +43,7 @@ func WithNeighbourEventWorkerLog(log *zap.Logger) NeighbourEventWorkerOption {
 // NeighbourEventWorker wakes full reconciliation after netlink events without
 // allowing a continuous event stream to bypass reconciliation backoff.
 type NeighbourEventWorker struct {
-	store        *route.Store
+	notify       func()
 	subscribe    NeighbourSubscriber
 	wakeInterval time.Duration
 	log          *zap.Logger
@@ -52,7 +51,7 @@ type NeighbourEventWorker struct {
 
 // NewNeighbourEventWorker creates an event-driven wake worker.
 func NewNeighbourEventWorker(
-	store *route.Store,
+	notify func(),
 	subscribe NeighbourSubscriber,
 	wakeInterval time.Duration,
 	options ...NeighbourEventWorkerOption,
@@ -62,7 +61,7 @@ func NewNeighbourEventWorker(
 		option(opts)
 	}
 	return &NeighbourEventWorker{
-		store:        store,
+		notify:       notify,
 		subscribe:    subscribe,
 		wakeInterval: wakeInterval,
 		log:          opts.Log,
@@ -71,8 +70,8 @@ func NewNeighbourEventWorker(
 
 // Run restores lost subscriptions without interrupting periodic reconciliation.
 func (m *NeighbourEventWorker) Run(ctx context.Context) error {
-	if m.store == nil {
-		return errors.New("run neighbour event worker: route store is nil")
+	if m.notify == nil {
+		return errors.New("run neighbour event worker: notify callback is nil")
 	}
 	if m.subscribe == nil {
 		return errors.New("run neighbour event worker: subscriber is nil")
@@ -115,6 +114,9 @@ func (m *NeighbourEventWorker) runSubscription(ctx context.Context) error {
 	var wakeTimerC <-chan time.Time
 	pendingWake := false
 	defer func() {
+		if pendingWake && ctx.Err() == nil {
+			m.notify()
+		}
 		if wakeTimer != nil {
 			wakeTimer.Stop()
 		}
@@ -140,7 +142,7 @@ func (m *NeighbourEventWorker) runSubscription(ctx context.Context) error {
 
 	// A full snapshot covers events missed before initial subscription or
 	// while a lost subscription was being restored.
-	m.store.Notify()
+	m.notify()
 
 	for {
 		select {
@@ -169,7 +171,7 @@ func (m *NeighbourEventWorker) runSubscription(ctx context.Context) error {
 				pendingWake = true
 				continue
 			}
-			m.store.Notify()
+			m.notify()
 			if wakeTimer == nil {
 				wakeTimer = time.NewTimer(m.wakeInterval)
 			} else {
@@ -181,7 +183,7 @@ func (m *NeighbourEventWorker) runSubscription(ctx context.Context) error {
 				wakeTimerC = nil
 				continue
 			}
-			m.store.Notify()
+			m.notify()
 			pendingWake = false
 			wakeTimer.Reset(m.wakeInterval)
 		}

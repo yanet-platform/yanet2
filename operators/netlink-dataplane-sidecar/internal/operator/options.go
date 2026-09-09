@@ -11,13 +11,12 @@ import (
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/route"
+	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
 
 // NetlinkHandle is the shared kernel handle surface used by all reconcilers.
 type NetlinkHandle interface {
 	netreconcile.Backend
-	route.Backend
 	neighbour.Backend
 	SetSocketTimeout(time.Duration) error
 	Close()
@@ -35,10 +34,15 @@ type GatewayConnection interface {
 // GatewayDialer opens a connection using common gateway configuration.
 type GatewayDialer func(commonoperator.GatewayConfig) (GatewayConnection, error)
 
+// NetplanLoader reads and validates the desired configuration at startup.
+type NetplanLoader func(string) (netplan.State, error)
+
 type options struct {
-	NewNetlinkHandle NetlinkHandleFactory
-	DialGateway      GatewayDialer
-	Log              *zap.Logger
+	NewNetlinkHandle    NetlinkHandleFactory
+	DialGateway         GatewayDialer
+	LoadNetplan         NetplanLoader
+	SubscribeNeighbours NeighbourSubscriber
+	Log                 *zap.Logger
 }
 
 func newOptions() *options {
@@ -49,7 +53,9 @@ func newOptions() *options {
 		DialGateway: func(config commonoperator.GatewayConfig) (GatewayConnection, error) {
 			return commonoperator.DialGateway(config)
 		},
-		Log: zap.NewNop(),
+		LoadNetplan:         netplan.ParseFile,
+		SubscribeNeighbours: netlink.NeighSubscribeWithOptions,
+		Log:                 zap.NewNop(),
 	}
 }
 
@@ -78,3 +84,17 @@ func WithGatewayDialer(dialer GatewayDialer) Option {
 }
 
 var _ NetlinkHandle = (*netlink.Handle)(nil)
+
+// WithNetplanLoader replaces startup configuration loading.
+func WithNetplanLoader(loader NetplanLoader) Option {
+	return func(options *options) {
+		options.LoadNetplan = loader
+	}
+}
+
+// WithNeighbourSubscriber replaces the event socket subscription.
+func WithNeighbourSubscriber(subscribe NeighbourSubscriber) Option {
+	return func(options *options) {
+		options.SubscribeNeighbours = subscribe
+	}
+}

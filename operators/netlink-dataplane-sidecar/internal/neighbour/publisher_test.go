@@ -7,9 +7,11 @@ import (
 	"maps"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -23,28 +25,21 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 type publicationCall struct {
 	Method  string
-	Table   string
 	Context context.Context
 	Chunk   *operatorpb.ReplaceNeighboursRequest
 }
 
 type publicationTable struct {
 	Priority uint32
-	BuiltIn  bool
 	Entries  []*operatorpb.NeighbourEntry
 }
 
-// publicationService exposes only replacement and cleanup over real transport.
-//
-// The route operator has its own internal-package boundary and tests the real
-// commit implementation there. This shared fixture records transport and stores
-// complete snapshots without emulating the removed neighbour CRUD path.
+// publicationService records real streaming transport and commits only at EOF.
 type publicationService struct {
 	operatorpb.UnimplementedNeighbourServiceServer
 	mu     sync.Mutex
@@ -53,7 +48,7 @@ type publicationService struct {
 	hook   func(publicationCall) error
 }
 
-// newPublicationService uses default gRPC message limits for every scenario.
+// newPublicationService serves the fixture with default gRPC message limits.
 func newPublicationService(t *testing.T) (*publicationService, operatorpb.NeighbourServiceClient) {
 	t.Helper()
 	service := &publicationService{tables: map[string]publicationTable{}}
@@ -75,44 +70,42 @@ func newPublicationService(t *testing.T) (*publicationService, operatorpb.Neighb
 	})
 	connection, err := grpc.NewClient("passthrough:///publication",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
-			return listener.DialContext(ctx)
-		}),
+		grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) { return listener.DialContext(ctx) }),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	return service, operatorpb.NewNeighbourServiceClient(connection)
 }
 
-// SetHook injects a failure or cancellation at a recorded transport boundary.
+// SetHook injects failures at receive, commit and response boundaries.
 func (m *publicationService) SetHook(hook func(publicationCall) error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hook = hook
 }
 
-// Store atomically seeds or commits one fixture table.
+// Store replaces one complete fixture snapshot.
 func (m *publicationService) Store(name string, table publicationTable) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.tables[name] = table
 }
 
-// Tables returns read-only snapshots; commits replace rather than mutate entries.
+// Tables captures immutable committed entries.
 func (m *publicationService) Tables() map[string]publicationTable {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return maps.Clone(m.tables)
 }
 
-// Calls returns read-only requests from completed receives.
+// Calls captures completed receive boundaries without sharing the history slice.
 func (m *publicationService) Calls() []publicationCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]publicationCall(nil), m.calls...)
+	return slices.Clone(m.calls)
 }
 
-// record captures requests before calling a potentially blocking hook unlocked.
+// record runs a potentially blocking hook outside the history lock.
 func (m *publicationService) record(call publicationCall) error {
 	hook := m.appendCall(call)
 	if hook != nil {
@@ -123,7 +116,7 @@ func (m *publicationService) record(call publicationCall) error {
 	return status.FromContextError(call.Context.Err()).Err()
 }
 
-// appendCall serializes history and returns the current failure hook.
+// appendCall atomically records a boundary and captures its failure hook.
 func (m *publicationService) appendCall(call publicationCall) func(publicationCall) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -131,10 +124,7 @@ func (m *publicationService) appendCall(call publicationCall) func(publicationCa
 	return m.hook
 }
 
-// ReplaceNeighbours stores only streams that reach a successful commit boundary.
-func (m *publicationService) ReplaceNeighbours(
-	stream grpc.ClientStreamingServer[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse],
-) error {
+func (m *publicationService) ReplaceNeighbours(stream grpc.ClientStreamingServer[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse]) error {
 	var first *operatorpb.ReplaceNeighboursRequest
 	var entries []*operatorpb.NeighbourEntry
 	for {
@@ -148,7 +138,7 @@ func (m *publicationService) ReplaceNeighbours(
 		if first == nil {
 			first = chunk
 		}
-		if err := m.record(publicationCall{Method: "chunk", Table: chunk.GetTable(), Context: stream.Context(), Chunk: chunk}); err != nil {
+		if err := m.record(publicationCall{Method: "chunk", Context: stream.Context(), Chunk: chunk}); err != nil {
 			return err
 		}
 		entries = append(entries, chunk.GetEntries()...)
@@ -156,194 +146,100 @@ func (m *publicationService) ReplaceNeighbours(
 	if first == nil {
 		return status.Error(codes.InvalidArgument, "missing snapshot")
 	}
-	if err := m.record(publicationCall{Method: "commit", Table: first.GetTable(), Context: stream.Context()}); err != nil {
+	if err := m.record(publicationCall{Method: "commit", Context: stream.Context()}); err != nil {
 		return err
 	}
 	m.Store(first.GetTable(), publicationTable{Priority: first.GetDefaultPriority(), Entries: entries})
+	if err := m.record(publicationCall{Method: "response", Context: stream.Context()}); err != nil {
+		return err
+	}
 	return stream.SendAndClose(&operatorpb.ReplaceNeighboursResponse{})
 }
 
-// ListTables returns only bounded metadata, never neighbouring addresses.
-func (m *publicationService) ListTables(ctx context.Context, request *operatorpb.ListNeighbourTablesRequest) (*operatorpb.ListNeighbourTablesResponse, error) {
-	if err := m.record(publicationCall{Method: "list_tables", Context: ctx}); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	response := &operatorpb.ListNeighbourTablesResponse{}
-	for name, table := range m.tables {
-		response.Tables = append(response.Tables, &operatorpb.NeighbourTableInfo{
-			Name: name, DefaultPriority: table.Priority, BuiltIn: table.BuiltIn, EntryCount: int64(len(table.Entries)),
-		})
-	}
-	return response, nil
+// publicationConfig supplies a stable namespace identity for all transports.
+func publicationConfig() neighbour.PublicationConfig {
+	return neighbour.PublicationConfig{TableName: "netlink-dataplane-default", DefaultPriority: 100, Timeout: 5 * time.Second}
 }
 
-// RemoveTable deletes only the requested table after its transport hook succeeds.
-func (m *publicationService) RemoveTable(ctx context.Context, request *operatorpb.RemoveNeighbourTableRequest) (*operatorpb.RemoveNeighbourTableResponse, error) {
-	if err := m.record(publicationCall{Method: "remove_table", Table: request.GetName(), Context: ctx}); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.tables, request.GetName())
-	return &operatorpb.RemoveNeighbourTableResponse{}, nil
+// newPublisherTarget provides an alternate connection without table ownership.
+func newPublisherTarget(name string, client neighbour.Client) neighbour.GatewayTarget {
+	return neighbour.GatewayTarget{Name: name, Client: client}
 }
 
-// newPublisherTarget assigns one logical device to a sidecar-owned table.
-func newPublisherTarget(name, device string, client neighbour.Client) neighbour.GatewayTarget {
-	return neighbour.GatewayTarget{Name: name, TableName: "netlink-dataplane-" + name, DefaultPriority: 100, Devices: []string{device}, Client: client}
-}
-
-// testDesiredEntry returns a complete forwarding identity without a local alias.
+// testDesiredEntry carries a complete observed identity in the publisher namespace.
 func testDesiredEntry(nextHop, device string) neighbour.Entry {
 	return neighbour.Entry{
-		NextHop: netip.MustParseAddr(nextHop),
-		HardwareRoute: hwroute.HardwareRoute{
-			SourceMAC: [6]byte{2, 0, 0, 0, 0, 1}, DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2}, Device: device,
-		},
-		State: neighbour.NeighbourState(operatorpb.NeighbourState_NUD_REACHABLE),
+		NextHop: netip.MustParseAddr(nextHop), Ifindex: 10,
+		HardwareRoute: hwroute.HardwareRoute{SourceMAC: [6]byte{2, 0, 0, 0, 0, 1}, DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2}, Device: device},
+		State:         neighbour.NeighbourState(operatorpb.NeighbourState_NUD_REACHABLE),
 	}
 }
 
-// wireEntry describes the exact publication payload, excluding server metadata.
+// wireEntry excludes receiver-generated metadata from the expected payload.
 func wireEntry(entry neighbour.Entry) *operatorpb.NeighbourEntry {
 	return &operatorpb.NeighbourEntry{
-		NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
+		NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop.Unmap()),
 		HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
 		LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
-		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState(entry.State),
+		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState(entry.State), Ifindex: entry.Ifindex,
 	}
 }
 
-// callMethods extracts ordered RPC boundaries without comparing gRPC contexts.
-func callMethods(calls []publicationCall) []string {
-	var methods []string
-	for _, call := range calls {
-		methods = append(methods, call.Method)
-	}
-	return methods
-}
-
-// Test_Publish_FilteringAndCleanup verifies that shared link-local next hops
-// survive per-device filtering and all configured tables are globally protected.
-func Test_Publish_FilteringAndCleanup(t *testing.T) {
+// Test_Publish_SingleTablePairs verifies that equal IPs retain device scope and
+// empty publication clears only the configured table without enumerating others.
+func Test_Publish_SingleTablePairs(t *testing.T) {
 	service, client := newPublicationService(t)
-	first := newPublisherTarget("first", "logical0", client)
-	second := newPublisherTarget("second", "logical1", client)
-	second.DefaultPriority = 200
-	for _, name := range []string{"netlink-dataplane-old-z", "netlink-dataplane-old-a", "static", "foreign"} {
-		service.Store(name, publicationTable{})
+	config := publicationConfig()
+	service.Store("netlink-dataplane-other", publicationTable{Priority: 7})
+	first := testDesiredEntry("fe80::1", "logical0")
+	second := testDesiredEntry("fe80::1", "logical1")
+	second.Ifindex = 20
+	second.HardwareRoute.DestinationMAC[5]++
+	entries := []neighbour.Entry{second, first, testDesiredEntry("::ffff:192.0.2.1", "logical0")}
+	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unused", client)}
+	require.NoError(t, neighbour.Publish(t.Context(), entries, targets, config))
+	actual := service.Tables()[config.TableName]
+	require.Equal(t, config.DefaultPriority, actual.Priority)
+	require.Len(t, actual.Entries, 3)
+	for idx, entry := range []neighbour.Entry{entries[2], first, second} {
+		require.True(t, proto.Equal(wireEntry(entry), actual.Entries[idx]))
 	}
-	firstEntry := testDesiredEntry("fe80::1", "logical0")
-	secondEntry := testDesiredEntry("fe80::1", "logical1")
-	secondEntry.HardwareRoute.DestinationMAC[5] = 3
-	entries := []neighbour.Entry{secondEntry, firstEntry, testDesiredEntry("192.0.2.1", "logical0")}
-	require.NoError(t, neighbour.Publish(t.Context(), entries, []neighbour.GatewayTarget{first, second}))
-	tables := service.Tables()
-	require.Len(t, tables, 4)
-	require.Contains(t, tables, "static")
-	require.Contains(t, tables, "foreign")
-	require.Equal(t, uint32(200), tables[second.TableName].Priority)
-	require.True(t, proto.Equal(wireEntry(secondEntry), tables[second.TableName].Entries[0]))
-	require.True(t, proto.Equal(wireEntry(entries[2]), tables[first.TableName].Entries[0]))
-	require.True(t, proto.Equal(wireEntry(firstEntry), tables[first.TableName].Entries[1]))
-	calls := service.Calls()
-	require.Equal(t, []string{"chunk", "commit", "chunk", "commit", "list_tables", "remove_table", "remove_table"}, callMethods(calls))
-	require.Equal(t, "netlink-dataplane-old-a", calls[5].Table)
-	require.Equal(t, "netlink-dataplane-old-z", calls[6].Table)
+	require.Len(t, service.Calls(), 3)
+	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
+	require.Empty(t, service.Tables()[config.TableName].Entries)
+	require.Equal(t, uint32(7), service.Tables()["netlink-dataplane-other"].Priority)
+	require.Len(t, service.Tables(), 2)
+	require.Len(t, service.Calls(), 6)
 }
 
-// Test_Publish_InvalidOwnership verifies that malformed desired ownership and
-// unbounded fields are rejected before any table can be changed.
-func Test_Publish_InvalidOwnership(t *testing.T) {
+// Test_Publish_InvalidSnapshot verifies that invalid pairs are rejected before
+// any transport opens, including the two wire representations of IPv4.
+func Test_Publish_InvalidSnapshot(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		configure func([]neighbour.GatewayTarget, []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry)
+		name   string
+		mutate func([]neighbour.Entry) []neighbour.Entry
 	}{
-		{name: "no targets", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			return nil, entries
+		{name: "duplicate pair", mutate: func(entries []neighbour.Entry) []neighbour.Entry { return append(entries, entries[0]) }},
+		{name: "mapped duplicate", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			duplicate := entries[0]
+			duplicate.NextHop = netip.MustParseAddr("::ffff:192.0.2.1")
+			return append(entries, duplicate)
 		}},
-		{name: "foreign namespace", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[0].TableName = "static"
-			return targets, entries
+		{name: "invalid address", mutate: func(entries []neighbour.Entry) []neighbour.Entry { entries[0].NextHop = netip.Addr{}; return entries }},
+		{name: "zoned address", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			entries[0].NextHop = netip.MustParseAddr("fe80::1%kni0")
+			return entries
 		}},
-		{name: "overlong table", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[0].TableName += strings.Repeat("x", 128)
-			return targets, entries
-		}},
-		{name: "invalid table characters", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[0].TableName += "/bad"
-			return targets, entries
-		}},
-		{name: "missing client", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[0].Client = nil
-			return targets, entries
-		}},
-		{name: "duplicate table", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[1].TableName = targets[0].TableName
-			return targets, entries
-		}},
-		{name: "duplicate device", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[1].Devices = targets[0].Devices
-			return targets, entries
-		}},
-		{name: "missing devices with multiple targets", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[0].Devices = nil
-			return targets, entries
-		}},
-		{name: "unowned device", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			entries[0].HardwareRoute.Device = "foreign"
-			return targets, entries
-		}},
-		{name: "duplicate next hop", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			return targets[:1], append(entries, entries[0])
-		}},
-		{name: "zoned next hop", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			entries[0].NextHop = netip.MustParseAddr("fe80::1%logical0")
-			return targets[:1], entries
-		}},
-		{name: "missing next hop", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			entries[0].NextHop = netip.Addr{}
-			return targets[:1], entries
-		}},
-		{name: "unbounded device with wildcard target", configure: func(targets []neighbour.GatewayTarget, entries []neighbour.Entry) ([]neighbour.GatewayTarget, []neighbour.Entry) {
-			targets[0].Devices = nil
-			entries[0].HardwareRoute.Device = strings.Repeat("x", 129)
-			return targets[:1], entries
+		{name: "overlong device", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
+			entries[0].HardwareRoute.Device = strings.Repeat("d", 129)
+			return entries
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			service, client := newPublicationService(t)
-			targets, entries := test.configure([]neighbour.GatewayTarget{
-				newPublisherTarget("first", "logical0", client), newPublisherTarget("second", "logical1", client),
-			}, []neighbour.Entry{testDesiredEntry("192.0.2.1", "logical0")})
-			require.Error(t, neighbour.Publish(t.Context(), entries, targets))
+			entries := test.mutate([]neighbour.Entry{testDesiredEntry("192.0.2.1", "logical0")})
+			require.Error(t, neighbour.Publish(t.Context(), entries, []neighbour.GatewayTarget{newPublisherTarget("first", client)}, publicationConfig()))
 			require.Empty(t, service.Calls())
 		})
 	}
-}
-
-// Test_ValidateManagedDeviceOwnership_UnownedLink verifies that a managed link
-// requires an owner even before any neighbours have been discovered.
-func Test_ValidateManagedDeviceOwnership_UnownedLink(t *testing.T) {
-	service, client := newPublicationService(t)
-	err := neighbour.ValidateManagedDeviceOwnership(
-		netplan.State{Links: []netplan.Link{{Name: "kni0"}, {Name: "kni1"}}},
-		map[string]string{"kni0": "logical0"},
-		[]neighbour.GatewayTarget{newPublisherTarget("first", "logical0", client)},
-	)
-	require.ErrorContains(t, err, `managed link "kni1" logical device "kni1" has no gateway owner`)
-	require.Empty(t, service.Calls())
-}
-
-// Test_Publish_ObsoleteBuiltIn verifies that reserved-looking names never
-// authorize deleting a source protected by the route operator.
-func Test_Publish_ObsoleteBuiltIn(t *testing.T) {
-	service, client := newPublicationService(t)
-	service.Store("netlink-dataplane-builtin", publicationTable{BuiltIn: true})
-	service.Store("netlink-dataplane-old", publicationTable{})
-	err := neighbour.Publish(t.Context(), nil, []neighbour.GatewayTarget{newPublisherTarget("first", "logical0", client)})
-	require.ErrorContains(t, err, "is built in")
-	require.Equal(t, []string{"chunk", "commit", "list_tables"}, callMethods(service.Calls()))
 }

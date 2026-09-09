@@ -8,70 +8,72 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
 
-var managedEthernetName = regexp.MustCompile(`^kni[0-9]+$`)
+var (
+	managedEthernetName = regexp.MustCompile(`^kni[0-9]+$`)
+	decimalVLANID       = regexp.MustCompile(`^[0-9]+$`)
+)
 
-// State is the managed network state described by a netplan document.
-//
-// Links are ordered lexicographically by name.
+// LinkKind distinguishes kernel-owned links from sidecar-created interfaces.
+type LinkKind int
+
+const (
+	LinkKindKNI LinkKind = iota
+	LinkKindVLAN
+	LinkKindLoopback
+	LinkKindDummy
+)
+
+// State is the startup configuration, ordered lexicographically by link name.
 type State struct {
 	Links []Link
 }
 
-// Link describes a managed base Ethernet link or VLAN.
+// Clone detaches every mutable part of the desired configuration.
+func (m State) Clone() State {
+	links := slices.Clone(m.Links)
+	for idx := range links {
+		links[idx].Addresses = slices.Clone(links[idx].Addresses)
+		links[idx].LinkLocal = slices.Clone(links[idx].LinkLocal)
+		if links[idx].AcceptRA != nil {
+			value := *links[idx].AcceptRA
+			links[idx].AcceptRA = &value
+		}
+	}
+	return State{Links: links}
+}
+
+// Link describes an explicitly managed interface.
 type Link struct {
 	Name      string
+	Kind      LinkKind
 	Parent    string
 	VLANID    int
 	MTU       int
 	Addresses []netip.Prefix
-	// AcceptRA is nil when netplan leaves the host setting unspecified.
+	// AcceptRA leaves the kernel setting untouched when unspecified.
 	AcceptRA  *bool
 	LinkLocal []string
 }
 
-type document struct {
-	Network *network `yaml:"network"`
+// IsEgress excludes loopbacks from neighbour device and MAC resolution.
+func (m Link) IsEgress() bool {
+	return m.Kind == LinkKindKNI || m.Kind == LinkKindVLAN
 }
 
-type network struct {
-	Version   yaml.Node            `yaml:"version"`
-	Ethernets map[string]yaml.Node `yaml:"ethernets"`
-	VLANs     map[string]yaml.Node `yaml:"vlans"`
-}
-
-type linkConfig struct {
-	Addresses []string  `yaml:"addresses"`
-	DHCP4     bool      `yaml:"dhcp4"`
-	DHCP6     bool      `yaml:"dhcp6"`
-	MTU       int       `yaml:"mtu"`
-	AcceptRA  *bool     `yaml:"accept-ra"`
-	LinkLocal *[]string `yaml:"link-local"`
-	Link      string    `yaml:"link"`
-	ID        int       `yaml:"id"`
-}
-
-type vlanParent struct {
-	Link string `yaml:"link"`
-}
-
-type vlanIdentity struct {
-	Parent string
-	ID     int
-}
-
-// Parse parses the managed state from generated netplan YAML.
+// Parse reads the managed interface subset of a single Netplan document.
 func Parse(data []byte) (State, error) {
-	var parsed document
+	var root map[string]yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&parsed); err != nil {
+	if err := decoder.Decode(&root); err != nil {
 		return State{}, fmt.Errorf("decode netplan YAML: %w", err)
 	}
-
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
@@ -79,103 +81,84 @@ func Parse(data []byte) (State, error) {
 		}
 		return State{}, fmt.Errorf("decode trailing netplan YAML: %w", err)
 	}
-	if parsed.Network == nil {
-		return State{}, errors.New("network mapping is required")
+	network, err := mapping(root["network"])
+	if err != nil {
+		return State{}, fmt.Errorf("network: %w", err)
 	}
-	if parsed.Network.Version.Kind != yaml.ScalarNode || parsed.Network.Version.Tag != "!!int" {
+	version := scalar(network["version"])
+	if version.Kind != yaml.ScalarNode || version.Tag != "!!int" || version.Value != "2" {
 		return State{}, errors.New("network.version must be 2")
 	}
-	var version int
-	if err := parsed.Network.Version.Decode(&version); err != nil || version != 2 {
-		return State{}, errors.New("network.version must be 2")
-	}
-	if parsed.Network.Ethernets == nil {
-		return State{}, errors.New("network.ethernets mapping is required")
-	}
-	if parsed.Network.VLANs == nil {
-		return State{}, errors.New("network.vlans mapping is required")
+	sections := map[string]map[string]yaml.Node{}
+	for _, name := range []string{"ethernets", "vlans", "dummy-devices"} {
+		if node, present := network[name]; present {
+			section, err := mapping(node)
+			if err != nil {
+				return State{}, fmt.Errorf("network.%s: %w", name, err)
+			}
+			sections[name] = section
+		}
 	}
 
-	links := make([]Link, 0, len(parsed.Network.Ethernets)+len(parsed.Network.VLANs))
-	managedNames := map[string]struct{}{}
-	managedParents := map[string]struct{}{}
-	managedVLANs := map[vlanIdentity]string{}
-
-	for name, node := range parsed.Network.Ethernets {
-		if !managedEthernetName.MatchString(name) {
+	state := State{}
+	for name, node := range sections["ethernets"] {
+		kind := LinkKindKNI
+		if name == "lo" {
+			kind = LinkKindLoopback
+		} else if !managedEthernetName.MatchString(name) {
 			continue
 		}
-		if err := ValidateInterfaceName(name); err != nil {
-			return State{}, fmt.Errorf("ethernet %q: %w", name, err)
-		}
-
-		link, err := parseLink(name, "", 0, node)
+		link, err := parseLink(name, kind, node)
 		if err != nil {
 			return State{}, err
 		}
-		links = append(links, link)
-		managedNames[name] = struct{}{}
-		managedParents[name] = struct{}{}
+		state.Links = append(state.Links, link)
 	}
-
-	for name, node := range parsed.Network.VLANs {
-		var parent vlanParent
-		if err := node.Decode(&parent); err != nil {
-			return State{}, fmt.Errorf("vlan %q: decode parent: %w", name, err)
+	for name, node := range sections["dummy-devices"] {
+		link, err := parseLink(name, LinkKindDummy, node)
+		if err != nil {
+			return State{}, err
 		}
-		if parent.Link == "" {
-			return State{}, fmt.Errorf("vlan %q: parent link is required", name)
-		}
-		if _, managed := managedParents[parent.Link]; !managed {
-			continue
-		}
-		if err := ValidateInterfaceName(name); err != nil {
+		state.Links = append(state.Links, link)
+	}
+	for name, node := range sections["vlans"] {
+		fields, err := mapping(node)
+		if err != nil {
 			return State{}, fmt.Errorf("vlan %q: %w", name, err)
 		}
-		if _, duplicate := managedNames[name]; duplicate {
-			return State{}, fmt.Errorf("duplicate managed link name %q", name)
+		parentNode := scalar(fields["link"])
+		if parentNode.Kind != yaml.ScalarNode || parentNode.Tag != "!!str" || parentNode.Value == "" {
+			return State{}, fmt.Errorf("vlan %q: parent link is required", name)
 		}
-
-		var config linkConfig
-		if err := node.Decode(&config); err != nil {
-			return State{}, fmt.Errorf("vlan %q: decode configuration: %w", name, err)
+		parent := parentNode.Value
+		if _, declared := sections["ethernets"][parent]; !declared || parent == "lo" {
+			return State{}, fmt.Errorf("vlan %q: parent %q is not a declared Ethernet", name, parent)
 		}
-		if config.ID < 1 || config.ID > 4094 {
-			return State{}, fmt.Errorf("vlan %q: ID %d is outside 1..4094", name, config.ID)
+		if !managedEthernetName.MatchString(parent) {
+			continue
 		}
-		identity := vlanIdentity{Parent: parent.Link, ID: config.ID}
-		if previous, duplicate := managedVLANs[identity]; duplicate {
-			return State{}, fmt.Errorf(
-				"vlan %q: parent %q ID %d is already used by %q",
-				name,
-				parent.Link,
-				config.ID,
-				previous,
-			)
-		}
-
-		link, err := linkFromConfig(name, parent.Link, config.ID, config)
+		link, err := parseLink(name, LinkKindVLAN, node)
 		if err != nil {
 			return State{}, err
 		}
-		links = append(links, link)
-		managedNames[name] = struct{}{}
-		managedVLANs[identity] = name
+		link.Parent = parent
+		state.Links = append(state.Links, link)
 	}
-
-	sort.Slice(links, func(first, second int) bool {
-		return links[first].Name < links[second].Name
+	sort.Slice(state.Links, func(first, second int) bool {
+		return state.Links[first].Name < state.Links[second].Name
 	})
-	return State{Links: links}, nil
+	if err := state.Validate(); err != nil {
+		return State{}, err
+	}
+	return state, nil
 }
 
-// ParseFile reads and parses the managed state from a netplan YAML file.
+// ParseFile reads and validates the startup Netplan file.
 func ParseFile(path string) (State, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return State{}, fmt.Errorf("read netplan file %q: %w", path, err)
 	}
-
 	state, err := Parse(data)
 	if err != nil {
 		return State{}, fmt.Errorf("parse netplan file %q: %w", path, err)
@@ -183,70 +166,97 @@ func ParseFile(path string) (State, error) {
 	return state, nil
 }
 
-func parseLink(name, parent string, vlanID int, node yaml.Node) (Link, error) {
-	var config *linkConfig
-	if err := node.Decode(&config); err != nil {
-		return Link{}, fmt.Errorf("link %q: decode configuration: %w", name, err)
+func mapping(node yaml.Node) (map[string]yaml.Node, error) {
+	node = scalar(node)
+	if node.Kind != yaml.MappingNode {
+		return nil, errors.New("configuration mapping is required")
 	}
-	if config == nil {
-		return Link{}, fmt.Errorf("link %q: configuration mapping is required", name)
+	var fields map[string]yaml.Node
+	if err := node.Decode(&fields); err != nil {
+		return nil, err
 	}
-	return linkFromConfig(name, parent, vlanID, *config)
+	return fields, nil
 }
 
-func linkFromConfig(name, parent string, vlanID int, config linkConfig) (Link, error) {
-	if config.DHCP4 {
-		return Link{}, fmt.Errorf("link %q: dhcp4 must be disabled", name)
+func scalar(node yaml.Node) yaml.Node {
+	for node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = *node.Alias
 	}
-	if config.DHCP6 {
-		return Link{}, fmt.Errorf("link %q: dhcp6 must be disabled", name)
-	}
-	if err := ValidateMTU(config.MTU); err != nil {
+	return node
+}
+
+func parseLink(name string, kind LinkKind, node yaml.Node) (Link, error) {
+	fields, err := mapping(node)
+	if err != nil {
 		return Link{}, fmt.Errorf("link %q: %w", name, err)
 	}
-
-	addresses := make([]netip.Prefix, 0, len(config.Addresses))
-	for idx, address := range config.Addresses {
-		prefix, err := netip.ParsePrefix(address)
-		if err != nil {
-			return Link{}, fmt.Errorf("link %q: address %d %q: %w", name, idx, address, err)
+	link := Link{Name: name, Kind: kind, LinkLocal: []string{"ipv6"}}
+	for key, value := range fields {
+		value = scalar(value)
+		switch key {
+		case "routes", "routing-policy":
+			continue
+		case "addresses", "link-local":
+			if value.Kind != yaml.SequenceNode {
+				return Link{}, fmt.Errorf("link %q: %s must be a sequence", name, key)
+			}
+			values := []string{}
+			for _, item := range value.Content {
+				itemValue := scalar(*item)
+				if itemValue.Kind != yaml.ScalarNode || itemValue.Tag != "!!str" {
+					return Link{}, fmt.Errorf("link %q: %s must contain strings", name, key)
+				}
+				values = append(values, itemValue.Value)
+			}
+			if key == "link-local" {
+				link.LinkLocal = values
+				continue
+			}
+			for _, address := range values {
+				prefix, err := netip.ParsePrefix(address)
+				if err != nil {
+					return Link{}, fmt.Errorf("link %q: address %q: %w", name, address, err)
+				}
+				link.Addresses = append(link.Addresses, prefix)
+			}
+		case "dhcp4", "dhcp6", "accept-ra":
+			var enabled bool
+			if value.Kind != yaml.ScalarNode || value.Tag == "!!null" {
+				return Link{}, fmt.Errorf("link %q: %s must be a boolean", name, key)
+			}
+			if err := value.Decode(&enabled); err != nil {
+				return Link{}, fmt.Errorf("link %q: %s: %w", name, key, err)
+			}
+			if key == "accept-ra" {
+				link.AcceptRA = &enabled
+			} else if enabled {
+				return Link{}, fmt.Errorf("link %q: %s must be disabled", name, key)
+			}
+		case "mtu":
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!int" {
+				return Link{}, fmt.Errorf("link %q: mtu must be an integer", name)
+			}
+			if err := value.Decode(&link.MTU); err != nil {
+				return Link{}, fmt.Errorf("link %q: mtu: %w", name, err)
+			}
+		case "id", "link":
+			if kind != LinkKindVLAN {
+				return Link{}, fmt.Errorf("link %q: %s is only supported for VLANs", name, key)
+			}
+		default:
+			return Link{}, fmt.Errorf("link %q: unsupported setting %q", name, key)
 		}
-		addresses = append(addresses, prefix)
 	}
-	if err := ValidateAddresses(addresses); err != nil {
-		return Link{}, fmt.Errorf("link %q: %w", name, err)
-	}
-
-	configuredLinkLocal := []string{"ipv6"}
-	if config.LinkLocal != nil {
-		configuredLinkLocal = *config.LinkLocal
-	}
-	linkLocal := make([]string, 0, len(configuredLinkLocal))
-	for idx, family := range configuredLinkLocal {
-		if family != "ipv4" && family != "ipv6" {
-			return Link{}, fmt.Errorf(
-				"link %q: link-local value %d %q is invalid; want ipv4 or ipv6",
-				name,
-				idx,
-				family,
-			)
+	if kind == LinkKindVLAN {
+		value := scalar(fields["id"])
+		if value.Kind != yaml.ScalarNode || value.Tag == "!!null" || !decimalVLANID.MatchString(value.Value) {
+			return Link{}, fmt.Errorf("vlan %q: id must be decimal digits in 0..4094", name)
 		}
-		linkLocal = append(linkLocal, family)
+		identifier, err := strconv.ParseUint(value.Value, 10, 16)
+		if err != nil || identifier > 4094 {
+			return Link{}, fmt.Errorf("vlan %q: id must be in 0..4094", name)
+		}
+		link.VLANID = int(identifier)
 	}
-
-	var acceptRA *bool
-	if config.AcceptRA != nil {
-		value := *config.AcceptRA
-		acceptRA = &value
-	}
-
-	return Link{
-		Name:      name,
-		Parent:    parent,
-		VLANID:    vlanID,
-		MTU:       config.MTU,
-		Addresses: addresses,
-		AcceptRA:  acceptRA,
-		LinkLocal: linkLocal,
-	}, nil
+	return link, nil
 }
