@@ -7,6 +7,8 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb"
 service Logging {
   // UpdateLevel updates the minimum logging level.
   rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse) {}
+  // GetLevel reports the current minimum logging level.
+  rpc GetLevel(GetLevelRequest) returns (GetLevelResponse) {}
 }
 
 // UpdateLevelRequest is the request to update the minimum logging level.
@@ -37,3 +39,12 @@ enum LogLevel {
 
 // UpdateLevelResponse is the response to the UpdateLevelRequest.
 message UpdateLevelResponse {}
+
+// GetLevelRequest carries no fields, the level in effect is process-wide.
+message GetLevelRequest {}
+
+// GetLevelResponse carries the minimum logging level currently in effect.
+message GetLevelResponse {
+  // Level is the current minimum logging level.
+  LogLevel level = 1;
+}

@@ -7,11 +7,12 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{UpdateLevelRequest, logging_client::LoggingClient};
+use ynpb::pb::{GetLevelRequest, UpdateLevelRequest, logging_client::LoggingClient};
 
 const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
 
-/// Manages the log level of the control plane.
+/// Manages the log level of the control plane process (`yanet-controlplane`),
+/// covering its Go logger and the hosted C libraries but not the dataplane.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -30,15 +31,17 @@ struct Cmd {
 
 #[derive(Debug, Clone, Subcommand)]
 enum ModeCmd {
-    /// Manage the logging service.
+    /// Manage the control plane's logging level.
     #[clap(subcommand)]
     Logging(LoggingCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
 enum LoggingCmd {
-    /// Set the new minimum log level.
+    /// Set the control plane's minimum log level.
     SetLevel(SetLogLevelCmd),
+    /// Show the control plane's current minimum log level.
+    Show,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -75,6 +78,7 @@ impl ModeCmd {
     pub fn action(&self) -> &'static str {
         match self {
             ModeCmd::Logging(LoggingCmd::SetLevel(..)) => "set-level",
+            ModeCmd::Logging(LoggingCmd::Show) => "show",
         }
     }
 }
@@ -100,7 +104,23 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 .map_err(service.status(action))?;
 
             let level_name = cmd.level.to_possible_value().expect("no skipped variants");
-            output::success(action, format_args!("Set log level to '{}'.", level_name.get_name()));
+            output::success(
+                action,
+                format_args!("Set the control plane log level to '{}'.", level_name.get_name()),
+            );
+        }
+        ModeCmd::Logging(LoggingCmd::Show) => {
+            let response = service
+                .client()
+                .get_level(GetLevelRequest {})
+                .await
+                .map_err(service.status(action))?
+                .into_inner();
+
+            output::data(
+                || &response,
+                || println!("level: {}", ynpb::log_level_name(response.level)),
+            );
         }
     }
 

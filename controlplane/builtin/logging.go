@@ -119,6 +119,23 @@ func (m *Logging) UpdateLevel(
 	return &ynpb.UpdateLevelResponse{}, nil
 }
 
+// GetLevel returns the minimum logging level currently in effect.
+func (m *Logging) GetLevel(
+	ctx context.Context,
+	req *ynpb.GetLevelRequest,
+) (*ynpb.GetLevelResponse, error) {
+	if m.atom == nil {
+		return nil, status.Errorf(codes.Unimplemented, "service doesn't support reading log level dynamically")
+	}
+
+	level, err := convertZapLevel(m.atom.Level())
+	if err != nil {
+		return nil, err
+	}
+
+	return &ynpb.GetLevelResponse{Level: level}, nil
+}
+
 func convertLevel(v ynpb.LogLevel) (zapcore.Level, error) {
 	switch v {
 	case ynpb.LogLevel_DEBUG:
@@ -131,5 +148,26 @@ func convertLevel(v ynpb.LogLevel) (zapcore.Level, error) {
 		return zapcore.ErrorLevel, nil
 	default:
 		return zapcore.InvalidLevel, fmt.Errorf("unexpected value: %v", v)
+	}
+}
+
+func convertZapLevel(level zapcore.Level) (ynpb.LogLevel, error) {
+	switch level {
+	case zapcore.DebugLevel:
+		return ynpb.LogLevel_DEBUG, nil
+	case zapcore.InfoLevel:
+		return ynpb.LogLevel_INFO, nil
+	case zapcore.WarnLevel:
+		return ynpb.LogLevel_WARN, nil
+	case zapcore.ErrorLevel:
+		return ynpb.LogLevel_ERROR, nil
+	default:
+		// DPanic, Panic and Fatal come only from the startup config, the API enum
+		// has no value for them.
+		return 0, status.Errorf(
+			codes.FailedPrecondition,
+			"current log level %s has no equivalent among DEBUG, INFO, WARN, ERROR",
+			level,
+		)
 	}
 }
