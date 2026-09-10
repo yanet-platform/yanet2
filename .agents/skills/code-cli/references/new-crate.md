@@ -32,30 +32,27 @@ workspace = true
 
 [dependencies]
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
+# Only when the proto imports common/filterpb.
+filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 netip = "0.3"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
-tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
 ```
 
-Add a dependency only when the code uses it; `netip` and `tabled` are
-listed because almost every binary parses an address or prints a table.
-`tabled` keeps its default features off, since the default `assert`
-feature links `testing_table` into the binary, and lists `derive` only
-when a row type derives `Tabled`.
-
-`tonic-prost-build` keeps its default features off: the default
-`cleanup-markdown` re-renders proto doc comments and fails clippy's
-`doc_lazy_continuation` on the generated code, while `transport` keeps the
-generated `connect` constructors that tonic-build 0.13 always emitted.
+Add a dependency only when the code uses it; `netip` is listed because
+almost every binary parses an address. A binary that prints a table adds
+`tabled = { version = "0.21", default-features = false, features = ["ansi",
+"derive"] }`: default features off, since the default `assert` feature
+links `testing_table` into the binary, and `derive` only when a row type
+derives `Tabled`.
 
 ## build.rs
 
@@ -63,53 +60,47 @@ generated `connect` constructors that tonic-build 0.13 always emitted.
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let root = "../../..";
     // modules, devices and objects; an operator's protos live under
     // operators/<x>/operatorpb/v1/ instead, with file names of their
     // own (route.proto, operator.proto, …) — check the tree.
-    let proto = "<owner>/<x>/controlplane/<x>pb/v1/<x>.proto";
-    println!("cargo:rerun-if-changed={root}/{proto}");
-
-    tonic_prost_build::configure()
-        .emit_rerun_if_changed(false)
-        .build_server(false)
-        .message_attribute(".", "#[derive(serde::Serialize)]")
-        // One line per enum field that must render by its proto name.
-        .field_attribute(".<package>.<Message>.<field>", "#[serde(serialize_with = \"crate::serialize_<field>\")]")
-        .extern_path(".common.commonpb.v1", "::commonpb::pb")
-        .compile_protos(&[format!("{root}/{proto}")], &[root])?;
-
-    Ok(())
+    ync_build::client("../../..", &["<owner>/<x>/controlplane/<x>pb/v1/<x>.proto"])
+        .serialize()
+        // One call per enum field that must render by its proto name.
+        .with(|builder| {
+            builder.field_attribute(
+                ".<package>.<Message>.<field>",
+                "#[serde(serialize_with = \"crate::serialize_<field>\")]",
+            )
+        })
+        .compile()
 }
 ```
 
-Shared packages (`common.commonpb.v1`, `common.filterpb.v1`) are always
-`extern_path`ed to their crate; never compile them twice.
+`ync_build::client` builds a client-only crate, `extern_path`s the shared
+packages (`common.commonpb.v1`, `common.filterpb.v1`) to their crates and
+watches the listed protos; a proto they import is not watched.
 
 ## src/main.rs
 
 ```rust
 //! CLI for YANET <x>.
 
-use std::borrow::Cow;
-
 use clap::{CommandFactory, Parser};
 use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
 };
-use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
     client::{LayeredChannel, Service},
     completion,
-    display::print_table_from_entries,
+    display,
     errors::Error,
     output,
 };
 
 use crate::<x>pb::{
-    Config, DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     <x>_service_client::<X>ServiceClient,
 };
 
@@ -213,17 +204,11 @@ async fn list_configs(service: &mut <X>Service) -> Result<(), Error> {
     output::data(
         || &response.configs,
         || {
-            if response.configs.is_empty() {
-                output::empty_with_hint(
-                    format_args!("No configs found."),
-                    format_args!("create one with 'yanet-cli-<suffix> update --name <name> …'"),
-                );
-                return;
-            }
-
-            let mut entries: Vec<&Config> = response.configs.iter().collect();
-            entries.sort_by(|a, b| a.name.cmp(&b.name));
-            print_table_from_entries(entries);
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No configs found."),
+                format_args!("create one with 'yanet-cli-<suffix> update --name <name> …'"),
+            )
         },
     );
 
@@ -245,8 +230,10 @@ async fn show_config(service: &mut <X>Service, cmd: ShowCmd) -> Result<(), Error
     output::data(
         || &response,
         || {
-            println!("name:     {}", response.name);
-            println!("prefixes: {}", response.prefixes.len());
+            display::KeyValue::new()
+                .row("name", &response.name)
+                .row("prefixes", response.prefixes.len())
+                .print();
         },
     );
 
@@ -285,34 +272,12 @@ async fn delete_config(service: &mut <X>Service, cmd: DeleteCmd) -> Result<(), E
     Ok(())
 }
 
-impl Tabled for Config {
-    const LENGTH: usize = 2;
-
-    fn fields(&self) -> Vec<Cow<'_, str>> {
-        vec![
-            Cow::Borrowed(self.name.as_str()),
-            Cow::Owned(self.prefixes.len().to_string()),
-        ]
-    }
-
-    fn headers() -> Vec<Cow<'static, str>> {
-        vec![Cow::Borrowed("NAME"), Cow::Borrowed("PREFIXES")]
-    }
-}
-
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(
         Cmd::command,
         client,
         async move |mut client| {
-            Ok(client
-                .list_configs(ListConfigsRequest {})
-                .await?
-                .into_inner()
-                .configs
-                .into_iter()
-                .map(|config| config.name)
-                .collect())
+            Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
         },
     )
 }
