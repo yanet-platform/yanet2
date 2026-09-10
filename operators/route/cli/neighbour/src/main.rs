@@ -10,18 +10,19 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{IpAddress, MacAddress};
 use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 use crate::operatorpb::{
@@ -53,13 +54,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -175,12 +170,12 @@ pub struct RemoveTableCmd {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = NeighbourService::new(&cmd.connection, action).await?;
+    let mut service = NeighbourService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Show(args) => service.show_neighbours(args).await,

@@ -22,13 +22,12 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `yanet-cli operator <x>` dispatch to `yanet-cli-device-<x>` /
   `yanet-cli-operator-<x>` by name; the dispatcher needs no registration.
 - `Cmd`: `#[derive(Debug, Clone, Parser)]`, `#[command(version, about)]`,
-  `#[command(flatten_help = true)]`, fields `#[clap(subcommand)] mode: ModeCmd`,
-  `#[command(flatten)] connection: ConnectionArgs`, `--format`
-  (`CommonFormat`, `default_value = "human"`, `global = true`, doc
-  `Output format.`) and `-v` (`ArgAction::Count`, `global = true`, doc
-  `Be verbose: shows debug log lines and raw gRPC error details.`).
+  `#[command(flatten_help = true)]`, fields `#[clap(subcommand)] mode: ModeCmd`
+  and `#[command(flatten)] globals: GlobalArgs`. `ync::GlobalArgs` carries
+  the connection flags, `--format` and `-v` for every binary, a crate never
+  declares them itself.
 - `fn main() -> std::process::ExitCode` delegates the lifecycle to
-  `ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)`. The scaffold
+  `ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)`. The scaffold
   owns completion before Tokio, parsing, output initialisation, the
   current-thread runtime, error rendering and the process status.
 - `run(cmd)` determines the action, builds the service object once and matches
@@ -41,14 +40,14 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   pull it into `fn client(channel: LayeredChannel) ->
   <X>ServiceClient<LayeredChannel>`, named `<x>_client` only when the crate
   imports the `ync::client` module under that name. One service:
-  `Service::connect_for(&cmd.connection, action, SERVICE_NAME,
+  `Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME,
   client).await?`, reused unchanged by completion. Several:
-  `Connection::connect_for(&cmd.connection, action).await?` once, then
+  `Connection::connect_for(&cmd.globals.connection, action).await?` once, then
   `Service::new(&connection, NAME, build)` per client. The action is the same
   user-facing verb passed to the command's RPC error mapping.
 - Connection settings resolve inside `ync`, from flags, environment and the
   configuration file (`ync::config`). A CLI never reads
-  `cmd.connection.endpoint` itself. A pre-connect error label comes from
+  `cmd.globals.connection.endpoint` itself. A pre-connect error label comes from
   `client::resolve_label`, a post-connect one from `Service::endpoint()` /
   `Connection::endpoint()`.
 - Every unary RPC of a command handler: `self.service.unary("<verb>",

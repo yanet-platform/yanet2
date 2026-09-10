@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use forwardpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
@@ -9,10 +9,11 @@ use forwardpb::{
 use serde::{Deserialize, Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{self, ConnectionArgs, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
@@ -30,13 +31,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -291,7 +286,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     // gateway.
     let update = match &cmd.mode {
         ModeCmd::Update(update) => {
-            let endpoint = client::resolve_label(&cmd.connection, action)?;
+            let endpoint = client::resolve_label(&cmd.globals.connection, action)?;
             let mut request = load_request(&update.file)
                 .map_err(|e| Error::invalid_argument("update", endpoint.clone(), e.to_string()))?;
             bind_request_name(&mut request, &update.config)
@@ -301,7 +296,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         _ => None,
     };
 
-    let mut service = ForwardService::new(&cmd.connection, action).await?;
+    let mut service = ForwardService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
@@ -315,7 +310,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the forward configs the

@@ -1,10 +1,14 @@
 use core::future::Future;
 use std::process::{ExitCode, Termination};
 
-use clap::Parser;
+use clap::{ArgAction, Args, Parser};
 use clap_complete::CompleteEnv;
 
-use crate::{errors::Error, output::Format};
+use crate::{
+    client::ConnectionArgs,
+    errors::Error,
+    output::{CommonFormat, Format},
+};
 
 pub mod auth;
 pub mod client;
@@ -22,6 +26,28 @@ pub mod timeout;
 pub mod yaml;
 
 mod signal;
+
+/// The flags every yanet CLI carries: the connection, the output format and
+/// the verbosity.
+#[derive(Debug, Clone, Args)]
+pub struct GlobalArgs {
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, value_enum, default_value = "human", global = true)]
+    pub format: CommonFormat,
+    /// Be verbose: shows debug log lines and raw gRPC error details.
+    #[arg(short, action = ArgAction::Count, global = true)]
+    pub verbose: u8,
+}
+
+impl GlobalArgs {
+    /// The verbosity and format pair [`entrypoint`] initialises the output
+    /// with.
+    pub fn options(&self) -> (u8, CommonFormat) {
+        (self.verbose, self.format)
+    }
+}
 
 /// Initialise the logger and selected output backend.
 ///

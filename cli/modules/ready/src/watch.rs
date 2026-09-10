@@ -69,7 +69,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// close likewise maps to `Ok(true)` rather than reporting the readiness
 /// observed at startup.
 pub async fn run(cmd: &Cmd) -> Result<bool, Error> {
-    let connection = Arc::new(Connection::connect_for(&cmd.connection, "ready").await?);
+    let connection = Arc::new(Connection::connect_for(&cmd.globals.connection, "ready").await?);
     let services = READINESS.list(&connection).await?;
 
     let mut reports = Vec::with_capacity(services.len());

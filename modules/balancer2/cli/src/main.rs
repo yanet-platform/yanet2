@@ -11,9 +11,9 @@ use core::{
 };
 use std::path::PathBuf;
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use ync::{client::ConnectionArgs, completion, errors::Error, output::CommonFormat};
+use ync::{GlobalArgs, completion, errors::Error};
 
 use crate::service::{Balancer2Service, client};
 
@@ -30,13 +30,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -322,12 +316,12 @@ impl FilterFlags {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = Balancer2Service::connect(&cmd.connection, action).await?;
-    service.handle(cmd.mode, cmd.format).await
+    let mut service = Balancer2Service::connect(&cmd.globals.connection, action).await?;
+    service.handle(cmd.mode, cmd.globals.format).await
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the balancer configs the

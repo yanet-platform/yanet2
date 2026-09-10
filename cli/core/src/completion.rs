@@ -133,6 +133,7 @@ mod test {
     use clap::{CommandFactory, Parser};
 
     use super::*;
+    use crate::GlobalArgs;
 
     fn words(raw: &[&str]) -> Vec<OsString> {
         raw.iter().map(OsString::from).collect()
@@ -165,7 +166,7 @@ mod test {
     }
 
     /// A faithful replica of a module CLI's `Cmd`: a required subcommand
-    /// plus globally flattened [`ConnectionArgs`], the exact shape that
+    /// plus the globally flattened [`GlobalArgs`], the exact shape that
     /// made a `ConnectionArgs`-only wrapper miss a global flag typed after
     /// the subcommand.
     #[derive(Parser)]
@@ -173,7 +174,7 @@ mod test {
         #[command(subcommand)]
         mode: TestModeCmd,
         #[command(flatten)]
-        connection: ConnectionArgs,
+        globals: GlobalArgs,
     }
 
     #[derive(Parser)]

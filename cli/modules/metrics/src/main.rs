@@ -1,14 +1,15 @@
 //! Generic metrics probe CLI.
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, MetricTag, metric::Value};
 use tabled::Tabled;
 use ync::{
-    client::{self, Connection, ConnectionArgs},
+    GlobalArgs,
+    client::{self, Connection},
     discovery::Family,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 /// The family of metrics services this CLI probes and discovers.
@@ -33,8 +34,6 @@ pub struct Cmd {
     /// Omitting it lists the available services as a usage error.
     #[arg(value_name = "SERVICE", add = ArgValueCandidates::new(service_candidates))]
     pub name: Option<String>,
-    #[command(flatten)]
-    pub connection: ConnectionArgs,
     /// Server-side tag filter: `NAME=VALUE`, repeatable — a metric is
     /// returned only if it satisfies every tag (logical AND).
     ///
@@ -44,16 +43,12 @@ pub struct Cmd {
     /// `--tag 'config=*'`.
     #[arg(long = "tag", short = 't', value_name = "NAME=VALUE", global = true)]
     pub tags: Vec<String>,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    #[command(flatten)]
+    pub globals: GlobalArgs,
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Run the metrics probe against the named service.
@@ -67,7 +62,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         return Err(require_service(&cmd).await);
     };
 
-    let endpoint = client::resolve_label(&cmd.connection, "metrics")?;
+    let endpoint = client::resolve_label(&cmd.globals.connection, "metrics")?;
 
     METRICS.require_name(&endpoint, &name)?;
 
@@ -78,7 +73,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         .collect::<Result<Vec<_>, String>>()
         .map_err(|message| Error::invalid_argument("metrics", endpoint, message))?;
 
-    let connection = Connection::connect_for(&cmd.connection, "metrics").await?;
+    let connection = Connection::connect_for(&cmd.globals.connection, "metrics").await?;
 
     let name = METRICS.resolve(&connection, &name).await?;
 
@@ -108,13 +103,13 @@ fn parse_tag(entry: &str) -> Result<MetricTag, String> {
 /// or slower than the budget simply leaves the error hintless, since the
 /// usage mistake stands on its own.
 async fn require_service(cmd: &Cmd) -> Error {
-    let endpoint = match client::resolve_label(&cmd.connection, "metrics") {
+    let endpoint = match client::resolve_label(&cmd.globals.connection, "metrics") {
         Ok(endpoint) => endpoint,
         Err(err) => return err,
     };
     let err = Error::invalid_argument("metrics", endpoint, "no metrics service specified");
 
-    METRICS.suggest_within(&cmd.connection, err).await
+    METRICS.suggest_within(&cmd.globals.connection, err).await
 }
 
 /// Probes one metrics service's `GetMetrics` over the shared connection, and
