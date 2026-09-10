@@ -32,6 +32,12 @@ type NeighbourReplacementLimits struct {
 	MaxConcurrentStreams int
 }
 
+// NeighbourListLimits bounds readers retaining immutable cache generations.
+type NeighbourListLimits struct {
+	MaxConcurrentStreams int
+	MaxDuration          time.Duration
+}
+
 // NeighbourService implements the operator-owned NeighbourService
 // surface. Mutations wake the reconcile loop.
 type NeighbourService struct {
@@ -41,6 +47,8 @@ type NeighbourService struct {
 	onChanged          func()
 	limits             NeighbourReplacementLimits
 	staged             chan struct{}
+	listReads          chan struct{}
+	listMaxDuration    time.Duration
 	onSnapshotReceived func(string, bool) bool
 	onTableRemoved     func(string)
 	commitMu           sync.Mutex
@@ -69,6 +77,8 @@ func NewNeighbourService(
 		onChanged:          opts.OnChanged,
 		limits:             opts.ReplacementLimits,
 		staged:             make(chan struct{}, opts.ReplacementLimits.MaxConcurrentStreams),
+		listReads:          make(chan struct{}, opts.ListLimits.MaxConcurrentStreams),
+		listMaxDuration:    opts.ListLimits.MaxDuration,
 		onSnapshotReceived: opts.OnSnapshotReceived,
 		onTableRemoved:     opts.OnTableRemoved,
 		readiness:          opts.Readiness,
@@ -237,11 +247,45 @@ func (m *NeighbourService) List(
 }
 
 // ListStream holds one immutable cache view for the lifetime of the read.
+//
+// Admission precedes view acquisition. A server deadline ends even a read stuck
+// in transport flow control; returning the handler cancels its blocked send.
+// The worker retains its admission slot until the view and send are released.
 func (m *NeighbourService) ListStream(
 	req *operatorpb.ListNeighboursRequest,
 	stream grpc.ServerStreamingServer[operatorpb.ListNeighboursResponse],
 ) error {
-	ctx := stream.Context()
+	ctx, cancel := context.WithTimeout(stream.Context(), m.listMaxDuration)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return status.FromContextError(err).Err()
+	}
+	select {
+	case m.listReads <- struct{}{}:
+	default:
+		return status.Error(codes.ResourceExhausted, "too many active neighbour list streams")
+	}
+	result := make(chan error, 1)
+	go func() {
+		defer func() { <-m.listReads }()
+		result <- m.listStream(ctx, req, stream)
+	}()
+	select {
+	case err := <-result:
+		if contextError := ctx.Err(); contextError != nil {
+			return status.FromContextError(contextError).Err()
+		}
+		return err
+	case <-ctx.Done():
+		return status.FromContextError(ctx.Err()).Err()
+	}
+}
+
+func (m *NeighbourService) listStream(
+	ctx context.Context,
+	req *operatorpb.ListNeighboursRequest,
+	stream grpc.ServerStreamingServer[operatorpb.ListNeighboursResponse],
+) error {
 	view, err := m.listView(ctx, req.GetTable())
 	if err != nil {
 		return err

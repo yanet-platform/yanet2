@@ -18,6 +18,9 @@ service NeighbourService {
   // Chunks contain at most 1,000 entries and 256 KiB, including receiver metadata.
   // Only successful stream completion establishes a complete list. An empty
   // snapshot yields one empty chunk. Ordering is unspecified.
+  // The default read budget is four concurrent streams and five minutes per
+  // stream, independent of client deadlines. Excess readers fail with
+  // ResourceExhausted; expired reads fail with DeadlineExceeded.
   rpc ListStream(ListNeighboursRequest) returns (stream ListNeighboursResponse);
 
   // CreateTable creates a new user-defined neighbour table.

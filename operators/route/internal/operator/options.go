@@ -152,6 +152,7 @@ type neighbourServiceOptions struct {
 	RemoteTable        string
 	RemoteDevices      []string
 	ReplacementLimits  NeighbourReplacementLimits
+	ListLimits         NeighbourListLimits
 }
 
 func newNeighbourServiceOptions() *neighbourServiceOptions {
@@ -164,11 +165,26 @@ func newNeighbourServiceOptions() *neighbourServiceOptions {
 			MaxBytes:             operatorpb.NeighbourSnapshotBytes,
 			MaxConcurrentStreams: operatorpb.NeighbourConcurrentStreams,
 		},
+		ListLimits: NeighbourListLimits{MaxConcurrentStreams: 4, MaxDuration: 5 * time.Minute},
 	}
 }
 
 // NeighbourServiceOption configures NewNeighbourService.
 type NeighbourServiceOption func(*neighbourServiceOptions)
+
+// WithNeighbourListLimits overrides positive read admission and lifetime limits.
+//
+// Nonpositive fields keep the defaults: four readers and five minutes per read.
+func WithNeighbourListLimits(limits NeighbourListLimits) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) {
+		if limits.MaxConcurrentStreams > 0 {
+			options.ListLimits.MaxConcurrentStreams = limits.MaxConcurrentStreams
+		}
+		if limits.MaxDuration > 0 {
+			options.ListLimits.MaxDuration = limits.MaxDuration
+		}
+	}
+}
 
 // WithNeighbourReplacementLimits overrides positive staging limits.
 //

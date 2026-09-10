@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -134,6 +135,43 @@ type neighbourServiceFixture struct {
 	Changes  atomic.Int64
 	Observer *replacementObserver
 	Sequence atomic.Int64
+	Lists    *neighbourListObserver
+}
+
+// neighbourListProgress observes real transport sends and handler completion.
+type neighbourListProgress struct {
+	Started         atomic.Int64
+	Completed       atomic.Int64
+	HandlerFinished atomic.Bool
+	HandlerCode     atomic.Uint32
+}
+
+type neighbourListObserver struct {
+	mu    sync.Mutex
+	reads map[string]*neighbourListProgress
+}
+
+// Read returns the stable counters for one independently identified RPC.
+func (m *neighbourListObserver) Read(identity string) *neighbourListProgress {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reads[identity] == nil {
+		m.reads[identity] = &neighbourListProgress{}
+	}
+	return m.reads[identity]
+}
+
+type observedNeighbourListStream struct {
+	grpc.ServerStream
+	Progress *neighbourListProgress
+}
+
+// SendMsg records entry and exit without bypassing HTTP/2 flow control.
+func (m *observedNeighbourListStream) SendMsg(message any) error {
+	m.Progress.Started.Add(1)
+	err := m.ServerStream.SendMsg(message)
+	m.Progress.Completed.Add(1)
+	return err
 }
 
 // newNeighbourServiceFixture serves the production handler with default caps.
@@ -142,6 +180,7 @@ func newNeighbourServiceFixture(t *testing.T, options ...operator.NeighbourServi
 	fixture := &neighbourServiceFixture{
 		Table:    neigh.NewNeighTable(),
 		Observer: &replacementObserver{progress: map[string]replacementProgress{}},
+		Lists:    &neighbourListObserver{reads: map[string]*neighbourListProgress{}},
 	}
 	options = append(options, operator.WithNeighbourServiceOnChanged(func() { fixture.Changes.Add(1) }))
 	service := operator.NewNeighbourService(fixture.Table, options...)
@@ -153,6 +192,13 @@ func newNeighbourServiceFixture(t *testing.T, options ...operator.NeighbourServi
 		identity := ""
 		if len(identities) != 0 {
 			identity = identities[0]
+		}
+		if info.FullMethod == operatorpb.NeighbourService_ListStream_FullMethodName {
+			progress := fixture.Lists.Read(identity)
+			err := handler(service, &observedNeighbourListStream{ServerStream: stream, Progress: progress})
+			progress.HandlerCode.Store(uint32(status.Code(err)))
+			progress.HandlerFinished.Store(true)
+			return err
 		}
 		err := handler(service, &observedReplacementStream{
 			ServerStream: stream, Observer: fixture.Observer, Identity: identity,
@@ -176,6 +222,8 @@ func newNeighbourServiceFixture(t *testing.T, options ...operator.NeighbourServi
 	})
 	connection, err := grpc.NewClient("passthrough:///neighbour-service",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStaticStreamWindowSize(64*1024),
+		grpc.WithStaticConnWindowSize(64*1024),
 		grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
 			return listener.DialContext(ctx)
 		}),
@@ -184,6 +232,126 @@ func newNeighbourServiceFixture(t *testing.T, options ...operator.NeighbourServi
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	fixture.Client = operatorpb.NewNeighbourServiceClient(connection)
 	return fixture
+}
+
+// Test_NeighbourService_ListReadBudgets verifies that stalled readers across
+// generations cannot exceed admission and are reclaimed without client reads.
+//
+// Fixed HTTP/2 windows force real sends to block. Only after all blocked sends
+// have exited and a fresh read succeeds do the old clients resume consumption.
+func Test_NeighbourService_ListReadBudgets(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		limit   int
+		readers int
+		cancel  bool
+	}{
+		{name: "server expiry without client deadline", limit: 2, readers: 2},
+		{name: "default admission and client cancellation", limit: -1, readers: 4, cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			duration := 3 * time.Second
+			if tc.cancel {
+				duration = -1
+			}
+			fixture := newNeighbourServiceFixture(t, operator.WithNeighbourListLimits(operator.NeighbourListLimits{
+				MaxConcurrentStreams: tc.limit, MaxDuration: duration,
+			}))
+			address := netip.MustParseAddr("2001:db8::1")
+			const entryCount = 5 * operatorpb.NeighbourChunkEntries
+			streams := []grpc.ServerStreamingClient[operatorpb.ListNeighboursResponse]{}
+			readers := []*neighbourListProgress{}
+			cancels := []context.CancelFunc{}
+			for idx := range tc.readers {
+				chunks := []*operatorpb.ReplaceNeighboursRequest{}
+				for range entryCount / operatorpb.NeighbourChunkEntries {
+					chunk := replacementChunk("snapshot", uint32(idx+1))
+					for range operatorpb.NeighbourChunkEntries {
+						entry := replacementChunk("snapshot", 1, address.String()).Entries[0]
+						entry.Device = strings.Repeat("d", 79)
+						chunk.Entries = append(chunk.Entries, entry)
+						address = address.Next()
+					}
+					chunks = append(chunks, chunk)
+				}
+				require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunks...))
+				identity := fmt.Sprintf("reader-%d", idx)
+				ctx, cancel := context.WithCancel(t.Context())
+				t.Cleanup(cancel)
+				cancels = append(cancels, cancel)
+				_, hasDeadline := ctx.Deadline()
+				require.False(t, hasDeadline)
+				table := ""
+				if idx%2 != 0 {
+					table = "snapshot"
+				}
+				stream, err := fixture.Client.ListStream(metadata.AppendToOutgoingContext(ctx, "snapshot-id", identity),
+					&operatorpb.ListNeighboursRequest{Table: table},
+				)
+				require.NoError(t, err)
+				streams = append(streams, stream)
+				progress := fixture.Lists.Read(identity)
+				readers = append(readers, progress)
+				require.Eventually(t, func() bool {
+					return progress.Started.Load() >= 2 && progress.Started.Load() > progress.Completed.Load()
+				}, time.Second, time.Millisecond)
+			}
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 100)))
+			for _, progress := range readers {
+				require.False(t, progress.HandlerFinished.Load())
+				require.Greater(t, progress.Started.Load(), progress.Completed.Load())
+			}
+			rejected, err := fixture.Client.ListStream(
+				metadata.AppendToOutgoingContext(t.Context(), "snapshot-id", "excess"),
+				&operatorpb.ListNeighboursRequest{},
+			)
+			require.NoError(t, err)
+			_, err = rejected.Recv()
+			require.Equal(t, codes.ResourceExhausted, status.Code(err))
+			require.Zero(t, fixture.Lists.Read("excess").Started.Load())
+			if tc.cancel {
+				for _, cancel := range cancels {
+					cancel()
+				}
+			}
+			code := codes.DeadlineExceeded
+			if tc.cancel {
+				code = codes.Canceled
+			}
+			require.Eventually(t, func() bool {
+				for _, progress := range readers {
+					if !progress.HandlerFinished.Load() || progress.Completed.Load() != progress.Started.Load() {
+						return false
+					}
+				}
+				return true
+			}, 10*time.Second, time.Millisecond)
+			for _, progress := range readers {
+				require.Equal(t, code, codes.Code(progress.HandlerCode.Load()))
+			}
+			require.EventuallyWithT(t, func(collect *assert.CollectT) {
+				stream, err := fixture.Client.ListStream(t.Context(), &operatorpb.ListNeighboursRequest{})
+				require.NoError(collect, err)
+				chunk, err := stream.Recv()
+				require.NoError(collect, err)
+				require.Empty(collect, chunk.GetNeighbours())
+				_, err = stream.Recv()
+				require.ErrorIs(collect, err, io.EOF)
+			}, time.Second, time.Millisecond)
+			for _, stream := range streams {
+				count := 0
+				for {
+					chunk, err := stream.Recv()
+					if err != nil {
+						require.Equal(t, code, status.Code(err))
+						break
+					}
+					count += len(chunk.GetNeighbours())
+				}
+				require.Less(t, count, entryCount)
+			}
+		})
+	}
 }
 
 // Open starts an independently observable generated-client stream.
@@ -924,8 +1092,10 @@ func Test_NeighbourService_ListStreamSnapshot(t *testing.T) {
 					chunks++
 					received = append(received, chunk.GetNeighbours()...)
 					if chunks == 1 {
-						require.Len(t, chunk.GetNeighbours(), operatorpb.NeighbourListChunkEntries)
-						require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 200, "192.0.2.1")))
+						if len(chunk.GetNeighbours()) != operatorpb.NeighbourListChunkEntries {
+							return fmt.Errorf("unexpected first chunk size: %d", len(chunk.GetNeighbours()))
+						}
+						return sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 200, "192.0.2.1"))
 					}
 					return nil
 				},
@@ -978,7 +1148,9 @@ func Test_NeighbourService_ListStreamCompletion(t *testing.T) {
 				RequestContext: ctx,
 				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
 					chunks++
-					require.Empty(t, chunk.GetNeighbours())
+					if len(chunk.GetNeighbours()) != 0 {
+						return fmt.Errorf("unexpected entries in empty view: %d", len(chunk.GetNeighbours()))
+					}
 					return nil
 				},
 			})
