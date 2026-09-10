@@ -6,7 +6,6 @@ use decappb::{
     decap_service_client::DecapServiceClient,
 };
 use netip::{Contiguous, IpNetwork};
-use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
@@ -162,7 +161,7 @@ impl DecapService {
                     return;
                 }
 
-                print_tree(&response);
+                config_block(&response).print();
             },
         );
 
@@ -205,19 +204,14 @@ impl DecapService {
     }
 }
 
-fn print_tree(resp: &ShowConfigResponse) {
-    let mut tree = TreeBuilder::new("Decap Prefixes".to_string());
-
-    let prefixes = resp
+fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
+    let prefixes = response
         .prefixes4
         .iter()
         .map(ToString::to_string)
-        .chain(resp.prefixes6.iter().map(ToString::to_string));
-    for (idx, prefix) in prefixes.enumerate() {
-        tree.add_empty_child(format!("{idx}: {prefix}"));
-    }
+        .chain(response.prefixes6.iter().map(ToString::to_string));
 
-    let _ = ptree::print_tree(&tree.build());
+    display::KeyValue::new().rows("prefixes", prefixes)
 }
 
 /// Completion candidates for a `--name` argument: the decap configs the

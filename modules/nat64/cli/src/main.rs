@@ -3,12 +3,11 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use nat64pb::{
-    AddMappingRequest, AddPrefixRequest, DeleteConfigRequest, ListConfigsRequest, RemoveMappingRequest,
-    RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
+    AddMappingRequest, AddPrefixRequest, Config, DeleteConfigRequest, ListConfigsRequest, RemoveMappingRequest,
+    RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest,
     nat64_service_client::Nat64ServiceClient,
 };
 use netip::{Contiguous, Ipv6Network};
-use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
@@ -260,15 +259,15 @@ impl NAT64Service {
         output::data(
             || &response,
             || {
-                if response.config.is_none() {
+                let Some(config) = &response.config else {
                     output::empty_with_hint(
                         format_args!("No NAT64 configuration found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-nat64 prefix add --name <name> --prefix <cidr>'"),
                     );
                     return;
-                }
+                };
 
-                print_tree(&response);
+                config_block(config).print();
             },
         );
 
@@ -422,48 +421,30 @@ impl NAT64Service {
     }
 }
 
-fn print_tree(resp: &ShowConfigResponse) {
-    let mut tree = TreeBuilder::new("NAT64 Config".to_owned());
+fn config_block(config: &Config) -> display::KeyValue {
+    let prefixes = config
+        .prefixes
+        .iter()
+        .enumerate()
+        .map(|(idx, prefix)| format!("{idx}: {prefix}"));
+    let mappings = config.mappings.iter().map(|mapping| {
+        let ipv4 = mapping.ipv4.as_ref().map(|a| a.to_string()).unwrap_or_default();
+        let ipv6 = mapping.ipv6.as_ref().map(|a| a.to_string()).unwrap_or_default();
 
-    if let Some(config) = &resp.config {
-        tree.begin_child("Prefixes".to_owned());
-        if config.prefixes.is_empty() {
-            tree.add_empty_child("(none)".to_owned());
-        }
+        format!("{ipv4} -> {ipv6} (prefix {})", mapping.prefix_index)
+    });
 
-        for (idx, prefix) in config.prefixes.iter().enumerate() {
-            tree.add_empty_child(format!("{}: {}", idx, prefix));
-        }
-        tree.end_child();
+    let mut block = display::KeyValue::new()
+        .rows("prefixes", prefixes)
+        .rows("mappings", mappings);
 
-        tree.begin_child("Mappings".to_owned());
-        if config.mappings.is_empty() {
-            tree.add_empty_child("(none)".to_owned());
-        }
-
-        for mapping in &config.mappings {
-            let ipv4 = mapping.ipv4.as_ref().map(|a| a.to_string()).unwrap_or_default();
-            let ipv6 = mapping.ipv6.as_ref().map(|a| a.to_string()).unwrap_or_default();
-
-            tree.add_empty_child(format!(
-                "IPv4: {} -> IPv6: {} (prefix: {})",
-                ipv4, ipv6, mapping.prefix_index
-            ));
-        }
-        tree.end_child();
-
-        if let Some(mtu) = &config.mtu {
-            tree.begin_child("MTU".to_owned());
-            tree.add_empty_child(format!("IPv4: {}", mtu.ipv4_mtu));
-            tree.add_empty_child(format!("IPv6: {}", mtu.ipv6_mtu));
-            tree.end_child();
-        }
-
-        tree.add_empty_child(format!("DropUnknownPrefix: {}", config.drop_unknown_prefix));
-        tree.add_empty_child(format!("DropUnknownMapping: {}", config.drop_unknown_mapping));
+    if let Some(mtu) = &config.mtu {
+        block = block.row("mtu ipv4", mtu.ipv4_mtu).row("mtu ipv6", mtu.ipv6_mtu);
     }
 
-    let _ = ptree::print_tree(&tree.build());
+    block
+        .row("drop unknown prefix", config.drop_unknown_prefix)
+        .row("drop unknown mapping", config.drop_unknown_mapping)
 }
 
 fn parse_prefix(value: &str) -> Result<Contiguous<Ipv6Network>, String> {

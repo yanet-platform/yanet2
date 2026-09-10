@@ -19,7 +19,6 @@ prost = "0.14"
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 serde = { version = "1", features = ["derive"] }
-ptree = "0.5"
 
 [build-dependencies]
 tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

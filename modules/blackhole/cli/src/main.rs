@@ -147,9 +147,7 @@ impl BlackholeService {
 
         output::data(
             || &response,
-            || {
-                println!("name: {}", response.name);
-            },
+            || display::KeyValue::new().row("name", &response.name).print(),
         );
 
         Ok(())

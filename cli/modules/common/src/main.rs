@@ -9,7 +9,7 @@ use ync::{
     GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    display::print_table_from_entries,
+    display::{self, print_table_from_entries},
     errors::Error,
     output,
 };
@@ -172,7 +172,11 @@ async fn run_logging(connection: &ConnectionArgs, mode: LoggingCmd) -> Result<()
 
             output::data(
                 || &response,
-                || println!("level: {}", ynpb::log_level_name(response.level)),
+                || {
+                    display::KeyValue::new()
+                        .row("level", ynpb::log_level_name(response.level))
+                        .print()
+                },
             );
         }
     }

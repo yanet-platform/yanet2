@@ -177,9 +177,11 @@ impl TrafgenService {
         output::data(
             || &response,
             || {
-                println!("rate (pps):  {}", response.rate_pps);
-                println!("frame count: {}", response.frame_count);
-                println!("total bytes: {}", response.total_bytes);
+                display::KeyValue::new()
+                    .row("rate (pps)", response.rate_pps)
+                    .row("frame count", response.frame_count)
+                    .row("total bytes", response.total_bytes)
+                    .print()
             },
         );
 
