@@ -85,29 +85,20 @@ impl PdumpService {
 
     async fn get_config(&mut self, name: &str, action: &'static str) -> Result<ShowConfigResponse, Error> {
         let request = ShowConfigRequest { name: name.to_owned() };
-        log::trace!("show config request: {request:?}");
-        let response = self
-            .service
-            .client()
-            .show_config(request)
+        self.service
+            .unary(action, request, async |client, request| {
+                client.show_config(request).await
+            })
             .await
-            .map_err(self.service.status(action))?
-            .into_inner();
-        log::debug!("show config response: {response:?}");
-        Ok(response)
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
-        log::debug!("list configs response: {response:?}");
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -182,12 +173,9 @@ impl PdumpService {
 
         request.config = Some(cfg);
         request.update_mask = Some(mask);
-        log::trace!("set config request: {request:?}");
         self.service
-            .client()
-            .set_config(request)
-            .await
-            .map_err(self.service.status("set"))?;
+            .unary("set", request, async |client, request| client.set_config(request).await)
+            .await?;
 
         output::success("set", format_args!("Updated config '{}'.", cmd.config_name));
 
@@ -196,12 +184,11 @@ impl PdumpService {
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        log::trace!("delete config request: {request:?}");
         self.service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(self.service.status("delete"))?;
+            .unary("delete", request, async |client, request| {
+                client.delete_config(request).await
+            })
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 

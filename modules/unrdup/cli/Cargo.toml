@@ -15,7 +15,6 @@ commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = 
 filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 tonic = { version = "0.14", features = ["gzip"] }
