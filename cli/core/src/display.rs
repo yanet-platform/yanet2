@@ -1,4 +1,4 @@
-use core::fmt::Arguments;
+use core::fmt::{Arguments, Display};
 
 use tabled::{
     Table, Tabled,
@@ -36,6 +36,82 @@ pub fn print_names_with_hint(names: &[String], empty: Arguments, hint: Arguments
     }
 
     print_sorted(names);
+}
+
+/// The key/value block of one object: keys dimmed and aligned, a list
+/// value one item per line, every cell escaped like [`escape_wire_text`].
+///
+/// Print it from the render closure of [`output::data`], like every other
+/// human renderer.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct KeyValue {
+    entries: Vec<(String, Vec<String>)>,
+}
+
+impl KeyValue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds one value.
+    pub fn row(mut self, key: &str, value: impl Display) -> Self {
+        self.entries
+            .push((escape_wire_text(key), vec![escape_wire_text(&value.to_string())]));
+
+        self
+    }
+
+    /// Adds a list, one item per line, `-` when it is empty.
+    pub fn rows<I>(mut self, key: &str, items: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Display,
+    {
+        let mut lines: Vec<String> = items
+            .into_iter()
+            .map(|item| escape_wire_text(&item.to_string()))
+            .collect();
+
+        if lines.is_empty() {
+            lines.push("-".to_owned());
+        }
+
+        self.entries.push((escape_wire_text(key), lines));
+
+        self
+    }
+
+    /// The entries in insertion order, keys and lines already escaped.
+    pub fn entries(&self) -> &[(String, Vec<String>)] {
+        &self.entries
+    }
+
+    pub fn print(&self) {
+        for (label, text) in self.cells() {
+            println!("{} {text}", output::dim(&label));
+        }
+    }
+
+    fn cells(&self) -> Vec<(String, String)> {
+        let width = self
+            .entries
+            .iter()
+            .map(|(key, _)| key.chars().count() + 1)
+            .max()
+            .unwrap_or(0);
+        let mut cells = Vec::new();
+
+        for (key, lines) in &self.entries {
+            let mut label = format!("{key}:");
+
+            for line in lines {
+                cells.push((format!("{label:<width$}"), line.clone()));
+                label.clear();
+            }
+        }
+
+        cells
+    }
 }
 
 fn print_sorted(names: &[String]) {
@@ -195,7 +271,45 @@ pub fn bar_len(count: u64, max_count: u64) -> usize {
 
 #[cfg(test)]
 mod test {
-    use super::{bar_len, escape_wire_text, sorted_names, wrap_words};
+    use super::{KeyValue, bar_len, escape_wire_text, sorted_names, wrap_words};
+
+    #[test]
+    fn test_key_value_escapes_every_cell_and_marks_an_empty_list() {
+        let block = KeyValue::new()
+            .row("name", "fw\nstate0")
+            .rows("prefixes", ["10.0.0.0/8", "10.1.0.0/16"])
+            .rows("mappings", Vec::<String>::new())
+            .row("na\u{1b}me", "x");
+
+        assert_eq!(
+            &[
+                ("name".to_owned(), vec!["fw\\nstate0".to_owned()]),
+                (
+                    "prefixes".to_owned(),
+                    vec!["10.0.0.0/8".to_owned(), "10.1.0.0/16".to_owned()]
+                ),
+                ("mappings".to_owned(), vec!["-".to_owned()]),
+                ("na\\u{1b}me".to_owned(), vec!["x".to_owned()]),
+            ],
+            block.entries()
+        );
+    }
+
+    #[test]
+    fn test_key_value_cells_pad_labels_and_continue_lists() {
+        let block = KeyValue::new()
+            .row("name", "fw\u{1b}0")
+            .rows("prefixes", ["10.0.0.0/8", "10.1.0.0/16"]);
+
+        assert_eq!(
+            vec![
+                ("name:    ".to_owned(), "fw\\u{1b}0".to_owned()),
+                ("prefixes:".to_owned(), "10.0.0.0/8".to_owned()),
+                ("         ".to_owned(), "10.1.0.0/16".to_owned()),
+            ],
+            block.cells()
+        );
+    }
 
     #[test]
     fn test_escape_wire_text_spells_out_control_and_invisible_characters() {
