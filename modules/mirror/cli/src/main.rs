@@ -273,6 +273,47 @@ mod test {
     }
 
     #[test]
+    fn test_file_fields_default_when_omitted() {
+        let document = r#"
+rules:
+  - action:
+      target: "01:00.0"
+      mode: OUT
+      counter: mirrored
+    devices:
+      - name: "01:00.0"
+    sources4:
+      - "0.0.0.0/0"
+  - action:
+      target: kni0
+      mode: 1
+"#;
+        let path = std::env::temp_dir().join(format!("mirror-cli-sparse-{}.yaml", std::process::id()));
+        std::fs::write(&path, document).expect("the fixture must be written");
+
+        let loaded: Result<UpdateConfigRequest, _> = yaml::load_document(&path);
+        std::fs::remove_file(&path).expect("the fixture must be removed");
+        let request = loaded.expect("a sparse file must load");
+
+        assert_eq!("", request.name);
+        assert_eq!(
+            mirrorpb::MirrorMode::Out as i32,
+            request.rules[0].action.as_ref().expect("action").mode
+        );
+        assert_eq!(
+            vec!["0.0.0.0/0".parse::<IPv4Network>().unwrap()],
+            request.rules[0].sources4
+        );
+        assert!(request.rules[0].vlan_ranges.is_empty());
+        assert!(request.rules[0].sources6.is_empty());
+        assert_eq!(
+            mirrorpb::MirrorMode::In as i32,
+            request.rules[1].action.as_ref().expect("action").mode
+        );
+        assert!(request.rules[1].devices.is_empty());
+    }
+
+    #[test]
     fn test_null_fields_read_as_zero_values() {
         let yaml = "name: mirror0\nrules:\n  - action:\n      target: t\n      mode: OUT\n      counter: c\n    devices: null\n    sources4: null\n";
 

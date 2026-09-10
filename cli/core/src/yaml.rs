@@ -28,7 +28,9 @@ pub fn load<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, Error> {
 /// Loads the one document at `path` as `T` the way the operators read a
 /// file: merge keys expand and an empty document is the default value.
 ///
-/// A file holding more than one document is refused.
+/// A file holding more than one document is refused, a bare separator
+/// closing the stream excepted. A rejected field names the place it came
+/// from, unless a merge key rebuilt the document first.
 pub fn load_document<T: DeserializeOwned + Default>(path: impl AsRef<Path>) -> Result<T, Error> {
     let path = path.as_ref();
 
@@ -37,20 +39,76 @@ pub fn load_document<T: DeserializeOwned + Default>(path: impl AsRef<Path>) -> R
     let content = fs::read_to_string(path).map_err(|source| at_path(Box::new(source)))?;
     let mut documents = Vec::new();
     for document in serde_yaml::Deserializer::from_str(&content) {
-        let value = Value::deserialize(document).map_err(|source| at_path(Box::new(source)))?;
-        if !value.is_null() {
-            documents.push(value);
+        documents.push(Value::deserialize(document).map_err(|source| at_path(Box::new(source)))?);
+    }
+    let closes_the_stream = documents.iter().skip(1).all(Value::is_null) && only_bare_separators_follow(&content);
+    if documents.len() > 1 && !closes_the_stream {
+        return Err(at_path("the file holds more than one document".into()));
+    }
+
+    let value = match documents.into_iter().next() {
+        Some(value) if !value.is_null() => value,
+        _ => return Ok(T::default()),
+    };
+
+    // Expanding a merge key means reading a rebuilt document, which no
+    // longer knows where its fields came from, so a document that merges
+    // nothing is read straight from the text and keeps the place it
+    // reports.
+    let mut merged = value.clone();
+    merged.apply_merge().map_err(|source| at_path(Box::new(source)))?;
+    if merged != value {
+        return serde_yaml::from_value(merged).map_err(|source| at_path(Box::new(source)));
+    }
+
+    let document = serde_yaml::Deserializer::from_str(&content)
+        .next()
+        .expect("the content holds the document just parsed");
+
+    T::deserialize(document).map_err(|source| at_path(Box::new(source)))
+}
+
+/// Tells whether everything past the first document is a bare separator
+/// carrying nothing but blank lines and comments.
+///
+/// A separator alone and a spelled-out null reach the parser as the same
+/// null document, and only the text tells them apart. A line break this
+/// scan does not know makes it answer yes too readily, so the parser's own
+/// count has to agree with it.
+fn only_bare_separators_follow(content: &str) -> bool {
+    // The parser breaks lines on more than Rust does, and treats fewer
+    // characters as the blank that follows a marker, so both are spelled
+    // out here rather than borrowed from the standard library.
+    let is_break = |c: char| matches!(c, '\n' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}');
+    let is_blank = |c: char| matches!(c, ' ' | '\t');
+
+    let mut documents: Vec<bool> = Vec::new();
+
+    for line in content.split(is_break) {
+        // A byte-order mark is presentation the parser drops, so a line
+        // holding one is not a document of its own.
+        let line = line.strip_prefix('\u{feff}').unwrap_or(line);
+        let rest = match line.strip_prefix("---").or_else(|| line.strip_prefix("...")) {
+            Some(rest) if rest.is_empty() || rest.starts_with(is_blank) => {
+                documents.push(false);
+                rest
+            }
+            _ => line,
+        };
+
+        let rest = rest.trim_start_matches(is_blank);
+        // A directive belongs to the stream rather than to a document, so
+        // it must not count as one on its own.
+        if rest.is_empty() || rest.starts_with('#') || rest.starts_with('%') {
+            continue;
+        }
+        match documents.last_mut() {
+            Some(spelled) => *spelled = true,
+            None => documents.push(true),
         }
     }
 
-    let mut value = match documents.pop() {
-        None => return Ok(T::default()),
-        Some(_) if !documents.is_empty() => return Err(at_path("the file holds more than one document".into())),
-        Some(value) => value,
-    };
-    value.apply_merge().map_err(|source| at_path(Box::new(source)))?;
-
-    serde_yaml::from_value(value).map_err(|source| at_path(Box::new(source)))
+    !documents.iter().skip(1).any(|spelled| *spelled)
 }
 
 /// Binds the name given on the command line into a file's name field:
@@ -143,7 +201,12 @@ mod test {
 
     #[test]
     fn test_load_document_empty_and_comment_only_files_are_the_default() {
-        for (case, content) in [("empty", ""), ("comment", "# nothing yet\n")] {
+        for (case, content) in [
+            ("empty", ""),
+            ("comment", "# nothing yet\n"),
+            ("separator-only", "---\n"),
+            ("two-separators", "--- \n---\n"),
+        ] {
             assert_eq!(Config::default(), load_config(case, content).unwrap());
         }
     }
@@ -156,12 +219,129 @@ mod test {
     }
 
     #[test]
-    fn test_load_document_tolerates_a_trailing_separator_and_refuses_a_second_document() {
-        let tolerated = load_config("separator", "name: c0\n---\n").unwrap();
-        let refused = load_config("two", "name: c0\n---\nname: c1\n").expect_err("a second document must be refused");
+    fn test_load_document_tolerates_a_bare_separator_closing_the_stream() {
+        for (case, content) in [
+            ("separator", "name: c0\n---\n"),
+            ("unterminated", "name: c0\n---"),
+            ("commented", "name: c0\n---\n# end\n"),
+        ] {
+            assert_eq!("c0", load_config(case, content).unwrap().name, "{case}");
+        }
+    }
+
+    #[test]
+    fn test_load_document_refuses_a_second_document_however_it_is_spelled() {
+        for (case, content) in [
+            ("two", "name: c0\n---\nname: c1\n"),
+            ("leading-null", "~\n---\nname: c1\n"),
+            ("trailing-null", "name: c0\n---\nnull\n"),
+            ("trailing-mapping", "name: c0\n---\n{}\n"),
+        ] {
+            let refused = load_config(case, content).expect_err("a second document must be refused");
+
+            assert!(
+                refused.to_string().contains("more than one document"),
+                "{case}: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_load_document_refuses_a_second_document_past_any_line_break() {
+        for (case, content) in [
+            ("carriage-return", "name: c0\r---\rname: c1\r"),
+            ("next-line", "name: c0\u{85}---\u{85}name: c1\u{85}"),
+            ("line-separator", "name: c0\u{2028}---\u{2028}name: c1\u{2028}"),
+            ("paragraph-separator", "name: c0\u{2029}---\u{2029}name: c1\u{2029}"),
+            ("carriage-return-null", "name: c0\r---\rnull\r"),
+            ("next-line-null", "name: c0\u{85}---\u{85}null\u{85}"),
+            ("line-separator-null", "name: c0\u{2028}---\u{2028}null\u{2028}"),
+            ("paragraph-separator-null", "name: c0\u{2029}---\u{2029}null\u{2029}"),
+            ("non-breaking-space", "name: c0\n---\n---\u{a0}\n"),
+        ] {
+            let refused = load_config(case, content).expect_err("a second document must be refused");
+
+            assert!(
+                refused.to_string().contains("more than one document"),
+                "{case}: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_load_document_reads_windows_line_endings() {
+        let tolerated = load_config("crlf", "name: c0\r\n---\r\n").unwrap();
+        let refused =
+            load_config("crlf-two", "name: c0\r\n---\r\nnull\r\n").expect_err("a second document must be refused");
 
         assert_eq!("c0", tolerated.name);
         assert!(refused.to_string().contains("more than one document"), "{refused}");
+    }
+
+    #[test]
+    fn test_load_document_tolerates_a_bare_separator_past_any_line_break() {
+        for (case, content) in [
+            ("bare-carriage-return", "name: c0\r---\r"),
+            ("bare-next-line", "name: c0\u{85}---\u{85}"),
+            ("bare-line-separator", "name: c0\u{2028}---\u{2028}"),
+            ("bare-paragraph-separator", "name: c0\u{2029}---\u{2029}"),
+        ] {
+            assert_eq!("c0", load_config(case, content).unwrap().name, "{case}");
+        }
+    }
+
+    #[test]
+    fn test_load_document_tolerates_a_byte_order_mark() {
+        for (case, content) in [
+            ("bom-preamble", "\u{feff}\n---\nname: c0\n---\n"),
+            ("bom-content", "\u{feff}name: c0\n---\n"),
+        ] {
+            assert_eq!("c0", load_config(case, content).unwrap().name, "{case}");
+        }
+    }
+
+    #[test]
+    fn test_load_document_tolerates_a_directive_before_the_document() {
+        let content = "%YAML 1.1\n---\nname: c0\n---\n";
+
+        let config = load_config("directive", content).unwrap();
+
+        assert_eq!("c0", config.name);
+    }
+
+    #[test]
+    fn test_load_document_expands_a_merge_key_inside_a_tagged_value() {
+        let content = "rules: !Custom\n  - &base\n    target: base\n    weight: 10\n  - <<: *base\n";
+        let path = scratch_path("tagged-merge");
+        fs::write(&path, content).unwrap();
+
+        let config = load_document::<Config>(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert_eq!(
+            vec![
+                Rule {
+                    target: "base".to_owned(),
+                    weight: 10
+                },
+                Rule {
+                    target: "base".to_owned(),
+                    weight: 10
+                },
+            ],
+            config.rules
+        );
+    }
+
+    #[test]
+    fn test_load_document_error_names_the_offending_field_and_line() {
+        let content = "name: c0\nrules:\n  - target: t\n  - targetx: t\n";
+
+        let refused = load_config("position", content).expect_err("an unknown field must be refused");
+
+        let message = refused.to_string();
+        assert!(message.contains("rules[1]"), "{message}");
+        assert!(message.contains("line 4"), "{message}");
     }
 
     #[test]
