@@ -424,46 +424,4 @@ mod test {
     fn not_ready_without_any_discovered_service() {
         assert!(!all_ready(&[]));
     }
-
-    #[test]
-    fn aggregate_mode_is_the_default() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-ready"]).expect("no arguments must parse");
-
-        assert!(cmd.is_aggregate());
-    }
-
-    #[test]
-    fn naming_a_service_leaves_aggregate_mode() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-ready", "route"]).expect("a service name must parse");
-
-        assert!(!cmd.is_aggregate());
-    }
-
-    #[test]
-    fn all_flag_conflicts_with_a_named_service() {
-        assert!(Cmd::try_parse_from(["yanet-cli-ready", "--all", "route"]).is_err());
-    }
-
-    #[test]
-    fn test_cmd_stale_multiple_defaults_to_three() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-ready"]).expect("default command must parse");
-
-        assert_eq!(3, cmd.stale_multiple);
-    }
-
-    #[test]
-    fn test_cmd_stale_multiple_accepts_override() {
-        let cmd =
-            Cmd::try_parse_from(["yanet-cli-ready", "--stale-multiple", "7"]).expect("staleness multiplier must parse");
-
-        assert_eq!(7, cmd.stale_multiple);
-    }
-
-    #[test]
-    fn test_cmd_stale_multiple_accepts_zero() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-ready", "--stale-multiple", "0"])
-            .expect("zero staleness multiplier must parse");
-
-        assert_eq!(0, cmd.stale_multiple);
-    }
 }

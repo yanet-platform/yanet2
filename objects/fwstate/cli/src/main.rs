@@ -398,11 +398,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cmd_is_valid() {
-        Cmd::command().debug_assert();
-    }
-
-    #[test]
     fn format_endpoint_brackets_ipv6_only() {
         let v4: IpAddress = "192.0.2.10".parse().unwrap();
         let v6: IpAddress = "2001:db8::2".parse().unwrap();

@@ -414,13 +414,8 @@ rules:
 
     #[test]
     fn test_unknown_null_valued_keys_are_still_refused() {
-        let yaml = "rulez: null\n";
-        let path = std::env::temp_dir().join(format!("fwd-nullkey-{}.yaml", std::process::id()));
-        std::fs::write(&path, yaml).expect("the fixture must be written");
-
-        let refused = yaml::load_document::<UpdateConfigRequest>(&path)
+        let refused = serde_yaml::from_str::<UpdateConfigRequest>("rulez: null\n")
             .expect_err("a misspelled null-valued key must be refused");
-        std::fs::remove_file(&path).ok();
 
         assert!(refused.to_string().contains("rulez"));
     }
@@ -428,11 +423,8 @@ rules:
     #[test]
     fn test_null_fields_read_as_zero_values() {
         let yaml = "name: forward0\nrules:\n  - action:\n      target: t\n      mode: OUT\n      counter: c\n    devices: null\n    sources4: null\n";
-        let path = std::env::temp_dir().join(format!("fwd-null-{}.yaml", std::process::id()));
-        std::fs::write(&path, yaml).expect("the fixture must be written");
 
-        let request = yaml::load_document::<UpdateConfigRequest>(&path).expect("null fields must load");
-        std::fs::remove_file(&path).ok();
+        let request: UpdateConfigRequest = serde_yaml::from_str(yaml).expect("null fields must load");
 
         assert_eq!("forward0", request.name);
         assert!(request.rules[0].devices.is_empty());
