@@ -7,7 +7,7 @@ use aclpb::{
 use args::{DeleteCmd, MetricsRulesCmd, ModeCmd, RuleCountersCmd, ShowCmd, UpdateCmd};
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -20,30 +20,27 @@ use ync::{
 
 mod args;
 
-use ::commonpb::pb as commonpb;
+use ::commonpb::{pb as commonpb, serde_with};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod aclpb {
     tonic::include_proto!("modules.acl.controlplane.aclpb.v1");
 }
 
-pub(crate) mod action_kind {
-    use serde::{Deserialize, Deserializer, Serializer, de};
+/// Serializes an action kind as its declared name, an undeclared number as
+/// the number itself, so one unknown kind cannot hide the rest of a ruleset.
+fn serialize_action_kind<S: Serializer>(kind: &i32, serializer: S) -> Result<S::Ok, S::Error> {
+    serde_with::declared_name(kind, serializer, aclpb::ActionKind::as_str_name)
+}
 
-    use super::aclpb;
+/// Deserializes an action kind from its declared name only: a null or a
+/// number is refused, because the zero kind would silently read as PASS.
+fn deserialize_action_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
+    let name = String::deserialize(deserializer)?;
+    let kind = aclpb::ActionKind::from_str_name(&name)
+        .ok_or_else(|| de::Error::custom(format!("unknown ActionKind name `{name}`")))?;
 
-    pub fn serialize<S: Serializer>(kind: &i32, s: S) -> Result<S::Ok, S::Error> {
-        let action_kind = aclpb::ActionKind::try_from(*kind)
-            .map_err(|_| serde::ser::Error::custom(format!("unknown ActionKind value {kind}")))?;
-        s.serialize_str(action_kind.as_str_name())
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i32, D::Error> {
-        let s = String::deserialize(d)?;
-        let action_kind = aclpb::ActionKind::from_str_name(&s)
-            .ok_or_else(|| de::Error::custom(format!("unknown ActionKind name `{s}`")))?;
-        Ok(action_kind as i32)
-    }
+    Ok(kind as i32)
 }
 
 #[derive(Tabled)]
