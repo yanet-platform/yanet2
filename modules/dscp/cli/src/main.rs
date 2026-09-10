@@ -320,10 +320,6 @@ fn flag_to_string(flag: u32) -> String {
     }
 }
 
-/// Completion candidates for a `--name` argument: the dscp configs the
-/// module currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)

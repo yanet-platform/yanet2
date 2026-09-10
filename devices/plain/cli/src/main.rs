@@ -196,10 +196,6 @@ fn binding_rows(device: &Device) -> Vec<BindingRow> {
     rows
 }
 
-/// Completion candidates for the device-name argument: the plain devices
-/// the device service currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn device_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, device_client, async move |mut client| {
         Ok(client

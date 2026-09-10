@@ -56,10 +56,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     Ok(())
 }
 
-/// Completion candidates for the device-name argument: the devices the
-/// service currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn device_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client

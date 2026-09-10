@@ -382,8 +382,6 @@ fn print_missing(missing: &[&str]) {
     }
 }
 
-/// Completion candidates for the service positional: the readiness services
-/// the gateway currently knows.
 fn service_candidates() -> Vec<CompletionCandidate> {
     READINESS.candidates(Cmd::command)
 }

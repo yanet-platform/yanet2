@@ -277,10 +277,6 @@ impl From<&ArenaInfo> for ArenaRow {
     }
 }
 
-/// Completion candidates for the agent argument: the agents that can be
-/// grown, leaving out the retired generations.
-///
-/// Strictly best-effort — an unreachable service offers no candidates.
 fn agent_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, memory_client, async move |mut client| {
         let mut names: Vec<String> = client

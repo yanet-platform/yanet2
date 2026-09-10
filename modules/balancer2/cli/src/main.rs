@@ -297,10 +297,6 @@ fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
-/// Completion candidates for a `--name` argument: the balancer configs the
-/// module currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client
@@ -311,10 +307,6 @@ fn config_candidates() -> Vec<CompletionCandidate> {
     })
 }
 
-/// Completion candidates for a sessions-state name argument: the sessions
-/// states the module currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn sessions_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client
