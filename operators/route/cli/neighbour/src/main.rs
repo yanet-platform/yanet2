@@ -25,7 +25,7 @@ use ync::{
 };
 
 use crate::operatorpb::{
-    CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
+    CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest, ListNeighboursResponse,
     NeighbourEntry as ProtoNeighbourEntry, NeighbourState, NeighbourTableInfo, RemoveNeighbourTableRequest,
     RemoveNeighboursRequest, UpdateNeighbourTableRequest, UpdateNeighboursRequest,
     neighbour_service_client::NeighbourServiceClient,
@@ -39,15 +39,8 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
 
-/// Covers a one-million-entry table plus receiver-owned source and timestamps.
-///
-/// The 128 MiB publication budget excludes that per-entry metadata. The unary
-/// response budget also includes every entry's receiver-owned fields.
-const MAX_LIST_RESPONSE_BYTES: usize = 512 * 1024 * 1024;
-
 fn client(channel: LayeredChannel) -> NeighbourServiceClient<LayeredChannel> {
     NeighbourServiceClient::new(channel)
-        .max_decoding_message_size(MAX_LIST_RESPONSE_BYTES)
         .send_compressed(CompressionEncoding::Gzip)
         .accept_compressed(CompressionEncoding::Gzip)
 }
@@ -213,22 +206,35 @@ impl NeighbourService {
         Ok(Self { service })
     }
 
-    pub async fn show_neighbours(&mut self, cmd: ShowCmd) -> Result<(), Error> {
+    /// Collects a complete snapshot; an interrupted read never returns partial
+    /// data.
+    pub async fn list_neighbours(&mut self, table: Option<&str>) -> Result<ListNeighboursResponse, Error> {
         let request = ListNeighboursRequest {
-            table: cmd.table.clone().unwrap_or_default(),
+            table: table.unwrap_or_default().to_owned(),
         };
-        let resource = cmd.table.as_ref().map(|table| format!("table '{table}'"));
-
-        let response = self
+        let resource = table.map(|table| format!("table '{table}'"));
+        let mut stream = self
             .service
-            .unary_with(
-                "show",
-                request,
+            .client()
+            .list_stream(request)
+            .await
+            .map_err(
                 self.service
                     .not_found("show", resource.as_deref().unwrap_or("requested table")),
-                async |client, request| client.list(request).await,
-            )
-            .await?;
+            )?
+            .into_inner();
+        let mut response = ListNeighboursResponse::default();
+        while let Some(chunk) = stream.message().await.map_err(
+            self.service
+                .not_found("show", resource.as_deref().unwrap_or("requested table")),
+        )? {
+            response.neighbours.extend(chunk.neighbours);
+        }
+        Ok(response)
+    }
+
+    pub async fn show_neighbours(&mut self, cmd: ShowCmd) -> Result<(), Error> {
+        let response = self.list_neighbours(cmd.table.as_deref()).await?;
 
         output::data(
             || &response.neighbours,

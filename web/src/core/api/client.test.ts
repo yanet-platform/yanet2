@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createService, ApiError, loadKnownConfigs } from './client';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createService, createStreamingService, ApiError, loadKnownConfigs } from './client';
 
 describe('ApiError', () => {
     beforeEach(() => {
@@ -43,6 +43,54 @@ describe('ApiError', () => {
             expect(err).toBeInstanceOf(ApiError);
             expect(err).toBeInstanceOf(Error);
         }
+    });
+});
+
+describe('finite streaming calls', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('waits for the successful terminal event after fragmented messages', async () => {
+        const wire = new TextEncoder().encode('event: message\ndata: {"name":"интерфейс"}\n\nevent: end\ndata: {}\n\n');
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                for (let offset = 0; offset < wire.length; offset += 3) controller.enqueue(wire.slice(offset, offset + 3));
+                controller.close();
+            },
+        });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)));
+        const received: unknown[] = [];
+        await createStreamingService('test.Service').read('ListStream', {}, (data) => received.push(data));
+        expect(received).toEqual([{ name: 'интерфейс' }]);
+    });
+
+    it.each([
+        ['transport EOF', ''],
+        ['server error', 'event: error\ndata: {"code":13,"message":"failed"}\n\n'],
+        ['malformed message', 'event: message\ndata: {broken}\n\nevent: end\ndata: {}\n\n'],
+    ])('rejects %s after receiving data', async (_name, ending) => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+            `event: message\ndata: {"value":1}\n\n${ending}`,
+        )));
+        const received: unknown[] = [];
+        await expect(createStreamingService('test.Service').read('ListStream', {}, (data) => received.push(data))).rejects.toBeInstanceOf(Error);
+        expect(received).toEqual([{ value: 1 }]);
+    });
+
+    it('rejects cancellation rather than completing an empty list', async () => {
+        const controller = new AbortController();
+        const reason = new Error('cancelled');
+        controller.abort(reason);
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(reason));
+        await expect(createStreamingService('test.Service').read('ListStream', {}, () => {}, controller.signal)).rejects.toBe(reason);
+    });
+
+    it('rejects a callback failure even when a success event follows', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+            'event: message\ndata: {}\n\nevent: end\ndata: {}\n\n',
+        )));
+        await expect(createStreamingService('test.Service').read('ListStream', {}, () => {
+            throw new Error('invalid payload');
+        })).rejects.toBeInstanceOf(Error);
     });
 });
 

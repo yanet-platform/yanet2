@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -208,47 +209,102 @@ func (m *NeighbourService) List(
 	ctx context.Context,
 	req *operatorpb.ListNeighboursRequest,
 ) (*operatorpb.ListNeighboursResponse, error) {
-	table := req.GetTable()
-
-	var view neigh.NexthopCacheView
-	if table == "" {
-		view = m.neighTable.View()
-	} else {
-		v, ok := m.neighTable.SourceView(table)
-		if !ok {
-			return nil, status.Errorf(codes.NotFound, "table %q not found", table)
-		}
-		view = v
+	view, err := m.listView(ctx, req.GetTable())
+	if err != nil {
+		return nil, err
 	}
-
 	entries, size := view.Entries()
-
-	neighbours := make([]*operatorpb.NeighbourEntry, 0, size)
+	// Refuse oversized views before allocating the complete unary response.
+	totalBytes := 0
 	for entry := range entries {
-		source := entry.Source
-		if source == "" {
-			source = table
+		if err := ctx.Err(); err != nil {
+			return nil, status.FromContextError(err).Err()
 		}
-
-		neighbours = append(
-			neighbours,
-			&operatorpb.NeighbourEntry{
-				NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
-				LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
-				HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
-				State:        operatorpb.NeighbourState(entry.State),
-				UpdatedAt:    entry.UpdatedAt.Unix(),
-				Source:       source,
-				Priority:     entry.Priority,
-				Device:       entry.HardwareRoute.Device,
-				Ifindex:      entry.Ifindex,
-			},
-		)
+		wireEntry := listedNeighbour(entry, req.GetTable())
+		totalBytes += protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(wireEntry))
+		if totalBytes > operatorpb.NeighbourListUnaryBytes {
+			return nil, status.Error(codes.ResourceExhausted, "neighbour list exceeds unary limit; use ListStream")
+		}
 	}
+	response := &operatorpb.ListNeighboursResponse{Neighbours: make([]*operatorpb.NeighbourEntry, 0, size)}
+	for entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, status.FromContextError(err).Err()
+		}
+		response.Neighbours = append(response.Neighbours, listedNeighbour(entry, req.GetTable()))
+	}
+	return response, nil
+}
 
-	return &operatorpb.ListNeighboursResponse{
-		Neighbours: neighbours,
-	}, nil
+// ListStream holds one immutable cache view for the lifetime of the read.
+func (m *NeighbourService) ListStream(
+	req *operatorpb.ListNeighboursRequest,
+	stream grpc.ServerStreamingServer[operatorpb.ListNeighboursResponse],
+) error {
+	ctx := stream.Context()
+	view, err := m.listView(ctx, req.GetTable())
+	if err != nil {
+		return err
+	}
+	entries, _ := view.Entries()
+	response := &operatorpb.ListNeighboursResponse{}
+	chunkBytes := 0
+	for entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return status.FromContextError(err).Err()
+		}
+		wireEntry := listedNeighbour(entry, req.GetTable())
+		entryBytes := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(wireEntry))
+		if entryBytes > operatorpb.NeighbourListChunkBytes {
+			return status.Error(codes.ResourceExhausted, "neighbour entry exceeds list chunk limit")
+		}
+		if len(response.Neighbours) == operatorpb.NeighbourListChunkEntries ||
+			chunkBytes+entryBytes > operatorpb.NeighbourListChunkBytes {
+			if err := stream.Send(response); err != nil {
+				return err
+			}
+			response = &operatorpb.ListNeighboursResponse{}
+			chunkBytes = 0
+		}
+		response.Neighbours = append(response.Neighbours, wireEntry)
+		chunkBytes += entryBytes
+	}
+	if err := ctx.Err(); err != nil {
+		return status.FromContextError(err).Err()
+	}
+	return stream.Send(response)
+}
+
+func (m *NeighbourService) listView(ctx context.Context, table string) (neigh.NexthopCacheView, error) {
+	if err := ctx.Err(); err != nil {
+		return neigh.NexthopCacheView{}, status.FromContextError(err).Err()
+	}
+	if table == "" {
+		return m.neighTable.View(), nil
+	}
+	view, ok := m.neighTable.SourceView(table)
+	if !ok {
+		return neigh.NexthopCacheView{}, status.Errorf(codes.NotFound, "table %q not found", table)
+	}
+	return view, nil
+}
+
+func listedNeighbour(entry neigh.NeighbourEntry, table string) *operatorpb.NeighbourEntry {
+	source := entry.Source
+	if source == "" {
+		source = table
+	}
+	return &operatorpb.NeighbourEntry{
+		NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
+		LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
+		HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
+		State:        operatorpb.NeighbourState(entry.State),
+		UpdatedAt:    entry.UpdatedAt.Unix(),
+		Source:       source,
+		Priority:     entry.Priority,
+		Device:       entry.HardwareRoute.Device,
+		Ifindex:      entry.Ifindex,
+	}
 }
 
 func (m *NeighbourService) CreateTable(

@@ -9,8 +9,16 @@ import "common/commonpb/v1/macaddr.proto";
 
 // NeighbourService is the operator-owned neighbour table surface.
 service NeighbourService {
-  // List returns neighbors either merged view or from a specific table.
+  // List returns a complete unary view up to 512 MiB; larger views fail with
+  // ResourceExhausted. Use the streaming list for arbitrary table sizes.
   rpc List(ListNeighboursRequest) returns (ListNeighboursResponse);
+
+  // ListStream returns one immutable merged or named-table snapshot.
+  //
+  // Chunks contain at most 1,000 entries and 256 KiB, including receiver metadata.
+  // Only successful stream completion establishes a complete list. An empty
+  // snapshot yields one empty chunk. Ordering is unspecified.
+  rpc ListStream(ListNeighboursRequest) returns (stream ListNeighboursResponse);
 
   // CreateTable creates a new user-defined neighbour table.
   rpc CreateTable(CreateNeighbourTableRequest) returns (CreateNeighbourTableResponse);

@@ -1,4 +1,5 @@
 use core::net::{IpAddr, Ipv4Addr};
+use std::vec::IntoIter;
 
 use prost::Message;
 use tokio::{net::TcpListener, sync::oneshot};
@@ -8,41 +9,31 @@ use ync::auth::{AuthArgs, AuthMethod};
 
 use super::{operatorpb::*, *};
 
-#[test]
-fn test_neighbour_wire_json_preserves_identity_and_named_state() {
-    let entry = ProtoNeighbourEntry {
-        next_hop: Some(IpAddress::from("192.0.2.1".parse::<IpAddr>().unwrap())),
-        link_addr: Some(MacAddress::from("02:00:00:00:00:01".parse::<MacAddr>().unwrap())),
-        hardware_addr: Some(MacAddress::from("02:00:00:00:00:02".parse::<MacAddr>().unwrap())),
-        state: NeighbourState::NudStale.into(),
-        updated_at: 123,
-        source: "static".to_owned(),
-        priority: 100,
-        device: "kni1".to_owned(),
-        ifindex: 17,
-    };
-    let value = serde_json::to_value(entry).unwrap();
-    assert_eq!("192.0.2.1", value["next_hop"]);
-    assert_eq!("02:00:00:00:00:01", value["link_addr"]);
-    assert_eq!("02:00:00:00:00:02", value["hardware_addr"]);
-    assert_eq!("STALE", value["state"]);
-    assert_eq!(123, value["updated_at"]);
-    assert_eq!("static", value["source"]);
-    assert_eq!(100, value["priority"]);
-    assert_eq!("kni1", value["device"]);
-    assert_eq!(17, value["ifindex"]);
-}
-
-/// Serves a complete large table through a real unary transport.
+/// Serves bounded chunks with an independently controlled terminal status.
 struct LargeList {
-    response: ListNeighboursResponse,
+    table: String,
+    chunks: Vec<ListNeighboursResponse>,
+    fail: bool,
 }
 
 #[tonic::async_trait]
 impl neighbour_service_server::NeighbourService for LargeList {
-    async fn list(&self, request: Request<ListNeighboursRequest>) -> Result<Response<ListNeighboursResponse>, Status> {
-        assert_eq!("netlink-dataplane-large", request.into_inner().table);
-        Ok(Response::new(self.response.clone()))
+    async fn list(&self, _: Request<ListNeighboursRequest>) -> Result<Response<ListNeighboursResponse>, Status> {
+        Err(Status::unimplemented("unary listing is not used"))
+    }
+
+    type ListStreamStream = tokio_stream::Iter<IntoIter<Result<ListNeighboursResponse, Status>>>;
+
+    async fn list_stream(
+        &self,
+        request: Request<ListNeighboursRequest>,
+    ) -> Result<Response<Self::ListStreamStream>, Status> {
+        assert_eq!(self.table, request.into_inner().table);
+        let mut chunks: Vec<_> = self.chunks.iter().cloned().map(Ok).collect();
+        if self.fail {
+            chunks.push(Err(Status::data_loss("incomplete snapshot")));
+        }
+        Ok(Response::new(tokio_stream::iter(chunks)))
     }
 
     async fn create_table(
@@ -96,7 +87,19 @@ impl neighbour_service_server::NeighbourService for LargeList {
 }
 
 #[tokio::test]
-async fn test_official_client_lists_response_larger_than_default_decode_limit() {
+async fn test_official_client_lists_complete_merged_and_named_streams() {
+    for table in [None, Some("netlink-dataplane-large")] {
+        run_list_stream(table, false).await;
+    }
+}
+
+#[tokio::test]
+async fn test_official_client_rejects_data_followed_by_a_stream_error() {
+    run_list_stream(None, true).await;
+}
+
+/// Drives the production collector over TCP without enabling unary listing.
+async fn run_list_stream(table: Option<&str>, fail: bool) {
     let entries = (0..20_000)
         .map(|index| ProtoNeighbourEntry {
             next_hop: Some(IpAddress::from(IpAddr::V4(Ipv4Addr::from(0xc000_0000_u32 + index)))),
@@ -112,13 +115,23 @@ async fn test_official_client_lists_response_larger_than_default_decode_limit() 
         .collect();
     let response = ListNeighboursResponse { neighbours: entries };
     assert!(response.encoded_len() > 4 * 1024 * 1024);
+    let chunks: Vec<_> = response
+        .neighbours
+        .chunks(500)
+        .map(|entries| {
+            let chunk = ListNeighboursResponse { neighbours: entries.to_vec() };
+            assert!(chunk.encoded_len() <= 256 * 1024);
+            chunk
+        })
+        .collect();
+    let server_table = table.unwrap_or_default().to_owned();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (stop, stopped) = oneshot::channel();
     let server = tokio::spawn(async move {
         Server::builder()
             .add_service(
-                neighbour_service_server::NeighbourServiceServer::new(LargeList { response })
+                neighbour_service_server::NeighbourServiceServer::new(LargeList { table: server_table, chunks, fail })
                     .accept_compressed(CompressionEncoding::Gzip),
             )
             .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
@@ -137,18 +150,22 @@ async fn test_official_client_lists_response_larger_than_default_decode_limit() 
         timeout: Some(Duration::from_secs(5)),
     };
     let mut service = NeighbourService::new(&connection, "show").await.unwrap();
-    let received = service
-        .service
-        .client()
-        .list(ListNeighboursRequest {
-            table: "netlink-dataplane-large".to_owned(),
-        })
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(20_000, received.neighbours.len());
-    assert_eq!(1, received.neighbours[0].ifindex);
-    assert_eq!(20_000, received.neighbours[19_999].ifindex);
+    let result = service.list_neighbours(table).await;
+    if fail {
+        assert!(result.is_err());
+    } else {
+        let received = result.unwrap();
+        assert_eq!(20_000, received.neighbours.len());
+        for (index, entry) in received.neighbours.iter().enumerate() {
+            assert_eq!(index as u32 + 1, entry.ifindex);
+            assert_eq!(
+                Some(IpAddress::from(IpAddr::V4(Ipv4Addr::from(
+                    0xc000_0000_u32 + index as u32
+                )))),
+                entry.next_hop
+            );
+        }
+    }
     stop.send(()).unwrap();
     server.await.unwrap();
 }

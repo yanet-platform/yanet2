@@ -3,12 +3,14 @@ package operator_test
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"math"
 	"net"
+	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
@@ -664,7 +666,7 @@ func Test_NeighbourService_ConcurrencyAndCompletionOrder(t *testing.T) {
 
 // newNeighbourGatewayClient exposes a real receiver behind a registered TCP
 // backend and the production gateway, including both proxy message boundaries.
-func newNeighbourGatewayClient(t *testing.T) operatorpb.NeighbourServiceClient {
+func newNeighbourGatewayClient(t *testing.T) (operatorpb.NeighbourServiceClient, string) {
 	t.Helper()
 	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -674,7 +676,13 @@ func newNeighbourGatewayClient(t *testing.T) operatorpb.NeighbourServiceClient {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
-	proxy, err := gateway.NewGateway(gateway.DefaultConfig(), gateway.WithListener(listener))
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	httpAddress := httpListener.Addr().String()
+	require.NoError(t, httpListener.Close())
+	config := gateway.DefaultConfig()
+	config.Server.HTTPEndpoint = httpAddress
+	proxy, err := gateway.NewGateway(config, gateway.WithListener(listener))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, proxy.Close()) })
 	ctx, cancel := context.WithCancel(t.Context())
@@ -694,7 +702,7 @@ func newNeighbourGatewayClient(t *testing.T) operatorpb.NeighbourServiceClient {
 	})
 	connection, err := grpc.NewClient(listener.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(512*1024*1024)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(operatorpb.NeighbourListChunkBytes)),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
@@ -709,60 +717,310 @@ func newNeighbourGatewayClient(t *testing.T) operatorpb.NeighbourServiceClient {
 		grpc.WaitForReady(true),
 	)
 	require.NoError(t, err)
-	return operatorpb.NewNeighbourServiceClient(connection)
+	return operatorpb.NewNeighbourServiceClient(connection), "http://" + httpAddress + "/api/" + operatorpb.NeighbourService_ServiceDesc.ServiceName
 }
 
-// Test_NeighbourService_ListThroughGateway verifies that an admitted million-row
-// snapshot remains listable after server metadata expands it beyond 256 MiB.
+// Test_NeighbourService_ListThroughGateway verifies that the default merged read
+// remains complete beyond 512 MiB after replacements and incremental growth.
 func Test_NeighbourService_ListThroughGateway(t *testing.T) {
-	client := newNeighbourGatewayClient(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	client, _ := newNeighbourGatewayClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
-	table := strings.Repeat("t", operatorpb.NeighbourTableNameBytes)
+	tables := []string{
+		strings.Repeat("a", operatorpb.NeighbourTableNameBytes),
+		strings.Repeat("b", operatorpb.NeighbourTableNameBytes),
+	}
 	device := strings.Repeat("d", 79)
-	stream, err := client.ReplaceNeighbours(ctx)
-	require.NoError(t, err)
 	address := netip.MustParseAddr("2001:db8::1")
-	totalBytes := 0
-	for range operatorpb.NeighbourSnapshotEntries / operatorpb.NeighbourChunkEntries {
-		chunk := replacementChunk(table, math.MaxUint32)
+	for _, table := range tables {
+		stream, err := client.ReplaceNeighbours(ctx)
+		require.NoError(t, err)
+		totalBytes := 0
+		for range operatorpb.NeighbourSnapshotEntries / operatorpb.NeighbourChunkEntries {
+			chunk := replacementChunk(table, math.MaxUint32)
+			for range operatorpb.NeighbourChunkEntries {
+				chunk.Entries = append(chunk.Entries, &operatorpb.NeighbourEntry{
+					NextHop:      commonpb.NewIPAddressFromAddr(address),
+					HardwareAddr: commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 1}),
+					LinkAddr:     commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 2}),
+					Device:       device, State: operatorpb.NeighbourState_NUD_PERMANENT, Ifindex: math.MaxInt32,
+				})
+				address = address.Next()
+			}
+			require.LessOrEqual(t, proto.Size(chunk), operatorpb.NeighbourChunkBytes)
+			totalBytes += proto.Size(chunk)
+			require.NoError(t, stream.Send(chunk))
+		}
+		require.LessOrEqual(t, totalBytes, operatorpb.NeighbourSnapshotBytes)
+		_, err = stream.CloseAndRecv()
+		require.NoError(t, err)
+	}
+	const extraEntries = 2
+	for range extraEntries {
+		chunk := replacementChunk(tables[0], 0, address.String())
+		chunk.Entries[0].Device = device
+		chunk.Entries[0].Ifindex = math.MaxInt32
+		_, err := client.UpdateNeighbours(ctx, &operatorpb.UpdateNeighboursRequest{
+			Table: tables[0], Entries: chunk.Entries,
+		})
+		require.NoError(t, err)
+		address = address.Next()
+	}
+	response, err := client.List(ctx, &operatorpb.ListNeighboursRequest{})
+	require.Nil(t, response)
+	require.Equal(t, codes.ResourceExhausted, status.Code(err))
+	require.ErrorContains(t, err, "use ListStream")
+	stream, err := client.ListStream(ctx, &operatorpb.ListNeighboursRequest{})
+	require.NoError(t, err)
+	const totalEntries = 2*operatorpb.NeighbourSnapshotEntries + extraEntries
+	seen := make([]bool, totalEntries+1)
+	count, totalBytes := 0, 0
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		require.NotEmpty(t, chunk.GetNeighbours())
+		require.LessOrEqual(t, len(chunk.GetNeighbours()), operatorpb.NeighbourListChunkEntries)
+		require.LessOrEqual(t, proto.Size(chunk), operatorpb.NeighbourListChunkBytes)
+		totalBytes += proto.Size(chunk)
+		count += len(chunk.GetNeighbours())
+		for _, entry := range chunk.GetNeighbours() {
+			address, err := entry.GetNextHop().ToAddr()
+			if err != nil || !address.Is6() {
+				t.Fatalf("listed address is not IPv6: %v", entry.GetNextHop())
+			}
+			raw := address.As16()
+			idx := binary.BigEndian.Uint64(raw[8:])
+			if binary.BigEndian.Uint64(raw[:8]) != 0x20010db800000000 ||
+				idx == 0 || idx > totalEntries || seen[idx] {
+				t.Fatalf("unexpected or duplicate listed address %s", address)
+			}
+			seen[idx] = true
+			table := tables[0]
+			if idx > operatorpb.NeighbourSnapshotEntries && idx <= 2*operatorpb.NeighbourSnapshotEntries {
+				table = tables[1]
+			}
+			if entry.GetSource() != table || entry.GetDevice() != device ||
+				entry.GetPriority() != math.MaxUint32 || entry.GetIfindex() != math.MaxInt32 ||
+				entry.GetUpdatedAt() == 0 {
+				t.Fatalf("listed metadata changed for %s", address)
+			}
+		}
+	}
+	require.Equal(t, totalEntries, count)
+	require.Greater(t, totalBytes, operatorpb.NeighbourListUnaryBytes)
+}
+
+// Test_NeighbourService_ListStreamHTTP verifies that the production JSON gateway
+// exposes all chunks and distinguishes a successful end from a missing source.
+func Test_NeighbourService_ListStreamHTTP(t *testing.T) {
+	client, endpoint := newNeighbourGatewayClient(t)
+	address := netip.MustParseAddr("2001:db8::1")
+	for _, table := range []string{"first", "second"} {
+		chunk := replacementChunk(table, 10)
 		for range operatorpb.NeighbourChunkEntries {
-			chunk.Entries = append(chunk.Entries, &operatorpb.NeighbourEntry{
-				NextHop:      commonpb.NewIPAddressFromAddr(address),
-				HardwareAddr: commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 1}),
-				LinkAddr:     commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 2}),
-				Device:       device, State: operatorpb.NeighbourState_NUD_PERMANENT, Ifindex: math.MaxInt32,
-			})
+			chunk.Entries = append(chunk.Entries, replacementChunk(table, 10, address.String()).Entries[0])
 			address = address.Next()
 		}
-		require.LessOrEqual(t, proto.Size(chunk), operatorpb.NeighbourChunkBytes)
-		totalBytes += proto.Size(chunk)
-		require.NoError(t, stream.Send(chunk))
+		require.NoError(t, sendNeighbourSnapshot(t.Context(), client, chunk))
 	}
-	require.LessOrEqual(t, totalBytes, operatorpb.NeighbourSnapshotBytes)
-	_, err = stream.CloseAndRecv()
-	require.NoError(t, err)
-	response, err := client.List(ctx, &operatorpb.ListNeighboursRequest{Table: table})
-	require.NoError(t, err)
-	require.Len(t, response.GetNeighbours(), operatorpb.NeighbourSnapshotEntries)
-	require.Greater(t, proto.Size(response), 256*1024*1024)
-	seen := make([]bool, operatorpb.NeighbourSnapshotEntries+1)
-	for _, entry := range response.GetNeighbours() {
-		address, err := entry.GetNextHop().ToAddr()
-		if err != nil || !address.Is6() {
-			t.Fatalf("listed address is not IPv6: %v", entry.GetNextHop())
-		}
-		raw := address.As16()
-		idx := binary.BigEndian.Uint64(raw[8:])
-		if binary.BigEndian.Uint64(raw[:8]) != 0x20010db800000000 ||
-			idx == 0 || idx > operatorpb.NeighbourSnapshotEntries || seen[idx] {
-			t.Fatalf("unexpected or duplicate listed address %s", address)
-		}
-		seen[idx] = true
-		if entry.GetSource() != table || entry.GetDevice() != device ||
-			entry.GetPriority() != math.MaxUint32 || entry.GetIfindex() != math.MaxInt32 ||
-			entry.GetUpdatedAt() == 0 {
-			t.Fatalf("listed metadata changed for %s", address)
-		}
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	t.Cleanup(httpClient.CloseIdleConnections)
+	for _, tc := range []struct {
+		name  string
+		table string
+		count int
+		code  codes.Code
+	}{
+		{name: "default merged read", count: 2 * operatorpb.NeighbourChunkEntries},
+		{name: "named source read", table: "first", count: operatorpb.NeighbourChunkEntries},
+		{name: "missing source is an error", table: "missing", code: codes.NotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body string
+			require.Eventually(t, func() bool {
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint+"/ListStream",
+					strings.NewReader(fmt.Sprintf(`{"table":%q}`, tc.table)),
+				)
+				require.NoError(t, err)
+				request.Header.Set("Content-Type", "application/json")
+				response, err := httpClient.Do(request)
+				if err != nil {
+					return false
+				}
+				defer response.Body.Close()
+				require.Equal(t, http.StatusOK, response.StatusCode)
+				require.Equal(t, "text/event-stream", response.Header.Get("Content-Type"))
+				data, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				body = string(data)
+				return true
+			}, 10*time.Second, time.Millisecond)
+			count, complete := 0, false
+			for event := range strings.SplitSeq(strings.TrimSpace(body), "\n\n") {
+				kind, data, ok := strings.Cut(event, "\ndata: ")
+				require.True(t, ok)
+				switch kind {
+				case "event: message":
+					var chunk operatorpb.ListNeighboursResponse
+					require.NoError(t, json.Unmarshal([]byte(data), &chunk))
+					count += len(chunk.GetNeighbours())
+				case "event: end":
+					complete = true
+				case "event: error":
+					var failure struct {
+						Code uint32 `json:"code"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(data), &failure))
+					require.Equal(t, tc.code, codes.Code(failure.Code))
+				default:
+					t.Fatalf("unexpected stream event %q", kind)
+				}
+			}
+			require.Equal(t, tc.count, count)
+			require.Equal(t, tc.code == codes.OK, complete)
+		})
+	}
+}
+
+// neighbourListStream allows mutations exactly between emitted chunks.
+type neighbourListStream struct {
+	grpc.ServerStream
+	RequestContext context.Context
+	OnChunk        func(*operatorpb.ListNeighboursResponse) error
+}
+
+func (m *neighbourListStream) Context() context.Context { return m.RequestContext }
+func (m *neighbourListStream) Send(chunk *operatorpb.ListNeighboursResponse) error {
+	return m.OnChunk(chunk)
+}
+
+// Test_NeighbourService_ListStreamSnapshot verifies that mutations between chunks
+// cannot change the selected view, for both merged and source-specific reads.
+func Test_NeighbourService_ListStreamSnapshot(t *testing.T) {
+	for _, table := range []string{"", "snapshot"} {
+		t.Run(fmt.Sprintf("table=%q", table), func(t *testing.T) {
+			fixture := newNeighbourServiceFixture(t)
+			addresses := []string{}
+			address := netip.MustParseAddr("2001:db8::1")
+			for range operatorpb.NeighbourListChunkEntries + 1 {
+				addresses = append(addresses, address.String())
+				address = address.Next()
+			}
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client,
+				replacementChunk("snapshot", 10, addresses[:operatorpb.NeighbourListChunkEntries]...),
+				replacementChunk("snapshot", 10, addresses[operatorpb.NeighbourListChunkEntries:]...),
+			))
+			before, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: table})
+			require.NoError(t, err)
+			var received []*operatorpb.NeighbourEntry
+			chunks := 0
+			service := operator.NewNeighbourService(fixture.Table)
+			err = service.ListStream(&operatorpb.ListNeighboursRequest{Table: table}, &neighbourListStream{
+				RequestContext: t.Context(),
+				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
+					chunks++
+					received = append(received, chunk.GetNeighbours()...)
+					if chunks == 1 {
+						require.Len(t, chunk.GetNeighbours(), operatorpb.NeighbourListChunkEntries)
+						require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 200, "192.0.2.1")))
+					}
+					return nil
+				},
+			})
+			require.NoError(t, err)
+			require.Equal(t, 2, chunks)
+			expected := map[neigh.Key]*operatorpb.NeighbourEntry{}
+			for _, entry := range before.GetNeighbours() {
+				address, err := entry.GetNextHop().ToAddr()
+				require.NoError(t, err)
+				expected[neigh.NewKey(address, entry.GetDevice())] = entry
+			}
+			for _, entry := range received {
+				address, err := entry.GetNextHop().ToAddr()
+				require.NoError(t, err)
+				key := neigh.NewKey(address, entry.GetDevice())
+				require.True(t, proto.Equal(expected[key], entry), "changed or duplicate entry for %s", address)
+				delete(expected, key)
+			}
+			require.Empty(t, expected)
+			after, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: table})
+			require.NoError(t, err)
+			require.Len(t, after.GetNeighbours(), 1)
+		})
+	}
+}
+
+// Test_NeighbourService_ListStreamCompletion verifies that empty views complete,
+// missing sources fail, and cancellation or a failed send interrupts the read.
+func Test_NeighbourService_ListStreamCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		table  string
+		cancel bool
+		code   codes.Code
+	}{
+		{name: "empty merged view completes", code: codes.OK},
+		{name: "missing source is not an empty view", table: "absent", code: codes.NotFound},
+		{name: "cancelled empty read fails", cancel: true, code: codes.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := operator.NewNeighbourService(neigh.NewNeighTable())
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			chunks := 0
+			err := service.ListStream(&operatorpb.ListNeighboursRequest{Table: tc.table}, &neighbourListStream{
+				RequestContext: ctx,
+				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
+					chunks++
+					require.Empty(t, chunk.GetNeighbours())
+					return nil
+				},
+			})
+			require.Equal(t, tc.code, status.Code(err))
+			if tc.code == codes.OK {
+				require.Equal(t, 1, chunks)
+			} else {
+				require.Zero(t, chunks)
+			}
+		})
+	}
+	for _, cancelRead := range []bool{false, true} {
+		t.Run(fmt.Sprintf("interrupted chunk cancel=%t", cancelRead), func(t *testing.T) {
+			fixture := newNeighbourServiceFixture(t)
+			chunk := replacementChunk("snapshot", 10)
+			address := netip.MustParseAddr("2001:db8::1")
+			for range operatorpb.NeighbourListChunkEntries {
+				entry := replacementChunk("snapshot", 10, address.String()).Entries[0]
+				chunk.Entries = append(chunk.Entries, entry)
+				address = address.Next()
+			}
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunk, replacementChunk("snapshot", 10, address.String())))
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			chunks := 0
+			err := operator.NewNeighbourService(fixture.Table).ListStream(&operatorpb.ListNeighboursRequest{}, &neighbourListStream{
+				RequestContext: ctx,
+				OnChunk: func(chunk *operatorpb.ListNeighboursResponse) error {
+					chunks++
+					if cancelRead {
+						cancel()
+						return nil
+					}
+					return status.Error(codes.Unavailable, "stream failed")
+				},
+			})
+			code := codes.Unavailable
+			if cancelRead {
+				code = codes.Canceled
+			}
+			require.Equal(t, code, status.Code(err))
+			require.Equal(t, 1, chunks)
+		})
 	}
 }
