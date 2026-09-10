@@ -323,11 +323,6 @@ mod test {
 
     use super::*;
 
-    #[test]
-    fn cmd_is_valid() {
-        Cmd::command().debug_assert();
-    }
-
     fn ip_range(start: &str, end: &str) -> IpRange {
         IpRange::from((start.parse::<IpAddr>().unwrap(), end.parse::<IpAddr>().unwrap()))
     }

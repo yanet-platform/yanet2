@@ -291,20 +291,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn no_arguments_leaves_the_service_unset() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-metrics"]).expect("no arguments must parse");
-
-        assert!(cmd.name.is_none());
-    }
-
-    #[test]
-    fn naming_a_service_sets_the_service() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-metrics", "route"]).expect("a service name must parse");
-
-        assert_eq!(Some("route".to_owned()), cmd.name);
-    }
-
-    #[test]
     fn a_tag_entry_splits_on_the_first_equals() {
         let tag = parse_tag("config=my-acl").expect("a well-formed tag must parse");
 

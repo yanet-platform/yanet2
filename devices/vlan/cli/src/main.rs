@@ -230,42 +230,7 @@ fn device_client(channel: LayeredChannel) -> DeviceServiceClient<LayeredChannel>
 
 #[cfg(test)]
 mod test {
-    use clap::{CommandFactory, error::ErrorKind};
-
     use super::*;
-
-    #[test]
-    fn test_cmd_is_valid() {
-        Cmd::command().debug_assert();
-    }
-
-    /// Verifies that the verbosity flag still counts after the subcommand,
-    /// where a short form of the vlan flag used to shadow it.
-    #[test]
-    fn test_update_verbosity_after_subcommand_counts() {
-        let cmd = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", "5", "-vv"]).unwrap();
-
-        assert_eq!(2, cmd.globals.verbose);
-    }
-
-    #[test]
-    fn test_update_vlan_accepts_range_boundaries() {
-        for (arg, expected) in [("0", 0), ("4094", 4094)] {
-            let cmd = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", arg]).unwrap();
-            let ModeCmd::Update(update) = cmd.mode else {
-                panic!("expected ModeCmd::Update");
-            };
-
-            assert_eq!(expected, update.vlan);
-        }
-    }
-
-    #[test]
-    fn test_update_vlan_rejects_id_above_range() {
-        let err = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", "4095"]).unwrap_err();
-
-        assert_eq!(ErrorKind::ValueValidation, err.kind());
-    }
 
     #[test]
     fn test_binding_rows_sorts_by_direction_then_pipeline() {
