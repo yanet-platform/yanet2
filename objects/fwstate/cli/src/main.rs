@@ -264,12 +264,9 @@ fn format_endpoint(addr: Option<&IpAddress>, port: u32) -> String {
         return format!("?:{port}");
     };
 
-    match IpAddr::try_from(addr) {
+    match IpAddr::try_from(addr).map(|addr| addr.to_canonical()) {
         Ok(IpAddr::V4(v4)) => format!("{v4}:{port}"),
-        Ok(IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
-            Some(v4) => format!("{v4}:{port}"),
-            None => format!("[{v6}]:{port}"),
-        },
+        Ok(IpAddr::V6(v6)) => format!("[{v6}]:{port}"),
         Err(..) => format!("invalid:{port}"),
     }
 }

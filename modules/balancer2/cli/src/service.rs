@@ -1,7 +1,7 @@
 use core::net::IpAddr;
 use std::time;
 
-use commonpb::pb::GetMetricsRequest;
+use commonpb::{ip_octets, pb::GetMetricsRequest};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{LayeredChannel, Service},
@@ -18,7 +18,7 @@ use crate::{
         balancer_client::BalancerClient,
     },
     config::{BalancerConfig, ConfigParts},
-    display, ip_to_bytes,
+    display,
     reals::{DisableRealCmd, EnableRealCmd, RealsMode},
     sessions::{SessionsMode, SessionsShowCmd, SessionsUpdateCmd},
 };
@@ -311,7 +311,7 @@ fn build_real_updates(vs: &VsId, reals: &[IpAddr], enable: Option<bool>, weight:
         .map(|real_ip| RealUpdate {
             real_id: Some(balancerpb::RealIdentifier {
                 vs: Some(vs_id.clone()),
-                real: Some(balancerpb::RelativeRealIdentifier { ip: ip_to_bytes(*real_ip), port: 0 }),
+                real: Some(balancerpb::RelativeRealIdentifier { ip: ip_octets(*real_ip), port: 0 }),
             }),
             enable,
             weight,

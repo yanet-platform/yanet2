@@ -29,13 +29,46 @@ impl FromStr for pb::DevicePipeline {
     }
 }
 
+/// The wire octets of an address: four for IPv4, sixteen for IPv6.
+pub fn ip_octets(addr: IpAddr) -> Vec<u8> {
+    match addr {
+        IpAddr::V4(v4) => v4.octets().to_vec(),
+        IpAddr::V6(v6) => v6.octets().to_vec(),
+    }
+}
+
+/// Reads an address back from its wire octets, any other count being
+/// malformed.
+pub fn ip_from_octets(octets: &[u8]) -> Result<IpAddr, InvalidIpLength> {
+    if let Ok(octets) = <[u8; 4]>::try_from(octets) {
+        return Ok(Ipv4Addr::from(octets).into());
+    }
+    if let Ok(octets) = <[u8; 16]>::try_from(octets) {
+        return Ok(Ipv6Addr::from(octets).into());
+    }
+
+    Err(InvalidIpLength(octets.len()))
+}
+
+/// An address that arrived with neither four nor sixteen octets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidIpLength(pub usize);
+
+impl Display for InvalidIpLength {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "invalid IP address length {}: expected 4 (IPv4) or 16 (IPv6)",
+            self.0
+        )
+    }
+}
+
+impl Error for InvalidIpLength {}
+
 impl From<IpAddr> for pb::IpAddress {
     fn from(addr: IpAddr) -> Self {
-        let bytes = match addr {
-            IpAddr::V4(v4) => v4.octets().to_vec(),
-            IpAddr::V6(v6) => v6.octets().to_vec(),
-        };
-        pb::IpAddress { addr: bytes }
+        pb::IpAddress { addr: ip_octets(addr) }
     }
 }
 
@@ -110,17 +143,7 @@ impl TryFrom<&pb::IpAddress> for IpAddr {
     type Error = Box<dyn Error>;
 
     fn try_from(ip: &pb::IpAddress) -> Result<Self, Self::Error> {
-        match ip.addr.len() {
-            4 => {
-                let octets: [u8; 4] = ip.addr[..].try_into().unwrap();
-                Ok(IpAddr::V4(Ipv4Addr::from(octets)))
-            }
-            16 => {
-                let octets: [u8; 16] = ip.addr[..].try_into().unwrap();
-                Ok(IpAddr::V6(Ipv6Addr::from(octets)))
-            }
-            n => Err(format!("invalid IP address length {n}: expected 4 (IPv4) or 16 (IPv6)").into()),
-        }
+        Ok(ip_from_octets(&ip.addr)?)
     }
 }
 
@@ -868,6 +891,20 @@ mod test {
         assert_eq!(16, ip.addr.len());
         let got = IpAddr::try_from(&ip).unwrap();
         assert_eq!(addr, got);
+    }
+
+    #[test]
+    fn test_ip_octets_round_trip_both_families() {
+        for text in ["10.0.0.1", "2001:db8::1"] {
+            let addr: IpAddr = text.parse().unwrap();
+
+            assert_eq!(Ok(addr), ip_from_octets(&ip_octets(addr)));
+        }
+    }
+
+    #[test]
+    fn test_ip_from_octets_refuses_another_count() {
+        assert_eq!(Err(InvalidIpLength(5)), ip_from_octets(&[0; 5]));
     }
 
     #[test]
