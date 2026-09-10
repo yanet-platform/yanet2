@@ -375,9 +375,12 @@ impl NeighbourService {
         let request = RemoveNeighbourTableRequest { name: cmd.name.clone() };
 
         self.service
-            .unary("remove table", request, async |client, request| {
-                client.remove_table(request).await
-            })
+            .unary_with(
+                "remove table",
+                request,
+                self.service.not_found("remove table", &format!("table '{}'", cmd.name)),
+                async |client, request| client.remove_table(request).await,
+            )
             .await?;
 
         output::success("remove table", format_args!("Removed table '{}'.", cmd.name));
