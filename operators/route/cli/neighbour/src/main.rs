@@ -4,11 +4,8 @@
 //! (the operator process directly, or the gateway once registration
 //! has propagated) and drives the operator-owned neighbour tables.
 
-use core::{net::IpAddr, time::Duration};
-use std::{
-    borrow::Cow,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use core::net::IpAddr;
+use std::{borrow::Cow, time::SystemTime};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -25,7 +22,7 @@ use ync::{
     completion,
     display::print_table_from_entries,
     errors::Error,
-    output,
+    humanfmt, output,
 };
 
 use crate::operatorpb::{
@@ -398,13 +395,8 @@ where
     serializer.serialize_str(state_name(*value))
 }
 
-/// Formats the time elapsed since a neighbour entry's `updated_at` Unix
-/// timestamp, clamping a negative timestamp to the epoch to avoid an
-/// overflow panic.
 fn age(updated_at: i64) -> String {
-    let updated_at = UNIX_EPOCH + Duration::from_secs(updated_at.max(0) as u64);
-    let elapsed = SystemTime::now().duration_since(updated_at).unwrap_or_default();
-    format!("{elapsed:.2?}")
+    humanfmt::age_since(updated_at, SystemTime::now())
 }
 
 impl Tabled for ProtoNeighbourEntry {

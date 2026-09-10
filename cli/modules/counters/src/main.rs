@@ -7,6 +7,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
     client::{LayeredChannel, Service},
+    display,
     errors::Error,
     metrics, output,
 };
@@ -304,7 +305,7 @@ fn format_worker_counters(response: &WorkerCountersResponse) {
     }
 
     let rows: Vec<WorkerRow> = response.workers.iter().map(WorkerRow::from).collect();
-    ync::display::print_table_from_entries(rows);
+    display::print_table_from_entries(rows);
 
     for worker in &response.workers {
         print_worker_histogram(worker);
@@ -320,14 +321,14 @@ fn print_worker_histogram(worker: &WorkerCounter) {
 
     println!("worker {} rx bursts", worker.worker_idx);
 
-    let max_count = bursts.iter().copied().max().unwrap_or(0);
     let wl = bursts.len().saturating_sub(1).to_string().len().max("0".len());
-    let wc = bursts.iter().map(|c| c.to_string().len()).max().unwrap_or(0);
 
-    for (idx, &count) in bursts.iter().enumerate() {
-        let bars = "∎".repeat(ync::display::bar_len(count, max_count));
-        println!("  {idx:>wl$} [ {count:>wc$} ] {bars}");
-    }
+    display::print_bars(
+        bursts
+            .iter()
+            .enumerate()
+            .map(|(idx, &count)| (format!("{idx:>wl$}"), count)),
+    );
 
     println!();
 }
