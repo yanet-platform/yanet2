@@ -101,7 +101,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
     errors::Error,
@@ -191,110 +191,98 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = <X>Service::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(args) => service.show_config(args).await,
-        ModeCmd::Update(args) => service.update_config(args).await,
-        ModeCmd::Delete(args) => service.delete_config(args).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(args) => show_config(&mut service, args).await,
+        ModeCmd::Update(args) => update_config(&mut service, args).await,
+        ModeCmd::Delete(args) => delete_config(&mut service, args).await,
     }
 }
 
-pub struct <X>Service {
-    service: Service<<X>ServiceClient<LayeredChannel>>,
+type <X>Service = Service<<X>ServiceClient<LayeredChannel>>;
+
+async fn list_configs(service: &mut <X>Service) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
+
+    output::data(
+        || &response.configs,
+        || {
+            if response.configs.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No configs found."),
+                    format_args!("create one with 'yanet-cli-<suffix> update --name <name> …'"),
+                );
+                return;
+            }
+
+            let mut entries: Vec<&Config> = response.configs.iter().collect();
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            print_table_from_entries(entries);
+        },
+    );
+
+    Ok(())
 }
 
-impl <X>Service {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn show_config(service: &mut <X>Service, cmd: ShowCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
 
-        Ok(Self { service })
-    }
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
 
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+    output::data(
+        || &response,
+        || {
+            println!("name:     {}", response.name);
+            println!("prefixes: {}", response.prefixes.len());
+        },
+    );
 
-        output::data(
-            || &response.configs,
-            || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No configs found."),
-                        format_args!("create one with 'yanet-cli-<suffix> update --name <name> …'"),
-                    );
-                    return;
-                }
+    Ok(())
+}
 
-                let mut entries: Vec<&Config> = response.configs.iter().collect();
-                entries.sort_by(|a, b| a.name.cmp(&b.name));
-                print_table_from_entries(entries);
-            },
-        );
+async fn update_config(service: &mut <X>Service, cmd: UpdateCmd) -> Result<(), Error> {
+    let request = UpdateConfigRequest {
+        name: cmd.config_name.clone(),
+        prefixes: cmd.prefixes.iter().map(|prefix| prefix.clone().into()).collect(),
+    };
 
-        Ok(())
-    }
+    service
+        .unary("update", request, async |client, request| client.update_config(request).await)
+        .await?;
 
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
-            )
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response,
-            || {
-                println!("name:     {}", response.name);
-                println!("prefixes: {}", response.prefixes.len());
-            },
-        );
+async fn delete_config(service: &mut <X>Service, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
 
-        Ok(())
-    }
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let request = UpdateConfigRequest {
-            name: cmd.config_name.clone(),
-            prefixes: cmd.prefixes.iter().map(|prefix| prefix.clone().into()).collect(),
-        };
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
-        self.service
-            .unary("update", request, async |client, request| client.update_config(request).await)
-            .await?;
-
-        output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
-
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service.not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
-
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 impl Tabled for Config {
@@ -336,8 +324,8 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 Several services behind one binary:
 `Connection::connect_for(connection, action).await?` once, then
-`Service::new(&connection, NAME, build)` for each client, all kept in the
-service struct.
+`Service::new(&connection, NAME, build)` for each client, all kept in a
+local struct the handlers take instead of the alias.
 
 ## Registration
 

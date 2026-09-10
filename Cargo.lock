@@ -3062,7 +3062,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tabled",
- "tokio",
  "tonic",
  "tonic-prost",
  "yanet-cli",

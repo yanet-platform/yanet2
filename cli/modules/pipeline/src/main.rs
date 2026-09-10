@@ -6,7 +6,7 @@ use commonpb::pb::{FunctionId, PipelineId};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -89,11 +89,11 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = PipelineService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, PIPELINE_SERVICE, client).await?;
 
     match cmd.mode {
         ModeCmd::List => {
-            let ids = service.list_pipelines().await?;
+            let ids = list_pipelines(&mut service, action).await?;
             let names: Vec<String> = ids.iter().map(|id| id.name.clone()).collect();
             output::data(
                 || &ids,
@@ -101,7 +101,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
             );
         }
         ModeCmd::Show(show) => {
-            let pipeline = service.get_pipeline(&show.name).await?;
+            let pipeline = get_pipeline(&mut service, action, &show.name).await?;
             output::data(
                 || &pipeline,
                 || {
@@ -123,12 +123,12 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         }
         ModeCmd::Update(update) => {
             let name = update.name.clone();
-            service.update_pipeline(update).await?;
+            update_pipeline(&mut service, action, update).await?;
             output::success(action, format_args!("Updated pipeline '{name}'."));
         }
         ModeCmd::Delete(delete) => {
             let name = delete.name.clone();
-            service.delete_pipeline(delete).await?;
+            delete_pipeline(&mut service, action, delete).await?;
             output::success(action, format_args!("Deleted pipeline '{name}'."));
         }
     }
@@ -136,101 +136,86 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     Ok(())
 }
 
-pub struct PipelineService {
-    service: Service<PipelineServiceClient<LayeredChannel>>,
-    action: &'static str,
+type PipelineService = Service<PipelineServiceClient<LayeredChannel>>;
+
+async fn list_pipelines(service: &mut PipelineService, action: &'static str) -> Result<Vec<PipelineId>, Error> {
+    let response = service
+        .unary_with(
+            action,
+            ListPipelinesRequest {},
+            service.not_found(action, "pipeline service"),
+            async |client, request| client.list(request).await,
+        )
+        .await?;
+
+    Ok(response.ids)
 }
 
-impl PipelineService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, PIPELINE_SERVICE, client).await?;
+async fn get_pipeline(service: &mut PipelineService, action: &'static str, name: &str) -> Result<Pipeline, Error> {
+    let request = GetPipelineRequest {
+        id: Some(PipelineId { name: name.to_string() }),
+    };
+    let response = service
+        .unary_with(
+            action,
+            request,
+            service.not_found(action, &format!("pipeline '{name}'")),
+            async |client, request| client.get(request).await,
+        )
+        .await?;
 
-        Ok(Self { service, action })
-    }
+    let pipeline = response.pipeline.ok_or_else(|| {
+        Error::from_status(
+            tonic::Status::not_found(format!("pipeline {name} not found")),
+            action,
+            service.endpoint(),
+            PIPELINE_SERVICE,
+        )
+    })?;
 
-    pub async fn list_pipelines(&mut self) -> Result<Vec<PipelineId>, Error> {
-        let response = self
-            .service
-            .unary_with(
-                self.action,
-                ListPipelinesRequest {},
-                self.service.not_found(self.action, "pipeline service"),
-                async |client, request| client.list(request).await,
-            )
-            .await?;
+    Ok(pipeline)
+}
 
-        Ok(response.ids)
-    }
+async fn update_pipeline(service: &mut PipelineService, action: &'static str, cmd: UpdateCmd) -> Result<(), Error> {
+    let pipeline_name = cmd.name;
+    let request = UpdatePipelineRequest {
+        pipeline: Some(Pipeline {
+            id: Some(PipelineId { name: pipeline_name.clone() }),
+            functions: cmd
+                .functions
+                .into_iter()
+                .map(|m| FunctionId { name: m.to_string() })
+                .collect(),
+        }),
+    };
 
-    pub async fn get_pipeline(&mut self, name: &str) -> Result<Pipeline, Error> {
-        let request = GetPipelineRequest {
-            id: Some(PipelineId { name: name.to_string() }),
-        };
-        let response = self
-            .service
-            .unary_with(
-                self.action,
-                request,
-                self.service.not_found(self.action, &format!("pipeline '{name}'")),
-                async |client, request| client.get(request).await,
-            )
-            .await?;
+    // Update is an upsert, so a referenced function the live configuration
+    // cannot resolve is a failed precondition, never a missing pipeline.
+    //
+    // The backend message is kept verbatim.
+    service
+        .unary(action, request, async |client, request| client.update(request).await)
+        .await?;
 
-        let pipeline = response.pipeline.ok_or_else(|| {
-            Error::from_status(
-                tonic::Status::not_found(format!("pipeline {name} not found")),
-                self.action,
-                self.service.endpoint(),
-                PIPELINE_SERVICE,
-            )
-        })?;
+    Ok(())
+}
 
-        Ok(pipeline)
-    }
+async fn delete_pipeline(service: &mut PipelineService, action: &'static str, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeletePipelineRequest {
+        id: Some(PipelineId { name: cmd.name }),
+    };
 
-    pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let pipeline_name = cmd.name;
-        let request = UpdatePipelineRequest {
-            pipeline: Some(Pipeline {
-                id: Some(PipelineId { name: pipeline_name.clone() }),
-                functions: cmd
-                    .functions
-                    .into_iter()
-                    .map(|m| FunctionId { name: m.to_string() })
-                    .collect(),
-            }),
-        };
+    let name = request.id.as_ref().expect("pipeline id").name.clone();
+    service
+        .unary_with(
+            action,
+            request,
+            service.not_found(action, &format!("pipeline '{name}'")),
+            async |client, request| client.delete(request).await,
+        )
+        .await?;
 
-        // Update is an upsert, so a referenced function the live configuration
-        // cannot resolve is a failed precondition, never a missing pipeline.
-        //
-        // The backend message is kept verbatim.
-        self.service
-            .unary(self.action, request, async |client, request| {
-                client.update(request).await
-            })
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeletePipelineRequest {
-            id: Some(PipelineId { name: cmd.name }),
-        };
-
-        let name = request.id.as_ref().expect("pipeline id").name.clone();
-        self.service
-            .unary_with(
-                self.action,
-                request,
-                self.service.not_found(self.action, &format!("pipeline '{name}'")),
-                async |client, request| client.delete(request).await,
-            )
-            .await?;
-
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Completion candidates for a `--name` argument: the pipelines the module

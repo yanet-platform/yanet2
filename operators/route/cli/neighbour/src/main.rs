@@ -21,7 +21,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
     errors::Error,
@@ -178,218 +178,205 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = NeighbourService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::Show(args) => service.show_neighbours(args).await,
-        ModeCmd::Add(args) => service.update_neighbour(args).await,
-        ModeCmd::Remove(args) => service.remove_neighbours(args).await,
+        ModeCmd::Show(args) => show_neighbours(&mut service, args).await,
+        ModeCmd::Add(args) => update_neighbour(&mut service, args).await,
+        ModeCmd::Remove(args) => remove_neighbours(&mut service, args).await,
         ModeCmd::Table(cmd) => match cmd.action {
-            TableAction::Show => service.list_tables().await,
-            TableAction::Create(args) => service.create_table(args).await,
-            TableAction::Update(args) => service.update_table(args).await,
-            TableAction::Remove(args) => service.remove_table(args).await,
+            TableAction::Show => list_tables(&mut service).await,
+            TableAction::Create(args) => create_table(&mut service, args).await,
+            TableAction::Update(args) => update_table(&mut service, args).await,
+            TableAction::Remove(args) => remove_table(&mut service, args).await,
         },
     }
 }
 
-pub struct NeighbourService {
-    service: Service<NeighbourServiceClient<LayeredChannel>>,
+type NeighbourService = Service<NeighbourServiceClient<LayeredChannel>>;
+
+async fn show_neighbours(service: &mut NeighbourService, cmd: ShowCmd) -> Result<(), Error> {
+    let request = ListNeighboursRequest {
+        table: cmd.table.clone().unwrap_or_default(),
+    };
+    let resource = cmd.table.as_ref().map(|table| format!("table '{table}'"));
+
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", resource.as_deref().unwrap_or("requested table")),
+            async |client, request| client.list(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response.neighbours,
+        || {
+            if response.neighbours.is_empty() {
+                match &cmd.table {
+                    Some(table) => output::empty(format_args!("No neighbours found for table '{table}'.")),
+                    None => output::empty(format_args!("No neighbours found.")),
+                }
+                return;
+            }
+
+            let mut entries: Vec<&ProtoNeighbourEntry> = response.neighbours.iter().collect();
+            entries.sort_by_key(|entry| {
+                let next_hop = entry
+                    .next_hop
+                    .as_ref()
+                    .and_then(|addr| IpAddr::try_from(addr).ok())
+                    .map(|addr| addr.to_canonical());
+                (entry.state, next_hop)
+            });
+            print_table_from_entries(entries);
+        },
+    );
+
+    Ok(())
 }
 
-impl NeighbourService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn update_neighbour(service: &mut NeighbourService, cmd: AddCmd) -> Result<(), Error> {
+    let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
 
-        Ok(Self { service })
-    }
+    let request = UpdateNeighboursRequest {
+        table: cmd.table.clone().unwrap_or_default(),
+        entries: vec![ProtoNeighbourEntry {
+            next_hop: Some(IpAddress::from(cmd.next_hop)),
+            link_addr: Some(MacAddress::from(cmd.link_addr)),
+            hardware_addr: Some(MacAddress::from(cmd.hardware_addr)),
+            priority: cmd.priority.unwrap_or_default(),
+            device: cmd.device.clone().unwrap_or_default(),
+            ..Default::default()
+        }],
+    };
 
-    pub async fn show_neighbours(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let request = ListNeighboursRequest {
-            table: cmd.table.clone().unwrap_or_default(),
-        };
-        let resource = cmd.table.as_ref().map(|table| format!("table '{table}'"));
+    service
+        .unary("add", request, async |client, request| {
+            client.update_neighbours(request).await
+        })
+        .await?;
 
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service
-                    .not_found("show", resource.as_deref().unwrap_or("requested table")),
-                async |client, request| client.list(request).await,
-            )
-            .await?;
+    output::success(
+        "add",
+        format_args!(
+            "Added neighbour {} ({}) to table '{}'.",
+            cmd.next_hop, cmd.link_addr, table
+        ),
+    );
 
-        output::data(
-            || &response.neighbours,
-            || {
-                if response.neighbours.is_empty() {
-                    match &cmd.table {
-                        Some(table) => output::empty(format_args!("No neighbours found for table '{table}'.")),
-                        None => output::empty(format_args!("No neighbours found.")),
-                    }
-                    return;
-                }
+    Ok(())
+}
 
-                let mut entries: Vec<&ProtoNeighbourEntry> = response.neighbours.iter().collect();
-                entries.sort_by_key(|entry| {
-                    let next_hop = entry
-                        .next_hop
-                        .as_ref()
-                        .and_then(|addr| IpAddr::try_from(addr).ok())
-                        .map(|addr| addr.to_canonical());
-                    (entry.state, next_hop)
-                });
-                print_table_from_entries(entries);
-            },
-        );
+async fn remove_neighbours(service: &mut NeighbourService, cmd: RemoveCmd) -> Result<(), Error> {
+    let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
 
-        Ok(())
-    }
+    let request = RemoveNeighboursRequest {
+        table: cmd.table.clone().unwrap_or_default(),
+        next_hops: cmd.next_hops.iter().copied().map(IpAddress::from).collect(),
+    };
 
-    pub async fn update_neighbour(&mut self, cmd: AddCmd) -> Result<(), Error> {
-        let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
+    service
+        .unary("remove", request, async |client, request| {
+            client.remove_neighbours(request).await
+        })
+        .await?;
 
-        let request = UpdateNeighboursRequest {
-            table: cmd.table.clone().unwrap_or_default(),
-            entries: vec![ProtoNeighbourEntry {
-                next_hop: Some(IpAddress::from(cmd.next_hop)),
-                link_addr: Some(MacAddress::from(cmd.link_addr)),
-                hardware_addr: Some(MacAddress::from(cmd.hardware_addr)),
-                priority: cmd.priority.unwrap_or_default(),
-                device: cmd.device.clone().unwrap_or_default(),
-                ..Default::default()
-            }],
-        };
+    let next_hops = cmd
+        .next_hops
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    output::success("remove", format_args!("Removed {next_hops} from table '{table}'."));
 
-        self.service
-            .unary("add", request, async |client, request| {
-                client.update_neighbours(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        output::success(
-            "add",
-            format_args!(
-                "Added neighbour {} ({}) to table '{}'.",
-                cmd.next_hop, cmd.link_addr, table
-            ),
-        );
+async fn list_tables(service: &mut NeighbourService) -> Result<(), Error> {
+    let response = service
+        .unary("list tables", ListNeighbourTablesRequest {}, async |client, request| {
+            client.list_tables(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::data(
+        || &response.tables,
+        || {
+            if response.tables.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No neighbour tables found."),
+                    format_args!(
+                        "create one with 'yanet-cli-operator-neighbour table create <name> --default-priority <n>'"
+                    ),
+                );
+                return;
+            }
 
-    pub async fn remove_neighbours(&mut self, cmd: RemoveCmd) -> Result<(), Error> {
-        let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
+            let entries: Vec<&NeighbourTableInfo> = response.tables.iter().collect();
+            print_table_from_entries(entries);
+        },
+    );
 
-        let request = RemoveNeighboursRequest {
-            table: cmd.table.clone().unwrap_or_default(),
-            next_hops: cmd.next_hops.iter().copied().map(IpAddress::from).collect(),
-        };
+    Ok(())
+}
 
-        self.service
-            .unary("remove", request, async |client, request| {
-                client.remove_neighbours(request).await
-            })
-            .await?;
+async fn create_table(service: &mut NeighbourService, cmd: CreateTableCmd) -> Result<(), Error> {
+    let request = CreateNeighbourTableRequest {
+        name: cmd.name.clone(),
+        default_priority: cmd.default_priority,
+    };
 
-        let next_hops = cmd
-            .next_hops
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        output::success("remove", format_args!("Removed {next_hops} from table '{table}'."));
+    service
+        .unary("create table", request, async |client, request| {
+            client.create_table(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::success("create table", format_args!("Created table '{}'.", cmd.name));
 
-    pub async fn list_tables(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list tables", ListNeighbourTablesRequest {}, async |client, request| {
-                client.list_tables(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response.tables,
-            || {
-                if response.tables.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No neighbour tables found."),
-                        format_args!(
-                            "create one with 'yanet-cli-operator-neighbour table create <name> --default-priority <n>'"
-                        ),
-                    );
-                    return;
-                }
+async fn update_table(service: &mut NeighbourService, cmd: UpdateTableCmd) -> Result<(), Error> {
+    let request = UpdateNeighbourTableRequest {
+        name: cmd.name.clone(),
+        default_priority: cmd.default_priority,
+    };
 
-                let entries: Vec<&NeighbourTableInfo> = response.tables.iter().collect();
-                print_table_from_entries(entries);
-            },
-        );
+    service
+        .unary("update table", request, async |client, request| {
+            client.update_table(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::success(
+        "update table",
+        format_args!(
+            "Updated table '{}' (default priority {}).",
+            cmd.name, cmd.default_priority
+        ),
+    );
 
-    pub async fn create_table(&mut self, cmd: CreateTableCmd) -> Result<(), Error> {
-        let request = CreateNeighbourTableRequest {
-            name: cmd.name.clone(),
-            default_priority: cmd.default_priority,
-        };
+    Ok(())
+}
 
-        self.service
-            .unary("create table", request, async |client, request| {
-                client.create_table(request).await
-            })
-            .await?;
+async fn remove_table(service: &mut NeighbourService, cmd: RemoveTableCmd) -> Result<(), Error> {
+    let request = RemoveNeighbourTableRequest { name: cmd.name.clone() };
 
-        output::success("create table", format_args!("Created table '{}'.", cmd.name));
+    service
+        .unary_with(
+            "remove table",
+            request,
+            service.not_found("remove table", &format!("table '{}'", cmd.name)),
+            async |client, request| client.remove_table(request).await,
+        )
+        .await?;
 
-        Ok(())
-    }
+    output::success("remove table", format_args!("Removed table '{}'.", cmd.name));
 
-    pub async fn update_table(&mut self, cmd: UpdateTableCmd) -> Result<(), Error> {
-        let request = UpdateNeighbourTableRequest {
-            name: cmd.name.clone(),
-            default_priority: cmd.default_priority,
-        };
-
-        self.service
-            .unary("update table", request, async |client, request| {
-                client.update_table(request).await
-            })
-            .await?;
-
-        output::success(
-            "update table",
-            format_args!(
-                "Updated table '{}' (default priority {}).",
-                cmd.name, cmd.default_priority
-            ),
-        );
-
-        Ok(())
-    }
-
-    pub async fn remove_table(&mut self, cmd: RemoveTableCmd) -> Result<(), Error> {
-        let request = RemoveNeighbourTableRequest { name: cmd.name.clone() };
-
-        self.service
-            .unary_with(
-                "remove table",
-                request,
-                self.service.not_found("remove table", &format!("table '{}'", cmd.name)),
-                async |client, request| client.remove_table(request).await,
-            )
-            .await?;
-
-        output::success("remove table", format_args!("Removed table '{}'.", cmd.name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Returns the proto-defined name for a `NeighbourState` discriminant,

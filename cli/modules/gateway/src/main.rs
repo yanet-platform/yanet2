@@ -7,7 +7,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     errors::Error,
     humanfmt, output,
 };
@@ -37,53 +37,42 @@ fn main() -> std::process::ExitCode {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = GatewayService::new(&cmd.globals.connection).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, "gateway", GATEWAY_SERVICE, |channel| {
+        GatewayClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_services().await,
+        ModeCmd::List => list_services(&mut service).await,
     }
 }
 
-pub struct GatewayService {
-    service: Service<GatewayClient<LayeredChannel>>,
-}
+type GatewayService = Service<GatewayClient<LayeredChannel>>;
 
-impl GatewayService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, "gateway", GATEWAY_SERVICE, |channel| {
-            GatewayClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
+async fn list_services(service: &mut GatewayService) -> Result<(), Error> {
+    let response = service
+        .unary("gateway", ListServicesRequest {}, async |client, request| {
+            client.list_services(request).await
         })
         .await?;
 
-        Ok(Self { service })
-    }
+    output::data(
+        || &response.services,
+        || {
+            let rows: Vec<ServiceRow> = response.services.iter().map(ServiceRow::from).collect();
 
-    pub async fn list_services(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("gateway", ListServicesRequest {}, async |client, request| {
-                client.list_services(request).await
-            })
-            .await?;
+            if rows.is_empty() {
+                output::empty(format_args!("No services registered."));
+                return;
+            }
 
-        output::data(
-            || &response.services,
-            || {
-                let rows: Vec<ServiceRow> = response.services.iter().map(ServiceRow::from).collect();
+            ync::display::print_table_from_entries(&rows);
+        },
+    );
 
-                if rows.is_empty() {
-                    output::empty(format_args!("No services registered."));
-                    return;
-                }
-
-                ync::display::print_table_from_entries(&rows);
-            },
-        );
-
-        Ok(())
-    }
+    Ok(())
 }
 
 /// A displayable row for the gateway services table.

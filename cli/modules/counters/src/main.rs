@@ -6,7 +6,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     errors::Error,
     metrics, output,
 };
@@ -119,11 +119,18 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.as_ref().map_or("show counters", ModeCmd::action);
-    let mut service = CountersService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, COUNTERS_SERVICE, |channel| {
+        CountersServiceClient::new(channel)
+            .max_decoding_message_size(256 * 1024 * 1024)
+            .max_encoding_message_size(256 * 1024 * 1024)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
 
     match cmd.mode {
         Some(ModeCmd::Workers) => {
-            let response = service.workers().await?;
+            let response = workers(&mut service, action).await?;
             output::data(
                 || &response,
                 || {
@@ -132,7 +139,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
             );
         }
         Some(ModeCmd::Ports) => {
-            let response = service.ports().await?;
+            let response = ports(&mut service, action).await?;
             output::data(
                 || &response,
                 || {
@@ -148,7 +155,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
             );
         }
         None => {
-            let response = service.by_tags(cmd.by_tags.into()).await?;
+            let response = by_tags(&mut service, action, cmd.by_tags.into()).await?;
             output::data(
                 || &response,
                 || {
@@ -168,48 +175,32 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     Ok(())
 }
 
-pub struct CountersService {
-    service: Service<CountersServiceClient<LayeredChannel>>,
+type CountersService = Service<CountersServiceClient<LayeredChannel>>;
+
+async fn by_tags(
+    service: &mut CountersService,
     action: &'static str,
+    request: CountersByTagsRequest,
+) -> Result<CountersByTagsResponse, Error> {
+    service
+        .unary(action, request, async |client, request| client.by_tags(request).await)
+        .await
 }
 
-impl CountersService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, COUNTERS_SERVICE, |channel| {
-            CountersServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
+async fn workers(service: &mut CountersService, action: &'static str) -> Result<WorkerCountersResponse, Error> {
+    service
+        .unary(action, WorkerCountersRequest {}, async |client, request| {
+            client.workers(request).await
         })
-        .await?;
+        .await
+}
 
-        Ok(Self { service, action })
-    }
-
-    pub async fn by_tags(&mut self, request: CountersByTagsRequest) -> Result<CountersByTagsResponse, Error> {
-        self.service
-            .unary(self.action, request, async |client, request| {
-                client.by_tags(request).await
-            })
-            .await
-    }
-
-    pub async fn workers(&mut self) -> Result<WorkerCountersResponse, Error> {
-        self.service
-            .unary(self.action, WorkerCountersRequest {}, async |client, request| {
-                client.workers(request).await
-            })
-            .await
-    }
-
-    pub async fn ports(&mut self) -> Result<PortCountersResponse, Error> {
-        self.service
-            .unary(self.action, PortCountersRequest {}, async |client, request| {
-                client.ports(request).await
-            })
-            .await
-    }
+async fn ports(service: &mut CountersService, action: &'static str) -> Result<PortCountersResponse, Error> {
+    service
+        .unary(action, PortCountersRequest {}, async |client, request| {
+            client.ports(request).await
+        })
+        .await
 }
 
 /// A displayable summary row for one worker in the workers table.

@@ -7,7 +7,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -88,98 +88,85 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = BlackholeService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
     }
 }
 
-pub struct BlackholeService {
-    service: Service<BlackholeServiceClient<LayeredChannel>>,
+type BlackholeService = Service<BlackholeServiceClient<LayeredChannel>>;
+
+async fn list_configs(service: &mut BlackholeService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
+
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No blackhole configurations found."),
+                format_args!("create one with 'yanet-cli-blackhole update --name <name>'"),
+            )
+        },
+    );
+
+    Ok(())
 }
 
-impl BlackholeService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn show_config(service: &mut BlackholeService, cmd: ShowConfigCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
 
-        Ok(Self { service })
-    }
+    output::data(
+        || &response,
+        || display::KeyValue::new().row("name", &response.name).print(),
+    );
 
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No blackhole configurations found."),
-                    format_args!("create one with 'yanet-cli-blackhole update --name <name>'"),
-                )
-            },
-        );
+async fn update_config(service: &mut BlackholeService, cmd: UpdateConfigCmd) -> Result<(), Error> {
+    let request = UpdateConfigRequest { name: cmd.config_name.clone() };
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
-            )
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response,
-            || display::KeyValue::new().row("name", &response.name).print(),
-        );
+async fn delete_config(service: &mut BlackholeService, cmd: DeleteConfigCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-        Ok(())
-    }
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
-    pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
-        let request = UpdateConfigRequest { name: cmd.config_name.clone() };
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
-
-    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service
-                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
-
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Completion candidates for a `--name` argument: the blackhole configs the

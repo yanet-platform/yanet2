@@ -8,7 +8,7 @@ use tonic::codec::CompressionEncoding;
 use vlanpb::{ShowDeviceVlanRequest, UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -74,90 +74,79 @@ pub struct UpdateCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService";
 
-pub struct DeviceVlanService {
-    service: Service<DeviceVlanServiceClient<LayeredChannel>>,
+type DeviceVlanService = Service<DeviceVlanServiceClient<LayeredChannel>>;
+
+async fn show_device(service: &mut DeviceVlanService, cmd: ShowCmd) -> Result<(), Error> {
+    let name = cmd.name;
+    let request = ShowDeviceVlanRequest { name: name.clone() };
+
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("vlan device '{name}'")),
+            async |client, request| client.show_device(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            let rows = response.device.as_ref().map(binding_rows).unwrap_or_default();
+
+            if output::is_colored() {
+                println!("{}: {}", output::paint_bold("VLAN"), response.vlan);
+            } else {
+                println!("VLAN: {}", response.vlan);
+            }
+
+            if rows.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No pipeline bindings found for '{name}'."),
+                    format_args!(
+                        "bind one with 'yanet-cli device vlan update -n <name> -i <pipeline:weight> -o <pipeline:weight> --vlan <id>'"
+                    ),
+                );
+                return;
+            }
+
+            display::print_table_from_entries(rows);
+        },
+    );
+
+    Ok(())
 }
 
-impl DeviceVlanService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            DeviceVlanServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
+async fn update_config(service: &mut DeviceVlanService, cmd: UpdateCmd) -> Result<(), Error> {
+    let request = UpdateDeviceVlanRequest {
+        name: cmd.name.clone(),
+        device: Some(Device { input: cmd.input, output: cmd.output }),
+        vlan: cmd.vlan as u32,
+    };
+
+    service
+        .unary("update", request, async |client, request| {
+            client.update_device(request).await
         })
         .await?;
 
-        Ok(Self { service })
-    }
+    output::success("update", format_args!("Updated device '{}'.", cmd.name));
 
-    pub async fn show_device(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let name = cmd.name;
-        let request = ShowDeviceVlanRequest { name: name.clone() };
-
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("vlan device '{name}'")),
-                async |client, request| client.show_device(request).await,
-            )
-            .await?;
-
-        output::data(
-            || &response,
-            || {
-                let rows = response.device.as_ref().map(binding_rows).unwrap_or_default();
-
-                if output::is_colored() {
-                    println!("{}: {}", output::paint_bold("VLAN"), response.vlan);
-                } else {
-                    println!("VLAN: {}", response.vlan);
-                }
-
-                if rows.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No pipeline bindings found for '{name}'."),
-                        format_args!(
-                            "bind one with 'yanet-cli device vlan update -n <name> -i <pipeline:weight> -o <pipeline:weight> --vlan <id>'"
-                        ),
-                    );
-                    return;
-                }
-
-                display::print_table_from_entries(rows);
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let request = UpdateDeviceVlanRequest {
-            name: cmd.name.clone(),
-            device: Some(Device { input: cmd.input, output: cmd.output }),
-            vlan: cmd.vlan as u32,
-        };
-
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_device(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated device '{}'.", cmd.name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DeviceVlanService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, |channel| {
+        DeviceVlanServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
 
     match cmd.mode {
-        ModeCmd::Show(cmd) => service.show_device(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Show(cmd) => show_device(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
     }
 }
 

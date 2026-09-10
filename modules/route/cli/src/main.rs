@@ -10,7 +10,7 @@ use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output, yaml,
@@ -211,133 +211,115 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = RouteService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
         ModeCmd::Fib(cmd) => match cmd.action {
-            FibAction::List => service.list_fibs().await,
-            FibAction::Show(cmd) => service.show_fib(cmd).await,
-            FibAction::Update(cmd) => service.update_fib(cmd).await,
-            FibAction::Delete(cmd) => service.delete_fib(cmd).await,
+            FibAction::List => list_fibs(&mut service).await,
+            FibAction::Show(cmd) => show_fib(&mut service, cmd).await,
+            FibAction::Update(cmd) => update_fib(&mut service, cmd).await,
+            FibAction::Delete(cmd) => delete_fib(&mut service, cmd).await,
         },
     }
 }
 
-pub struct RouteService {
-    service: Service<RouteServiceClient<LayeredChannel>>,
+type RouteService = Service<RouteServiceClient<LayeredChannel>>;
+
+async fn update_fib(service: &mut RouteService, cmd: FibUpdateCmd) -> Result<(), Error> {
+    let config = FibConfig::load(&cmd.file).map_err(|err| service.invalid("update", err.to_string()))?;
+    let entry_count = config.entries.len();
+    let request = UpdateFibRequest {
+        module_name: cmd.config_name.clone(),
+        entries: config.entries,
+    };
+    service
+        .unary("update", request, async |client, request| {
+            client.update_fib(request).await
+        })
+        .await?;
+
+    output::success(
+        "update",
+        format_args!("Updated config '{}' ({} entries).", cmd.config_name, entry_count),
+    );
+    Ok(())
 }
 
-impl RouteService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn delete_fib(service: &mut RouteService, cmd: FibDeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
 
-        Ok(Self { service })
-    }
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-    pub async fn update_fib(&mut self, cmd: FibUpdateCmd) -> Result<(), Error> {
-        let config = FibConfig::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
-        let entry_count = config.entries.len();
-        let request = UpdateFibRequest {
-            module_name: cmd.config_name.clone(),
-            entries: config.entries,
-        };
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_fib(request).await
-            })
-            .await?;
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
+    Ok(())
+}
 
-        output::success(
-            "update",
-            format_args!("Updated config '{}' ({} entries).", cmd.config_name, entry_count),
-        );
-        Ok(())
-    }
+async fn list_fibs(service: &mut RouteService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-    pub async fn delete_fib(&mut self, cmd: FibDeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service
-                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No FIB configurations found."),
+                format_args!("create one with 'yanet-cli-route fib update --name <name> <path>'"),
             )
-            .await?;
+        },
+    );
+    Ok(())
+}
 
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
-        Ok(())
-    }
+async fn show_fib(service: &mut RouteService, cmd: FibShowCmd) -> Result<(), Error> {
+    let request = ShowFibRequest {
+        name: cmd.config_name.clone(),
+        ipv4_only: cmd.ipv4,
+        ipv6_only: cmd.ipv6,
+    };
 
-    pub async fn list_fibs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_fib(request).await,
+        )
+        .await?;
+    let entries = response.entries;
 
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No FIB configurations found."),
-                    format_args!("create one with 'yanet-cli-route fib update --name <name> <path>'"),
-                )
-            },
-        );
-        Ok(())
-    }
+    output::data(
+        || &entries,
+        || {
+            if entries.is_empty() {
+                output::empty(format_args!("No FIB entries found for '{}'.", cmd.config_name));
+                return;
+            }
 
-    pub async fn show_fib(&mut self, cmd: FibShowCmd) -> Result<(), Error> {
-        let request = ShowFibRequest {
-            name: cmd.config_name.clone(),
-            ipv4_only: cmd.ipv4,
-            ipv6_only: cmd.ipv6,
-        };
+            print_fib(&entries);
+        },
+    );
 
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_fib(request).await,
-            )
-            .await?;
-        let entries = response.entries;
-
-        output::data(
-            || &entries,
-            || {
-                if entries.is_empty() {
-                    output::empty(format_args!("No FIB entries found for '{}'.", cmd.config_name));
-                    return;
-                }
-
-                print_fib(&entries);
-            },
-        );
-
-        Ok(())
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod test {
     use core::net::IpAddr;
-    use std::{env, fs, net::TcpListener};
+    use std::{env, fs};
 
     use commonpb::pb::{IpRange, MacAddress};
     use netip::MacAddr;
-    use ync::{
-        auth::{AuthArgs, AuthMethod},
-        client::TlsArgs,
-        errors::ErrorKind,
-    };
 
     use super::*;
 
@@ -735,28 +717,5 @@ entries:
         fs::remove_file(&path).unwrap();
 
         assert_eq!(format!("{}: entry 0: missing range", path.display()), err.to_string());
-    }
-
-    /// Verifies that a refused connection is reported through the shared
-    /// error contract as a connection failure, exit code 4.
-    #[tokio::test]
-    async fn test_route_service_new_connection_refused_reports_connection_error() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let connection = ConnectionArgs {
-            endpoint: Some(format!("grpc://127.0.0.1:{port}")),
-            auth: AuthArgs {
-                auth: Some(AuthMethod::None),
-                cert_tag: None,
-            },
-            tls: TlsArgs::default(),
-            timeout: None,
-        };
-
-        let err = RouteService::new(&connection, "list").await.err().unwrap();
-
-        assert_eq!(ErrorKind::Connection, err.kind());
-        assert_eq!(4, err.exit_code());
     }
 }
