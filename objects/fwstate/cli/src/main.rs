@@ -12,10 +12,10 @@ use serde::Serialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 mod args;
@@ -45,269 +45,212 @@ pub struct Cmd {
     pub globals: GlobalArgs,
 }
 
-pub struct FWStateMapService {
-    service: Service<FwStateMapServiceClient<LayeredChannel>>,
-}
+type FWStateMapService = Service<FwStateMapServiceClient<LayeredChannel>>;
 
-/// State an `entries` dump carries across its batches.
-struct DumpState {
-    /// Entries printed so far, which `--count` limits.
-    printed: u32,
-    /// Whether the human-readable header row is already out. Deferred until
-    /// the first entry arrives, so a zero-entry result prints no header.
-    header_printed: bool,
-    /// Map generation the last response reported.
-    generation: Option<u64>,
-}
-
-impl DumpState {
-    fn new() -> Self {
-        Self {
-            printed: 0,
-            header_printed: false,
-            generation: None,
-        }
-    }
-
-    /// Warns when a response reports a different generation than the one
-    /// before it.
-    ///
-    /// A bump means layers were relinked, so the cursor and `--layer` stop
-    /// denoting what they did when the dump began, and the remaining
-    /// entries can repeat or be missed. Rows already printed were accurate
-    /// when read, so the dump goes on and only warns.
-    fn note_generation(&mut self, generation: u64) {
-        match self.generation.replace(generation) {
-            Some(previous) if previous != generation => log::warn!(
-                "fwstate-map changed mid-dump (generation {previous} -> {generation}): \
-                 entries may repeat or be missed"
-            ),
-            _ => {}
-        }
+/// Warns when a response reports a different generation than the one
+/// before it, `seen` carrying the last one across the batches.
+///
+/// A bump means layers were relinked, so the cursor and `--layer` stop
+/// denoting what they did when the dump began, and the remaining
+/// entries can repeat or be missed. Rows already printed were accurate
+/// when read, so the dump goes on and only warns.
+fn note_generation(seen: &mut Option<u64>, generation: u64) {
+    match seen.replace(generation) {
+        Some(previous) if previous != generation => log::warn!(
+            "fwstate-map changed mid-dump (generation {previous} -> {generation}): \
+             entries may repeat or be missed"
+        ),
+        _ => {}
     }
 }
 
-impl FWStateMapService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, client);
+async fn map_create(service: &mut FWStateMapService, cmd: CreateCmd) -> Result<(), Error> {
+    let request = CreateMapRequest {
+        name: cmd.map_name.clone(),
+        kind: match cmd.kind {
+            args::MapKind::V4 => fwstatemappb::Kind::V4.into(),
+            args::MapKind::V6 => fwstatemappb::Kind::V6.into(),
+        },
+        index_size: cmd.index_size.unwrap_or(0),
+        extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
+        worker_count: cmd.worker_count.unwrap_or(0),
+    };
+    service
+        .unary("create", request, async |client, request| {
+            client.create_map(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
+    output::success("create", format_args!("Created map '{}'.", cmd.map_name));
+
+    Ok(())
+}
+
+async fn map_delete(service: &mut FWStateMapService, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeleteMapRequest { name: cmd.map_name.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("map '{}'", cmd.map_name)),
+            async |client, request| client.delete_map(request).await,
+        )
+        .await?;
+
+    output::success("delete", format_args!("Deleted map '{}'.", cmd.map_name));
+
+    Ok(())
+}
+
+async fn map_list(service: &mut FWStateMapService, _cmd: ListCmd) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListMapsRequest {}, async |client, request| {
+            client.list_maps(request).await
+        })
+        .await?;
+
+    // The wire response's kinds map has no defined iteration order and
+    // HashMap serialization is keyed by name only, so a stable payload
+    // pairs each name with its family in the listing's own order. A
+    // kind the enum does not know (a server ahead of this CLI) reads
+    // as "unknown" rather than silently pretending to be a family.
+    #[derive(Serialize)]
+    struct ListedMap<'a> {
+        name: &'a str,
+        kind: &'a str,
     }
-
-    pub async fn map_create(&mut self, cmd: CreateCmd) -> Result<(), Error> {
-        let request = CreateMapRequest {
-            name: cmd.map_name.clone(),
-            kind: match cmd.kind {
-                args::MapKind::V4 => fwstatemappb::Kind::V4.into(),
-                args::MapKind::V6 => fwstatemappb::Kind::V6.into(),
+    let listed: Vec<ListedMap> = response
+        .maps
+        .iter()
+        .map(|name| ListedMap {
+            name,
+            kind: match response.kinds.get(name).and_then(|raw| Kind::try_from(*raw).ok()) {
+                Some(Kind::V4) => "v4",
+                Some(Kind::V6) => "v6",
+                // Absent from the map or a discriminant this CLI's
+                // enum does not know (a server ahead of it).
+                None => "unknown",
             },
-            index_size: cmd.index_size.unwrap_or(0),
-            extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
-            worker_count: cmd.worker_count.unwrap_or(0),
+        })
+        .collect();
+
+    output::data(
+        || &listed,
+        || {
+            display::print_names_with_hint(
+                &response.maps,
+                format_args!("No fwstate-map objects found."),
+                format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
+            )
+        },
+    );
+
+    Ok(())
+}
+
+async fn map_stats(service: &mut FWStateMapService, cmd: StatsCmd) -> Result<(), Error> {
+    let request = GetMapStatsRequest { name: cmd.map_name.clone() };
+    let response = service
+        .unary_with(
+            "stats",
+            request,
+            service.not_found("stats", &format!("map '{}'", cmd.map_name)),
+            async |client, request| client.get_map_stats(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).expect("fwstate-map stats JSON serialization must not fail")
+            );
+        },
+    );
+
+    Ok(())
+}
+
+async fn map_insert_layer(service: &mut FWStateMapService, cmd: InsertLayerCmd) -> Result<(), Error> {
+    // The map object carries its own address family; the request's kind
+    // field is redundant with it, so it is left at the default.
+    let request = InsertLayerRequest {
+        name: cmd.map_name.clone(),
+        index_size: cmd.index_size.unwrap_or(0),
+        extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
+        worker_count: cmd.worker_count.unwrap_or(0),
+        ..Default::default()
+    };
+    service
+        .unary("insert-layer", request, async |client, request| {
+            client.insert_layer(request).await
+        })
+        .await?;
+
+    output::success(
+        "insert-layer",
+        format_args!("Inserted layer into map '{}'.", cmd.map_name),
+    );
+
+    Ok(())
+}
+
+async fn map_entries(service: &mut FWStateMapService, cmd: EntriesCmd) -> Result<(), Error> {
+    let direction = match cmd.direction {
+        DirectionArg::Forward => Direction::Forward,
+        DirectionArg::Backward => Direction::Backward,
+    };
+
+    let limit = usize::try_from(cmd.count).expect("a count fits usize");
+    let mut generation = None;
+    let mut rows = output::rows(print_entries_header, print_entry);
+
+    // Plain cursor pagination: each request carries the full cursor
+    // and the response's index feeds the next call until has_more is
+    // false, so a failed page is one failed call rather than a torn
+    // stream.
+    let mut index = cmd.index as i64;
+    loop {
+        let request = ListEntriesRequest {
+            map_name: cmd.map_name.clone(),
+            layer_index: cmd.layer,
+            include_expired: cmd.include_expired,
+            direction: direction as i32,
+            batch_size: cmd.batch,
+            index,
         };
-        self.service
-            .unary("create", request, async |client, request| {
-                client.create_map(request).await
-            })
-            .await?;
-
-        output::success("create", format_args!("Created map '{}'.", cmd.map_name));
-
-        Ok(())
-    }
-
-    pub async fn map_delete(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteMapRequest { name: cmd.map_name.clone() };
-        self.service
+        let resp = service
             .unary_with(
-                "delete",
+                "entries",
                 request,
-                self.service.not_found("delete", &format!("map '{}'", cmd.map_name)),
-                async |client, request| client.delete_map(request).await,
+                service.not_found("entries", &format!("map '{}'", cmd.map_name)),
+                async |client, request| client.list_entries(request).await,
             )
             .await?;
 
-        output::success("delete", format_args!("Deleted map '{}'.", cmd.map_name));
+        note_generation(&mut generation, resp.generation);
 
-        Ok(())
-    }
-
-    pub async fn map_list(&mut self, _cmd: ListCmd) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListMapsRequest {}, async |client, request| {
-                client.list_maps(request).await
-            })
-            .await?;
-
-        // The wire response's kinds map has no defined iteration order and
-        // HashMap serialization is keyed by name only, so a stable payload
-        // pairs each name with its family in the listing's own order. A
-        // kind the enum does not know (a server ahead of this CLI) reads
-        // as "unknown" rather than silently pretending to be a family.
-        #[derive(Serialize)]
-        struct ListedMap<'a> {
-            name: &'a str,
-            kind: &'a str,
-        }
-        let listed: Vec<ListedMap> = response
-            .maps
-            .iter()
-            .map(|name| ListedMap {
-                name,
-                kind: match response.kinds.get(name).and_then(|raw| Kind::try_from(*raw).ok()) {
-                    Some(Kind::V4) => "v4",
-                    Some(Kind::V6) => "v6",
-                    // Absent from the map or a discriminant this CLI's
-                    // enum does not know (a server ahead of it).
-                    None => "unknown",
-                },
-            })
-            .collect();
-
-        output::data(
-            || &listed,
-            || {
-                display::print_names_with_hint(
-                    &response.maps,
-                    format_args!("No fwstate-map objects found."),
-                    format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
-                )
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn map_stats(&mut self, cmd: StatsCmd) -> Result<(), Error> {
-        let request = GetMapStatsRequest { name: cmd.map_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "stats",
-                request,
-                self.service.not_found("stats", &format!("map '{}'", cmd.map_name)),
-                async |client, request| client.get_map_stats(request).await,
-            )
-            .await?;
-
-        output::data(
-            || &response,
-            || {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response)
-                        .expect("fwstate-map stats JSON serialization must not fail")
-                );
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn map_insert_layer(&mut self, cmd: InsertLayerCmd) -> Result<(), Error> {
-        // The map object carries its own address family; the request's kind
-        // field is redundant with it, so it is left at the default.
-        let request = InsertLayerRequest {
-            name: cmd.map_name.clone(),
-            index_size: cmd.index_size.unwrap_or(0),
-            extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
-            worker_count: cmd.worker_count.unwrap_or(0),
-            ..Default::default()
-        };
-        self.service
-            .unary("insert-layer", request, async |client, request| {
-                client.insert_layer(request).await
-            })
-            .await?;
-
-        output::success(
-            "insert-layer",
-            format_args!("Inserted layer into map '{}'.", cmd.map_name),
-        );
-
-        Ok(())
-    }
-
-    pub async fn map_entries(&mut self, cmd: EntriesCmd, format: CommonFormat) -> Result<(), Error> {
-        let direction = match cmd.direction {
-            DirectionArg::Forward => Direction::Forward,
-            DirectionArg::Backward => Direction::Backward,
-        };
-
-        let limit = cmd.count;
-        let mut state = DumpState::new();
-
-        // Plain cursor pagination: each request carries the full cursor
-        // and the response's index feeds the next call until has_more is
-        // false, so a failed page is one failed call rather than a torn
-        // stream.
-        let mut index = cmd.index as i64;
-        loop {
-            let request = ListEntriesRequest {
-                map_name: cmd.map_name.clone(),
-                layer_index: cmd.layer,
-                include_expired: cmd.include_expired,
-                direction: direction as i32,
-                batch_size: cmd.batch,
-                index,
-            };
-            let resp = self
-                .service
-                .unary_with(
-                    "entries",
-                    request,
-                    self.service.not_found("entries", &format!("map '{}'", cmd.map_name)),
-                    async |client, request| client.list_entries(request).await,
-                )
-                .await?;
-
-            state.note_generation(resp.generation);
-
-            for entry in &resp.entries {
-                if limit > 0 && state.printed >= limit {
-                    break;
-                }
-
-                match format {
-                    CommonFormat::Human => {
-                        if !state.header_printed {
-                            println!(
-                                "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
-                                "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
-                            );
-                            state.header_printed = true;
-                        }
-
-                        print_entry(entry);
-                    }
-                    CommonFormat::Json => {
-                        println!(
-                            "{}",
-                            serde_json::to_string(entry).expect("fwstate-map entry JSON serialization must not fail")
-                        );
-                    }
-                }
-
-                state.printed += 1;
-            }
-
-            if (limit > 0 && state.printed >= limit) || !resp.has_more {
+        for entry in &resp.entries {
+            if limit > 0 && rows.printed() >= limit {
                 break;
             }
-            index = resp.index;
+
+            rows.push(entry);
         }
 
-        if state.printed == 0 {
-            output::empty(format_args!(
-                "No firewall state entries found for map '{}'.",
-                cmd.map_name
-            ));
+        if (limit > 0 && rows.printed() >= limit) || !resp.has_more {
+            break;
         }
-
-        Ok(())
+        index = resp.index;
     }
+
+    rows.finish(format_args!(
+        "No firewall state entries found for map '{}'.",
+        cmd.map_name
+    ));
+
+    Ok(())
 }
 
 /// Formats an address and port as an endpoint, bracketing IPv6.
@@ -395,6 +338,13 @@ impl fmt::Display for FwStateFlags {
     }
 }
 
+fn print_entries_header() {
+    println!(
+        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
+        "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
+    );
+}
+
 fn print_entry(entry: &fwstatemappb::FwStateEntry) {
     let (src, dst, proto) = match &entry.key {
         Some(key) => (
@@ -420,16 +370,15 @@ fn print_entry(entry: &fwstatemappb::FwStateEntry) {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FWStateMapService::new(&cmd.globals.connection, action).await?;
-    let format = cmd.globals.format;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.map_list(args::ListCmd).await,
-        ModeCmd::Create(cmd) => service.map_create(cmd).await,
-        ModeCmd::Delete(cmd) => service.map_delete(cmd).await,
-        ModeCmd::Stats(cmd) => service.map_stats(cmd).await,
-        ModeCmd::Entries(cmd) => service.map_entries(cmd, format).await,
-        ModeCmd::InsertLayer(cmd) => service.map_insert_layer(cmd).await,
+        ModeCmd::List => map_list(&mut service, args::ListCmd).await,
+        ModeCmd::Create(cmd) => map_create(&mut service, cmd).await,
+        ModeCmd::Delete(cmd) => map_delete(&mut service, cmd).await,
+        ModeCmd::Stats(cmd) => map_stats(&mut service, cmd).await,
+        ModeCmd::Entries(cmd) => map_entries(&mut service, cmd).await,
+        ModeCmd::InsertLayer(cmd) => map_insert_layer(&mut service, cmd).await,
     }
 }
 

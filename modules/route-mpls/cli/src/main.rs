@@ -17,7 +17,7 @@ use routemplspb::{
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -150,174 +150,161 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = RouteMplsService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Create(cmd) => service.create_config(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Update(cmd) => service.update_route(cmd).await,
-        ModeCmd::Withdraw(cmd) => service.withdraw_route(cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::Create(cmd) => create_config(&mut service, cmd).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_route(&mut service, cmd).await,
+        ModeCmd::Withdraw(cmd) => withdraw_route(&mut service, cmd).await,
     }
 }
 
-pub struct RouteMplsService {
-    service: Service<RouteMplsServiceClient<LayeredChannel>>,
-}
+type RouteMplsService = Service<RouteMplsServiceClient<LayeredChannel>>;
 
-impl RouteMplsService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn list_configs(service: &mut RouteMplsService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
-
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No route-mpls configurations found."),
-                    format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
-                )
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn show_config(&mut self, cmd: RouteShowCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No route-mpls configurations found."),
+                format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response,
-            || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("route-mpls config YAML serialization must not fail")
+    Ok(())
+}
+
+async fn show_config(service: &mut RouteMplsService, cmd: RouteShowCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            print!(
+                "{}",
+                serde_yaml::to_string(&response).expect("route-mpls config YAML serialization must not fail")
+            );
+
+            if response.rules.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No route-mpls rules found for '{}'.", cmd.config_name),
+                    format_args!(
+                        "create one with 'yanet-cli-route-mpls update --name <name> --prefix <cidr> --dst <addr> --label <n> --src <addr> --weight <n> --counter <counter-name>'"
+                    ),
                 );
+            }
+        },
+    );
 
-                if response.rules.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No route-mpls rules found for '{}'.", cmd.config_name),
-                        format_args!(
-                            "create one with 'yanet-cli-route-mpls update --name <name> --prefix <cidr> --dst <addr> --label <n> --src <addr> --weight <n> --counter <counter-name>'"
-                        ),
-                    );
-                }
-            },
-        );
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn create_config(service: &mut RouteMplsService, cmd: RouteCreateCmd) -> Result<(), Error> {
+    let request = CreateConfigRequest {
+        name: cmd.config_name.clone(),
+        rules: Vec::<Rule>::new(),
+    };
+    service
+        .unary("create", request, async |client, request| {
+            client.create_config(request).await
+        })
+        .await?;
 
-    pub async fn create_config(&mut self, cmd: RouteCreateCmd) -> Result<(), Error> {
-        let request = CreateConfigRequest {
-            name: cmd.config_name.clone(),
-            rules: Vec::<Rule>::new(),
-        };
-        self.service
-            .unary("create", request, async |client, request| {
-                client.create_config(request).await
-            })
-            .await?;
+    output::success("create", format_args!("Created config '{}'.", cmd.config_name));
 
-        output::success("create", format_args!("Created config '{}'.", cmd.config_name));
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn delete_config(service: &mut RouteMplsService, cmd: RouteDeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-    pub async fn delete_config(&mut self, cmd: RouteDeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service
-                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn update_route(service: &mut RouteMplsService, cmd: RouteUpdateCmd) -> Result<(), Error> {
+    let request = UpdateConfigRequest {
+        name: cmd.config_name.clone(),
+        updates: vec![UpdateEvent {
+            event: Some(Event::Update(Rule {
+                prefix: Some(cmd.prefix.into()),
+                nexthop: Some(NextHop {
+                    kind: routemplspb::ActionKind::Tunnel.into(),
+                    label: cmd.mpls_label,
+                    source_ip: Some(cmd.src_addr.into()),
+                    destination_ip: Some(cmd.dst_addr.into()),
+                    weight: cmd.weight,
+                    counter: cmd.counter,
+                }),
+            })),
+        }],
+    };
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-    pub async fn update_route(&mut self, cmd: RouteUpdateCmd) -> Result<(), Error> {
-        let request = UpdateConfigRequest {
-            name: cmd.config_name.clone(),
-            updates: vec![UpdateEvent {
-                event: Some(Event::Update(Rule {
-                    prefix: Some(cmd.prefix.into()),
-                    nexthop: Some(NextHop {
-                        kind: routemplspb::ActionKind::Tunnel.into(),
-                        label: cmd.mpls_label,
-                        source_ip: Some(cmd.src_addr.into()),
-                        destination_ip: Some(cmd.dst_addr.into()),
-                        weight: cmd.weight,
-                        counter: cmd.counter,
-                    }),
-                })),
-            }],
-        };
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
+    output::success("update", format_args!("Updated route in config '{}'.", cmd.config_name));
 
-        output::success("update", format_args!("Updated route in config '{}'.", cmd.config_name));
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn withdraw_route(service: &mut RouteMplsService, cmd: RouteWithdrawCmd) -> Result<(), Error> {
+    let request = UpdateConfigRequest {
+        name: cmd.config_name.clone(),
+        updates: vec![UpdateEvent {
+            event: Some(Event::Withdraw(Rule {
+                prefix: Some(cmd.prefix.into()),
+                nexthop: Some(NextHop {
+                    kind: routemplspb::ActionKind::Tunnel.into(),
+                    label: cmd.mpls_label,
+                    source_ip: None,
+                    destination_ip: Some(cmd.dst_addr.into()),
+                    weight: 0,
+                    counter: "".to_string(),
+                }),
+            })),
+        }],
+    };
+    service
+        .unary("withdraw", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-    pub async fn withdraw_route(&mut self, cmd: RouteWithdrawCmd) -> Result<(), Error> {
-        let request = UpdateConfigRequest {
-            name: cmd.config_name.clone(),
-            updates: vec![UpdateEvent {
-                event: Some(Event::Withdraw(Rule {
-                    prefix: Some(cmd.prefix.into()),
-                    nexthop: Some(NextHop {
-                        kind: routemplspb::ActionKind::Tunnel.into(),
-                        label: cmd.mpls_label,
-                        source_ip: None,
-                        destination_ip: Some(cmd.dst_addr.into()),
-                        weight: 0,
-                        counter: "".to_string(),
-                    }),
-                })),
-            }],
-        };
-        self.service
-            .unary("withdraw", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
+    output::success(
+        "withdraw",
+        format_args!("Withdrew route from config '{}'.", cmd.config_name),
+    );
 
-        output::success(
-            "withdraw",
-            format_args!("Withdrew route from config '{}'.", cmd.config_name),
-        );
-
-        Ok(())
-    }
+    Ok(())
 }

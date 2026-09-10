@@ -1,18 +1,17 @@
-use core::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use commonpb::pb::{IPv4Network, IPv6Network};
+use commonpb::serde_with;
 use mirrorpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     mirror_service_client::MirrorServiceClient,
 };
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{self, LayeredChannel, Service},
     completion, display,
     errors::Error,
     output, yaml,
@@ -76,157 +75,32 @@ pub struct UpdateCmd {
     /// The name of the module config to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config: String,
-    /// Path to the ruleset YAML file.
+    /// Path to the module config file: the update request in YAML.
+    ///
+    /// The file spells the wire request, exactly what the generic operator
+    /// pushes and what `show` prints: rules with an `action`, `devices` as
+    /// named objects, family-typed `sources4/6` and `destinations4/6`
+    /// networks, a mode by its declared name in any case or by its number.
+    /// An undeclared mode number, which `show` still prints raw, is
+    /// refused. The `name` may be omitted, it is then taken from `--name`,
+    /// and a file naming another config is refused.
     #[arg(value_name = "PATH")]
     pub file: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct VlanRange {
-    from: u32,
-    to: u32,
+/// Serializes a mirror mode as its declared name, an undeclared number as
+/// the number itself, so one unknown mode cannot hide the rest of a config.
+fn serialize_mirror_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S::Ok, S::Error> {
+    serde_with::declared_name(mode, serializer, mirrorpb::MirrorMode::as_str_name)
 }
 
-impl From<VlanRange> for filterpb::pb::VlanRange {
-    fn from(r: VlanRange) -> Self {
-        Self { from: r.from, to: r.to }
-    }
-}
-
-impl From<filterpb::pb::VlanRange> for VlanRange {
-    fn from(r: filterpb::pb::VlanRange) -> Self {
-        Self { from: r.from, to: r.to }
-    }
-}
-
-/// Mirroring direction for a rule's action.
+/// Deserializes a mirror mode from its declared name or number, a null
+/// as NONE.
 ///
-/// The uppercase spelling is canonical, matching `MirrorMode`'s proto enum
-/// names. The PascalCase spellings are accepted because the schema used them
-/// previously.
-#[derive(Debug, Deserialize)]
-enum ModeKind {
-    #[serde(rename = "NONE", alias = "None")]
-    None,
-    #[serde(rename = "IN", alias = "In")]
-    In,
-    #[serde(rename = "OUT", alias = "Out")]
-    Out,
-    /// An unrecognised proto enum value.
-    ///
-    /// `show` renders the raw number so one rule from a newer module cannot
-    /// hide the rest of a configuration. `update` rejects it.
-    #[serde(skip)]
-    Unknown(i32),
-}
-
-impl Display for ModeKind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::None => write!(f, "NONE"),
-            Self::In => write!(f, "IN"),
-            Self::Out => write!(f, "OUT"),
-            Self::Unknown(mode) => write!(f, "{mode}"),
-        }
-    }
-}
-
-impl Serialize for ModeKind {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.collect_str(self)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct MirrorRule {
-    target: String,
-    mode: ModeKind,
-    counter: String,
-    devices: Vec<String>,
-    vlan_ranges: Vec<VlanRange>,
-    sources4: Vec<IPv4Network>,
-    sources6: Vec<IPv6Network>,
-    destinations4: Vec<IPv4Network>,
-    destinations6: Vec<IPv6Network>,
-}
-
-impl TryFrom<MirrorRule> for mirrorpb::Rule {
-    type Error = Box<dyn core::error::Error>;
-
-    fn try_from(mirror_rule: MirrorRule) -> Result<Self, Self::Error> {
-        let mode: i32 = match mirror_rule.mode {
-            ModeKind::None => mirrorpb::MirrorMode::None.into(),
-            ModeKind::In => mirrorpb::MirrorMode::In.into(),
-            ModeKind::Out => mirrorpb::MirrorMode::Out.into(),
-            ModeKind::Unknown(mode) => return Err(format!("unknown mirror mode {mode}").into()),
-        };
-
-        Ok(Self {
-            action: Some(mirrorpb::Action {
-                target: mirror_rule.target,
-                mode,
-                counter: mirror_rule.counter,
-            }),
-            devices: mirror_rule.devices.into_iter().map(|m| m.into()).collect(),
-            vlan_ranges: mirror_rule.vlan_ranges.into_iter().map(Into::into).collect(),
-            sources4: mirror_rule.sources4,
-            sources6: mirror_rule.sources6,
-            destinations4: mirror_rule.destinations4,
-            destinations6: mirror_rule.destinations6,
-        })
-    }
-}
-
-impl TryFrom<mirrorpb::Rule> for MirrorRule {
-    type Error = Box<dyn core::error::Error>;
-
-    fn try_from(rule: mirrorpb::Rule) -> Result<Self, Self::Error> {
-        let action = rule.action.ok_or("mirror rule is missing its action")?;
-        let mode = match mirrorpb::MirrorMode::try_from(action.mode) {
-            Ok(mirrorpb::MirrorMode::None) => ModeKind::None,
-            Ok(mirrorpb::MirrorMode::In) => ModeKind::In,
-            Ok(mirrorpb::MirrorMode::Out) => ModeKind::Out,
-            Err(_) => ModeKind::Unknown(action.mode),
-        };
-
-        Ok(Self {
-            target: action.target,
-            mode,
-            counter: action.counter,
-            devices: rule.devices.into_iter().map(|d| d.name).collect(),
-            vlan_ranges: rule.vlan_ranges.into_iter().map(VlanRange::from).collect(),
-            sources4: rule.sources4,
-            sources6: rule.sources6,
-            destinations4: rule.destinations4,
-            destinations6: rule.destinations6,
-        })
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MirrorConfig {
-    rules: Vec<MirrorRule>,
-}
-
-impl TryFrom<MirrorConfig> for Vec<mirrorpb::Rule> {
-    type Error = Box<dyn core::error::Error>;
-
-    fn try_from(config: MirrorConfig) -> Result<Self, Self::Error> {
-        config.rules.into_iter().map(mirrorpb::Rule::try_from).collect()
-    }
-}
-
-impl TryFrom<Vec<mirrorpb::Rule>> for MirrorConfig {
-    type Error = Box<dyn core::error::Error>;
-
-    fn try_from(rules: Vec<mirrorpb::Rule>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            rules: rules
-                .into_iter()
-                .map(MirrorRule::try_from)
-                .collect::<Result<Vec<_>, _>>()?,
-        })
-    }
+/// An undeclared value is refused here, because the service would
+/// silently coerce it to NONE rather than reject it.
+fn deserialize_mirror_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
+    serde_with::from_declared_name(deserializer, mirrorpb::MirrorMode::from_str_name)
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -238,117 +112,119 @@ fn client(channel: LayeredChannel) -> MirrorServiceClient<LayeredChannel> {
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
-pub struct MirrorService {
-    service: Service<MirrorServiceClient<LayeredChannel>>,
+type MirrorService = Service<MirrorServiceClient<LayeredChannel>>;
+
+async fn show_config(service: &mut MirrorService, cmd: ShowCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            // The document is printed even without rules, so a
+            // redirected show yields a file update accepts, an
+            // undeclared mode number excepted.
+            print!(
+                "{}",
+                serde_yaml::to_string(&response).expect("mirror config YAML serialization must not fail")
+            );
+
+            if response.rules.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No mirror rules found for '{}'.", cmd.config_name),
+                    format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
+                );
+            }
+        },
+    );
+
+    Ok(())
 }
 
-impl MirrorService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn list_configs(service: &mut MirrorService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No mirror configurations found."),
+                format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
             )
-            .await?;
+        },
+    );
 
-        let config = MirrorConfig::try_from(response.rules)
-            .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("show", e.to_string()))?;
+    Ok(())
+}
 
-        output::data(
-            || &config,
-            || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&config).expect("mirror config YAML serialization must not fail")
-                );
+async fn delete_config(service: &mut MirrorService, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-                if config.rules.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No mirror rules found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
-                    );
-                }
-            },
-        );
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+async fn update_config(service: &mut MirrorService, cmd: UpdateCmd, request: UpdateConfigRequest) -> Result<(), Error> {
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No mirror configurations found."),
-                    format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
-                )
-            },
-        );
+    output::success("update", format_args!("Updated config '{}'.", cmd.config));
 
-        Ok(())
-    }
-
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service.not_found("delete", &format!("config '{}'", cmd.config)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
-
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
-
-        Ok(())
-    }
-
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config: MirrorConfig = yaml::load(&cmd.file).map_err(|e| self.service.invalid("update", e.to_string()))?;
-        let rules: Vec<mirrorpb::Rule> = config
-            .try_into()
-            .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("update", e.to_string()))?;
-        let request = UpdateConfigRequest { name: cmd.config.clone(), rules };
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated config '{}'.", cmd.config));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = MirrorService::new(&cmd.globals.connection, action).await?;
+
+    // The update file is read and bound before the connection, so bad
+    // local input fails deterministically with or without a reachable
+    // gateway.
+    let update = match &cmd.mode {
+        ModeCmd::Update(update) => {
+            let endpoint = client::resolve_label(&cmd.globals.connection, action)?;
+            let mut request: UpdateConfigRequest = yaml::load_document(&update.file)
+                .map_err(|err| Error::invalid_argument("update", endpoint.clone(), err.to_string()))?;
+            yaml::bind_name(&mut request.name, &update.config)
+                .map_err(|err| Error::invalid_argument("update", endpoint, err))?;
+            Some(request)
+        }
+        _ => None,
+    };
+
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::List => service.list_configs().await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => {
+            let request = update.expect("prepared for the update mode");
+            update_config(&mut service, cmd, request).await
+        }
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
     }
 }
 
@@ -368,195 +244,69 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 #[cfg(test)]
 mod test {
+    use commonpb::pb::{IPv4Network, IPv6Network};
+
     use super::*;
 
-    fn v4_net(net: &str) -> IPv4Network {
-        net.parse().expect("valid IPv4 network in test fixture")
-    }
-
-    fn v6_net(net: &str) -> IPv6Network {
-        net.parse().expect("valid IPv6 network in test fixture")
-    }
-
-    fn sample_rules() -> Vec<mirrorpb::Rule> {
-        vec![
-            mirrorpb::Rule {
-                action: Some(mirrorpb::Action {
-                    target: "target-none".to_string(),
-                    mode: mirrorpb::MirrorMode::None as i32,
-                    counter: "counter-none".to_string(),
-                }),
-                devices: vec![
-                    filterpb::pb::Device { name: "eth0".to_string() },
-                    filterpb::pb::Device { name: "eth1".to_string() },
-                ],
-                vlan_ranges: vec![
-                    filterpb::pb::VlanRange { from: 0, to: 100 },
-                    filterpb::pb::VlanRange { from: 200, to: 300 },
-                ],
-                sources4: vec![v4_net("192.0.2.0/24")],
-                sources6: vec![v6_net("2001:db8::/32")],
-                destinations4: vec![v4_net("203.0.113.0/24")],
-                destinations6: vec![v6_net("2001:db8:1::/48")],
-            },
-            mirrorpb::Rule {
-                action: Some(mirrorpb::Action {
-                    target: "target-in".to_string(),
-                    mode: mirrorpb::MirrorMode::In as i32,
-                    counter: String::new(),
-                }),
-                devices: vec![],
-                vlan_ranges: vec![],
-                sources4: vec![],
-                sources6: vec![],
-                destinations4: vec![],
-                destinations6: vec![],
-            },
-            mirrorpb::Rule {
+    #[test]
+    fn test_shown_config_round_trips_into_the_update_request() {
+        let shown = mirrorpb::ShowConfigResponse {
+            name: "mirror0".to_string(),
+            rules: vec![mirrorpb::Rule {
                 action: Some(mirrorpb::Action {
                     target: "target-out".to_string(),
                     mode: mirrorpb::MirrorMode::Out as i32,
                     counter: "counter-out".to_string(),
                 }),
-                devices: vec![filterpb::pb::Device { name: "eth2".to_string() }],
+                devices: vec![filterpb::pb::Device { name: "eth0".to_string() }],
                 vlan_ranges: vec![filterpb::pb::VlanRange { from: 10, to: 20 }],
-                sources4: vec![v4_net("10.0.0.0/8")],
-                sources6: vec![],
-                destinations4: vec![v4_net("10.1.0.0/16")],
+                sources4: vec!["10.0.0.0/8".parse::<IPv4Network>().unwrap()],
+                // The mask hole sits exactly at the /64 boundary, which the
+                // filter compiler accepts.
+                sources6: vec!["2001:db8::/ffff:ffff:ffff:0:ffff::".parse::<IPv6Network>().unwrap()],
+                destinations4: vec![],
                 destinations6: vec![],
-            },
-        ]
-    }
-
-    #[test]
-    fn a_shown_config_round_trips_through_yaml_back_into_the_original_rules() {
-        let rules = sample_rules();
-
-        let config = MirrorConfig::try_from(rules.clone()).expect("pb rules must convert into a mirror config");
-        let yaml = serde_yaml::to_string(&config).expect("mirror config must serialize");
-        let parsed: MirrorConfig = serde_yaml::from_str(&yaml).expect("mirror config must deserialize");
-        let reconstructed: Vec<mirrorpb::Rule> = parsed.try_into().expect("mirror config must convert back");
-
-        assert_eq!(rules, reconstructed);
-    }
-
-    #[test]
-    fn a_rule_file_accepts_the_full_mode_vocabulary() {
-        let uppercase = r#"
-rules:
-  - target: "t1"
-    mode: "NONE"
-    counter: ""
-    devices: []
-    vlan_ranges: []
-    sources4: []
-    sources6: []
-    destinations4: []
-    destinations6: []
-  - target: "t2"
-    mode: "IN"
-    counter: ""
-    devices: []
-    vlan_ranges: []
-    sources4: []
-    sources6: []
-    destinations4: []
-    destinations6: []
-  - target: "t3"
-    mode: "OUT"
-    counter: ""
-    devices: []
-    vlan_ranges: []
-    sources4: []
-    sources6: []
-    destinations4: []
-    destinations6: []
-"#;
-        let legacy = r#"
-rules:
-  - target: "t1"
-    mode: "None"
-    counter: ""
-    devices: []
-    vlan_ranges: []
-    sources4: []
-    sources6: []
-    destinations4: []
-    destinations6: []
-  - target: "t2"
-    mode: "In"
-    counter: ""
-    devices: []
-    vlan_ranges: []
-    sources4: []
-    sources6: []
-    destinations4: []
-    destinations6: []
-  - target: "t3"
-    mode: "Out"
-    counter: ""
-    devices: []
-    vlan_ranges: []
-    sources4: []
-    sources6: []
-    destinations4: []
-    destinations6: []
-"#;
-
-        for yaml in [uppercase, legacy] {
-            let config: MirrorConfig = serde_yaml::from_str(yaml).expect("mode spellings must parse");
-            assert!(matches!(config.rules[0].mode, ModeKind::None));
-            assert!(matches!(config.rules[1].mode, ModeKind::In));
-            assert!(matches!(config.rules[2].mode, ModeKind::Out));
-        }
-    }
-
-    #[test]
-    fn a_bi_contiguous_v6_mask_round_trips_through_the_rule_file() {
-        let rule = mirrorpb::Rule {
-            action: Some(mirrorpb::Action {
-                target: "t".to_string(),
-                mode: mirrorpb::MirrorMode::None as i32,
-                counter: "c".to_string(),
-            }),
-            devices: vec![],
-            vlan_ranges: vec![],
-            sources4: vec![],
-            // The mask hole sits exactly at the /64 boundary, which the
-            // filter compiler accepts.
-            sources6: vec![v6_net("2001:db8::/ffff:ffff:ffff:0:ffff::")],
-            destinations4: vec![],
-            destinations6: vec![],
+            }],
         };
 
-        let config = MirrorConfig::try_from(vec![rule.clone()]).expect("a bi-contiguous v6 network must render");
-        let yaml = serde_yaml::to_string(&config).expect("mirror config must serialize");
-        let parsed: MirrorConfig = serde_yaml::from_str(&yaml).expect("mirror config must deserialize");
-        let rebuilt: Vec<mirrorpb::Rule> = parsed.try_into().expect("mirror config must convert back");
+        let yaml = serde_yaml::to_string(&shown).expect("shown config must serialize");
+        let parsed: UpdateConfigRequest = serde_yaml::from_str(&yaml).expect("shown config must parse back");
 
-        assert_eq!(vec![rule], rebuilt);
+        assert_eq!(shown.name, parsed.name);
+        assert_eq!(shown.rules, parsed.rules);
     }
 
     #[test]
-    fn an_unrecognised_mode_number_is_shown_but_rejected_by_update() {
-        let rule = mirrorpb::Rule {
-            action: Some(mirrorpb::Action {
-                target: "t".to_string(),
-                mode: 99,
-                counter: String::new(),
-            }),
-            devices: vec![],
-            vlan_ranges: vec![],
-            sources4: vec![],
-            sources6: vec![],
-            destinations4: vec![],
-            destinations6: vec![],
+    fn test_null_fields_read_as_zero_values() {
+        let yaml = "name: mirror0\nrules:\n  - action:\n      target: t\n      mode: OUT\n      counter: c\n    devices: null\n    sources4: null\n";
+
+        let request: UpdateConfigRequest = serde_yaml::from_str(yaml).expect("null fields must load");
+
+        assert_eq!(1, request.rules.len());
+        assert!(request.rules[0].devices.is_empty());
+        assert!(request.rules[0].sources4.is_empty());
+    }
+
+    #[test]
+    fn test_mode_accepts_the_legacy_pascal_case_spelling() {
+        let action: mirrorpb::Action = serde_yaml::from_str("mode: Out\n").expect("a legacy spelling must parse");
+
+        assert_eq!(mirrorpb::MirrorMode::Out as i32, action.mode);
+    }
+
+    #[test]
+    fn test_an_undeclared_mode_is_shown_but_refused_by_update() {
+        let action = mirrorpb::Action {
+            target: "t".to_string(),
+            mode: 99,
+            counter: String::new(),
         };
 
-        let config = MirrorConfig::try_from(vec![rule]).expect("an unrecognised mode must not blank the show");
-        assert!(serde_yaml::to_string(&config).is_ok());
-
-        let rebuilt: Result<Vec<mirrorpb::Rule>, _> = config.try_into();
-        assert!(rebuilt.is_err());
+        assert!(
+            serde_yaml::to_string(&action)
+                .expect("must serialize")
+                .contains("mode: 99")
+        );
+        assert!(serde_yaml::from_str::<mirrorpb::Action>("mode: 99\n").is_err());
     }
 }

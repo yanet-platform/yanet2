@@ -13,9 +13,9 @@ use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use ync::{GlobalArgs, completion, errors::Error};
+use ync::{GlobalArgs, client::Service, completion, errors::Error};
 
-use crate::service::{Balancer2Service, client};
+use crate::service::{SERVICE_NAME, client, handle};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod balancerpb {
@@ -316,8 +316,9 @@ impl FilterFlags {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = Balancer2Service::connect(&cmd.globals.connection, action).await?;
-    service.handle(cmd.mode, cmd.globals.format).await
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
+
+    handle(&mut service, cmd.mode).await
 }
 
 fn main() -> std::process::ExitCode {

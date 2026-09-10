@@ -10,7 +10,7 @@ use trafgenpb::{
 };
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -109,131 +109,117 @@ fn client(channel: LayeredChannel) -> TrafgenServiceClient<LayeredChannel> {
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
-pub struct TrafgenService {
-    service: Service<TrafgenServiceClient<LayeredChannel>>,
+type TrafgenService = Service<TrafgenServiceClient<LayeredChannel>>;
+
+async fn update_device(service: &mut TrafgenService, cmd: UpdateCmd) -> Result<(), Error> {
+    let request = UpdateDeviceRequest {
+        name: cmd.config_name.clone(),
+        device: Some(Device { input: cmd.input, output: cmd.output }),
+    };
+    service
+        .unary("update", request, async |client, request| {
+            client.update_device(request).await
+        })
+        .await?;
+
+    output::success("update", format_args!("Updated device '{}'.", cmd.config_name));
+
+    Ok(())
 }
 
-impl TrafgenService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn list_configs(service: &mut TrafgenService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn update_device(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let request = UpdateDeviceRequest {
-            name: cmd.config_name.clone(),
-            device: Some(Device { input: cmd.input, output: cmd.output }),
-        };
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_device(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated device '{}'.", cmd.config_name));
-
-        Ok(())
-    }
-
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
-
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No trafgen configurations found."),
-                    format_args!(
-                        "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
-                    ),
-                )
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("device '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No trafgen configurations found."),
+                format_args!(
+                    "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
+                ),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response,
-            || {
-                display::KeyValue::new()
-                    .row("rate (pps)", response.rate_pps)
-                    .row("frame count", response.frame_count)
-                    .row("total bytes", response.total_bytes)
-                    .print()
-            },
-        );
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn show_config(service: &mut TrafgenService, cmd: ShowConfigCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("device '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
 
-    pub async fn upload_pcap(&mut self, cmd: UploadPcapCmd) -> Result<(), Error> {
-        let pcap = std::fs::read(&cmd.pcap).map_err(|err| {
-            self.service
-                .invalid("upload", format!("failed to read pcap {}: {err}", cmd.pcap.display()))
-        })?;
+    output::data(
+        || &response,
+        || {
+            display::KeyValue::new()
+                .row("rate (pps)", response.rate_pps)
+                .row("frame count", response.frame_count)
+                .row("total bytes", response.total_bytes)
+                .print()
+        },
+    );
 
-        // The capture itself must never reach the log, so the upload
-        // bypasses the logged call path.
-        let request = UploadPcapRequest { name: cmd.config_name.clone(), pcap };
-        self.service
-            .client()
-            .upload_pcap(request)
-            .await
-            .map_err(self.service.status("upload"))?;
+    Ok(())
+}
 
-        output::success("upload", format_args!("Uploaded pcap to device '{}'.", cmd.config_name));
+async fn upload_pcap(service: &mut TrafgenService, cmd: UploadPcapCmd) -> Result<(), Error> {
+    let pcap = std::fs::read(&cmd.pcap)
+        .map_err(|err| service.invalid("upload", format!("failed to read pcap {}: {err}", cmd.pcap.display())))?;
 
-        Ok(())
-    }
+    // The capture itself must never reach the log, so the upload
+    // bypasses the logged call path.
+    let request = UploadPcapRequest { name: cmd.config_name.clone(), pcap };
+    service
+        .client()
+        .upload_pcap(request)
+        .await
+        .map_err(service.status("upload"))?;
 
-    pub async fn set_rate(&mut self, cmd: SetRateCmd) -> Result<(), Error> {
-        let request = SetRateRequest {
-            name: cmd.config_name.clone(),
-            rate_pps: cmd.rate,
-        };
-        self.service
-            .unary("rate", request, async |client, request| client.set_rate(request).await)
-            .await?;
+    output::success("upload", format_args!("Uploaded pcap to device '{}'.", cmd.config_name));
 
-        output::success(
-            "rate",
-            format_args!("Set rate on device '{}' to {} pps.", cmd.config_name, cmd.rate),
-        );
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn set_rate(service: &mut TrafgenService, cmd: SetRateCmd) -> Result<(), Error> {
+    let request = SetRateRequest {
+        name: cmd.config_name.clone(),
+        rate_pps: cmd.rate,
+    };
+    service
+        .unary("rate", request, async |client, request| client.set_rate(request).await)
+        .await?;
+
+    output::success(
+        "rate",
+        format_args!("Set rate on device '{}' to {} pps.", cmd.config_name, cmd.rate),
+    );
+
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = TrafgenService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::Update(cmd) => service.update_device(cmd).await,
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Upload(cmd) => service.upload_pcap(cmd).await,
-        ModeCmd::Rate(cmd) => service.set_rate(cmd).await,
+        ModeCmd::Update(cmd) => update_device(&mut service, cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::Upload(cmd) => upload_pcap(&mut service, cmd).await,
+        ModeCmd::Rate(cmd) => set_rate(&mut service, cmd).await,
     }
 }
 

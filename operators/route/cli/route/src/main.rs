@@ -13,13 +13,13 @@ use std::collections::HashMap;
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
-use commonpb::pb::IpPrefix;
+use commonpb::{pb::IpPrefix, serde_with};
 use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -187,208 +187,192 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 /// failure.
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = RouteService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(c) => service.show_routes(c).await,
-        ModeCmd::Lookup(c) => service.lookup_route(c).await,
-        ModeCmd::Insert(c) => service.insert_route(c).await,
-        ModeCmd::Remove(c) => service.remove_route(c).await,
-        ModeCmd::Flush(c) => service.flush_routes(c).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(c) => show_routes(&mut service, c).await,
+        ModeCmd::Lookup(c) => lookup_route(&mut service, c).await,
+        ModeCmd::Insert(c) => insert_route(&mut service, c).await,
+        ModeCmd::Remove(c) => remove_route(&mut service, c).await,
+        ModeCmd::Flush(c) => flush_routes(&mut service, c).await,
     }
 }
 
-pub struct RouteService {
-    service: Service<RouteServiceClient<LayeredChannel>>,
-}
+type RouteService = Service<RouteServiceClient<LayeredChannel>>;
 
-impl RouteService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, client);
+async fn list_configs(service: &mut RouteService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
-
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No route configurations found."),
-                    format_args!(
-                        "create one with 'yanet-cli-operator-route insert <prefix> --name <name> --via <addr>'"
-                    ),
-                )
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Error> {
-        let request = ShowRoutesRequest {
-            name: cmd.name.clone(),
-            ipv4_only: cmd.ipv4,
-            ipv6_only: cmd.ipv6,
-        };
-
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.name)),
-                async |client, request| client.show_routes(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No route configurations found."),
+                format_args!("create one with 'yanet-cli-operator-route insert <prefix> --name <name> --via <addr>'"),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response.routes,
-            || {
-                if response.routes.is_empty() {
-                    output::empty(format_args!("No routes found for '{}'.", cmd.name));
-                    return;
-                }
+    Ok(())
+}
 
-                let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
-                entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
-                annotate_ecmp_groups(&mut entries);
-                print_route_table(entries);
-            },
-        );
+async fn show_routes(service: &mut RouteService, cmd: RouteShowCmd) -> Result<(), Error> {
+    let request = ShowRoutesRequest {
+        name: cmd.name.clone(),
+        ipv4_only: cmd.ipv4,
+        ipv6_only: cmd.ipv6,
+    };
 
-        Ok(())
-    }
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.name)),
+            async |client, request| client.show_routes(request).await,
+        )
+        .await?;
 
-    pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Error> {
-        let request = LookupRouteRequest {
-            name: cmd.name.clone(),
-            ip_addr: Some(cmd.addr.into()),
-        };
+    output::data(
+        || &response.routes,
+        || {
+            if response.routes.is_empty() {
+                output::empty(format_args!("No routes found for '{}'.", cmd.name));
+                return;
+            }
 
-        let response = self
-            .service
-            .unary("lookup", request, async |client, request| {
-                client.lookup_route(request).await
-            })
-            .await?;
+            let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
+            entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
+            annotate_ecmp_groups(&mut entries);
+            print_route_table(entries);
+        },
+    );
 
-        output::data(
-            || &response.routes,
-            || {
-                if response.routes.is_empty() {
-                    output::empty(format_args!("No routes found for {}.", cmd.addr));
-                    return;
-                }
+    Ok(())
+}
 
-                let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
-                annotate_ecmp_groups(&mut entries);
-                print_route_table(entries);
-            },
-        );
+async fn lookup_route(service: &mut RouteService, cmd: RouteLookupCmd) -> Result<(), Error> {
+    let request = LookupRouteRequest {
+        name: cmd.name.clone(),
+        ip_addr: Some(cmd.addr.into()),
+    };
 
-        Ok(())
-    }
+    let response = service
+        .unary("lookup", request, async |client, request| {
+            client.lookup_route(request).await
+        })
+        .await?;
 
-    pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Error> {
-        let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
+    output::data(
+        || &response.routes,
+        || {
+            if response.routes.is_empty() {
+                output::empty(format_args!("No routes found for {}.", cmd.addr));
+                return;
+            }
 
-        let request = InsertRouteRequest {
-            name: cmd.name.clone(),
-            prefix: Some(IpPrefix::from(cmd.prefix)),
-            nexthop_addrs,
-            do_flush: true,
-            source_id: cmd.source.to_proto().into(),
-        };
+            let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
+            annotate_ecmp_groups(&mut entries);
+            print_route_table(entries);
+        },
+    );
 
-        self.service
-            .unary("insert", request, async |client, request| {
-                client.insert_route(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        let via = cmd
-            .nexthop_addrs
-            .iter()
-            .map(|a| a.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+async fn insert_route(service: &mut RouteService, cmd: RouteInsertCmd) -> Result<(), Error> {
+    let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
 
-        output::success(
-            "insert",
-            format_args!(
-                "Inserted {} via {} in config '{}' (source: {}).",
-                cmd.prefix,
-                via,
-                cmd.name,
-                cmd.source.as_str()
-            ),
-        );
+    let request = InsertRouteRequest {
+        name: cmd.name.clone(),
+        prefix: Some(IpPrefix::from(cmd.prefix)),
+        nexthop_addrs,
+        do_flush: true,
+        source_id: cmd.source.to_proto().into(),
+    };
 
-        Ok(())
-    }
+    service
+        .unary("insert", request, async |client, request| {
+            client.insert_route(request).await
+        })
+        .await?;
 
-    pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Error> {
-        let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
+    let via = cmd
+        .nexthop_addrs
+        .iter()
+        .map(|a| a.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
 
-        let request = DeleteRouteRequest {
-            name: cmd.name.clone(),
-            prefix: Some(IpPrefix::from(cmd.prefix)),
-            nexthop_addrs,
-            do_flush: true,
-            source_id: cmd.source.to_proto().into(),
-        };
+    output::success(
+        "insert",
+        format_args!(
+            "Inserted {} via {} in config '{}' (source: {}).",
+            cmd.prefix,
+            via,
+            cmd.name,
+            cmd.source.as_str()
+        ),
+    );
 
-        self.service
-            .unary("remove", request, async |client, request| {
-                client.delete_route(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        let via = cmd
-            .nexthop_addrs
-            .iter()
-            .map(|a| a.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+async fn remove_route(service: &mut RouteService, cmd: RouteRemoveCmd) -> Result<(), Error> {
+    let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
 
-        output::success(
-            "remove",
-            format_args!(
-                "Removed {} via {} from config '{}' (source: {}).",
-                cmd.prefix,
-                via,
-                cmd.name,
-                cmd.source.as_str()
-            ),
-        );
+    let request = DeleteRouteRequest {
+        name: cmd.name.clone(),
+        prefix: Some(IpPrefix::from(cmd.prefix)),
+        nexthop_addrs,
+        do_flush: true,
+        source_id: cmd.source.to_proto().into(),
+    };
 
-        Ok(())
-    }
+    service
+        .unary("remove", request, async |client, request| {
+            client.delete_route(request).await
+        })
+        .await?;
 
-    pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Error> {
-        let request = FlushRoutesRequest { name: cmd.name.clone() };
+    let via = cmd
+        .nexthop_addrs
+        .iter()
+        .map(|a| a.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
 
-        self.service
-            .unary("flush", request, async |client, request| {
-                client.flush_routes(request).await
-            })
-            .await?;
+    output::success(
+        "remove",
+        format_args!(
+            "Removed {} via {} from config '{}' (source: {}).",
+            cmd.prefix,
+            via,
+            cmd.name,
+            cmd.source.as_str()
+        ),
+    );
 
-        output::success("flush", format_args!("Flushed config '{}'.", cmd.name));
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn flush_routes(service: &mut RouteService, cmd: RouteFlushCmd) -> Result<(), Error> {
+    let request = FlushRoutesRequest { name: cmd.name.clone() };
+
+    service
+        .unary("flush", request, async |client, request| {
+            client.flush_routes(request).await
+        })
+        .await?;
+
+    output::success("flush", format_args!("Flushed config '{}'.", cmd.name));
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -588,12 +572,9 @@ fn print_route_table(entries: Vec<RouteEntry>) {
 /// Converts a raw `i32` source value to its lowercase string name by calling
 /// `as_str_name` on the corresponding `RouteSourceId` variant.
 fn route_source_name(value: i32) -> String {
-    RouteSourceId::try_from(value)
-        .unwrap_or_default()
-        .as_str_name()
-        .strip_prefix("ROUTE_SOURCE_ID_")
-        .unwrap_or_default()
-        .to_lowercase()
+    let source = RouteSourceId::try_from(value).unwrap_or_default();
+
+    serde_with::short_name(source.as_str_name(), "ROUTE_SOURCE_ID_").to_lowercase()
 }
 
 /// Serializes the `source` field of `Route` as a lowercase string name

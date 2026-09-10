@@ -11,7 +11,7 @@ use fwstatepb::{
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -219,101 +219,88 @@ fn update_sync_endpoints(sync_config: &mut SyncConfig, cmd: &UpdateCmd) -> Resul
     Ok(())
 }
 
-pub struct FWStateService {
-    service: Service<FwStateServiceClient<LayeredChannel>>,
+type FWStateService = Service<FwStateServiceClient<LayeredChannel>>;
+
+async fn list_configs(service: &mut FWStateService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
+
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No FWState configurations found."),
+                format_args!(
+                    "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
+                ),
+            )
+        },
+    );
+
+    Ok(())
 }
 
-impl FWStateService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, client);
-        Ok(Self { service })
-    }
+async fn show_config(service: &mut FWStateService, cmd: ShowCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest {
+        name: cmd.config_name.clone(),
+        ok_if_not_found: false,
+    };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
 
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+    output::data(|| &response, || config_block(&response).print());
 
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No FWState configurations found."),
-                    format_args!(
-                        "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
-                    ),
-                )
-            },
-        );
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn delete_config(service: &mut FWStateService, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest {
-            name: cmd.config_name.clone(),
-            ok_if_not_found: false,
-        };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
-            )
-            .await?;
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
-        output::data(|| &response, || config_block(&response).print());
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn update_config(service: &mut FWStateService, cmd: UpdateCmd) -> Result<(), Error> {
+    let request = update_request(&cmd).map_err(|err| service.invalid("update", err))?;
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service
-                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
+    output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
-
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let request = update_request(&cmd).map_err(|err| self.service.invalid("update", err))?;
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FWStateService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
     }
 }
 

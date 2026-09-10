@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .field_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Action.kind",
-                    "#[serde(with = \"crate::action_kind\")]",
+                    "#[serde(serialize_with = \"crate::serialize_action_kind\", deserialize_with = \"crate::deserialize_action_kind\")]",
                 )
                 // The typed network lists stay out of the YAML output while empty,
                 // so show rendering of a legacy-schema config is unchanged.

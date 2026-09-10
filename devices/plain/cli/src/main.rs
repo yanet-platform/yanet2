@@ -10,7 +10,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -73,83 +73,72 @@ pub struct UpdateCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "devices.plain.controlplane.plainpb.v1.DevicePlainService";
 
-pub struct DevicePlainService {
-    service: Service<DevicePlainServiceClient<LayeredChannel>>,
+type DevicePlainService = Service<DevicePlainServiceClient<LayeredChannel>>;
+
+async fn show_device(service: &mut DevicePlainService, cmd: ShowCmd) -> Result<(), Error> {
+    let name = cmd.name;
+    let request = ShowDevicePlainRequest { name: name.clone() };
+
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("plain device '{name}'")),
+            async |client, request| client.show_device(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            let rows = response.device.as_ref().map(binding_rows).unwrap_or_default();
+
+            if rows.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No pipeline bindings found for '{name}'."),
+                    format_args!(
+                        "bind one with 'yanet-cli device plain update -n <name> -i <pipeline:weight> -o <pipeline:weight>'"
+                    ),
+                );
+                return;
+            }
+
+            display::print_table_from_entries(rows);
+        },
+    );
+
+    Ok(())
 }
 
-impl DevicePlainService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            DevicePlainServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
+async fn update_config(service: &mut DevicePlainService, cmd: UpdateCmd) -> Result<(), Error> {
+    let request = UpdateDevicePlainRequest {
+        name: cmd.name.clone(),
+        device: Some(Device { input: cmd.input, output: cmd.output }),
+    };
+
+    service
+        .unary("update", request, async |client, request| {
+            client.update_device(request).await
         })
         .await?;
 
-        Ok(Self { service })
-    }
+    output::success("update", format_args!("Updated device '{}'.", cmd.name));
 
-    pub async fn show_device(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let name = cmd.name;
-        let request = ShowDevicePlainRequest { name: name.clone() };
-
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("plain device '{name}'")),
-                async |client, request| client.show_device(request).await,
-            )
-            .await?;
-
-        output::data(
-            || &response,
-            || {
-                let rows = response.device.as_ref().map(binding_rows).unwrap_or_default();
-
-                if rows.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No pipeline bindings found for '{name}'."),
-                        format_args!(
-                            "bind one with 'yanet-cli device plain update -n <name> -i <pipeline:weight> -o <pipeline:weight>'"
-                        ),
-                    );
-                    return;
-                }
-
-                display::print_table_from_entries(rows);
-            },
-        );
-
-        Ok(())
-    }
-
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let request = UpdateDevicePlainRequest {
-            name: cmd.name.clone(),
-            device: Some(Device { input: cmd.input, output: cmd.output }),
-        };
-
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_device(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated device '{}'.", cmd.name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DevicePlainService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, |channel| {
+        DevicePlainServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
 
     match cmd.mode {
-        ModeCmd::Show(cmd) => service.show_device(cmd).await,
-        ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Show(cmd) => show_device(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
     }
 }
 

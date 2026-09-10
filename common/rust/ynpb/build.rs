@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .field_attribute(
             ".controlplane.ynpb.v1.RegisteredBackend.last_seen_at",
-            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"commonpb::serde_with::timestamp\")]",
         )
         .field_attribute(
             ".controlplane.ynpb.v1.RegisteredBackend.kind",

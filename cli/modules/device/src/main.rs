@@ -9,7 +9,7 @@ use colored::Colorize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     errors::Error,
     output,
 };
@@ -31,40 +31,29 @@ fn main() -> std::process::ExitCode {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = DeviceService::new(&cmd.globals.connection).await?;
-    let response = service.list().await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, "device-list", DEVICE_SERVICE, |channel| {
+        DeviceServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
+    let response = list(&mut service).await?;
 
     output::data(|| &response, || render(&response));
 
     Ok(())
 }
 
-pub struct DeviceService {
-    service: Service<DeviceServiceClient<LayeredChannel>>,
-}
+type DeviceService = Service<DeviceServiceClient<LayeredChannel>>;
 
-impl DeviceService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, "device-list", DEVICE_SERVICE, |channel| {
-            DeviceServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
+async fn list(service: &mut DeviceService) -> Result<ListDevicesResponse, Error> {
+    let response = service
+        .unary("device-list", ListDevicesRequest {}, async |client, request| {
+            client.list(request).await
         })
         .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn list(&mut self) -> Result<ListDevicesResponse, Error> {
-        let response = self
-            .service
-            .unary("device-list", ListDevicesRequest {}, async |client, request| {
-                client.list(request).await
-            })
-            .await?;
-
-        Ok(response)
-    }
+    Ok(response)
 }
 
 fn render(response: &ListDevicesResponse) {

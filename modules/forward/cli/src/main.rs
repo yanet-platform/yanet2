@@ -1,19 +1,20 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
+use commonpb::serde_with;
 use forwardpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     forward_service_client::ForwardServiceClient,
 };
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{self, ConnectionArgs, LayeredChannel, Service},
+    client::{self, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output,
+    output, yaml,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
@@ -91,10 +92,7 @@ pub struct UpdateCmd {
 /// the number itself, so one rule from a newer module cannot hide the rest
 /// of a configuration.
 fn serialize_forward_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S::Ok, S::Error> {
-    match forwardpb::ForwardMode::try_from(*mode) {
-        Ok(mode) => serializer.serialize_str(mode.as_str_name()),
-        Err(_) => serializer.serialize_i32(*mode),
-    }
+    serde_with::declared_name(mode, serializer, forwardpb::ForwardMode::as_str_name)
 }
 
 /// Deserializes a forward mode from its declared name or number, a null
@@ -103,77 +101,7 @@ fn serialize_forward_mode<S: Serializer>(mode: &i32, serializer: S) -> Result<S:
 /// An undeclared value is refused here, because the service would
 /// silently coerce it to NONE rather than reject it.
 fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum NameOrNumber {
-        Number(i32),
-        Name(String),
-    }
-
-    match Option::<NameOrNumber>::deserialize(deserializer)? {
-        None => Ok(forwardpb::ForwardMode::None as i32),
-        Some(NameOrNumber::Number(mode)) => forwardpb::ForwardMode::try_from(mode)
-            .map(|mode| mode as i32)
-            .map_err(|_| serde::de::Error::custom(format!("unknown forward mode {mode}"))),
-        Some(NameOrNumber::Name(name)) => forwardpb::ForwardMode::from_str_name(&name)
-            .map(|mode| mode as i32)
-            .ok_or_else(|| serde::de::Error::custom(format!("unknown forward mode {name:?}"))),
-    }
-}
-
-/// Deserializes a null as the field's zero value, as the operator's YAML
-/// decoder reads it.
-fn null_as_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-    T: Default + Deserialize<'de>,
-    D: Deserializer<'de>,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
-}
-
-/// Loads the update request from its YAML file.
-///
-/// The reading matches the generic operator's: merge keys expand, a null
-/// field takes its zero value, an empty document is the zero request and
-/// a bare document separator is tolerated.
-fn load_request<P>(path: P) -> Result<UpdateConfigRequest, Box<dyn core::error::Error>>
-where
-    P: AsRef<Path>,
-{
-    let content = std::fs::read_to_string(path)?;
-    let mut documents = Vec::new();
-    for document in serde_yaml::Deserializer::from_str(&content) {
-        let value = serde_yaml::Value::deserialize(document)?;
-        if !value.is_null() {
-            documents.push(value);
-        }
-    }
-
-    let mut value = match documents.pop() {
-        None => return Ok(UpdateConfigRequest::default()),
-        Some(_) if !documents.is_empty() => {
-            return Err("the file holds more than one document".into());
-        }
-        Some(value) => value,
-    };
-    value.apply_merge()?;
-    Ok(serde_yaml::from_value(value)?)
-}
-
-/// Binds the config name into a loaded request, refusing a file that names
-/// another config.
-fn bind_request_name(request: &mut UpdateConfigRequest, name: &str) -> Result<(), String> {
-    if request.name.is_empty() {
-        request.name = name.to_string();
-        return Ok(());
-    }
-    if request.name != name {
-        return Err(format!(
-            "the file names config {:?}, but --name is {:?}",
-            request.name, name
-        ));
-    }
-    Ok(())
+    serde_with::from_declared_name(deserializer, forwardpb::ForwardMode::from_str_name)
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -185,101 +113,93 @@ fn forward_client(channel: LayeredChannel) -> ForwardServiceClient<LayeredChanne
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
-pub struct ForwardService {
-    service: Service<ForwardServiceClient<LayeredChannel>>,
+type ForwardService = Service<ForwardServiceClient<LayeredChannel>>;
+
+async fn show_config(service: &mut ForwardService, cmd: ShowCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            // The document is printed even without rules, so a
+            // redirected show yields a file update accepts, an
+            // undeclared mode number excepted.
+            print!(
+                "{}",
+                serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
+            );
+
+            if response.rules.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No forward rules found for '{}'.", cmd.config_name),
+                    format_args!("create one with 'yanet-cli-forward update --name <name> <path>'"),
+                );
+            }
+        },
+    );
+
+    Ok(())
 }
 
-impl ForwardService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, forward_client).await?;
+async fn list_configs(service: &mut ForwardService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No forward configurations found."),
+                format_args!("create one with 'yanet-cli-forward update --name <name> <path>'"),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response,
-            || {
-                // The document is printed even without rules, so a
-                // redirected show yields a file update accepts, an
-                // undeclared mode number excepted.
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
-                );
+    Ok(())
+}
 
-                if response.rules.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No forward rules found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-forward update --name <name> <path>'"),
-                    );
-                }
-            },
-        );
+async fn delete_config(service: &mut ForwardService, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-        Ok(())
-    }
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No forward configurations found."),
-                    format_args!("create one with 'yanet-cli-forward update --name <name> <path>'"),
-                )
-            },
-        );
+async fn update_config(
+    service: &mut ForwardService,
+    cmd: UpdateCmd,
+    request: UpdateConfigRequest,
+) -> Result<(), Error> {
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::success("update", format_args!("Updated config '{}'.", cmd.config));
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service.not_found("delete", &format!("config '{}'", cmd.config)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
-
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
-
-        Ok(())
-    }
-
-    pub async fn update_config(&mut self, cmd: UpdateCmd, request: UpdateConfigRequest) -> Result<(), Error> {
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated config '{}'.", cmd.config));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -291,25 +211,25 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     let update = match &cmd.mode {
         ModeCmd::Update(update) => {
             let endpoint = client::resolve_label(&cmd.globals.connection, action)?;
-            let mut request = load_request(&update.file)
-                .map_err(|e| Error::invalid_argument("update", endpoint.clone(), e.to_string()))?;
-            bind_request_name(&mut request, &update.config)
-                .map_err(|e| Error::invalid_argument("update", endpoint, e))?;
+            let mut request: UpdateConfigRequest = yaml::load_document(&update.file)
+                .map_err(|err| Error::invalid_argument("update", endpoint.clone(), err.to_string()))?;
+            yaml::bind_name(&mut request.name, &update.config)
+                .map_err(|err| Error::invalid_argument("update", endpoint, err))?;
             Some(request)
         }
         _ => None,
     };
 
-    let mut service = ForwardService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, forward_client).await?;
 
     match cmd.mode {
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
         ModeCmd::Update(cmd) => {
             let request = update.expect("prepared for the update mode");
-            service.update_config(cmd, request).await
+            update_config(&mut service, cmd, request).await
         }
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::List => service.list_configs().await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
     }
 }
 
@@ -478,19 +398,6 @@ rules:
     }
 
     #[test]
-    fn test_empty_and_comment_only_files_are_the_zero_request() {
-        for content in ["", "# nothing yet\n"] {
-            let path = std::env::temp_dir().join(format!("fwd-empty-{}-{}.yaml", std::process::id(), content.len()));
-            std::fs::write(&path, content).expect("the fixture must be written");
-
-            let request = load_request(&path).expect("an empty document must load");
-            std::fs::remove_file(&path).ok();
-
-            assert_eq!(UpdateConfigRequest::default(), request);
-        }
-    }
-
-    #[test]
     fn test_extern_messages_default_and_refuse_unknown_keys() {
         let sparse: forwardpb::Rule =
             serde_yaml::from_str("vlan_ranges:\n  - {}\n").expect("an empty vlan range must default");
@@ -511,7 +418,8 @@ rules:
         let path = std::env::temp_dir().join(format!("fwd-nullkey-{}.yaml", std::process::id()));
         std::fs::write(&path, yaml).expect("the fixture must be written");
 
-        let refused = load_request(&path).expect_err("a misspelled null-valued key must be refused");
+        let refused = yaml::load_document::<UpdateConfigRequest>(&path)
+            .expect_err("a misspelled null-valued key must be refused");
         std::fs::remove_file(&path).ok();
 
         assert!(refused.to_string().contains("rulez"));
@@ -523,95 +431,10 @@ rules:
         let path = std::env::temp_dir().join(format!("fwd-null-{}.yaml", std::process::id()));
         std::fs::write(&path, yaml).expect("the fixture must be written");
 
-        let request = load_request(&path).expect("null fields must load");
+        let request = yaml::load_document::<UpdateConfigRequest>(&path).expect("null fields must load");
         std::fs::remove_file(&path).ok();
 
         assert_eq!("forward0", request.name);
         assert!(request.rules[0].devices.is_empty());
-    }
-
-    #[test]
-    fn test_trailing_separator_is_tolerated_but_a_second_document_is_not() {
-        let trailing = "name: forward0\n---\n";
-        let second = "name: forward0\n---\nname: forward1\n";
-        let dir = std::env::temp_dir();
-        let trailing_path = dir.join(format!("fwd-sep-{}.yaml", std::process::id()));
-        let second_path = dir.join(format!("fwd-two-{}.yaml", std::process::id()));
-        std::fs::write(&trailing_path, trailing).expect("the fixture must be written");
-        std::fs::write(&second_path, second).expect("the fixture must be written");
-
-        let tolerated = load_request(&trailing_path).expect("a bare separator must be tolerated");
-        let refused = load_request(&second_path).expect_err("a second document must be refused");
-        std::fs::remove_file(&trailing_path).ok();
-        std::fs::remove_file(&second_path).ok();
-
-        assert_eq!("forward0", tolerated.name);
-        assert!(refused.to_string().contains("more than one document"));
-    }
-
-    #[test]
-    fn test_file_rejects_duplicate_keys() {
-        let yaml = "rules:\n  - action:\n      target: t\n      mode: OUT\n      mode: NONE\n";
-
-        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(yaml);
-
-        assert!(
-            parsed
-                .expect_err("a duplicate mapping key must be refused")
-                .to_string()
-                .contains("duplicate")
-        );
-    }
-
-    #[test]
-    fn test_file_expands_merge_keys() {
-        let yaml = r#"
-rules:
-  - &base
-    action:
-      target: base
-      mode: OUT
-      counter: base
-    vlan_ranges:
-      - from: 0
-        to: 100
-  - <<: *base
-    devices:
-      - name: eth0
-"#;
-        let path = std::env::temp_dir().join(format!("fwd-merge-{}.yaml", std::process::id()));
-        std::fs::write(&path, yaml).expect("the fixture must be written");
-
-        let request = load_request(&path).expect("a merged document must load");
-        std::fs::remove_file(&path).ok();
-
-        assert_eq!(2, request.rules.len());
-        assert_eq!("base", request.rules[1].action.as_ref().expect("merged action").target);
-        assert_eq!(
-            vec![filterpb::pb::Device { name: "eth0".to_string() }],
-            request.rules[1].devices
-        );
-        assert_eq!(request.rules[0].vlan_ranges, request.rules[1].vlan_ranges);
-    }
-
-    #[test]
-    fn test_bind_request_name_fills_checks_and_refuses() {
-        let mut nameless = UpdateConfigRequest::default();
-        bind_request_name(&mut nameless, "forward0").expect("an empty name must bind");
-        assert_eq!("forward0", nameless.name);
-
-        let mut matching = UpdateConfigRequest {
-            name: "forward0".to_string(),
-            ..Default::default()
-        };
-        bind_request_name(&mut matching, "forward0").expect("a matching name must pass");
-
-        let mut mismatched = UpdateConfigRequest {
-            name: "other".to_string(),
-            ..Default::default()
-        };
-        let err = bind_request_name(&mut mismatched, "forward0").expect_err("a mismatch must be refused");
-        assert!(err.contains("other"));
-        assert!(err.contains("forward0"));
     }
 }

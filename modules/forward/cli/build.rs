@@ -12,19 +12,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .field_attribute(
                     ".modules.forward.controlplane.forwardpb.v1.Action.target",
-                    "#[serde(deserialize_with = \"crate::null_as_default\")]",
+                    "#[serde(deserialize_with = \"filterpb::null_as_default\")]",
                 )
                 .field_attribute(
                     ".modules.forward.controlplane.forwardpb.v1.Action.counter",
-                    "#[serde(deserialize_with = \"crate::null_as_default\")]",
+                    "#[serde(deserialize_with = \"filterpb::null_as_default\")]",
                 )
                 .field_attribute(
                     ".modules.forward.controlplane.forwardpb.v1.Rule",
-                    "#[serde(deserialize_with = \"crate::null_as_default\")]",
+                    "#[serde(deserialize_with = \"filterpb::null_as_default\")]",
                 )
                 .field_attribute(
                     ".modules.forward.controlplane.forwardpb.v1.UpdateConfigRequest",
-                    "#[serde(deserialize_with = \"crate::null_as_default\")]",
+                    "#[serde(deserialize_with = \"filterpb::null_as_default\")]",
                 )
         })
         .compile()

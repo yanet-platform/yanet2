@@ -5,7 +5,10 @@ use prost::Message;
 use tokio::{net::TcpListener, sync::oneshot};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status, Streaming, transport::Server};
-use ync::auth::{AuthArgs, AuthMethod};
+use ync::{
+    auth::{AuthArgs, AuthMethod},
+    client::ConnectionArgs,
+};
 
 use super::{operatorpb::*, *};
 
@@ -149,8 +152,10 @@ async fn run_list_stream(table: Option<&str>, fail: bool) {
         tls: Default::default(),
         timeout: Some(Duration::from_secs(5)),
     };
-    let mut service = NeighbourService::new(&connection, "show").await.unwrap();
-    let result = service.list_neighbours(table).await;
+    let mut service = Service::connect_for(&connection, "show", SERVICE_NAME, client)
+        .await
+        .unwrap();
+    let result = list_neighbours(&mut service, table).await;
     if fail {
         assert!(result.is_err());
     } else {
