@@ -94,9 +94,7 @@ trafgen_input_handle(
 	struct packet_front *packet_front
 ) {
 	struct cp_device_trafgen *config = container_of(
-		ADDR_OF(&device_ectx->cp_device),
-		struct cp_device_trafgen,
-		cp_device
+		device_ectx->abs_cp_device, struct cp_device_trafgen, cp_device
 	);
 
 	// Forward anything that arrived on this device unchanged; a generator

@@ -347,6 +347,7 @@ config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
 		}
 
 		struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+		device_ectx->abs_cp_device = cp_device;
 		struct counter_storage *counter_storage =
 			ADDR_OF(&device_ectx->counter_storage);
 
