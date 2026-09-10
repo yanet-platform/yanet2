@@ -5,7 +5,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
-        .build_server(false)
+        .build_server(true)
+        .server_mod_attribute(".", "#[cfg(test)]")
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .field_attribute(
             ".operators.route.operatorpb.v1.NeighbourEntry.state",

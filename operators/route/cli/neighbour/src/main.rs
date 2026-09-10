@@ -39,6 +39,12 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
 
+/// Covers a one-million-entry table plus receiver-owned source and timestamps.
+///
+/// The 128 MiB publication budget excludes that per-entry metadata. The unary
+/// response budget also includes every entry's receiver-owned fields.
+const MAX_LIST_RESPONSE_BYTES: usize = 512 * 1024 * 1024;
+
 /// Maps a genuine "table not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested table");
 
@@ -201,6 +207,7 @@ impl NeighbourService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             NeighbourServiceClient::new(channel)
+                .max_decoding_message_size(MAX_LIST_RESPONSE_BYTES)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
         })
@@ -391,6 +398,9 @@ impl NeighbourService {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test;
 
 /// Returns the proto-defined name for a `NeighbourState` discriminant,
 /// stripped of its `NUD_` prefix (e.g. `"REACHABLE"`).
