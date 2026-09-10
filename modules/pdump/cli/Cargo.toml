@@ -18,7 +18,6 @@ tokio = { version = "1", features = ["rt", "macros", "signal"] }
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 prost = "0.14"
-ptree = "0.5"
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 bytesize = "2"
 # Pinned exactly: semver sorts rc.2 below rc1, so a caret requirement

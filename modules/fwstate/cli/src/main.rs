@@ -8,7 +8,6 @@ use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, UpdateConfigRequest,
     fw_state_service_client::FwStateServiceClient,
 };
-use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
@@ -64,54 +63,29 @@ fn format_timeout_millis(nanos: u64) -> String {
     format!("{millis}.{}", fraction.trim_end_matches('0'))
 }
 
-#[derive(Tabled)]
-struct SettingRow {
-    #[tabled(rename = "Setting")]
-    setting: String,
-    #[tabled(rename = "Value")]
-    value: String,
-}
-
-impl SettingRow {
-    fn new(setting: &str, value: String) -> Self {
-        Self { setting: setting.to_string(), value }
-    }
-}
-
 /// Lays out one stored configuration for a human reader.
-fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
-    let mut rows = vec![
-        SettingRow::new("name", display::escape_wire_text(&response.name)),
-        SettingRow::new("map name v4", display::escape_wire_text(&response.map_name_v4)),
-        SettingRow::new("map name v6", display::escape_wire_text(&response.map_name_v6)),
-    ];
+fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
+    let mut block = display::KeyValue::new()
+        .row("name", &response.name)
+        .row("map name v4", &response.map_name_v4)
+        .row("map name v6", &response.map_name_v6);
 
     let Some(sync_config) = response.sync_config.as_ref() else {
-        return rows;
+        return block;
     };
 
     let address = |addr: Option<&IpAddress>| addr.map_or_else(|| "-".to_string(), ToString::to_string);
-    rows.push(SettingRow::new("src addr", address(sync_config.src_addr.as_ref())));
-    rows.push(SettingRow::new(
-        "dst ether",
-        sync_config
-            .dst_ether
-            .as_ref()
-            .map_or_else(|| "-".to_string(), ToString::to_string),
-    ));
-    rows.push(SettingRow::new(
-        "dst addr multicast",
-        address(sync_config.dst_addr_multicast.as_ref()),
-    ));
-    rows.push(SettingRow::new(
-        "port multicast",
-        sync_config.port_multicast.to_string(),
-    ));
-    rows.push(SettingRow::new(
-        "dst addr unicast",
-        address(sync_config.dst_addr_unicast.as_ref()),
-    ));
-    rows.push(SettingRow::new("port unicast", sync_config.port_unicast.to_string()));
+    let dst_ether = sync_config
+        .dst_ether
+        .as_ref()
+        .map_or_else(|| "-".to_string(), ToString::to_string);
+    block = block
+        .row("src addr", address(sync_config.src_addr.as_ref()))
+        .row("dst ether", dst_ether)
+        .row("dst addr multicast", address(sync_config.dst_addr_multicast.as_ref()))
+        .row("port multicast", sync_config.port_multicast)
+        .row("dst addr unicast", address(sync_config.dst_addr_unicast.as_ref()))
+        .row("port unicast", sync_config.port_unicast);
 
     for (setting, nanos) in [
         ("tcp syn-ack timeout", sync_config.tcp_syn_ack),
@@ -122,10 +96,10 @@ fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
         ("default timeout", sync_config.default),
         ("sync suppress timeout", sync_config.sync_suppress_timeout),
     ] {
-        rows.push(SettingRow::new(setting, format!("{} ms", format_timeout_millis(nanos))));
+        block = block.row(setting, format!("{} ms", format_timeout_millis(nanos)));
     }
 
-    rows
+    block
 }
 
 /// Builds a partial update from explicitly supplied flags only.
@@ -297,10 +271,7 @@ impl FWStateService {
             )
             .await?;
 
-        output::data(
-            || &response,
-            || display::print_table_from_entries(config_rows(&response)),
-        );
+        output::data(|| &response, || config_block(&response).print());
 
         Ok(())
     }
@@ -428,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_rows_carry_endpoints_and_converted_timeouts() {
+    fn test_config_block_carries_endpoints_and_converted_timeouts() {
         let response = ShowConfigResponse {
             name: "fwstate0".to_string(),
             sync_config: Some(fwstatepb::SyncConfig {
@@ -445,10 +416,8 @@ mod tests {
             ..Default::default()
         };
 
-        let rows: Vec<(String, String)> = config_rows(&response)
-            .into_iter()
-            .map(|row| (row.setting, row.value))
-            .collect();
+        let block = config_block(&response);
+        let rows = block.entries();
         for expected in [
             ("src addr", "::1"),
             ("dst ether", "33:33:00:00:00:01"),
@@ -460,29 +429,32 @@ mod tests {
             ("sync suppress timeout", "0 ms"),
         ] {
             assert!(
-                rows.iter().any(|row| row.0 == expected.0 && row.1 == expected.1),
+                rows.iter()
+                    .any(|(key, lines)| key == expected.0 && *lines == [expected.1]),
                 "missing {expected:?} in {rows:?}"
             );
         }
         assert!(
-            !rows.iter().any(|row| row.1.contains("60000000000")),
+            !rows.iter().any(|(_, lines)| lines[0].contains("60000000000")),
             "no row may carry the stored nanoseconds: {rows:?}"
         );
     }
 
     #[test]
-    fn test_config_rows_without_sync_config_omit_timeouts() {
+    fn test_config_block_without_sync_config_omits_timeouts() {
         let response = show_response("fwstate0", "map4", "map6");
 
-        let settings: Vec<String> = config_rows(&response).into_iter().map(|row| row.setting).collect();
+        let block = config_block(&response);
+        let settings: Vec<&str> = block.entries().iter().map(|(key, _)| key.as_str()).collect();
         assert_eq!(vec!["name", "map name v4", "map name v6"], settings);
     }
 
     #[test]
-    fn test_config_rows_escape_names() {
+    fn test_config_block_escapes_names() {
         let response = show_response("fw\nstate0", "map\u{1b}4", "map6");
 
-        let values: Vec<String> = config_rows(&response).into_iter().map(|row| row.value).collect();
+        let block = config_block(&response);
+        let values: Vec<&str> = block.entries().iter().map(|(_, lines)| lines[0].as_str()).collect();
         assert_eq!(vec!["fw\\nstate0", "map\\u{1b}4", "map6"], values);
     }
 

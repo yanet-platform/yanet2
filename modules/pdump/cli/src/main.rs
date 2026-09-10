@@ -5,7 +5,6 @@ use pdumppb::{
     DeleteConfigRequest, ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
     pdump_service_client::PdumpServiceClient,
 };
-use ptree::TreeBuilder;
 use tokio::{
     signal::{unix, unix::SignalKind},
     task::JoinSet,
@@ -118,15 +117,15 @@ impl PdumpService {
         output::data(
             || &response,
             || {
-                if response.config.is_none() {
+                let Some(config) = &response.config else {
                     output::empty_with_hint(
                         format_args!("No pdump configuration found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
                     );
                     return;
-                }
+                };
 
-                print_tree(&response);
+                config_block(config).print();
             },
         );
 
@@ -290,17 +289,12 @@ impl PdumpService {
     }
 }
 
-fn print_tree(resp: &ShowConfigResponse) {
-    let mut tree = TreeBuilder::new("Pdump Config".to_owned());
-
-    if let Some(config) = &resp.config {
-        tree.add_empty_child(format!("Filter: {}", config.filter));
-        tree.add_empty_child(format!("Mode: {}", dump_mode::to_str(config.mode)));
-        tree.add_empty_child(format!("Snaplen: {}", config.snaplen));
-        tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
-    }
-
-    let _ = ptree::print_tree(&tree.build());
+fn config_block(config: &pdumppb::Config) -> display::KeyValue {
+    display::KeyValue::new()
+        .row("filter", &config.filter)
+        .row("mode", dump_mode::to_str(config.mode))
+        .row("snaplen", config.snaplen)
+        .row("ring size", config.ring_size)
 }
 
 fn main() -> std::process::ExitCode {
