@@ -1,16 +1,17 @@
 use std::borrow::Cow;
 
-use clap::{ArgAction, CommandFactory, Parser, value_parser};
+use clap::{CommandFactory, Parser, value_parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{Device, DevicePipeline};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use vlanpb::{ShowDeviceVlanRequest, UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 use ynpb::pb::{ListDevicesRequest, device_service_client::DeviceServiceClient};
 
@@ -29,13 +30,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -160,7 +155,7 @@ impl DeviceVlanService {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DeviceVlanService::new(&cmd.connection, action).await?;
+    let mut service = DeviceVlanService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_device(cmd).await,
@@ -169,7 +164,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// One row of a device's pipeline bindings table.
@@ -263,7 +258,7 @@ mod test {
     fn test_update_verbosity_after_subcommand_counts() {
         let cmd = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", "5", "-vv"]).unwrap();
 
-        assert_eq!(2, cmd.verbose);
+        assert_eq!(2, cmd.globals.verbose);
     }
 
     #[test]

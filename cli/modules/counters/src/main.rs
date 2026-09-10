@@ -1,14 +1,14 @@
 //! CLI for YANET "counters" module.
 
 use bytesize::ByteSize;
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
-    metrics,
-    output::{self, CommonFormat},
+    metrics, output,
 };
 use ynpb::pb::{
     CounterTag, CountersByTagsRequest, CountersByTagsResponse, PortCountersRequest, PortCountersResponse,
@@ -28,13 +28,7 @@ pub struct Cmd {
     #[command(flatten)]
     pub by_tags: ByTagsCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, clap::Args, Default)]
@@ -120,12 +114,12 @@ impl ModeCmd {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.as_ref().map_or("show counters", ModeCmd::action);
-    let mut service = CountersService::new(&cmd.connection, action).await?;
+    let mut service = CountersService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         Some(ModeCmd::Workers) => {

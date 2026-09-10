@@ -5,15 +5,15 @@ mod fib;
 use core::error::Error as StdError;
 use std::path::{Path, PathBuf};
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
-    yaml,
+    output, yaml,
 };
 
 use crate::{
@@ -116,13 +116,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -202,7 +196,7 @@ fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the route configs the
@@ -217,7 +211,7 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = RouteService::new(&cmd.connection, action).await?;
+    let mut service = RouteService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Fib(cmd) => match cmd.action {

@@ -3,12 +3,13 @@
 mod memory;
 mod report;
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 use ynpb::pb::{InspectRequest, InspectResponse, inspect_service_client::InspectServiceClient};
 
@@ -20,25 +21,19 @@ const INSPECT_SERVICE: &str = "controlplane.ynpb.v1.InspectService";
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
-    #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
     /// Include detailed memory contexts in human output.
     #[arg(long)]
     pub memory: bool,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    #[command(flatten)]
+    pub globals: GlobalArgs,
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = InspectService::new(&cmd.connection).await?;
+    let mut service = InspectService::new(&cmd.globals.connection).await?;
     let response = service.inspect().await?;
 
     output::data(|| &response, || report::render(&response, cmd.memory));

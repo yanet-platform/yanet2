@@ -1,7 +1,7 @@
 use core::{error::Error as StdError, net::IpAddr};
 use std::path::PathBuf;
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::IpAddress;
 use filterpb::pb::IpNet;
@@ -12,11 +12,11 @@ use unrduppb::{
     UpdateConfigRequest, unrdup_service_client::UnrdupServiceClient,
 };
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service as GrpcService},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
-    yaml,
+    output, yaml,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
@@ -34,13 +34,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -235,12 +229,12 @@ fn client(channel: LayeredChannel) -> UnrdupServiceClient<LayeredChannel> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = UnrdupService::new(&cmd.connection, action).await?;
+    let mut service = UnrdupService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,

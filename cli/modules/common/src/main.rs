@@ -1,16 +1,17 @@
 //! CLI for the YANET core services.
 
 use bytesize::ByteSize;
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 use ynpb::pb::{
     ArenaInfo, ExtendAgentRequest, GetLevelRequest, ListArenasRequest, UpdateLevelRequest,
@@ -36,13 +37,7 @@ struct Cmd {
     #[command(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[arg(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -114,7 +109,7 @@ impl From<LogLevel> for ynpb::pb::LogLevel {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 impl LoggingCmd {
@@ -137,8 +132,8 @@ impl MemoryCmd {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
-        ModeCmd::Logging(mode) => run_logging(&cmd.connection, mode).await,
-        ModeCmd::Memory(mode) => run_memory(&cmd.connection, mode).await,
+        ModeCmd::Logging(mode) => run_logging(&cmd.globals.connection, mode).await,
+        ModeCmd::Memory(mode) => run_memory(&cmd.globals.connection, mode).await,
     }
 }
 

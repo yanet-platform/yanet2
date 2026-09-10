@@ -1,7 +1,7 @@
 use core::{fmt, net::IpAddr};
 
 use args::{CreateCmd, DeleteCmd, DirectionArg, EntriesCmd, InsertLayerCmd, ListCmd, ModeCmd, StatsCmd};
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::IpAddress;
 use fwstatemappb::{
@@ -11,6 +11,7 @@ use fwstatemappb::{
 use serde::Serialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion, display,
     errors::Error,
@@ -43,13 +44,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 pub struct FWStateMapService {
@@ -418,8 +413,8 @@ fn print_entry(entry: &fwstatemappb::FwStateEntry) {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FWStateMapService::new(&cmd.connection, action).await?;
-    let format = cmd.format;
+    let mut service = FWStateMapService::new(&cmd.globals.connection, action).await?;
+    let format = cmd.globals.format;
 
     match cmd.mode {
         ModeCmd::List => service.map_list(args::ListCmd).await,
@@ -432,7 +427,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the fwstate-map objects

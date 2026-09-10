@@ -2,16 +2,17 @@
 
 use std::{collections::BTreeMap, process::ExitCode, time::SystemTime};
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
 use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use serde::Serialize;
 use ync::{
-    client::{self, Connection, ConnectionArgs},
+    GlobalArgs,
+    client::{self, Connection},
     discovery::Family,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 mod render;
@@ -52,13 +53,7 @@ pub struct Cmd {
     #[arg(long, default_value_t = false, conflicts_with = "name")]
     pub all: bool,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
     /// Stream readiness changes until interrupted instead of exiting after one
     /// snapshot.
     ///
@@ -105,7 +100,7 @@ struct ServiceReport {
 }
 
 fn main() -> ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Run the readiness probe, dispatching to aggregate or single-service mode.
@@ -120,9 +115,9 @@ async fn run(cmd: Cmd) -> Result<ExitCode, Error> {
     } else {
         let name = cmd.name.clone().expect("a non-aggregate command names a service");
 
-        READINESS.require_name(&client::resolve_label(&cmd.connection, "ready")?, &name)?;
+        READINESS.require_name(&client::resolve_label(&cmd.globals.connection, "ready")?, &name)?;
 
-        let connection = Connection::connect_for(&cmd.connection, "ready").await?;
+        let connection = Connection::connect_for(&cmd.globals.connection, "ready").await?;
 
         let name = READINESS.resolve(&connection, &name).await?;
 
@@ -273,7 +268,7 @@ async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
         return watch::run(&cmd).await;
     }
 
-    let connection = Connection::connect_for(&cmd.connection, "ready").await?;
+    let connection = Connection::connect_for(&cmd.globals.connection, "ready").await?;
     let services = READINESS.list(&connection).await?;
 
     let mut reports = Vec::with_capacity(services.len());

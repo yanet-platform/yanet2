@@ -5,8 +5,8 @@
 //! invocation ends in help or a usage error. Operator metrics are read
 //! with `yanet-cli metrics`.
 
-use clap::{ArgAction, Parser};
-use ync::{client::ConnectionArgs, errors::Error, output::CommonFormat};
+use clap::Parser;
+use ync::{GlobalArgs, errors::Error};
 
 /// Manages the pipeline operator (no commands yet).
 #[derive(Debug, Clone, Parser)]
@@ -14,17 +14,11 @@ use ync::{client::ConnectionArgs, errors::Error, output::CommonFormat};
 #[command(flatten_help = true, subcommand_required = true, arg_required_else_help = true)]
 pub struct Cmd {
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(_: Cmd) -> Result<(), Error> {

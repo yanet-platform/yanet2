@@ -4,13 +4,14 @@
 //! consumers to resolve numeric device_id values (e.g. from pdump
 //! RecordMeta.rx_device_id) to human-readable names.
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use colored::Colorize;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 use ynpb::pb::{ListDevicesRequest, ListDevicesResponse, device_service_client::DeviceServiceClient};
 
@@ -22,21 +23,15 @@ const DEVICE_SERVICE: &str = "controlplane.ynpb.v1.DeviceService";
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = DeviceService::new(&cmd.connection).await?;
+    let mut service = DeviceService::new(&cmd.globals.connection).await?;
     let response = service.list().await?;
 
     output::data(|| &response, || render(&response));
