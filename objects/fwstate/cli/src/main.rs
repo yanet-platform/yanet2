@@ -15,7 +15,7 @@ use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 mod args;
@@ -49,41 +49,20 @@ pub struct FWStateMapService {
     service: Service<FwStateMapServiceClient<LayeredChannel>>,
 }
 
-/// State an `entries` dump carries across its batches.
-struct DumpState {
-    /// Entries printed so far, which `--count` limits.
-    printed: u32,
-    /// Whether the human-readable header row is already out. Deferred until
-    /// the first entry arrives, so a zero-entry result prints no header.
-    header_printed: bool,
-    /// Map generation the last response reported.
-    generation: Option<u64>,
-}
-
-impl DumpState {
-    fn new() -> Self {
-        Self {
-            printed: 0,
-            header_printed: false,
-            generation: None,
-        }
-    }
-
-    /// Warns when a response reports a different generation than the one
-    /// before it.
-    ///
-    /// A bump means layers were relinked, so the cursor and `--layer` stop
-    /// denoting what they did when the dump began, and the remaining
-    /// entries can repeat or be missed. Rows already printed were accurate
-    /// when read, so the dump goes on and only warns.
-    fn note_generation(&mut self, generation: u64) {
-        match self.generation.replace(generation) {
-            Some(previous) if previous != generation => log::warn!(
-                "fwstate-map changed mid-dump (generation {previous} -> {generation}): \
-                 entries may repeat or be missed"
-            ),
-            _ => {}
-        }
+/// Warns when a response reports a different generation than the one
+/// before it, `seen` carrying the last one across the batches.
+///
+/// A bump means layers were relinked, so the cursor and `--layer` stop
+/// denoting what they did when the dump began, and the remaining
+/// entries can repeat or be missed. Rows already printed were accurate
+/// when read, so the dump goes on and only warns.
+fn note_generation(seen: &mut Option<u64>, generation: u64) {
+    match seen.replace(generation) {
+        Some(previous) if previous != generation => log::warn!(
+            "fwstate-map changed mid-dump (generation {previous} -> {generation}): \
+             entries may repeat or be missed"
+        ),
+        _ => {}
     }
 }
 
@@ -230,14 +209,15 @@ impl FWStateMapService {
         Ok(())
     }
 
-    pub async fn map_entries(&mut self, cmd: EntriesCmd, format: CommonFormat) -> Result<(), Error> {
+    pub async fn map_entries(&mut self, cmd: EntriesCmd) -> Result<(), Error> {
         let direction = match cmd.direction {
             DirectionArg::Forward => Direction::Forward,
             DirectionArg::Backward => Direction::Backward,
         };
 
-        let limit = cmd.count;
-        let mut state = DumpState::new();
+        let limit = usize::try_from(cmd.count).expect("a count fits usize");
+        let mut generation = None;
+        let mut rows = output::rows(print_entries_header, print_entry);
 
         // Plain cursor pagination: each request carries the full cursor
         // and the response's index feeds the next call until has_more is
@@ -263,48 +243,26 @@ impl FWStateMapService {
                 )
                 .await?;
 
-            state.note_generation(resp.generation);
+            note_generation(&mut generation, resp.generation);
 
             for entry in &resp.entries {
-                if limit > 0 && state.printed >= limit {
+                if limit > 0 && rows.printed() >= limit {
                     break;
                 }
 
-                match format {
-                    CommonFormat::Human => {
-                        if !state.header_printed {
-                            println!(
-                                "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
-                                "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
-                            );
-                            state.header_printed = true;
-                        }
-
-                        print_entry(entry);
-                    }
-                    CommonFormat::Json => {
-                        println!(
-                            "{}",
-                            serde_json::to_string(entry).expect("fwstate-map entry JSON serialization must not fail")
-                        );
-                    }
-                }
-
-                state.printed += 1;
+                rows.push(entry);
             }
 
-            if (limit > 0 && state.printed >= limit) || !resp.has_more {
+            if (limit > 0 && rows.printed() >= limit) || !resp.has_more {
                 break;
             }
             index = resp.index;
         }
 
-        if state.printed == 0 {
-            output::empty(format_args!(
-                "No firewall state entries found for map '{}'.",
-                cmd.map_name
-            ));
-        }
+        rows.finish(format_args!(
+            "No firewall state entries found for map '{}'.",
+            cmd.map_name
+        ));
 
         Ok(())
     }
@@ -395,6 +353,13 @@ impl fmt::Display for FwStateFlags {
     }
 }
 
+fn print_entries_header() {
+    println!(
+        "{:<6} {:<48} {:<48} {:<8} {:<9} {:<7}",
+        "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
+    );
+}
+
 fn print_entry(entry: &fwstatemappb::FwStateEntry) {
     let (src, dst, proto) = match &entry.key {
         Some(key) => (
@@ -421,14 +386,13 @@ fn print_entry(entry: &fwstatemappb::FwStateEntry) {
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
     let mut service = FWStateMapService::new(&cmd.globals.connection, action).await?;
-    let format = cmd.globals.format;
 
     match cmd.mode {
         ModeCmd::List => service.map_list(args::ListCmd).await,
         ModeCmd::Create(cmd) => service.map_create(cmd).await,
         ModeCmd::Delete(cmd) => service.map_delete(cmd).await,
         ModeCmd::Stats(cmd) => service.map_stats(cmd).await,
-        ModeCmd::Entries(cmd) => service.map_entries(cmd, format).await,
+        ModeCmd::Entries(cmd) => service.map_entries(cmd).await,
         ModeCmd::InsertLayer(cmd) => service.map_insert_layer(cmd).await,
     }
 }

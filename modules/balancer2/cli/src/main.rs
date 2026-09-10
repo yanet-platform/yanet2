@@ -317,7 +317,7 @@ impl FilterFlags {
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
     let mut service = Balancer2Service::connect(&cmd.globals.connection, action).await?;
-    service.handle(cmd.mode, cmd.globals.format).await
+    service.handle(cmd.mode).await
 }
 
 fn main() -> std::process::ExitCode {

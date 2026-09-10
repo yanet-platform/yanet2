@@ -268,6 +268,62 @@ where
     current().data(&payload, Box::new(render));
 }
 
+/// Opens a stream of rows, see [`Rows`].
+pub fn rows<'a, R, Header, Render>(header: Header, render: Render) -> Rows<'a, R>
+where
+    R: Serialize,
+    Header: FnOnce() + 'a,
+    Render: FnMut(&R) + 'a,
+{
+    Rows::new(current().serializes(), header, render)
+}
+
+/// Rows that leave one at a time: under a serializing backend each is one
+/// JSON line, otherwise a header goes out once before the first row.
+pub struct Rows<'a, R> {
+    serializes: bool,
+    printed: usize,
+    header: Option<Box<dyn FnOnce() + 'a>>,
+    render: Box<dyn FnMut(&R) + 'a>,
+}
+
+impl<'a, R: Serialize> Rows<'a, R> {
+    fn new(serializes: bool, header: impl FnOnce() + 'a, render: impl FnMut(&R) + 'a) -> Self {
+        Self {
+            serializes,
+            printed: 0,
+            header: Some(Box::new(header)),
+            render: Box::new(render),
+        }
+    }
+
+    pub fn push(&mut self, row: &R) {
+        if self.serializes {
+            let json = serde_json::to_string(row).expect("row serialization must not fail");
+            println!("{json}");
+        } else {
+            if let Some(header) = self.header.take() {
+                header();
+            }
+            (self.render)(row);
+        }
+
+        self.printed += 1;
+    }
+
+    /// Rows pushed so far.
+    pub fn printed(&self) -> usize {
+        self.printed
+    }
+
+    /// Closes the stream, reporting `message` when no row was pushed.
+    pub fn finish(self, message: Arguments) {
+        if self.printed == 0 {
+            empty(message);
+        }
+    }
+}
+
 /// Reports an empty result.
 ///
 /// Suppressed when the installed backend serializes — see
@@ -484,7 +540,42 @@ struct ErrorDetailJson<'a> {
 
 #[cfg(test)]
 mod test {
+    use core::cell::{Cell, RefCell};
+
     use super::*;
+
+    #[test]
+    fn test_rows_print_the_header_once_and_render_every_row_when_not_serializing() {
+        let headers = Cell::new(0);
+        let rendered = RefCell::new(Vec::new());
+        let mut rows = Rows::new(
+            false,
+            || headers.set(headers.get() + 1),
+            |row: &u8| rendered.borrow_mut().push(*row),
+        );
+
+        rows.push(&1);
+        rows.push(&2);
+
+        assert_eq!(2, rows.printed());
+        assert_eq!(1, headers.get());
+        assert_eq!(vec![1, 2], *rendered.borrow());
+    }
+
+    #[test]
+    fn test_rows_skip_the_header_and_the_renderer_when_serializing() {
+        let rendered = Cell::new(0);
+        let mut rows = Rows::new(
+            true,
+            || rendered.set(rendered.get() + 1),
+            |_: &u8| rendered.set(rendered.get() + 1),
+        );
+
+        rows.push(&1);
+
+        assert_eq!(1, rows.printed());
+        assert_eq!(0, rendered.get());
+    }
 
     /// Set on the re-invoked child process to select the direct-call branch
     /// below, instead of re-spawning itself again.

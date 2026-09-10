@@ -7,8 +7,7 @@ use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     display::print_names_with_hint,
     errors::Error,
-    output::{self, CommonFormat},
-    yaml,
+    output, yaml,
 };
 
 use crate::{
@@ -44,7 +43,7 @@ impl Balancer2Service {
         Ok(Self { service })
     }
 
-    pub async fn handle(&mut self, mode: ModeCmd, format: CommonFormat) -> Result<(), Error> {
+    pub async fn handle(&mut self, mode: ModeCmd) -> Result<(), Error> {
         match mode {
             ModeCmd::Update(cmd) => self.update(cmd).await,
             ModeCmd::List => self.list().await,
@@ -52,7 +51,7 @@ impl Balancer2Service {
             ModeCmd::Show(cmd) => self.show(cmd).await,
             ModeCmd::Sessions(cmd) => match cmd.mode {
                 SessionsMode::List => self.sessions_list().await,
-                SessionsMode::Show(cmd) => self.sessions_show(cmd, format).await,
+                SessionsMode::Show(cmd) => self.sessions_show(cmd).await,
                 SessionsMode::Update(cmd) => self.sessions_update(cmd).await,
             },
             ModeCmd::Metrics(cmd) => self.metrics(cmd).await,
@@ -211,7 +210,7 @@ impl Balancer2Service {
         Ok(())
     }
 
-    async fn sessions_show(&mut self, cmd: SessionsShowCmd, format: CommonFormat) -> Result<(), Error> {
+    async fn sessions_show(&mut self, cmd: SessionsShowCmd) -> Result<(), Error> {
         let name = cmd.name.clone();
         let request = ListSessionsRequest {
             sessions_state_name: cmd.name,
@@ -231,32 +230,15 @@ impl Balancer2Service {
             .duration_since(time::UNIX_EPOCH)
             .expect("system clock before UNIX epoch")
             .as_secs() as i64;
-        let mut printed = 0usize;
-        // Deferred until the first session actually arrives, so a zero-session
-        // result does not print a header row over an empty table.
-        let mut header_printed = false;
+        let mut rows = output::rows(display::print_sessions_header, |session| {
+            display::print_session(session, now)
+        });
 
         while let Some(session) = stream.message().await.map_err(self.service.status("sessions show"))? {
-            match format {
-                CommonFormat::Human => {
-                    if !header_printed {
-                        display::print_sessions_header();
-                        header_printed = true;
-                    }
-
-                    display::print_session(&session, now);
-                }
-                CommonFormat::Json => println!(
-                    "{}",
-                    serde_json::to_string(&session).expect("balancer session JSON serialization must not fail")
-                ),
-            }
-            printed += 1;
+            rows.push(&session);
         }
 
-        if printed == 0 {
-            output::empty(format_args!("No sessions found for '{name}'."));
-        }
+        rows.finish(format_args!("No sessions found for '{name}'."));
 
         Ok(())
     }
