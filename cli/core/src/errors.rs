@@ -240,6 +240,19 @@ impl Error {
         self
     }
 
+    /// Prefix the failure text with context the caller has and the server
+    /// does not, such as which of a sequence of calls failed.
+    ///
+    /// The context reaches the machine-readable rendering, which drops
+    /// anything meant for a reader alone. The classification and the
+    /// server's own wording are untouched, so the verbose diagnostic still
+    /// shows exactly what came back.
+    pub fn with_context(mut self, context: impl Display) -> Self {
+        self.message = format!("{context}: {}", self.message);
+
+        self
+    }
+
     /// The category this error was mapped to.
     pub fn kind(&self) -> ErrorKind {
         self.kind
@@ -529,6 +542,17 @@ mod test {
 
         assert_eq!("received fatal alert: CertificateRequired", err.message);
         assert_eq!(Some("transport error".to_owned()), err.raw_message);
+    }
+
+    #[test]
+    fn test_with_context_prefixes_the_message_and_keeps_the_classification() {
+        let status = Status::unavailable("backend down");
+        let err =
+            Error::from_status(status, "insert", "grpc://[::1]:8080", "test.Service").with_context("route 2 of 3");
+
+        assert_eq!("route 2 of 3: backend down", err.message());
+        assert_eq!(ErrorKind::Unavailable, err.kind());
+        assert_eq!(Some("backend down".to_owned()), err.raw_message);
     }
 
     #[test]

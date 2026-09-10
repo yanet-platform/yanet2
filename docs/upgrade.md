@@ -180,3 +180,10 @@ release.
 (`target`, `mode`, `counter`) and its `devices` as named objects. The
 previous flat rule form is refused, and `--format json` prints the wire
 message.
+
+## Route lookup prints the matched prefix in JSON
+
+`yanet-cli-operator-route lookup --format json` prints an object with a
+`prefix` field and a `routes` array, where it printed the route array
+alone. A script reading the old form reaches its routes through `.routes`
+now.
