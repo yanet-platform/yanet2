@@ -63,6 +63,14 @@ The wire limits are 1,000 entries / 256 KiB per chunk, one million entries /
 identity is `(IP.Unmap(), logical device)`; observed `ifindex` belongs to the
 publisher namespace. Loopback and dummy interfaces are never neighbour egress.
 
+These publication limits apply per replacement, not to the merged neighbour view
+or cumulative static updates. CLI and Web inspection use `ListStream`, which reads
+one immutable named or merged snapshot in messages of at most 1,000 entries and
+256 KiB, including source metadata. Consumers accept the list only after successful
+stream completion. The legacy unary `List` retains its 512 MiB response envelope
+and rejects larger views with an instruction to use streaming. Streaming clients
+require a route operator and gateway built with the updated service descriptor.
+
 ## Receiver configuration and readiness
 
 Configure the route operator with local netlink monitoring disabled, explicit

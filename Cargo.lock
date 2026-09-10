@@ -2963,7 +2963,6 @@ dependencies = [
  "netip",
  "prost",
  "serde",
- "serde_json",
  "tabled",
  "tokio",
  "tokio-stream",

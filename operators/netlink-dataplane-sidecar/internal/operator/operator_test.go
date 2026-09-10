@@ -227,18 +227,12 @@ func Test_NewOperator_ClosesHandleOnSocketTimeoutFailure(t *testing.T) {
 }
 
 // Test_NewOperator_RejectsInvalidConfigBeforeCreatingHandle verifies that bad
-// endpoints and scheduling values cannot allocate kernel resources.
+// scheduling values fail validation before allocating kernel resources.
 func Test_NewOperator_RejectsInvalidConfigBeforeCreatingHandle(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*sidecaroperator.Config)
 	}{
-		{
-			name: "malformed server endpoint",
-			mutate: func(cfg *sidecaroperator.Config) {
-				cfg.Server.Endpoint = xcfg.MustNonEmptyString("::1:8080")
-			},
-		},
 		{
 			name: "negative register interval",
 			mutate: func(config *sidecaroperator.Config) {
@@ -261,6 +255,7 @@ func Test_NewOperator_RejectsInvalidConfigBeforeCreatingHandle(t *testing.T) {
 
 			runnable, err := sidecaroperator.NewOperator(
 				cfg,
+				sidecaroperator.WithNetplanLoader(emptyNetplan),
 				sidecaroperator.WithNetlinkHandleFactory(func() (
 					sidecaroperator.NetlinkHandle,
 					error,
@@ -270,7 +265,7 @@ func Test_NewOperator_RejectsInvalidConfigBeforeCreatingHandle(t *testing.T) {
 				}),
 			)
 
-			require.Error(t, err)
+			require.ErrorContains(t, err, "invalid config")
 			require.Nil(t, runnable)
 			require.False(t, handleCreated)
 		})

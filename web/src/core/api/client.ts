@@ -171,6 +171,8 @@ export interface StreamCallbacks<T> {
     onMessage: (data: T) => void;
     onError?: (error: Error) => void;
     onEnd?: () => void;
+    /** Called only for the gateway's successful terminal event. */
+    onComplete?: () => void;
 }
 
 interface SSEEvent {
@@ -294,6 +296,7 @@ const processSSEEvent = <T>(evt: SSEEvent, callbacks: StreamCallbacks<T>): void 
             }
             break;
         case 'end':
+            callbacks.onComplete?.();
             callbacks.onEnd?.();
             break;
     }
@@ -301,6 +304,37 @@ const processSSEEvent = <T>(evt: SSEEvent, callbacks: StreamCallbacks<T>): void 
 
 export const createStreamingService = (serviceName: string) => {
     return {
+        /** Reads a finite stream, rejecting errors, cancellation and truncated responses. */
+        read: <T>(
+            method: string,
+            body: unknown,
+            onMessage: (data: T) => void,
+            signal?: AbortSignal,
+        ): Promise<void> => {
+            const controller = new AbortController();
+            const readSignal = signal
+                ? AbortSignal.any([signal, controller.signal])
+                : controller.signal;
+            return new Promise<void>((resolve, reject) => {
+                const fail = (error: unknown): void => {
+                    reject(error);
+                    controller.abort();
+                };
+                streamGRPCService<T>(`${serviceName}/${method}`, body, {
+                    onMessage: (data) => { if (!readSignal.aborted) onMessage(data); },
+                    onError: fail,
+                    onComplete: () => {
+                        if (readSignal.aborted) {
+                            fail(readSignal.reason);
+                        } else {
+                            resolve();
+                            controller.abort();
+                        }
+                    },
+                    onEnd: () => fail(readSignal.reason ?? new Error('Stream ended without successful completion')),
+                }, readSignal);
+            });
+        },
         stream: <T>(
             method: string,
             body: any,
