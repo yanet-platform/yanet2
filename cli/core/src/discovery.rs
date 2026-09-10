@@ -245,11 +245,17 @@ pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<
     Ok(services)
 }
 
+/// Returns the last dot-separated segment of a service name, the segment that
+/// names the family it belongs to.
+pub fn suffix_of(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
 /// Reports whether `name`'s last dot-separated segment is exactly `suffix`,
 /// so that a service merely mentioning it elsewhere in its name is not
 /// mistaken for a match.
-fn has_suffix(name: &str, suffix: &str) -> bool {
-    name.rsplit('.').next() == Some(suffix)
+pub fn has_suffix(name: &str, suffix: &str) -> bool {
+    suffix_of(name) == suffix
 }
 
 /// Resolves a short alias (e.g. `route`) against the discovered `services`.
@@ -428,6 +434,13 @@ mod test {
             format!("operators.pipeline.operatorpb.v1.{suffix}"),
             format!("operators.route.operatorpb.v1.{suffix}"),
         ]
+    }
+
+    #[test]
+    fn test_suffix_of_returns_the_trailing_segment() {
+        assert_eq!("ReadinessService", suffix_of("controlplane.ynpb.v1.ReadinessService"));
+        assert_eq!("Gateway", suffix_of("Gateway"));
+        assert_eq!("", suffix_of(""));
     }
 
     #[test]
