@@ -93,6 +93,16 @@ agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx) {
 	       DP_CONFIG_READY_MAGIC;
 }
 
+static struct cp_config *
+shm_cp_config(struct yanet_shm *shm, uint32_t instance_idx) {
+	if (!agent_dp_config_ready(shm, instance_idx)) {
+		return NULL;
+	}
+
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
+	return ADDR_OF(&dp_config->cp_config);
+}
+
 uint32_t
 yanet_shm_instance_count(struct yanet_shm *shm) {
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
@@ -171,8 +181,10 @@ allocate_arenas(
 
 		void *arena = memory_balloc(memory_context, arena_size);
 		if (arena == NULL) {
-			yanet_error_add(
-				err, "failed to allocate memory for arena"
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate memory for arena"
 			);
 			for (uint64_t idx = 0; idx < added; ++idx) {
 				struct agent_arena *reserved = &arenas[idx];
@@ -395,14 +407,10 @@ agent_memory_limit(struct agent *agent) {
 	return memory_limit;
 }
 
-int
-agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
-	int ret = 0;
-
+static int
+agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct memory_context *cp_memory_context = &cp_config->memory_context;
-
-	cp_config_lock(cp_config);
 
 	// An agent that draws straight from the controlplane pool owns no
 	// arena of its own and cannot be grown here.
@@ -416,8 +424,7 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 			"pool and cannot be extended",
 			agent->name
 		);
-		ret = -1;
-		goto unlock;
+		return -1;
 	}
 
 	uint64_t needed = size;
@@ -428,13 +435,12 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 			yanet_error_add(
 				err, "agent cannot grow by %lu bytes", size
 			);
-			ret = -1;
-			goto unlock;
+			return -1;
 		}
 		needed += pad;
 	}
 	if (needed == 0) {
-		goto unlock;
+		return 0;
 	}
 
 	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
@@ -447,9 +453,12 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 		cp_memory_context, sizeof(struct agent_arena) * new_arena_count
 	);
 	if (new_arenas == NULL) {
-		yanet_error_add(err, "failed to allocate memory for arenas");
-		ret = -1;
-		goto unlock;
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate memory for arenas"
+		);
+		return -1;
 	}
 	memset(new_arenas, 0, sizeof(struct agent_arena) * new_arena_count);
 
@@ -465,8 +474,7 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 			new_arenas,
 			sizeof(struct agent_arena) * new_arena_count
 		);
-		ret = -1;
-		goto unlock;
+		return -1;
 	}
 
 	for (uint64_t arena_idx = 0; arena_idx < arena_count; ++arena_idx) {
@@ -495,7 +503,15 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 		sizeof(struct agent_arena) * arena_count
 	);
 
-unlock:
+	return 0;
+}
+
+int
+agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	cp_config_lock(cp_config);
+	int ret = agent_extend_locked(agent, size, err);
 	cp_config_unlock(cp_config);
 
 	return ret;
@@ -1808,4 +1824,54 @@ set_prev:
 	}
 
 	return 0;
+}
+
+static struct agent *
+find_agent_locked(struct cp_config *cp_config, const char *name) {
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+	for (uint64_t agent_idx = 0; agent_idx < registry->count; ++agent_idx) {
+		struct agent *agent = ADDR_OF(&registry->agents[agent_idx]);
+		if (!strncmp(agent->name, name, sizeof(agent->name))) {
+			return agent;
+		}
+	}
+
+	return NULL;
+}
+
+int
+yanet_shm_extend_agent(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	const char *name,
+	uint64_t size,
+	uint64_t *memory_limit,
+	yanet_error **err
+) {
+	struct cp_config *cp_config = shm_cp_config(shm, instance_idx);
+	if (cp_config == NULL) {
+		yanet_error_add(
+			err,
+			"dataplane shared memory instance %u is not yet "
+			"initialised",
+			instance_idx
+		);
+		return -1;
+	}
+
+	cp_config_lock(cp_config);
+
+	int ret = 1;
+	struct agent *agent = find_agent_locked(cp_config, name);
+	if (agent != NULL) {
+		ret = agent_extend_locked(agent, size, err);
+		if (ret == 0) {
+			*memory_limit = agent->memory_limit;
+		}
+	}
+
+	cp_config_unlock(cp_config);
+
+	return ret;
 }

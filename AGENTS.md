@@ -38,6 +38,9 @@ make ai/agents                                     # regenerate agent charters f
 - `cli/` — Rust CLI workspace: `core/` (crate `yanet-cli`, aliased `ync`), `modules/{inspect,pipeline,function,counters,common}`.
 - `lint/` — repo linters (`style`, `commit`, `protobuf`); `docs/`, `deploy/`, `debian/`, `etc/`, `subprojects/dpdk/`.
 
+- `lab/` — reusable local QEMU lab library (manifests, scenarios, operator baseline); `cmd/yanet-lab/` — developer-only lab supervisor CLI (not packaged).
+- `tests/functional/framework/` — shared QEMU/harness infrastructure used by both functional tests and the lab supervisor (not purely test code; imports `testing`).
+
 ### Module layout (canonical — decap, dscp, forward, route as reference)
 
 ```
@@ -46,7 +49,7 @@ modules/<name>/
   bindings/go/   CGO wrapper consumed by controlplane
   controlplane/  <name>pb/ protos, mod.go (BuiltInModule, New(opts)), backend.go (shm write path), service.go (+_test), cfg.go
   dataplane/     config.h (shm config struct), dataplane.c/h (entry; hot paths are static inline in headers)
-  cli/           Rust crate, build.rs runs tonic-build (client only)
+  cli/           Rust crate, build.rs runs tonic-prost-build (client only)
   tests/  fuzzing/  [internal/]
 ```
 

@@ -103,13 +103,32 @@ dataplane_ut_round_result_free(struct dataplane_ut_round_result *result);
 size_t
 dataplane_ut_mempool_outstanding(struct dataplane_ut *ut);
 
+// Overwrite the value of a named size-1 counter in one worker's shared
+// worker-counter storage.
+//
+// A fault-injection hook for control-plane tests: it produces snapshots
+// no healthy dataplane would publish (an available above capacity, a
+// zero capacity) without reaching into the storage layout. A
+// multi-value counter is refused, matching the doc contract. Returns 0
+// on success, -1 when the worker index or the counter name is unknown
+// or the counter carries more than one value.
+int
+dataplane_ut_set_worker_counter(
+	struct dataplane_ut *ut,
+	size_t worker_idx,
+	const char *name,
+	uint64_t value
+);
+
 // Run one pipeline round on worker_idx with the given input.
 //
 // input is drained to empty on return; result->output and result->drop
 // hold the post-pipeline packets, whose mbuf ownership transfers to the caller.
 //
-// The harness is single-threaded: concurrent calls on the same handle
-// race on dp_worker state and the shared mempool.
+// The harness is single-threaded with one pairing: an install
+// running concurrently with a round serializes with it on the harness
+// round lock. Every other concurrent pairing on the same handle races
+// on dp_worker state and the shared mempool.
 void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
@@ -159,3 +178,45 @@ dataplane_ut_run_rounds(
 	uint64_t rounds,
 	int reset_payload
 );
+
+// Install one named empty pipeline, forcing a generation switch.
+//
+// Returns 0 on success. The switch runs synchronously under the harness
+// round lock, so on return every worker's context field holds the newly
+// published generation's context; acknowledgements advance only as
+// rounds run.
+int
+dataplane_ut_install_empty_pipeline(struct dataplane_ut *ut, const char *name);
+
+// Hold the harness round lock.
+//
+// The lock a round holds across every context dereference; a caller
+// holding it proves that a concurrent install waits for the in-flight
+// round instead of retiring its contexts. Every acquire must pair
+// with exactly one release.
+void
+dataplane_ut_round_lock_acquire(struct dataplane_ut *ut);
+
+// Release the harness round lock taken by the acquire above.
+void
+dataplane_ut_round_lock_release(struct dataplane_ut *ut);
+
+// Resolved value of the worker's assigned context field, 0 when the
+// worker index is out of range or no context is assigned.
+uintptr_t
+dataplane_ut_worker_ectx(struct dataplane_ut *ut, size_t worker_idx);
+
+// Resolved per-worker context of the currently published generation,
+// with the same conventions as the worker field reader above.
+uintptr_t
+dataplane_ut_published_ectx(struct dataplane_ut *ut, size_t worker_idx);
+
+// The generation number the worker last acknowledged, 0 when the worker
+// index is out of range.
+uint64_t
+dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx);
+
+// Generation number of the currently published generation, 0 when no
+// generation is published.
+uint64_t
+dataplane_ut_published_gen(struct dataplane_ut *ut);

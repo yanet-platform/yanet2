@@ -3,10 +3,7 @@
 mod fib;
 
 use core::error::Error as StdError;
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -16,6 +13,7 @@ use ync::{
     completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
+    yaml,
 };
 
 use crate::{
@@ -64,11 +62,8 @@ impl FibConfig {
         P: AsRef<Path>,
     {
         let path = path.as_ref();
-        let at_path = |err: LoadError| -> LoadError { format!("{}: {err}", path.display()).into() };
-
-        let file = File::open(path).map_err(|err| at_path(err.into()))?;
-        let config: Self = serde_yaml::from_reader(file).map_err(|err| at_path(err.into()))?;
-        config.validate().map_err(at_path)?;
+        let config: Self = yaml::load(path)?;
+        config.validate().map_err(|err| format!("{}: {err}", path.display()))?;
         Ok(config)
     }
 
@@ -113,7 +108,7 @@ impl FibConfig {
     }
 }
 
-/// Route module CLI.
+/// Manages route module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -122,9 +117,10 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -162,7 +158,7 @@ pub enum FibAction {
     Show(FibShowCmd),
     /// Replace the FIB atomically with entries from a YAML file.
     Update(FibUpdateCmd),
-    /// Delete a route module config.
+    /// Delete a config.
     Delete(FibDeleteCmd),
 }
 
@@ -202,6 +198,12 @@ const SERVICE_NAME: &str = "modules.route.controlplane.routepb.v1.RouteService";
 /// Rewrites a genuine missing-config `NotFound` into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
+fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
+    RouteServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
@@ -211,15 +213,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            RouteServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -242,12 +238,7 @@ pub struct RouteService {
 
 impl RouteService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            RouteServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -267,7 +258,7 @@ impl RouteService {
 
         output::success(
             "update",
-            format_args!("Updated FIB '{}' ({} entries).", cmd.config_name, entry_count),
+            format_args!("Updated config '{}' ({} entries).", cmd.config_name, entry_count),
         );
         Ok(())
     }
@@ -284,7 +275,7 @@ impl RouteService {
             )
         })?;
 
-        output::success("delete", format_args!("Deleted FIB '{}'.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
         Ok(())
     }
 

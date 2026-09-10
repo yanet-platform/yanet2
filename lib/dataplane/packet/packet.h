@@ -12,6 +12,7 @@
 
 enum packet_flag {
 	PACKET_FLAG_FRAGMENTED,
+	PACKET_FLAG_FWSTATE_SYNC_INTERNAL,
 };
 
 struct rte_mbuf;

@@ -12,6 +12,29 @@ struct yanet_error;
 
 typedef struct yanet_error yanet_error;
 
+// Kind of failure a frame reports, so a caller can act on the cause
+// without parsing the message.
+//
+// A frame added without a kind carries YANET_ERROR_NONE and is transparent:
+// the chain reports the kind of its outermost tagged frame, so a wrapper
+// that knows the cause better than the leaf may re-tag it. The mapping to
+// a status code belongs to the caller, the same kind means different
+// things to different operations.
+enum yanet_error_kind {
+	YANET_ERROR_NONE = 0,
+	// The entity the operation names does not exist.
+	YANET_ERROR_NOT_FOUND,
+	// The system is not in the state the operation needs, such as a live
+	// configuration naming an entity that does not exist.
+	YANET_ERROR_FAILED_PRECONDITION,
+	// The entity is still referenced, so the operation was refused.
+	YANET_ERROR_BUSY,
+	// The request is wrong regardless of the system state.
+	YANET_ERROR_INVALID_ARGUMENT,
+	// The pool the operation draws from has no room left for the request.
+	YANET_ERROR_RESOURCE_EXHAUSTED,
+};
+
 // Frees the whole chain.
 //
 // No-op on NULL and on the out-of-memory singleton.
@@ -54,6 +77,17 @@ yanet_error_format(const yanet_error *err);
 void
 yanet_error_add(yanet_error **err, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3)));
+
+// Adds an error frame tagged with a kind, otherwise like yanet_error_add().
+void
+yanet_error_add_kind(
+	yanet_error **err, enum yanet_error_kind kind, const char *fmt, ...
+) __attribute__((format(printf, 3, 4)));
+
+// Returns the kind of the outermost tagged frame, or YANET_ERROR_NONE when
+// no frame of the chain carries one.
+enum yanet_error_kind
+yanet_error_kind(const yanet_error *err);
 
 // Frees the current error chain stored in `*err` and resets it to NULL.
 //

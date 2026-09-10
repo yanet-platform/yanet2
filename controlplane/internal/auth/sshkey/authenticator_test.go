@@ -58,7 +58,7 @@ func setupAuthenticator(t *testing.T) (*sshkey.Authenticator, map[string]ssh.Sig
 	return auth, signers
 }
 
-func TestAuthenticator_IsTokenSupported(t *testing.T) {
+func TestAuthenticator_Supports(t *testing.T) {
 	auth := &sshkey.Authenticator{}
 
 	tests := []struct {
@@ -75,7 +75,7 @@ func TestAuthenticator_IsTokenSupported(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, auth.IsTokenSupported(tt.token))
+			assert.Equal(t, tt.want, auth.Supports(core.Credential{Token: tt.token}))
 		})
 	}
 }
@@ -89,7 +89,7 @@ func TestAuthenticate_Ed25519(t *testing.T) {
 
 	token := signTestToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
-	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 	assert.Equal(t, "sshkey", authInfo.AuthMethod)
@@ -104,7 +104,7 @@ func TestAuthenticate_RSA(t *testing.T) {
 
 	token := signTestToken(t, signers["bob"], "bob", method, now.UnixNano(), "nonce-1")
 
-	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("bob"), authInfo.Subject)
 	assert.Equal(t, "sshkey", authInfo.AuthMethod)
@@ -119,7 +119,7 @@ func TestAuthenticate_ECDSA(t *testing.T) {
 
 	token := signTestToken(t, signers["charlie"], "charlie", method, now.UnixNano(), "nonce-1")
 
-	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("charlie"), authInfo.Subject)
 	assert.Equal(t, "sshkey", authInfo.AuthMethod)
@@ -135,7 +135,7 @@ func TestAuthenticate_ExpiredTimestamp(t *testing.T) {
 	oldTimestamp := now.Add(-10 * time.Second).UnixNano()
 	token := signTestToken(t, signers["alice"], "alice", method, oldTimestamp, "nonce-1")
 
-	_, err := auth.Authenticate(context.Background(), token, reqInfo)
+	_, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.Unauthenticated, st.Code())
@@ -152,7 +152,7 @@ func TestAuthenticate_MethodBindingMismatch(t *testing.T) {
 		"/other.Service/OtherMethod", now.UnixNano(), "nonce-1",
 	)
 
-	_, err := auth.Authenticate(context.Background(), token, reqInfo)
+	_, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	requireGRPCError(t, err, codes.Unauthenticated,
 		`method binding mismatch: token method "/other.Service/OtherMethod" != request method "/test.Service/TestMethod"`,
 	)
@@ -167,7 +167,7 @@ func TestAuthenticate_UnknownUser(t *testing.T) {
 
 	token := signTestToken(t, signers["alice"], "unknown_user", method, now.UnixNano(), "nonce-1")
 
-	_, err := auth.Authenticate(context.Background(), token, reqInfo)
+	_, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	requireGRPCError(t, err, codes.Unauthenticated,
 		`no SSH keys found for user "unknown_user"`,
 	)
@@ -183,7 +183,7 @@ func TestAuthenticate_WrongSignature(t *testing.T) {
 	// Sign with bob's key but claim to be alice.
 	token := signTestToken(t, signers["bob"], "alice", method, now.UnixNano(), "nonce-1")
 
-	_, err := auth.Authenticate(context.Background(), token, reqInfo)
+	_, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, reqInfo)
 	requireGRPCError(t, err, codes.Unauthenticated,
 		"signature verification failed: signature verification failed",
 	)
@@ -193,7 +193,7 @@ func TestAuthenticate_InvalidTokenFormat(t *testing.T) {
 	auth, _ := setupAuthenticator(t)
 	reqInfo := &core.RequestInfo{FullMethod: "/test.Service/TestMethod"}
 
-	_, err := auth.Authenticate(context.Background(), "sshkey invalid", reqInfo)
+	_, err := auth.Authenticate(context.Background(), core.Credential{Token: "sshkey invalid"}, reqInfo)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.Unauthenticated, st.Code())
@@ -207,7 +207,7 @@ func TestAuthenticate_NilRequestInfo(t *testing.T) {
 
 	token := signTestToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
-	authInfo, err := auth.Authenticate(context.Background(), token, nil)
+	authInfo, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }
@@ -221,7 +221,7 @@ func TestAuthenticate_EmptyFullMethod(t *testing.T) {
 	token := signTestToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
 	emptyReqInfo := &core.RequestInfo{}
-	authInfo, err := auth.Authenticate(context.Background(), token, emptyReqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), core.Credential{Token: token}, emptyReqInfo)
 	require.NoError(t, err)
 	assert.Equal(t, core.NewLocalSubject("alice"), authInfo.Subject)
 }

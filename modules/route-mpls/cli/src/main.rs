@@ -24,7 +24,7 @@ use ync::{
     output::{self, CommonFormat},
 };
 
-/// Route module.
+/// Manages route-mpls module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -36,24 +36,24 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// List all route configurations.
+    /// List configs.
     List,
-    /// Show routes currently stored in RIB (route information base).
+    /// Show the MPLS routes of a config.
     Show(RouteShowCmd),
-    /// Create route mpls config
+    /// Create a config.
     Create(RouteCreateCmd),
-    /// Delete route mpls config
+    /// Delete a config.
     Delete(RouteDeleteCmd),
-    /// Update route
+    /// Update a route in a config.
     Update(RouteUpdateCmd),
-    /// Withdraw route
+    /// Withdraw a route from a config.
     Withdraw(RouteWithdrawCmd),
 }
 
@@ -80,7 +80,7 @@ pub struct RouteShowCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteCreateCmd {
     /// Route config name.
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
@@ -96,7 +96,7 @@ pub struct RouteUpdateCmd {
     /// Route config name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// Route prefix
+    /// Route prefix.
     #[arg(long = "prefix", short = 'p')]
     pub prefix: Contiguous<IpNetwork>,
     /// The IP address of the tunnel destination.
@@ -111,7 +111,7 @@ pub struct RouteUpdateCmd {
     /// The ECMP weight.
     #[arg(long = "weight")]
     pub weight: u64,
-    /// Nexthop counter name
+    /// Nexthop counter name.
     #[arg(long = "counter")]
     pub counter: String,
 }
@@ -121,7 +121,7 @@ pub struct RouteWithdrawCmd {
     /// Route config name.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// Route prefix
+    /// Route prefix.
     #[arg(long = "prefix", short = 'p')]
     pub prefix: Contiguous<IpNetwork>,
     /// The IP address of the tunnel destination.
@@ -135,6 +135,12 @@ pub struct RouteWithdrawCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService";
 
+fn client(channel: LayeredChannel) -> RouteMplsServiceClient<LayeredChannel> {
+    RouteMplsServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
@@ -144,15 +150,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            RouteMplsServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -175,12 +175,7 @@ pub struct RouteMplsService {
 
 impl RouteMplsService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            RouteMplsServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -259,7 +254,7 @@ impl RouteMplsService {
             .map_err(self.service.status("create"))?
             .into_inner();
 
-        output::success("create", format_args!("Created route-mpls config {}.", cmd.config_name));
+        output::success("create", format_args!("Created config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -273,7 +268,7 @@ impl RouteMplsService {
             .map_err(self.service.status("delete"))?
             .into_inner();
 
-        output::success("delete", format_args!("Deleted route-mpls config {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -302,7 +297,7 @@ impl RouteMplsService {
             .map_err(self.service.status("update"))?
             .into_inner();
 
-        output::success("update", format_args!("Updated route in {}.", cmd.config_name));
+        output::success("update", format_args!("Updated route in config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -331,7 +326,10 @@ impl RouteMplsService {
             .map_err(self.service.status("withdraw"))?
             .into_inner();
 
-        output::success("withdraw", format_args!("Withdrew route from {}.", cmd.config_name));
+        output::success(
+            "withdraw",
+            format_args!("Withdrew route from config '{}'.", cmd.config_name),
+        );
 
         Ok(())
     }

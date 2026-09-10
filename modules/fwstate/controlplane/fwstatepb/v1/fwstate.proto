@@ -9,7 +9,7 @@ import "common/commonpb/v1/metric.proto";
 option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1;fwstatepb";
 
 service FWStateService {
-  // Updates the complete FWState configuration
+  // Creates or atomically updates the named FWState configuration.
   rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
   // Allows to delete fwstate config if it is not referenced
   // by any pipeline.
@@ -29,11 +29,33 @@ service MetricsService {
 message UpdateConfigRequest {
   string name = 1;
   // Names of the published fwstate_map_v4 / fwstate_map_v6 objects whose
-  // fwtables receive the synced state. Both are required: the module owns
-  // neither family's table itself.
+  // fwtables receive the synced state.
+  //
+  // The module owns neither family's table itself. Without a mask, an empty
+  // name keeps the existing link. A selected empty name unlinks that family.
+  // A config without a link inserts no state for that family.
   string map_name_v4 = 2;
   string map_name_v6 = 3;
   SyncConfig sync_config = 4;
+  // Explicitly disables the corresponding synchronization endpoint. The
+  // flags distinguish an explicit clear from an update carrying no
+  // destination pair. The latter keeps both current pairs; supplying a pair
+  // replaces the destination set and disables any other omitted pair.
+  bool clear_multicast = 5;
+  bool clear_unicast = 6;
+  // When present, only the named fields change, including zero and empty values.
+  //
+  // An empty mask preserves all fields; a missing config starts from defaults.
+  // Paths are map_name_v4, map_name_v6 and individual
+  // sync_config fields. Unknown paths fail. Endpoint clear flags cannot be
+  // combined with a mask; select both endpoint fields with empty values instead.
+  // Without a mask, legacy merging and destination-set replacement apply.
+  FieldMask update_mask = 7;
+}
+
+// FieldMask selects fields using their protobuf names.
+message FieldMask {
+  repeated string paths = 1;
 }
 
 message UpdateConfigResponse {}
@@ -50,39 +72,44 @@ message ShowConfigResponse {
   SyncConfig sync_config = 5;
 }
 
-message DeleteConfigRequest { string name = 1; }
+message DeleteConfigRequest {
+  string name = 1;
+}
 
 message DeleteConfigResponse {}
 
 message ListConfigsRequest {}
 
-message ListConfigsResponse { repeated string configs = 1; }
+message ListConfigsResponse {
+  repeated string configs = 1;
+}
 
-// Firewall state synchronization configuration
-// SyncConfig carries the receive-side fwstate synchronization parameters:
-// incoming-packet matching, connection timeouts, and the suppression
-// window. The emission addressing for modules that synthesize sync
-// packets lives with the ACL module's own configuration.
+// SyncConfig carries receive matching and local emission parameters:
+// incoming-packet matching, state updates, connection timeouts and the
+// suppression window. The multicast endpoint is used for wire matching and
+// emission; the unicast endpoint is emission-only.
+//
+// Synchronization is optional: a config naming no destination does not claim
+// external sync traffic; trusted internal events are still consumed and
+// dropped so their neutral outer headers cannot leak into the pipeline. Each
+// destination needs both an address and a port in the resulting config.
+// The source address and destination MAC are required whenever an endpoint
+// is configured because fwstate stamps emitted frames.
 message SyncConfig {
-  common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source address stamped on forwarded internal frames;
-  // Deprecated: the emission-side destination MAC moved to the ACL
-  // module's SyncConfig; fwstate ignores this field.
-  common.commonpb.v1.MACAddress dst_ether = 2 [ deprecated = true ];
-  common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address matched on incoming sync packets;
-  uint32 port_multicast = 4;                           // Multicast port. The applied config requires 1..65535. Zero keeps the current port on update.
-  // Deprecated: the emission-side unicast destination moved to the ACL
-  // module's SyncConfig; fwstate ignores this field.
-  common.commonpb.v1.IPAddress dst_addr_unicast = 5 [ deprecated = true ];
-  // Deprecated: see dst_addr_unicast.
-  uint32 port_unicast = 6 [ deprecated = true ]; // Unused. Ignored by fwstate.
+  common.commonpb.v1.IPAddress src_addr = 1; // IPv6 source stamped on emitted internal frames;
+  common.commonpb.v1.MACAddress dst_ether = 2; // Ethernet destination MAC for emitted frames;
+  common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast address matched on wire and emitted;
+  uint32 port_multicast = 4; // Multicast port, 1..65535;
+  common.commonpb.v1.IPAddress dst_addr_unicast = 5; // Unicast address used for emission only;
+  uint32 port_unicast = 6; // Unicast port, 1..65535;
 
   // Connection timeouts
   uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
-  uint64 tcp_syn = 8;     // TCP SYN timeout in nanoseconds;
-  uint64 tcp_fin = 9;     // TCP FIN timeout in nanoseconds;
-  uint64 tcp = 10;        // TCP established timeout in nanoseconds;
-  uint64 udp = 11;        // UDP timeout in nanoseconds;
-  uint64 default = 12;    // Default timeout in nanoseconds;
+  uint64 tcp_syn = 8; // TCP SYN timeout in nanoseconds;
+  uint64 tcp_fin = 9; // TCP FIN timeout in nanoseconds;
+  uint64 tcp = 10; // TCP established timeout in nanoseconds;
+  uint64 udp = 11; // UDP timeout in nanoseconds;
+  uint64 default = 12; // Default timeout in nanoseconds;
 
   // Sync suppression window in nanoseconds. A sync frame for an alive entry
   // whose new expiry lands within this window of the current one is discarded

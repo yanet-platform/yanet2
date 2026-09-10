@@ -20,6 +20,7 @@ usr/bin/yanet-cli-ready
 usr/bin/yanet-cli-metrics
 usr/bin/yanet-cli-counters
 usr/bin/yanet-cli-device-list
+usr/bin/yanet-cli-device-delete
 usr/bin/yanet-cli-device-plain
 usr/bin/yanet-cli-device-vlan
 usr/bin/yanet-cli-device-trafgen

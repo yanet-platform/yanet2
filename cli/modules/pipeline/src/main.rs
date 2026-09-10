@@ -18,7 +18,13 @@ use ynpb::pb::{
 const PIPELINE_SERVICE: &str = "controlplane.ynpb.v1.PipelineService";
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(PIPELINE_SERVICE, "requested pipeline");
 
-/// Pipeline module.
+fn client(channel: LayeredChannel) -> PipelineServiceClient<LayeredChannel> {
+    PipelineServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+/// Manages pipelines.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -30,7 +36,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -152,12 +158,7 @@ pub struct PipelineService {
 
 impl PipelineService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, PIPELINE_SERVICE, |channel| {
-            PipelineServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, PIPELINE_SERVICE, client).await?;
 
         Ok(Self { service, action })
     }
@@ -218,8 +219,10 @@ impl PipelineService {
             }),
         };
 
-        // Update is an upsert, so a resource-level NotFound names a referenced
-        // function, not the pipeline. Keep the backend message verbatim.
+        // Update is an upsert, so a referenced function the live configuration
+        // cannot resolve is a failed precondition, never a missing pipeline.
+        //
+        // The backend message is kept verbatim.
         self.service
             .client()
             .update(request)
@@ -253,22 +256,14 @@ impl PipelineService {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn pipeline_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            PipelineServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| {
-            Ok(client
-                .list(ListPipelinesRequest {})
-                .await?
-                .into_inner()
-                .ids
-                .into_iter()
-                .map(|id| id.name)
-                .collect())
-        },
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client
+            .list(ListPipelinesRequest {})
+            .await?
+            .into_inner()
+            .ids
+            .into_iter()
+            .map(|id| id.name)
+            .collect())
+    })
 }

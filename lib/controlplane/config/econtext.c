@@ -39,6 +39,17 @@ module_ectx_free(
 		);
 	}
 
+	struct counter_storage **abs_runtime_storages =
+		ADDR_OF(&module_ectx->abs_runtime_counter_storages);
+	if (abs_runtime_storages != NULL) {
+		memory_bfree(
+			memory_context,
+			abs_runtime_storages,
+			sizeof(struct counter_storage *) *
+				module_ectx->runtime_counter_storage_count
+		);
+	}
+
 	uint64_t *cm_index = ADDR_OF(&module_ectx->cm_index);
 	if (cm_index != NULL) {
 		memory_bfree(
@@ -153,37 +164,6 @@ module_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(
-		&module_ectx->rx_counter,
-		counter_get_value_handle(
-			cp_module->rx_counter_id, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&module_ectx->tx_counter,
-		counter_get_value_handle(
-			cp_module->tx_counter_id, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&module_ectx->drop_counter,
-		counter_get_value_handle(
-			cp_module->drop_counter_id, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&module_ectx->pending_input_counter,
-		counter_get_value_handle(
-			cp_module->pending_input_counter_id, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&module_ectx->pending_output_counter,
-		counter_get_value_handle(
-			cp_module->pending_output_counter_id, counter_storage
-		)
-	);
-
 	if (cp_config_counter_storage_registry_insert_module(
 		    ADDR_OF(&config_gen_ectx->counter_storage_registry),
 		    cp_device->name,
@@ -232,6 +212,29 @@ module_ectx_create(
 			cp_module->runtime_counter_registry_count;
 		SET_OFFSET_OF(
 			&module_ectx->runtime_counter_storages, runtime_storages
+		);
+
+		struct counter_storage **abs_runtime_storages =
+			(struct counter_storage **)memory_balloc(
+				memory_context,
+				sizeof(struct counter_storage *) *
+					cp_module
+						->runtime_counter_registry_count
+			);
+		if (abs_runtime_storages == NULL &&
+		    cp_module->runtime_counter_registry_count > 0) {
+			yanet_error_add(
+				err,
+				"failed to allocate memory for the runtime "
+				"storage addresses of module '%s:%s'",
+				cp_module->type,
+				cp_module->name
+			);
+			goto error;
+		}
+		SET_OFFSET_OF(
+			&module_ectx->abs_runtime_counter_storages,
+			abs_runtime_storages
 		);
 
 		struct cp_module_counter_registry **runtime_registries =
@@ -340,8 +343,9 @@ module_ectx_create(
 				    linked_objects[link_idx].name,
 				    &object_idx
 			    )) {
-				yanet_error_add(
+				yanet_error_add_kind(
 					err,
+					YANET_ERROR_FAILED_PRECONDITION,
 					"linked object '%s:%s' not found for "
 					"module '%s:%s'",
 					linked_objects[link_idx].type,
@@ -466,27 +470,37 @@ chain_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
-		struct module_ectx *module_ectx =
-			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
-		if (module_ectx == NULL) {
-			continue;
+	struct module_ectx **module_ptrs = ADDR_OF(&chain_ectx->module_ptrs);
+	if (module_ptrs != NULL) {
+		for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
+			struct module_ectx *module_ectx =
+				ADDR_OF(module_ptrs + idx);
+			if (module_ectx == NULL) {
+				continue;
+			}
+
+			module_ectx_free(cp_config_gen, module_ectx);
 		}
-
-		module_ectx_free(cp_config_gen, module_ectx);
 	}
-
 	struct counter_storage *counter_storage =
 		ADDR_OF(&chain_ectx->counter_storage);
 	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
 	}
 
+	if (module_ptrs != NULL) {
+		memory_bfree(
+			memory_context,
+			module_ptrs,
+			sizeof(struct module_ectx *) * chain_ectx->length
+		);
+	}
+
 	memory_bfree(
 		memory_context,
 		chain_ectx,
 		sizeof(struct chain_ectx) +
-			sizeof(struct chain_module_ectx) * chain_ectx->length
+			sizeof(struct module_ectx *) * chain_ectx->length
 	);
 }
 
@@ -505,9 +519,8 @@ chain_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	uint64_t ectx_size =
-		sizeof(struct chain_ectx) +
-		sizeof(struct chain_module_ectx) * cp_chain->length;
+	uint64_t ectx_size = sizeof(struct chain_ectx) +
+			     sizeof(struct module_ectx *) * cp_chain->length;
 	struct chain_ectx *chain_ectx =
 		(struct chain_ectx *)memory_balloc(memory_context, ectx_size);
 	if (chain_ectx == NULL) {
@@ -521,6 +534,25 @@ chain_ectx_create(
 	memset(chain_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&chain_ectx->cp_chain, cp_chain);
 	chain_ectx->length = cp_chain->length;
+
+	struct module_ectx **module_ptrs = (struct module_ectx **)memory_balloc(
+		memory_context, sizeof(struct module_ectx *) * cp_chain->length
+	);
+	if (module_ptrs == NULL && cp_chain->length > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the module "
+			"addresses of chain '%s'",
+			cp_chain->name
+		);
+		goto error;
+	}
+	if (cp_chain->length > 0) {
+		memset(module_ptrs,
+		       0,
+		       sizeof(struct module_ectx *) * cp_chain->length);
+	}
+	SET_OFFSET_OF(&chain_ectx->module_ptrs, module_ptrs);
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
@@ -573,19 +605,6 @@ chain_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(
-		&chain_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_chain->counter_packet_pending_input, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&chain_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_chain->counter_packet_pending_output, counter_storage
-		)
-	);
-
 	for (uint64_t idx = 0; idx < cp_chain->length; ++idx) {
 		struct cp_module *cp_module = cp_config_gen_lookup_module(
 			cp_config_gen,
@@ -594,8 +613,9 @@ chain_ectx_create(
 		);
 
 		if (cp_module == NULL) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"module '%s:%s' not found in chain '%s' of "
 				"function '%s' in pipeline '%s'",
 				cp_chain->modules[idx].type,
@@ -631,9 +651,7 @@ chain_ectx_create(
 			goto error;
 		}
 
-		SET_OFFSET_OF(
-			&chain_ectx->modules[idx].module_ectx, module_ectx
-		);
+		SET_OFFSET_OF(module_ptrs + idx, module_ectx);
 	}
 
 	return chain_ectx;
@@ -650,11 +668,12 @@ function_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
-	if (chains != NULL) {
+	struct chain_ectx **chain_ptrs = ADDR_OF(&function_ectx->chain_ptrs);
+	if (chain_ptrs != NULL) {
 		for (uint64_t idx = 0; idx < function_ectx->chain_count;
 		     ++idx) {
-			struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
+			struct chain_ectx *chain_ectx =
+				ADDR_OF(chain_ptrs + idx);
 			if (chain_ectx == NULL) {
 				continue;
 			}
@@ -663,7 +682,16 @@ function_ectx_free(
 		}
 		memory_bfree(
 			memory_context,
-			chains,
+			chain_ptrs,
+			sizeof(struct chain_ectx *) * function_ectx->chain_count
+		);
+	}
+
+	struct chain_ectx **abs_chains = ADDR_OF(&function_ectx->chains);
+	if (abs_chains != NULL) {
+		memory_bfree(
+			memory_context,
+			abs_chains,
 			sizeof(struct chain_ectx *) * function_ectx->chain_count
 		);
 	}
@@ -730,9 +758,32 @@ function_ectx_create(
 		);
 		goto error;
 	}
-	memset(chains, 0, sizeof(struct chain_ectx *) * cp_function->chain_count
+	if (cp_function->chain_count > 0) {
+		memset(chains,
+		       0,
+		       sizeof(struct chain_ectx *) * cp_function->chain_count);
+	}
+	SET_OFFSET_OF(&function_ectx->chain_ptrs, chains);
+
+	struct chain_ectx **abs_chains = (struct chain_ectx **)memory_balloc(
+		memory_context,
+		sizeof(struct chain_ectx *) * cp_function->chain_count
 	);
-	SET_OFFSET_OF(&function_ectx->chains, chains);
+	if (abs_chains == NULL && cp_function->chain_count > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the chain "
+			"addresses of function '%s'",
+			cp_function->name
+		);
+		goto error;
+	}
+	if (cp_function->chain_count > 0) {
+		memset(abs_chains,
+		       0,
+		       sizeof(struct chain_ectx *) * cp_function->chain_count);
+	}
+	SET_OFFSET_OF(&function_ectx->chains, abs_chains);
 	function_ectx->chain_count = cp_function->chain_count;
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
@@ -783,39 +834,6 @@ function_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_in,
-		counter_get_value_handle(
-			cp_function->counter_packet_in, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_out,
-		counter_get_value_handle(
-			cp_function->counter_packet_out, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_drop,
-		counter_get_value_handle(
-			cp_function->counter_packet_drop, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_function->counter_packet_pending_input,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_function->counter_packet_pending_output,
-			counter_storage
-		)
-	);
-
 	uint64_t pos = 0;
 	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
 		struct cp_chain *cp_chain =
@@ -861,20 +879,32 @@ pipeline_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
-		struct function_ectx *function_ectx =
-			ADDR_OF(pipeline_ectx->functions + idx);
-		if (function_ectx == NULL) {
-			continue;
-		}
+	struct function_ectx **function_ptrs =
+		ADDR_OF(&pipeline_ectx->function_ptrs);
+	if (function_ptrs != NULL) {
+		for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
+			struct function_ectx *function_ectx =
+				ADDR_OF(function_ptrs + idx);
+			if (function_ectx == NULL) {
+				continue;
+			}
 
-		function_ectx_free(cp_config_gen, function_ectx);
+			function_ectx_free(cp_config_gen, function_ectx);
+		}
 	}
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&pipeline_ectx->counter_storage);
 	if (counter_storage != NULL) {
 		counter_storage_free(counter_storage);
+	}
+
+	if (function_ptrs != NULL) {
+		memory_bfree(
+			memory_context,
+			function_ptrs,
+			sizeof(struct function_ectx *) * pipeline_ectx->length
+		);
 	}
 
 	size_t ectx_size =
@@ -912,6 +942,27 @@ pipeline_ectx_create(
 	memset(pipeline_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&pipeline_ectx->cp_pipeline, cp_pipeline);
 	pipeline_ectx->length = cp_pipeline->length;
+
+	struct function_ectx **function_ptrs =
+		(struct function_ectx **)memory_balloc(
+			memory_context,
+			sizeof(struct function_ectx *) * cp_pipeline->length
+		);
+	if (function_ptrs == NULL && cp_pipeline->length > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the function "
+			"addresses of pipeline '%s'",
+			cp_pipeline->name
+		);
+		goto error;
+	}
+	if (cp_pipeline->length > 0) {
+		memset(function_ptrs,
+		       0,
+		       sizeof(struct function_ectx *) * cp_pipeline->length);
+	}
+	SET_OFFSET_OF(&pipeline_ectx->function_ptrs, function_ptrs);
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 
@@ -958,46 +1009,14 @@ pipeline_ectx_create(
 		goto error;
 	}
 
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_in,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_in, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_out,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_out, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_drop,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_drop, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_pending_input,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_pending_output,
-			counter_storage
-		)
-	);
-
 	for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
 		struct cp_function *cp_function = cp_config_gen_lookup_function(
 			cp_config_gen, cp_pipeline->functions[idx].name
 		);
 		if (cp_function == NULL) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"function '%s' not found for pipeline '%s'",
 				cp_pipeline->functions[idx].name,
 				cp_pipeline->name
@@ -1019,7 +1038,7 @@ pipeline_ectx_create(
 			goto error;
 		}
 
-		SET_OFFSET_OF(pipeline_ectx->functions + idx, function_ectx);
+		SET_OFFSET_OF(function_ptrs + idx, function_ectx);
 	}
 
 	return pipeline_ectx;
@@ -1038,13 +1057,13 @@ device_entry_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	struct pipeline_ectx **pipelines =
-		ADDR_OF(&device_entry_ectx->pipelines);
-	if (pipelines != NULL) {
+	struct pipeline_ectx **pipeline_ptrs =
+		ADDR_OF(&device_entry_ectx->pipeline_ptrs);
+	if (pipeline_ptrs != NULL) {
 		for (uint64_t idx = 0; idx < device_entry_ectx->pipeline_count;
 		     ++idx) {
 			struct pipeline_ectx *pipeline_ectx =
-				ADDR_OF(pipelines + idx);
+				ADDR_OF(pipeline_ptrs + idx);
 			if (pipeline_ectx == NULL) {
 				continue;
 			}
@@ -1053,7 +1072,18 @@ device_entry_ectx_free(
 
 		memory_bfree(
 			memory_context,
-			pipelines,
+			pipeline_ptrs,
+			sizeof(struct pipeline_ectx *) *
+				device_entry_ectx->pipeline_count
+		);
+	}
+
+	struct pipeline_ectx **abs_pipelines =
+		ADDR_OF(&device_entry_ectx->pipelines);
+	if (abs_pipelines != NULL) {
+		memory_bfree(
+			memory_context,
+			abs_pipelines,
 			sizeof(struct pipeline_ectx *) *
 				device_entry_ectx->pipeline_count
 		);
@@ -1104,54 +1134,6 @@ device_entry_ectx_create(
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
 
-	struct counter_storage *counter_storage =
-		ADDR_OF(&device_ectx->counter_storage);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_rx,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_rx, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_entry,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_entry, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_tx,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_tx, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_drop,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_drop, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_recirc_drop,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_recirc_drop,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_pending_input,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_pending_input,
-			counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_entry_ectx->counter_packet_pending_output,
-		counter_get_value_handle(
-			cp_device_entry->counter_packet_pending_output,
-			counter_storage
-		)
-	);
-
 	struct pipeline_ectx **pipelines =
 		(struct pipeline_ectx **)memory_balloc(
 			memory_context,
@@ -1172,11 +1154,35 @@ device_entry_ectx_create(
 		return device_entry_ectx;
 	}
 
-	memset(pipelines,
-	       0,
-	       sizeof(struct pipeline_ectx *) *
-		       device_entry_ectx->pipeline_count);
-	SET_OFFSET_OF(&device_entry_ectx->pipelines, pipelines);
+	if (cp_device_entry->pipeline_count > 0) {
+		memset(pipelines,
+		       0,
+		       sizeof(struct pipeline_ectx *) *
+			       cp_device_entry->pipeline_count);
+	}
+	SET_OFFSET_OF(&device_entry_ectx->pipeline_ptrs, pipelines);
+
+	struct pipeline_ectx **abs_pipelines =
+		(struct pipeline_ectx **)memory_balloc(
+			memory_context,
+			sizeof(struct pipeline_ectx *) *
+				cp_device_entry->pipeline_count
+		);
+	if (abs_pipelines == NULL && cp_device_entry->pipeline_count > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the pipeline "
+			"addresses in device entry"
+		);
+		goto error;
+	}
+	if (cp_device_entry->pipeline_count > 0) {
+		memset(abs_pipelines,
+		       0,
+		       sizeof(struct pipeline_ectx *) *
+			       cp_device_entry->pipeline_count);
+	}
+	SET_OFFSET_OF(&device_entry_ectx->pipelines, abs_pipelines);
 
 	device_entry_ectx->pipeline_map_size = weight_sum;
 	uint64_t pos = 0;
@@ -1185,8 +1191,9 @@ device_entry_ectx_create(
 			new_config_gen, cp_device_entry->pipelines[idx].name
 		);
 		if (cp_pipeline == NULL) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_FAILED_PRECONDITION,
 				"pipeline '%s' not found in device entry",
 				cp_device_entry->pipelines[idx].name
 			);
@@ -1210,7 +1217,10 @@ device_entry_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_device_entry->pipelines[idx].weight;
 		     ++weight_idx) {
-			device_entry_ectx->pipeline_map[pos] = idx;
+			SET_OFFSET_OF(
+				device_entry_ectx->pipeline_map + pos,
+				pipeline_ectx
+			);
 			++pos;
 		}
 	}
@@ -1473,16 +1483,26 @@ config_gen_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
-	for (uint64_t device_idx = 0;
-	     device_idx < config_gen_ectx->device_count;
-	     ++device_idx) {
+	struct device_ectx **device_ptrs =
+		ADDR_OF(&config_gen_ectx->device_ptrs);
+	if (device_ptrs != NULL) {
+		for (uint64_t device_idx = 0;
+		     device_idx < config_gen_ectx->device_count;
+		     ++device_idx) {
 
-		struct device_ectx *device_ectx =
-			ADDR_OF(config_gen_ectx->devices + device_idx);
+			struct device_ectx *device_ectx =
+				ADDR_OF(device_ptrs + device_idx);
 
-		if (device_ectx != NULL) {
-			device_ectx_free(cp_config_gen, device_ectx);
+			if (device_ectx != NULL) {
+				device_ectx_free(cp_config_gen, device_ectx);
+			}
 		}
+		memory_bfree(
+			memory_context,
+			device_ptrs,
+			sizeof(struct device_ectx *) *
+				config_gen_ectx->device_count
+		);
 	}
 
 	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
@@ -1590,7 +1610,8 @@ link_module_ectx(
 		for (uint64_t c_idx = 0; c_idx < config_gen_ectx->device_count;
 		     ++c_idx) {
 			struct device_ectx *device_ectx =
-				ADDR_OF(config_gen_ectx->devices + c_idx);
+				ADDR_OF(ADDR_OF(&config_gen_ectx->device_ptrs) +
+					c_idx);
 			if (device_ectx == NULL) {
 				continue;
 			}
@@ -1623,9 +1644,9 @@ link_chain_ectx(
 	struct chain_ectx *chain_ectx,
 	yanet_error **err
 ) {
+	struct module_ectx **module_ptrs = ADDR_OF(&chain_ectx->module_ptrs);
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
-		struct module_ectx *module_ectx =
-			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
+		struct module_ectx *module_ectx = ADDR_OF(module_ptrs + idx);
 		if (module_ectx == NULL) {
 			continue;
 		}
@@ -1661,9 +1682,9 @@ link_function_ectx(
 	struct function_ectx *function_ectx,
 	yanet_error **err
 ) {
-	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	struct chain_ectx **chain_ptrs = ADDR_OF(&function_ectx->chain_ptrs);
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
-		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
+		struct chain_ectx *chain_ectx = ADDR_OF(chain_ptrs + idx);
 		if (chain_ectx == NULL) {
 			continue;
 		}
@@ -1697,9 +1718,11 @@ link_pipeline_ectx(
 	struct pipeline_ectx *pipeline_ectx,
 	yanet_error **err
 ) {
+	struct function_ectx **function_ptrs =
+		ADDR_OF(&pipeline_ectx->function_ptrs);
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
-			ADDR_OF(pipeline_ectx->functions + idx);
+			ADDR_OF(function_ptrs + idx);
 		if (function_ectx == NULL) {
 			continue;
 		}
@@ -1731,10 +1754,11 @@ link_device_entry_ectx(
 	struct device_entry_ectx *device_entry_ectx,
 	yanet_error **err
 ) {
-	struct pipeline_ectx **pipelines =
-		ADDR_OF(&device_entry_ectx->pipelines);
+	struct pipeline_ectx **pipeline_ptrs =
+		ADDR_OF(&device_entry_ectx->pipeline_ptrs);
 	for (uint64_t idx = 0; idx < device_entry_ectx->pipeline_count; ++idx) {
-		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
+		struct pipeline_ectx *pipeline_ectx =
+			ADDR_OF(pipeline_ptrs + idx);
 		if (pipeline_ectx == NULL) {
 			continue;
 		}
@@ -1799,9 +1823,10 @@ static int
 link_config_gen_ectx(
 	struct config_gen_ectx *config_gen_ectx, yanet_error **err
 ) {
+	struct device_ectx **device_ptrs =
+		ADDR_OF(&config_gen_ectx->device_ptrs);
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
-		struct device_ectx *device_ectx =
-			ADDR_OF(config_gen_ectx->devices + idx);
+		struct device_ectx *device_ectx = ADDR_OF(device_ptrs + idx);
 		if (device_ectx == NULL) {
 			continue;
 		}
@@ -1853,6 +1878,24 @@ config_gen_ectx_create(
 	config_gen_ectx->device_count = device_count;
 	config_gen_ectx->object_count =
 		cp_object_registry_capacity(&cp_config_gen->object_registry);
+
+	struct device_ectx **device_ptrs = (struct device_ectx **)memory_balloc(
+		memory_context, sizeof(struct device_ectx *) * device_count
+	);
+	if (device_ptrs == NULL && device_count > 0) {
+		yanet_error_add(
+			err,
+			"failed to allocate memory for the device "
+			"addresses of the config generation"
+		);
+		goto error;
+	}
+	if (device_count > 0) {
+		memset(device_ptrs,
+		       0,
+		       sizeof(struct device_ectx *) * device_count);
+	}
+	SET_OFFSET_OF(&config_gen_ectx->device_ptrs, device_ptrs);
 
 	struct cp_config_counter_storage_registry *registry =
 		(struct cp_config_counter_storage_registry *)memory_balloc(
@@ -1948,9 +1991,7 @@ config_gen_ectx_create(
 		if (device_ectx == NULL) {
 			goto error;
 		}
-		SET_OFFSET_OF(
-			config_gen_ectx->devices + device_idx, device_ectx
-		);
+		SET_OFFSET_OF(device_ptrs + device_idx, device_ectx);
 	}
 
 	if (link_config_gen_ectx(config_gen_ectx, err)) {

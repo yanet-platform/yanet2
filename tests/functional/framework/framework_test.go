@@ -1,9 +1,12 @@
 package framework
 
 import (
+	"encoding/binary"
+	"net"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestRestartYANETGuardsMissingConfig verifies that RestartYANET rejects a
@@ -39,6 +42,44 @@ func TestRestartYANETGuardsMissingConfig(t *testing.T) {
 		if !strings.Contains(err.Error(), "no recorded configuration") {
 			t.Errorf("case %d (%s): RestartYANET() error = %q, want it to describe the no-recorded-configuration case", idx, testCase.name, err.Error())
 		}
+	}
+}
+
+func TestReceiveAllPacketsUnfilteredReportsPartialFrame(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	clientSocket := &SocketClient{inner: &socketClientInner{conn: client}}
+	go func() {
+		var length [4]byte
+		binary.BigEndian.PutUint32(length[:], 4)
+		_, _ = server.Write(length[:])
+		_, _ = server.Write([]byte{1})
+	}()
+
+	_, err := clientSocket.ReceiveAllPacketsUnfiltered(20*time.Millisecond, "")
+
+	if err == nil || !strings.Contains(err.Error(), "packet data") {
+		t.Fatalf("error = %v, want partial packet error", err)
+	}
+}
+
+// TestReceiveAllPacketsUnfilteredReturnsEmptyOnIdleTimeout pins the idle-window
+// contract for drop probes: when the link stays quiet for the whole capture
+// window, the receive returns an empty list with no error. This is what backs
+// `expect: {drop: true}` in manifests.
+func TestReceiveAllPacketsUnfilteredReturnsEmptyOnIdleTimeout(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	clientSocket := &SocketClient{inner: &socketClientInner{conn: client}}
+
+	packets, err := clientSocket.ReceiveAllPacketsUnfiltered(20*time.Millisecond, "")
+	if err != nil {
+		t.Fatalf("idle capture returned error: %v", err)
+	}
+	if len(packets) != 0 {
+		t.Fatalf("idle capture returned %d packets, want 0", len(packets))
 	}
 }
 

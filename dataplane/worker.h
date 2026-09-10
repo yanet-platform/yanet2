@@ -9,6 +9,8 @@
 
 #include "common/data_pipe.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/worker/counters.h"
+#include "lib/dataplane/worker/rx_pool_sampler.h"
 #include "lib/dataplane/worker/tx_stage.h"
 
 struct dataplane;
@@ -18,6 +20,16 @@ struct dp_worker;
 
 struct worker_read_ctx {
 	uint16_t read_size;
+
+	// Batch received at the end of the previous round, parsed at the
+	// start of the current one.
+	//
+	// The batch is polled and its coldest lines prefetched before the
+	// transmit of its predecessor, so the parse runs on lines the caches
+	// already hold. A non-zero count means the batch is still pending:
+	// every consumer resets the count once the mbufs leave its hands.
+	struct rte_mbuf *staged[WORKER_RX_BURST_SIZE];
+	uint16_t staged_count;
 };
 
 struct worker_write_ctx {
@@ -49,6 +61,11 @@ struct dataplane_worker {
 	uint32_t device_id;
 
 	struct rte_mempool *rx_mempool;
+
+	// Publishes the rx pool occupancy gauge into shared counter
+	// storage. Bound before the instance becomes visible; state is
+	// dataplane-local on purpose (see the sampler header).
+	struct worker_rx_pool_sampler rx_pool_sampler;
 
 	struct worker_read_ctx read_ctx;
 	struct worker_write_ctx write_ctx;

@@ -215,6 +215,9 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	defer m.mu.Unlock()
 
 	inst := m.instanceFor(name).Clone()
+	if slices.ContainsFunc(inst.Config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
+		return &nat64pb.AddPrefixResponse{}, nil
+	}
 	inst.Config.Prefixes = append(inst.Config.Prefixes, prefix)
 
 	if err := m.updateModuleConfig(name, inst); err != nil {
@@ -240,7 +243,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 
 	inst, ok := m.configs[name]
 	if !ok {
-		return &nat64pb.RemovePrefixResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	next := inst.Clone()
 
@@ -252,7 +255,7 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 		}
 	}
 	if removeIdx == -1 {
-		return &nat64pb.RemovePrefixResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "prefix not found in config %q", name)
 	}
 
 	next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
@@ -295,6 +298,7 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 			len(inst.Config.Prefixes),
 		)
 	}
+	inst.Config.Mappings = slices.DeleteFunc(inst.Config.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
 	inst.Config.Mappings = append(inst.Config.Mappings, Mapping{
 		IPv4:        ipv4,
 		IPv6:        ipv6,
@@ -324,7 +328,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 
 	inst, ok := m.configs[name]
 	if !ok {
-		return &nat64pb.RemoveMappingResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 	next := inst.Clone()
 
@@ -332,7 +336,7 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 		return mapping.IPv4 == ipv4
 	})
 	if len(next.Config.Mappings) == len(inst.Config.Mappings) {
-		return &nat64pb.RemoveMappingResponse{}, nil
+		return nil, status.Errorf(codes.NotFound, "mapping for %s not found in config %q", ipv4, name)
 	}
 
 	if err := m.updateModuleConfig(name, next); err != nil {

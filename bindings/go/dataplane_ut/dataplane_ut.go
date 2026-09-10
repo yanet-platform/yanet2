@@ -43,7 +43,6 @@ package dataplaneut
 #cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
-#cgo LDFLAGS: -L../../../build/subprojects/regex
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
 #cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
 #cgo LDFLAGS: -Wl,--end-group
@@ -364,10 +363,121 @@ func (m *Harness) OutstandingMbufs() uint64 {
 	return uint64(C.dataplane_ut_mempool_outstanding(m.ptr))
 }
 
+// holdRoundLock takes the harness round lock.
+//
+// Test support mirroring a round in flight: a concurrent install must
+// wait for the same lock before it may retire the old contexts. Every
+// hold must pair with exactly one release.
+func (m *Harness) holdRoundLock() {
+	C.dataplane_ut_round_lock_acquire(m.ptr)
+}
+
+// releaseRoundLock drops the harness round lock taken by holdRoundLock.
+func (m *Harness) releaseRoundLock() {
+	C.dataplane_ut_round_lock_release(m.ptr)
+}
+
+// validateWorkerIdx bounds a worker index against the registered
+// topology, so a caller cannot silently inspect the wrong worker.
+func (m *Harness) validateWorkerIdx(worker int) error {
+	if worker < 0 || worker >= m.workerCount {
+		return fmt.Errorf(
+			"worker %d exceeds topology worker count %d",
+			worker,
+			m.workerCount,
+		)
+	}
+	return nil
+}
+
+// SetWorkerCounter overwrites the value of a named size-1 counter in the
+// given worker's shared worker-counter storage.
+//
+// A fault-injection hook for control-plane tests: it publishes snapshots
+// no healthy dataplane would produce, such as an availability above the
+// pool capacity. A counter carrying more than one value is refused.
+// Returns an error when the worker index or the counter name is unknown
+// or the counter is not size-1.
+func (m *Harness) SetWorkerCounter(worker int, name string, value uint64) error {
+	// The setter indexes the worker's counter storage directly, so an
+	// index outside the registered workers would corrupt C memory.
+	if err := m.validateWorkerIdx(worker); err != nil {
+		return err
+	}
+
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	if rc := C.dataplane_ut_set_worker_counter(
+		m.ptr,
+		C.size_t(worker),
+		cName,
+		C.uint64_t(value),
+	); rc != 0 {
+		return fmt.Errorf("failed to set worker %d counter %q", worker, name)
+	}
+	return nil
+}
+
 // SharedMemory returns the shared-memory handle backing this harness.
 func (m *Harness) SharedMemory() *ffi.SharedMemory {
 	shm := C.dataplane_ut_shm(m.ptr)
 	return ffi.NewSharedMemoryFromRaw(unsafe.Pointer(shm))
+}
+
+// InstallEmptyPipeline installs one named empty pipeline, forcing a
+// generation switch that completes synchronously: on return every worker
+// holds the newly published generation's execution context.
+func (m *Harness) InstallEmptyPipeline(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	rc := C.dataplane_ut_install_empty_pipeline(m.ptr, cName)
+	if rc != 0 {
+		return fmt.Errorf("failed to install empty pipeline %q: rc=%d", name, int(rc))
+	}
+	return nil
+}
+
+// WorkerExecutionContext returns the execution context currently assigned
+// to the given worker, zero when none is assigned.
+//
+// An error is returned when the worker index is outside the topology,
+// distinguishing a missing context from an invalid worker.
+func (m *Harness) WorkerExecutionContext(workerIdx int) (uintptr, error) {
+	if err := m.validateWorkerIdx(workerIdx); err != nil {
+		return 0, err
+	}
+	return uintptr(C.dataplane_ut_worker_ectx(m.ptr, C.size_t(workerIdx))), nil
+}
+
+// PublishedExecutionContext returns the per-worker execution context of
+// the currently published generation, zero when none is published.
+//
+// An error is returned when the worker index is outside the topology,
+// distinguishing a missing context from an invalid worker.
+func (m *Harness) PublishedExecutionContext(workerIdx int) (uintptr, error) {
+	if err := m.validateWorkerIdx(workerIdx); err != nil {
+		return 0, err
+	}
+	return uintptr(C.dataplane_ut_published_ectx(m.ptr, C.size_t(workerIdx))), nil
+}
+
+// WorkerGeneration returns the generation the given worker last
+// acknowledged.
+//
+// An error is returned when the worker index is outside the topology.
+func (m *Harness) WorkerGeneration(workerIdx int) (uint64, error) {
+	if err := m.validateWorkerIdx(workerIdx); err != nil {
+		return 0, err
+	}
+	return uint64(C.dataplane_ut_worker_gen(m.ptr, C.size_t(workerIdx))), nil
+}
+
+// PublishedGeneration returns the generation number of the currently
+// published generation, zero when no generation was published.
+func (m *Harness) PublishedGeneration() uint64 {
+	return uint64(C.dataplane_ut_published_gen(m.ptr))
 }
 
 // SetCurrentTime installs a deterministic wall-clock value used by the next

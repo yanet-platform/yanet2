@@ -157,8 +157,6 @@ acl_handle_packets(
 	const bool net6_share =
 		net6_share_dir_is_built(&acl_config->net6_share_src);
 
-	struct fwstate_sync_emit_config *sync_config = &acl_config->sync_config;
-
 	// fwtables of the linked map objects, one per family. NULL when the
 	// config declared no link for the family, in which case CHECK_STATE
 	// finds no state for that family.
@@ -169,7 +167,7 @@ acl_handle_packets(
 			module_ectx, acl_config->v4_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct object_ectx *oectx = link->abs_object_ectx;
 			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
 			fw4table = fwstate_map_v4_object_table(cp_obj);
 		}
@@ -179,14 +177,14 @@ acl_handle_packets(
 			module_ectx, acl_config->v6_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
+			struct object_ectx *oectx = link->abs_object_ectx;
 			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
 			fw6table = fwstate_map_v6_object_table(cp_obj);
 		}
 	}
 
 	struct counter_storage *counter_storage =
-		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+		module_ectx->abs_counter_storage;
 
 	struct counter_storage *rules_storage = module_ectx_counter_storage(
 		module_ectx, acl_config->rules_registry_idx
@@ -621,11 +619,9 @@ acl_handle_packets(
 			pass_cnt[0] += 1;
 			packet_front_output(packet_front, packet);
 
-			if (push_sync_packet != SYNC_NONE &&
-			    fwstate_sync_emit_config_usable(sync_config)) {
+			if (push_sync_packet != SYNC_NONE) {
 				create_cnt[0] += 1;
 
-				// Allocate a new packet for the sync frame
 				struct packet *sync_pkt =
 					worker_packet_alloc(dp_worker);
 				if (unlikely(sync_pkt == NULL)) {
@@ -635,7 +631,6 @@ acl_handle_packets(
 				}
 				if (unlikely(
 					    fwstate_craft_state_sync_packet(
-						    sync_config,
 						    packet,
 						    push_sync_packet,
 						    sync_pkt
@@ -646,6 +641,8 @@ acl_handle_packets(
 					    "failed to craft sync packet");
 					continue;
 				}
+				sync_pkt->flags |=
+					1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
 
 				sync_cnt[0] += 1;
 				sync_cnt[1] += packet_data_len(sync_pkt);

@@ -5,6 +5,7 @@ package cfwstate
 //#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
 //#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/pipeline -lpipeline
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
@@ -32,9 +33,7 @@ type ModuleConfig struct {
 	ptr  ffi.ModuleConfig
 }
 
-// DefaultSyncConfig returns the C-side default receive-side sync
-// configuration, the baseline a fresh config starts from before the
-// caller's request is merged over it.
+// DefaultSyncConfig returns no active endpoints and the production timeouts.
 func DefaultSyncConfig() SyncConfig {
 	var cSyncConfig C.struct_fwstate_sync_config
 	C.fwstate_config_set_defaults(&cSyncConfig)
@@ -45,7 +44,7 @@ func DefaultSyncConfig() SyncConfig {
 // one step: a config handle is constructed once and never updated
 // afterwards.
 //
-// syncConfig is the final receive-side sync config to install, or nil to
+// syncConfig is the final sync config to install, or nil to
 // keep the defaults. fw4MapName and fw6MapName name standalone
 // fwstate_map_v4 / fwstate_map_v6 objects whose fwtables the module
 // inserts synced state into; an empty name declares no link and that

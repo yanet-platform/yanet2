@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/basic"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
@@ -18,6 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/rbac"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
+	x509auth "github.com/yanet-platform/yanet2/controlplane/internal/auth/x509"
 )
 
 // AuthenticatorFactory creates an Authenticator from a raw YAML config node.
@@ -59,6 +62,7 @@ type Manager struct {
 	authenticators   []core.Authenticator
 	identityProvider identity.Provider
 	authorizer       Authorizer
+	clientCAs        func() *x509.CertPool
 	disabled         bool
 	log              *zap.Logger
 }
@@ -148,6 +152,21 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 		"sshcert": func(rawCfg *yaml.Node) (core.Authenticator, error) {
 			return sshcert.NewFromConfig(rawCfg, sshcert.WithLog(log))
 		},
+		"x509": func(rawCfg *yaml.Node) (core.Authenticator, error) {
+			// One handshake verifies against one pool, so a second
+			// x509 entry could not be honoured.
+			if m.clientCAs != nil {
+				return nil, fmt.Errorf("x509 authenticator configured more than once")
+			}
+
+			authenticator, err := x509auth.NewFromConfig(rawCfg, x509auth.WithLog(log))
+			if err != nil {
+				return nil, err
+			}
+			m.clientCAs = authenticator.ClientCAs
+
+			return authenticator, nil
+		},
 	}
 
 	for _, entry := range cfg.Authenticators {
@@ -175,18 +194,18 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	return m, nil
 }
 
-// Authenticate attempts to authenticate the given token using registered
-// authenticators.
+// Authenticate attempts to authenticate the given credential using
+// registered authenticators.
 //
 // Returns the authenticated Principal on success.
 func (m *Manager) Authenticate(
 	ctx context.Context,
-	token string,
+	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.Principal, error) {
 	// Iterate through authenticators, first match wins.
 	for _, auth := range m.authenticators {
-		if !auth.IsTokenSupported(token) {
+		if !auth.Supports(credential) {
 			continue
 		}
 
@@ -194,7 +213,7 @@ func (m *Manager) Authenticate(
 			zap.String("authenticator", auth.Name()),
 		)
 
-		authInfo, err := auth.Authenticate(ctx, token, reqInfo)
+		authInfo, err := auth.Authenticate(ctx, credential, reqInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +223,7 @@ func (m *Manager) Authenticate(
 
 	// This shouldn't happen with NoneAuthenticator registered, because it
 	// accepts everything.
-	return nil, fmt.Errorf("no authenticator supports the given token")
+	return nil, fmt.Errorf("no authenticator supports the given credential")
 }
 
 // buildPrincipal resolves an authenticated subject into its authorization
@@ -251,6 +270,36 @@ func (m *Manager) buildPrincipal(
 		AuthTime:    time.Now(),
 		IsAnonymous: false,
 	}, nil
+}
+
+// ClientCAs returns the authorities the x509 authenticator verifies client
+// certificates against, nil when none is configured.
+//
+// A TLS server asks for the pool on every handshake, so a reload of the
+// authenticator's sources takes effect without a restart.
+func (m *Manager) ClientCAs() *x509.CertPool {
+	if m.clientCAs == nil {
+		return nil
+	}
+
+	return m.clientCAs()
+}
+
+// metricsCollector provides collected metrics.
+type metricsCollector interface {
+	Collect() []*commonpb.Metric
+}
+
+// Collect gathers the metrics of every authenticator that reports any.
+func (m *Manager) Collect() []*commonpb.Metric {
+	var out []*commonpb.Metric
+	for _, authenticator := range m.authenticators {
+		if collector, ok := authenticator.(metricsCollector); ok {
+			out = append(out, collector.Collect()...)
+		}
+	}
+
+	return out
 }
 
 // Authorize checks if the principal has permission to execute the given

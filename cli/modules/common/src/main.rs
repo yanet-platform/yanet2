@@ -7,11 +7,12 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{UpdateLevelRequest, logging_client::LoggingClient};
+use ynpb::pb::{GetLevelRequest, UpdateLevelRequest, logging_client::LoggingClient};
 
 const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
 
-/// Common functionality.
+/// Manages the log level of the control plane process (`yanet-controlplane`),
+/// covering its Go logger and the hosted C libraries but not the dataplane.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -23,22 +24,24 @@ struct Cmd {
     /// Output format.
     #[arg(long, value_enum, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[arg(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Subcommand)]
 enum ModeCmd {
-    /// Logging service.
+    /// Manage the control plane's logging level.
     #[clap(subcommand)]
     Logging(LoggingCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
 enum LoggingCmd {
-    /// Sets the new minimum log level.
+    /// Set the control plane's minimum log level.
     SetLevel(SetLogLevelCmd),
+    /// Show the control plane's current minimum log level.
+    Show,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -75,6 +78,7 @@ impl ModeCmd {
     pub fn action(&self) -> &'static str {
         match self {
             ModeCmd::Logging(LoggingCmd::SetLevel(..)) => "set-level",
+            ModeCmd::Logging(LoggingCmd::Show) => "show",
         }
     }
 }
@@ -99,7 +103,24 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 .await
                 .map_err(service.status(action))?;
 
-            output::success(action, format_args!("Set log level to {:?}.", cmd.level));
+            let level_name = cmd.level.to_possible_value().expect("no skipped variants");
+            output::success(
+                action,
+                format_args!("Set the control plane log level to '{}'.", level_name.get_name()),
+            );
+        }
+        ModeCmd::Logging(LoggingCmd::Show) => {
+            let response = service
+                .client()
+                .get_level(GetLevelRequest {})
+                .await
+                .map_err(service.status(action))?
+                .into_inner();
+
+            output::data(
+                || &response,
+                || println!("level: {}", ynpb::log_level_name(response.level)),
+            );
         }
     }
 

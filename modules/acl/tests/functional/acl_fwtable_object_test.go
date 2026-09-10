@@ -102,7 +102,7 @@ func TestACL_FWTableObjectStateLookup(t *testing.T) {
 	t.Cleanup(func() { _ = map6.Free() })
 
 	handle, err := backend.NewModule(
-		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "obj4", "obj6", nil,
+		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "obj4", "obj6",
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
@@ -163,7 +163,7 @@ func TestACL_FWTableObjectFallbackWithoutNames(t *testing.T) {
 	h, agent, backend := setupACLFWTableHarness(t)
 
 	handle, err := backend.NewModule(
-		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "", "", nil,
+		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "", "",
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
@@ -202,7 +202,7 @@ func TestACL_FWTableObjectUnknownNameRejected(t *testing.T) {
 	_, _, backend := setupACLFWTableHarness(t)
 
 	handle, err := backend.NewModule(
-		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "no-such-map", "", nil,
+		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "no-such-map", "",
 	)
 	require.NoError(t, err, "construction only declares the link and must succeed")
 	t.Cleanup(func() { _ = handle.Free() })
@@ -236,7 +236,7 @@ func TestACL_FWTableObjectDeleteRefusedWhileLinked(t *testing.T) {
 	t.Cleanup(func() { _ = map6.Free() })
 
 	handle, err := backend.NewModule(
-		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "obj4", "obj6", nil,
+		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "obj4", "obj6",
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
@@ -249,7 +249,7 @@ func TestACL_FWTableObjectDeleteRefusedWhileLinked(t *testing.T) {
 	require.Contains(t, err.Error(), "is linked by module")
 
 	unlinked, err := backend.NewModule(
-		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "", "", nil,
+		"acl0", []cacl.AclRule{checkStateDeny4Rule()}, "", "",
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = unlinked.Free() })

@@ -1,10 +1,66 @@
 package fwstate
 
 import (
+	"fmt"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
+
+// maskedUpdate merges only selected fields over the current configuration.
+//
+// The caller holds the mutation lock until publication, so independent
+// updates preserve one another regardless of their arrival order.
+func maskedUpdate(old *FwStateConfig, req *fwstatepb.UpdateConfigRequest) (*fwstatepb.UpdateConfigRequest, error) {
+	if req.ClearMulticast || req.ClearUnicast {
+		return nil, fmt.Errorf("endpoint clear flags cannot be combined with an update mask")
+	}
+	merged := &fwstatepb.UpdateConfigRequest{
+		SyncConfig: mergedSyncConfig(old, nil),
+	}
+	if old != nil {
+		merged.MapNameV4 = old.MapNameV4()
+		merged.MapNameV6 = old.MapNameV6()
+	}
+	for _, path := range req.UpdateMask.Paths {
+		switch path {
+		case "map_name_v4":
+			merged.MapNameV4 = req.MapNameV4
+		case "map_name_v6":
+			merged.MapNameV6 = req.MapNameV6
+		case "sync_config.dst_ether":
+			merged.SyncConfig.DstEther = req.GetSyncConfig().GetDstEther()
+		case "sync_config.dst_addr_unicast":
+			merged.SyncConfig.DstAddrUnicast = req.GetSyncConfig().GetDstAddrUnicast()
+		case "sync_config.port_unicast":
+			merged.SyncConfig.PortUnicast = req.GetSyncConfig().GetPortUnicast()
+		case "sync_config.src_addr":
+			merged.SyncConfig.SrcAddr = req.GetSyncConfig().GetSrcAddr()
+		case "sync_config.dst_addr_multicast":
+			merged.SyncConfig.DstAddrMulticast = req.GetSyncConfig().GetDstAddrMulticast()
+		case "sync_config.port_multicast":
+			merged.SyncConfig.PortMulticast = req.GetSyncConfig().GetPortMulticast()
+		case "sync_config.tcp_syn_ack":
+			merged.SyncConfig.TcpSynAck = req.GetSyncConfig().GetTcpSynAck()
+		case "sync_config.tcp_syn":
+			merged.SyncConfig.TcpSyn = req.GetSyncConfig().GetTcpSyn()
+		case "sync_config.tcp_fin":
+			merged.SyncConfig.TcpFin = req.GetSyncConfig().GetTcpFin()
+		case "sync_config.tcp":
+			merged.SyncConfig.Tcp = req.GetSyncConfig().GetTcp()
+		case "sync_config.udp":
+			merged.SyncConfig.Udp = req.GetSyncConfig().GetUdp()
+		case "sync_config.default":
+			merged.SyncConfig.Default = req.GetSyncConfig().GetDefault()
+		case "sync_config.sync_suppress_timeout":
+			merged.SyncConfig.SyncSuppressTimeout = req.GetSyncConfig().GetSyncSuppressTimeout()
+		default:
+			return nil, fmt.Errorf("unknown update mask path %q", path)
+		}
+	}
+	return merged, nil
+}
 
 // FwStateConfig is a service-owned fwstate module config plus the names of
 // the fwstate-map objects it links, which the service needs for ShowConfig
@@ -16,14 +72,16 @@ type FwStateConfig struct {
 	mapNameV6 string
 }
 
-// NewFWStateModuleConfig builds the config in one step: the request's
-// sync config merges over the replaced config's values (or the defaults
-// for a fresh config) and both map names are declared as object links,
-// resolving against published objects when the config is published.
+// NewFWStateModuleConfig builds the config in one step, ready to
+// publish.
 //
-// The map names are remembered only after the C construction succeeds,
-// so a failed construction leaves the previous linkage visible to
-// readers.
+// The request's sync settings merge over the values they replace, and
+// each named map is declared as an object link resolving against
+// published objects when the config is published. An empty map name
+// declares no link, and the module then counts and drops that family's
+// synced state. The map names are remembered only after the construction
+// succeeds, so a failed construction leaves the previous linkage visible
+// to readers.
 func NewFWStateModuleConfig(
 	agent *ffi.Agent,
 	name string,
@@ -31,21 +89,35 @@ func NewFWStateModuleConfig(
 	syncConfig *fwstatepb.SyncConfig,
 	fw4MapName, fw6MapName string,
 ) (*FwStateConfig, error) {
-	current := cfwstate.DefaultSyncConfig()
-	if old != nil {
-		current = old.ModuleConfig.GetSyncConfig()
-	}
+	merged := mergedSyncConfigC(old, syncConfig)
+	return newFWStateModuleConfig(agent, name, merged, fw4MapName, fw6MapName)
+}
 
-	var finalSync *cfwstate.SyncConfig
-	if syncConfig != nil {
-		merged := syncConfig.ToCWithDefaults(current)
-		finalSync = &merged
-	}
+// NewFWStateModuleConfigWithEndpointClears builds a replacement config while
+// honoring explicit requests to disable either synchronization endpoint.
+func NewFWStateModuleConfigWithEndpointClears(
+	agent *ffi.Agent,
+	name string,
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+	fw4MapName, fw6MapName string,
+) (*FwStateConfig, error) {
+	merged := mergedSyncConfigCWithClears(old, syncConfig, clearMulticast, clearUnicast)
+	return newFWStateModuleConfig(agent, name, merged, fw4MapName, fw6MapName)
+}
 
+// newFWStateModuleConfig installs the already merged values verbatim.
+func newFWStateModuleConfig(
+	agent *ffi.Agent,
+	name string,
+	syncConfig cfwstate.SyncConfig,
+	fw4MapName, fw6MapName string,
+) (*FwStateConfig, error) {
 	moduleCfg, err := cfwstate.NewModuleConfig(
 		agent,
 		name,
-		finalSync,
+		&syncConfig,
 		fw4MapName,
 		fw6MapName,
 	)
@@ -59,18 +131,73 @@ func NewFWStateModuleConfig(
 	}, nil
 }
 
-// mergedSyncConfig merges the request's sync config over the replaced
-// config's current values (or the defaults for a fresh config): the
-// exact values a construction would install.
+// mergedMapNames returns the map object links a replacement config
+// should declare.
+//
+// A legacy request naming a map relinks that family; leaving it unnamed keeps
+// the link the replaced config had, the only spelling the request has
+// for "leave this family alone". A fresh config left unnamed declares no
+// link at all, and the maps can be attached by a later update.
+func mergedMapNames(
+	old *FwStateConfig,
+	req *fwstatepb.UpdateConfigRequest,
+) (string, string) {
+	mapNameV4, mapNameV6 := req.GetMapNameV4(), req.GetMapNameV6()
+	if old == nil {
+		return mapNameV4, mapNameV6
+	}
+	if mapNameV4 == "" {
+		mapNameV4 = old.MapNameV4()
+	}
+	if mapNameV6 == "" {
+		mapNameV6 = old.MapNameV6()
+	}
+	return mapNameV4, mapNameV6
+}
+
+// mergedSyncConfig returns the sync settings a construction would
+// install: the request merged over the values it replaces.
 func mergedSyncConfig(
 	old *FwStateConfig,
 	syncConfig *fwstatepb.SyncConfig,
 ) *fwstatepb.SyncConfig {
+	return mergedSyncConfigWithClears(old, syncConfig, false, false)
+}
+
+func mergedSyncConfigWithClears(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+) *fwstatepb.SyncConfig {
+	return fwstatepb.FromCSyncConfig(mergedSyncConfigCWithClears(old, syncConfig, clearMulticast, clearUnicast))
+}
+
+// mergedSyncConfigC is the merge in the form the construction consumes.
+//
+// A request carrying no sync settings at all asks for no sync change,
+// which is not the same as asking for the defaults: it keeps the
+// replaced config's values, so an update touching only the linked maps
+// leaves synchronization exactly as it was.
+func mergedSyncConfigC(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+) cfwstate.SyncConfig {
+	return mergedSyncConfigCWithClears(old, syncConfig, false, false)
+}
+
+func mergedSyncConfigCWithClears(
+	old *FwStateConfig,
+	syncConfig *fwstatepb.SyncConfig,
+	clearMulticast, clearUnicast bool,
+) cfwstate.SyncConfig {
 	current := cfwstate.DefaultSyncConfig()
 	if old != nil {
 		current = old.ModuleConfig.GetSyncConfig()
 	}
-	return fwstatepb.FromCSyncConfig(syncConfig.ToCWithDefaults(current))
+	if syncConfig == nil && !clearMulticast && !clearUnicast {
+		return current
+	}
+	return syncConfig.ToCWithDefaultsAndClears(current, clearMulticast, clearUnicast)
 }
 
 // MergedSyncConfig returns the request's sync config merged with the

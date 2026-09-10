@@ -14,7 +14,7 @@ config_gen_ectx_get_device(
 	if (index >= config_gen_ectx->device_count) {
 		return NULL;
 	}
-	return ADDR_OF(config_gen_ectx->devices + index);
+	return config_gen_ectx->devices[index];
 }
 
 // Return the object execution context installed at the given object index, or
@@ -38,93 +38,78 @@ static inline void
 device_entry_ectx_count_recirc_drop(
 	struct device_entry_ectx *entry_ectx, const struct packet *packet
 ) {
-	uint64_t *counter = counter_handle_get_value(
-		ADDR_OF_NONNULL(&entry_ectx->counter_packet_recirc_drop)
-	);
+	uint64_t *counter =
+		counter_handle_get_value(entry_ectx->counter_packet_recirc_drop
+		);
 	counter[0] += 1;
 	counter[1] += rte_pktmbuf_pkt_len(packet_to_mbuf(packet));
 }
 
-// Advance the generation's worklists to the start of a worker tick.
+// Build the generation's device-entry worklists once.
 //
-// Must run on the owning worker before any packet is scheduled in the
-// tick. Once the lists are built, a tick start only flips the roles,
-// which turns the processed list into the to-execute list with no
-// per-node work; the first build walks the devices once and links every
-// input entry before every output entry, mirroring the historical phase
-// order of the full sweep. The freshly built list is the active one for
-// the current tick, so the build path must not flip.
+// Must run on the owning worker before any packet is scheduled. Every
+// entry is linked onto the home list, each device's input entry
+// before its output one. After the first build the lists are
+// permanent state and preparation does nothing: the round itself
+// drains the home list onto its untouched list and works entries
+// back home.
 static inline void
 config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 	if (config_gen_ectx->schedules_ready) {
-		config_gen_ectx->schedule_active ^= 1;
 		return;
 	}
 
-	rlist_init(&config_gen_ectx->schedule_lists[0]);
-	rlist_init(&config_gen_ectx->schedule_lists[1]);
+	rlist_init(&config_gen_ectx->entry_list);
+	rlist_init(&config_gen_ectx->ready_list);
 
-	for (uint64_t pass = 0; pass < 2; ++pass) {
-		for (uint64_t idx = 0; idx < config_gen_ectx->device_count;
-		     ++idx) {
-			struct device_ectx *device_ectx =
-				config_gen_ectx_get_device(
-					config_gen_ectx, idx
-				);
-			if (device_ectx == NULL) {
-				continue;
-			}
-
-			struct device_entry_ectx *device_entry_ectx;
-			if (pass == 0) {
-				device_entry_ectx =
-					ADDR_OF(&device_ectx->input_pipelines);
-			} else {
-				device_entry_ectx =
-					ADDR_OF(&device_ectx->output_pipelines);
-			}
-
-			rlist_add(
-				&config_gen_ectx->schedule_lists[0],
-				&device_entry_ectx->schedule_node
-			);
-			device_entry_ectx->schedule_list = 0;
+	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
+		struct device_ectx *device_ectx =
+			config_gen_ectx_get_device(config_gen_ectx, idx);
+		if (device_ectx == NULL) {
+			continue;
 		}
+
+		rlist_add(
+			&config_gen_ectx->entry_list,
+			&device_ectx->abs_input_pipelines->schedule_node
+		);
+		device_ectx->abs_input_pipelines->schedule_list =
+			device_entry_schedule_home;
+
+		rlist_add(
+			&config_gen_ectx->entry_list,
+			&device_ectx->abs_output_pipelines->schedule_node
+		);
+		device_ectx->abs_output_pipelines->schedule_list =
+			device_entry_schedule_home;
 	}
 
-	config_gen_ectx->schedule_active = 0;
 	config_gen_ectx->schedules_ready = 1;
 }
 
 // Schedule a packet onto a device entry's input list, moving the entry
-// onto the active worklist when needed.
+// onto the round's ready list when needed.
 //
-// An entry parked on the processed list after running this tick is
-// moved back to the active list so it runs again, reproducing the
-// recirculation semantics; an entry already queued for this tick is
-// left where it is. Before the lists are built the packet is only
-// placed on the entry's schedule and the first full sweep picks it up.
+// An entry anywhere but ready — home, or already drained onto the
+// round's untouched list — moves to the tail of ready so the round
+// runs it, reproducing the recirculation semantics; an entry already
+// queued stays where it is. Removal needs no list head, so the entry
+// may sit on any of the round's lists. Packets are only scheduled
+// from inside a worker round, whose preparation built the worklists
+// before any of them, so no readiness check is needed here.
 static inline void
 device_entry_ectx_schedule(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_entry_ectx *device_entry_ectx,
 	struct packet *packet
 ) {
-	if (!config_gen_ectx->schedules_ready) {
-		packet_front_input(&device_entry_ectx->schedule, packet);
-		return;
-	}
-
-	if (device_entry_ectx->schedule_list !=
-	    config_gen_ectx->schedule_active) {
+	if (device_entry_ectx->schedule_list != device_entry_schedule_ready) {
 		rlist_remove(&device_entry_ectx->schedule_node);
 		rlist_add(
-			&config_gen_ectx->schedule_lists
-				 [config_gen_ectx->schedule_active],
+			&config_gen_ectx->ready_list,
 			&device_entry_ectx->schedule_node
 		);
-		device_entry_ectx->schedule_list =
-			config_gen_ectx->schedule_active;
+		device_entry_ectx->schedule_list = device_entry_schedule_ready;
 	}
 
 	packet_front_input(&device_entry_ectx->schedule, packet);
@@ -151,7 +136,7 @@ module_ectx_route_input(
 	packet_front->pending_input_bytes += packet->data_len;
 
 	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&module_ectx->config_gen_ectx);
+		module_ectx->abs_config_gen_ectx;
 	struct device_ectx *device_ectx = config_gen_ectx_get_device(
 		config_gen_ectx, packet->tx_device_id
 	);
@@ -159,8 +144,7 @@ module_ectx_route_input(
 		packet_front_drop(packet_front, packet);
 		return;
 	}
-	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->input_pipelines);
+	struct device_entry_ectx *entry_ectx = device_ectx->abs_input_pipelines;
 	if (!packet_recirc_try_redirect(
 		    packet, module_ectx->packet_recirc_limit
 	    )) {
@@ -191,7 +175,7 @@ module_ectx_route_output(
 	packet_front->pending_output_bytes += packet->data_len;
 
 	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&module_ectx->config_gen_ectx);
+		module_ectx->abs_config_gen_ectx;
 	struct device_ectx *device_ectx = config_gen_ectx_get_device(
 		config_gen_ectx, packet->tx_device_id
 	);
@@ -200,7 +184,7 @@ module_ectx_route_output(
 		return;
 	}
 	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->output_pipelines);
+		device_ectx->abs_output_pipelines;
 	if (!packet_recirc_try_redirect(
 		    packet, module_ectx->packet_recirc_limit
 	    )) {

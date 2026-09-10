@@ -18,6 +18,7 @@ RELEASE_DIR := $(TARGET_DIR)/release
 CLI_CORE_MODULES := \
 	common \
 	device-list \
+	device-delete \
 	inspect \
 	pipeline \
 	function \

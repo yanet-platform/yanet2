@@ -1,4 +1,4 @@
-package sshcert_test
+package loader_test
 
 import (
 	"crypto/tls"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 func TestNewLoader_FileAutoDetect(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNewLoader_FileAutoDetect(t *testing.T) {
 	path := t.TempDir() + "/ca.pub"
 	require.NoError(t, os.WriteFile(path, expectedData, 0o600))
 
-	loader := sshcert.NewLoader(path)
+	loader := loader.NewLoader(path)
 	data, err := loader.Load()
 	require.NoError(t, err)
 	assert.Equal(t, expectedData, data)
@@ -35,7 +35,7 @@ func TestNewLoader_HTTPAutoDetect(t *testing.T) {
 	)
 	defer server.Close()
 
-	loader := sshcert.NewLoader(server.URL + "/ca.yaml")
+	loader := loader.NewLoader(server.URL + "/ca.yaml")
 	_, err := loader.Load()
 	require.Error(t, err)
 	var verificationError *tls.CertificateVerificationError
@@ -43,7 +43,7 @@ func TestNewLoader_HTTPAutoDetect(t *testing.T) {
 }
 
 func TestNewLoader_HTTPAutoDetect_NoTLS(t *testing.T) {
-	loader := sshcert.NewLoader("http://example.com/ca.yaml")
+	loader := loader.NewLoader("http://example.com/ca.yaml")
 	assert.Equal(t, "http://example.com/ca.yaml", loader.Source())
 }
 
@@ -58,7 +58,7 @@ func TestHTTPLoader_Success(t *testing.T) {
 	)
 	defer server.Close()
 
-	loader := sshcert.NewLoader(server.URL + "/ca.yaml")
+	loader := loader.NewLoader(server.URL + "/ca.yaml")
 	data, err := loader.Load()
 	require.NoError(t, err)
 	assert.Equal(t, expectedData, data)
@@ -72,7 +72,7 @@ func TestHTTPLoader_Non200Status(t *testing.T) {
 	)
 	defer server.Close()
 
-	loader := sshcert.NewLoader(server.URL + "/missing")
+	loader := loader.NewLoader(server.URL + "/missing")
 	_, err := loader.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected status 404")

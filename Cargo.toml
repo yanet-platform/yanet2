@@ -23,6 +23,7 @@ members = [
     "cli/modules/ready",
     "cli/modules/metrics",
     "cli/modules/device",
+    "cli/modules/device-delete",
     "modules/acl/cli",
     "modules/balancer2/cli",
     "modules/blackhole/cli",

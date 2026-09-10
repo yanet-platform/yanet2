@@ -427,6 +427,21 @@ pub fn paint_dim(text: &str) -> String {
     text.truecolor(127, 127, 127).to_string()
 }
 
+/// Paints bold text after the caller has checked terminal colour support.
+pub fn paint_bold(text: &str) -> String {
+    text.bold().to_string()
+}
+
+/// Paints yellow text after the caller has checked terminal colour support.
+pub fn paint_warning(text: &str) -> String {
+    text.yellow().to_string()
+}
+
+/// Paints red text after the caller has checked terminal colour support.
+pub fn paint_error(text: &str) -> String {
+    text.red().to_string()
+}
+
 /// Returns `true` if the current locale advertises UTF-8 encoding.
 fn is_utf8_locale() -> bool {
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {

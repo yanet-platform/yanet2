@@ -22,6 +22,8 @@ pub use self::interceptor::AuthLayer;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
+    /// No token. A client certificate given for the TLS connection
+    /// identifies the caller instead.
     None,
     /// SSH certificate authentication via ssh-agent.
     Sshcert,
@@ -38,8 +40,8 @@ pub struct AuthArgs {
     /// `none`.
     #[arg(long, global = true, env = "YANET_AUTH")]
     pub auth: Option<AuthMethod>,
-    /// Substring matched against a certificate's key id to select it from
-    /// the SSH agent, required when `--auth sshcert` is in effect.
+    /// Key id of the certificate to use from the SSH agent, matched
+    /// exactly, required when `--auth sshcert` is in effect.
     ///
     /// Falls back to the `cert_tag` key of the configuration file.
     #[arg(long, global = true, env = "YANET_CERT_TAG")]

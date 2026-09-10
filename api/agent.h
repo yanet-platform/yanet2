@@ -119,6 +119,30 @@ agent_memory_limit(struct agent *agent);
 int
 agent_extend(struct agent *agent, uint64_t size, yanet_error **err);
 
+// Grows the shared memory of a named agent and reports its new size.
+//
+// Finding the agent and growing it happen under one hold of the
+// configuration lock, so a concurrent re-attach of the same name cannot
+// retire the agent midway.
+//
+// @param shm Handle to shared memory segment
+// @param instance_idx Index of the dataplane instance
+// @param name Name the agent was attached under
+// @param size Number of bytes to add
+// @param memory_limit Receives the total size reserved for the agent
+// @param err Error output parameter
+//
+// @return 0 on success, 1 if no agent goes by that name, -1 on error.
+int
+yanet_shm_extend_agent(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	const char *name,
+	uint64_t size,
+	uint64_t *memory_limit,
+	yanet_error **err
+);
+
 // Returns number of dataplane instances in the specified shared memory segment.
 //
 // @param shm Handle to the shared memory segment.

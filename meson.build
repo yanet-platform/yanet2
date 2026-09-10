@@ -15,8 +15,11 @@ project(
 )
 
 yanet_project_args = ['-g', '-D_GNU_SOURCE']
+# Also held on its own because the dataplane version banner reports it.
+yanet_isa_flag = ''
 if host_machine.cpu_family() == 'x86_64'
-  yanet_project_args += '-march=' + get_option('cpu_arch')
+  yanet_isa_flag = '-march=' + get_option('cpu_arch')
+  yanet_project_args += yanet_isa_flag
 endif
 # The aarch64 branch appends its own ISA flag to yanet_project_args
 # further down, once the DPDK subproject() has resolved its ISA baseline.
@@ -35,6 +38,9 @@ configure_file(output: build_cfg, configuration: yanet_conf)
 # Volatile config: version/commit/timestamp change on essentially every
 # build. Kept out of yanet_build_config.h and included only by the version
 # banner, so it does not poison ccache manifests across the rest of the tree.
+#
+# The header itself is written further down, once the DPDK subproject has
+# resolved the target ISA and the sanitizer set is final.
 yanet_stamp = configuration_data()
 
 # Version and build info
@@ -70,9 +76,6 @@ build_date = run_command(
 )
 yanet_stamp.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
 
-build_stamp = 'yanet_build_stamp.h'
-configure_file(output: build_stamp, configuration: yanet_stamp)
-
 dataplane_only = get_option('dataplane_only')
 
 if not dataplane_only
@@ -89,6 +92,14 @@ yanet_cgo_cflags = []
 yanet_cgo_ldflags = []
 sanitize_link_args = []
 b_sanitize = get_option('b_sanitize')
+# Every sanitizer the C tree is instrumented with, as the version banner
+# reports it. The fuzzing build below adds the ones it forces on.
+yanet_sanitizers = []
+foreach sanitizer : ['address', 'undefined', 'thread', 'memory', 'leak']
+  if b_sanitize.contains(sanitizer)
+    yanet_sanitizers += sanitizer
+  endif
+endforeach
 if b_sanitize != 'none'
     yanet_project_args += '-DYANET_SANITIZE'
     sanitize_flags = []
@@ -128,6 +139,11 @@ if get_option('fuzzing').enabled()
   # For fuzzing builds, all libraries should be instrumented with coverage counters.
   yanet_c_args += fuzz_args
   yanet_link_args += fuzz_args
+  foreach sanitizer : ['fuzzer', 'address', 'undefined']
+    if not yanet_sanitizers.contains(sanitizer)
+      yanet_sanitizers += sanitizer
+    endif
+  endforeach
 
   # Add sanitizer flags to CGO for Go binaries
   cgo_flags = '-fsanitize=address -g'
@@ -145,8 +161,9 @@ yanet_rootdir = include_directories('.')
 # Modules will populate this with their fuzzing targets
 fuzzing_targets = {}
 
+yanet_dpdk_platform = get_option('dpdk_platform')
 libdpdk_default_options = [
-  'platform=' + get_option('dpdk_platform'),
+  'platform=' + yanet_dpdk_platform,
   'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
   # An empty enable_apps means "build every app", so any app a disable list
   # fails to name is still built. The glob also covers apps added upstream
@@ -230,6 +247,7 @@ if host_machine.cpu_family() == 'aarch64'
   else
     aarch64_platform = get_option('dpdk_platform')
   endif
+  yanet_dpdk_platform = aarch64_platform
 
   dpdk_machine_args = libdpdk.get_variable('machine_args')
   dpdk_aarch64_isa_flag = dpdk_machine_args.length() > 0 ? dpdk_machine_args[0] : ''
@@ -273,9 +291,23 @@ if host_machine.cpu_family() == 'aarch64'
     endif
   endif
 
-  yanet_project_args += yanet_aarch64_isa_flag
+  yanet_isa_flag = yanet_aarch64_isa_flag
+  yanet_project_args += yanet_isa_flag
 endif
 add_project_arguments(yanet_project_args, language: 'c')
+
+yanet_target = host_machine.cpu_family()
+if yanet_isa_flag != ''
+  yanet_target += ' ' + yanet_isa_flag
+endif
+yanet_stamp.set_quoted('YANET_TARGET', yanet_target)
+yanet_stamp.set_quoted('YANET_DPDK_PLATFORM', yanet_dpdk_platform)
+yanet_stamp.set_quoted(
+  'YANET_SANITIZERS',
+  yanet_sanitizers.length() > 0 ? ','.join(yanet_sanitizers) : 'none',
+)
+build_stamp = 'yanet_build_stamp.h'
+configure_file(output: build_stamp, configuration: yanet_stamp)
 
 subdir('common')
 subdir('lib')

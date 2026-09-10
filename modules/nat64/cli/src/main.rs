@@ -29,7 +29,13 @@ const SERVICE_NAME: &str = "modules.nat64.controlplane.nat64pb.v1.NAT64Service";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
-/// NAT64 module CLI.
+fn client(channel: LayeredChannel) -> Nat64ServiceClient<LayeredChannel> {
+    Nat64ServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+/// Manages nat64 module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -41,32 +47,32 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum ModeCmd {
-    /// List all NAT64 configurations
+    /// List all NAT64 configurations.
     List,
-    /// Show current configuration
+    /// Show current configuration.
     Show(ShowConfigCmd),
-    /// Delete a nat64 module config.
+    /// Delete a config.
     Delete(DeleteConfigCmd),
-    /// Manage NAT64 prefixes
+    /// Manage NAT64 prefixes.
     Prefix {
         #[clap(subcommand)]
         cmd: PrefixCmd,
     },
-    /// Manage NAT64 mappings
+    /// Manage NAT64 mappings.
     Mapping {
         #[clap(subcommand)]
         cmd: MappingCmd,
     },
-    /// Set MTU values
+    /// Set MTU values.
     Mtu(MtuCmd),
-    /// Set drop_unknown flags
+    /// Set drop_unknown flags.
     Drop(DropCmd),
 }
 
@@ -88,17 +94,17 @@ impl ModeCmd {
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum PrefixCmd {
-    /// Add a new NAT64 prefix
+    /// Add a new NAT64 prefix.
     Add(AddPrefixCmd),
-    /// Remove NAT64 prefix
+    /// Remove NAT64 prefix.
     Remove(RemovePrefixCmd),
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum MappingCmd {
-    /// Add a new IPv4-IPv6 mapping
+    /// Add a new IPv4-IPv6 mapping.
     Add(AddMappingCmd),
-    /// Remove IPv4-IPv6 mapping
+    /// Remove IPv4-IPv6 mapping.
     Remove(RemoveMappingCmd),
 }
 
@@ -181,10 +187,10 @@ pub struct DropCmd {
     /// The name of the config to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// Drop packets with unknown prefix
+    /// Drop packets with unknown prefix.
     #[arg(long)]
     pub drop_unknown_prefix: bool,
-    /// Drop packets with unknown mapping
+    /// Drop packets with unknown mapping.
     #[arg(long)]
     pub drop_unknown_mapping: bool,
 }
@@ -220,12 +226,7 @@ pub struct NAT64Service {
 
 impl NAT64Service {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            Nat64ServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -320,7 +321,7 @@ impl NAT64Service {
             .into_inner();
         log::debug!("delete config response: {response:?}");
 
-        output::success("delete", format_args!("Deleted nat64 {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -339,7 +340,7 @@ impl NAT64Service {
 
         output::success(
             "add prefix",
-            format_args!("Added prefix {} to {}.", cmd.prefix, cmd.config_name),
+            format_args!("Added prefix {} to config '{}'.", cmd.prefix, cmd.config_name),
         );
 
         Ok(())
@@ -359,7 +360,7 @@ impl NAT64Service {
 
         output::success(
             "remove prefix",
-            format_args!("Removed prefix {} from {}.", cmd.prefix, cmd.config_name),
+            format_args!("Removed prefix {} from config '{}'.", cmd.prefix, cmd.config_name),
         );
 
         Ok(())
@@ -382,7 +383,7 @@ impl NAT64Service {
         output::success(
             "add mapping",
             format_args!(
-                "Added mapping {} -> {} (prefix {}) to {}.",
+                "Added mapping {} -> {} (prefix {}) to config '{}'.",
                 cmd.ipv4, cmd.ipv6, cmd.prefix_index, cmd.config_name
             ),
         );
@@ -404,7 +405,7 @@ impl NAT64Service {
 
         output::success(
             "remove mapping",
-            format_args!("Removed mapping for {} from {}.", cmd.ipv4, cmd.config_name),
+            format_args!("Removed mapping for {} from config '{}'.", cmd.ipv4, cmd.config_name),
         );
 
         Ok(())
@@ -428,7 +429,7 @@ impl NAT64Service {
         output::success(
             "set mtu",
             format_args!(
-                "Set MTU for {} (IPv4: {}, IPv6: {}).",
+                "Set MTU on config '{}' (IPv4: {}, IPv6: {}).",
                 cmd.config_name, cmd.ipv4_mtu, cmd.ipv6_mtu
             ),
         );
@@ -452,7 +453,7 @@ impl NAT64Service {
         output::success(
             "set drop",
             format_args!(
-                "Set drop flags for {} (unknown prefix: {}, unknown mapping: {}).",
+                "Set drop flags on config '{}' (unknown prefix: {}, unknown mapping: {}).",
                 cmd.config_name, cmd.drop_unknown_prefix, cmd.drop_unknown_mapping
             ),
         );
@@ -522,15 +523,9 @@ fn parse_prefix(value: &str) -> Result<Contiguous<Ipv6Network>, String> {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            Nat64ServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]

@@ -59,57 +59,57 @@
 
 #include "lib/logging/log.h"
 
+#include <rte_errno.h>
 #include <rte_ethdev.h>
+#include <rte_lcore.h>
+#include <rte_mempool.h>
 #include <rte_prefetch.h>
 
 #include <string.h>
 
-// Lookahead that hides the two cache misses every received packet costs.
+// Receive the next batch and warm its coldest lines ahead of the parse.
 //
 // Every received packet costs two cache lines nobody has touched lately:
 // its metadata in the headroom, last written a whole pool rotation ago,
-// and the first line of the frame, written by the NIC. The out-of-order
-// window overlaps that latency for two or three packets on its own. Eight
-// was measured rather than derived: on the firewall profile it is where
-// the parser stops waiting on the frame line, while the prefetches are
-// still few enough not to be dropped.
-#define WORKER_RX_PREFETCH_DISTANCE 8
-
+// and the first line of the frame, written by the NIC. The batch is held
+// until the next round and parsed only after this round transmits its
+// predecessor, giving the prefetches a whole transmit to land.
 static void
-worker_read(
-	struct dataplane_worker *worker, struct config_gen_ectx *config_gen_ectx
-) {
+worker_rx_stage(struct dataplane_worker *worker) {
 	struct worker_read_ctx *ctx = &worker->read_ctx;
-	struct rte_mbuf *mbufs[ctx->read_size];
 
 	uint16_t read = rte_eth_rx_burst(
-		worker->port_id, worker->queue_id, mbufs, ctx->read_size
+		worker->port_id, worker->queue_id, ctx->staged, ctx->read_size
 	);
+	ctx->staged_count = read;
+
 	*(worker->dp_worker->rx_count) += read;
 	if (worker->dp_worker->rx_bursts != NULL) {
 		worker->dp_worker->rx_bursts[read] += 1;
 	}
 
-	// Keep the lookahead full: the first packets up front, then one more
-	// for every packet parsed.
-	for (uint32_t idx = 0; idx < read && idx < WORKER_RX_PREFETCH_DISTANCE;
-	     ++idx) {
-		rte_prefetch0(mbufs[idx]->buf_addr);
-		rte_prefetch0(rte_pktmbuf_mtod(mbufs[idx], void *));
+	for (uint16_t idx = 0; idx < read; ++idx) {
+		rte_prefetch0(ctx->staged[idx]->buf_addr);
+		rte_prefetch0(rte_pktmbuf_mtod(ctx->staged[idx], void *));
 	}
+}
 
-	for (uint32_t idx = 0; idx < read; ++idx) {
-		if (idx + WORKER_RX_PREFETCH_DISTANCE < read) {
-			struct rte_mbuf *ahead =
-				mbufs[idx + WORKER_RX_PREFETCH_DISTANCE];
-			rte_prefetch0(ahead->buf_addr);
-			rte_prefetch0(rte_pktmbuf_mtod(ahead, void *));
-		}
+// Parse the staged batch and schedule it into the pipeline.
+//
+// The batch was received at the end of the previous round and prefetched
+// then. The execution context is the one this round snapshotted and must
+// be non-NULL.
+static void
+worker_process_staged(
+	struct dataplane_worker *worker, struct config_gen_ectx *config_gen_ectx
+) {
+	struct worker_read_ctx *ctx = &worker->read_ctx;
 
-		struct packet *packet = mbuf_to_packet(mbufs[idx]);
+	for (uint16_t idx = 0; idx < ctx->staged_count; ++idx) {
+		struct packet *packet = mbuf_to_packet(ctx->staged[idx]);
 		memset(packet, 0, sizeof(struct packet));
 		// FIXME update packet fields
-		packet->mbuf = mbufs[idx];
+		packet->mbuf = ctx->staged[idx];
 
 		packet->rx_device_id = worker->device_id;
 		// Preserve device by default
@@ -122,29 +122,34 @@ worker_read(
 			continue;
 		}
 
-		// With no active config there is no device schedule to route
-		// into, so free the mbuf and account it as a drop rather than
-		// letting pre-config traffic accumulate in the NIC RX ring.
-		if (config_gen_ectx == NULL) {
-			rte_pktmbuf_free(mbufs[idx]);
-			*(worker->dp_worker->drop_count) += 1;
-			continue;
-		}
-
 		struct device_ectx *device_ectx = config_gen_ectx_get_device(
 			config_gen_ectx, packet->tx_device_id
 		);
 		if (device_ectx == NULL) {
-			rte_pktmbuf_free(mbufs[idx]);
+			rte_pktmbuf_free(ctx->staged[idx]);
 			*(worker->dp_worker->drop_count) += 1;
 			continue;
 		}
 		device_entry_ectx_schedule(
 			config_gen_ectx,
-			ADDR_OF(&device_ectx->input_pipelines),
+			device_ectx->abs_input_pipelines,
 			packet
 		);
 	}
+
+	ctx->staged_count = 0;
+}
+
+static void
+worker_drop_staged(struct dataplane_worker *worker) {
+	struct worker_read_ctx *ctx = &worker->read_ctx;
+
+	for (uint16_t idx = 0; idx < ctx->staged_count; ++idx) {
+		rte_pktmbuf_free(ctx->staged[idx]);
+	}
+
+	*(worker->dp_worker->drop_count) += ctx->staged_count;
+	ctx->staged_count = 0;
 }
 
 static size_t
@@ -284,25 +289,31 @@ worker_write(
 
 static void
 worker_loop_round(struct dataplane_worker *worker) {
-	struct cp_config *cp_config = worker->instance->cp_config;
-	struct worker_round round = worker_round_prepare(
-		worker->dp_worker,
-		cp_config,
-		tsc_clock_get_time_ns(&worker->dp_worker->clock)
+	uint64_t current_time_ns =
+		tsc_clock_get_time_ns(&worker->dp_worker->clock);
+	worker_rx_pool_sampler_sample(
+		&worker->rx_pool_sampler, worker->rx_mempool, current_time_ns
 	);
+	struct worker_round round =
+		worker_round_prepare(worker->dp_worker, current_time_ns);
 	struct cp_config_gen *cp_config_gen = round.cp_config_gen;
 	struct config_gen_ectx *config_gen_ectx = round.config_gen_ectx;
 
-	// No configuration has been installed yet (startup). worker_read frees
-	// the RX mbufs itself when handed a NULL config_gen_ectx, so pre-config
-	// traffic does not accumulate and get processed stale once a
-	// configuration appears. worker_write still runs to drain remote rx
-	// pipes and reclaim tx pipes.
+	// No configuration has been installed yet (startup): free the
+	// staged batch and keep the ring drained.
+	//
+	// The batch polled during the last configuration-less round is the
+	// only pre-configuration traffic that survives the transition, and
+	// it is parsed by a round that already holds the new configuration,
+	// never stale. The write side still runs to drain remote rx pipes
+	// and reclaim tx pipes.
 	if (config_gen_ectx == NULL) {
-		worker_read(worker, NULL);
+		worker_drop_staged(worker);
 
 		struct packet_front packet_front;
 		packet_front_init(&packet_front);
+
+		worker_rx_stage(worker);
 
 		worker_write(worker, &packet_front);
 		return;
@@ -310,11 +321,16 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 	struct packet_front *packet_front = &config_gen_ectx->packet_front;
 
-	worker_read(worker, config_gen_ectx);
+	worker_process_staged(worker, config_gen_ectx);
 
 	worker_pipeline_round(
 		worker->dp_worker, cp_config_gen, config_gen_ectx, packet_front
 	);
+
+	// Poll the next batch and warm its lines just before the transmit:
+	// parsing waits for the next round, so the prefetches overlap the
+	// whole transmit instead of stalling the parse.
+	worker_rx_stage(worker);
 
 	worker_write(worker, packet_front);
 
@@ -332,6 +348,25 @@ worker_loop_round(struct dataplane_worker *worker) {
 static void *
 worker_thread_start(void *arg) {
 	struct dataplane_worker *worker = (struct dataplane_worker *)arg;
+
+	// Give the thread an lcore id so the pool cache serves it.
+	//
+	// The mempool cache is indexed by lcore id, and a plain thread has
+	// none: every alloc and free then goes through the pool ring, which
+	// recycles mbufs in FIFO order over the whole pool. With the cache a
+	// freed mbuf is the next one the NIC gets back, its lines still in
+	// L2. Registering also disables DPDK multi-process support for the
+	// rest of the process, so no secondary process can attach afterwards.
+	// The call fails when EAL has no lcore id left or the multi-process
+	// channel is already in use, and the worker then runs without the
+	// cache.
+	if (rte_thread_register() != 0) {
+		LOG(ERROR,
+		    "failed to register worker core_id=%u as an lcore, running "
+		    "without the pool cache: %s",
+		    worker->config.core_id,
+		    rte_strerror(rte_errno));
+	}
 
 	while (1) {
 		worker_loop_round(worker);
@@ -432,6 +467,7 @@ dataplane_worker_init(
 	dp_config->worker_count += 1;
 
 	worker->read_ctx.read_size = WORKER_RX_BURST_SIZE;
+	worker->read_ctx.staged_count = 0;
 	worker->write_ctx.write_size = 32;
 	worker->write_ctx.rx_pipes = NULL;
 
@@ -466,11 +502,19 @@ dataplane_worker_init(
 
 	uint32_t num_mbufs = config->num_mbufs ? config->num_mbufs : 16384;
 
+	// Sized under both limits the pool enforces, so a small pool degrades
+	// instead of failing to start.
+	//
+	// The pool refuses a cache above its own maximum, or one whose flush
+	// threshold, one and a half times the cache, exceeds the pool.
+	uint32_t cache_size =
+		RTE_MIN((uint32_t)RTE_MEMPOOL_CACHE_MAX_SIZE, num_mbufs / 2);
+
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,
 		num_mbufs,
 		MBUF_MAX_SIZE,
-		0,
+		cache_size,
 		sizeof(struct rte_pktmbuf_pool_private),
 		rte_pktmbuf_pool_init,
 		NULL,

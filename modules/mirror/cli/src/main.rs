@@ -1,8 +1,5 @@
 use core::fmt::{self, Display, Formatter};
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
@@ -18,6 +15,7 @@ use ync::{
     completion,
     errors::Error,
     output::{self, CommonFormat},
+    yaml,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
@@ -27,7 +25,7 @@ pub mod mirrorpb {
     tonic::include_proto!("modules.mirror.controlplane.mirrorpb.v1");
 }
 
-/// Mirror module.
+/// Manages mirror module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -39,16 +37,20 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Delete a config.
     Delete(DeleteCmd),
+    /// Create or replace a config.
     Update(UpdateCmd),
+    /// Show a config.
     Show(ShowCmd),
+    /// List configs.
     List,
 }
 
@@ -235,20 +237,14 @@ impl TryFrom<Vec<mirrorpb::Rule>> for MirrorConfig {
     }
 }
 
-impl MirrorConfig {
-    pub fn load<P>(path: P) -> Result<Self, Box<dyn core::error::Error>>
-    where
-        P: AsRef<Path>,
-    {
-        let file = File::open(path)?;
-        let config = serde_yaml::from_reader(file)?;
-
-        Ok(config)
-    }
-}
-
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.mirror.controlplane.mirrorpb.v1.MirrorService";
+
+fn client(channel: LayeredChannel) -> MirrorServiceClient<LayeredChannel> {
+    MirrorServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
 
 pub struct MirrorService {
     service: Service<MirrorServiceClient<LayeredChannel>>,
@@ -256,12 +252,7 @@ pub struct MirrorService {
 
 impl MirrorService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            MirrorServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -337,13 +328,13 @@ impl MirrorService {
             .await
             .map_err(self.service.status("delete"))?;
 
-        output::success("delete", format_args!("Deleted mirror config {}.", cmd.config));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
         Ok(())
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config = MirrorConfig::load(&cmd.file).map_err(|e| self.service.invalid("update", e.to_string()))?;
+        let config: MirrorConfig = yaml::load(&cmd.file).map_err(|e| self.service.invalid("update", e.to_string()))?;
         let rules: Vec<mirrorpb::Rule> = config
             .try_into()
             .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("update", e.to_string()))?;
@@ -354,7 +345,7 @@ impl MirrorService {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated mirror config {}.", cmd.config));
+        output::success("update", format_args!("Updated config '{}'.", cmd.config));
 
         Ok(())
     }
@@ -381,15 +372,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            MirrorServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]

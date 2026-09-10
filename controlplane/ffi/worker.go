@@ -6,11 +6,23 @@ import "C"
 
 import "fmt"
 
+// maxUint32 bounds the pool gauges: both live in the dataplane as
+// mempool object counts, whose native width is 32 bits.
+const maxUint32 = uint64(1<<32 - 1)
+
 const (
 	singleValueIdx = 0
 	packetsIdx     = 0
 	bytesIdx       = 1
 )
+
+// WorkerRxMempool is the occupancy of one worker's RX packet pool, in
+// mempool objects. In-use objects are the difference Capacity minus
+// Available, which counts mbufs held by NIC descriptors and in flight.
+type WorkerRxMempool struct {
+	Capacity  uint32
+	Available uint32
+}
 
 type WorkerCounter struct {
 	WorkerIdx       uint32
@@ -29,6 +41,7 @@ type WorkerCounter struct {
 	LocalTxDrops    uint64
 	RemoteTxDrops   uint64
 	Disposed        uint64
+	RxMempool       *WorkerRxMempool
 }
 
 func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
@@ -51,6 +64,8 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	localTxDrops := counterSet.Lookup("local_tx_drops", 1).Require()
 	remoteTxDrops := counterSet.Lookup("remote_tx_drops", 1).Require()
 	drops := counterSet.Lookup("drops", 1).Require()
+	rxMempoolCapacity := counterSet.Lookup("rx_mempool_capacity", 1).Require()
+	rxMempoolAvailable := counterSet.Lookup("rx_mempool_available", 1).Require()
 
 	if err := counterSet.Err(); err != nil {
 		return nil, fmt.Errorf("failed to resolve worker counters: %w", err)
@@ -65,6 +80,14 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 				"failed to get metadata for worker at index %d",
 				idx,
 			)
+		}
+
+		pool, err := workerRxMempool(
+			rxMempoolCapacity.Value(idx, singleValueIdx),
+			rxMempoolAvailable.Value(idx, singleValueIdx),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("worker %d: %w", idx, err)
 		}
 
 		result[idx] = WorkerCounter{
@@ -84,8 +107,33 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			LocalTxDrops:    localTxDrops.Value(idx, singleValueIdx),
 			RemoteTxDrops:   remoteTxDrops.Value(idx, singleValueIdx),
 			Disposed:        drops.Value(idx, singleValueIdx),
+			RxMempool:       pool,
 		}
 	}
 
 	return result, nil
+}
+
+// workerRxMempool validates one worker's pool gauge pair. A snapshot no
+// healthy dataplane would publish is an error rather than a clamped or
+// zero-valued pool, so monitoring sees the failure instead of a
+// plausible value.
+func workerRxMempool(capacity, available uint64) (*WorkerRxMempool, error) {
+	if capacity == 0 || capacity > maxUint32 {
+		return nil, fmt.Errorf(
+			"invalid rx mempool capacity %d", capacity,
+		)
+	}
+	if available > capacity {
+		return nil, fmt.Errorf(
+			"rx mempool availability %d exceeds capacity %d",
+			available,
+			capacity,
+		)
+	}
+
+	return &WorkerRxMempool{
+		Capacity:  uint32(capacity),
+		Available: uint32(available),
+	}, nil
 }

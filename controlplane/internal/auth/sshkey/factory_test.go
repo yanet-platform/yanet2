@@ -111,7 +111,7 @@ func TestNewFromConfig(t *testing.T) {
 	requestInfo := &core.RequestInfo{FullMethod: method}
 	token := signToken(t, signer, "alice", method, time.Now().UnixNano(), "nonce-1")
 
-	authInfo, err := authenticator.Authenticate(t.Context(), token, requestInfo)
+	authInfo, err := authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 	require.NoError(t, err)
 	require.Equal(t, &core.AuthInfo{
 		Subject:    core.NewLocalSubject("alice"),
@@ -138,7 +138,7 @@ func TestNewFromConfigTimeWindow(t *testing.T) {
 		authenticator, err := sshkey.NewFromConfig(rawConfig)
 		require.NoError(t, err)
 
-		_, err = authenticator.Authenticate(t.Context(), token, requestInfo)
+		_, err = authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 		require.NoError(t, err)
 	})
 
@@ -148,7 +148,7 @@ func TestNewFromConfigTimeWindow(t *testing.T) {
 		authenticator, err := sshkey.NewFromConfig(rawConfig)
 		require.NoError(t, err)
 
-		_, err = authenticator.Authenticate(t.Context(), token, requestInfo)
+		_, err = authenticator.Authenticate(t.Context(), core.Credential{Token: token}, requestInfo)
 		require.Error(t, err)
 	})
 }

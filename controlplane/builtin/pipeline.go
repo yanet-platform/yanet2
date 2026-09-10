@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
@@ -11,7 +12,6 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/internal/agenterr"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -178,7 +178,10 @@ func (m *Pipeline) Update(
 	defer agent.Close()
 
 	if err := agent.UpdatePipeline(pipeline); err != nil {
-		return nil, agenterr.ClassifyUpdate(err)
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &ynpb.UpdatePipelineResponse{}, nil
@@ -205,7 +208,14 @@ func (m *Pipeline) Delete(
 	defer agent.Close()
 
 	if err := agent.DeletePipeline(pipelineName); err != nil {
-		return nil, agenterr.ClassifyDelete(err)
+		switch {
+		case errors.Is(err, ffi.ErrNotFound):
+			return nil, status.Error(codes.NotFound, err.Error())
+		case errors.Is(err, ffi.ErrFailedPrecondition):
+			// The live configuration still runs the pipeline.
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &ynpb.DeletePipelineResponse{}, nil

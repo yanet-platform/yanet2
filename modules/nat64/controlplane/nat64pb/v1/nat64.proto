@@ -15,16 +15,24 @@ service NAT64Service {
   // ShowConfig returns the current configuration of the NAT64 module
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
 
-  // AddPrefix adds a new NAT64 prefix to the configuration
+  // AddPrefix adds a NAT64 prefix to the configuration.
+  //
+  // Adding a prefix that is already present is a no-op.
   rpc AddPrefix(AddPrefixRequest) returns (AddPrefixResponse) {}
 
-  // RemovePrefix removes a NAT64 prefix from the configuration
+  // RemovePrefix removes a NAT64 prefix from the configuration.
+  //
+  // Returns NotFound if the config or prefix is absent.
   rpc RemovePrefix(RemovePrefixRequest) returns (RemovePrefixResponse) {}
 
-  // AddMapping adds a new IPv4-IPv6 address mapping
+  // AddMapping adds an IPv4-IPv6 address mapping.
+  //
+  // Mappings are keyed by IPv4, so adding one for an already mapped IPv4 replaces it.
   rpc AddMapping(AddMappingRequest) returns (AddMappingResponse) {}
 
-  // RemoveMapping removes an IPv4-IPv6 address mapping
+  // RemoveMapping removes an IPv4-IPv6 address mapping.
+  //
+  // Returns NotFound if the config or IPv4 mapping is absent.
   rpc RemoveMapping(RemoveMappingRequest) returns (RemoveMappingResponse) {}
 
   // SetMTU sets MTU values for IPv4/IPv6

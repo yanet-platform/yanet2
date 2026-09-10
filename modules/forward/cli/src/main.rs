@@ -22,7 +22,7 @@ pub mod forwardpb {
     tonic::include_proto!("modules.forward.controlplane.forwardpb.v1");
 }
 
-/// Forward module.
+/// Manages forward module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -34,16 +34,20 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Delete a config.
     Delete(DeleteCmd),
+    /// Create or replace a config.
     Update(UpdateCmd),
+    /// Show a config.
     Show(ShowCmd),
+    /// List configs.
     List,
 }
 
@@ -182,18 +186,19 @@ fn bind_request_name(request: &mut UpdateConfigRequest, name: &str) -> Result<()
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.forward.controlplane.forwardpb.v1.ForwardService";
 
+fn forward_client(channel: LayeredChannel) -> ForwardServiceClient<LayeredChannel> {
+    ForwardServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 pub struct ForwardService {
     service: Service<ForwardServiceClient<LayeredChannel>>,
 }
 
 impl ForwardService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            ForwardServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, forward_client).await?;
 
         Ok(Self { service })
     }
@@ -222,7 +227,7 @@ impl ForwardService {
                 if response.rules.is_empty() {
                     output::empty_with_hint(
                         format_args!("No forward rules found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-forward update --name <name> --file <path>'"),
+                        format_args!("create one with 'yanet-cli-forward update --name <name> <path>'"),
                     );
                 }
             },
@@ -247,7 +252,7 @@ impl ForwardService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No forward configurations found."),
-                        format_args!("create one with 'yanet-cli-forward update --name <name> --file <path>'"),
+                        format_args!("create one with 'yanet-cli-forward update --name <name> <path>'"),
                     );
                     return;
                 }
@@ -269,7 +274,7 @@ impl ForwardService {
             .await
             .map_err(self.service.status("delete"))?;
 
-        output::success("delete", format_args!("Deleted forward config {}.", cmd.config));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
         Ok(())
     }
@@ -281,7 +286,7 @@ impl ForwardService {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated forward config {}.", cmd.config));
+        output::success("update", format_args!("Updated config '{}'.", cmd.config));
 
         Ok(())
     }
@@ -327,15 +332,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            ForwardServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, forward_client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]

@@ -168,10 +168,13 @@ fuzz_setup(yanet_error **err) {
 	SET_OFFSET_OF(
 		&fuzz_params.module_ectx.mc_index, &fuzz_params.mc_index_stub
 	);
+	fuzz_params.module_ectx.abs_mc_index = &fuzz_params.mc_index_stub;
 	SET_OFFSET_OF(
 		&fuzz_params.module_ectx.config_gen_ectx,
 		&fuzz_params.config_gen_ectx_stub
 	);
+	fuzz_params.module_ectx.abs_config_gen_ectx =
+		&fuzz_params.config_gen_ectx_stub;
 
 	return 0;
 }

@@ -37,7 +37,13 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
 
-/// Route operator CLI (RIB management).
+fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
+    RouteServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+/// Manages the RIB of the route operator.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -46,6 +52,7 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
     /// Be verbose: shows debug log lines and raw gRPC error details.
@@ -174,15 +181,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            RouteServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 /// Run the requested subcommand.
@@ -210,11 +211,7 @@ pub struct RouteService {
 impl RouteService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, |channel| {
-            RouteServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
+        let service = Service::new(&conn, SERVICE_NAME, client);
 
         Ok(Self { service })
     }
@@ -341,7 +338,7 @@ impl RouteService {
         output::success(
             "insert",
             format_args!(
-                "Inserted {} via {} in {} (source: {}).",
+                "Inserted {} via {} in config '{}' (source: {}).",
                 cmd.prefix,
                 via,
                 cmd.name,
@@ -379,7 +376,7 @@ impl RouteService {
         output::success(
             "remove",
             format_args!(
-                "Removed {} via {} from {} (source: {}).",
+                "Removed {} via {} from config '{}' (source: {}).",
                 cmd.prefix,
                 via,
                 cmd.name,
@@ -399,7 +396,7 @@ impl RouteService {
             .await
             .map_err(self.service.status("flush"))?;
 
-        output::success("flush", format_args!("Flushed {}.", cmd.name));
+        output::success("flush", format_args!("Flushed config '{}'.", cmd.name));
 
         Ok(())
     }

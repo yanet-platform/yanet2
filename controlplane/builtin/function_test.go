@@ -83,6 +83,21 @@ func Test_Function_Update_EmptyName(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
+// Test_Function_Update_RejectsInvalidWeights verifies that model validation
+// produces InvalidArgument before accessing shared memory.
+func Test_Function_Update_RejectsInvalidWeights(t *testing.T) {
+	service := builtin.NewFunction(0, nil)
+	_, err := service.Update(t.Context(), &ynpb.UpdateFunctionRequest{
+		Function: &ynpb.Function{
+			Id: &commonpb.FunctionId{Name: "weights"},
+			Chains: []*ynpb.FunctionChain{{
+				Chain: &ynpb.Chain{Name: "chain"}, Weight: 65536,
+			}},
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 // TestFunctionDeleteRejectsMissingID verifies that Delete rejects a request
 // with no id instead of dereferencing it to build the function name.
 func TestFunctionDeleteRejectsMissingID(t *testing.T) {

@@ -8,6 +8,7 @@ use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
+    yaml,
 };
 
 use crate::{
@@ -26,18 +27,19 @@ use crate::{
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.balancer2.controlplane.balancerpb.v1.Balancer";
 
+pub fn client(channel: LayeredChannel) -> BalancerClient<LayeredChannel> {
+    BalancerClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 pub struct Balancer2Service {
     service: Service<BalancerClient<LayeredChannel>>,
 }
 
 impl Balancer2Service {
     pub async fn connect(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            BalancerClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -62,8 +64,8 @@ impl Balancer2Service {
     }
 
     async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let yaml_config =
-            BalancerConfig::from_yaml_file(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
+        let yaml_config: BalancerConfig =
+            yaml::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
         let parts: ConfigParts = yaml_config
             .try_into()
             .map_err(|err: Box<dyn core::error::Error>| self.service.invalid("update", err.to_string()))?;
@@ -84,7 +86,7 @@ impl Balancer2Service {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated balancer {}.", cmd.name));
+        output::success("update", format_args!("Updated config '{}'.", cmd.name));
 
         Ok(())
     }
@@ -309,7 +311,7 @@ impl Balancer2Service {
 
         output::success(
             "sessions update",
-            format_args!("Updated sessions state {} (capacity: {}).", cmd.name, cmd.capacity),
+            format_args!("Updated sessions state '{}' (capacity: {}).", cmd.name, cmd.capacity),
         );
 
         Ok(())
@@ -375,7 +377,7 @@ impl Balancer2Service {
             .await
             .map_err(self.service.status(action))?;
 
-        output::success(action, format_args!("Updated reals for balancer {config_name}."));
+        output::success(action, format_args!("Updated reals of config '{config_name}'."));
 
         Ok(())
     }

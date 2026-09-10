@@ -1,5 +1,5 @@
 use clap::{ArgAction, Parser};
-use commonpb::pb::Device;
+use commonpb::pb::{Device, DevicePipeline};
 use plainpb::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -15,7 +15,7 @@ pub mod plainpb {
     tonic::include_proto!("devices.plain.controlplane.plainpb.v1");
 }
 
-/// DevicePlain module.
+/// Manages plain devices.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -27,13 +27,14 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Create or replace a device.
     Update(UpdateCmd),
 }
 
@@ -42,12 +43,12 @@ pub struct UpdateCmd {
     /// The name of the device.
     #[arg(long, short = 'n')]
     pub name: String,
-    /// Pipeline assignments in format "pipeline_name:weight"
+    /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'i')]
-    pub input: Vec<String>,
-    /// Pipeline assignments in format "pipeline_name:weight"
+    pub input: Vec<DevicePipeline>,
+    /// Pipeline assignments in format "pipeline_name:weight".
     #[arg(long, short = 'o')]
-    pub output: Vec<String>,
+    pub output: Vec<DevicePipeline>,
 }
 
 /// The fully-qualified gRPC service name used in error messages.
@@ -70,22 +71,9 @@ impl DevicePlainService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let input = cmd
-            .input
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-        let output = cmd
-            .output
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-
         let request = UpdateDevicePlainRequest {
             name: cmd.name.clone(),
-            device: Some(Device { input, output }),
+            device: Some(Device { input: cmd.input, output: cmd.output }),
         };
 
         self.service
@@ -94,7 +82,7 @@ impl DevicePlainService {
             .await
             .map_err(self.service.status("update"))?;
 
-        output::success("update", format_args!("Updated device {}.", cmd.name));
+        output::success("update", format_args!("Updated device '{}'.", cmd.name));
 
         Ok(())
     }

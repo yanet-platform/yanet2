@@ -13,17 +13,16 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use tonic::codec::CompressionEncoding;
 use ync::{client::ConnectionArgs, completion, errors::Error, output::CommonFormat};
 
-use crate::service::Balancer2Service;
+use crate::service::{Balancer2Service, client};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod balancerpb {
     tonic::include_proto!("modules.balancer2.controlplane.balancerpb.v1");
 }
 
-/// Balancer2 module CLI.
+/// Manages balancer2 module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -35,7 +34,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Be verbose in terms of logging.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -336,21 +335,13 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            balancerpb::balancer_client::BalancerClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| {
-            Ok(client
-                .list_configs(balancerpb::ListConfigsRequest {})
-                .await?
-                .into_inner()
-                .names)
-        },
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client
+            .list_configs(balancerpb::ListConfigsRequest {})
+            .await?
+            .into_inner()
+            .names)
+    })
 }
 
 /// Completion candidates for a sessions-state name argument: the sessions
@@ -358,19 +349,11 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn sessions_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            balancerpb::balancer_client::BalancerClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| {
-            Ok(client
-                .list_sessions_states(balancerpb::ListSessionsStatesRequest {})
-                .await?
-                .into_inner()
-                .names)
-        },
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client
+            .list_sessions_states(balancerpb::ListSessionsStatesRequest {})
+            .await?
+            .into_inner()
+            .names)
+    })
 }

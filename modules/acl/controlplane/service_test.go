@@ -3,6 +3,7 @@ package acl_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +29,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
-	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 const metricsConcurrencyTestTimeout = 5 * time.Second
@@ -57,7 +57,6 @@ type fakeHandle struct {
 	rules       []cacl.AclRule
 	fw4MapName  string
 	fw6MapName  string
-	emitConfig  *cfwstate.SyncEmitConfig
 	freeCount   int
 	transferred bool
 }
@@ -97,15 +96,6 @@ func (m *fakeHandle) Rules() []cacl.AclRule {
 
 func (m *fakeHandle) AsFFIModule() ffi.ModuleConfig {
 	return ffi.ModuleConfig{}
-}
-
-// EmitConfig returns the emit config the handle was constructed with,
-// so a test can assert a relink carried the stored sync config over.
-func (m *fakeHandle) EmitConfig() *cfwstate.SyncEmitConfig {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.emitConfig
 }
 
 func (m *fakeHandle) GetInfo() *cacl.AclConfigInfo {
@@ -249,7 +239,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 	moduleNames := []string{"acl0", "a", "b", "c", "d"}
 	moduleConfigs := make([]ffi.ModuleConfig, 0, len(moduleNames))
 	for _, name := range moduleNames {
-		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, "", "", nil)
+		moduleConfig, moduleErr := cacl.NewModuleConfig(agent, name, nil, "", "")
 		require.NoError(testingTB, moduleErr)
 		testingTB.Cleanup(func() { _ = moduleConfig.Free() })
 		moduleConfigs = append(moduleConfigs, moduleConfig.AsFFIModule())
@@ -292,7 +282,6 @@ func (m *fakeBackend) NewModule(
 	name string,
 	rules []cacl.AclRule,
 	fw4MapName, fw6MapName string,
-	emitConfig *cfwstate.SyncEmitConfig,
 ) (acl.ModuleHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -306,7 +295,6 @@ func (m *fakeBackend) NewModule(
 		rules:      rules,
 		fw4MapName: fw4MapName,
 		fw6MapName: fw6MapName,
-		emitConfig: emitConfig,
 	}
 	m.created = append(m.created, h)
 	return h, nil
@@ -485,14 +473,13 @@ func (m *compileBlockingBackend) NewModule(
 	name string,
 	rules []cacl.AclRule,
 	fw4MapName, fw6MapName string,
-	emitConfig *cfwstate.SyncEmitConfig,
 ) (acl.ModuleHandle, error) {
 	block := m.recordEntry(name)
 	if block != nil {
 		close(block.entered)
 		<-block.release
 	}
-	return m.fakeBackend.NewModule(name, rules, fw4MapName, fw6MapName, emitConfig)
+	return m.fakeBackend.NewModule(name, rules, fw4MapName, fw6MapName)
 }
 
 func newTestService(b acl.Backend) *acl.ACLService {
@@ -624,61 +611,9 @@ func TestUpdateConfig_Idempotency(t *testing.T) {
 	assert.Equal(t, publishBefore, publishAfter, "second call with identical rules must not publish")
 }
 
-// validTestSyncConfig returns a sync config that passes validation.
-func validTestSyncConfig() *aclpb.SyncConfig {
-	return &aclpb.SyncConfig{
-		DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
-		DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}},
-		PortMulticast:    9999,
-	}
-}
-
-// TestUpdateConfig_IdempotencyCountsSyncConfig verifies that the
-// idempotence short-circuit compares the sync config, not only the rules.
-// The ruleset only reads state, so a config with no sync section stays
-// legal and dropping the section is observable as a publish.
-func TestUpdateConfig_IdempotencyCountsSyncConfig(t *testing.T) {
-	b := newFakeBackend()
-	svc := newTestService(b)
-
-	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CHECK_STATE}}}}
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:       "acl0",
-		Rules:      rules,
-		SyncConfig: validTestSyncConfig(),
-	})
-	require.NoError(t, err)
-	publishBefore := b.PublishCalls()
-
-	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:       "acl0",
-		Rules:      rules,
-		SyncConfig: validTestSyncConfig(),
-	})
-	require.NoError(t, err)
-	assert.Equal(t, publishBefore, b.PublishCalls(), "identical sync config must not publish")
-
-	altered := validTestSyncConfig()
-	altered.PortMulticast = 1000
-	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:       "acl0",
-		Rules:      rules,
-		SyncConfig: altered,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, publishBefore+1, b.PublishCalls(), "a changed sync config must publish")
-
-	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:  "acl0",
-		Rules: rules,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, publishBefore+2, b.PublishCalls(), "dropping the sync config must publish")
-}
-
 // TestUpdateConfigClassifiesUpdateError verifies that a module update
 // failing with the generation install's linked-object refusal surfaces
-// as InvalidArgument naming the missing map, while any other update
+// as FailedPrecondition naming the missing map, while any other update
 // failure stays Internal.
 //
 // A client typo in fwtable_name_v4 must be distinguishable from a
@@ -689,19 +624,19 @@ func TestUpdateConfigClassifiesUpdateError(t *testing.T) {
 		Rules:         []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CHECK_STATE}}}},
 		FwtableNameV4: "missing-map",
 		FwtableNameV6: "missing-map6",
-		SyncConfig:    validTestSyncConfig(),
 	}
 
 	t.Run("linked object not found", func(t *testing.T) {
 		b := newFakeBackend()
 		svc := newTestService(b)
-		b.SetUpdateErr(errors.New(
-			"linked object 'fwstate_map_v4:missing-map' not found for module 'acl:acl0'",
+		b.SetUpdateErr(fmt.Errorf(
+			"linked object 'fwstate_map_v4:missing-map' not found for module 'acl:acl0': %w",
+			ffi.ErrFailedPrecondition,
 		))
 
 		_, err := svc.UpdateConfig(t.Context(), request)
 		require.Error(t, err)
-		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+		assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 		assert.Contains(t, err.Error(), "missing-map")
 		assertAllHandlesFreed(t, b)
 	})
@@ -718,148 +653,20 @@ func TestUpdateConfigClassifiesUpdateError(t *testing.T) {
 	})
 }
 
-// TestUpdateConfig_CheckStateOnlyRulesNeedNoSyncConfig verifies that a
-// ruleset which only reads state carries no sync config requirement.
-func TestUpdateConfig_CheckStateOnlyRulesNeedNoSyncConfig(t *testing.T) {
-	b := newFakeBackend()
-	svc := newTestService(b)
+// Test_ACLService_UpdateConfig_RejectsDeprecatedSyncConfig verifies that old
+// clients cannot silently install emission settings on the wrong module.
+func Test_ACLService_UpdateConfig_RejectsDeprecatedSyncConfig(t *testing.T) {
+	backend := newFakeBackend()
+	service := newTestService(backend)
 
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name: "acl0",
-		Rules: []*aclpb.Rule{
-			{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CHECK_STATE}}},
-		},
-	})
-	require.NoError(t, err)
-}
-
-// TestUpdateConfig_RequiresSyncConfigForCreateState verifies that a ruleset
-// using CREATE_STATE is rejected without a sync config and accepted with one.
-func TestUpdateConfig_RequiresSyncConfigForCreateState(t *testing.T) {
-	b := newFakeBackend()
-	svc := newTestService(b)
-
-	rules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CREATE_STATE}}}}
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "acl0", Rules: rules})
-	require.Error(t, err)
-	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-	assert.Contains(t, err.Error(), "sync_config is required")
-
-	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-		Name:       "acl0",
-		Rules:      rules,
-		SyncConfig: validTestSyncConfig(),
-	})
-	require.NoError(t, err)
-}
-
-// TestUpdateConfig_RejectsInvalidSyncConfig verifies that a supplied sync
-// config is validated even when no rule requires one.
-func TestUpdateConfig_RejectsInvalidSyncConfig(t *testing.T) {
-	b := newFakeBackend()
-	svc := newTestService(b)
-
-	cfg := validTestSyncConfig()
-	cfg.PortUnicast = 65536
-
-	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+	_, err := service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:       "acl0",
 		Rules:      []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}},
-		SyncConfig: cfg,
+		SyncConfig: &aclpb.SyncConfig{},
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-	assert.Contains(t, err.Error(), "port_unicast")
-}
-
-// TestUpdateConfig_ValidatesSyncConfig covers the sync config validation
-// through the update RPC: every field the craft path requires, and the
-// 16-bit port bounds.
-func TestUpdateConfig_ValidatesSyncConfig(t *testing.T) {
-	tests := []struct {
-		name    string
-		mutate  func(*aclpb.SyncConfig)
-		wantErr string
-	}{
-		{
-			name:   "valid config passes",
-			mutate: func(*aclpb.SyncConfig) {},
-		},
-		{
-			name: "valid config with unicast destination passes",
-			mutate: func(c *aclpb.SyncConfig) {
-				c.DstAddrUnicast = &commonpb.IPAddress{Addr: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}}
-				c.PortUnicast = 1000
-			},
-		},
-		{
-			name:    "missing dst_ether",
-			mutate:  func(c *aclpb.SyncConfig) { c.DstEther = nil },
-			wantErr: "dst_ether",
-		},
-		{
-			name:    "all-zero dst_ether",
-			mutate:  func(c *aclpb.SyncConfig) { c.DstEther = &commonpb.MACAddress{} },
-			wantErr: "dst_ether",
-		},
-		{
-			name:    "missing multicast address",
-			mutate:  func(c *aclpb.SyncConfig) { c.DstAddrMulticast = nil },
-			wantErr: "dst_addr_multicast",
-		},
-		{
-			name:    "short multicast address",
-			mutate:  func(c *aclpb.SyncConfig) { c.DstAddrMulticast = &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4}} },
-			wantErr: "dst_addr_multicast",
-		},
-		{
-			name:    "all-zero multicast address",
-			mutate:  func(c *aclpb.SyncConfig) { c.DstAddrMulticast = &commonpb.IPAddress{} },
-			wantErr: "dst_addr_multicast",
-		},
-		{
-			name:    "zero multicast port",
-			mutate:  func(c *aclpb.SyncConfig) { c.PortMulticast = 0 },
-			wantErr: "port_multicast",
-		},
-		{
-			name:    "multicast port over 16 bits",
-			mutate:  func(c *aclpb.SyncConfig) { c.PortMulticast = 65536 },
-			wantErr: "port_multicast",
-		},
-		{
-			name:    "unicast port over 16 bits",
-			mutate:  func(c *aclpb.SyncConfig) { c.PortUnicast = 65536 },
-			wantErr: "port_unicast",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			b := newFakeBackend()
-			svc := newTestService(b)
-
-			cfg := validTestSyncConfig()
-			tc.mutate(cfg)
-
-			resp, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
-				Name: "acl0",
-				Rules: []*aclpb.Rule{
-					{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_CREATE_STATE}}},
-				},
-				SyncConfig: cfg,
-			})
-			if tc.wantErr == "" {
-				require.NoError(t, err)
-				return
-			}
-			require.Error(t, err)
-			assert.Equal(t, codes.InvalidArgument, status.Code(err))
-			assert.Contains(t, err.Error(), tc.wantErr)
-			assert.Nil(t, resp)
-		})
-	}
+	assert.Contains(t, err.Error(), "fwstate")
 }
 
 // TestUpdateConfig_ErrorPropagation verifies that a backend failure from

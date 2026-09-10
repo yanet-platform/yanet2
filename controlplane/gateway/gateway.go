@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -193,6 +194,12 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
 
+	// A client certificate is only ever verified in a TLS handshake, so an
+	// authenticator that reads one is dead without server TLS.
+	if authManager.ClientCAs() != nil && cfg.Server.TLS == nil {
+		return nil, errors.New("x509 authenticator requires server.tls")
+	}
+
 	authService := NewAuthService(authManager)
 
 	director := func(ctx context.Context, fullMethodName string) (proxy.Mode, []proxy.Backend, error) {
@@ -327,7 +334,12 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		),
 	}
 	if cfg.Server.TLS != nil {
-		creds, err := cfg.Server.TLS.ServerCredentials()
+		var clientCAs func() *x509.CertPool
+		if authManager.ClientCAs() != nil {
+			clientCAs = authManager.ClientCAs
+		}
+
+		creds, err := cfg.Server.TLS.ServerCredentials(clientCAs)
 		if err != nil {
 			return nil, fmt.Errorf("load gateway TLS: %w", err)
 		}
@@ -350,7 +362,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	readinessSvc := NewReadinessService(rdTracker)
 	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
 
-	metricsService := NewMetricsService(metricsCollectors(serverMetrics, opts.Services)...)
+	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager)...)
 	ynpb.RegisterMetricsServiceServer(server, metricsService)
 
 	// Gateway-hosted services are reached through one in-memory connection

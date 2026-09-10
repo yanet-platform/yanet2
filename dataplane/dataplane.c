@@ -529,6 +529,7 @@ dataplane_init(
 
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
+		instance->config_assigner_started = false;
 
 		static const char *default_modules[] = {
 			"forward",
@@ -831,6 +832,52 @@ dataplane_init(
 
 		worker_counters_bind(dp_config, &counter_ids);
 
+		// Publish each worker pool's occupancy before the instance
+		// becomes visible: until the worker threads run their first
+		// rounds, a scrape would otherwise read the zero-filled
+		// storage, fail pool validation, and drop the whole worker
+		// family despite a healthy startup.
+		for (uint32_t device_idx = 0;
+		     device_idx < dataplane->device_count;
+		     ++device_idx) {
+			struct dataplane_device *device =
+				dataplane->devices + device_idx;
+			for (uint32_t wrk_idx = 0;
+			     wrk_idx < device->worker_count;
+			     ++wrk_idx) {
+				struct dataplane_worker *worker =
+					device->workers + wrk_idx;
+				if (worker->instance != instance) {
+					continue;
+				}
+
+				uint64_t worker_idx = worker->dp_worker->idx;
+				if (worker_rx_pool_sampler_init(
+					    &worker->rx_pool_sampler,
+					    worker->rx_mempool,
+					    worker_counter_slot(
+						    dp_config,
+						    worker_idx,
+						    counter_ids
+							    .rx_mempool_capacity
+					    ),
+					    worker_counter_slot(
+						    dp_config,
+						    worker_idx,
+						    counter_ids
+							    .rx_mempool_available
+					    )
+				    )) {
+					LOG(ERROR,
+					    "failed to bind rx pool counters "
+					    "for worker %lu of instance %u",
+					    worker_idx,
+					    instance_idx);
+					return -1;
+				}
+			}
+		}
+
 		for (uint64_t device_idx = 0;
 		     device_idx < dataplane->device_count;
 		     ++device_idx) {
@@ -846,7 +893,16 @@ dataplane_init(
 				return -1;
 			}
 		}
+	}
 
+	// Mark instances ready only after all of them are set up, so a
+	// failure cannot leave a ready instance that no dataplane serves.
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		struct dataplane_instance *instance =
+			dataplane->instances + instance_idx;
+		struct dp_config *dp_config = instance->dp_config;
 		dp_config_mark_ready(dp_config);
 	}
 
@@ -910,6 +966,19 @@ dataplane_start(struct dataplane *dataplane) {
 		}
 	}
 
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		if (dataplane_instance_config_assigner_start(
+			    dataplane->instances + instance_idx
+		    )) {
+			LOG(ERROR,
+			    "failed to start config assigner for instance %u",
+			    instance_idx);
+			return -1;
+		}
+	}
+
 	pthread_t thread_id;
 	int rc = pthread_create(&thread_id, NULL, stat_thread, dataplane);
 	if (rc != 0) {
@@ -925,6 +994,20 @@ int
 dataplane_stop(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
 		dataplane_device_stop(dataplane->devices + dev_idx);
+	}
+
+	// The workers are joined above while the assigners still run:
+	// this call parks the process (the worker loops never return on
+	// their own), and a join only ends once the worker's loop has
+	// ended, so the assigners must keep publishing generations for
+	// as long as workers acknowledge them. The assigners are stopped
+	// only after every worker loop has ended.
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		dataplane_instance_config_assigner_stop(
+			dataplane->instances + instance_idx
+		);
 	}
 
 	return 0;

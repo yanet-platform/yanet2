@@ -1,4 +1,4 @@
-package sshcert
+package loader
 
 import (
 	"strings"

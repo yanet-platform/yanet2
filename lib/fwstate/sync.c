@@ -131,7 +131,6 @@ fwstate_fill_sync_frame(
 
 int
 fwstate_craft_state_sync_packet(
-	const struct fwstate_sync_emit_config *emit_config,
 	const struct packet *packet,
 	const enum sync_packet_direction direction,
 	struct packet *sync_pkt
@@ -163,7 +162,7 @@ fwstate_craft_state_sync_packet(
 	);
 	eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
 	struct ether_addr *ether_dst = (struct ether_addr *)&eth_hdr->dst_addr;
-	*ether_dst = emit_config->dst_ether;
+	memset(ether_dst, 0, sizeof(*ether_dst));
 
 	// Fill VLAN header
 	struct rte_vlan_hdr *vlan_hdr = rte_pktmbuf_mtod_offset(
@@ -182,19 +181,16 @@ fwstate_craft_state_sync_packet(
 	);
 	ipv6_hdr->proto = IPPROTO_UDP;
 	ipv6_hdr->hop_limits = 64;
-	// NOTE: Address will be set by the fwstate module
+	// Outer addressing stays neutral until fwstate accepts the event.
 	memset(ipv6_hdr->src_addr, 0, 16);
-	rte_memcpy(ipv6_hdr->dst_addr, emit_config->dst_addr_multicast, 16);
+	memset(ipv6_hdr->dst_addr, 0, 16);
 
 	// Fill UDP header
 	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 		sync_mbuf, struct rte_udp_hdr *, udp_offset
 	);
-	// IPFW reuses the same port for both src and dst
-	// FIXME: support for unicast addrs
-	// Port values are converted to BE format in the controlplane
-	udp_hdr->src_port = emit_config->port_multicast;
-	udp_hdr->dst_port = emit_config->port_multicast;
+	udp_hdr->src_port = 0;
+	udp_hdr->dst_port = 0;
 	udp_hdr->dgram_len = rte_cpu_to_be_16(
 		sizeof(struct rte_udp_hdr) + sizeof(struct fw_state_sync_frame)
 	);
@@ -219,4 +215,30 @@ fwstate_craft_state_sync_packet(
 	packet_refresh_data_len(sync_pkt);
 
 	return 0;
+}
+
+void
+fwstate_sync_set_destination(
+	struct packet *packet,
+	const struct ether_addr *dst_ether,
+	const uint8_t dst_addr[16],
+	uint16_t dst_port
+) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ether_hdr *ether_hdr =
+		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+	struct ether_addr *ether_dst =
+		(struct ether_addr *)&ether_hdr->dst_addr;
+	*ether_dst = *dst_ether;
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
+	rte_memcpy(ipv6_hdr->dst_addr, dst_addr, 16);
+
+	struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_udp_hdr *, packet->transport_header.offset
+	);
+	udp_hdr->src_port = dst_port;
+	udp_hdr->dst_port = dst_port;
+	udp_hdr->dgram_cksum = 0;
 }

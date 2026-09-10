@@ -20,6 +20,8 @@ struct worker_counter_ids {
 	uint64_t local_tx_drops;
 	uint64_t remote_tx_drops;
 	uint64_t drops;
+	uint64_t rx_mempool_capacity;
+	uint64_t rx_mempool_available;
 };
 
 // Registers the standard worker counters in an already initialised registry
@@ -39,4 +41,16 @@ worker_counters_register(
 void
 worker_counters_bind(
 	struct dp_config *dp_config, const struct worker_counter_ids *ids
+);
+
+// Returns the first slot of one counter in one worker's storage, or NULL
+// when the worker index or the counter id is out of range.
+//
+// The slot itself lives in the shared counter storage like every bound
+// one; what stays dataplane-local is the pointer a caller keeps to it,
+// so a writer such as the rx pool sampler can publish gauges without
+// growing the plugin-visible worker layout.
+uint64_t *
+worker_counter_slot(
+	struct dp_config *dp_config, uint64_t worker_idx, uint64_t counter_id
 );

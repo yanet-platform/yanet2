@@ -29,8 +29,13 @@ pub mod fwstatemappb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "objects.fwstate.controlplane.fwstatemappb.v1.FWStateMapService";
 
-/// FWState-map CLI: manages the standalone fwstate-map objects module
-/// configs (fwstate sync, ACL) link by name.
+fn client(channel: LayeredChannel) -> FwStateMapServiceClient<LayeredChannel> {
+    FwStateMapServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+/// Manages fwstate-map objects that fwstate and acl configs link by name.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -42,7 +47,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -92,11 +97,7 @@ impl DumpState {
 impl FWStateMapService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, |channel| {
-            FwStateMapServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
+        let service = Service::new(&conn, SERVICE_NAME, client);
 
         Ok(Self { service })
     }
@@ -119,7 +120,7 @@ impl FWStateMapService {
             .await
             .map_err(self.service.status("create"))?;
 
-        output::success("create", format_args!("Created fwstate-map {}.", cmd.map_name));
+        output::success("create", format_args!("Created map '{}'.", cmd.map_name));
 
         Ok(())
     }
@@ -133,7 +134,7 @@ impl FWStateMapService {
             .await
             .map_err(self.service.status("delete"))?;
 
-        output::success("delete", format_args!("Deleted fwstate-map {}.", cmd.map_name));
+        output::success("delete", format_args!("Deleted map '{}'.", cmd.map_name));
 
         Ok(())
     }
@@ -241,7 +242,7 @@ impl FWStateMapService {
 
         output::success(
             "insert-layer",
-            format_args!("Inserted layer into fwstate-map {}.", cmd.map_name),
+            format_args!("Inserted layer into map '{}'.", cmd.map_name),
         );
 
         Ok(())
@@ -456,15 +457,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn map_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            FwStateMapServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_maps(ListMapsRequest {}).await?.into_inner().maps),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_maps(ListMapsRequest {}).await?.into_inner().maps)
+    })
 }
 
 #[cfg(test)]

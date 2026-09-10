@@ -139,6 +139,15 @@ fwstate_test_counter_storage_free(struct counter_storage *storage) {
 }
 
 void
+fwstate_test_mark_internal(struct packet_front *packet_front) {
+	for (struct packet *packet = packet_list_first(&packet_front->input);
+	     packet != NULL;
+	     packet = packet->next) {
+		packet->flags |= 1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
+	}
+}
+
+void
 test_fwstate_handle_packets(
 	struct dp_worker *dp_worker,
 	struct cp_module *cp_module,

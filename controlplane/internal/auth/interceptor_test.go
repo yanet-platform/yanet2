@@ -133,7 +133,7 @@ func TestStreamServerInterceptor(t *testing.T) {
 	}
 }
 
-func TestExtractToken(t *testing.T) {
+func TestExtractCredential_Token(t *testing.T) {
 	tests := []struct {
 		name string
 		md   metadata.MD
@@ -158,20 +158,20 @@ func TestExtractToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := metadata.NewIncomingContext(context.Background(), tt.md)
-			got := auth.ExtractToken(ctx)
+			ctx := metadata.NewIncomingContext(t.Context(), tt.md)
+			got := auth.ExtractCredential(ctx).Token
 			if got != tt.want {
-				t.Errorf("extractToken() = %q, want %q", got, tt.want)
+				t.Errorf("ExtractCredential().Token = %q, want %q", got, tt.want)
 			}
 		})
 	}
 
 	// Test without metadata in context.
 	t.Run("no metadata", func(t *testing.T) {
-		ctx := context.Background()
-		got := auth.ExtractToken(ctx)
+		ctx := t.Context()
+		got := auth.ExtractCredential(ctx).Token
 		if got != "" {
-			t.Errorf("extractToken() = %q, want empty", got)
+			t.Errorf("ExtractCredential().Token = %q, want empty", got)
 		}
 	})
 }

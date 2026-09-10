@@ -1,7 +1,7 @@
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .field_attribute(
@@ -11,6 +11,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .field_attribute(
             ".controlplane.ynpb.v1.RegisteredBackend.kind",
             "#[serde(serialize_with = \"crate::serialize_backend_kind\")]",
+        )
+        .field_attribute(
+            ".controlplane.ynpb.v1.GetLevelResponse.level",
+            "#[serde(serialize_with = \"crate::serialize_log_level\")]",
         )
         .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .compile_protos(
@@ -22,6 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "controlplane/ynpb/v1/inspect.proto",
                 "controlplane/ynpb/v1/counters.proto",
                 "controlplane/ynpb/v1/gateway.proto",
+                "controlplane/ynpb/v1/auth.proto",
             ],
             &["../../.."],
         )?;

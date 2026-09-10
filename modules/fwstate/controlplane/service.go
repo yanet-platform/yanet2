@@ -3,7 +3,6 @@ package fwstate
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -93,10 +92,6 @@ func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
 const (
 	// moduleType is the registered shared-memory type for fwstate configs.
 	moduleType = "fwstate"
-
-	// maxSyncPort is the highest value accepted for port_multicast,
-	// matching the width of the C-side uint16 port field.
-	maxSyncPort uint32 = 65535
 )
 
 // FWStateServiceName and MetricsServiceName are the fully-qualified gRPC
@@ -199,29 +194,6 @@ func (m *FWStateService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	// Get fwstate configuration from req
-	if req.SyncConfig == nil {
-		return nil, status.Error(codes.InvalidArgument, "sync_config is required")
-	}
-	if req.GetMapNameV4() == "" {
-		return nil, status.Error(codes.InvalidArgument, "map_name_v4 is required")
-	}
-	if req.GetMapNameV6() == "" {
-		return nil, status.Error(codes.InvalidArgument, "map_name_v6 is required")
-	}
-	// The names must round-trip through the fixed-size C object registry:
-	// cp_module_link_object silently truncates longer ones, which could
-	// link an entirely different map than the one ShowConfig reports.
-	if err := fwstatemap.ValidateMapName(req.GetMapNameV4()); err != nil {
-		return nil, err
-	}
-	if err := fwstatemap.ValidateMapName(req.GetMapNameV6()); err != nil {
-		return nil, err
-	}
-	if err := validateSyncPorts(req.SyncConfig); err != nil {
-		return nil, err
-	}
-
 	m.log.Debug("update fwstate config", zap.String("config", name))
 
 	err := m.withMutation("update", func() error {
@@ -238,7 +210,10 @@ func (m *FWStateService) UpdateConfig(
 					zap.String("config", name), zap.Error(err))
 			}
 			m.log.Error("failed to publish fwstate config", zap.String("config", name), zap.Error(err))
-			return classifyPublishError(err)
+			if errors.Is(err, ffi.ErrFailedPrecondition) {
+				return status.Errorf(codes.FailedPrecondition, "failed to publish fwstate config: %v", err)
+			}
+			return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 		}
 
 		// The publish retired the generations holding this service's
@@ -258,10 +233,12 @@ func (m *FWStateService) UpdateConfig(
 	return &fwstatepb.UpdateConfigResponse{}, nil
 }
 
-// prepareUpdate builds the replacement config for name in one step: the
-// old config's sync config propagates, the request's sync config merges
-// over it, and both map names are declared as object links. The state
-// lock stays held so the old handle cannot disappear mid-construction.
+// prepareUpdate builds the replacement config for name in one step.
+//
+// The old config's sync settings and map links propagate, the request
+// merges over them, and the resulting map names are declared as object
+// links. The state lock stays held so the old handle cannot disappear
+// mid-construction.
 func (m *FWStateService) prepareUpdate(
 	name string,
 	req *fwstatepb.UpdateConfigRequest,
@@ -271,9 +248,40 @@ func (m *FWStateService) prepareUpdate(
 
 	oldConfig := m.configs[name]
 
+	if req.UpdateMask != nil {
+		merged, err := maskedUpdate(oldConfig, req)
+		if err != nil {
+			return nil, nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		req = merged
+	} else {
+		// Validate before conversion can narrow a legacy numeric value.
+		if err := req.GetSyncConfig().ValidateFields(); err != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+		}
+		if err := req.ValidateEndpointClears(); err != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync endpoint update: %v", err)
+		}
+		mapNameV4, mapNameV6 := mergedMapNames(oldConfig, req)
+		req = &fwstatepb.UpdateConfigRequest{
+			MapNameV4:  mapNameV4,
+			MapNameV6:  mapNameV6,
+			SyncConfig: mergedSyncConfigWithClears(oldConfig, req.SyncConfig, req.GetClearMulticast(), req.GetClearUnicast()),
+		}
+	}
+	for _, mapName := range []string{req.MapNameV4, req.MapNameV6} {
+		if mapName != "" {
+			if err := fwstatemap.ValidateMapName(mapName); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	if err := req.SyncConfig.ValidateFields(); err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
 	// Validate the merged sync config before any C state is touched.
-	syncConfig := mergedSyncConfig(oldConfig, req.SyncConfig)
-	if err := validateSyncConfig(syncConfig); err != nil {
+	syncConfig := req.SyncConfig
+	if err := syncConfig.Validate(); err != nil {
 		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}
@@ -282,13 +290,12 @@ func (m *FWStateService) prepareUpdate(
 	// and declares the map-name links: the names resolve against
 	// published objects when the new generation installs, so an unknown
 	// name surfaces from the publish, not from here.
-	newConfig, err := NewFWStateModuleConfig(
+	newConfig, err := newFWStateModuleConfig(
 		m.agent,
 		name,
-		oldConfig,
-		req.SyncConfig,
-		req.GetMapNameV4(),
-		req.GetMapNameV6(),
+		syncConfig.ToC(),
+		req.MapNameV4,
+		req.MapNameV6,
 	)
 	if err != nil {
 		m.log.Error("failed to build fwstate config", zap.String("config", name), zap.Error(err))
@@ -311,22 +318,6 @@ func (m *FWStateService) publishUpdate(
 	m.configs[name] = newConfig
 
 	return nil
-}
-
-// classifyPublishError maps a failed config publish to its gRPC status.
-//
-// The C generation install validates every declared object link against
-// the published objects and refuses the update with the exact error
-// text "linked object '<type>:<name>' not found for module
-// '<type>:<name>'". That refusal names a map the request asked for but
-// no published object provides — a client-input error, so it surfaces
-// as InvalidArgument with the C text intact; every other publish
-// failure is internal.
-func classifyPublishError(err error) error {
-	if strings.Contains(err.Error(), "linked object") {
-		return status.Errorf(codes.InvalidArgument, "failed to publish fwstate config: %v", err)
-	}
-	return status.Errorf(codes.Internal, "failed to publish fwstate config: %v", err)
 }
 
 // configForMutation returns a handle whose lifetime remains protected by the
@@ -459,58 +450,6 @@ func (m *FWStateService) unpublishConfig(name string) {
 	defer m.stateMu.Unlock()
 
 	delete(m.configs, name)
-}
-
-// validateSyncPorts rejects sync config ports that do not fit into the
-// C-side uint16 port field.
-//
-// A zero port means "unset / keep current" and is allowed here. The
-// required-destination check in validateSyncConfig rejects a request
-// that leaves the multicast destination unset.
-func validateSyncPorts(cfg *fwstatepb.SyncConfig) error {
-	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
-		return status.Errorf(codes.InvalidArgument, "port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
-	}
-	return nil
-}
-
-// validateSyncConfig validates that required sync config fields are set
-func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
-	var missing []string
-
-	// Check src_addr (16 bytes for IPv6)
-	if len(cfg.GetSrcAddr().GetAddr()) != 16 || isAllZeroBytes(cfg.GetSrcAddr().GetAddr()) {
-		missing = append(missing, "src_addr")
-	}
-
-	// The module matches incoming sync packets against the multicast
-	// destination, so both the address and the port are required.
-	if len(cfg.GetDstAddrMulticast().GetAddr()) != 16 || isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) {
-		missing = append(missing, "dst_addr_multicast")
-	}
-	if cfg.GetPortMulticast() == 0 {
-		missing = append(missing, "port_multicast")
-	}
-
-	if len(missing) > 0 {
-		return status.Errorf(codes.InvalidArgument, "missing required sync config fields: %v", missing)
-	}
-
-	if err := cfg.ValidateTimeouts(); err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid sync config timeouts: %v", err)
-	}
-
-	return nil
-}
-
-// isAllZeroBytes checks if all bytes in the slice are zero
-func isAllZeroBytes(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // parkOrFree frees the config when it is dangling and parks it for

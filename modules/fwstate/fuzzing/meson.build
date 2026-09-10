@@ -11,6 +11,7 @@ fuzzing_targets += {
       lib_lib_utils_dep,
       lib_time_dp_dep,
       lib_counters_dep,
+      lib_worker_dp_dep,
     ],
     'module_dir': '..',
   }

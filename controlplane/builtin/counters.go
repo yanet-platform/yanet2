@@ -155,7 +155,8 @@ func (m *Counters) ByTags(
 	return response, nil
 }
 
-// Workers returns raw cumulative worker counters.
+// Workers returns a per-worker snapshot: cumulative polling and traffic
+// counters plus the RX pool occupancy gauges.
 func (m *Counters) Workers(
 	ctx context.Context,
 	request *ynpb.WorkerCountersRequest,
@@ -170,6 +171,14 @@ func (m *Counters) Workers(
 		Workers: make([]*ynpb.WorkerCounter, 0, len(workers)),
 	}
 	for _, worker := range workers {
+		var pool *ynpb.WorkerRxMempool
+		if worker.RxMempool != nil {
+			pool = &ynpb.WorkerRxMempool{
+				Capacity:  worker.RxMempool.Capacity,
+				Available: worker.RxMempool.Available,
+			}
+		}
+
 		response.Workers = append(response.Workers, &ynpb.WorkerCounter{
 			WorkerIdx:       worker.WorkerIdx,
 			CoreId:          worker.CoreID,
@@ -187,6 +196,7 @@ func (m *Counters) Workers(
 			LocalTxDrops:    worker.LocalTxDrops,
 			RemoteTxDrops:   worker.RemoteTxDrops,
 			Disposed:        worker.Disposed,
+			RxMempool:       pool,
 		})
 	}
 
@@ -240,7 +250,7 @@ func (m *Counters) Collect() []*commonpb.Metric {
 	}
 
 	if workers, err := dpConfig.WorkerCounters(); err == nil {
-		metrics = append(metrics, workerMetrics(workers)...)
+		metrics = append(metrics, workerMetrics(workers, m.instanceID)...)
 	} else {
 		m.log.Warn("failed to collect worker counters", zap.Error(err))
 	}
@@ -265,8 +275,9 @@ func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
 	return metrics
 }
 
-func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
+func workerMetrics(workers []ffi.WorkerCounter, instanceID uint32) []*commonpb.Metric {
 	metrics := make([]*commonpb.Metric, 0)
+	instance := strconv.FormatUint(uint64(instanceID), 10)
 	for _, worker := range workers {
 		labels := []*commonpb.Label{
 			{Name: "worker_idx", Value: strconv.FormatUint(uint64(worker.WorkerIdx), 10)},
@@ -287,6 +298,29 @@ func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
 			commonpb.NewMetricCounter("worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
 			commonpb.NewMetricCounter("worker_disposed", worker.Disposed, labels...),
 		)
+
+		// The pool gauges are the only worker series keyed by
+		// instance: a pool identity only exists inside its instance,
+		// while the counters above keep their long-standing label
+		// set so existing time series are not recreated.
+		if worker.RxMempool != nil {
+			poolLabels := append(
+				[]*commonpb.Label{{Name: "instance_id", Value: instance}},
+				labels...,
+			)
+			metrics = append(metrics,
+				commonpb.NewMetricGauge(
+					"worker_rx_mempool_capacity",
+					float64(worker.RxMempool.Capacity),
+					poolLabels...,
+				),
+				commonpb.NewMetricGauge(
+					"worker_rx_mempool_available",
+					float64(worker.RxMempool.Available),
+					poolLabels...,
+				),
+			)
+		}
 
 		if len(worker.RxBursts) > 0 {
 			metrics = append(metrics, makeHistogram(

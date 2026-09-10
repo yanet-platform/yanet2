@@ -4,7 +4,6 @@ use core::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
-use std::{fs::File, path::Path};
 
 use filterpb::pb::PortRange;
 use netip::IpNetwork;
@@ -36,12 +35,6 @@ pub struct BalancerConfig {
     pub sessions_timeouts: Option<SessionsTimeouts>,
     #[serde(default)]
     pub wlc: Option<WlcConfig>,
-}
-
-impl BalancerConfig {
-    pub fn from_yaml_file(path: &Path) -> Result<Self, Box<dyn Error>> {
-        Ok(serde_yaml::from_reader(File::open(path)?)?)
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

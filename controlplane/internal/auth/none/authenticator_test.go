@@ -8,7 +8,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/none"
 )
 
-func TestNoneAuthenticator_IsTokenSupported(t *testing.T) {
+func TestNoneAuthenticator_Supports(t *testing.T) {
 	authenticator := none.NewNoneAuthenticator()
 
 	tests := []struct {
@@ -30,8 +30,8 @@ func TestNoneAuthenticator_IsTokenSupported(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := authenticator.IsTokenSupported(tt.token); got != tt.want {
-				t.Errorf("IsTokenSupported() = %v, want %v", got, tt.want)
+			if got := authenticator.Supports(core.Credential{Token: tt.token}); got != tt.want {
+				t.Errorf("Supports() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -58,7 +58,7 @@ func TestNoneAuthenticator_Authenticate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
-			authInfo, err := authenticator.Authenticate(ctx, tt.token, requestInfo)
+			authInfo, err := authenticator.Authenticate(ctx, core.Credential{Token: tt.token}, requestInfo)
 			if err != nil {
 				t.Fatalf("Authenticate() error = %v, want nil", err)
 			}

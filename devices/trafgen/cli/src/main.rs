@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use commonpb::pb::Device;
+use commonpb::pb::{Device, DevicePipeline};
 use tonic::codec::CompressionEncoding;
 use trafgenpb::{
     ListConfigsRequest, SetRateRequest, ShowConfigRequest, UpdateDeviceRequest, UploadPcapRequest,
@@ -22,7 +22,7 @@ pub mod trafgenpb {
     tonic::include_proto!("devices.trafgen.controlplane.trafgenpb.v1");
 }
 
-/// Traffic generator device CLI.
+/// Manages trafgen devices.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -34,7 +34,7 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -72,10 +72,10 @@ pub struct UpdateCmd {
     pub config_name: String,
     /// Input pipeline assignments in "pipeline:weight" format.
     #[arg(long, short = 'i')]
-    pub input: Vec<String>,
+    pub input: Vec<DevicePipeline>,
     /// Output pipeline assignments in "pipeline:weight" format.
     #[arg(long, short = 'o')]
-    pub output: Vec<String>,
+    pub output: Vec<DevicePipeline>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -108,41 +108,29 @@ pub struct SetRateCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "devices.trafgen.controlplane.trafgenpb.v1.TrafgenService";
 
+fn client(channel: LayeredChannel) -> TrafgenServiceClient<LayeredChannel> {
+    TrafgenServiceClient::new(channel)
+        .max_decoding_message_size(256 * 1024 * 1024)
+        .max_encoding_message_size(256 * 1024 * 1024)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 pub struct TrafgenService {
     service: Service<TrafgenServiceClient<LayeredChannel>>,
 }
 
 impl TrafgenService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            TrafgenServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
 
     pub async fn update_device(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let input = cmd
-            .input
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-        let output = cmd
-            .output
-            .into_iter()
-            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.service.invalid("update", err.to_string()))?;
-
         let request = UpdateDeviceRequest {
             name: cmd.config_name.clone(),
-            device: Some(Device { input, output }),
+            device: Some(Device { input: cmd.input, output: cmd.output }),
         };
         self.service
             .client()
@@ -151,7 +139,7 @@ impl TrafgenService {
             .map_err(self.service.status("update"))?
             .into_inner();
 
-        output::success("update", format_args!("Updated device {}.", cmd.config_name));
+        output::success("update", format_args!("Updated device '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -171,7 +159,9 @@ impl TrafgenService {
                 if response.configs.is_empty() {
                     output::empty_with_hint(
                         format_args!("No trafgen configurations found."),
-                        format_args!("create one with 'yanet-cli-device-trafgen update --name <name>'"),
+                        format_args!(
+                            "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
+                        ),
                     );
                     return;
                 }
@@ -221,7 +211,7 @@ impl TrafgenService {
             .map_err(self.service.status("upload"))?
             .into_inner();
 
-        output::success("upload", format_args!("Uploaded pcap to {}.", cmd.config_name));
+        output::success("upload", format_args!("Uploaded pcap to device '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -240,7 +230,7 @@ impl TrafgenService {
 
         output::success(
             "rate",
-            format_args!("Set rate of {} to {} pps.", cmd.config_name, cmd.rate),
+            format_args!("Set rate on device '{}' to {} pps.", cmd.config_name, cmd.rate),
         );
 
         Ok(())
@@ -269,15 +259,7 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            TrafgenServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }

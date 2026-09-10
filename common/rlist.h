@@ -5,6 +5,11 @@
 // A member embeds a node and is reached back through the node; a head is
 // a plain node that points at itself when empty. Insertion appends at
 // the tail, so first-out order matches insertion order.
+//
+// A node embedded in shared memory keeps absolute addresses in its
+// links: only the process that builds the list ever writes or walks
+// them, and that process leaves them zeroed until the first build, so
+// no other mapping ever dereferences a foreign address.
 struct rlist {
 	struct rlist *prev;
 	struct rlist *next;
@@ -38,4 +43,25 @@ rlist_first(struct rlist *head) {
 static inline int
 rlist_empty(struct rlist *head) {
 	return head->next == head;
+}
+
+// Move every item of one list onto the tail of another.
+//
+// The source head is left empty and neither list is walked, so the
+// move costs the same regardless of lengths.
+static inline void
+rlist_concat(struct rlist *dst, struct rlist *src) {
+	if (rlist_empty(src)) {
+		return;
+	}
+
+	struct rlist *first = src->next;
+	struct rlist *last = src->prev;
+
+	dst->prev->next = first;
+	first->prev = dst->prev;
+	last->next = dst;
+	dst->prev = last;
+
+	rlist_init(src);
 }

@@ -8,7 +8,7 @@
 use clap::{ArgAction, Parser};
 use ync::{client::ConnectionArgs, errors::Error, output::CommonFormat};
 
-/// Pipeline operator CLI.
+/// Manages the pipeline operator (no commands yet).
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true, subcommand_required = true, arg_required_else_help = true)]

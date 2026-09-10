@@ -14,7 +14,7 @@ pub mod pb {
 }
 
 impl FromStr for pb::DevicePipeline {
-    type Err = Box<dyn Error>;
+    type Err = Box<dyn Error + Send + Sync>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (name, weight) = s
@@ -806,6 +806,24 @@ pub fn partition_prefixes(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_device_pipeline_from_str_accepts_name_and_weight() {
+        let pipeline: pb::DevicePipeline = "eth0:3".parse().expect("a valid 'name:weight' pair must parse");
+
+        assert_eq!("eth0", pipeline.name);
+        assert_eq!(3, pipeline.weight);
+    }
+
+    #[test]
+    fn test_device_pipeline_from_str_rejects_missing_weight() {
+        assert!("eth0".parse::<pb::DevicePipeline>().is_err());
+    }
+
+    #[test]
+    fn test_device_pipeline_from_str_rejects_non_numeric_weight() {
+        assert!("eth0:many".parse::<pb::DevicePipeline>().is_err());
+    }
 
     #[test]
     fn partition_prefixes_splits_by_family_preserving_order() {

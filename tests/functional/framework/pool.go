@@ -26,6 +26,8 @@ type VMPool struct {
 	templateOverlay      string // preferred startup template overlay for pool VMs
 	templateSnapshotName string // snapshot loaded from templateOverlay
 	log                  *zap.SugaredLogger
+	forceStop            bool
+	projectRoot          string
 }
 
 type poolEntry struct {
@@ -88,7 +90,11 @@ func PoolSize() int {
 // booted template and bootstraps it if needed.
 //
 // VMs are not started yet - call StartAll after creating the pool.
-func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, log *zap.SugaredLogger) (_ *VMPool, err error) {
+func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, enableSSHForward bool, log *zap.SugaredLogger) (_ *VMPool, err error) {
+	return newVMPool(size, baseName, qemuImage, bootedTemplate, templateOverlay, templateSnapshotName, enableSSHForward, log, "")
+}
+
+func newVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, enableSSHForward bool, log *zap.SugaredLogger, projectRoot string) (_ *VMPool, err error) {
 	if size < 1 {
 		size = 1
 	}
@@ -101,6 +107,7 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		templateOverlay:      templateOverlay,
 		templateSnapshotName: templateSnapshotName,
 		log:                  log.Named("VMPool"),
+		projectRoot:          projectRoot,
 	}
 	defer func() {
 		if err == nil {
@@ -119,10 +126,13 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		if size > 1 {
 			name = fmt.Sprintf("%s-%d", baseName, i)
 		}
-		qemu, qemuErr := NewQEMUManager(name, qemuImage, log)
+		qemu, qemuErr := newQEMUManager(name, qemuImage, log, projectRoot)
 		if qemuErr != nil {
 			err = qemuErr
 			return nil, fmt.Errorf("failed to create QEMU manager for pool slot %d: %w", i, err)
+		}
+		if enableSSHForward {
+			qemu.EnableSSHForward()
 		}
 
 		fw := &TestFramework{
@@ -150,6 +160,14 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 // Size returns the number of VM slots in the pool.
 func (p *VMPool) Size() int {
 	return p.size
+}
+
+// ForceStop makes every VM in the pool ignore the test keep-alive setting.
+func (p *VMPool) ForceStop() {
+	p.forceStop = true
+	for _, entry := range p.vms {
+		entry.manager.ForceStop()
+	}
 }
 
 // StartAll starts all VM slots. It prefers the configured template overlay when
@@ -192,12 +210,15 @@ func (p *VMPool) StartAll() error {
 func (p *VMPool) validateBootedTemplate() error {
 	vm0ImagePath := p.vms[0].manager.ImagePath
 
-	valMgr, err := NewQEMUManager("validate-booted", vm0ImagePath, p.log)
+	valMgr, err := newQEMUManager("validate-booted-"+p.vms[0].manager.Name, vm0ImagePath, p.log, p.projectRoot)
 	if err != nil {
 		return fmt.Errorf("failed to create validation manager: %w", err)
 	}
 	valMgr.TemplateOverlay = p.bootedTemplate
 	valMgr.TemplateSnapshotName = BootedSnapshotName
+	if p.forceStop {
+		valMgr.ForceStop()
+	}
 
 	valFW := &TestFramework{
 		qemu: valMgr,
@@ -212,6 +233,7 @@ func (p *VMPool) validateBootedTemplate() error {
 		return fmt.Errorf("failed to create validation CLI: %w", err)
 	}
 	valFW.cli = cli
+	defer valFW.Stop() //nolint:errcheck
 
 	p.log.Infof("Starting validation VM from booted template...")
 	defer valFW.Stop() //nolint:errcheck
@@ -323,8 +345,8 @@ func (p *VMPool) bootstrapTemplate() error {
 		return fmt.Errorf("failed to freeze filesystem before booted snapshot: %w", err)
 	}
 
-	// Save the booted snapshot and get the overlay path.
-	overlayPath, err := vm0.manager.SaveBootedOverlay()
+	// Save the booted snapshot before exporting the live overlay.
+	_, err := vm0.manager.SaveBootedOverlay()
 	thawErr := vm0.fw.thawRootFilesystem()
 	if err != nil {
 		_ = vm0.fw.Stop()
@@ -339,7 +361,7 @@ func (p *VMPool) bootstrapTemplate() error {
 	// (Stop() removes WorkDir which contains the overlay).
 	if err := os.MkdirAll(filepath.Dir(p.bootedTemplate), 0755); err != nil {
 		p.log.Warnf("Failed to create template cache dir: %v", err)
-	} else if err := copyFile(overlayPath, p.bootedTemplate); err != nil {
+	} else if err := vm0.fw.ExportCurrentOverlay(p.bootedTemplate); err != nil {
 		p.log.Warnf("Failed to cache booted template: %v", err)
 		if rerr := os.Remove(p.bootedTemplate); rerr != nil && !os.IsNotExist(rerr) {
 			p.log.Warnf("Failed to remove stale booted template %s: %v", p.bootedTemplate, rerr)

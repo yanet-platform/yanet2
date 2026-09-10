@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
@@ -11,7 +12,6 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/internal/agenterr"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -161,32 +161,18 @@ func (m *Function) Update(
 	request *ynpb.UpdateFunctionRequest,
 ) (*ynpb.UpdateFunctionResponse, error) {
 	reqFunction := request.GetFunction()
-	if reqFunction == nil {
-		return nil, status.Error(codes.InvalidArgument, "function is required")
-	}
-
-	reqFunctionId := reqFunction.GetId()
-	if reqFunctionId == nil {
-		return nil, status.Error(codes.InvalidArgument, "function id is required")
-	}
-	if reqFunctionId.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "function name is required")
+	if err := reqFunction.Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	function := ffi.FunctionConfig{
-		Name: reqFunctionId.Name,
+		Name: reqFunction.Id.Name,
 	}
 	for _, reqFunctionChain := range reqFunction.Chains {
 		reqChain := reqFunctionChain.GetChain()
-		if reqChain == nil {
-			return nil, status.Error(codes.InvalidArgument, "function chain is required")
-		}
 
 		modules := make([]ffi.ChainModuleConfig, 0, len(reqChain.Modules))
 		for _, reqChainModule := range reqChain.Modules {
-			if reqChainModule == nil {
-				return nil, status.Error(codes.InvalidArgument, "module id is required")
-			}
 			modules = append(modules, ffi.ChainModuleConfig{
 				Type: reqChainModule.Type,
 				Name: reqChainModule.Name,
@@ -211,7 +197,10 @@ func (m *Function) Update(
 	defer agent.Close()
 
 	if err := agent.UpdateFunction(function); err != nil {
-		return nil, agenterr.ClassifyUpdate(err)
+		if errors.Is(err, ffi.ErrFailedPrecondition) {
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &ynpb.UpdateFunctionResponse{}, nil
@@ -238,7 +227,14 @@ func (m *Function) Delete(
 	defer agent.Close()
 
 	if err := agent.DeleteFunction(functionName); err != nil {
-		return nil, agenterr.ClassifyDelete(err)
+		switch {
+		case errors.Is(err, ffi.ErrNotFound):
+			return nil, status.Error(codes.NotFound, err.Error())
+		case errors.Is(err, ffi.ErrFailedPrecondition):
+			// The live configuration still runs the function.
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &ynpb.DeleteFunctionResponse{}, nil

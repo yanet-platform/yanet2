@@ -773,6 +773,11 @@ test_extend_rolls_back_on_exhausted_pool() {
 	rc = agent_extend(agent, 1 << 20, &err);
 	TEST_ASSERT(rc == -1, "an unsatisfiable extend must fail");
 	TEST_ASSERT_NOT_NULL(err, "a failed extend must set an error");
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(err),
+		YANET_ERROR_RESOURCE_EXHAUSTED,
+		"a pool with no room left must say so"
+	);
 	yanet_error_free(err);
 	err = NULL;
 
@@ -824,6 +829,94 @@ test_attach_name_too_long_is_refused() {
 	TEST_ASSERT_NOT_NULL(err, "a refused attach must set an error");
 
 	yanet_error_free(err);
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that a growth lands on the agent it names and leaves every other
+// agent's memory untouched.
+static int
+test_extend_agent_grows_the_named_agent() {
+	void *storage = extend_storage_alloc(1 << 25);
+	TEST_ASSERT_NOT_NULL(storage, "storage allocation failed");
+
+	struct cp_config *cp_config = NULL;
+	int rc = extend_env_init(storage, 1 << 24, &cp_config);
+	TEST_ASSERT(rc == 0, "storage setup failed");
+
+	struct yanet_shm shm = {.base = storage, .size = 1 << 25};
+	yanet_error *err = NULL;
+	struct agent *first = agent_attach(&shm, 0, "first", 1 << 12, &err);
+	TEST_ASSERT_NOT_NULL(first, "agent_attach failed");
+	struct agent *second = agent_attach(&shm, 0, "second", 1 << 12, &err);
+	TEST_ASSERT_NOT_NULL(second, "agent_attach failed");
+
+	uint64_t memory_limit = 0;
+	rc = yanet_shm_extend_agent(
+		&shm, 0, "second", 1u << 20, &memory_limit, &err
+	);
+	TEST_ASSERT(rc == 0, "growing an attached agent must succeed");
+	TEST_ASSERT_NULL(err, "a successful growth must not set an error");
+
+	TEST_ASSERT_EQUAL(
+		second->memory_limit,
+		(uint64_t)((1u << 12) + (1u << 20)),
+		"the named agent must be the one that grew"
+	);
+	TEST_ASSERT_EQUAL(
+		first->memory_limit,
+		(uint64_t)(1u << 12),
+		"an agent nobody named must keep its memory"
+	);
+
+	extend_agent_release(first, cp_config);
+	extend_agent_release(second, cp_config);
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that a growth refuses an instance the dataplane has not finished
+// initialising, so an early caller gets an error instead of a fault.
+static int
+test_extend_agent_gates_on_readiness() {
+	void *storage = extend_storage_alloc(1 << 25);
+	TEST_ASSERT_NOT_NULL(storage, "storage allocation failed");
+
+	struct yanet_shm shm = {.base = storage, .size = 1 << 25};
+	yanet_error *err = NULL;
+	uint64_t memory_limit = 0;
+	int rc = yanet_shm_extend_agent(
+		&shm, 0, "any", 1u << 20, &memory_limit, &err
+	);
+	TEST_ASSERT(rc == -1, "a zeroed instance must not be grown");
+	TEST_ASSERT_NOT_NULL(err, "a refused growth must set an error");
+	yanet_error_free(err);
+	err = NULL;
+
+	struct cp_config *cp_config = NULL;
+	rc = extend_env_init(storage, 1 << 24, &cp_config);
+	TEST_ASSERT(rc == 0, "storage setup failed");
+
+	struct agent *agent = agent_attach(&shm, 0, "ready", 1 << 12, &err);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	rc = yanet_shm_extend_agent(
+		&shm, 1, "ready", 1u << 20, &memory_limit, &err
+	);
+	TEST_ASSERT(
+		rc == -1,
+		"an index past the published instance count must not be grown"
+	);
+	TEST_ASSERT_NOT_NULL(err, "a refused growth must set an error");
+	yanet_error_free(err);
+
+	TEST_ASSERT_EQUAL(
+		agent->memory_limit,
+		(uint64_t)(1u << 12),
+		"a refused growth must not move any agent's memory"
+	);
+
+	extend_agent_release(agent, cp_config);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -969,6 +1062,18 @@ main() {
 		LOG(ERROR,
 		    "test_current_time_does_not_regress_when_a_worker_stops "
 		    "failed");
+	}
+
+	++tests_count;
+	if (test_extend_agent_grows_the_named_agent() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR, "test_extend_agent_grows_the_named_agent failed");
+	}
+
+	++tests_count;
+	if (test_extend_agent_gates_on_readiness() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR, "test_extend_agent_gates_on_readiness failed");
 	}
 
 	if (tests_failed != 0) {

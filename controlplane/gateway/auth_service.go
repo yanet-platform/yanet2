@@ -26,16 +26,22 @@ func NewAuthService(manager *auth.Manager) *AuthService {
 }
 
 // IntrospectToken validates a token and returns principal information.
+//
+// An empty token introspects what the call itself presented: the token in
+// its metadata or the client certificate of its connection.
 func (m *AuthService) IntrospectToken(
 	ctx context.Context,
 	request *ynpb.IntrospectTokenRequest,
 ) (*ynpb.IntrospectTokenResponse, error) {
-	token := request.GetToken()
+	credential := core.Credential{Token: request.GetToken()}
+	if credential.Token == "" {
+		credential = auth.ExtractCredential(ctx)
+	}
 
 	// IntrospectToken is not bound to a specific method, so we pass
 	// an empty RequestInfo.
 	requestInfo := &core.RequestInfo{}
-	principal, err := m.manager.Authenticate(ctx, token, requestInfo)
+	principal, err := m.manager.Authenticate(ctx, credential, requestInfo)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
 	}

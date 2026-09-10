@@ -22,15 +22,15 @@ func (m *NoneAuthenticator) Name() string {
 	return "none"
 }
 
-// IsTokenSupported always returns true.
-func (m *NoneAuthenticator) IsTokenSupported(token string) bool {
+// Supports always returns true.
+func (m *NoneAuthenticator) Supports(credential core.Credential) bool {
 	return true
 }
 
 // Authenticate always succeeds and returns anonymous authentication info.
 func (m *NoneAuthenticator) Authenticate(
 	ctx context.Context,
-	token string,
+	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.AuthInfo, error) {
 	return &core.AuthInfo{

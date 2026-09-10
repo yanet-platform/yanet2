@@ -1,0 +1,33 @@
+$schema: ../../yanet2-lab.schema.json
+version: 1
+name: decap
+description: Configure an unmanaged decapsulation module and verify one IPv4-in-IPv4 packet.
+steps:
+  - name: configure-decap
+    argv:
+      - /tmp/yanet/cli/yanet-cli-decap
+      - update
+      - --name
+      - decap_lab
+      - -p
+      - 4.5.6.7/32
+      - -p
+      - 1:2:3:4::abcd/128
+  - name: attach-decap
+    argv:
+      - /tmp/yanet/cli/yanet-cli-function
+      - update
+      - --name=fn:lab
+      - --chains
+      - default:1=decap:decap_lab
+  - name: inspect-decap
+    argv: [/tmp/yanet/cli/yanet-cli-decap, show, --name, decap_lab]
+probes:
+  - name: decap-ipv4
+    ingress: 0
+    egress: 0
+    timeout: 1s
+    send:
+      pcap: input.pcap
+    expect:
+      pcap: expected.pcap

@@ -18,10 +18,10 @@ collect_port_values(
 	const struct filter_rule **actions,
 	uint32_t count,
 	action_get_port_range_func get_port_range,
-	struct value_table *table,
+	struct vline *line,
 	struct value_registry *registry
 ) {
-	if (value_table_init(table, memory_context, "port", 1, 65536)) {
+	if (vline_init(line, memory_context, "port", 65536)) {
 		return -1;
 	}
 
@@ -52,8 +52,7 @@ collect_port_values(
 			}
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
-				uint32_t *value =
-					value_table_get_ptr(table, 0, port);
+				uint32_t *value = vline_get_ptr(line, port);
 				if (remap_table_touch(
 					    &remap_table, *value, value
 				    ) < 0) {
@@ -64,7 +63,7 @@ collect_port_values(
 	}
 
 	remap_table_compact(&remap_table);
-	value_table_compact(table, &remap_table);
+	vline_compact(line, &remap_table);
 	remap_table_free(&remap_table);
 
 	for (const struct filter_rule **action_ptr = actions;
@@ -88,8 +87,7 @@ collect_port_values(
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
 				if (value_registry_collect(
-					    registry,
-					    value_table_get(table, 0, port)
+					    registry, vline_get(line, port)
 				    )) {
 					goto error_collect;
 				}
@@ -100,8 +98,7 @@ collect_port_values(
 		if (!port_range_count) {
 			for (uint32_t port = 0; port <= 65535; ++port) {
 				if (value_registry_collect(
-					    registry,
-					    value_table_get(table, 0, port)
+					    registry, vline_get(line, port)
 				    )) {
 					goto error_collect;
 				}
@@ -116,7 +113,7 @@ error_touch:
 
 error_collect:
 error_remap_table:
-	value_table_free(table);
+	vline_free(line);
 	return -1;
 }
 
@@ -148,22 +145,22 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct value_table *table =
-		memory_balloc(memory_context, sizeof(struct value_table));
-	if (table == NULL) {
+	struct vline *line =
+		memory_balloc(memory_context, sizeof(struct vline));
+	if (line == NULL) {
 		return -1;
 	}
-	SET_OFFSET_OF(data, table);
+	SET_OFFSET_OF(data, line);
 	if (collect_port_values(
 		    memory_context,
 		    actions,
 		    actions_count,
 		    get_port_range_dst,
-		    table,
+		    line,
 		    registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
-		memory_bfree(memory_context, table, sizeof(struct value_table));
+		memory_bfree(memory_context, line, sizeof(struct vline));
 		return -1;
 	}
 	return 0;
@@ -177,22 +174,22 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct value_table *table =
-		memory_balloc(memory_context, sizeof(struct value_table));
-	if (table == NULL) {
+	struct vline *line =
+		memory_balloc(memory_context, sizeof(struct vline));
+	if (line == NULL) {
 		return -1;
 	}
-	SET_OFFSET_OF(data, table);
+	SET_OFFSET_OF(data, line);
 	if (collect_port_values(
 		    memory_context,
 		    actions,
 		    actions_count,
 		    get_port_range_src,
-		    table,
+		    line,
 		    registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
-		memory_bfree(memory_context, table, sizeof(struct value_table));
+		memory_bfree(memory_context, line, sizeof(struct vline));
 		return -1;
 	}
 
@@ -203,24 +200,24 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(port_src)(
 	void *data, struct memory_context *memory_context
 ) {
-	struct value_table *table = (struct value_table *)data;
-	if (table == NULL) {
+	struct vline *line = (struct vline *)data;
+	if (line == NULL) {
 		return;
 	}
 
-	value_table_free(table);
-	memory_bfree(memory_context, table, sizeof(struct value_table));
+	vline_free(line);
+	memory_bfree(memory_context, line, sizeof(struct vline));
 }
 
 void
 FILTER_ATTR_COMPILER_FREE_FUNC(port_dst)(
 	void *data, struct memory_context *memory_context
 ) {
-	struct value_table *table = (struct value_table *)data;
-	if (table == NULL) {
+	struct vline *line = (struct vline *)data;
+	if (line == NULL) {
 		return;
 	}
 
-	value_table_free(table);
-	memory_bfree(memory_context, table, sizeof(struct value_table));
+	vline_free(line);
+	memory_bfree(memory_context, line, sizeof(struct vline));
 }

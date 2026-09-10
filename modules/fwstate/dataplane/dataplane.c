@@ -15,7 +15,9 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
+#include "lib/dataplane/worker/worker.h"
 #include "lib/fwstate/fwtable.h"
+#include "lib/fwstate/sync.h"
 #include "lib/fwstate/types.h"
 #include "lib/logging/log.h"
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
@@ -68,11 +70,24 @@ is_fw_state_sync_packet(
 	struct packet *packet, struct fwstate_sync_config *sync_config
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	bool is_internal =
+		(packet->flags >> PACKET_FLAG_FWSTATE_SYNC_INTERNAL) & 1;
+	// External frames require multicast; internal events are always
+	// claimed.
+	//
+	// This prevents neutral events from entering ordinary processing when
+	// no emission endpoint is configured.
+	if (!is_internal && !fwstate_sync_multicast_enabled(sync_config)) {
+		return false;
+	}
 
-	// Check for multicast Ethernet destination
+	// Locally crafted packets are identified by trusted packet metadata.
+	//
+	// Wire packets cannot set this flag and still follow the configured
+	// multicast receive contract.
 	struct rte_ether_hdr *eth_hdr =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	if ((eth_hdr->dst_addr.addr_bytes[0] & 1) == 0) {
+	if (!is_internal && (eth_hdr->dst_addr.addr_bytes[0] & 1) == 0) {
 		return false; // Not multicast
 	}
 
@@ -106,18 +121,17 @@ is_fw_state_sync_packet(
 			sizeof(struct rte_ipv6_hdr)
 	);
 
-	// FIXME: support for unicast destination?
+	if (!is_internal) {
+		// Port values are stored in network byte order.
+		if (udp_hdr->dst_port != sync_config->port_multicast) {
+			return false;
+		}
 
-	// Check destination port matches configured multicast port
-	// (port in config is already big-endian)
-	if (udp_hdr->dst_port != sync_config->port_multicast) {
-		return false;
-	}
-
-	// Check destination IPv6 address matches configured multicast address
-	if (memcmp(ipv6_hdr->dst_addr, sync_config->dst_addr_multicast, 16) !=
-	    0) {
-		return false;
+		if (memcmp(ipv6_hdr->dst_addr,
+			   sync_config->dst_addr_multicast,
+			   16) != 0) {
+			return false;
+		}
 	}
 
 	// Check if UDP payload size is a multiple of fw_state_sync_frame.
@@ -136,6 +150,31 @@ is_fw_state_sync_packet(
 	}
 
 	return true;
+}
+
+static inline void
+fwstate_finalize_internal_sync(
+	struct packet *packet,
+	const struct fwstate_sync_config *sync_config,
+	const uint8_t dst_addr[16],
+	uint16_t dst_port
+) {
+	fwstate_sync_set_destination(
+		packet, &sync_config->dst_ether, dst_addr, dst_port
+	);
+	const uint16_t ipv6_offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr);
+	const uint16_t udp_offset = ipv6_offset + sizeof(struct rte_ipv6_hdr);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, ipv6_offset
+	);
+	rte_memcpy(ipv6_hdr->src_addr, sync_config->src_addr, 16);
+	struct rte_udp_hdr *udp_hdr =
+		rte_pktmbuf_mtod_offset(mbuf, struct rte_udp_hdr *, udp_offset);
+	udp_hdr->dgram_cksum = 0;
+	udp_hdr->dgram_cksum = rte_ipv6_udptcp_cksum(ipv6_hdr, udp_hdr);
+	packet->flags &= (uint16_t)~(1U << PACKET_FLAG_FWSTATE_SYNC_INTERNAL);
 }
 
 // Build fw_state_value from sync frame
@@ -210,11 +249,11 @@ fwstate_should_suppress_sync(
 	return (new_expiry - current_deadline) < suppress_timeout;
 }
 
-// Process IPv4 state sync frame.
+// Sync processors return false only when suppression rejects a frame.
 //
-// Returns true when the frame was applied (or a put was attempted), false when
-// it was suppressed by the suppression window. Callers use the return value to
-// decide whether a fully-suppressed internal packet should still be forwarded.
+// Missing storage or a failed insertion still returns true: the packet-level
+// caller uses false solely to drop a fully suppressed local event before
+// emission.
 static bool
 fwstate_process_sync_v4(
 	fwtable_t *fw4table,
@@ -314,7 +353,6 @@ fwstate_process_sync_v4(
 	return true;
 }
 
-// Process IPv6 state sync frame. See fwstate_process_sync_v4 for semantics.
 static bool
 fwstate_process_sync_v6(
 	fwtable_t *fw6table,
@@ -519,10 +557,10 @@ fwstate_handle_packets(
 			mbuf, struct rte_ipv6_hdr *, ipv6_offset
 		);
 
-		// Check if packet is from this machine (internal) or from the
-		// network (external)
-		bool is_external =
-			(memcmp(ipv6_hdr->src_addr, (uint8_t[16]){0}, 16) != 0);
+		bool is_internal =
+			(packet->flags >> PACKET_FLAG_FWSTATE_SYNC_INTERNAL) &
+			1;
+		bool is_external = !is_internal;
 
 		uint16_t udp_payload_len;
 		if (!fwstate_sync_payload_len(
@@ -533,11 +571,6 @@ fwstate_handle_packets(
 		}
 		size_t frame_count =
 			udp_payload_len / sizeof(struct fw_state_sync_frame);
-
-		// Whether any frame in this packet was actually applied (not
-		// suppressed). A fully-suppressed internal packet carries no
-		// new state for peers either, so it is dropped instead of
-		// forwarded to spare downstream and inter-firewall bandwidth.
 		bool any_applied = false;
 
 		// Process each sync frame in the packet
@@ -552,7 +585,7 @@ fwstate_handle_packets(
 						      )
 				);
 
-			bool applied = true;
+			bool applied = false;
 			if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
 				applied = fwstate_process_sync_v4(
 					fw4table,
@@ -582,29 +615,64 @@ fwstate_handle_packets(
 			any_applied = any_applied || applied;
 		}
 
-		// Drop external packets (from other firewalls) after
-		// processing. Pass through internal packets (from our ACL) to
-		// reach other firewalls, unless every frame was suppressed — in
-		// that case the packet holds no new state and is dropped.
+		// Received sync packets are consumed after updating state.
+		// Local events are emitted only when at least one frame was
+		// applied.
 		if (is_external) {
 			external_dropped_cnt[0] += 1;
 			external_dropped_cnt[1] += mbuf->pkt_len;
 			packet_front_drop(packet_front, packet);
 		} else if (any_applied) {
-			rte_memcpy(
-				ipv6_hdr->src_addr,
-				fwstate_module->sync_config.src_addr,
-				16
+			const struct fwstate_sync_config *sync_config =
+				&fwstate_module->sync_config;
+			bool emit_multicast =
+				fwstate_sync_multicast_enabled(sync_config);
+			bool emit_unicast =
+				fwstate_sync_unicast_enabled(sync_config);
+
+			if (!emit_multicast && !emit_unicast) {
+				packet_front_drop(packet_front, packet);
+				continue;
+			}
+
+			struct packet *sync_copy = NULL;
+			if (emit_multicast && emit_unicast) {
+				sync_copy = worker_clone_packet(
+					dp_worker,
+					packet,
+					module_ectx->packet_recirc_limit
+				);
+				if (unlikely(sync_copy == NULL)) {
+					LOG(ERROR,
+					    "failed to clone sync packet");
+				}
+			}
+
+			const uint8_t *dst_addr =
+				emit_multicast ? sync_config->dst_addr_multicast
+					       : sync_config->dst_addr_unicast;
+			uint16_t dst_port =
+				emit_multicast ? sync_config->port_multicast
+					       : sync_config->port_unicast;
+			fwstate_finalize_internal_sync(
+				packet, sync_config, dst_addr, dst_port
 			);
-			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-				mbuf, struct rte_udp_hdr *, udp_offset
-			);
-			udp_hdr->dgram_cksum = 0;
-			udp_hdr->dgram_cksum =
-				rte_ipv6_udptcp_cksum(ipv6_hdr, udp_hdr);
 			internal_forwarded_cnt[0] += 1;
 			internal_forwarded_cnt[1] += mbuf->pkt_len;
 			packet_front_output(packet_front, packet);
+
+			if (sync_copy != NULL) {
+				fwstate_finalize_internal_sync(
+					sync_copy,
+					sync_config,
+					sync_config->dst_addr_unicast,
+					sync_config->port_unicast
+				);
+				internal_forwarded_cnt[0] += 1;
+				internal_forwarded_cnt[1] +=
+					packet_to_mbuf(sync_copy)->pkt_len;
+				packet_front_output(packet_front, sync_copy);
+			}
 		} else {
 			packet_front_drop(packet_front, packet);
 		}

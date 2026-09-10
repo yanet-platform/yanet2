@@ -3,7 +3,11 @@ package auth
 import (
 	"context"
 
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 const (
@@ -11,19 +15,26 @@ const (
 	authMetadataKey = "x-yanet-authentication"
 )
 
-// ExtractToken extracts the authentication token from gRPC metadata.
-// Returns empty string if no token is present.
-func ExtractToken(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
+// ExtractCredential collects what the request presents for authentication:
+// the token from gRPC metadata and the TLS state of the peer connection.
+//
+// Either part is left empty when absent.
+func ExtractCredential(ctx context.Context) core.Credential {
+	var credential core.Credential
+
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		// TODO: should we allow passing multiple tokens at once?
+		if values := md.Get(authMetadataKey); len(values) > 0 {
+			credential.Token = values[0]
+		}
 	}
 
-	values := md.Get(authMetadataKey)
-	if len(values) == 0 {
-		return ""
+	if peerInfo, ok := peer.FromContext(ctx); ok {
+		if info, ok := peerInfo.AuthInfo.(credentials.TLSInfo); ok {
+			state := info.State
+			credential.TLS = &state
+		}
 	}
 
-	// TODO: should we allow passing multiple tokens at once?
-	return values[0]
+	return credential
 }

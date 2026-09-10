@@ -5,6 +5,7 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
 //#cgo LDFLAGS: -L../../build/devices/plain/api -ldev_plain_api
 //#cgo LDFLAGS: -L../../build/devices/vlan/api -ldev_vlan_api
 //#cgo LDFLAGS: -L../../build/lib/logging/ -llogging
@@ -291,6 +292,19 @@ func (m *Agent) DeletePipeline(name string) error {
 	rc := C.agent_delete_pipeline(m.ptr, cName, &cErr)
 	if rc != 0 {
 		return fmt.Errorf("failed to delete pipeline %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return nil
+}
+
+func (m *Agent) DeleteDevice(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cErr *C.yanet_error
+	rc := C.agent_delete_device(m.ptr, cName, &cErr)
+	if rc != 0 {
+		return fmt.Errorf("failed to delete device %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil

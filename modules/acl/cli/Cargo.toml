@@ -13,15 +13,15 @@ workspace = true
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
-netip = "0.3"
 log = "0.4"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-prost = "0.13"
-tonic = { version = "0.13", features = ["gzip"] }
-tabled = { version = "0.18", features = ["ansi"] }
+prost = "0.14"
+tonic = { version = "0.14", features = ["gzip"] }
+tonic-prost = "0.14"
+tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 
 [build-dependencies]
-tonic-build = "0.13"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

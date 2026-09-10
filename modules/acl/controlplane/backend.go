@@ -5,7 +5,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
-	cfwstate "github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 // backend is the production Backend implementation backed by *ffi.Agent.
@@ -22,10 +21,9 @@ func (m *backend) NewModule(
 	name string,
 	rules []cacl.AclRule,
 	fw4MapName, fw6MapName string,
-	emitConfig *cfwstate.SyncEmitConfig,
 ) (ModuleHandle, error) {
 	handle, err := cacl.NewModuleConfig(
-		m.agent, name, rules, fw4MapName, fw6MapName, emitConfig,
+		m.agent, name, rules, fw4MapName, fw6MapName,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)

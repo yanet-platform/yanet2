@@ -6,6 +6,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 // NewFromConfig creates an SSH certificate Authenticator from a raw YAML.
@@ -24,7 +26,7 @@ func NewFromConfig(
 
 	caStores := make([]*CAStore, len(cfg.CASources))
 	for idx, src := range cfg.CASources {
-		store, err := NewCAStoreFromLoader(NewLoader(src))
+		store, err := NewCAStoreFromLoader(loader.NewLoader(src))
 		if err != nil {
 			return nil, fmt.Errorf(
 				"create CA store from %q: %w", src, err,
@@ -38,7 +40,7 @@ func NewFromConfig(
 
 	var revChecker RevocationChecker = NewNopRevocationChecker()
 	if cfg.KRLSource != "" {
-		krlLoader := NewLoader(cfg.KRLSource)
+		krlLoader := loader.NewLoader(cfg.KRLSource)
 		var err error
 		revChecker, err = NewKRLRevocationCheckerFromLoader(krlLoader)
 		if err != nil {

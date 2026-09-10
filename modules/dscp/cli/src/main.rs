@@ -24,7 +24,7 @@ pub mod dscppb {
     tonic::include_proto!("modules.dscp.controlplane.dscppb.v1");
 }
 
-/// DSCP module for packet marking.
+/// Manages dscp module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
@@ -36,19 +36,24 @@ pub struct Cmd {
     /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// List configs.
     List,
+    /// Show a config.
     Show(ShowConfigCmd),
+    /// Add prefixes to the input filter of a config.
     PrefixAdd(AddPrefixesCmd),
+    /// Remove prefixes from the input filter of a config.
     PrefixRemove(RemovePrefixesCmd),
+    /// Set the DSCP marking of a config.
     SetMarking(SetDscpMarkingCmd),
-    /// Delete a dscp module config.
+    /// Delete a config.
     Delete(DeleteConfigCmd),
 }
 
@@ -139,6 +144,12 @@ const SERVICE_NAME: &str = "modules.dscp.controlplane.dscppb.v1.DscpService";
 /// Maps a genuine "config not found" status into a friendly message.
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
+fn client(channel: LayeredChannel) -> DscpServiceClient<LayeredChannel> {
+    DscpServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
 }
@@ -163,12 +174,7 @@ pub struct DscpService {
 
 impl DscpService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            DscpServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
 
         Ok(Self { service })
     }
@@ -256,7 +262,7 @@ impl DscpService {
 
         output::success(
             "prefix-add",
-            format_args!("Added {} prefix(es) to {}.", cmd.prefix.len(), cmd.config_name),
+            format_args!("Added {} prefix(es) to config '{}'.", cmd.prefix.len(), cmd.config_name),
         );
 
         Ok(())
@@ -281,7 +287,11 @@ impl DscpService {
 
         output::success(
             "prefix-remove",
-            format_args!("Removed {} prefix(es) from {}.", cmd.prefix.len(), cmd.config_name),
+            format_args!(
+                "Removed {} prefix(es) from config '{}'.",
+                cmd.prefix.len(),
+                cmd.config_name
+            ),
         );
 
         Ok(())
@@ -305,7 +315,10 @@ impl DscpService {
             .into_inner();
         log::debug!("SetDscpMarkingResponse: {response:?}");
 
-        output::success("set-marking", format_args!("Set DSCP marking on {}.", cmd.config_name));
+        output::success(
+            "set-marking",
+            format_args!("Set marking on config '{}'.", cmd.config_name),
+        );
 
         Ok(())
     }
@@ -329,7 +342,7 @@ impl DscpService {
             .into_inner();
         log::debug!("DeleteConfigResponse: {response:?}");
 
-        output::success("delete", format_args!("Deleted dscp {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }
@@ -379,13 +392,7 @@ fn flag_to_string(flag: u32) -> String {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            DscpServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }

@@ -152,4 +152,12 @@ mod test {
             assert!(Metric::from_proto(m).kind == expected);
         }
     }
+
+    #[test]
+    fn test_format_number_groups_thousands() {
+        assert_eq!("0", format_number(0));
+        assert_eq!("999", format_number(999));
+        assert_eq!("1,000", format_number(1000));
+        assert_eq!("1,234,567", format_number(1234567));
+    }
 }

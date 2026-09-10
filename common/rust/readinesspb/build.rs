@@ -3,7 +3,7 @@ use core::error::Error;
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=common/readinesspb/v1/readiness.proto");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute("common.readinesspb.v1.Reason", "#[derive(serde::Serialize)]")

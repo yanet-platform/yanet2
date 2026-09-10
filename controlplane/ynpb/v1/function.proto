@@ -81,6 +81,7 @@ message Function {
   //
   // At least one chain is required.
   // Traffic is distributed across chains based on their weights.
+  // The sum of chain weights must be in 0..65535.
   repeated FunctionChain chains = 2;
 }
 
@@ -89,7 +90,7 @@ message Function {
 message FunctionChain {
   // The processing chain defining the module sequence.
   Chain chain = 1;
-  // Weight for load balancing.
+  // Weight for load balancing in the accepted range 0..65535.
   //
   // Higher weight means more traffic is directed to this chain. A weight
   // of 0 effectively disables the chain without removing it from the

@@ -1,5 +1,4 @@
-use core::net::IpAddr;
-use std::{collections::HashMap, fs::File, path::Path};
+use std::collections::HashMap;
 
 use aclpb::{
     DeleteConfigRequest, GetMetricsRulesRequest, GetRulesCountersRequest, ListConfigsRequest, ShowConfigRequest,
@@ -17,6 +16,7 @@ use ync::{
     errors::Error,
     metrics,
     output::{self, CommonFormat},
+    yaml,
 };
 
 mod args;
@@ -192,32 +192,18 @@ fn print_rule_metrics_table(metrics: &[commonpb::Metric]) {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ACLConfig {
     rules: Vec<aclpb::Rule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fwtable_name_v4: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fwtable_name_v6: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    sync_config: Option<aclpb::SyncConfig>,
-}
-
-impl ACLConfig {
-    pub fn load<P>(path: P) -> Result<Self, Box<dyn core::error::Error>>
-    where
-        P: AsRef<Path>,
-    {
-        let file = File::open(path)?;
-        let config = serde_yaml::from_reader(file)?;
-
-        Ok(config)
-    }
 }
 
 /// Display view of an ACL config returned by the show command.
 ///
-/// `fwtable_name_v4`, `fwtable_name_v6`, and `sync_config` are omitted
-/// when absent.
+/// Map names are omitted when absent.
 #[derive(Debug, Serialize)]
 struct ShowConfig {
     rules: Vec<aclpb::Rule>,
@@ -225,11 +211,9 @@ struct ShowConfig {
     fwtable_name_v4: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     fwtable_name_v6: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sync_config: Option<aclpb::SyncConfig>,
 }
 
-/// ACL module CLI.
+/// Manages acl module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
 pub struct Cmd {
@@ -237,9 +221,10 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
     #[arg(long, default_value = "human", global = true)]
     pub format: CommonFormat,
-    /// Log verbosity level.
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -247,6 +232,22 @@ pub struct Cmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
 const METRICS_SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.MetricsService";
+
+fn client(channel: LayeredChannel) -> AclServiceClient<LayeredChannel> {
+    AclServiceClient::new(channel)
+        .max_decoding_message_size(256 * 1024 * 1024)
+        .max_encoding_message_size(256 * 1024 * 1024)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+fn metrics_client(channel: LayeredChannel) -> MetricsServiceClient<LayeredChannel> {
+    MetricsServiceClient::new(channel)
+        .max_decoding_message_size(256 * 1024 * 1024)
+        .max_encoding_message_size(256 * 1024 * 1024)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
+}
 
 pub struct ACLService {
     service: Service<AclServiceClient<LayeredChannel>>,
@@ -256,20 +257,8 @@ pub struct ACLService {
 impl ACLService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let conn = Connection::connect_for(connection, action).await?;
-        let service = Service::new(&conn, SERVICE_NAME, |channel| {
-            AclServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
-        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, |channel| {
-            MetricsServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        });
+        let service = Service::new(&conn, SERVICE_NAME, client);
+        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, metrics_client);
 
         Ok(Self { service, metrics })
     }
@@ -328,7 +317,6 @@ impl ACLService {
                     } else {
                         Some(response.fwtable_name_v6.clone())
                     },
-                    sync_config: response.sync_config.clone(),
                 };
                 print!(
                     "{}",
@@ -356,57 +344,13 @@ impl ACLService {
             .map_err(self.service.status("delete"))?
             .into_inner();
 
-        output::success("delete", format_args!("Deleted {}.", cmd.config_name));
+        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
         Ok(())
     }
 
-    /// Merge the emission sync config from the YAML file and the flags.
-    ///
-    /// The YAML section is the base; every flag that was passed overrides
-    /// its field. A config with neither source carries no sync config.
-    fn merge_sync_config(&self, base: Option<aclpb::SyncConfig>, cmd: &UpdateCmd) -> Option<aclpb::SyncConfig> {
-        let mut sync = match base {
-            Some(base) => base,
-            None => {
-                let no_flags = cmd.dst_ether.is_none()
-                    && cmd.dst_addr_multicast.is_none()
-                    && cmd.port_multicast.is_none()
-                    && cmd.dst_addr_unicast.is_none()
-                    && cmd.port_unicast.is_none();
-                if no_flags {
-                    return None;
-                }
-                aclpb::SyncConfig::default()
-            }
-        };
-
-        if let Some(dst_ether) = cmd.dst_ether {
-            sync.dst_ether = Some(commonpb::MacAddress::from(dst_ether));
-        }
-        if let Some(dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync.dst_addr_multicast = Some(commonpb::IpAddress::from(IpAddr::V6(dst_addr_multicast)));
-        }
-        if let Some(port_multicast) = cmd.port_multicast {
-            sync.port_multicast = u32::from(port_multicast);
-        }
-        if let Some(dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync.dst_addr_unicast = Some(commonpb::IpAddress::from(IpAddr::V6(dst_addr_unicast)));
-        }
-        if let Some(port_unicast) = cmd.port_unicast {
-            sync.port_unicast = u32::from(port_unicast);
-        }
-
-        Some(sync)
-    }
-
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let config = ACLConfig::load(&cmd.file).map_err(|err| {
-            self.service.invalid(
-                "update",
-                format!("failed to load rules from {}: {err}", cmd.file.display()),
-            )
-        })?;
+        let config: ACLConfig = yaml::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
         let rule_count = config.rules.len();
 
         // A flag wins for that field whenever it is passed, even as an
@@ -423,14 +367,12 @@ impl ACLService {
             .clone()
             .or(config.fwtable_name_v6.clone())
             .unwrap_or_default();
-        let sync_config = self.merge_sync_config(config.sync_config, &cmd);
-
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
             fwtable_name_v4,
             fwtable_name_v6,
-            sync_config,
+            ..Default::default()
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self
@@ -444,7 +386,7 @@ impl ACLService {
 
         output::success(
             "update",
-            format_args!("Updated {} ({} rules).", cmd.config_name, rule_count),
+            format_args!("Updated config '{}' ({} rules).", cmd.config_name, rule_count),
         );
 
         Ok(())
@@ -575,17 +517,9 @@ fn main() -> std::process::ExitCode {
 ///
 /// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
-    completion::candidates(
-        Cmd::command,
-        |channel| {
-            AclServiceClient::new(channel)
-                .max_decoding_message_size(256 * 1024 * 1024)
-                .max_encoding_message_size(256 * 1024 * 1024)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        },
-        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
-    )
+    completion::candidates(Cmd::command, client, async move |mut client| {
+        Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
+    })
 }
 
 #[cfg(test)]
@@ -668,6 +602,13 @@ mod test {
         let content = include_str!("../../../../tests/functional/testdata/acl+fwstate.yaml");
         let config: ACLConfig = serde_yaml::from_str(content).expect("acl+fwstate.yaml fixture must deserialize");
         assert!(!config.rules.is_empty());
+    }
+
+    #[test]
+    fn test_acl_config_rejects_legacy_sync_config() {
+        let err = serde_yaml::from_str::<ACLConfig>("rules: []\nsync_config: {}\n").unwrap_err();
+
+        assert!(err.to_string().contains("unknown field `sync_config`"));
     }
 
     #[test]

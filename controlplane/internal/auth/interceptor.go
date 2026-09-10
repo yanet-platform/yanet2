@@ -18,14 +18,14 @@ func UnaryServerInterceptor(
 	log *zap.Logger,
 ) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		token := ExtractToken(ctx)
+		credential := ExtractCredential(ctx)
 
 		requestInfo := &core.RequestInfo{
 			FullMethod: info.FullMethod,
 		}
 
 		// Authenticate the request.
-		principal, err := manager.Authenticate(ctx, token, requestInfo)
+		principal, err := manager.Authenticate(ctx, credential, requestInfo)
 		if err != nil {
 			log.Warn("authentication failed",
 				zap.String("method", info.FullMethod),
@@ -53,14 +53,14 @@ func StreamServerInterceptor(manager *Manager, log *zap.Logger) grpc.StreamServe
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := ss.Context()
 
-		token := ExtractToken(ctx)
+		credential := ExtractCredential(ctx)
 
 		requestInfo := &core.RequestInfo{
 			FullMethod: info.FullMethod,
 		}
 
 		// Authenticate the request.
-		principal, err := manager.Authenticate(ctx, token, requestInfo)
+		principal, err := manager.Authenticate(ctx, credential, requestInfo)
 		if err != nil {
 			log.Warn("authentication failed",
 				zap.String("method", info.FullMethod),
