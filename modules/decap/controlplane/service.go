@@ -4,17 +4,14 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"net/netip"
 	"slices"
-	"sync"
-
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
@@ -61,21 +58,15 @@ func (m *config) Free() error {
 type DecapService struct {
 	decappb.UnimplementedDecapServiceServer
 
-	mu sync.Mutex
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-	backend  Backend
-	configs  map[string]*config
+	backend Backend
+	configs *configstore.Store[*config]
 }
 
 // NewDecapService constructs a DecapService backed by the given Backend.
 func NewDecapService(backend Backend) *DecapService {
 	return &DecapService{
 		backend: backend,
-		configs: map[string]*config{},
+		configs: configstore.NewStore[*config](),
 	}
 }
 
@@ -84,15 +75,7 @@ func (m *DecapService) ListConfigs(
 	ctx context.Context,
 	req *decappb.ListConfigsRequest,
 ) (*decappb.ListConfigsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	names := make([]string, 0, len(m.configs))
-	for name := range m.configs {
-		names = append(names, name)
-	}
-
-	return &decappb.ListConfigsResponse{Configs: names}, nil
+	return &decappb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 // ShowConfig returns the current prefix set for the named config.
@@ -105,10 +88,7 @@ func (m *DecapService) ShowConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
+	entry, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
@@ -144,14 +124,19 @@ func (m *DecapService) UpdateConfig(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	cfg := &config{
 		Prefixes4: normalizePrefixes(prefixes4),
 		Prefixes6: normalizePrefixes(prefixes6),
 	}
-	if err := m.updateConfig(name, cfg); err != nil {
+	err = m.configs.Update(name, func(*config, bool) (*config, error) {
+		module, err := m.backend.UpdateModule(name, slices.Concat(cfg.Prefixes4, cfg.Prefixes6))
+		if err != nil {
+			return nil, err
+		}
+		cfg.Module = module
+		return cfg, nil
+	})
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -169,29 +154,28 @@ func (m *DecapService) DeleteConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*config) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to delete module config %q: %v", name, err,
 		)
 	}
 
-	// The delete retired the generation holding the published module.
-	// Retry the deferred ones, then retire this one.
-	m.reclaimDeferred()
-	m.parkOrFree(entry.Module)
-
-	delete(m.configs, name)
-
 	return &decappb.DeleteConfigResponse{}, nil
+}
+
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained. The service runs it
+// after each successful publish, and anything else may call it at any
+// time.
+func (m *DecapService) ReclaimDeferred() {
+	m.configs.ReclaimDeferred()
 }
 
 func comparePrefixes(first, second netip.Prefix) int {
@@ -209,62 +193,4 @@ func normalizePrefixes(prefixes []netip.Prefix) []netip.Prefix {
 			comparePrefixes,
 		),
 	)
-}
-
-// updateConfig calls the backend to publish cfg, retries this service's
-// deferred handles (the publish retired the generations that were
-// holding them), frees or defers the old module handle, and stores the
-// new config. The caller must hold m.mu.
-func (m *DecapService) updateConfig(name string, cfg *config) error {
-	mod, err := m.backend.UpdateModule(name, slices.Concat(cfg.Prefixes4, cfg.Prefixes6))
-	if err != nil {
-		return fmt.Errorf("failed to update module config %q: %w", name, err)
-	}
-
-	m.reclaimDeferred()
-
-	if old, ok := m.configs[name]; ok {
-		m.parkOrFree(old)
-	}
-
-	m.configs[name] = &config{
-		Prefixes4: cfg.Prefixes4,
-		Prefixes6: cfg.Prefixes6,
-		Module:    mod,
-	}
-
-	return nil
-}
-
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must hold
-// m.mu.
-func (m *DecapService) parkOrFree(handle ModuleHandle) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
-func (m *DecapService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *DecapService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
 }

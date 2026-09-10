@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
@@ -60,33 +62,9 @@ func prefixStrings[T interface{ ToPrefix() (netip.Prefix, error) }](t *testing.T
 
 var errInjectedBackend = errors.New("injected backend failure")
 
-// mockModuleHandle counts Free calls so tests can assert a release happened.
-type mockModuleHandle struct {
-	freed atomic.Int64
-}
-
-func (m *mockModuleHandle) Free() error {
-	m.freed.Add(1)
-	return nil
-}
-
-// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
-type refusingOnceHandle struct {
-	numCalls atomic.Int64
-	freed    atomic.Int64
-}
-
-func (m *refusingOnceHandle) Free() error {
-	if m.numCalls.Add(1) == 1 {
-		return ffi.ErrStillReferenced
-	}
-	m.freed.Add(1)
-	return nil
-}
-
 // mockBackend records the last handle it minted and the name it last saw in DeleteModule.
 type mockBackend struct {
-	lastHandle  atomic.Pointer[mockModuleHandle]
+	lastHandle  atomic.Pointer[testutils.FreeSequence]
 	deletedName string
 }
 
@@ -94,7 +72,7 @@ func (m *mockBackend) UpdateModule(
 	name string,
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
-	handle := &mockModuleHandle{}
+	handle := testutils.NewFreeSequence()
 	m.lastHandle.Store(handle)
 	return handle, nil
 }
@@ -120,12 +98,13 @@ func (m *refusingDeleteBackend) DeleteModule(name string) error {
 	return errInjectedBackend
 }
 
-// parkingBackend refuses to release the first handle it mints, then releases
-// normally, so that handle must be parked before it can be reclaimed.
+// parkingBackend hands out the given handle on its first update and fresh
+// releasable ones afterwards, so a handle that refuses its first free must
+// be parked before it can be reclaimed.
 type parkingBackend struct {
 	mockBackend
 	numCalls atomic.Int64
-	first    refusingOnceHandle
+	first    *testutils.FreeSequence
 }
 
 func (m *parkingBackend) UpdateModule(
@@ -133,9 +112,26 @@ func (m *parkingBackend) UpdateModule(
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
 	if m.numCalls.Add(1) == 1 {
-		return &m.first, nil
+		return m.first, nil
 	}
-	return &mockModuleHandle{}, nil
+	return testutils.NewFreeSequence(), nil
+}
+
+// blockingBackend holds every update until released, modeling a slow
+// shared-memory publish.
+type blockingBackend struct {
+	mockBackend
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingBackend) UpdateModule(
+	name string,
+	prefixes []netip.Prefix,
+) (ModuleHandle, error) {
+	m.entered <- struct{}{}
+	<-m.release
+	return m.mockBackend.UpdateModule(name, prefixes)
 }
 
 // flakyBackend succeeds on the first UpdateModule call and fails thereafter.
@@ -150,7 +146,7 @@ func (m *flakyBackend) UpdateModule(
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
-	return &mockModuleHandle{}, nil
+	return testutils.NewFreeSequence(), nil
 }
 
 func (m *flakyBackend) DeleteModule(name string) error {
@@ -345,7 +341,7 @@ func Test_DecapService_DeleteConfig_RemovesConfig(t *testing.T) {
 	require.NotNil(t, resp)
 	require.NoError(t, err)
 	assert.Equal(t, "decap0", backend.deletedName)
-	assert.Equal(t, int64(1), handle.freed.Load())
+	assert.Equal(t, int64(1), handle.Freed())
 
 	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
 	require.NoError(t, err)
@@ -386,7 +382,7 @@ func Test_DecapService_DeleteConfig_Referenced(t *testing.T) {
 // Test_DecapService_DeleteConfig_ParksThenReclaims verifies that a handle
 // refused on delete is parked and reclaimed by the next successful update.
 func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
-	backend := &parkingBackend{}
+	backend := &parkingBackend{first: testutils.NewFreeSequence(ffi.ErrStillReferenced)}
 	svc := NewDecapService(backend)
 	ctx := t.Context()
 
@@ -399,8 +395,8 @@ func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
 	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
 	require.NotNil(t, resp)
 	require.NoError(t, err)
-	require.Len(t, svc.deferred, 1)
-	assert.Equal(t, int64(0), backend.first.freed.Load())
+	assert.Equal(t, int64(1), backend.first.Calls())
+	assert.Equal(t, int64(0), backend.first.Freed())
 
 	// A later successful update reclaims deferred handles first.
 	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
@@ -408,8 +404,60 @@ func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
 		Prefixes4: mustPrefixes4(t, "10.0.1.0/24"),
 	})
 	require.NoError(t, err)
-	assert.Empty(t, svc.deferred)
-	assert.Equal(t, int64(1), backend.first.freed.Load())
+	assert.Equal(t, int64(2), backend.first.Calls())
+	assert.Equal(t, int64(1), backend.first.Freed())
+}
+
+// Test_DecapService_ListConfigs_DuringSlowUpdate verifies that reads
+// complete while an update's publish is in flight, so a slow
+// shared-memory write never stalls the read RPCs.
+func Test_DecapService_ListConfigs_DuringSlowUpdate(t *testing.T) {
+	backend := &blockingBackend{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := NewDecapService(backend)
+	ctx := t.Context()
+
+	var group errgroup.Group
+	group.Go(func() error {
+		_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+			Name:      "decap0",
+			Prefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+		})
+		return err
+	})
+	<-backend.entered
+
+	type readResult struct {
+		list    *decappb.ListConfigsResponse
+		listErr error
+		showErr error
+	}
+	reads := make(chan readResult, 1)
+	go func() {
+		list, listErr := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+		_, showErr := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: "decap0"})
+		reads <- readResult{list: list, listErr: listErr, showErr: showErr}
+	}()
+
+	var result readResult
+	select {
+	case result = <-reads:
+	case <-time.After(5 * time.Second):
+		close(backend.release)
+		t.Fatal("reads blocked behind an in-flight publish")
+	}
+	require.NoError(t, result.listErr)
+	assert.Empty(t, result.list.GetConfigs())
+	assert.Equal(t, codes.NotFound, status.Code(result.showErr))
+
+	close(backend.release)
+	require.NoError(t, group.Wait())
+
+	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"decap0"}, list.GetConfigs())
 }
 
 func Test_DecapService_DeduplicatePrefixes(t *testing.T) {
