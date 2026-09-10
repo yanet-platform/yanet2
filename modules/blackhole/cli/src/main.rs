@@ -169,10 +169,6 @@ async fn delete_config(service: &mut BlackholeService, cmd: DeleteConfigCmd) -> 
     Ok(())
 }
 
-/// Completion candidates for a `--name` argument: the blackhole configs the
-/// module currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)

@@ -218,10 +218,6 @@ async fn delete_pipeline(service: &mut PipelineService, action: &'static str, cm
     Ok(())
 }
 
-/// Completion candidates for a `--name` argument: the pipelines the module
-/// currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn pipeline_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client

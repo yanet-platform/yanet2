@@ -218,10 +218,6 @@ async fn delete_function(service: &mut FunctionService, cmd: DeleteCmd) -> Resul
     Ok(())
 }
 
-/// Completion candidates for a `--name` argument: the functions the module
-/// currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn function_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client

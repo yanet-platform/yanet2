@@ -300,10 +300,6 @@ impl Tabled for Config {
     }
 }
 
-/// Completion candidates for a config-name argument: the configs the
-/// service currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(
         Cmd::command,

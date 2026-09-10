@@ -383,10 +383,6 @@ fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
-/// Completion candidates for a `--name` argument: the fwstate-map objects
-/// the map service currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn map_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client.list_maps(ListMapsRequest {}).await?.into_inner().maps)

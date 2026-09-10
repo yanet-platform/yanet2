@@ -174,8 +174,6 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
     Ok(())
 }
 
-/// Completion candidates for the service positional: the metrics services
-/// the gateway currently knows.
 fn service_candidates() -> Vec<CompletionCandidate> {
     METRICS.candidates(Cmd::command)
 }

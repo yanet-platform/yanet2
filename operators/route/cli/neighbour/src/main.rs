@@ -451,10 +451,6 @@ impl Tabled for NeighbourTableInfo {
     }
 }
 
-/// Completion candidates for a table-name argument: the neighbour tables
-/// the operator currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn table_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client

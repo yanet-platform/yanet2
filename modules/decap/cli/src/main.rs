@@ -199,10 +199,6 @@ fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
     display::KeyValue::new().rows("prefixes", prefixes)
 }
 
-/// Completion candidates for a `--name` argument: the decap configs the
-/// module currently knows.
-///
-/// Strictly best-effort — see [`completion::candidates`].
 fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
