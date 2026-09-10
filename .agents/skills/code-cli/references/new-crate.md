@@ -103,7 +103,7 @@ use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 
@@ -119,9 +119,6 @@ pub mod <x>pb {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "<proto package>.<X>Service";
-
-/// Maps a genuine "config not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "config");
 
 fn client(channel: LayeredChannel) -> <X>ServiceClient<LayeredChannel> {
     <X>ServiceClient::new(channel)
@@ -223,11 +220,10 @@ impl <X>Service {
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_configs(ListConfigsRequest {})
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -254,11 +250,13 @@ impl <X>Service {
 
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(|status| NOT_FOUND.map(status, "show", self.service.endpoint(), Some(&cmd.config_name)))?
-            .into_inner();
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
+            .await?;
 
         output::data(
             || &response,
@@ -278,10 +276,8 @@ impl <X>Service {
         };
 
         self.service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?;
+            .unary("update", request, async |client, request| client.update_config(request).await)
+            .await?;
 
         output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
@@ -292,10 +288,13 @@ impl <X>Service {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
 
         self.service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(|status| NOT_FOUND.map(status, "delete", self.service.endpoint(), Some(&cmd.config_name)))?;
+            .unary_with(
+                "delete",
+                request,
+                self.service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
