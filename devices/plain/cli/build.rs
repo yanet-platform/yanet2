@@ -1,14 +1,7 @@
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../controlplane/plainpb/v1/plain.proto");
-
-    tonic_prost_build::configure()
-        .emit_rerun_if_changed(false)
-        .build_server(false)
-        .extern_path(".common.commonpb.v1", "::commonpb::pb")
-        .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(&["plainpb/v1/plain.proto"], &["../../..", "../controlplane"])?;
-
-    Ok(())
+    ync_build::client("../../..", &["devices/plain/controlplane/plainpb/v1/plain.proto"])
+        .serialize()
+        .compile()
 }

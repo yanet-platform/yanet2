@@ -4,12 +4,10 @@ use core::net::IpAddr;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod routemplspb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.route_mpls.controlplane.routemplspb.v1");
 }
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use netip::{Contiguous, IpNetwork};
 use routemplspb::{
@@ -18,10 +16,11 @@ use routemplspb::{
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 /// Manages route-mpls module configs.
@@ -32,13 +31,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -142,7 +135,7 @@ fn client(channel: LayeredChannel) -> RouteMplsServiceClient<LayeredChannel> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the route-mpls configs
@@ -157,7 +150,7 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = RouteMplsService::new(&cmd.connection, action).await?;
+    let mut service = RouteMplsService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -191,17 +184,11 @@ impl RouteMplsService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No route-mpls configurations found."),
-                        format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
-                    );
-                    return;
-                }
-
-                for name in &response.configs {
-                    println!("{name}");
-                }
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No route-mpls configurations found."),
+                    format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
+                )
             },
         );
 
@@ -212,9 +199,12 @@ impl RouteMplsService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
         output::data(
@@ -258,9 +248,13 @@ impl RouteMplsService {
     pub async fn delete_config(&mut self, cmd: RouteDeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.service
-            .unary("delete", request, async |client, request| {
-                client.delete_config(request).await
-            })
+            .unary_with(
+                "delete",
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
             .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));

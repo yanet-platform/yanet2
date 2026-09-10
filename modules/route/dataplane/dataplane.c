@@ -153,13 +153,13 @@ route_handle_packets(
 	(void)dp_worker;
 
 	struct route_module_config *route_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct route_module_config,
 		cp_module
 	);
 
 	struct counter_storage *counter_storage =
-		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+		module_ectx->abs_counter_storage;
 	// Per-route counters live in the "routes" runtime registry, resolved
 	// through its own per-worker storage.
 	struct counter_storage *routes_storage = module_ectx_counter_storage(

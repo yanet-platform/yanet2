@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{Device, DevicePipeline};
 use tonic::codec::CompressionEncoding;
@@ -9,16 +9,15 @@ use trafgenpb::{
     trafgen_service_client::TrafgenServiceClient,
 };
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod trafgenpb {
-    use serde::Serialize;
-
     tonic::include_proto!("devices.trafgen.controlplane.trafgenpb.v1");
 }
 
@@ -30,13 +29,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -154,19 +147,13 @@ impl TrafgenService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No trafgen configurations found."),
-                        format_args!(
-                            "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
-                        ),
-                    );
-                    return;
-                }
-
-                for name in &response.configs {
-                    println!("{name}");
-                }
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No trafgen configurations found."),
+                    format_args!(
+                        "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
+                    ),
+                )
             },
         );
 
@@ -177,17 +164,22 @@ impl TrafgenService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("device '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
         output::data(
             || &response,
             || {
-                println!("rate (pps):  {}", response.rate_pps);
-                println!("frame count: {}", response.frame_count);
-                println!("total bytes: {}", response.total_bytes);
+                display::KeyValue::new()
+                    .row("rate (pps)", response.rate_pps)
+                    .row("frame count", response.frame_count)
+                    .row("total bytes", response.total_bytes)
+                    .print()
             },
         );
 
@@ -234,7 +226,7 @@ impl TrafgenService {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = TrafgenService::new(&cmd.connection, action).await?;
+    let mut service = TrafgenService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Update(cmd) => service.update_device(cmd).await,
@@ -246,7 +238,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the generator device

@@ -172,8 +172,9 @@ fuzzing_process_packet(
 	}
 
 	// Use module_ectx from params (can be customized per module)
-	// Always set cp_module pointer
+	// Always set cp_module pointer, relative and absolute
 	SET_OFFSET_OF(&params->module_ectx.cp_module, params->cp_module);
+	params->module_ectx.abs_cp_module = params->cp_module;
 
 	// Process packet through module
 	// Some modules (like fwstate) need a worker context

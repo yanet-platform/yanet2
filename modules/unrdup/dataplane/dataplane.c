@@ -739,13 +739,13 @@ unrdup_handle_packets(
 	struct packet_front *packet_front
 ) {
 	struct unrdup_module_config *config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct unrdup_module_config,
 		cp_module
 	);
 
 	struct counter_storage *counter_storage =
-		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+		module_ectx->abs_counter_storage;
 
 	struct unrdup_fanout fanout = {
 		.dp_worker = dp_worker,

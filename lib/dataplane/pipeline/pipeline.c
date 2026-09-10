@@ -105,6 +105,8 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 	struct counter_storage *counter_storage =
 		ADDR_OF(&module_ectx->counter_storage);
 
+	module_ectx->abs_cp_module = cp_module;
+
 	module_ectx->rx_counter = counter_get_value_handle(
 		cp_module->rx_counter_id, counter_storage
 	);
@@ -130,6 +132,7 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 
 	struct counter_storage **abs_runtime =
 		ADDR_OF(&module_ectx->abs_runtime_counter_storages);
+	module_ectx->abs_runtime_counter_storages_base = abs_runtime;
 	if (abs_runtime != NULL) {
 		struct counter_storage **runtime =
 			ADDR_OF(&module_ectx->runtime_counter_storages);
@@ -142,6 +145,7 @@ module_ectx_resolve_absolutes(struct module_ectx *module_ectx) {
 
 	struct module_object_link_ectx *object_links =
 		ADDR_OF(&module_ectx->object_links);
+	module_ectx->abs_object_links = object_links;
 	for (uint64_t idx = 0; idx < module_ectx->object_link_count; ++idx) {
 		object_links[idx].abs_object_ectx =
 			ADDR_OF(&object_links[idx].object_ectx);
@@ -198,6 +202,7 @@ function_ectx_resolve_absolutes(struct function_ectx *function_ectx) {
 
 	struct chain_ectx **chain_ptrs = ADDR_OF(&function_ectx->chain_ptrs);
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	function_ectx->abs_chains = chains;
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
 		chains[idx] = ADDR_OF(chain_ptrs + idx);
 		chain_ectx_resolve_absolutes(chains[idx]);
@@ -287,6 +292,7 @@ device_entry_ectx_resolve_absolutes(
 	struct pipeline_ectx **pipeline_ptrs =
 		ADDR_OF(&entry_ectx->pipeline_ptrs);
 	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
+	entry_ectx->abs_pipelines = pipelines;
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
 		pipelines[idx] = ADDR_OF(pipeline_ptrs + idx);
 		pipeline_ectx_resolve_absolutes(pipelines[idx]);
@@ -312,14 +318,25 @@ device_entry_ectx_resolve_absolutes(
 
 // Derive the absolute addresses the packet hot path runs on: the
 // counter pointers of every stage, resolved from the counter registry
-// ids and the stage counter storages, and the stage hop addresses,
-// copied or recoded from the controlplane-owned relative arrays.
+// ids and the stage counter storages; the stage hop addresses, copied
+// or recoded from the controlplane-owned relative arrays; and every
+// object's controlplane counterpart, copied from the generation's
+// relative object array.
 //
 // Runs in the dataplane process before the context is released to the
 // worker, and recomputes everything from controlplane-owned data, so a
 // re-run never corrupts a previous derivation.
 void
 config_gen_ectx_resolve_counters(struct config_gen_ectx *config_gen_ectx) {
+	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
+	for (uint64_t idx = 0; idx < config_gen_ectx->object_count; ++idx) {
+		struct object_ectx *object_ectx = ADDR_OF(objects + idx);
+		if (object_ectx == NULL) {
+			continue;
+		}
+		object_ectx->abs_cp_object = ADDR_OF(&object_ectx->cp_object);
+	}
+
 	struct device_ectx **device_ptrs =
 		ADDR_OF(&config_gen_ectx->device_ptrs);
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
@@ -405,8 +422,7 @@ function_ectx_run_single_chain(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
-	struct chain_ectx *chain_ectx = chains[0];
+	struct chain_ectx *chain_ectx = function_ectx->abs_chains[0];
 
 	struct packet_front *schedule = &chain_ectx->schedule;
 	packet_front_take_input(schedule, packet_front);
@@ -439,7 +455,7 @@ function_ectx_run_chains(
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
 
-	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	struct chain_ectx **chains = function_ectx->abs_chains;
 
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
 		struct chain_ectx *chain_ectx = chains[idx];
@@ -586,8 +602,7 @@ device_entry_ectx_dispatch_single(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
-	struct pipeline_ectx *pipeline_ectx = pipelines[0];
+	struct pipeline_ectx *pipeline_ectx = entry_ectx->abs_pipelines[0];
 
 	struct packet_front *schedule = &pipeline_ectx->schedule;
 	packet_front_take_output(schedule, packet_front);
@@ -607,7 +622,7 @@ device_entry_ectx_dispatch_many(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
+	struct pipeline_ectx **pipelines = entry_ectx->abs_pipelines;
 
 	struct packet *packet = packet_list_pop(&packet_front->output);
 	while (packet != NULL) {

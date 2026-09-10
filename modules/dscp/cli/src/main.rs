@@ -1,26 +1,24 @@
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum, value_parser};
+use clap::{CommandFactory, Parser, ValueEnum, value_parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use dscppb::{
-    AddPrefixesRequest, DeleteConfigRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
-    ShowConfigRequest, ShowConfigResponse, dscp_service_client::DscpServiceClient,
+    AddPrefixesRequest, Config, DeleteConfigRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
+    ShowConfigRequest, dscp_service_client::DscpServiceClient,
 };
 use netip::{Contiguous, IpNetwork};
-use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 use crate::dscppb::ListConfigsRequest;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod dscppb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.dscp.controlplane.dscppb.v1");
 }
 
@@ -32,13 +30,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -148,12 +140,12 @@ fn client(channel: LayeredChannel) -> DscpServiceClient<LayeredChannel> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DscpService::new(&cmd.connection, action).await?;
+    let mut service = DscpService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -187,19 +179,11 @@ impl DscpService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No DSCP configurations found."),
-                        format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
-                for config in &response.configs {
-                    tree.add_empty_child(config.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No DSCP configurations found."),
+                    format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
+                )
             },
         );
 
@@ -210,23 +194,26 @@ impl DscpService {
         let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
         output::data(
             || &response,
             || {
-                if response.config.is_none() {
+                let Some(config) = &response.config else {
                     output::empty_with_hint(
                         format_args!("No DSCP configuration found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
                     );
                     return;
-                }
+                };
 
-                print_tree(&response);
+                config_block(config).print();
             },
         );
 
@@ -319,34 +306,22 @@ impl DscpService {
     }
 }
 
-fn print_tree(response: &ShowConfigResponse) {
-    let mut tree = TreeBuilder::new("View DSCP Config".to_string());
+fn config_block(config: &Config) -> display::KeyValue {
+    let mut block = display::KeyValue::new();
 
-    if let Some(config) = &response.config {
-        if let Some(dscp_config) = config.dscp_config {
-            tree.begin_child("DSCP Marking".to_string());
-            tree.add_empty_child(format!("Flag: {}", flag_to_string(dscp_config.flag)));
-            tree.add_empty_child(format!("Mark: {} (0x{:02x})", dscp_config.mark, dscp_config.mark));
-            tree.end_child();
-        }
-
-        tree.begin_child("Prefixes".to_string());
-        if config.prefixes4.is_empty() && config.prefixes6.is_empty() {
-            tree.add_empty_child("(none)".to_owned());
-        }
-
-        let prefixes = config
-            .prefixes4
-            .iter()
-            .map(ToString::to_string)
-            .chain(config.prefixes6.iter().map(ToString::to_string));
-        for (idx, prefix) in prefixes.enumerate() {
-            tree.add_empty_child(format!("{idx}: {prefix}"));
-        }
-        tree.end_child();
+    if let Some(marking) = config.dscp_config {
+        block = block
+            .row("flag", flag_to_string(marking.flag))
+            .row("mark", format!("{} (0x{:02x})", marking.mark, marking.mark));
     }
 
-    let _ = ptree::print_tree(&tree.build());
+    let prefixes = config
+        .prefixes4
+        .iter()
+        .map(ToString::to_string)
+        .chain(config.prefixes6.iter().map(ToString::to_string));
+
+    block.rows("prefixes", prefixes)
 }
 
 fn flag_to_string(flag: u32) -> String {

@@ -1,7 +1,7 @@
 use core::{fmt, net::IpAddr};
 
 use args::{CreateCmd, DeleteCmd, DirectionArg, EntriesCmd, InsertLayerCmd, ListCmd, ModeCmd, StatsCmd};
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::IpAddress;
 use fwstatemappb::{
@@ -11,8 +11,9 @@ use fwstatemappb::{
 use serde::Serialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -21,8 +22,6 @@ mod args;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod fwstatemappb {
-    use serde::Serialize;
-
     tonic::include_proto!("objects.fwstate.controlplane.fwstatemappb.v1");
 }
 
@@ -43,13 +42,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 pub struct FWStateMapService {
@@ -127,9 +120,12 @@ impl FWStateMapService {
     pub async fn map_delete(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteMapRequest { name: cmd.map_name.clone() };
         self.service
-            .unary("delete", request, async |client, request| {
-                client.delete_map(request).await
-            })
+            .unary_with(
+                "delete",
+                request,
+                self.service.not_found("delete", &format!("map '{}'", cmd.map_name)),
+                async |client, request| client.delete_map(request).await,
+            )
             .await?;
 
         output::success("delete", format_args!("Deleted map '{}'.", cmd.map_name));
@@ -173,21 +169,11 @@ impl FWStateMapService {
         output::data(
             || &listed,
             || {
-                if response.maps.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No fwstate-map objects found."),
-                        format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
-                    );
-                    return;
-                }
-
-                // The human render keeps the plain name list; the family
-                // pairs above are the structured payload for JSON output.
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.maps)
-                        .expect("fwstate-map list JSON serialization must not fail")
-                );
+                display::print_names_with_hint(
+                    &response.maps,
+                    format_args!("No fwstate-map objects found."),
+                    format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
+                )
             },
         );
 
@@ -198,9 +184,12 @@ impl FWStateMapService {
         let request = GetMapStatsRequest { name: cmd.map_name.clone() };
         let response = self
             .service
-            .unary("stats", request, async |client, request| {
-                client.get_map_stats(request).await
-            })
+            .unary_with(
+                "stats",
+                request,
+                self.service.not_found("stats", &format!("map '{}'", cmd.map_name)),
+                async |client, request| client.get_map_stats(request).await,
+            )
             .await?;
 
         output::data(
@@ -266,9 +255,12 @@ impl FWStateMapService {
             };
             let resp = self
                 .service
-                .unary("entries", request, async |client, request| {
-                    client.list_entries(request).await
-                })
+                .unary_with(
+                    "entries",
+                    request,
+                    self.service.not_found("entries", &format!("map '{}'", cmd.map_name)),
+                    async |client, request| client.list_entries(request).await,
+                )
                 .await?;
 
             state.note_generation(resp.generation);
@@ -428,8 +420,8 @@ fn print_entry(entry: &fwstatemappb::FwStateEntry) {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FWStateMapService::new(&cmd.connection, action).await?;
-    let format = cmd.format;
+    let mut service = FWStateMapService::new(&cmd.globals.connection, action).await?;
+    let format = cmd.globals.format;
 
     match cmd.mode {
         ModeCmd::List => service.map_list(args::ListCmd).await,
@@ -442,7 +434,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the fwstate-map objects

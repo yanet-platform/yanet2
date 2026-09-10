@@ -1,4 +1,4 @@
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use decappb::{
@@ -6,19 +6,17 @@ use decappb::{
     decap_service_client::DecapServiceClient,
 };
 use netip::{Contiguous, IpNetwork};
-use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod decappb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.decap.controlplane.decappb.v1");
 }
 
@@ -30,13 +28,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -96,12 +88,12 @@ fn client(channel: LayeredChannel) -> DecapServiceClient<LayeredChannel> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DecapService::new(&cmd.connection, action).await?;
+    let mut service = DecapService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -133,19 +125,11 @@ impl DecapService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No decap configurations found."),
-                        format_args!("create one with 'yanet-cli-decap update --name <name> --prefix <cidr>'"),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("List Decap Configs".to_string());
-                for config in &response.configs {
-                    tree.add_empty_child(config.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No decap configurations found."),
+                    format_args!("create one with 'yanet-cli-decap update --name <name> --prefix <cidr>'"),
+                )
             },
         );
 
@@ -156,9 +140,12 @@ impl DecapService {
         let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
         output::data(
@@ -172,7 +159,7 @@ impl DecapService {
                     return;
                 }
 
-                print_tree(&response);
+                config_block(&response).print();
             },
         );
 
@@ -215,19 +202,14 @@ impl DecapService {
     }
 }
 
-fn print_tree(resp: &ShowConfigResponse) {
-    let mut tree = TreeBuilder::new("Decap Prefixes".to_string());
-
-    let prefixes = resp
+fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
+    let prefixes = response
         .prefixes4
         .iter()
         .map(ToString::to_string)
-        .chain(resp.prefixes6.iter().map(ToString::to_string));
-    for (idx, prefix) in prefixes.enumerate() {
-        tree.add_empty_child(format!("{idx}: {prefix}"));
-    }
+        .chain(response.prefixes6.iter().map(ToString::to_string));
 
-    let _ = ptree::print_tree(&tree.build());
+    display::KeyValue::new().rows("prefixes", prefixes)
 }
 
 /// Completion candidates for a `--name` argument: the decap configs the

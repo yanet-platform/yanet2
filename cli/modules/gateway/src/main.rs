@@ -2,14 +2,14 @@
 
 use std::time::SystemTime;
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
-    humanfmt,
-    output::{self, CommonFormat},
+    humanfmt, output,
 };
 use ynpb::pb::{BackendKind, ListServicesRequest, RegisteredBackend, gateway_client::GatewayClient};
 
@@ -23,13 +23,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -39,11 +33,11 @@ pub enum ModeCmd {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = GatewayService::new(&cmd.connection).await?;
+    let mut service = GatewayService::new(&cmd.globals.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_services().await,

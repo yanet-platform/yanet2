@@ -2,10 +2,10 @@ use core::net::IpAddr;
 use std::time;
 
 use commonpb::pb::GetMetricsRequest;
-use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    display::print_names_with_hint,
     errors::Error,
     output::{self, CommonFormat},
     yaml,
@@ -100,21 +100,13 @@ impl Balancer2Service {
         output::data(
             || &response.names,
             || {
-                if response.names.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No balancer configurations found."),
-                        format_args!(
-                            "create one with 'yanet-cli-balancer2 update --name <name> --sessions <sessions-name> <path>'"
-                        ),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("Balancers".to_owned());
-                for name in &response.names {
-                    tree.add_empty_child(name.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                print_names_with_hint(
+                    &response.names,
+                    format_args!("No balancer configurations found."),
+                    format_args!(
+                        "create one with 'yanet-cli-balancer2 update --name <name> --sessions <sessions-name> <path>'"
+                    ),
+                )
             },
         );
 
@@ -122,12 +114,15 @@ impl Balancer2Service {
     }
 
     async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Error> {
-        let request = GetConfigRequest { config_name: cmd.name };
+        let request = GetConfigRequest { config_name: cmd.name.clone() };
         let response = self
             .service
-            .unary("config", request, async |client, request| {
-                client.get_config(request).await
-            })
+            .unary_with(
+                "config",
+                request,
+                self.service.not_found("config", &format!("config '{}'", cmd.name)),
+                async |client, request| client.get_config(request).await,
+            )
             .await?;
 
         output::data(
@@ -205,21 +200,11 @@ impl Balancer2Service {
         output::data(
             || &response.names,
             || {
-                if response.names.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No session states found."),
-                        format_args!(
-                            "create one with 'yanet-cli-balancer2 sessions update --name <name> --capacity <n>'"
-                        ),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("Sessions States".to_owned());
-                for name in &response.names {
-                    tree.add_empty_child(name.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                print_names_with_hint(
+                    &response.names,
+                    format_args!("No session states found."),
+                    format_args!("create one with 'yanet-cli-balancer2 sessions update --name <name> --capacity <n>'"),
+                )
             },
         );
 

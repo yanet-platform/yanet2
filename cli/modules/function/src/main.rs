@@ -1,14 +1,15 @@
 //! CLI for YANET "function" module.
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::FunctionId;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 use ynpb::pb::{
     DeleteFunctionRequest, Function, FunctionChain, GetFunctionRequest, ListFunctionsRequest, UpdateFunctionRequest,
@@ -31,13 +32,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, value_enum, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -91,29 +86,20 @@ pub struct DeleteCmd {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FunctionService::new(&cmd.connection, action).await?;
+    let mut service = FunctionService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_functions().await?;
+            let names: Vec<String> = ids.iter().map(|id| id.name.clone()).collect();
             output::data(
                 || &ids,
-                || {
-                    if ids.is_empty() {
-                        output::empty(format_args!("No functions found."));
-                        return;
-                    }
-
-                    print!(
-                        "{}",
-                        serde_yaml::to_string(&ids).expect("function list YAML serialization must not fail")
-                    );
-                },
+                || display::print_names(&names, format_args!("No functions found.")),
             );
         }
         ModeCmd::Show(show) => {

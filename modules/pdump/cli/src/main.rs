@@ -1,11 +1,10 @@
 use args::{DeleteCmd, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
 use pdumppb::{
     DeleteConfigRequest, ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
     pdump_service_client::PdumpServiceClient,
 };
-use ptree::TreeBuilder;
 use tokio::{
     signal::{unix, unix::SignalKind},
     task::JoinSet,
@@ -13,10 +12,11 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::{Error, ErrorKind},
-    output::{self, CommonFormat},
+    output,
 };
 
 use crate::{pdumppb::SetConfigRequest, writer::PdumpWriter};
@@ -28,8 +28,6 @@ mod writer;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod pdumppb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.pdump.controlplane.pdumppb.v1");
 }
 
@@ -41,18 +39,12 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = PdumpService::new(&cmd.connection, action).await?;
+    let mut service = PdumpService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -86,9 +78,12 @@ impl PdumpService {
     async fn get_config(&mut self, name: &str, action: &'static str) -> Result<ShowConfigResponse, Error> {
         let request = ShowConfigRequest { name: name.to_owned() };
         self.service
-            .unary(action, request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                action,
+                request,
+                self.service.not_found(action, &format!("config '{name}'")),
+                async |client, request| client.show_config(request).await,
+            )
             .await
     }
 
@@ -103,19 +98,11 @@ impl PdumpService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No pdump configurations found."),
-                        format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("List Pdump Configs".to_owned());
-                for config in &response.configs {
-                    tree.add_empty_child(config.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No pdump configurations found."),
+                    format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
+                )
             },
         );
 
@@ -128,15 +115,15 @@ impl PdumpService {
         output::data(
             || &response,
             || {
-                if response.config.is_none() {
+                let Some(config) = &response.config else {
                     output::empty_with_hint(
                         format_args!("No pdump configuration found for '{}'.", cmd.config_name),
                         format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
                     );
                     return;
-                }
+                };
 
-                print_tree(&response);
+                config_block(config).print();
             },
         );
 
@@ -185,9 +172,13 @@ impl PdumpService {
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.service
-            .unary("delete", request, async |client, request| {
-                client.delete_config(request).await
-            })
+            .unary_with(
+                "delete",
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
             .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
@@ -296,21 +287,16 @@ impl PdumpService {
     }
 }
 
-fn print_tree(resp: &ShowConfigResponse) {
-    let mut tree = TreeBuilder::new("Pdump Config".to_owned());
-
-    if let Some(config) = &resp.config {
-        tree.add_empty_child(format!("Filter: {}", config.filter));
-        tree.add_empty_child(format!("Mode: {}", dump_mode::to_str(config.mode)));
-        tree.add_empty_child(format!("Snaplen: {}", config.snaplen));
-        tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
-    }
-
-    let _ = ptree::print_tree(&tree.build());
+fn config_block(config: &pdumppb::Config) -> display::KeyValue {
+    display::KeyValue::new()
+        .row("filter", &config.filter)
+        .row("mode", dump_mode::to_str(config.mode))
+        .row("snaplen", config.snaplen)
+        .row("ring size", config.ring_size)
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the pdump configs the

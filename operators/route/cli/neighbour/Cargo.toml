@@ -22,7 +22,7 @@ tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync"] }

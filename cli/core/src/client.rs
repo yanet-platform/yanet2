@@ -12,10 +12,10 @@
 //! #[derive(clap::Parser)]
 //! struct Cmd {
 //!     #[command(flatten)]
-//!     connection: ConnectionArgs,
+//!     globals: ync::GlobalArgs,
 //! }
 //!
-//! let channel = connect(&cmd.connection).await?;
+//! let channel = connect(&cmd.globals.connection).await?;
 //! let client = MyServiceClient::new(channel)
 //!     .send_compressed(CompressionEncoding::Gzip)
 //!     .accept_compressed(CompressionEncoding::Gzip);
@@ -77,7 +77,8 @@ impl Settings {
 
 /// Common CLI arguments for gRPC connection.
 ///
-/// Embed this in your module's `Cmd` struct with `#[command(flatten)]`.
+/// A command reaches them through [`crate::GlobalArgs`], which it flattens
+/// into its `Cmd` together with the output format and verbosity flags.
 #[derive(Debug, Clone, clap::Args)]
 pub struct ConnectionArgs {
     /// Gateway endpoint (grpc://, grpcs://, or unix://) or an alias from the

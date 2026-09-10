@@ -3208,7 +3208,7 @@ nat64_handle_packets(
 	(void)dp_worker;
 
 	struct nat64_module_config *nat64_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct nat64_module_config,
 		cp_module
 	);

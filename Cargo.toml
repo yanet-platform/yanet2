@@ -13,6 +13,7 @@ members = [
     "common/rust/filterpb",
     "common/rust/readinesspb",
     "common/rust/ynpb",
+    "cli/ync-build",
     "cli/core",
     "cli/modules/common",
     "cli/modules/inspect",

@@ -134,9 +134,7 @@ acl_handle_packets(
 	struct packet_front *packet_front
 ) {
 	struct acl_module_config *acl_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
-		struct acl_module_config,
-		cp_module
+		module_ectx->abs_cp_module, struct acl_module_config, cp_module
 	);
 
 	// When the compile side built the union tries, both v6 filters are
@@ -168,7 +166,7 @@ acl_handle_packets(
 		);
 		if (link != NULL) {
 			struct object_ectx *oectx = link->abs_object_ectx;
-			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			struct cp_object *cp_obj = oectx->abs_cp_object;
 			fw4table = fwstate_map_v4_object_table(cp_obj);
 		}
 	}
@@ -178,7 +176,7 @@ acl_handle_packets(
 		);
 		if (link != NULL) {
 			struct object_ectx *oectx = link->abs_object_ectx;
-			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			struct cp_object *cp_obj = oectx->abs_cp_object;
 			fw6table = fwstate_map_v6_object_table(cp_obj);
 		}
 	}

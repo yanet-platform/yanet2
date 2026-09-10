@@ -1,28 +1,26 @@
 use core::net::IpAddr;
 
 use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::CompletionCandidate;
 use commonpb::pb::{IpAddress, MacAddress};
 use fwstatepb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, SyncConfig, UpdateConfigRequest,
     fw_state_service_client::FwStateServiceClient,
 };
-use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 mod args;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod fwstatepb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.fwstate.controlplane.fwstatepb.v1");
 }
 
@@ -43,37 +41,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
-}
-
-/// Makes text that came off the wire safe to hand a terminal.
-///
-/// A name is stored as it was given, so it can carry an escape sequence or
-/// a newline. It is spelled out rather than dropped: two names that differ
-/// only in one must not read alike.
-fn escape_wire_text(value: &str) -> String {
-    value.escape_debug().to_string()
-}
-
-/// Orders the stored configuration names for a human reader.
-///
-/// The service builds its reply by walking a map, so the order it answers
-/// in changes between calls and would otherwise reshuffle the listing under
-/// an operator watching it.
-fn config_list_rows(configs: &[String]) -> Vec<ConfigRow> {
-    let mut names: Vec<&String> = configs.iter().collect();
-    names.sort();
-
-    names
-        .into_iter()
-        .map(|name| ConfigRow { config: escape_wire_text(name) })
-        .collect()
+    pub globals: GlobalArgs,
 }
 
 /// Renders a stored nanosecond timeout as the milliseconds an operator reads.
@@ -93,60 +61,29 @@ fn format_timeout_millis(nanos: u64) -> String {
     format!("{millis}.{}", fraction.trim_end_matches('0'))
 }
 
-#[derive(Tabled)]
-struct ConfigRow {
-    #[tabled(rename = "Config")]
-    config: String,
-}
-
-#[derive(Tabled)]
-struct SettingRow {
-    #[tabled(rename = "Setting")]
-    setting: String,
-    #[tabled(rename = "Value")]
-    value: String,
-}
-
-impl SettingRow {
-    fn new(setting: &str, value: String) -> Self {
-        Self { setting: setting.to_string(), value }
-    }
-}
-
 /// Lays out one stored configuration for a human reader.
-fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
-    let mut rows = vec![
-        SettingRow::new("name", escape_wire_text(&response.name)),
-        SettingRow::new("map name v4", escape_wire_text(&response.map_name_v4)),
-        SettingRow::new("map name v6", escape_wire_text(&response.map_name_v6)),
-    ];
+fn config_block(response: &ShowConfigResponse) -> display::KeyValue {
+    let mut block = display::KeyValue::new()
+        .row("name", &response.name)
+        .row("map name v4", &response.map_name_v4)
+        .row("map name v6", &response.map_name_v6);
 
     let Some(sync_config) = response.sync_config.as_ref() else {
-        return rows;
+        return block;
     };
 
     let address = |addr: Option<&IpAddress>| addr.map_or_else(|| "-".to_string(), ToString::to_string);
-    rows.push(SettingRow::new("src addr", address(sync_config.src_addr.as_ref())));
-    rows.push(SettingRow::new(
-        "dst ether",
-        sync_config
-            .dst_ether
-            .as_ref()
-            .map_or_else(|| "-".to_string(), ToString::to_string),
-    ));
-    rows.push(SettingRow::new(
-        "dst addr multicast",
-        address(sync_config.dst_addr_multicast.as_ref()),
-    ));
-    rows.push(SettingRow::new(
-        "port multicast",
-        sync_config.port_multicast.to_string(),
-    ));
-    rows.push(SettingRow::new(
-        "dst addr unicast",
-        address(sync_config.dst_addr_unicast.as_ref()),
-    ));
-    rows.push(SettingRow::new("port unicast", sync_config.port_unicast.to_string()));
+    let dst_ether = sync_config
+        .dst_ether
+        .as_ref()
+        .map_or_else(|| "-".to_string(), ToString::to_string);
+    block = block
+        .row("src addr", address(sync_config.src_addr.as_ref()))
+        .row("dst ether", dst_ether)
+        .row("dst addr multicast", address(sync_config.dst_addr_multicast.as_ref()))
+        .row("port multicast", sync_config.port_multicast)
+        .row("dst addr unicast", address(sync_config.dst_addr_unicast.as_ref()))
+        .row("port unicast", sync_config.port_unicast);
 
     for (setting, nanos) in [
         ("tcp syn-ack timeout", sync_config.tcp_syn_ack),
@@ -157,10 +94,10 @@ fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
         ("default timeout", sync_config.default),
         ("sync suppress timeout", sync_config.sync_suppress_timeout),
     ] {
-        rows.push(SettingRow::new(setting, format!("{} ms", format_timeout_millis(nanos))));
+        block = block.row(setting, format!("{} ms", format_timeout_millis(nanos)));
     }
 
-    rows
+    block
 }
 
 /// Builds a partial update from explicitly supplied flags only.
@@ -304,17 +241,13 @@ impl FWStateService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No FWState configurations found."),
-                        format_args!(
-                            "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
-                        ),
-                    );
-                    return;
-                }
-
-                ync::display::print_table_from_entries(config_list_rows(&response.configs));
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No FWState configurations found."),
+                    format_args!(
+                        "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
+                    ),
+                )
             },
         );
 
@@ -328,15 +261,15 @@ impl FWStateService {
         };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
-        output::data(
-            || &response,
-            || ync::display::print_table_from_entries(config_rows(&response)),
-        );
+        output::data(|| &response, || config_block(&response).print());
 
         Ok(())
     }
@@ -344,9 +277,13 @@ impl FWStateService {
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.service
-            .unary("delete", request, async |client, request| {
-                client.delete_config(request).await
-            })
+            .unary_with(
+                "delete",
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
             .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
@@ -370,7 +307,7 @@ impl FWStateService {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FWStateService::new(&cmd.connection, action).await?;
+    let mut service = FWStateService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -381,7 +318,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the fwstate configs the
@@ -460,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_rows_carry_endpoints_and_converted_timeouts() {
+    fn test_config_block_carries_endpoints_and_converted_timeouts() {
         let response = ShowConfigResponse {
             name: "fwstate0".to_string(),
             sync_config: Some(fwstatepb::SyncConfig {
@@ -477,10 +414,8 @@ mod tests {
             ..Default::default()
         };
 
-        let rows: Vec<(String, String)> = config_rows(&response)
-            .into_iter()
-            .map(|row| (row.setting, row.value))
-            .collect();
+        let block = config_block(&response);
+        let rows = block.entries();
         for expected in [
             ("src addr", "::1"),
             ("dst ether", "33:33:00:00:00:01"),
@@ -492,44 +427,32 @@ mod tests {
             ("sync suppress timeout", "0 ms"),
         ] {
             assert!(
-                rows.iter().any(|row| row.0 == expected.0 && row.1 == expected.1),
+                rows.iter()
+                    .any(|(key, lines)| key == expected.0 && *lines == [expected.1]),
                 "missing {expected:?} in {rows:?}"
             );
         }
         assert!(
-            !rows.iter().any(|row| row.1.contains("60000000000")),
+            !rows.iter().any(|(_, lines)| lines[0].contains("60000000000")),
             "no row may carry the stored nanoseconds: {rows:?}"
         );
     }
 
     #[test]
-    fn test_config_rows_without_sync_config_omit_timeouts() {
+    fn test_config_block_without_sync_config_omits_timeouts() {
         let response = show_response("fwstate0", "map4", "map6");
 
-        let settings: Vec<String> = config_rows(&response).into_iter().map(|row| row.setting).collect();
+        let block = config_block(&response);
+        let settings: Vec<&str> = block.entries().iter().map(|(key, _)| key.as_str()).collect();
         assert_eq!(vec!["name", "map name v4", "map name v6"], settings);
     }
 
     #[test]
-    fn test_escape_wire_text_spells_out_control_characters() {
-        assert_eq!("fwstate0", escape_wire_text("fwstate0"));
-        assert_eq!("a\\nb", escape_wire_text("a\nb"));
-        assert_eq!("\\u{1b}\\r[2J", escape_wire_text("\u{1b}\r[2J"));
-    }
-
-    #[test]
-    fn test_config_list_rows_are_ordered() {
-        let configs = ["fwstate2".to_string(), "fwstate0".to_string(), "fwstate1".to_string()];
-
-        let names: Vec<String> = config_list_rows(&configs).into_iter().map(|row| row.config).collect();
-        assert_eq!(vec!["fwstate0", "fwstate1", "fwstate2"], names);
-    }
-
-    #[test]
-    fn test_config_rows_escape_names() {
+    fn test_config_block_escapes_names() {
         let response = show_response("fw\nstate0", "map\u{1b}4", "map6");
 
-        let values: Vec<String> = config_rows(&response).into_iter().map(|row| row.value).collect();
+        let block = config_block(&response);
+        let values: Vec<&str> = block.entries().iter().map(|(_, lines)| lines[0].as_str()).collect();
         assert_eq!(vec!["fw\\nstate0", "map\\u{1b}4", "map6"], values);
     }
 

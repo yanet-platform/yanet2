@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{Device, DevicePipeline};
 use plainpb::{
@@ -9,17 +9,16 @@ use plainpb::{
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{ConnectionArgs, LayeredChannel, Service},
     completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 use ynpb::pb::{ListDevicesRequest, device_service_client::DeviceServiceClient};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod plainpb {
-    use serde::Serialize;
-
     tonic::include_proto!("devices.plain.controlplane.plainpb.v1");
 }
 
@@ -31,13 +30,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -152,7 +145,7 @@ impl DevicePlainService {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DevicePlainService::new(&cmd.connection, action).await?;
+    let mut service = DevicePlainService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_device(cmd).await,
@@ -161,7 +154,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// One row of a device's pipeline bindings table.

@@ -451,7 +451,7 @@ fwstate_handle_packets(
 	struct packet_front *packet_front
 ) {
 	struct fwstate_module_config *fwstate_module = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct fwstate_module_config,
 		cp_module
 	);
@@ -466,8 +466,8 @@ fwstate_handle_packets(
 			module_ectx, fwstate_module->v4_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
-			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			struct object_ectx *oectx = link->abs_object_ectx;
+			struct cp_object *cp_obj = oectx->abs_cp_object;
 			fw4table = fwstate_map_v4_object_table(cp_obj);
 		}
 	}
@@ -476,8 +476,8 @@ fwstate_handle_packets(
 			module_ectx, fwstate_module->v6_object_link_idx
 		);
 		if (link != NULL) {
-			struct object_ectx *oectx = ADDR_OF(&link->object_ectx);
-			struct cp_object *cp_obj = ADDR_OF(&oectx->cp_object);
+			struct object_ectx *oectx = link->abs_object_ectx;
+			struct cp_object *cp_obj = oectx->abs_cp_object;
 			fw6table = fwstate_map_v6_object_table(cp_obj);
 		}
 	}
@@ -488,7 +488,7 @@ fwstate_handle_packets(
 	// size=2 counters: [0]=packets, [1]=bytes; size=1 counters:
 	// [0]=packets.
 	struct counter_storage *counter_storage =
-		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+		module_ectx->abs_counter_storage;
 
 	uint64_t *sync_packets_cnt = counter_get_address(
 		fwstate_module->sync_packets_counter_id, counter_storage

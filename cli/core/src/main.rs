@@ -4,18 +4,18 @@
 
 use std::{collections::HashSet, path::PathBuf, sync::LazyLock};
 
-use clap::{Arg, ArgAction, ArgMatches, Args as _, Command, FromArgMatches, crate_name, parser::ValueSource};
+use clap::{ArgMatches, Args as _, Command, FromArgMatches, crate_name, parser::ValueSource};
 use colored::{ColoredString, Colorize};
 use serde::Serialize;
 use tonic::{Status, codec::CompressionEncoding};
 use yanet_cli::{
+    GlobalArgs,
     auth::AuthMethod,
     client::{ConnectionArgs, Service},
     config::{self, Origin, Settings},
     dispatcher::{self, Dispatch, Namespace},
     errors::Error,
-    init,
-    output::{self, CommonFormat},
+    init, output,
 };
 use ynpb::pb::{IntrospectTokenRequest, Principal, auth_service_client::AuthServiceClient};
 
@@ -145,42 +145,10 @@ impl Dispatch for Dispatcher {
     }
 }
 
-/// Adds the `--format` and `-v` arguments every command carries, for a
-/// built-in that embeds [`ConnectionArgs`] instead of a derived `Cmd`.
-fn output_args(command: Command) -> Command {
-    command
-        .arg(
-            Arg::new("format")
-                .long("format")
-                .value_parser(clap::value_parser!(CommonFormat))
-                .default_value("human")
-                .global(true)
-                .help("Output format."),
-        )
-        .arg(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .action(ArgAction::Count)
-                .global(true)
-                .help("Be verbose: shows debug log lines and raw gRPC error details."),
-        )
-}
-
-/// Reads the arguments added by [`output_args`].
-fn output_options(matches: &ArgMatches) -> (CommonFormat, u8) {
-    let format = matches
-        .get_one::<CommonFormat>("format")
-        .copied()
-        .unwrap_or(CommonFormat::Human);
-
-    (format, matches.get_count("verbose"))
-}
-
 /// Builds the `config show` subcommand tree.
 ///
-/// `show` embeds [`ConnectionArgs`] directly (rather than a dedicated
-/// `Cmd`) so its flags, environment variables and completion candidates stay
+/// `show` embeds [`GlobalArgs`] directly (rather than a dedicated `Cmd`) so
+/// its flags, environment variables and completion candidates stay
 /// identical to every other command's.
 fn config_command() -> Command {
     const SHOW_ABOUT: &str = "Prints the effective connection settings and where each came from.";
@@ -188,11 +156,9 @@ fn config_command() -> Command {
         from. Reads /etc/yanet2/cli.yaml merged with $XDG_CONFIG_HOME/yanet2/cli.yaml \
         (~/.config by default), or the single file named by YANET_CONFIG.";
 
-    let show = output_args(
-        ConnectionArgs::augment_args(Command::new("show"))
-            .about(SHOW_ABOUT)
-            .long_about(SHOW_LONG_ABOUT),
-    );
+    let show = GlobalArgs::augment_args(Command::new("show"))
+        .about(SHOW_ABOUT)
+        .long_about(SHOW_LONG_ABOUT);
 
     Command::new("config")
         .about("Configuration file inspection.")
@@ -203,9 +169,10 @@ fn config_command() -> Command {
 /// Runs `config show`: resolves the connection settings and reports them
 /// through the shared output backend, exactly like any other command.
 fn run_config_show(matches: &ArgMatches) -> i32 {
-    let connection =
-        ConnectionArgs::from_arg_matches(matches).expect("show's own augmented matches must parse into ConnectionArgs");
-    let (format, verbose) = output_options(matches);
+    let globals =
+        GlobalArgs::from_arg_matches(matches).expect("show's own augmented matches must parse into GlobalArgs");
+    let (verbose, format) = globals.options();
+    let connection = globals.connection;
 
     init(verbose, format);
 
@@ -228,19 +195,17 @@ fn run_config_show(matches: &ArgMatches) -> i32 {
 
 /// Builds the `auth whoami` subcommand tree.
 ///
-/// `whoami` embeds [`ConnectionArgs`] like `config show`, so the very flags
-/// that select a token or a certificate are the ones it reports on.
+/// `whoami` embeds [`GlobalArgs`] like `config show`, so the very flags that
+/// select a token or a certificate are the ones it reports on.
 fn auth_command() -> Command {
     const WHOAMI_ABOUT: &str = "Prints the identity the gateway resolves for the current connection settings.";
     const WHOAMI_LONG_ABOUT: &str = "Prints the identity the gateway resolves for the current connection \
         settings: the token of --auth when one is sent, else the client certificate of --client-cert, \
         else anonymous.";
 
-    let whoami = output_args(
-        ConnectionArgs::augment_args(Command::new("whoami"))
-            .about(WHOAMI_ABOUT)
-            .long_about(WHOAMI_LONG_ABOUT),
-    );
+    let whoami = GlobalArgs::augment_args(Command::new("whoami"))
+        .about(WHOAMI_ABOUT)
+        .long_about(WHOAMI_LONG_ABOUT);
 
     Command::new("auth")
         .about("Authentication inspection.")
@@ -251,9 +216,10 @@ fn auth_command() -> Command {
 /// Runs `auth whoami`: asks the gateway to introspect the call's own
 /// credential and reports the principal through the shared output backend.
 fn run_auth_whoami(matches: &ArgMatches) -> i32 {
-    let connection = ConnectionArgs::from_arg_matches(matches)
-        .expect("whoami's own augmented matches must parse into ConnectionArgs");
-    let (format, verbose) = output_options(matches);
+    let globals =
+        GlobalArgs::from_arg_matches(matches).expect("whoami's own augmented matches must parse into GlobalArgs");
+    let (verbose, format) = globals.options();
+    let connection = globals.connection;
 
     init(verbose, format);
 

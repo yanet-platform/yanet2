@@ -180,6 +180,7 @@ unrdup_test_config(struct cp_module **cp_module, yanet_error **err) {
 	SET_OFFSET_OF(
 		&fuzz_params.module_ectx.counter_storage, counter_storage
 	);
+	fuzz_params.module_ectx.abs_counter_storage = counter_storage;
 
 	*cp_module = &config->cp_module;
 	return 0;

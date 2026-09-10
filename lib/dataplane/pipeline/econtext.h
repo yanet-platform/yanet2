@@ -25,6 +25,13 @@ struct dp_config;
 struct module_ectx {
 	module_handler handler;
 	struct cp_module *cp_module;
+	// The same module, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct cp_module *abs_cp_module;
 
 	// The module's counters, as absolute addresses for the packet hot
 	// path.
@@ -62,6 +69,13 @@ struct module_ectx {
 	// the relative one before the context is released to workers; it
 	// is zero until then.
 	struct counter_storage **abs_runtime_counter_storages;
+	// The array of absolute storages above, as an absolute address
+	// for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct counter_storage **abs_runtime_counter_storages_base;
 	// Offset pointer to the owning generation, owned by the control
 	// plane.
 	struct config_gen_ectx *config_gen_ectx;
@@ -99,6 +113,13 @@ struct module_ectx {
 	// references that object's per-worker execution context.
 	uint64_t object_link_count;
 	struct module_object_link_ectx *object_links;
+	// The same link array, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct module_object_link_ectx *abs_object_links;
 };
 
 // Per-worker, per-link state for a module's link to a cp_object.
@@ -125,9 +146,7 @@ object_link_get_address(struct module_ectx *module_ectx, uint64_t index) {
 	if (index >= module_ectx->object_link_count) {
 		return NULL;
 	}
-	struct module_object_link_ectx *links =
-		ADDR_OF(&module_ectx->object_links);
-	return links + index;
+	return module_ectx->abs_object_links + index;
 }
 
 // Return the per-worker counter storage for the module's runtime counter
@@ -137,9 +156,7 @@ module_ectx_counter_storage(struct module_ectx *module_ectx, uint64_t index) {
 	if (index >= module_ectx->runtime_counter_storage_count) {
 		return NULL;
 	}
-	struct counter_storage **storages =
-		ADDR_OF(&module_ectx->abs_runtime_counter_storages);
-	return storages[index];
+	return module_ectx->abs_runtime_counter_storages_base[index];
 }
 
 static inline uint64_t
@@ -210,6 +227,13 @@ struct function_ectx {
 	// before the context is released to workers; they are zero until
 	// then, and the packet hot path loads them directly.
 	struct chain_ectx **chains;
+	// The chains array, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct chain_ectx **abs_chains;
 	uint64_t chain_map_size;
 	// The function's chains, indexed by packet hash for the demux.
 	//
@@ -320,6 +344,13 @@ struct device_entry_ectx {
 	// array before the context is released to workers; they are zero
 	// until then, and the packet hot path loads them directly.
 	struct pipeline_ectx **pipelines;
+	// The pipelines array, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct pipeline_ectx **abs_pipelines;
 	uint64_t pipeline_map_size;
 	// Per-entry inbox for packets awaiting processing.
 	//
@@ -359,6 +390,13 @@ struct device_ectx {
 // registry under the object_type and object_name tags.
 struct object_ectx {
 	struct cp_object *cp_object;
+	// The same object, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct cp_object *abs_cp_object;
 	struct counter_storage *counter_storage;
 };
 

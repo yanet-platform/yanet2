@@ -10,7 +10,7 @@ use core::{
 };
 use std::collections::HashMap;
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
 use commonpb::pb::IpPrefix;
@@ -18,10 +18,11 @@ use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
+    GlobalArgs,
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
-    output::{self, CommonFormat},
+    output,
 };
 
 use crate::operatorpb::{
@@ -51,13 +52,7 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ConnectionArgs,
-    /// Output format.
-    #[arg(long, default_value = "human", global = true)]
-    pub format: CommonFormat,
-    /// Be verbose: shows debug log lines and raw gRPC error details.
-    #[clap(short, action = ArgAction::Count, global = true)]
-    pub verbose: u8,
+    pub globals: GlobalArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -173,7 +168,7 @@ impl RouteSource {
 }
 
 fn main() -> std::process::ExitCode {
-    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+    ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)
 }
 
 /// Completion candidates for a `--name` argument: the route operator
@@ -192,7 +187,7 @@ fn config_candidates() -> Vec<CompletionCandidate> {
 /// failure.
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = RouteService::new(&cmd.connection, action).await?;
+    let mut service = RouteService::new(&cmd.globals.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -227,19 +222,13 @@ impl RouteService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No route configurations found."),
-                        format_args!(
-                            "create one with 'yanet-cli-operator-route insert <prefix> --name <name> --via <addr>'"
-                        ),
-                    );
-                    return;
-                }
-
-                for config in &response.configs {
-                    println!("{config}");
-                }
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No route configurations found."),
+                    format_args!(
+                        "create one with 'yanet-cli-operator-route insert <prefix> --name <name> --via <addr>'"
+                    ),
+                )
             },
         );
 
@@ -255,9 +244,12 @@ impl RouteService {
 
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_routes(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.name)),
+                async |client, request| client.show_routes(request).await,
+            )
             .await?;
 
         output::data(

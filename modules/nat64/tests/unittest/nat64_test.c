@@ -4085,6 +4085,7 @@ test_nat64_udp_checksum() {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -4164,6 +4165,7 @@ process_test_case(struct test_case *tc) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -4857,6 +4859,8 @@ test_nat64_bounds_validation(void) {
 			&module_ectx.cp_module,
 			&test_params.module_config.cp_module
 		);
+		module_ectx.abs_cp_module =
+			&test_params.module_config.cp_module;
 		test_params.module->handler(
 			NULL, &module_ectx, &test_params.packet_front
 		);
@@ -4938,6 +4942,8 @@ test_nat64_bounds_validation(void) {
 			&module_ectx.cp_module,
 			&test_params.module_config.cp_module
 		);
+		module_ectx.abs_cp_module =
+			&test_params.module_config.cp_module;
 		test_params.module->handler(
 			NULL, &module_ectx, &test_params.packet_front
 		);
@@ -5111,6 +5117,7 @@ test_nat64_icmp_embedded_overflow(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(NULL, &module_ectx, &pf);
 
 	// Packet should be dropped due to payload_len overflow
@@ -5354,6 +5361,7 @@ test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -5425,6 +5433,7 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -5530,6 +5539,7 @@ test_nat64_icmp_v6tov4_empty_embedded_transport(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -5627,6 +5637,7 @@ test_nat64_icmp_v4tov6_empty_embedded_transport(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -5732,6 +5743,7 @@ test_nat64_icmp_v4tov6_valid_error_translates(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -5837,6 +5849,7 @@ test_nat64_icmp_v4tov6_fuzz_crash_regression(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(NULL, &module_ectx, &pf);
 
 	// The packet must be dropped, not cause a crash or OOB read
@@ -5966,6 +5979,7 @@ test_nat64_icmp_v6tov4_truncated_embedded_tcp(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -6064,6 +6078,7 @@ test_nat64_icmp_v4tov6_truncated_embedded_tcp(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -6184,6 +6199,7 @@ test_nat64_icmp_v6tov4_nested_icmp_zero_payload(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -6306,6 +6322,7 @@ test_nat64_icmp_v6tov4_nontransport_embedded_translated(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
@@ -6401,6 +6418,7 @@ test_nat64_icmp_v4tov6_nontransport_embedded_translated(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
+	module_ectx.abs_cp_module = &test_params.module_config.cp_module;
 	test_params.module->handler(
 		NULL, &module_ectx, &test_params.packet_front
 	);
