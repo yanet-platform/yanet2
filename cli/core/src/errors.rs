@@ -379,19 +379,35 @@ impl NotFoundMapper {
         endpoint: impl Into<String>,
         resource: Option<&str>,
     ) -> Error {
-        if status.code() == Code::NotFound && !is_unknown_service_status(&status) {
-            let resource = resource.unwrap_or(self.default_resource);
-
-            return Error::from_status(
-                Status::not_found(format!("{resource} not found")),
-                action,
-                endpoint,
-                self.service,
-            );
-        }
-
-        Error::from_status(status, action, endpoint, self.service)
+        map_not_found(
+            status,
+            action,
+            endpoint,
+            self.service,
+            resource.unwrap_or(self.default_resource),
+        )
     }
+}
+
+/// Maps `status` to an [`Error`] for `service`, rewriting a genuine resource
+/// `NotFound` into `<resource> not found` and passing the rest through.
+pub fn map_not_found(
+    status: Status,
+    action: impl Into<String>,
+    endpoint: impl Into<String>,
+    service: &'static str,
+    resource: &str,
+) -> Error {
+    if status.code() == Code::NotFound && !is_unknown_service_status(&status) {
+        return Error::from_status(
+            Status::not_found(format!("{resource} not found")),
+            action,
+            endpoint,
+            service,
+        );
+    }
+
+    Error::from_status(status, action, endpoint, service)
 }
 
 #[cfg(test)]
