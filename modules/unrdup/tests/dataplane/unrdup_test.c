@@ -337,7 +337,9 @@ run_module(struct packet *packet, struct packet_front *packet_front) {
 	struct module_ectx module_ectx;
 	memset(&module_ectx, 0, sizeof(module_ectx));
 	SET_OFFSET_OF(&module_ectx.cp_module, &config.cp_module);
+	module_ectx.abs_cp_module = &config.cp_module;
 	SET_OFFSET_OF(&module_ectx.counter_storage, test_counter_storage);
+	module_ectx.abs_counter_storage = test_counter_storage;
 
 	unrdup_handle_packets(&worker, &module_ectx, packet_front);
 }

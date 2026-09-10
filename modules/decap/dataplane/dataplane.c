@@ -64,7 +64,7 @@ decap_handle_packets(
 ) {
 	(void)dp_worker;
 	struct decap_module_config *decap_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct decap_module_config,
 		cp_module
 	);

@@ -182,6 +182,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 		goto error_registry;
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
+	fuzz_params.module_ectx.abs_counter_storage = cs;
 
 	// Give each stand-in map object one table layer, grown with the
 	// fwtable control-plane helper into the module's memory context.
@@ -234,16 +235,23 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 	// Wire the config's link indices to the stand-in objects through the
 	// execution context: slot 0 names the v4 map, slot 1 the v6 map.
+	// Both the relative and the absolute hops are set, the way a
+	// published context carries them.
 	memset(fuzz_object_ectxs, 0, sizeof(fuzz_object_ectxs));
 	memset(fuzz_object_links, 0, sizeof(fuzz_object_links));
 	SET_OFFSET_OF(&fuzz_object_ectxs[0].cp_object, &fuzz_map_v4.cp_object);
+	fuzz_object_ectxs[0].abs_cp_object = &fuzz_map_v4.cp_object;
 	SET_OFFSET_OF(&fuzz_object_ectxs[1].cp_object, &fuzz_map_v6.cp_object);
+	fuzz_object_ectxs[1].abs_cp_object = &fuzz_map_v6.cp_object;
 	SET_OFFSET_OF(&fuzz_object_links[0].object_ectx, &fuzz_object_ectxs[0]);
+	fuzz_object_links[0].abs_object_ectx = &fuzz_object_ectxs[0];
 	SET_OFFSET_OF(&fuzz_object_links[1].object_ectx, &fuzz_object_ectxs[1]);
+	fuzz_object_links[1].abs_object_ectx = &fuzz_object_ectxs[1];
 	fuzz_params.module_ectx.object_link_count = 2;
 	SET_OFFSET_OF(
 		&fuzz_params.module_ectx.object_links, &fuzz_object_links[0]
 	);
+	fuzz_params.module_ectx.abs_object_links = &fuzz_object_links[0];
 
 	config->v4_object_link_idx = 0;
 	config->v6_object_link_idx = 1;
@@ -279,6 +287,7 @@ error_table_v4:
 error_storage:
 	counter_storage_free(ADDR_OF(&fuzz_params.module_ectx.counter_storage));
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, NULL);
+	fuzz_params.module_ectx.abs_counter_storage = NULL;
 
 error_registry:
 	counter_registry_fini(&config->cp_module.counter_registry);

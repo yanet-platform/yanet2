@@ -66,7 +66,7 @@ pdump_handle_packets(
 	struct packet_front *packet_front
 ) {
 	struct pdump_module_config *config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct pdump_module_config,
 		cp_module
 	);

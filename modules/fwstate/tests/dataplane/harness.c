@@ -156,7 +156,9 @@ test_fwstate_handle_packets(
 ) {
 	struct module_ectx module_ectx = {};
 	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+	module_ectx.abs_cp_module = cp_module;
 	SET_OFFSET_OF(&module_ectx.counter_storage, counter_storage);
+	module_ectx.abs_counter_storage = counter_storage;
 
 	// Populate the ectx's object links the way the production build does:
 	// one entry per declaration, each pointing at the registered object.
@@ -191,12 +193,15 @@ test_fwstate_handle_packets(
 		}
 
 		SET_OFFSET_OF(&object_ectxs[idx].cp_object, cp_object);
+		object_ectxs[idx].abs_cp_object = cp_object;
 		SET_OFFSET_OF(&links[idx].object_ectx, &object_ectxs[idx]);
+		links[idx].abs_object_ectx = &object_ectxs[idx];
 	}
 
 	if (all_resolved) {
 		module_ectx.object_link_count = object_count;
 		SET_OFFSET_OF(&module_ectx.object_links, &links[0]);
+		module_ectx.abs_object_links = &links[0];
 	}
 
 	fwstate_handle_packets(dp_worker, &module_ectx, packet_front);

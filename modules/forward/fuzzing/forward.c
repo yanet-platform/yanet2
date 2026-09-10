@@ -152,6 +152,7 @@ forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 		goto fail;
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
+	fuzz_params.module_ectx.abs_counter_storage = cs;
 
 	// Set up "mc_index" so "module_ectx_encode_device" returns invalid
 	// device, causing all matched packets to be dropped safely.
