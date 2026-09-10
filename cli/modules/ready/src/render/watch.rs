@@ -7,11 +7,13 @@ use core::time::Duration;
 use std::collections::BTreeMap;
 
 use chrono::Local;
-use colored::Colorize;
 use readinesspb::pb::{Scope, State};
-use ync::{display, output};
+use ync::{
+    display::{self, Mark},
+    output,
+};
 
-use super::{StateStyle, Symbols, dim, layout::normalize_whitespace};
+use super::{Symbols, dim, state_mark};
 
 /// Gap between the transition line's prefix and the reason text that follows
 /// it on the same line.
@@ -120,7 +122,7 @@ struct Prefix {
 ///
 /// `name` must already be padded to the scope-name column width. Every part
 /// is rendered twice from the same text: once bare for [`Prefix::plain`] and
-/// once through [`StateStyle`] for [`Prefix::styled`], so the two can never
+/// once through [`state_mark`] for [`Prefix::styled`], so the two can never
 /// disagree on the visible width. The mark and both state labels are colored
 /// by their own state — the previous label keeps its old state's color — and
 /// the timestamp, service cell, and arrow stay grey or uncolored.
@@ -136,22 +138,21 @@ fn transition_prefix(
     colored: bool,
 ) -> Prefix {
     let symbols = Symbols::new(colored);
-    let style = StateStyle::new(state, colored);
+    let mark = state_mark(state);
     let label = super::label(state);
     let service = service.cell();
 
     let (change, styled_change) = match transition {
         Transition::StateChanged { previous } => {
-            let previous_style = StateStyle::new(previous, colored);
             let previous_label = super::label(previous);
 
             (
                 format!("{previous_label} {} {label}", symbols.arrow),
                 format!(
                     "{} {} {}",
-                    previous_style.paint(previous_label),
+                    state_mark(previous).paint(previous_label, colored),
                     dim(symbols.arrow, colored),
-                    style.paint(label)
+                    mark.paint(label, colored)
                 ),
             )
         }
@@ -162,16 +163,16 @@ fn transition_prefix(
             // cannot share that column anyway, so it is left unpadded.
             let label = format!("{label:<width$}", width = super::STATE_WIDTH);
 
-            (label.clone(), style.paint(&label))
+            (label.clone(), mark.paint(&label, colored))
         }
     };
 
     Prefix {
-        plain: format!("{timestamp}  {} {service}{name} {change}", style.mark),
+        plain: format!("{timestamp}  {} {service}{name} {change}", mark.text(colored)),
         styled: format!(
             "{}  {} {service}{name} {styled_change}",
             dim(timestamp, colored),
-            style.styled_mark()
+            mark.styled(colored)
         ),
     }
 }
@@ -212,28 +213,16 @@ pub fn print_transition_line(service: ServiceColumn, scope: &Scope, name_width: 
         print!("{:width$}{tag}", "", width = REASON_GAP);
     }
 
-    let mut is_first_line = true;
-    for reason in &scope.reasons {
-        let reason_text = super::format_reason(reason);
-
-        let lines = match wrap_width {
-            Some(width) if width > indent => display::wrap_words(&reason_text, width - indent),
-            _ => vec![normalize_whitespace(&reason_text)],
-        };
-
-        for line in &lines {
-            let styled = dim(line, colored);
-
-            if is_first_line {
-                print!("{:width$}{styled}", "", width = REASON_GAP);
-                is_first_line = false;
-            } else {
-                print!("\n{:indent$}{styled}", "");
-            }
-        }
+    if !scope.reasons.is_empty() {
+        print!("{:width$}", "", width = REASON_GAP);
     }
 
-    println!();
+    display::print_hanging(
+        indent,
+        wrap_width,
+        scope.reasons.iter().map(super::format_reason),
+        |line| dim(line, colored),
+    );
 }
 
 /// Prints one dim lifecycle line for `--watch` reconnect chatter that is
@@ -243,7 +232,7 @@ pub fn print_transition_line(service: ServiceColumn, scope: &Scope, name_width: 
 /// Callers compose `message` themselves — [`print_lost_line`] shows how a
 /// lost stream's cause and retry delay become one such message.
 /// `HH:MM:SS  [!] alias message`, the whole line dim — this is transport
-/// chatter, not a readiness state, and must never borrow a [`StateStyle`]
+/// chatter, not a readiness state, and must never borrow a state mark's
 /// colour or [`print_membership_line`]'s colored mark. Long messages wrap
 /// with a hanging indent, the same way a transition line's reason text
 /// does.
@@ -258,20 +247,7 @@ pub fn print_lifecycle_line(alias: &str, alias_width: usize, message: &str) {
     let indent = prefix.chars().count();
 
     print!("{}", dim(&prefix, colored));
-
-    let lines = match wrap_width {
-        Some(width) if width > indent => display::wrap_words(message, width - indent),
-        _ => vec![normalize_whitespace(message)],
-    };
-
-    for (idx, line) in lines.iter().enumerate() {
-        if idx > 0 {
-            print!("\n{:indent$}", "");
-        }
-        print!("{}", dim(line, colored));
-    }
-
-    println!();
+    display::print_hanging(indent, wrap_width, [message.to_owned()], |line| dim(line, colored));
 }
 
 /// Prints one lifecycle line for a `--watch` supervisor losing its stream,
@@ -317,38 +293,24 @@ impl Membership {
     }
 }
 
-/// [`Membership`]'s mark and color, resolved once per call from the same
-/// `colored` gate every other glyph in this render uses.
+/// [`Membership`]'s mark and color.
 ///
-/// Mirrors [`StateStyle`]'s shape: the glyph itself changes between the
+/// Mirrors [`state_mark`]'s shape: the glyph itself changes between the
 /// Unicode and ASCII forms, not just its color, chosen so neither
 /// direction is ever confused with a readiness-state mark or with
 /// [`print_lifecycle_line`]'s own `[!]` / `[--]` transport marks.
-struct MembershipStyle {
-    mark: &'static str,
-    color: fn(&str) -> String,
-    colored: bool,
-}
-
-impl MembershipStyle {
-    fn new(membership: Membership, colored: bool) -> Self {
-        let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = match membership {
-            Membership::Discovered => ("[▲]", "[^^]", |s| s.green().to_string()),
-            Membership::Gone => ("[▼]", "[vv]", |s| s.red().to_string()),
-        };
-
-        let mark = if colored { unicode_mark } else { ascii_mark };
-
-        Self { mark, color, colored }
-    }
-
-    /// Returns the mark glyph in this direction's color.
-    fn styled_mark(&self) -> String {
-        if self.colored {
-            (self.color)(self.mark)
-        } else {
-            self.mark.to_string()
-        }
+fn membership_mark(membership: Membership) -> Mark {
+    match membership {
+        Membership::Discovered => Mark {
+            unicode: "[▲]",
+            ascii: "[^^]",
+            color: output::paint_ok,
+        },
+        Membership::Gone => Mark {
+            unicode: "[▼]",
+            ascii: "[vv]",
+            color: output::paint_error,
+        },
     }
 }
 
@@ -360,7 +322,7 @@ impl MembershipStyle {
 /// but the mark keeps `membership`'s own color instead of [`dim`]'s grey: a
 /// backend joining or leaving the registry is a state-level event, not
 /// transport chatter, so the mark stays as prominent as a readiness
-/// [`StateStyle`] mark. The alias prints at full weight and only the
+/// state mark. The alias prints at full weight and only the
 /// descriptive message is dimmed, the same split a transition line makes
 /// between its state labels and its dim reason text. `membership` alone
 /// selects the mark, its color, and the message text, so the joined and
@@ -369,56 +331,21 @@ pub fn print_membership_line(alias: &str, alias_width: usize, membership: Member
     let colored = output::is_colored();
     let wrap_width = display::terminal_width();
     let timestamp = Local::now().format("%H:%M:%S").to_string();
-    let style = MembershipStyle::new(membership, colored);
+    let mark = membership_mark(membership);
     let message = membership.message();
     let name = format!("{alias:<alias_width$}");
 
-    let plain_prefix = format!("{timestamp}  {} {name} ", style.mark);
+    let plain_prefix = format!("{timestamp}  {} {name} ", mark.text(colored));
     let indent = plain_prefix.chars().count();
 
-    print!("{}  {} {name} ", dim(&timestamp, colored), style.styled_mark());
-
-    let lines = match wrap_width {
-        Some(width) if width > indent => display::wrap_words(message, width - indent),
-        _ => vec![normalize_whitespace(message)],
-    };
-
-    for (idx, line) in lines.iter().enumerate() {
-        if idx > 0 {
-            print!("\n{:indent$}", "");
-        }
-        print!("{}", dim(line, colored));
-    }
-
-    println!();
+    print!("{}  {} {name} ", dim(&timestamp, colored), mark.styled(colored));
+    display::print_hanging(indent, wrap_width, [message.to_owned()], |line| dim(line, colored));
 }
 
 #[cfg(test)]
 mod test {
-    use readinesspb::pb::Reason;
-
     use super::*;
-
-    fn scope(name: &str, state: State) -> Scope {
-        Scope {
-            name: name.to_string(),
-            state: state as i32,
-            reasons: Vec::new(),
-            observed_at: None,
-            last_transition_time: None,
-            expected_observation_interval: None,
-        }
-    }
-
-    fn scope_with_reason(name: &str, state: State, code: &str) -> Scope {
-        Scope {
-            reasons: vec![Reason {
-                code: code.to_owned(),
-                message: String::new(),
-            }],
-            ..scope(name, state)
-        }
-    }
+    use crate::fixtures::{scope, scope_with_reason};
 
     /// Drops every ANSI SGR escape (`ESC [ … m`) from `text`, leaving the
     /// characters a terminal would actually show.
@@ -491,7 +418,7 @@ mod test {
         );
 
         assert_eq!(prefix.plain, strip_ansi(&prefix.styled));
-        assert!(prefix.plain.contains(StateStyle::new(State::Degraded, true).mark));
+        assert!(prefix.plain.contains(state_mark(State::Degraded).text(true)));
         assert!(prefix.plain.contains("rib"));
         assert!(!prefix.plain.contains(Symbols::new(true).arrow));
     }
@@ -523,12 +450,11 @@ mod test {
     }
 
     #[test]
-    fn membership_style_uncolored_mark_is_ascii_for_both_directions() {
+    fn membership_mark_uncolored_is_ascii_for_both_directions() {
         for membership in [Membership::Discovered, Membership::Gone] {
-            let style = MembershipStyle::new(membership, false);
+            let mark = membership_mark(membership);
 
-            assert!(style.mark.is_ascii());
-            assert_eq!(style.mark, style.styled_mark());
+            assert!(mark.text(false).is_ascii());
             assert!(membership.message().is_ascii());
         }
     }

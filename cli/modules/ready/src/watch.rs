@@ -917,33 +917,7 @@ mod test {
     use readinesspb::pb::State;
 
     use super::*;
-
-    fn scope(name: &str, state: State) -> Scope {
-        Scope {
-            name: name.to_owned(),
-            state: state as i32,
-            reasons: Vec::new(),
-            observed_at: None,
-            last_transition_time: None,
-            expected_observation_interval: None,
-        }
-    }
-
-    fn report(service: &str, scopes: Vec<Scope>) -> ServiceReport {
-        ServiceReport {
-            service: service.to_owned(),
-            scopes,
-            error: None,
-        }
-    }
-
-    fn failed_report(service: &str) -> ServiceReport {
-        ServiceReport {
-            service: service.to_owned(),
-            scopes: Vec::new(),
-            error: Some("unknown service".to_owned()),
-        }
-    }
+    use crate::fixtures::{failed_report, report, scope};
 
     #[test]
     fn grow_widths_widens_alias_width_from_a_service_event_and_never_shrinks_it() {

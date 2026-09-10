@@ -15,6 +15,8 @@ use ync::{
     output,
 };
 
+#[cfg(test)]
+mod fixtures;
 mod render;
 mod watch;
 
@@ -389,33 +391,7 @@ fn service_candidates() -> Vec<CompletionCandidate> {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    fn scope(name: &str, state: State) -> Scope {
-        Scope {
-            name: name.to_owned(),
-            state: state as i32,
-            reasons: Vec::new(),
-            observed_at: None,
-            last_transition_time: None,
-            expected_observation_interval: None,
-        }
-    }
-
-    fn report(service: &str, scopes: Vec<Scope>) -> ServiceReport {
-        ServiceReport {
-            service: service.to_owned(),
-            scopes,
-            error: None,
-        }
-    }
-
-    fn failed_report(service: &str) -> ServiceReport {
-        ServiceReport {
-            service: service.to_owned(),
-            scopes: Vec::new(),
-            error: Some("unknown service".to_owned()),
-        }
-    }
+    use crate::fixtures::{failed_report, report, scope};
 
     #[test]
     fn all_ready_when_every_scope_of_every_service_is_ready() {

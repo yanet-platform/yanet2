@@ -14,6 +14,7 @@ use yanet_cli::{
     client::{ConnectionArgs, Service},
     config::{self, Origin, Settings},
     dispatcher::{self, Dispatch, Namespace},
+    display::Mark,
     errors::Error,
     init, output,
 };
@@ -280,16 +281,20 @@ const DETAIL_WIDTH: usize = 13;
 /// details indented under the name.
 fn print_principal(endpoint: &str, principal: &Principal) {
     let colored = output::is_colored();
-    let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = if principal.is_anonymous {
-        ("[~]", "[!!]", |s| s.yellow().to_string())
+    let mark = if principal.is_anonymous {
+        Mark {
+            unicode: "[~]",
+            ascii: "[!!]",
+            color: output::paint_warning,
+        }
     } else {
-        ("[✓]", "[ok]", |s| s.green().to_string())
+        Mark {
+            unicode: "[✓]",
+            ascii: "[ok]",
+            color: output::paint_ok,
+        }
     };
-    let mark = if colored {
-        color(unicode_mark)
-    } else {
-        ascii_mark.to_owned()
-    };
+    let mark = mark.styled(colored);
     let indent = " ".repeat(if colored { 4 } else { 5 });
     let user = if colored {
         principal.user.bold().to_string()

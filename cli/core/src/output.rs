@@ -493,6 +493,11 @@ pub fn paint_warning(text: &str) -> String {
     text.yellow().to_string()
 }
 
+/// Paints `text` in the green reserved for a healthy or accepted state.
+pub fn paint_ok(text: &str) -> String {
+    text.green().to_string()
+}
+
 /// Paints red text after the caller has checked terminal colour support.
 pub fn paint_error(text: &str) -> String {
     text.red().to_string()
