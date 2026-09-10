@@ -32,12 +32,17 @@ func (m *Cache[K, V]) View() CacheView[K, V] {
 
 	// Just copy the pointer here.
 	//
-	// The returned type provides only read-only access, while this structure
-	// only allows to atomically swap the entire table.
+	// The view reads the table without taking a lock, so it stays sound
+	// only while nothing writes into that table in place; swapping a
+	// rebuilt table in leaves the view reading the one it was given.
 	return CacheView[K, V]{cache: m.cache}
 }
 
 // Swap atomically swaps the entire cache.
+//
+// The supplied table becomes the published one, so a caller that keeps a
+// reference and writes through it later corrupts a reader already walking
+// it: hand over a table nothing else holds.
 func (m *Cache[K, V]) Swap(cache map[K]V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -46,6 +51,11 @@ func (m *Cache[K, V]) Swap(cache map[K]V) {
 }
 
 // Set inserts or updates a single entry in the cache.
+//
+// The entry lands in the table every outstanding view is already reading,
+// and a reader walking that table at the same time aborts the process.
+// Use this only before the cache is reachable by a reader; afterwards
+// swap a rebuilt table in instead.
 func (m *Cache[K, V]) Set(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -54,6 +64,9 @@ func (m *Cache[K, V]) Set(key K, value V) {
 }
 
 // Delete removes a single entry from the cache.
+//
+// Carries the same hazard as Set: it writes into the table outstanding
+// views are reading.
 func (m *Cache[K, V]) Delete(key K) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

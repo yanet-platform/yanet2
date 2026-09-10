@@ -1,11 +1,13 @@
 package neigh
 
 import (
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 func makeEntry(ip string, mac [6]byte, priority uint32) NeighbourEntry {
@@ -268,6 +270,94 @@ func TestNeighTableBatchRemove(t *testing.T) {
 
 	_, ok := view.Lookup(netip.MustParseAddr("10.0.0.2"))
 	require.True(t, ok)
+}
+
+// Test_NeighTable_Add_ConcurrentWithSourceView verifies that a listing
+// walking a source table while batches land against it neither races the
+// writer nor aborts the process.
+//
+// The race detector is what gives this test its teeth, and the failure it
+// guards against is a runtime abort rather than a recoverable one, so a
+// regression takes the whole operator down rather than failing one call.
+func Test_NeighTable_Add_ConcurrentWithSourceView(t *testing.T) {
+	nt := NewNeighTable()
+	mustCreateSource(t, nt, "static", 10, true)
+
+	const rounds = 200
+
+	var writers errgroup.Group
+	writers.Go(func() error {
+		for round := range rounds {
+			entry := makeEntry(fmt.Sprintf("10.0.%d.%d", round/256, round%256),
+				[6]byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}, 10)
+
+			if err := nt.Add("static", []NeighbourEntry{entry}); err != nil {
+				return err
+			}
+			if err := nt.Remove("static", []netip.Addr{entry.NextHop}); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	writers.Go(func() error {
+		for range rounds {
+			view, ok := nt.SourceView("static")
+			if !ok {
+				return fmt.Errorf("source not found")
+			}
+
+			entries, _ := view.Entries()
+			for range entries {
+			}
+		}
+
+		return nil
+	})
+
+	require.NoError(t, writers.Wait())
+}
+
+// Test_NeighTable_Add_LeavesAnEarlierViewUntouched verifies that a batch
+// applied after a view was taken lands in a map of its own, so a reader
+// still walking that view neither sees the batch nor races the writer.
+func Test_NeighTable_Add_LeavesAnEarlierViewUntouched(t *testing.T) {
+	nt := NewNeighTable()
+	mustCreateSource(t, nt, "static", 10, true)
+	require.NoError(t, nt.Add("static", []NeighbourEntry{
+		makeEntry("10.0.0.1", [6]byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}, 10),
+	}))
+
+	view, ok := nt.SourceView("static")
+	require.True(t, ok)
+
+	require.NoError(t, nt.Add("static", []NeighbourEntry{
+		makeEntry("10.0.0.2", [6]byte{0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB}, 20),
+	}))
+
+	_, count := view.Entries()
+	require.Equal(t, 1, count)
+}
+
+// Test_NeighTable_Remove_LeavesAnEarlierViewUntouched verifies that a
+// removal applied after a view was taken lands in a map of its own, so a
+// reader still walking that view neither loses the entry nor races the
+// writer.
+func Test_NeighTable_Remove_LeavesAnEarlierViewUntouched(t *testing.T) {
+	nt := NewNeighTable()
+	mustCreateSource(t, nt, "static", 10, true)
+	require.NoError(t, nt.Add("static", []NeighbourEntry{
+		makeEntry("10.0.0.1", [6]byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}, 10),
+	}))
+
+	view, ok := nt.SourceView("static")
+	require.True(t, ok)
+
+	require.NoError(t, nt.Remove("static", []netip.Addr{netip.MustParseAddr("10.0.0.1")}))
+
+	_, count := view.Entries()
+	require.Equal(t, 1, count)
 }
 
 func TestNeighTableListSources(t *testing.T) {

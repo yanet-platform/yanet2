@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,74 @@ func (m *blockingReadinessServer) Watch(
 
 	<-stream.Context().Done()
 	return stream.Context().Err()
+}
+
+// countingReadinessServer is a fake ReadinessServiceServer that reports
+// how many scopes the request carried, so a caller can tell an accepted
+// large request from a refused one.
+type countingReadinessServer struct {
+	ynpb.UnimplementedReadinessServiceServer
+}
+
+func (m *countingReadinessServer) Ready(
+	ctx context.Context,
+	req *readinesspb.ReadyRequest,
+) (*readinesspb.ReadyResponse, error) {
+	scopes := make([]*readinesspb.Scope, 0, len(req.GetScopes()))
+	for _, scope := range req.GetScopes() {
+		scopes = append(scopes, &readinesspb.Scope{Name: scope})
+	}
+
+	return &readinesspb.ReadyResponse{Scopes: scopes[:min(len(scopes), 1)]}, nil
+}
+
+// Test_GRPCServer_Ready_AcceptsARequestPastTheGRPCDefault verifies that a
+// request larger than the four mebibytes gRPC accepts by default reaches
+// the handler, so a bulk configuration push is not refused as exhausted.
+func Test_GRPCServer_Ready_AcceptsARequestPastTheGRPCDefault(t *testing.T) {
+	t.Parallel()
+
+	registrar := func(server *grpc.Server) string {
+		ynpb.RegisterReadinessServiceServer(server, &countingReadinessServer{})
+		return ynpb.ReadinessService_ServiceDesc.ServiceName
+	}
+
+	server, _ := NewGRPCServer(GRPCServerConfig{}, []ServiceRegistrar{registrar}, WithGRPCLog(zap.NewNop()))
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var group errgroup.Group
+	group.Go(func() error {
+		return server.Run(ctx, listener)
+	})
+
+	conn, err := grpc.NewClient(listener.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(maxRequestSize)),
+	)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// Just past the four mebibytes gRPC would otherwise refuse.
+	const scopeCount = 5 * 1024
+	const scopeSize = 1024
+
+	scopes := make([]string, scopeCount)
+	for idx := range scopes {
+		scopes[idx] = strings.Repeat("s", scopeSize)
+	}
+
+	response, err := ynpb.NewReadinessServiceClient(conn).Ready(ctx, &readinesspb.ReadyRequest{Scopes: scopes})
+
+	require.NoError(t, err)
+	require.Len(t, response.GetScopes(), 1)
+
+	cancel()
+	require.NoError(t, group.Wait())
 }
 
 // TestGRPCServer_Run_ShutsDownWithOpenStream verifies that GRPCServer.Run
