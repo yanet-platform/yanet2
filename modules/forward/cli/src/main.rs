@@ -121,16 +121,6 @@ fn deserialize_forward_mode<'de, D: Deserializer<'de>>(deserializer: D) -> Resul
     }
 }
 
-/// Deserializes a null as the field's zero value, as the operator's YAML
-/// decoder reads it.
-fn null_as_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-    T: Default + Deserialize<'de>,
-    D: Deserializer<'de>,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
-}
-
 /// Loads the update request from its YAML file.
 ///
 /// The reading matches the generic operator's: merge keys expand, a null

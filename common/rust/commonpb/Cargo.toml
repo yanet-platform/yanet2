@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 netip = "0.3"
 prost = "0.14"
+prost-types = "0.14"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.14", features = ["gzip"] }
 

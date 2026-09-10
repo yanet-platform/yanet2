@@ -11,14 +11,9 @@ pub fn serialize_backend_kind<S>(value: &i32, serializer: S) -> Result<S::Ok, S:
 where
     S: serde::Serializer,
 {
-    let name = pb::BackendKind::try_from(*value)
-        .unwrap_or_default()
-        .as_str_name()
-        .strip_prefix("BACKEND_KIND_")
-        .unwrap_or("UNSPECIFIED")
-        .to_lowercase();
+    let kind = pb::BackendKind::try_from(*value).unwrap_or_default();
 
-    serializer.serialize_str(&name)
+    commonpb::serde_with::lowercase_name(kind.as_str_name(), "BACKEND_KIND_", serializer)
 }
 
 /// Returns the lowercase name of a logging-level wire value (e.g. `debug`,
@@ -37,27 +32,6 @@ where
     S: serde::Serializer,
 {
     serializer.serialize_str(&log_level_name(*value))
-}
-
-/// Serializes an `Option<prost_types::Timestamp>` as `{"seconds": i64, "nanos":
-/// i32}` or `null` when absent.
-pub fn serialize_timestamp<S>(value: &Option<prost_types::Timestamp>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    use serde::Serialize;
-
-    match value {
-        Some(ts) => {
-            #[derive(serde::Serialize)]
-            struct Ts {
-                seconds: i64,
-                nanos: i32,
-            }
-            Ts { seconds: ts.seconds, nanos: ts.nanos }.serialize(serializer)
-        }
-        None => serializer.serialize_none(),
-    }
 }
 
 #[cfg(test)]

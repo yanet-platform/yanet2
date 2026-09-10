@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use colored::Colorize;
-use commonpb::pb::IpPrefix;
+use commonpb::{pb::IpPrefix, serde_with};
 use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -588,12 +588,9 @@ fn print_route_table(entries: Vec<RouteEntry>) {
 /// Converts a raw `i32` source value to its lowercase string name by calling
 /// `as_str_name` on the corresponding `RouteSourceId` variant.
 fn route_source_name(value: i32) -> String {
-    RouteSourceId::try_from(value)
-        .unwrap_or_default()
-        .as_str_name()
-        .strip_prefix("ROUTE_SOURCE_ID_")
-        .unwrap_or_default()
-        .to_lowercase()
+    let source = RouteSourceId::try_from(value).unwrap_or_default();
+
+    serde_with::short_name(source.as_str_name(), "ROUTE_SOURCE_ID_").to_lowercase()
 }
 
 /// Serializes the `source` field of `Route` as a lowercase string name
