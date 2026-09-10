@@ -1,56 +1,51 @@
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../controlplane/aclpb/v1/acl.proto");
-
-    tonic_prost_build::configure()
-        .emit_rerun_if_changed(false)
-        .build_server(false)
-        .extern_path(".common.commonpb.v1", "::commonpb::pb")
-        .extern_path(".common.filterpb.v1", "::filterpb::pb")
-        .message_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Rule",
-            "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
-        )
-        .message_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Action",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .message_attribute(
-            ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse",
-            "#[derive(serde::Serialize)]",
-        )
-        .message_attribute(
-            ".modules.acl.controlplane.aclpb.v1.RuleCounter",
-            "#[derive(serde::Serialize)]",
-        )
-        .message_attribute(
-            ".modules.acl.controlplane.aclpb.v1.SyncConfig",
-            "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
-        )
-        .field_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Action.kind",
-            "#[serde(with = \"crate::action_kind\")]",
-        )
-        // The typed network lists stay out of the YAML output while empty,
-        // so show rendering of a legacy-schema config is unchanged.
-        .field_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Rule.sources4",
-            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-        )
-        .field_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Rule.sources6",
-            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-        )
-        .field_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Rule.destinations4",
-            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-        )
-        .field_attribute(
-            ".modules.acl.controlplane.aclpb.v1.Rule.destinations6",
-            "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
-        )
-        .compile_protos(&["aclpb/v1/acl.proto"], &["../../..", "../controlplane"])?;
-
-    Ok(())
+    ync_build::client("../../..", &["modules/acl/controlplane/aclpb/v1/acl.proto"])
+        .with(|builder| {
+            builder
+                .message_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Rule",
+                    "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
+                )
+                .message_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Action",
+                    "#[derive(serde::Serialize, serde::Deserialize)]",
+                )
+                .message_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse",
+                    "#[derive(serde::Serialize)]",
+                )
+                .message_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.RuleCounter",
+                    "#[derive(serde::Serialize)]",
+                )
+                .message_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.SyncConfig",
+                    "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
+                )
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Action.kind",
+                    "#[serde(with = \"crate::action_kind\")]",
+                )
+                // The typed network lists stay out of the YAML output while empty,
+                // so show rendering of a legacy-schema config is unchanged.
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Rule.sources4",
+                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+                )
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Rule.sources6",
+                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+                )
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Rule.destinations4",
+                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+                )
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Rule.destinations6",
+                    "#[serde(skip_serializing_if = \"Vec::is_empty\")]",
+                )
+        })
+        .compile()
 }

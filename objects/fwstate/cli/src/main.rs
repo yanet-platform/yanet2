@@ -22,8 +22,6 @@ mod args;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod fwstatemappb {
-    use serde::Serialize;
-
     tonic::include_proto!("objects.fwstate.controlplane.fwstatemappb.v1");
 }
 

@@ -17,8 +17,6 @@ use ync::{
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod decappb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.decap.controlplane.decappb.v1");
 }
 

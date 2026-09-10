@@ -1,13 +1,10 @@
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../controlplane/blackholepb/v1/blackhole.proto");
-
-    tonic_prost_build::configure()
-        .emit_rerun_if_changed(false)
-        .build_server(false)
-        .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(&["blackholepb/v1/blackhole.proto"], &["../controlplane"])?;
-
-    Ok(())
+    ync_build::client(
+        "../../..",
+        &["modules/blackhole/controlplane/blackholepb/v1/blackhole.proto"],
+    )
+    .serialize()
+    .compile()
 }

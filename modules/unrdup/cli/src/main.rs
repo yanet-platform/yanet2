@@ -21,8 +21,6 @@ use ync::{
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod unrduppb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.unrdup.controlplane.unrduppb.v1");
 }
 

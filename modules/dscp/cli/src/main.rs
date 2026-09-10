@@ -19,8 +19,6 @@ use crate::dscppb::ListConfigsRequest;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod dscppb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.dscp.controlplane.dscppb.v1");
 }
 

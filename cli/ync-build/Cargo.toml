@@ -1,0 +1,13 @@
+[package]
+name = "yanet-cli-build"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.88"
+
+[lints]
+workspace = true
+
+[dependencies]
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }

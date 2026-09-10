@@ -17,8 +17,6 @@ use ynpb::pb::{ListDevicesRequest, device_service_client::DeviceServiceClient};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod vlanpb {
-    use serde::Serialize;
-
     tonic::include_proto!("devices.vlan.controlplane.vlanpb.v1");
 }
 
