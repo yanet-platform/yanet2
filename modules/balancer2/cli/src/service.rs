@@ -78,13 +78,11 @@ impl Balancer2Service {
             addr: parts.addr,
             wlc: parts.wlc,
         };
-        log::trace!("update config request: {request:?}");
-
         self.service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?;
+            .unary("update", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated config '{}'.", cmd.name));
 
@@ -92,17 +90,12 @@ impl Balancer2Service {
     }
 
     async fn list(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
-
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
-        log::debug!("list configs response: {response:?}");
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.names,
@@ -130,16 +123,12 @@ impl Balancer2Service {
 
     async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Error> {
         let request = GetConfigRequest { config_name: cmd.name };
-        log::trace!("get config request: {request:?}");
-
         let response = self
             .service
-            .client()
-            .get_config(request)
-            .await
-            .map_err(self.service.status("config"))?
-            .into_inner();
-        log::debug!("get config response: {response:?}");
+            .unary("config", request, async |client, request| {
+                client.get_config(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -183,16 +172,10 @@ impl Balancer2Service {
             packet_handler_ref,
             filter,
         };
-        log::trace!("get state request: {request:?}");
-
         let response = self
             .service
-            .client()
-            .get_state(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
-        log::debug!("get state response: {response:?}");
+            .unary("show", request, async |client, request| client.get_state(request).await)
+            .await?;
 
         output::data(
             || &response.states,
@@ -210,17 +193,14 @@ impl Balancer2Service {
     }
 
     async fn sessions_list(&mut self) -> Result<(), Error> {
-        let request = ListSessionsStatesRequest {};
-        log::trace!("list sessions states request: {request:?}");
-
         let response = self
             .service
-            .client()
-            .list_sessions_states(request)
-            .await
-            .map_err(self.service.status("sessions list"))?
-            .into_inner();
-        log::debug!("list sessions states response: {response:?}");
+            .unary(
+                "sessions list",
+                ListSessionsStatesRequest {},
+                async |client, request| client.list_sessions_states(request).await,
+            )
+            .await?;
 
         output::data(
             || &response.names,
@@ -301,13 +281,11 @@ impl Balancer2Service {
             sessions_state_name: cmd.name.clone(),
             capacity: cmd.capacity,
         };
-        log::trace!("update sessions state request: {request:?}");
-
         self.service
-            .client()
-            .update_sessions_state(request)
-            .await
-            .map_err(self.service.status("sessions update"))?;
+            .unary("sessions update", request, async |client, request| {
+                client.update_sessions_state(request).await
+            })
+            .await?;
 
         output::success(
             "sessions update",
@@ -318,17 +296,12 @@ impl Balancer2Service {
     }
 
     async fn metrics(&mut self, _cmd: MetricsCmd) -> Result<(), Error> {
-        let request = GetMetricsRequest::default();
-        log::trace!("get metrics request: {request:?}");
-
         let response = self
             .service
-            .client()
-            .get_metrics(request)
-            .await
-            .map_err(self.service.status("metrics"))?
-            .into_inner();
-        log::debug!("get metrics response: {response:?}");
+            .unary("metrics", GetMetricsRequest::default(), async |client, request| {
+                client.get_metrics(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -369,13 +342,11 @@ impl Balancer2Service {
             config_name: config_name.clone(),
             updates,
         };
-        log::trace!("update reals request: {request:?}");
-
         self.service
-            .client()
-            .update_reals(request)
-            .await
-            .map_err(self.service.status(action))?;
+            .unary(action, request, async |client, request| {
+                client.update_reals(request).await
+            })
+            .await?;
 
         output::success(action, format_args!("Updated reals of config '{config_name}'."));
 
