@@ -434,37 +434,68 @@ fn print_target_address<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<
     Ok(())
 }
 
+/// Reports a packet too short for its header, `family` naming the protocol.
+fn print_malformed_icmp<W: Write>(writer: &mut W, family: &str, len: usize) -> io::Result<()> {
+    writeln!(
+        writer,
+        "      Error: Malformed {family} packet (insufficient length: {len} bytes)"
+    )
+}
+
+/// Prints the header lines every ICMP and ICMPv6 message shares.
+fn print_icmp_header<W: Write>(
+    writer: &mut W,
+    family: &str,
+    type_num: u8,
+    type_name: &str,
+    code: u8,
+    checksum: u16,
+) -> io::Result<()> {
+    writeln!(writer, "    --- {family} Packet ---")?;
+    writeln!(writer, "      Type:             {type_num} ({type_name})")?;
+    writeln!(writer, "      Code:             {code}")?;
+    writeln!(writer, "      Checksum:         0x{checksum:04x}")
+}
+
+/// Prints how much of the offending packet an error message quotes after
+/// its four-byte field, `note` describing the quoted shape.
+fn print_original_data<W: Write>(writer: &mut W, payload: &[u8], note: &str) -> io::Result<()> {
+    if payload.len() > 4 {
+        writeln!(writer, "      Original Data:    {} bytes ({note})", payload.len() - 4)?;
+    }
+
+    Ok(())
+}
+
+/// Prints the payload size of a message the printer does not decode.
+fn print_payload_length<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
+    if !payload.is_empty() {
+        writeln!(writer, "      Payload Length:   {} bytes", payload.len())?;
+    }
+
+    Ok(())
+}
+
 /// Pretty prints an ICMP packet with detailed information.
 ///
 /// # Arguments
 ///
 /// * `icmp_packet` - A byte slice representing the ICMP packet payload.
 fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::Result<()> {
-    let packet = match IcmpPacket::new(icmp_packet) {
-        Some(packet) => packet,
-        None => {
-            writeln!(
-                writer,
-                "      Error: Malformed ICMP packet (insufficient length: {} bytes)",
-                icmp_packet.len()
-            )?;
-            return Ok(());
-        }
+    let Some(packet) = IcmpPacket::new(icmp_packet) else {
+        return print_malformed_icmp(&mut writer, "ICMP", icmp_packet.len());
     };
-
-    writeln!(writer, "    --- ICMP Packet ---")?;
 
     let icmp_type = packet.get_icmp_type();
     let icmp_code = packet.get_icmp_code();
-
-    writeln!(
-        writer,
-        "      Type:             {} ({})",
+    print_icmp_header(
+        &mut writer,
+        "ICMP",
         icmp_type.0,
-        icmp_type_to_string(icmp_type)
+        icmp_type_to_string(icmp_type),
+        icmp_code.0,
+        packet.get_checksum(),
     )?;
-    writeln!(writer, "      Code:             {}", icmp_code.0)?;
-    writeln!(writer, "      Checksum:         0x{:04x}", packet.get_checksum())?;
 
     // Parse type-specific fields based on ICMP type
     match icmp_type {
@@ -504,15 +535,9 @@ fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::
                 writeln!(writer, "      Gateway Address:  {gateway}")?;
             }
         }
-        _ => {
-            // For other types, just show raw payload info
-            if !packet.payload().is_empty() {
-                writeln!(writer, "      Payload Length:   {} bytes", packet.payload().len())?;
-            }
-        }
+        _ => print_payload_length(&mut writer, packet.payload())?,
     }
 
-    // Show original packet data for error messages (if present and reasonable size)
     if matches!(
         icmp_type,
         IcmpTypes::DestinationUnreachable
@@ -520,20 +545,7 @@ fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::
             | IcmpTypes::ParameterProblem
             | IcmpTypes::RedirectMessage
     ) {
-        let data_offset = match icmp_type {
-            IcmpTypes::RedirectMessage => 4,
-            IcmpTypes::ParameterProblem => 4,
-            _ => 4,
-        };
-
-        if packet.payload().len() > data_offset {
-            let original_data = &packet.payload()[data_offset..];
-            writeln!(
-                writer,
-                "      Original Data:    {} bytes (truncated IP header + 8 bytes)",
-                original_data.len()
-            )?;
-        }
+        print_original_data(&mut writer, packet.payload(), "truncated IP header + 8 bytes")?;
     }
 
     Ok(())
@@ -545,31 +557,20 @@ fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::
 ///
 /// * `icmpv6_packet` - A byte slice representing the ICMPv6 packet payload.
 fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> io::Result<()> {
-    let packet = match Icmpv6Packet::new(icmpv6_packet) {
-        Some(packet) => packet,
-        None => {
-            writeln!(
-                writer,
-                "      Error: Malformed ICMPv6 packet (insufficient length: {} bytes)",
-                icmpv6_packet.len()
-            )?;
-            return Ok(());
-        }
+    let Some(packet) = Icmpv6Packet::new(icmpv6_packet) else {
+        return print_malformed_icmp(&mut writer, "ICMPv6", icmpv6_packet.len());
     };
-
-    writeln!(writer, "    --- ICMPv6 Packet ---")?;
 
     let icmpv6_type = packet.get_icmpv6_type();
     let icmpv6_code = packet.get_icmpv6_code();
-
-    writeln!(
-        writer,
-        "      Type:             {} ({})",
+    print_icmp_header(
+        &mut writer,
+        "ICMPv6",
         icmpv6_type.0,
-        icmpv6_type_to_string(icmpv6_type)
+        icmpv6_type_to_string(icmpv6_type),
+        icmpv6_code.0,
+        packet.get_checksum(),
     )?;
-    writeln!(writer, "      Code:             {}", icmpv6_code.0)?;
-    writeln!(writer, "      Checksum:         0x{:04x}", packet.get_checksum())?;
 
     // Parse type-specific fields based on ICMPv6 type
     match icmpv6_type {
@@ -674,15 +675,9 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
             }
             print_target_address(&mut writer, packet.payload())?;
         }
-        _ => {
-            // For other types, just show raw payload info
-            if !packet.payload().is_empty() {
-                writeln!(writer, "      Payload Length:   {} bytes", packet.payload().len())?;
-            }
-        }
+        _ => print_payload_length(&mut writer, packet.payload())?,
     }
 
-    // Show original packet data for error messages (if present and reasonable size)
     if matches!(
         icmpv6_type,
         Icmpv6Types::DestinationUnreachable
@@ -690,19 +685,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
             | Icmpv6Types::TimeExceeded
             | Icmpv6Types::ParameterProblem
     ) {
-        let data_offset = match icmpv6_type {
-            Icmpv6Types::PacketTooBig | Icmpv6Types::ParameterProblem => 4,
-            _ => 4,
-        };
-
-        if packet.payload().len() > data_offset {
-            let original_data = &packet.payload()[data_offset..];
-            writeln!(
-                writer,
-                "      Original Data:    {} bytes (truncated IPv6 header + payload)",
-                original_data.len()
-            )?;
-        }
+        print_original_data(&mut writer, packet.payload(), "truncated IPv6 header + payload")?;
     }
 
     Ok(())
