@@ -154,35 +154,35 @@ fn rule_counter_rows(metrics: &[commonpb::Metric]) -> Vec<RuleCounterRow> {
     order.into_iter().filter_map(|key| rows.remove(&key)).collect()
 }
 
-fn print_rule_metrics_table(metrics: &[commonpb::Metric]) {
-    let rows = rule_counter_rows(metrics);
-
-    let mut current: Option<&RuleLocation> = None;
-    let mut pending: Vec<CounterRow> = Vec::new();
-
-    for row in &rows {
-        if current != Some(&row.location) {
-            if current.is_some() {
-                print_counter_table(core::mem::take(&mut pending));
-                println!();
-            }
-            let (config, device, pipeline, function, chain) = &row.location;
-            println!(
-                "ACL RULE COUNTERS  config={config} device={device} pipeline={pipeline} function={function} chain={chain}"
-            );
-            println!();
-            current = Some(&row.location);
-        }
-
-        pending.push(CounterRow {
-            counter: row.counter.clone(),
-            packets: row.packets.map_or_else(|| "-".to_string(), metrics::format_number),
-            bytes: row.bytes.map_or_else(|| "-".to_string(), metrics::format_number),
+/// Prints the rows as one titled counter table per location, the
+/// locations in order of first appearance.
+fn print_rule_counter_groups(rows: &[RuleCounterRow]) {
+    let mut groups: Vec<(&RuleLocation, Vec<&RuleCounterRow>)> = Vec::new();
+    let mut index: HashMap<&RuleLocation, usize> = HashMap::new();
+    for row in rows {
+        let group = *index.entry(&row.location).or_insert_with(|| {
+            groups.push((&row.location, Vec::new()));
+            groups.len() - 1
         });
+        groups[group].1.push(row);
     }
 
-    if !pending.is_empty() {
-        print_counter_table(pending);
+    for (location, rows) in groups {
+        let (config, device, pipeline, function, chain) = location;
+        println!(
+            "ACL RULE COUNTERS  config={config} device={device} pipeline={pipeline} function={function} chain={chain}"
+        );
+        println!();
+
+        let table = rows
+            .iter()
+            .map(|row| CounterRow {
+                counter: row.counter.clone(),
+                packets: row.packets.map_or_else(|| "-".to_string(), metrics::format_number),
+                bytes: row.bytes.map_or_else(|| "-".to_string(), metrics::format_number),
+            })
+            .collect();
+        print_counter_table(table);
         println!();
     }
 }
@@ -398,42 +398,23 @@ impl ACLService {
                     return;
                 }
 
-                let mut location_keys: Vec<String> = Vec::new();
-                let mut location_map: HashMap<String, Vec<&aclpb::RuleCounter>> = HashMap::new();
-                for entry in &response.counters {
-                    let key = format!(
-                        "{}\0{}\0{}\0{}\0{}",
-                        entry.config, entry.device, entry.pipeline, entry.function, entry.chain,
-                    );
-                    if !location_map.contains_key(&key) {
-                        location_keys.push(key.clone());
-                    }
-                    location_map.entry(key).or_default().push(entry);
-                }
-
-                for (loc_idx, key) in location_keys.iter().enumerate() {
-                    if loc_idx > 0 {
-                        println!();
-                    }
-                    let entries = &location_map[key];
-                    let parts: Vec<&str> = key.split('\0').collect();
-                    let (cfg, device, pipeline, function, chain) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
-                    println!(
-                        "ACL RULE COUNTERS  config={cfg} device={device} pipeline={pipeline} function={function} chain={chain}"
-                    );
-                    println!();
-
-                    let rows: Vec<CounterRow> = entries
-                        .iter()
-                        .map(|entry| CounterRow {
-                            counter: entry.counter.clone(),
-                            packets: metrics::format_number(entry.packets),
-                            bytes: metrics::format_number(entry.bytes),
-                        })
-                        .collect();
-                    print_counter_table(rows);
-                    println!();
-                }
+                let rows: Vec<RuleCounterRow> = response
+                    .counters
+                    .iter()
+                    .map(|entry| RuleCounterRow {
+                        location: (
+                            entry.config.clone(),
+                            entry.device.clone(),
+                            entry.pipeline.clone(),
+                            entry.function.clone(),
+                            entry.chain.clone(),
+                        ),
+                        counter: entry.counter.clone(),
+                        packets: Some(entry.packets),
+                        bytes: Some(entry.bytes),
+                    })
+                    .collect();
+                print_rule_counter_groups(&rows);
             },
         );
 
@@ -469,7 +450,7 @@ impl ACLService {
                     return;
                 }
 
-                print_rule_metrics_table(&metrics)
+                print_rule_counter_groups(&rule_counter_rows(&metrics))
             },
         );
 
