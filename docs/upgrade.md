@@ -172,3 +172,11 @@ balancer2, `-c` in `sessions update`, `-t` in counters, `-f` and `-s` in
 pdump) and the spellings `--config` on `acl metrics-rules` and
 `--prefixes` on `decap update` keep working as hidden aliases for one
 release.
+
+## Mirror rule files spell the wire request
+
+`yanet-cli-mirror update` reads the shape the generic operator pushes and
+`show` prints, exactly like forward: a rule carries an `action` object
+(`target`, `mode`, `counter`) and its `devices` as named objects. The
+previous flat rule form is refused, and `--format json` prints the wire
+message.
