@@ -3255,13 +3255,16 @@ name = "yanet-cli-device-plain"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "prost",
  "serde",
+ "tabled",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
+ "yanet-ynpb",
 ]
 
 [[package]]
@@ -3284,13 +3287,16 @@ name = "yanet-cli-device-vlan"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "prost",
  "serde",
+ "tabled",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
  "yanet-cli",
  "yanet-commonpb",
+ "yanet-ynpb",
 ]
 
 [[package]]

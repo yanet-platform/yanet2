@@ -1,12 +1,18 @@
-use clap::{ArgAction, Parser, value_parser};
+use std::borrow::Cow;
+
+use clap::{ArgAction, CommandFactory, Parser, value_parser};
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::pb::{Device, DevicePipeline};
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
-use vlanpb::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
+use vlanpb::{ShowDeviceVlanRequest, UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    errors::Error,
+    completion, display,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
+use ynpb::pb::{ListDevicesRequest, device_service_client::DeviceServiceClient};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod vlanpb {
@@ -34,8 +40,26 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Show the pipeline bindings and the vlan id of a device.
+    Show(ShowCmd),
     /// Create or replace a device.
     Update(UpdateCmd),
+}
+
+impl ModeCmd {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Show(..) => "show",
+            Self::Update(..) => "update",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ShowCmd {
+    /// Name of the device to show.
+    #[arg(add = ArgValueCandidates::new(device_candidates))]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -57,13 +81,16 @@ pub struct UpdateCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService";
 
+/// Maps a genuine "device not found" status into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "device");
+
 pub struct DeviceVlanService {
     service: Service<DeviceVlanServiceClient<LayeredChannel>>,
 }
 
 impl DeviceVlanService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, "update", SERVICE_NAME, |channel| {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
             DeviceVlanServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
@@ -71,6 +98,53 @@ impl DeviceVlanService {
         .await?;
 
         Ok(Self { service })
+    }
+
+    pub async fn show_device(&mut self, cmd: ShowCmd) -> Result<(), Error> {
+        let name = cmd.name;
+        let request = ShowDeviceVlanRequest { name: name.clone() };
+
+        let response = self
+            .service
+            .client()
+            .show_device(request)
+            .await
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    "show",
+                    self.service.endpoint(),
+                    Some(&format!("vlan device '{name}'")),
+                )
+            })?
+            .into_inner();
+
+        output::data(
+            || &response,
+            || {
+                let rows = response.device.as_ref().map(binding_rows).unwrap_or_default();
+
+                if output::is_colored() {
+                    println!("{}: {}", output::paint_bold("VLAN"), response.vlan);
+                } else {
+                    println!("VLAN: {}", response.vlan);
+                }
+
+                if rows.is_empty() {
+                    output::empty_with_hint(
+                        format_args!("No pipeline bindings found for '{name}'."),
+                        format_args!(
+                            "bind one with 'yanet-cli device vlan update -n <name> -i <pipeline:weight> -o <pipeline:weight> --vlan <id>'"
+                        ),
+                    );
+                    return;
+                }
+
+                display::print_table_from_entries(rows);
+            },
+        );
+
+        Ok(())
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
@@ -93,15 +167,91 @@ impl DeviceVlanService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = DeviceVlanService::new(&cmd.connection).await?;
+    let action = cmd.mode.action();
+    let mut service = DeviceVlanService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
+        ModeCmd::Show(cmd) => service.show_device(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
     }
 }
 
 fn main() -> std::process::ExitCode {
     ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+}
+
+/// One row of a device's pipeline bindings table.
+struct BindingRow {
+    direction: &'static str,
+    pipeline: String,
+    weight: u64,
+}
+
+impl Tabled for BindingRow {
+    const LENGTH: usize = 3;
+
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![
+            Cow::Borrowed(self.direction),
+            Cow::Borrowed(self.pipeline.as_str()),
+            Cow::Owned(self.weight.to_string()),
+        ]
+    }
+
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![
+            Cow::Borrowed("DIRECTION"),
+            Cow::Borrowed("PIPELINE"),
+            Cow::Borrowed("WEIGHT"),
+        ]
+    }
+}
+
+/// Flattens a device's input and output pipeline bindings into rows sorted
+/// by direction, then pipeline name.
+fn binding_rows(device: &Device) -> Vec<BindingRow> {
+    let mut rows: Vec<BindingRow> = device
+        .input
+        .iter()
+        .map(|binding| BindingRow {
+            direction: "input",
+            pipeline: binding.name.clone(),
+            weight: binding.weight,
+        })
+        .chain(device.output.iter().map(|binding| BindingRow {
+            direction: "output",
+            pipeline: binding.name.clone(),
+            weight: binding.weight,
+        }))
+        .collect();
+
+    rows.sort_by(|a, b| a.direction.cmp(b.direction).then_with(|| a.pipeline.cmp(&b.pipeline)));
+
+    rows
+}
+
+/// Completion candidates for the device-name argument: the vlan devices the
+/// device service currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn device_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(Cmd::command, device_client, async move |mut client| {
+        Ok(client
+            .list(ListDevicesRequest {})
+            .await?
+            .into_inner()
+            .ids
+            .into_iter()
+            .filter(|id| id.r#type == "vlan")
+            .map(|id| id.name)
+            .collect())
+    })
+}
+
+fn device_client(channel: LayeredChannel) -> DeviceServiceClient<LayeredChannel> {
+    DeviceServiceClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip)
 }
 
 #[cfg(test)]
@@ -128,7 +278,9 @@ mod test {
     fn test_update_vlan_accepts_range_boundaries() {
         for (arg, expected) in [("0", 0), ("4094", 4094)] {
             let cmd = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", arg]).unwrap();
-            let ModeCmd::Update(update) = cmd.mode;
+            let ModeCmd::Update(update) = cmd.mode else {
+                panic!("expected ModeCmd::Update");
+            };
 
             assert_eq!(expected, update.vlan);
         }
@@ -139,5 +291,24 @@ mod test {
         let err = Cmd::try_parse_from(["yanet-cli-device-vlan", "update", "-n", "x", "--vlan", "4095"]).unwrap_err();
 
         assert_eq!(ErrorKind::ValueValidation, err.kind());
+    }
+
+    #[test]
+    fn test_binding_rows_sorts_by_direction_then_pipeline() {
+        let device = Device {
+            input: vec![
+                DevicePipeline { name: "b".to_string(), weight: 2 },
+                DevicePipeline { name: "a".to_string(), weight: 1 },
+            ],
+            output: vec![DevicePipeline { name: "a".to_string(), weight: 3 }],
+        };
+
+        let rows = binding_rows(&device);
+        let got: Vec<(&str, &str, u64)> = rows
+            .iter()
+            .map(|row| (row.direction, row.pipeline.as_str(), row.weight))
+            .collect();
+
+        assert_eq!(vec![("input", "a", 1), ("input", "b", 2), ("output", "a", 3)], got);
     }
 }

@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
@@ -93,6 +94,54 @@ func (m *DeviceVlanService) UpdateDevice(
 	m.configs[name] = *deviceConfig
 
 	return &vlanpb.UpdateDeviceVlanResponse{}, nil
+}
+
+// ShowDevice returns the pipeline bindings and vlan id of the vlan device
+// with the given name, read from the dataplane's live device registry
+// rather than this service's in-memory state.
+func (m *DeviceVlanService) ShowDevice(
+	ctx context.Context,
+	request *vlanpb.ShowDeviceVlanRequest,
+) (*vlanpb.ShowDeviceVlanResponse, error) {
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "device name is required")
+	}
+	if err := ffi.ValidateDeviceName(name); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	vlan, err := LookupVlan(m.agent, name)
+	if err != nil {
+		if errors.Is(err, ffi.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	// The bindings come from a second registry read, so a device deleted
+	// in between reports not found and one replaced in between pairs the
+	// id above with the replacement's bindings.
+	info, ok := m.agent.DPConfig().Device("vlan", name)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "vlan device '%s' not found", name)
+	}
+
+	return &vlanpb.ShowDeviceVlanResponse{Device: deviceProto(info), Vlan: uint32(vlan)}, nil
+}
+
+func deviceProto(info ffi.DeviceInfo) *commonpb.Device {
+	device := &commonpb.Device{
+		Input:  make([]*commonpb.DevicePipeline, len(info.InputPipelines)),
+		Output: make([]*commonpb.DevicePipeline, len(info.OutputPipelines)),
+	}
+	for idx, pipeline := range info.InputPipelines {
+		device.Input[idx] = &commonpb.DevicePipeline{Name: pipeline.Name, Weight: pipeline.Weight}
+	}
+	for idx, pipeline := range info.OutputPipelines {
+		device.Output[idx] = &commonpb.DevicePipeline{Name: pipeline.Name, Weight: pipeline.Weight}
+	}
+	return device
 }
 
 // parkOrFree frees the device when it is dangling and parks it for
