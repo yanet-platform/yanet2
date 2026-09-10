@@ -148,6 +148,7 @@ type neighbourServiceOptions struct {
 	OnChanged          func()
 	OnSnapshotReceived func(string, bool) bool
 	OnTableRemoved     func(string)
+	Readiness          *NeighbourReadiness
 	RemoteTable        string
 	RemoteDevices      []string
 	ReplacementLimits  NeighbourReplacementLimits
@@ -194,17 +195,23 @@ func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
 	}
 }
 
-// WithNeighbourServiceOnSnapshotReceived observes successful full replacements.
+// WithNeighbourServiceOnSnapshotReceived observes replacements after content
+// and input authorization have been committed.
 //
-// The callback receives whether the content changed and returns whether restored
-// input availability requires a reconcile wake even with equivalent content.
+// The callback receives whether the content changed and may request an
+// additional reconcile wake even with equivalent content.
 func WithNeighbourServiceOnSnapshotReceived(callback func(string, bool) bool) NeighbourServiceOption {
 	return func(options *neighbourServiceOptions) { options.OnSnapshotReceived = callback }
 }
 
-// WithNeighbourServiceOnTableRemoved invalidates freshness before table recreation.
+// WithNeighbourServiceOnTableRemoved observes committed table deletions.
 func WithNeighbourServiceOnTableRemoved(callback func(string)) NeighbourServiceOption {
 	return func(options *neighbourServiceOptions) { options.OnTableRemoved = callback }
+}
+
+// WithNeighbourServiceReadiness couples table commits to input authorization.
+func WithNeighbourServiceReadiness(input *NeighbourReadiness) NeighbourServiceOption {
+	return func(options *neighbourServiceOptions) { options.Readiness = input }
 }
 
 // WithNeighbourServiceRemoteSource restricts the expected source to known devices.

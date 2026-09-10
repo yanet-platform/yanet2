@@ -68,15 +68,13 @@ func NewOperator(cfg *Config, options ...Option) (_ *commonoperator.Operator[Sta
 	targets := make([]neighbour.GatewayTarget, 0, len(cfg.Gateways))
 	for idx, gateway := range cfg.Gateways {
 		connection, dialErr := opts.DialGateway(commonGateways[idx])
-		if connection != nil {
-			connections = append(connections, connection)
-		}
 		if dialErr != nil {
 			return nil, fmt.Errorf("dial gateway %q: %w", gateway.Name, dialErr)
 		}
 		if connection == nil {
 			return nil, fmt.Errorf("dial gateway %q: dialer returned nil", gateway.Name)
 		}
+		connections = append(connections, connection)
 
 		targets = append(targets, neighbour.GatewayTarget{
 			Name:   gateway.Name,

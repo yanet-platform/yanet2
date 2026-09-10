@@ -39,7 +39,7 @@ func Test_NeighbourService_RemoteRemoval(t *testing.T) {
 	input := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
 	fixture := newNeighbourServiceFixture(t,
 		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0"}),
-		operator.WithNeighbourServiceOnSnapshotReceived(input.OnSnapshotReceived),
+		operator.WithNeighbourServiceReadiness(input),
 	)
 	chunk := replacementChunk("remote", 100, "192.0.2.1")
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, chunk))
