@@ -7,7 +7,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
@@ -16,7 +16,6 @@ use ynpb::pb::{
 };
 
 const PIPELINE_SERVICE: &str = "controlplane.ynpb.v1.PipelineService";
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(PIPELINE_SERVICE, "requested pipeline");
 
 fn client(channel: LayeredChannel) -> PipelineServiceClient<LayeredChannel> {
     PipelineServiceClient::new(channel)
@@ -166,11 +165,13 @@ impl PipelineService {
     pub async fn list_pipelines(&mut self) -> Result<Vec<PipelineId>, Error> {
         let response = self
             .service
-            .client()
-            .list(ListPipelinesRequest {})
-            .await
-            .map_err(|status| NOT_FOUND.map(status, self.action, self.service.endpoint(), Some("pipeline service")))?
-            .into_inner();
+            .unary_with(
+                self.action,
+                ListPipelinesRequest {},
+                self.service.not_found(self.action, "pipeline service"),
+                async |client, request| client.list(request).await,
+            )
+            .await?;
 
         Ok(response.ids)
     }
@@ -181,18 +182,13 @@ impl PipelineService {
         };
         let response = self
             .service
-            .client()
-            .get(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    self.action,
-                    self.service.endpoint(),
-                    Some(&format!("pipeline '{name}'")),
-                )
-            })?
-            .into_inner();
+            .unary_with(
+                self.action,
+                request,
+                self.service.not_found(self.action, &format!("pipeline '{name}'")),
+                async |client, request| client.get(request).await,
+            )
+            .await?;
 
         let pipeline = response.pipeline.ok_or_else(|| {
             Error::from_status(
@@ -224,10 +220,10 @@ impl PipelineService {
         //
         // The backend message is kept verbatim.
         self.service
-            .client()
-            .update(request)
-            .await
-            .map_err(self.service.status(self.action))?;
+            .unary(self.action, request, async |client, request| {
+                client.update(request).await
+            })
+            .await?;
 
         Ok(())
     }
@@ -238,14 +234,14 @@ impl PipelineService {
         };
 
         let name = request.id.as_ref().expect("pipeline id").name.clone();
-        self.service.client().delete(request).await.map_err(|status| {
-            NOT_FOUND.map(
-                status,
+        self.service
+            .unary_with(
                 self.action,
-                self.service.endpoint(),
-                Some(&format!("pipeline '{name}'")),
+                request,
+                self.service.not_found(self.action, &format!("pipeline '{name}'")),
+                async |client, request| client.delete(request).await,
             )
-        })?;
+            .await?;
 
         Ok(())
     }

@@ -98,10 +98,10 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 level: ynpb::pb::LogLevel::from(cmd.level.clone()).into(),
             };
             service
-                .client()
-                .update_level(request)
-                .await
-                .map_err(service.status(action))?;
+                .unary(action, request, async |client, request| {
+                    client.update_level(request).await
+                })
+                .await?;
 
             let level_name = cmd.level.to_possible_value().expect("no skipped variants");
             output::success(
@@ -111,11 +111,10 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         }
         ModeCmd::Logging(LoggingCmd::Show) => {
             let response = service
-                .client()
-                .get_level(GetLevelRequest {})
-                .await
-                .map_err(service.status(action))?
-                .into_inner();
+                .unary(action, GetLevelRequest {}, async |client, request| {
+                    client.get_level(request).await
+                })
+                .await?;
 
             output::data(
                 || &response,

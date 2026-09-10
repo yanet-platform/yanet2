@@ -65,11 +65,10 @@ impl InspectService {
     pub async fn inspect(&mut self) -> Result<InspectResponse, Error> {
         let response = self
             .service
-            .client()
-            .inspect(InspectRequest {})
-            .await
-            .map_err(self.service.status("inspect"))?
-            .into_inner();
+            .unary("inspect", InspectRequest {}, async |client, request| {
+                client.inspect(request).await
+            })
+            .await?;
 
         Ok(response)
     }

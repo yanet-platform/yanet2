@@ -194,33 +194,27 @@ impl CountersService {
     }
 
     pub async fn by_tags(&mut self, request: CountersByTagsRequest) -> Result<CountersByTagsResponse, Error> {
-        Ok(self
-            .service
-            .client()
-            .by_tags(request)
+        self.service
+            .unary(self.action, request, async |client, request| {
+                client.by_tags(request).await
+            })
             .await
-            .map_err(self.service.status(self.action))?
-            .into_inner())
     }
 
     pub async fn workers(&mut self) -> Result<WorkerCountersResponse, Error> {
-        Ok(self
-            .service
-            .client()
-            .workers(WorkerCountersRequest {})
+        self.service
+            .unary(self.action, WorkerCountersRequest {}, async |client, request| {
+                client.workers(request).await
+            })
             .await
-            .map_err(self.service.status(self.action))?
-            .into_inner())
     }
 
     pub async fn ports(&mut self) -> Result<PortCountersResponse, Error> {
-        Ok(self
-            .service
-            .client()
-            .ports(PortCountersRequest {})
+        self.service
+            .unary(self.action, PortCountersRequest {}, async |client, request| {
+                client.ports(request).await
+            })
             .await
-            .map_err(self.service.status(self.action))?
-            .into_inner())
     }
 }
 

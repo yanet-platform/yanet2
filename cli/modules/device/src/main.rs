@@ -63,11 +63,10 @@ impl DeviceService {
     pub async fn list(&mut self) -> Result<ListDevicesResponse, Error> {
         let response = self
             .service
-            .client()
-            .list(ListDevicesRequest {})
-            .await
-            .map_err(self.service.status("device-list"))?
-            .into_inner();
+            .unary("device-list", ListDevicesRequest {}, async |client, request| {
+                client.list(request).await
+            })
+            .await?;
 
         Ok(response)
     }

@@ -219,11 +219,10 @@ impl RouteService {
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_configs(ListConfigsRequest {})
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -256,11 +255,10 @@ impl RouteService {
 
         let response = self
             .service
-            .client()
-            .show_routes(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| {
+                client.show_routes(request).await
+            })
+            .await?;
 
         output::data(
             || &response.routes,
@@ -288,11 +286,10 @@ impl RouteService {
 
         let response = self
             .service
-            .client()
-            .lookup_route(request)
-            .await
-            .map_err(self.service.status("lookup"))?
-            .into_inner();
+            .unary("lookup", request, async |client, request| {
+                client.lookup_route(request).await
+            })
+            .await?;
 
         output::data(
             || &response.routes,
@@ -323,10 +320,10 @@ impl RouteService {
         };
 
         self.service
-            .client()
-            .insert_route(request)
-            .await
-            .map_err(self.service.status("insert"))?;
+            .unary("insert", request, async |client, request| {
+                client.insert_route(request).await
+            })
+            .await?;
 
         let via = cmd
             .nexthop_addrs
@@ -361,10 +358,10 @@ impl RouteService {
         };
 
         self.service
-            .client()
-            .delete_route(request)
-            .await
-            .map_err(self.service.status("remove"))?;
+            .unary("remove", request, async |client, request| {
+                client.delete_route(request).await
+            })
+            .await?;
 
         let via = cmd
             .nexthop_addrs
@@ -391,10 +388,10 @@ impl RouteService {
         let request = FlushRoutesRequest { name: cmd.name.clone() };
 
         self.service
-            .client()
-            .flush_routes(request)
-            .await
-            .map_err(self.service.status("flush"))?;
+            .unary("flush", request, async |client, request| {
+                client.flush_routes(request).await
+            })
+            .await?;
 
         output::success("flush", format_args!("Flushed config '{}'.", cmd.name));
 

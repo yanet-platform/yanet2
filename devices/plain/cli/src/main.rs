@@ -11,7 +11,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion, display,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 use ynpb::pb::{ListDevicesRequest, device_service_client::DeviceServiceClient};
@@ -80,9 +80,6 @@ pub struct UpdateCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "devices.plain.controlplane.plainpb.v1.DevicePlainService";
 
-/// Maps a genuine "device not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "device");
-
 pub struct DevicePlainService {
     service: Service<DevicePlainServiceClient<LayeredChannel>>,
 }
@@ -105,18 +102,13 @@ impl DevicePlainService {
 
         let response = self
             .service
-            .client()
-            .show_device(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "show",
-                    self.service.endpoint(),
-                    Some(&format!("plain device '{name}'")),
-                )
-            })?
-            .into_inner();
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("plain device '{name}'")),
+                async |client, request| client.show_device(request).await,
+            )
+            .await?;
 
         output::data(
             || &response,
@@ -147,10 +139,10 @@ impl DevicePlainService {
         };
 
         self.service
-            .client()
-            .update_device(request)
-            .await
-            .map_err(self.service.status("update"))?;
+            .unary("update", request, async |client, request| {
+                client.update_device(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated device '{}'.", cmd.name));
 

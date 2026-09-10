@@ -20,7 +20,7 @@ use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
     display::print_table_from_entries,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 
@@ -38,9 +38,6 @@ pub mod operatorpb {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
-
-/// Maps a genuine "table not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested table");
 
 fn client(channel: LayeredChannel) -> NeighbourServiceClient<LayeredChannel> {
     NeighbourServiceClient::new(channel)
@@ -217,11 +214,14 @@ impl NeighbourService {
 
         let response = self
             .service
-            .client()
-            .list(request)
-            .await
-            .map_err(|status| NOT_FOUND.map(status, "show", self.service.endpoint(), resource.as_deref()))?
-            .into_inner();
+            .unary_with(
+                "show",
+                request,
+                self.service
+                    .not_found("show", resource.as_deref().unwrap_or("requested table")),
+                async |client, request| client.list(request).await,
+            )
+            .await?;
 
         output::data(
             || &response.neighbours,
@@ -266,10 +266,10 @@ impl NeighbourService {
         };
 
         self.service
-            .client()
-            .update_neighbours(request)
-            .await
-            .map_err(self.service.status("add"))?;
+            .unary("add", request, async |client, request| {
+                client.update_neighbours(request).await
+            })
+            .await?;
 
         output::success(
             "add",
@@ -291,10 +291,10 @@ impl NeighbourService {
         };
 
         self.service
-            .client()
-            .remove_neighbours(request)
-            .await
-            .map_err(self.service.status("remove"))?;
+            .unary("remove", request, async |client, request| {
+                client.remove_neighbours(request).await
+            })
+            .await?;
 
         let next_hops = cmd
             .next_hops
@@ -310,11 +310,10 @@ impl NeighbourService {
     pub async fn list_tables(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_tables(ListNeighbourTablesRequest {})
-            .await
-            .map_err(self.service.status("list tables"))?
-            .into_inner();
+            .unary("list tables", ListNeighbourTablesRequest {}, async |client, request| {
+                client.list_tables(request).await
+            })
+            .await?;
 
         output::data(
             || &response.tables,
@@ -344,10 +343,10 @@ impl NeighbourService {
         };
 
         self.service
-            .client()
-            .create_table(request)
-            .await
-            .map_err(self.service.status("create table"))?;
+            .unary("create table", request, async |client, request| {
+                client.create_table(request).await
+            })
+            .await?;
 
         output::success("create table", format_args!("Created table '{}'.", cmd.name));
 
@@ -361,10 +360,10 @@ impl NeighbourService {
         };
 
         self.service
-            .client()
-            .update_table(request)
-            .await
-            .map_err(self.service.status("update table"))?;
+            .unary("update table", request, async |client, request| {
+                client.update_table(request).await
+            })
+            .await?;
 
         output::success(
             "update table",
@@ -381,10 +380,10 @@ impl NeighbourService {
         let request = RemoveNeighbourTableRequest { name: cmd.name.clone() };
 
         self.service
-            .client()
-            .remove_table(request)
-            .await
-            .map_err(self.service.status("remove table"))?;
+            .unary("remove table", request, async |client, request| {
+                client.remove_table(request).await
+            })
+            .await?;
 
         output::success("remove table", format_args!("Removed table '{}'.", cmd.name));
 

@@ -69,11 +69,10 @@ impl GatewayService {
     pub async fn list_services(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_services(ListServicesRequest {})
-            .await
-            .map_err(self.service.status("gateway"))?
-            .into_inner();
+            .unary("gateway", ListServicesRequest {}, async |client, request| {
+                client.list_services(request).await
+            })
+            .await?;
 
         output::data(
             || &response.services,

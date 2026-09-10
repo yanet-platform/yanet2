@@ -7,7 +7,7 @@ use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
@@ -16,7 +16,6 @@ use ynpb::pb::{
 };
 
 const FUNCTION_SERVICE: &str = "controlplane.ynpb.v1.FunctionService";
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(FUNCTION_SERVICE, "requested function");
 
 fn client(channel: LayeredChannel) -> FunctionServiceClient<LayeredChannel> {
     FunctionServiceClient::new(channel)
@@ -167,11 +166,13 @@ impl FunctionService {
     pub async fn list_functions(&mut self) -> Result<Vec<FunctionId>, Error> {
         let response = self
             .service
-            .client()
-            .list(ListFunctionsRequest {})
-            .await
-            .map_err(|status| NOT_FOUND.map(status, "list functions", self.service.endpoint(), None))?
-            .into_inner();
+            .unary_with(
+                "list functions",
+                ListFunctionsRequest {},
+                self.service.not_found("list functions", "requested function"),
+                async |client, request| client.list(request).await,
+            )
+            .await?;
 
         Ok(response.ids)
     }
@@ -183,18 +184,13 @@ impl FunctionService {
 
         let response = self
             .service
-            .client()
-            .get(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "show function",
-                    self.service.endpoint(),
-                    Some(&format!("function '{name}'")),
-                )
-            })?
-            .into_inner();
+            .unary_with(
+                "show function",
+                request,
+                self.service.not_found("show function", &format!("function '{name}'")),
+                async |client, request| client.get(request).await,
+            )
+            .await?;
 
         let function = response.function.ok_or_else(|| {
             Error::from_status(
@@ -221,10 +217,10 @@ impl FunctionService {
         //
         // The backend message is kept verbatim.
         self.service
-            .client()
-            .update(request)
-            .await
-            .map_err(self.service.status("update function"))?;
+            .unary("update function", request, async |client, request| {
+                client.update(request).await
+            })
+            .await?;
 
         Ok(())
     }
@@ -232,20 +228,17 @@ impl FunctionService {
     pub async fn delete_function(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let name = cmd.name;
 
+        let request = DeleteFunctionRequest {
+            id: Some(FunctionId { name: name.clone() }),
+        };
         self.service
-            .client()
-            .delete(DeleteFunctionRequest {
-                id: Some(FunctionId { name: name.clone() }),
-            })
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "delete function",
-                    self.service.endpoint(),
-                    Some(&format!("function '{name}'")),
-                )
-            })?;
+            .unary_with(
+                "delete function",
+                request,
+                self.service.not_found("delete function", &format!("function '{name}'")),
+                async |client, request| client.delete(request).await,
+            )
+            .await?;
 
         Ok(())
     }
