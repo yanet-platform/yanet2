@@ -2,10 +2,12 @@ package operator_test
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"net/netip"
 	"strings"
@@ -27,6 +29,8 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/operator"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -658,35 +662,107 @@ func Test_NeighbourService_ConcurrencyAndCompletionOrder(t *testing.T) {
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("fifth", 200)))
 }
 
-// Test_NeighbourService_LargeSnapshot verifies that a snapshot larger than a
-// default gRPC message commits completely through bounded chunks.
-func Test_NeighbourService_LargeSnapshot(t *testing.T) {
-	fixture := newNeighbourServiceFixture(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+// newNeighbourGatewayClient exposes a real receiver behind a registered TCP
+// backend and the production gateway, including both proxy message boundaries.
+func newNeighbourGatewayClient(t *testing.T) operatorpb.NeighbourServiceClient {
+	t.Helper()
+	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = backendListener.Close() })
+	server := grpc.NewServer()
+	operatorpb.RegisterNeighbourServiceServer(server, operator.NewNeighbourService(neigh.NewNeighTable()))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	proxy, err := gateway.NewGateway(gateway.DefaultConfig(), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, proxy.Close()) })
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error {
+		err := server.Serve(backendListener)
+		if errors.Is(err, grpc.ErrServerStopped) {
+			return nil
+		}
+		return err
+	})
+	group.Go(func() error { return proxy.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		server.Stop()
+		require.NoError(t, group.Wait())
+	})
+	connection, err := grpc.NewClient(listener.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(512*1024*1024)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	registration, stopRegistration := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stopRegistration()
+	_, err = ynpb.NewGatewayClient(connection).Register(
+		registration,
+		&ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+			Name:     operatorpb.NeighbourService_ServiceDesc.ServiceName,
+			Endpoint: backendListener.Addr().String(),
+		}},
+		grpc.WaitForReady(true),
+	)
+	require.NoError(t, err)
+	return operatorpb.NewNeighbourServiceClient(connection)
+}
+
+// Test_NeighbourService_ListThroughGateway verifies that an admitted million-row
+// snapshot remains listable after server metadata expands it beyond 256 MiB.
+func Test_NeighbourService_ListThroughGateway(t *testing.T) {
+	client := newNeighbourGatewayClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
-	table := "netlink-dataplane-" + strings.Repeat("t", 128-len("netlink-dataplane-"))
-	chunks := make([]*operatorpb.ReplaceNeighboursRequest, 60)
+	table := strings.Repeat("t", operatorpb.NeighbourTableNameBytes)
+	device := strings.Repeat("d", 79)
+	stream, err := client.ReplaceNeighbours(ctx)
+	require.NoError(t, err)
 	address := netip.MustParseAddr("2001:db8::1")
 	totalBytes := 0
-	for idx := range chunks {
-		chunk := replacementChunk(table, 100)
-		for range 1000 {
-			entry := replacementChunk(table, 100, address.String()).Entries[0]
-			entry.Device = strings.Repeat("d", 79)
-			chunk.Entries = append(chunk.Entries, entry)
+	for range operatorpb.NeighbourSnapshotEntries / operatorpb.NeighbourChunkEntries {
+		chunk := replacementChunk(table, math.MaxUint32)
+		for range operatorpb.NeighbourChunkEntries {
+			chunk.Entries = append(chunk.Entries, &operatorpb.NeighbourEntry{
+				NextHop:      commonpb.NewIPAddressFromAddr(address),
+				HardwareAddr: commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 1}),
+				LinkAddr:     commonpb.NewMACAddressEUI48([6]byte{0xfe, 0xff, 0xff, 0xff, 0xff, 2}),
+				Device:       device, State: operatorpb.NeighbourState_NUD_PERMANENT, Ifindex: math.MaxInt32,
+			})
 			address = address.Next()
 		}
-		require.LessOrEqual(t, proto.Size(chunk), 256*1024)
+		require.LessOrEqual(t, proto.Size(chunk), operatorpb.NeighbourChunkBytes)
 		totalBytes += proto.Size(chunk)
-		chunks[idx] = chunk
+		require.NoError(t, stream.Send(chunk))
 	}
-	require.Greater(t, totalBytes, 4*1024*1024)
-	require.NoError(t, sendNeighbourSnapshot(ctx, fixture.Client, chunks...))
-	response, err := fixture.Client.ListTables(ctx, &operatorpb.ListNeighbourTablesRequest{})
+	require.LessOrEqual(t, totalBytes, operatorpb.NeighbourSnapshotBytes)
+	_, err = stream.CloseAndRecv()
 	require.NoError(t, err)
-	require.Len(t, response.GetTables(), 1)
-	require.Equal(t, int64(60_000), response.GetTables()[0].GetEntryCount())
-	require.Equal(t, uint32(100), response.GetTables()[0].GetDefaultPriority())
-	require.Len(t, sourceEntries(t, fixture.Table, table), 60_000)
-	require.Equal(t, int64(1), fixture.Changes.Load())
+	response, err := client.List(ctx, &operatorpb.ListNeighboursRequest{Table: table})
+	require.NoError(t, err)
+	require.Len(t, response.GetNeighbours(), operatorpb.NeighbourSnapshotEntries)
+	require.Greater(t, proto.Size(response), 256*1024*1024)
+	seen := make([]bool, operatorpb.NeighbourSnapshotEntries+1)
+	for _, entry := range response.GetNeighbours() {
+		address, err := entry.GetNextHop().ToAddr()
+		if err != nil || !address.Is6() {
+			t.Fatalf("listed address is not IPv6: %v", entry.GetNextHop())
+		}
+		raw := address.As16()
+		idx := binary.BigEndian.Uint64(raw[8:])
+		if binary.BigEndian.Uint64(raw[:8]) != 0x20010db800000000 ||
+			idx == 0 || idx > operatorpb.NeighbourSnapshotEntries || seen[idx] {
+			t.Fatalf("unexpected or duplicate listed address %s", address)
+		}
+		seen[idx] = true
+		if entry.GetSource() != table || entry.GetDevice() != device ||
+			entry.GetPriority() != math.MaxUint32 || entry.GetIfindex() != math.MaxInt32 ||
+			entry.GetUpdatedAt() == 0 {
+			t.Fatalf("listed metadata changed for %s", address)
+		}
+	}
 }

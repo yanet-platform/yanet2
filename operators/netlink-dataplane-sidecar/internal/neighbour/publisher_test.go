@@ -184,24 +184,41 @@ func wireEntry(entry neighbour.Entry) *operatorpb.NeighbourEntry {
 	}
 }
 
-// Test_Publish_SingleTablePairs verifies that equal IPs retain device scope
-// while mapped IPv4 and observed interface indices survive wire conversion.
-func Test_Publish_SingleTablePairs(t *testing.T) {
+// Test_Publish_PairOrdering verifies that equal IPs retain device scope and
+// mapped IPv4 is canonicalized before deterministic pair ordering.
+func Test_Publish_PairOrdering(t *testing.T) {
 	service, client := newPublicationService(t)
 	config := publicationConfig()
 	first := testDesiredEntry("fe80::1", "logical0")
 	second := testDesiredEntry("fe80::1", "logical1")
-	second.Ifindex = 20
-	second.HardwareRoute.DestinationMAC[5]++
 	entries := []neighbour.Entry{second, first, testDesiredEntry("::ffff:192.0.2.1", "logical0")}
 	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
 	require.NoError(t, neighbour.Publish(t.Context(), entries, targets, config))
 	actual := service.Tables()[config.TableName]
-	require.Equal(t, config.DefaultPriority, actual.Priority)
 	require.Len(t, actual.Entries, 3)
 	for idx, entry := range []neighbour.Entry{entries[2], first, second} {
-		require.True(t, proto.Equal(wireEntry(entry), actual.Entries[idx]))
+		address, err := actual.Entries[idx].GetNextHop().ToAddr()
+		require.NoError(t, err)
+		require.Equal(t, entry.NextHop.Unmap(), address)
+		require.Equal(t, entry.HardwareRoute.Device, actual.Entries[idx].GetDevice())
 	}
+}
+
+// Test_Publish_WireChunk verifies that table metadata and the complete observed
+// forwarding payload reach the transport without receiver-owned fields.
+func Test_Publish_WireChunk(t *testing.T) {
+	service, client := newPublicationService(t)
+	config := publicationConfig()
+	entry := testDesiredEntry("2001:db8::1", "logical0")
+	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
+	require.NoError(t, neighbour.Publish(t.Context(), []neighbour.Entry{entry}, targets, config))
+	expected := &operatorpb.ReplaceNeighboursRequest{
+		Table: config.TableName, DefaultPriority: config.DefaultPriority,
+		Entries: []*operatorpb.NeighbourEntry{wireEntry(entry)},
+	}
+	calls := service.Calls()
+	require.NotEmpty(t, calls)
+	require.True(t, proto.Equal(expected, calls[0].Chunk))
 }
 
 // Test_Publish_EmptyReplacement verifies that an empty complete snapshot clears

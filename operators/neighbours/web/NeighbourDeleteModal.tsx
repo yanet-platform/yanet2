@@ -4,19 +4,20 @@ import type { Neighbour } from '@yanet/core/api/neighbours';
 import { getNeighbourId, getNeighbourNextHop } from './utils';
 
 interface NeighbourDeleteModalProps {
-    open: boolean;
     table: string;
     affected: Neighbour[];
     onClose: () => void;
     onConfirm: () => void;
 }
 
-/** Shows every currently known device variant covered by IP-wide removal. */
+const PREVIEW_LIMIT = 50;
+
+/** Shows a bounded preview and the full scope of IP-wide removal. */
 export const NeighbourDeleteModal: React.FC<NeighbourDeleteModalProps> = ({
-    open, table, affected, onClose, onConfirm,
+    table, affected, onClose, onConfirm,
 }) => (
     <ConfirmModal
-        open={open}
+        open
         title="Delete IPs across all devices"
         confirmText="Delete all device variants"
         onClose={onClose}
@@ -28,12 +29,15 @@ export const NeighbourDeleteModal: React.FC<NeighbourDeleteModalProps> = ({
             you did not select. Any new variants of the same IPs are also removed.
         </p>
         <ul style={{ maxHeight: 240, overflowY: 'auto' }}>
-            {affected.map((entry) => (
+            {affected.slice(0, PREVIEW_LIMIT).map((entry) => (
                 <li key={getNeighbourId(entry)}>
                     <code>{getNeighbourNextHop(entry)}</code> on <code>{entry.device || '(unscoped)'}</code>
                 </li>
             ))}
         </ul>
+        {affected.length > PREVIEW_LIMIT && (
+            <p>Showing the first {PREVIEW_LIMIT} entries; {affected.length - PREVIEW_LIMIT} more are also affected.</p>
+        )}
         <p>This action cannot be undone.</p>
     </ConfirmModal>
 );

@@ -30,6 +30,7 @@ func Test_UpdateFIB_DeviceNameBoundary(t *testing.T) {
 		{name: "79 UTF-8 bytes", device: strings.Repeat("é", 39) + "a", valid: true},
 		{name: "80 UTF-8 bytes", device: strings.Repeat("é", 40)},
 		{name: "embedded NUL", device: "logical0\x00other"},
+		{name: "logical name with whitespace", device: "logical \t\n\r\v\f1", valid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			backend := newFakeBackend()

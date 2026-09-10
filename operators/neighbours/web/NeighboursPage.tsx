@@ -147,13 +147,16 @@ const NeighboursPage: React.FC = () => {
     }, [sortState, updateParams]);
 
     const allRows = cache.get(activeTab) || [];
-    const selectedRows = allRows.filter((row) => selectedIds.has(getNeighbourId(row)));
-    const bulkRemovalRows = getIPWideRemovalRows(allRows, selectedRows);
+    const bulkRemovalRows = useMemo(() => {
+        if (!bulkRemoveOpen || selectedIds.size === 0) return [];
+        const selectedRows = allRows.filter((row) => selectedIds.has(getNeighbourId(row)));
+        return getIPWideRemovalRows(allRows, selectedRows);
+    }, [bulkRemoveOpen, allRows, selectedIds]);
     const rowRemovalTable = isMergedView ? rowDeleteConfirm.neighbour?.source || 'static' : activeTab;
-    const rowRemovalRows = getIPWideRemovalRows(
-        cache.get(rowRemovalTable) || [],
-        rowDeleteConfirm.neighbour ? [rowDeleteConfirm.neighbour] : [],
-    );
+    const rowRemovalRows = useMemo(() => {
+        if (!rowDeleteConfirm.open || !rowDeleteConfirm.neighbour) return [];
+        return getIPWideRemovalRows(cache.get(rowRemovalTable) || [], [rowDeleteConfirm.neighbour]);
+    }, [rowDeleteConfirm, cache, rowRemovalTable]);
 
     const visibleRows = useMemo(() => {
         let res = allRows;
@@ -691,21 +694,23 @@ const NeighboursPage: React.FC = () => {
                     />
                 )}
 
-                <NeighbourDeleteModal
-                    open={bulkRemoveOpen}
-                    affected={bulkRemovalRows}
-                    table={activeTab}
-                    onClose={() => setBulkRemoveOpen(false)}
-                    onConfirm={handleBulkRemove}
-                />
+                {bulkRemoveOpen && (
+                    <NeighbourDeleteModal
+                        affected={bulkRemovalRows}
+                        table={activeTab}
+                        onClose={() => setBulkRemoveOpen(false)}
+                        onConfirm={handleBulkRemove}
+                    />
+                )}
 
-                <NeighbourDeleteModal
-                    open={rowDeleteConfirm.open}
-                    affected={rowRemovalRows}
-                    table={rowRemovalTable}
-                    onClose={() => setRowDeleteConfirm({ open: false, neighbour: null })}
-                    onConfirm={handleDeleteRowConfirm}
-                />
+                {rowDeleteConfirm.open && (
+                    <NeighbourDeleteModal
+                        affected={rowRemovalRows}
+                        table={rowRemovalTable}
+                        onClose={() => setRowDeleteConfirm({ open: false, neighbour: null })}
+                        onConfirm={handleDeleteRowConfirm}
+                    />
+                )}
 
                 <DeleteConfigModal
                     open={deleteTableOpen}
