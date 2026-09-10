@@ -184,7 +184,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
 
             const entry: Neighbour = {
                 next_hop: nextHopWire,
-                device: device.trim() || undefined,
+                device: mode === 'edit' ? neighbour?.device : device.trim() || undefined,
                 priority: priority.trim() ? Number(priority.trim()) : undefined,
             };
             const linkAddrWire = normalizeMAC(linkAddr);
@@ -453,6 +453,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 </label>
                                                 <input
                                                     ref={nextHopRef}
+                                                    aria-label="Next Hop"
                                                     className={`yn-input yn-input--mono${nextHopError ? ' yn-input--invalid' : ''}`}
                                                     value={nextHop}
                                                     placeholder="192.168.1.1 or fe80::1"
@@ -463,7 +464,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                     <span className="yn-field__hint yn-field__error">{nextHopError}</span>
                                                 )}
                                                 {mode === 'edit' && (
-                                                    <span className="yn-field__hint">Primary key — delete and recreate to change.</span>
+                                                    <span className="yn-field__hint">Next hop is part of the entry identity.</span>
                                                 )}
                                             </div>
                                         </div>
@@ -510,10 +511,15 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 <label className="yn-field__label">Device</label>
                                                 <input
                                                     className="yn-input"
+                                                    aria-label="Device"
                                                     value={device}
                                                     placeholder="eth0"
                                                     onChange={(e) => setDevice(e.target.value)}
+                                                    disabled={mode === 'edit'}
                                                 />
+                                                {mode === 'edit' && (
+                                                    <span className="yn-field__hint">Device is part of the entry identity. Add a new entry to use another device.</span>
+                                                )}
                                             </div>
                                             <div className="yn-field">
                                                 <label className="yn-field__label">Priority</label>
@@ -579,7 +585,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                             onClick={handleDeleteRequest}
                                             disabled={submitting}
                                         >
-                                            Delete
+                                            Delete IP across devices
                                         </button>
                                     </div>
                                     <div className="yn-drawer__foot-actions">

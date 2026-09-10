@@ -140,10 +140,10 @@ export const useNeighbours = (activeTab: string, paused = false): UseNeighboursR
 
     const removeNeighbours = useCallback(
         async (table: string, nextHopWires: (string | undefined)[]): Promise<void> => {
-            const wires = nextHopWires.filter((w): w is string => w !== undefined);
+            const wires = [...new Set(nextHopWires.filter((wire): wire is string => wire !== undefined))];
             try {
                 await API.neighbours.removeNeighbours(table, wires);
-                toaster.success('nb-removed', `${wires.length} neighbour(s) removed.`);
+                toaster.success('nb-removed', `Removed all device variants of ${wires.length} IP(s).`);
                 await reloadAll();
             } catch (err) {
                 toaster.error('nb-remove-error', 'Failed to remove neighbours', err);

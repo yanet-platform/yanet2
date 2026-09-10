@@ -7,7 +7,7 @@ import {
     getUnixSecondsValue,
     isValidMAC,
 } from '@yanet/core/utils';
-import { stringToIPAddress } from '@yanet/core/utils/netip';
+import { formatIPFromBytes, parseIPToBytes, stringToIPAddress } from '@yanet/core/utils/netip';
 import type { SortableColumn } from './types';
 import { MERGED_TAB } from './types';
 
@@ -30,8 +30,25 @@ export const resolveSubmitTable = (
 
 export { isValidMAC };
 
-/** Returns a stable string key for a neighbour row. */
-export const getNeighbourId = (n: Neighbour): string => n.next_hop ?? '';
+/** Canonicalizes next hops to the receiver's unmapped IP identity. */
+export const getNeighbourNextHop = (neighbour: Neighbour): string => {
+    const address = neighbour.next_hop ?? '';
+    const bytes = parseIPToBytes(address);
+    if (!bytes) return address;
+    const mapped = bytes.length === 16 && bytes.slice(0, 10).every((byte) => byte === 0)
+        && bytes[10] === 255 && bytes[11] === 255;
+    return formatIPFromBytes(mapped ? bytes.slice(12) : bytes);
+};
+
+/** Identifies one IP/device pair independently of source and mutable payload. */
+export const getNeighbourId = (neighbour: Neighbour): string =>
+    JSON.stringify([getNeighbourNextHop(neighbour), neighbour.device ?? '']);
+
+/** Expands selected pairs to the IP-wide scope of the removal RPC. */
+export const getIPWideRemovalRows = (rows: Neighbour[], selected: Neighbour[]): Neighbour[] => {
+    const addresses = new Set(selected.map(getNeighbourNextHop));
+    return rows.filter((row) => addresses.has(getNeighbourNextHop(row)));
+};
 
 /** Type guard for sortable column names. */
 export const isSortableColumn = (value: string): value is SortableColumn =>
