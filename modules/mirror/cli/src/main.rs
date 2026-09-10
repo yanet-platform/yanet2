@@ -261,11 +261,10 @@ impl MirrorService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         let config = MirrorConfig::try_from(response.rules)
             .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("show", e.to_string()))?;
@@ -291,14 +290,12 @@ impl MirrorService {
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -323,10 +320,10 @@ impl MirrorService {
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config.clone() };
         self.service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(self.service.status("delete"))?;
+            .unary("delete", request, async |client, request| {
+                client.delete_config(request).await
+            })
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
@@ -340,10 +337,10 @@ impl MirrorService {
             .map_err(|e: Box<dyn core::error::Error>| self.service.invalid("update", e.to_string()))?;
         let request = UpdateConfigRequest { name: cmd.config.clone(), rules };
         self.service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?;
+            .unary("update", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated config '{}'.", cmd.config));
 

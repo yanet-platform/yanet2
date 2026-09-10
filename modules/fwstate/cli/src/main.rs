@@ -294,14 +294,12 @@ impl FWStateService {
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -330,11 +328,10 @@ impl FWStateService {
         };
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -347,10 +344,10 @@ impl FWStateService {
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(self.service.status("delete"))?;
+            .unary("delete", request, async |client, request| {
+                client.delete_config(request).await
+            })
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
@@ -359,12 +356,11 @@ impl FWStateService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         let request = update_request(&cmd).map_err(|err| self.service.invalid("update", err))?;
-        log::trace!("UpdateConfigRequest: {request:?}");
         self.service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?;
+            .unary("update", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
