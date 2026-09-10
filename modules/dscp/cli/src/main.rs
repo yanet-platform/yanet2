@@ -197,9 +197,12 @@ impl DscpService {
         let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
         output::data(

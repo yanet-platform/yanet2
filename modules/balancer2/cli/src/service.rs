@@ -114,12 +114,15 @@ impl Balancer2Service {
     }
 
     async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Error> {
-        let request = GetConfigRequest { config_name: cmd.name };
+        let request = GetConfigRequest { config_name: cmd.name.clone() };
         let response = self
             .service
-            .unary("config", request, async |client, request| {
-                client.get_config(request).await
-            })
+            .unary_with(
+                "config",
+                request,
+                self.service.not_found("config", &format!("config '{}'", cmd.name)),
+                async |client, request| client.get_config(request).await,
+            )
             .await?;
 
         output::data(

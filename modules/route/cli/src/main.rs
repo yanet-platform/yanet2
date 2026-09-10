@@ -301,7 +301,12 @@ impl RouteService {
 
         let response = self
             .service
-            .unary("show", request, async |client, request| client.show_fib(request).await)
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_fib(request).await,
+            )
             .await?;
         let entries = response.entries;
 

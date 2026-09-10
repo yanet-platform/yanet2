@@ -244,9 +244,12 @@ impl RouteService {
 
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_routes(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.name)),
+                async |client, request| client.show_routes(request).await,
+            )
             .await?;
 
         output::data(

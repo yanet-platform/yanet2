@@ -202,9 +202,12 @@ impl ForwardService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .unary("show", request, async |client, request| {
-                client.show_config(request).await
-            })
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
             .await?;
 
         output::data(
@@ -255,9 +258,12 @@ impl ForwardService {
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config.clone() };
         self.service
-            .unary("delete", request, async |client, request| {
-                client.delete_config(request).await
-            })
+            .unary_with(
+                "delete",
+                request,
+                self.service.not_found("delete", &format!("config '{}'", cmd.config)),
+                async |client, request| client.delete_config(request).await,
+            )
             .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config));

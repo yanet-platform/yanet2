@@ -122,9 +122,12 @@ impl FWStateMapService {
     pub async fn map_delete(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteMapRequest { name: cmd.map_name.clone() };
         self.service
-            .unary("delete", request, async |client, request| {
-                client.delete_map(request).await
-            })
+            .unary_with(
+                "delete",
+                request,
+                self.service.not_found("delete", &format!("map '{}'", cmd.map_name)),
+                async |client, request| client.delete_map(request).await,
+            )
             .await?;
 
         output::success("delete", format_args!("Deleted map '{}'.", cmd.map_name));
@@ -183,9 +186,12 @@ impl FWStateMapService {
         let request = GetMapStatsRequest { name: cmd.map_name.clone() };
         let response = self
             .service
-            .unary("stats", request, async |client, request| {
-                client.get_map_stats(request).await
-            })
+            .unary_with(
+                "stats",
+                request,
+                self.service.not_found("stats", &format!("map '{}'", cmd.map_name)),
+                async |client, request| client.get_map_stats(request).await,
+            )
             .await?;
 
         output::data(
@@ -251,9 +257,12 @@ impl FWStateMapService {
             };
             let resp = self
                 .service
-                .unary("entries", request, async |client, request| {
-                    client.list_entries(request).await
-                })
+                .unary_with(
+                    "entries",
+                    request,
+                    self.service.not_found("entries", &format!("map '{}'", cmd.map_name)),
+                    async |client, request| client.list_entries(request).await,
+                )
                 .await?;
 
             state.note_generation(resp.generation);
