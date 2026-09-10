@@ -200,8 +200,8 @@ impl TrafgenService {
                 .invalid("upload", format!("failed to read pcap {}: {err}", cmd.pcap.display()))
         })?;
 
-        // The request carries the whole capture, which the unary helper
-        // would trace-log byte by byte.
+        // The capture itself must never reach the log, so the upload
+        // bypasses the logged call path.
         let request = UploadPcapRequest { name: cmd.config_name.clone(), pcap };
         self.service
             .client()

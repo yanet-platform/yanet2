@@ -541,7 +541,7 @@ impl<C> Service<C> {
     /// Issues one unary RPC, mapping a failure through
     /// [`status`](Service::status) under `action`.
     ///
-    /// The request and the unwrapped response are logged at trace and debug.
+    /// The request and the unwrapped response are logged at trace level.
     pub async fn unary<Req, Resp, Call>(
         &mut self,
         action: &'static str,
@@ -575,7 +575,7 @@ impl<C> Service<C> {
     {
         log::trace!("{action} request: {request:?}");
         let response = call(&mut self.client, request).await.map_err(map)?.into_inner();
-        log::debug!("{action} response: {response:?}");
+        log::trace!("{action} response: {response:?}");
 
         Ok(response)
     }
