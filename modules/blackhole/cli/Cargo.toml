@@ -19,4 +19,4 @@ tonic-prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }

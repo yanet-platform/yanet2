@@ -28,4 +28,4 @@ chrono = "0.4"
 netip = "0.3"
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }

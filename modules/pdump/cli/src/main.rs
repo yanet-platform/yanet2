@@ -28,8 +28,6 @@ mod writer;
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod pdumppb {
-    use serde::Serialize;
-
     tonic::include_proto!("modules.pdump.controlplane.pdumppb.v1");
 }
 

@@ -18,8 +18,6 @@ use ync::{
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod trafgenpb {
-    use serde::Serialize;
-
     tonic::include_proto!("devices.trafgen.controlplane.trafgenpb.v1");
 }
 

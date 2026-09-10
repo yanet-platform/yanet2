@@ -27,5 +27,5 @@ tokio-util = "0.7"
 pnet_packet = "0.35"
 
 [build-dependencies]
-tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
 bindgen = "0.72"

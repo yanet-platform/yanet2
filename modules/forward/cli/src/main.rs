@@ -18,8 +18,6 @@ use ync::{
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod forwardpb {
-    use serde::{Deserialize, Serialize};
-
     tonic::include_proto!("modules.forward.controlplane.forwardpb.v1");
 }
 
