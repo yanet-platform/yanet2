@@ -1,8 +1,10 @@
 package neighbour_test
 
 import (
+	"context"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,13 +13,113 @@ import (
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
+
+// Test_ValidateManagedDevices_DeviceNameBoundary verifies that startup mappings
+// preserve the same byte-exact logical identity as published FIB entries.
+func Test_ValidateManagedDevices_DeviceNameBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		device string
+		valid  bool
+	}{
+		{name: "79 bytes", device: strings.Repeat("d", 79), valid: true},
+		{name: "80 bytes", device: strings.Repeat("d", 80)},
+		{name: "embedded NUL", device: "logical0\x00other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := netplan.State{Links: []netplan.Link{{Name: "kni0"}}}
+			err := neighbour.ValidateManagedDevices(state, map[string]string{"kni0": test.device})
+			if test.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
 
 type fakeBackend struct {
 	links          []vnetlink.Link
 	linkError      error
 	neighbours     []vnetlink.Neigh
 	neighbourError error
+}
+
+// generatedBackend exercises an over-limit dump without allocating it first.
+type generatedBackend struct {
+	fakeBackend
+	Count    int
+	Visited  int
+	CancelAt int
+	Cancel   context.CancelFunc
+}
+
+func (m *generatedBackend) WalkNeighbours(ctx context.Context, visit func(vnetlink.Neigh) error) error {
+	entry := testKernelNeighbour(1, "192.0.2.1", 2, vnetlink.NUD_REACHABLE)
+	for range m.Count {
+		m.Visited++
+		if m.Visited == m.CancelAt {
+			m.Cancel()
+		}
+		if err := visit(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Test_Discover_EntryBound verifies that an oversized dump stops at the shared
+// limit even when every record would collapse into one canonical pair.
+func Test_Discover_EntryBound(t *testing.T) {
+	backend := &generatedBackend{fakeBackend: fakeBackend{links: []vnetlink.Link{testLink(1, "kni0", 1)}}, Count: operatorpb.NeighbourSnapshotEntries + 100}
+	entries, err := neighbour.Discover(t.Context(), backend, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
+	require.ErrorContains(t, err, "entry limit")
+	require.Nil(t, entries)
+	require.Equal(t, operatorpb.NeighbourSnapshotEntries+1, backend.Visited)
+}
+
+// Test_Discover_CancelDuringScan verifies that cancellation aborts a partial
+// observation without consuming the remainder or returning publishable data.
+func Test_Discover_CancelDuringScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	backend := &generatedBackend{fakeBackend: fakeBackend{links: []vnetlink.Link{testLink(1, "kni0", 1)}}, Count: 1000, CancelAt: 3, Cancel: cancel}
+	entries, err := neighbour.Discover(ctx, backend, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, entries)
+	require.Equal(t, 3, backend.Visited)
+}
+
+// Test_Discover_CanonicalDuplicates verifies that NUD transitions and mapped
+// IPv4 representations collapse only when the published payload is identical.
+func Test_Discover_CanonicalDuplicates(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		conflicting bool
+	}{
+		{name: "same payload across NUD transition"},
+		{name: "changed destination MAC fails the snapshot", conflicting: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			first := testKernelNeighbour(1, "192.0.2.1", 2, vnetlink.NUD_REACHABLE)
+			second := testKernelNeighbour(1, "::ffff:192.0.2.1", 2, vnetlink.NUD_STALE)
+			if test.conflicting {
+				second.HardwareAddr = testMAC(3)
+			}
+			backend := fakeBackend{links: []vnetlink.Link{testLink(1, "kni0", 1)}, neighbours: []vnetlink.Neigh{first, second}}
+			entries, err := neighbour.Discover(t.Context(), backend, netplan.State{Links: []netplan.Link{{Name: "kni0"}}}, nil)
+			if test.conflicting {
+				require.ErrorContains(t, err, "conflicting next hop/device")
+				require.Nil(t, entries)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, entries, 1)
+				require.Equal(t, netip.MustParseAddr("192.0.2.1"), entries[0].NextHop)
+			}
+		})
+	}
 }
 
 type changingBackend struct {
@@ -32,8 +134,8 @@ func (m *changingBackend) LinkList() ([]vnetlink.Link, error) {
 	return snapshot, nil
 }
 
-func (m *changingBackend) NeighList(int, int) ([]vnetlink.Neigh, error) {
-	return m.neighbours, nil
+func (m *changingBackend) WalkNeighbours(ctx context.Context, visit func(vnetlink.Neigh) error) error {
+	return walkNeighbours(ctx, m.neighbours, visit)
 }
 
 // LinkList returns the configured complete or partial link dump.
@@ -41,9 +143,25 @@ func (m fakeBackend) LinkList() ([]vnetlink.Link, error) {
 	return m.links, m.linkError
 }
 
-// NeighList returns the configured complete or partial neighbour dump.
-func (m fakeBackend) NeighList(linkIndex, family int) ([]vnetlink.Neigh, error) {
-	return m.neighbours, m.neighbourError
+// WalkNeighbours delivers partial data before reporting an interrupted dump.
+func (m fakeBackend) WalkNeighbours(ctx context.Context, visit func(vnetlink.Neigh) error) error {
+	if err := walkNeighbours(ctx, m.neighbours, visit); err != nil {
+		return err
+	}
+	return m.neighbourError
+}
+
+// walkNeighbours stops the fixture at the same visitor boundary as the kernel.
+func walkNeighbours(ctx context.Context, entries []vnetlink.Neigh, visit func(vnetlink.Neigh) error) error {
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(entry); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Test_Discover_ManagedIsolationAndLinkMapping verifies that only neighbours
@@ -69,6 +187,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 	}
 
 	entries, err := neighbour.Discover(
+		t.Context(),
 		backend,
 		state,
 		map[string]string{"tenant.100": "dataplane-vlan"},
@@ -82,7 +201,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 				DestinationMAC: testMACArray(10),
 				Device:         "kni0",
 			},
-			State: neighbour.NeighbourState(vnetlink.NUD_REACHABLE), Ifindex: 1,
+			Ifindex: 1,
 		},
 		{
 			NextHop: netip.MustParseAddr("192.0.2.20"),
@@ -91,7 +210,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 				DestinationMAC: testMACArray(20),
 				Device:         "dataplane-vlan",
 			},
-			State: neighbour.NeighbourState(vnetlink.NUD_STALE), Ifindex: 2,
+			Ifindex: 2,
 		},
 	}, entries)
 }
@@ -100,6 +219,7 @@ func Test_Discover_ManagedIsolationAndLinkMapping(t *testing.T) {
 // name cannot alias another managed link's unmapped logical device.
 func Test_Discover_RejectsMappedAndFallbackDeviceCollision(t *testing.T) {
 	entries, err := neighbour.Discover(
+		t.Context(),
 		fakeBackend{},
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}, {Name: "kni1"}}},
 		map[string]string{"kni0": "kni1"},
@@ -113,6 +233,7 @@ func Test_Discover_RejectsMappedAndFallbackDeviceCollision(t *testing.T) {
 // the managed topology invalidate discovery rather than being silently ignored.
 func Test_Discover_RejectsMappingForUnmanagedLink(t *testing.T) {
 	entries, err := neighbour.Discover(
+		t.Context(),
 		fakeBackend{},
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 		map[string]string{"kni1": "logical1"},
@@ -165,7 +286,7 @@ func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
 		},
 	}
 
-	entries, err := neighbour.Discover(backend, state, nil)
+	entries, err := neighbour.Discover(t.Context(), backend, state, nil)
 	require.NoError(t, err)
 	require.Equal(t, []neighbour.Entry{{
 		NextHop: netip.MustParseAddr("192.0.2.1"),
@@ -174,7 +295,7 @@ func Test_Discover_SkipsMalformedAddresses(t *testing.T) {
 			DestinationMAC: testMACArray(1),
 			Device:         "kni0",
 		},
-		State: neighbour.NeighbourState(vnetlink.NUD_REACHABLE), Ifindex: 1,
+		Ifindex: 1,
 	}}, entries)
 }
 
@@ -222,6 +343,7 @@ func Test_Discover_RejectsMissingOrInvalidManagedLinks(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			entries, err := neighbour.Discover(
+				t.Context(),
 				fakeBackend{links: test.links},
 				netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 				nil,
@@ -279,7 +401,7 @@ func Test_Discover_RejectsInvalidManagedVLANIdentity(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			entries, err := neighbour.Discover(fakeBackend{
+			entries, err := neighbour.Discover(t.Context(), fakeBackend{
 				links: []vnetlink.Link{testLink(1, "kni0", 1), test.link},
 			}, state, nil)
 
@@ -310,7 +432,7 @@ func Test_Discover_FiltersNUDStates(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			entries, err := neighbour.Discover(fakeBackend{
+			entries, err := neighbour.Discover(t.Context(), fakeBackend{
 				links: []vnetlink.Link{testLink(1, "kni0", 1)},
 				neighbours: []vnetlink.Neigh{
 					testKernelNeighbour(1, "192.0.2.1", 2, test.state),
@@ -328,7 +450,7 @@ func Test_Discover_FiltersNUDStates(t *testing.T) {
 					DestinationMAC: testMACArray(2),
 					Device:         "kni0",
 				},
-				State: neighbour.NeighbourState(test.state), Ifindex: 1,
+				Ifindex: 1,
 			}}, entries)
 		})
 	}
@@ -368,6 +490,7 @@ func Test_Discover_DumpErrorsInvalidateSnapshot(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			entries, err := neighbour.Discover(
+				t.Context(),
 				test.backend,
 				netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 				nil,
@@ -392,6 +515,7 @@ func Test_Discover_RejectsLinkRecreationDuringNeighbourDump(t *testing.T) {
 	}
 
 	entries, err := neighbour.Discover(
+		t.Context(),
 		backend,
 		netplan.State{Links: []netplan.Link{{Name: "kni0"}}},
 		nil,
@@ -415,7 +539,7 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 		{Name: "tenant.100", Kind: netplan.LinkKindVLAN, Parent: "kni0", VLANID: 100},
 	}}
 
-	first, err := neighbour.Discover(fakeBackend{
+	first, err := neighbour.Discover(t.Context(), fakeBackend{
 		links: links,
 		neighbours: []vnetlink.Neigh{
 			firstNeighbour,
@@ -425,7 +549,7 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 		},
 	}, state, nil)
 	require.NoError(t, err)
-	second, err := neighbour.Discover(fakeBackend{
+	second, err := neighbour.Discover(t.Context(), fakeBackend{
 		links:      []vnetlink.Link{links[1], links[0]},
 		neighbours: []vnetlink.Neigh{thirdNeighbour, secondNeighbour, firstNeighbour},
 	}, state, nil)
@@ -443,7 +567,7 @@ func Test_Discover_DeterministicOrdering(t *testing.T) {
 // per-gateway filtering can distinguish identical link-local next hops.
 func Test_Discover_PreservesSameNextHopOnDifferentDevices(t *testing.T) {
 	nextHop := netip.MustParseAddr("192.0.2.1")
-	entries, err := neighbour.Discover(fakeBackend{
+	entries, err := neighbour.Discover(t.Context(), fakeBackend{
 		links: []vnetlink.Link{
 			testLink(1, "kni0", 1),
 			testLink(2, "kni1", 1),
@@ -524,7 +648,7 @@ func entryNextHops(entries []neighbour.Entry) []netip.Addr {
 // Test_Discover_ExcludesLoopbacks verifies that dummy MACs and irrelevant
 // loopback mappings cannot enter or invalidate an egress snapshot.
 func Test_Discover_ExcludesLoopbacks(t *testing.T) {
-	entries, err := neighbour.Discover(fakeBackend{
+	entries, err := neighbour.Discover(t.Context(), fakeBackend{
 		links: []vnetlink.Link{
 			testLink(1, "kni0", 1),
 			&vnetlink.Device{LinkAttrs: vnetlink.LinkAttrs{Name: "lo", Index: 2, Flags: net.FlagLoopback}},

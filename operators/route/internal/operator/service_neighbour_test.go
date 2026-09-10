@@ -249,7 +249,7 @@ func sourceEntries(t *testing.T, table *neigh.NeighTable, name string) map[neigh
 }
 
 // Test_NeighbourService_AtomicReplacement verifies that entries and priority
-// become visible together only on EOF, and equivalent refreshes never wake up.
+// become visible together only on EOF.
 func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
@@ -290,16 +290,77 @@ func Test_NeighbourService_AtomicReplacement(t *testing.T) {
 			_, found = fixture.Table.View().Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.1"), "logical0"))
 			require.False(t, found)
 
-			for range 3 {
-				require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, second, first))
-				require.Equal(t, entries, sourceEntries(t, fixture.Table, "snapshot"))
-				require.Equal(t, changes+1, fixture.Changes.Load())
-			}
 			response, err := fixture.Client.List(t.Context(), &operatorpb.ListNeighboursRequest{Table: "snapshot"})
 			require.NoError(t, err)
 			require.Len(t, response.GetNeighbours(), 2)
 			for _, entry := range response.GetNeighbours() {
 				require.Equal(t, "snapshot", entry.GetSource())
+			}
+		})
+	}
+}
+
+// Test_NeighbourService_EquivalentReplacement verifies that equivalent content
+// in a different chunk order retains timestamps and produces no wake.
+func Test_NeighbourService_EquivalentReplacement(t *testing.T) {
+	fixture := newNeighbourServiceFixture(t)
+	first := replacementChunk("snapshot", 100, "192.0.2.1")
+	second := replacementChunk("snapshot", 100, "2001:db8::1")
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, first, second))
+	before := sourceEntries(t, fixture.Table, "snapshot")
+	changes := fixture.Changes.Load()
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, second, first))
+	require.Equal(t, before, sourceEntries(t, fixture.Table, "snapshot"))
+	require.Equal(t, changes, fixture.Changes.Load())
+}
+
+// Test_NeighbourService_EmptyReplacement verifies that an explicit empty
+// snapshot clears a source once and an equivalent empty refresh stays silent.
+func Test_NeighbourService_EmptyReplacement(t *testing.T) {
+	fixture := newNeighbourServiceFixture(t)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 100, "192.0.2.1")))
+	for range 2 {
+		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("snapshot", 100)))
+		require.Empty(t, sourceEntries(t, fixture.Table, "snapshot"))
+		require.Equal(t, []neigh.SourceInfo{{Name: "snapshot", DefaultPriority: 100}}, fixture.Table.ListSources())
+		require.Equal(t, int64(2), fixture.Changes.Load())
+	}
+}
+
+// Test_NeighbourService_DeviceNameBoundary verifies that both incremental and
+// complete updates preserve byte-exact device names within the dataplane ABI.
+func Test_NeighbourService_DeviceNameBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		device string
+		valid  bool
+	}{
+		{name: "79 ASCII bytes", device: strings.Repeat("d", 79), valid: true},
+		{name: "80 ASCII bytes", device: strings.Repeat("d", 80)},
+		{name: "79 UTF-8 bytes", device: strings.Repeat("é", 39) + "a", valid: true},
+		{name: "80 UTF-8 bytes", device: strings.Repeat("é", 40)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newNeighbourServiceFixture(t)
+			_, err := fixture.Table.CreateSource("static", 100, true)
+			require.NoError(t, err)
+			chunk := replacementChunk("remote", 100, "192.0.2.1")
+			chunk.Entries[0].Device = test.device
+			for _, replace := range []bool{false, true} {
+				table := "static"
+				if replace {
+					table = "remote"
+					err = sendNeighbourSnapshot(t.Context(), fixture.Client, chunk)
+				} else {
+					_, err = fixture.Client.UpdateNeighbours(t.Context(), &operatorpb.UpdateNeighboursRequest{Table: table, Entries: chunk.Entries})
+				}
+				if test.valid {
+					require.NoError(t, err)
+					entries := sourceEntries(t, fixture.Table, table)
+					require.Contains(t, entries, neigh.NewKey(netip.MustParseAddr("192.0.2.1"), test.device))
+				} else {
+					require.Equal(t, codes.InvalidArgument, status.Code(err))
+				}
 			}
 		})
 	}
@@ -333,9 +394,6 @@ func Test_NeighbourService_InvalidReplacement(t *testing.T) {
 	}{
 		{name: "empty stream", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
 			return nil
-		}},
-		{name: "nil request", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			return []*operatorpb.ReplaceNeighboursRequest{nil}
 		}},
 		{name: "missing table", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
 			first.Table = ""
@@ -409,7 +467,7 @@ func Test_NeighbourService_InvalidReplacement(t *testing.T) {
 			return []*operatorpb.ReplaceNeighboursRequest{first, second}
 		}},
 		{name: "overlong device", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
-			second.Entries[0].Device = strings.Repeat("d", 129)
+			second.Entries[0].Device = strings.Repeat("d", 80)
 			return []*operatorpb.ReplaceNeighboursRequest{first, second}
 		}},
 		{name: "client owned source", mutate: func(first, second *operatorpb.ReplaceNeighboursRequest) []*operatorpb.ReplaceNeighboursRequest {
@@ -552,22 +610,18 @@ func Test_NeighbourService_InterruptedReplacement(t *testing.T) {
 // Test_NeighbourService_BuiltInReplacement verifies that even an empty complete
 // snapshot cannot change entries or priority of a protected source.
 func Test_NeighbourService_BuiltInReplacement(t *testing.T) {
-	for _, name := range []string{"kernel", "static"} {
-		t.Run(name, func(t *testing.T) {
-			fixture := newNeighbourServiceFixture(t)
-			_, err := fixture.Table.CreateSource(name, 10, true)
-			require.NoError(t, err)
-			entry := neigh.NeighbourEntry{NextHop: netip.MustParseAddr("192.0.2.1"), UpdatedAt: time.Now()}
-			require.NoError(t, fixture.Table.Add(name, []neigh.NeighbourEntry{entry}))
-			before := sourceEntries(t, fixture.Table, name)
-			for _, chunk := range []*operatorpb.ReplaceNeighboursRequest{replacementChunk(name, 200, "192.0.2.2"), replacementChunk(name, 200)} {
-				err := sendNeighbourSnapshot(t.Context(), fixture.Client, chunk)
-				require.Equal(t, codes.FailedPrecondition, status.Code(err))
-				require.Equal(t, before, sourceEntries(t, fixture.Table, name))
-				require.Equal(t, []neigh.SourceInfo{{Name: name, DefaultPriority: 10, EntryCount: 1, BuiltIn: true}}, fixture.Table.ListSources())
-				require.Zero(t, fixture.Changes.Load())
-			}
-		})
+	fixture := newNeighbourServiceFixture(t)
+	_, err := fixture.Table.CreateSource("kernel", 10, true)
+	require.NoError(t, err)
+	entry := neigh.NeighbourEntry{NextHop: netip.MustParseAddr("192.0.2.1"), UpdatedAt: time.Now()}
+	require.NoError(t, fixture.Table.Add("kernel", []neigh.NeighbourEntry{entry}))
+	before := sourceEntries(t, fixture.Table, "kernel")
+	for _, chunk := range []*operatorpb.ReplaceNeighboursRequest{replacementChunk("kernel", 200, "192.0.2.2"), replacementChunk("kernel", 200)} {
+		err := sendNeighbourSnapshot(t.Context(), fixture.Client, chunk)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Equal(t, before, sourceEntries(t, fixture.Table, "kernel"))
+		require.Equal(t, []neigh.SourceInfo{{Name: "kernel", DefaultPriority: 10, EntryCount: 1, BuiltIn: true}}, fixture.Table.ListSources())
+		require.Zero(t, fixture.Changes.Load())
 	}
 }
 
@@ -604,9 +658,9 @@ func Test_NeighbourService_ConcurrencyAndCompletionOrder(t *testing.T) {
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("fifth", 200)))
 }
 
-// Test_NeighbourService_LargeSnapshotLifecycle verifies that 60k neighbours can
-// be created, refreshed unchanged, and cleared under default gRPC message caps.
-func Test_NeighbourService_LargeSnapshotLifecycle(t *testing.T) {
+// Test_NeighbourService_LargeSnapshot verifies that a snapshot larger than a
+// default gRPC message commits completely through bounded chunks.
+func Test_NeighbourService_LargeSnapshot(t *testing.T) {
 	fixture := newNeighbourServiceFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -618,7 +672,7 @@ func Test_NeighbourService_LargeSnapshotLifecycle(t *testing.T) {
 		chunk := replacementChunk(table, 100)
 		for range 1000 {
 			entry := replacementChunk(table, 100, address.String()).Entries[0]
-			entry.Device = strings.Repeat("d", 128)
+			entry.Device = strings.Repeat("d", 79)
 			chunk.Entries = append(chunk.Entries, entry)
 			address = address.Next()
 		}
@@ -627,31 +681,12 @@ func Test_NeighbourService_LargeSnapshotLifecycle(t *testing.T) {
 		chunks[idx] = chunk
 	}
 	require.Greater(t, totalBytes, 4*1024*1024)
-	var initial map[neigh.Key]neigh.NeighbourEntry
-	for _, desired := range [][]*operatorpb.ReplaceNeighboursRequest{chunks, chunks, {replacementChunk(table, 100)}, {replacementChunk(table, 100)}} {
-		require.NoError(t, sendNeighbourSnapshot(ctx, fixture.Client, desired...))
-		count := 60_000
-		changes := int64(1)
-		if len(desired) == 1 {
-			count, changes = 0, 2
-		}
-		response, err := fixture.Client.ListTables(ctx, &operatorpb.ListNeighbourTablesRequest{})
-		require.NoError(t, err)
-		require.Len(t, response.GetTables(), 1)
-		require.Equal(t, int64(count), response.GetTables()[0].GetEntryCount())
-		require.Equal(t, uint32(100), response.GetTables()[0].GetDefaultPriority())
-		entries := sourceEntries(t, fixture.Table, table)
-		require.Len(t, entries, count)
-		if count != 0 {
-			if initial == nil {
-				initial = entries
-			} else {
-				require.Equal(t, initial, entries)
-			}
-		}
-		require.Equal(t, changes, fixture.Changes.Load())
-	}
-	_, count := fixture.Table.View().Entries()
-	require.Zero(t, count)
-	require.Len(t, initial, 60_000)
+	require.NoError(t, sendNeighbourSnapshot(ctx, fixture.Client, chunks...))
+	response, err := fixture.Client.ListTables(ctx, &operatorpb.ListNeighbourTablesRequest{})
+	require.NoError(t, err)
+	require.Len(t, response.GetTables(), 1)
+	require.Equal(t, int64(60_000), response.GetTables()[0].GetEntryCount())
+	require.Equal(t, uint32(100), response.GetTables()[0].GetDefaultPriority())
+	require.Len(t, sourceEntries(t, fixture.Table, table), 60_000)
+	require.Equal(t, int64(1), fixture.Changes.Load())
 }

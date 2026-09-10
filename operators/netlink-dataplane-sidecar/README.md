@@ -33,6 +33,11 @@ parent MTU when unspecified. An oversized existing child with no explicit MTU
 blocks a parent decrease; it is not silently resized. Unmanaged dependent links
 also block incompatible decreases. MTUs below 1280 are rejected to preserve IPv6.
 
+MTU preflight assumes the sidecar is the sole configurator of this namespace.
+The kernel can successfully lower a parent and clamp a VLAN created between
+preflight and the write. Internal serialization does not protect against an
+external writer; no other process may create or resize links concurrently.
+
 ## Configuration
 
 The installed example is `/etc/yanet2/yanet-netlink-dataplane-sidecar-default.yaml`.

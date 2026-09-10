@@ -20,6 +20,7 @@ type LinkIdentity struct {
 	Loopback        bool
 	VLANID          int
 	VLANProtocol    vnetlink.VlanProtocol
+	TuntapMode      vnetlink.TuntapMode
 }
 
 // IdentifyLink captures stable properties without configuration or ownership.
@@ -40,6 +41,9 @@ func IdentifyLink(link vnetlink.Link) (LinkIdentity, error) {
 		identity.VLANID = vlan.VlanId
 		identity.VLANProtocol = vlan.VlanProtocol
 	}
+	if tuntap, ok := link.(*vnetlink.Tuntap); ok {
+		identity.TuntapMode = tuntap.Mode
+	}
 	return identity, nil
 }
 
@@ -54,7 +58,8 @@ func ValidateLink(wanted netplan.Link, link, parent vnetlink.Link) error {
 	}
 	switch wanted.Kind {
 	case netplan.LinkKindKNI:
-		if identity.Loopback || (identity.Type != "device" && identity.Type != "veth" && identity.Type != "tuntap") {
+		if identity.Loopback || (identity.Type != "device" &&
+			(identity.Type != "tuntap" || identity.TuntapMode != vnetlink.TUNTAP_MODE_TAP)) {
 			return fmt.Errorf("KNI %q has incompatible type %q", wanted.Name, identity.Type)
 		}
 	case netplan.LinkKindLoopback:

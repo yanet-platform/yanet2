@@ -1,6 +1,7 @@
 package neighbour
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -18,17 +19,13 @@ import (
 // Backend is the netlink surface needed to discover kernel neighbours.
 type Backend interface {
 	LinkList() ([]vnetlink.Link, error)
-	NeighList(linkIndex, family int) ([]vnetlink.Neigh, error)
+	WalkNeighbours(context.Context, func(vnetlink.Neigh) error) error
 }
-
-// NeighbourState is the kernel neighbour-unreachability-detection state.
-type NeighbourState int
 
 // Entry is a discovered neighbour ready for gateway publication.
 type Entry struct {
 	NextHop       netip.Addr
 	HardwareRoute hwroute.HardwareRoute
-	State         NeighbourState
 	Ifindex       uint32
 }
 
@@ -43,10 +40,14 @@ type linkRoute struct {
 // and entries without usable IP or EUI-48 addresses are omitted. Any backend
 // error invalidates the whole dump.
 func Discover(
+	ctx context.Context,
 	backend Backend,
 	state netplan.State,
 	linkMap map[string]string,
 ) ([]Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if backend == nil {
 		return nil, fmt.Errorf("discover neighbours: netlink backend is nil")
 	}
@@ -60,49 +61,40 @@ func Discover(
 	if err != nil {
 		return nil, fmt.Errorf("discover neighbours: list links: %w", err)
 	}
-	linksByIndex, err := indexManagedLinks(links, managedLinks)
+	linksByIndex, err := indexManagedLinks(ctx, links, managedLinks)
 	if err != nil {
 		return nil, err
 	}
-	neighbours, err := backend.NeighList(0, vnetlink.FAMILY_ALL)
-	if err != nil {
-		return nil, fmt.Errorf("discover neighbours: list neighbours: %w", err)
-	}
-	revalidatedLinks, err := backend.LinkList()
-	if err != nil {
-		return nil, fmt.Errorf("discover neighbours: revalidate links: %w", err)
-	}
-	revalidatedByIndex, err := indexManagedLinks(revalidatedLinks, managedLinks)
-	if err != nil {
-		return nil, err
-	}
-	if !maps.Equal(linksByIndex, revalidatedByIndex) {
-		return nil, errors.New("discover neighbours: managed links changed during dump")
-	}
-
 	type entryKey struct {
-		nextHop       netip.Addr
-		hardwareRoute hwroute.HardwareRoute
-		state         NeighbourState
+		NextHop netip.Addr
+		Device  string
 	}
-	seen := map[entryKey]struct{}{}
-	entries := make([]Entry, 0, len(neighbours))
-	for _, kernelNeighbour := range neighbours {
+	seen := map[entryKey]Entry{}
+	entries := []Entry{}
+	count := 0
+	err = backend.WalkNeighbours(ctx, func(kernelNeighbour vnetlink.Neigh) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		count++
+		if count > operatorpb.NeighbourSnapshotEntries {
+			return errors.New("dump exceeds entry limit")
+		}
 		link, managed := linksByIndex[kernelNeighbour.LinkIndex]
 		if !managed {
-			continue
+			return nil
 		}
 		if !usableNeighbourState(kernelNeighbour.State) {
-			continue
+			return nil
 		}
 
 		nextHop, valid := netip.AddrFromSlice(kernelNeighbour.IP)
 		if !valid {
-			continue
+			return nil
 		}
 		destinationMAC, usable := hwroute.ParseMAC(kernelNeighbour.HardwareAddr)
 		if !usable {
-			continue
+			return nil
 		}
 
 		entry := Entry{
@@ -113,15 +105,35 @@ func Discover(
 				DestinationMAC: destinationMAC,
 				Device:         devicesByLink[link.Name],
 			},
-			State: NeighbourState(kernelNeighbour.State),
 		}
 
-		key := entryKey{nextHop: nextHop, hardwareRoute: entry.HardwareRoute, state: entry.State}
-		if _, found := seen[key]; found {
-			continue
+		key := entryKey{NextHop: entry.NextHop, Device: entry.HardwareRoute.Device}
+		if previous, found := seen[key]; found {
+			if previous != entry {
+				return fmt.Errorf("conflicting next hop/device %s/%s", key.NextHop, key.Device)
+			}
+			return nil
 		}
-		seen[key] = struct{}{}
+		seen[key] = entry
 		entries = append(entries, entry)
+		return nil
+	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("discover neighbours: list neighbours: %w", err)
+	}
+	revalidatedLinks, err := backend.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("discover neighbours: revalidate links: %w", err)
+	}
+	revalidatedByIndex, err := indexManagedLinks(ctx, revalidatedLinks, managedLinks)
+	if err != nil {
+		return nil, err
+	}
+	if !maps.Equal(linksByIndex, revalidatedByIndex) {
+		return nil, errors.New("discover neighbours: managed links changed during dump")
 	}
 
 	sort.Slice(entries, func(first, second int) bool {
@@ -132,11 +144,11 @@ func Discover(
 		if left.HardwareRoute.Device != right.HardwareRoute.Device {
 			return left.HardwareRoute.Device < right.HardwareRoute.Device
 		}
-		if comparison := left.HardwareRoute.Compare(right.HardwareRoute); comparison != 0 {
-			return comparison < 0
-		}
-		return left.State < right.State
+		return false
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -193,12 +205,19 @@ func managedLinkConfiguration(
 }
 
 func indexManagedLinks(
+	ctx context.Context,
 	links []vnetlink.Link,
 	managedLinks map[string]netplan.Link,
 ) (map[int]linkRoute, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	linksByIndex := map[int]linkRoute{}
 	linksByName := map[string]vnetlink.Link{}
 	for idx, link := range links {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if link == nil || link.Attrs() == nil {
 			return nil, fmt.Errorf("discover neighbours: link %d is incomplete", idx)
 		}
@@ -218,6 +237,9 @@ func indexManagedLinks(
 	}
 	sort.Strings(managedNames)
 	for _, name := range managedNames {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		wanted := managedLinks[name]
 		link, found := linksByName[name]
 		if !found {

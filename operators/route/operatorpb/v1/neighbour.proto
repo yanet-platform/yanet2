@@ -135,7 +135,7 @@ message ReplaceNeighboursRequest {
   // Entries have unique (canonical IP, device) pairs across the entire stream.
   // IPv4-mapped IPv6 addresses are normalized to IPv4. IP addresses must
   // contain 4 or 16 bytes and both MAC addresses must be present EUI-48 values.
-  // Device is at most 128 bytes. Source and updated_at must be unset; the server
+  // Device is at most 79 bytes. Source and updated_at must be unset; the server
   // owns them and normalizes state to permanent, like unary updates. Zero entry
   // priority inherits the table default.
   repeated NeighbourEntry entries = 3;

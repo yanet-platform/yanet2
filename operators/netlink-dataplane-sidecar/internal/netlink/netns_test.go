@@ -1,10 +1,10 @@
 package netlink_test
 
 import (
-	"fmt"
 	"net/netip"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
@@ -13,7 +13,7 @@ import (
 )
 
 // Test_Reconciler_NetnsMTU verifies that Linux enforces the intended parent and
-// child MTUs without changing unrelated interfaces or the veth peer.
+// child MTUs without changing unrelated interfaces.
 func Test_Reconciler_NetnsMTU(t *testing.T) {
 	if os.Getenv("YANET_NETNS_TESTS") != "1" {
 		t.Skip("requires a disposable network namespace")
@@ -46,14 +46,9 @@ func Test_Reconciler_NetnsMTU(t *testing.T) {
 			handle, err := vnetlink.NewHandle()
 			require.NoError(t, err)
 			t.Cleanup(handle.Close)
-			pair := &vnetlink.Veth{LinkAttrs: vnetlink.LinkAttrs{Name: "kni9", MTU: tc.initialParent}, PeerName: "testpeer9"}
-			require.NoError(t, handle.LinkAdd(pair))
-			t.Cleanup(func() { _ = handle.LinkDel(pair) })
+			newKernelTAP(t, handle, "kni9", tc.initialParent)
 			parent, err := handle.LinkByName("kni9")
 			require.NoError(t, err)
-			peer, err := handle.LinkByName("testpeer9")
-			require.NoError(t, err)
-			peerMTU := peer.Attrs().MTU
 			unmanaged := &vnetlink.Dummy{LinkAttrs: vnetlink.LinkAttrs{Name: "eth0", MTU: 2000}}
 			require.NoError(t, handle.LinkAdd(unmanaged))
 			t.Cleanup(func() { _ = handle.LinkDel(unmanaged) })
@@ -81,7 +76,7 @@ func Test_Reconciler_NetnsMTU(t *testing.T) {
 				} else {
 					require.NoError(t, err, "pass %d", idx)
 				}
-				for name, expected := range map[string]int{"kni9": tc.wantParent, "aaa9": tc.wantChild, "testpeer9": peerMTU, "eth0": 2000} {
+				for name, expected := range map[string]int{"kni9": tc.wantParent, "aaa9": tc.wantChild, "eth0": 2000} {
 					link, err := handle.LinkByName(name)
 					require.NoError(t, err)
 					require.Equal(t, expected, link.Attrs().MTU, "%s pass %d", name, idx)
@@ -96,9 +91,24 @@ func Test_Reconciler_NetnsMTU(t *testing.T) {
 	}
 }
 
-// Test_Reconciler_NetnsMTURestoration verifies that recreated KNI and VLAN links
-// recover explicit jumbo MTUs while loopback and dummy drift is repaired.
-func Test_Reconciler_NetnsMTURestoration(t *testing.T) {
+// newKernelTAP keeps carrier present and explicitly sets the initial MTU.
+func newKernelTAP(t *testing.T, handle *vnetlink.Handle, name string, mtu int) *vnetlink.Tuntap {
+	t.Helper()
+	link := &vnetlink.Tuntap{LinkAttrs: vnetlink.LinkAttrs{Name: name}, Mode: vnetlink.TUNTAP_MODE_TAP, Queues: 1}
+	require.NoError(t, handle.LinkAdd(link))
+	t.Cleanup(func() {
+		_ = handle.LinkDel(link)
+		for _, descriptor := range link.Fds {
+			_ = descriptor.Close()
+		}
+	})
+	require.NoError(t, handle.LinkSetMTU(link, mtu))
+	return link
+}
+
+// Test_Reconciler_Netns verifies that real KNI recreation restores its VLAN
+// and explicit IPv6LL while loopback and dummy MTU drift also converges.
+func Test_Reconciler_Netns(t *testing.T) {
 	if os.Getenv("YANET_NETNS_TESTS") != "1" {
 		t.Skip("requires a disposable network namespace")
 	}
@@ -109,75 +119,44 @@ func Test_Reconciler_NetnsMTURestoration(t *testing.T) {
 	require.NoError(t, err)
 	originalLoopbackMTU := loopback.Attrs().MTU
 	t.Cleanup(func() { _ = handle.LinkSetMTU(loopback, originalLoopbackMTU) })
-	state := netplan.State{Links: []netplan.Link{
-		{Name: "kni9", MTU: 9000},
-		{Name: "aaa9", Kind: netplan.LinkKindVLAN, Parent: "kni9", VLANID: 100, MTU: 9000},
-		{Name: "lo", Kind: netplan.LinkKindLoopback, MTU: 9000},
-		{Name: "dummy9", Kind: netplan.LinkKindDummy, MTU: 9000},
-	}}
-	reconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
 	t.Cleanup(func() {
 		if dummy, err := handle.LinkByName("dummy9"); err == nil {
 			_ = handle.LinkDel(dummy)
 		}
 	})
-	for idx := range 2 {
-		pair := &vnetlink.Veth{LinkAttrs: vnetlink.LinkAttrs{Name: "kni9", MTU: 1500}, PeerName: fmt.Sprintf("peer9%d", idx)}
-		require.NoError(t, handle.LinkAdd(pair))
-		t.Cleanup(func() { _ = handle.LinkDel(pair) })
-		require.NoError(t, reconciler.Apply(t.Context(), state))
-		for _, wanted := range state.Links {
-			link, err := handle.LinkByName(wanted.Name)
-			require.NoError(t, err)
-			require.Equal(t, 9000, link.Attrs().MTU, wanted.Name)
-			if wanted.Kind != netplan.LinkKindKNI {
-				require.NoError(t, handle.LinkSetMTU(link, 1500))
-			}
-		}
-		require.NoError(t, reconciler.Apply(t.Context(), state))
-		for _, wanted := range state.Links {
-			link, err := handle.LinkByName(wanted.Name)
-			require.NoError(t, err)
-			require.Equal(t, 9000, link.Attrs().MTU, wanted.Name)
-		}
-		require.NoError(t, handle.LinkDel(pair))
-	}
-}
-
-// Test_Reconciler_Netns verifies that real Linux restoration retains explicit
-// IPv6LL and converges after a new VLAN inherits a decreasing parent's MTU.
-func Test_Reconciler_Netns(t *testing.T) {
-	if os.Getenv("YANET_NETNS_TESTS") != "1" {
-		t.Skip("requires a disposable network namespace")
-	}
-	pair := &vnetlink.Veth{LinkAttrs: vnetlink.LinkAttrs{Name: "kni9", MTU: 9000}, PeerName: "testpeer9"}
-	require.NoError(t, vnetlink.LinkAdd(pair))
-	t.Cleanup(func() { _ = vnetlink.LinkDel(pair) })
-	handle, err := vnetlink.NewHandle()
-	require.NoError(t, err)
-	t.Cleanup(handle.Close)
 	state := netplan.State{Links: []netplan.Link{
 		{Name: "kni9", MTU: 1500, Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}},
 		{Name: "vlan9", Kind: netplan.LinkKindVLAN, Parent: "kni9", VLANID: 100},
+		{Name: "lo", Kind: netplan.LinkKindLoopback, MTU: 9000},
+		{Name: "dummy9", Kind: netplan.LinkKindDummy, MTU: 9000},
 	}}
 	reconciler := netreconcile.NewReconciler(handle, netreconcile.NewProcSysctl())
+	previousIndex := 0
 	for range 2 {
-		require.NoError(t, reconciler.Apply(t.Context(), state))
+		parent := newKernelTAP(t, handle, "kni9", 9000)
+		require.NotEqual(t, previousIndex, parent.Index)
+		previousIndex = parent.Index
+		require.Eventually(t, func() bool { return reconciler.Apply(t.Context(), state) == nil }, 5*time.Second, 20*time.Millisecond)
+		for _, name := range []string{"lo", "dummy9"} {
+			link, err := handle.LinkByName(name)
+			require.NoError(t, err)
+			require.NoError(t, handle.LinkSetMTU(link, 1500))
+		}
+		addresses, err := handle.AddrList(parent, vnetlink.FAMILY_V6)
+		require.NoError(t, err)
+		require.Len(t, addresses, 1)
+		require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
+		require.NoError(t, handle.AddrDel(parent, &addresses[0]))
+		require.Eventually(t, func() bool { return reconciler.Apply(t.Context(), state) == nil }, 5*time.Second, 20*time.Millisecond)
+		for name, mtu := range map[string]int{"kni9": 1500, "vlan9": 1500, "lo": 9000, "dummy9": 9000} {
+			link, err := handle.LinkByName(name)
+			require.NoError(t, err)
+			require.Equal(t, mtu, link.Attrs().MTU, name)
+		}
+		addresses, err = handle.AddrList(parent, vnetlink.FAMILY_V6)
+		require.NoError(t, err)
+		require.Len(t, addresses, 1)
+		require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
+		require.NoError(t, handle.LinkDel(parent))
 	}
-	parent, err := handle.LinkByName("kni9")
-	require.NoError(t, err)
-	child, err := handle.LinkByName("vlan9")
-	require.NoError(t, err)
-	require.Equal(t, 1500, parent.Attrs().MTU)
-	require.Equal(t, 1500, child.Attrs().MTU)
-	addresses, err := handle.AddrList(parent, vnetlink.FAMILY_V6)
-	require.NoError(t, err)
-	require.Len(t, addresses, 1)
-	require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
-	require.NoError(t, handle.AddrDel(parent, &addresses[0]))
-	require.NoError(t, reconciler.Apply(t.Context(), state))
-	addresses, err = handle.AddrList(parent, vnetlink.FAMILY_V6)
-	require.NoError(t, err)
-	require.Len(t, addresses, 1)
-	require.Equal(t, "fe80::f1/64", addresses[0].IPNet.String())
 }

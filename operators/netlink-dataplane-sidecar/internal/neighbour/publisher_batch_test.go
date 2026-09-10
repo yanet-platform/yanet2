@@ -16,8 +16,8 @@ import (
 // split into bounded chunks without losing or duplicating entries.
 func Test_Publish_LargeSnapshotBatching(t *testing.T) {
 	service, client := newPublicationService(t)
-	entry := testDesiredEntry("2001:db8::1", strings.Repeat("d", 128))
-	entries := make([]neighbour.Entry, 60_000)
+	entry := testDesiredEntry("2001:db8::1", strings.Repeat("d", 79))
+	entries := make([]neighbour.Entry, 1001)
 	for idx := range entries {
 		entries[idx] = entry
 		entry.NextHop = entry.NextHop.Next()
@@ -45,6 +45,6 @@ func Test_Publish_LargeSnapshotBatching(t *testing.T) {
 			published++
 		}
 	}
-	require.Equal(t, 60, chunks)
+	require.Equal(t, 2, chunks)
 	require.Equal(t, len(entries), published)
 }

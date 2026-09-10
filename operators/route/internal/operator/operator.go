@@ -162,12 +162,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighbourOptions = append(neighbourOptions,
 			WithNeighbourServiceRemoteSource(scopeSource, devices),
 			WithNeighbourServiceOnTableRemoved(remoteInput.OnTableRemoved),
-			WithNeighbourServiceOnSnapshotReceived(func(table string) {
-				remoteInput.OnSnapshotReceived(table)
-				if table == scopeSource {
-					wake()
-				}
-			}),
+			WithNeighbourServiceOnSnapshotReceived(remoteInput.OnSnapshotReceived),
 		)
 	}
 	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)

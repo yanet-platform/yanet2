@@ -8,6 +8,7 @@ import (
 	_ "google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	sidecaroperator "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/operator"
 )
 
@@ -16,6 +17,7 @@ func main() {
 		"yanet-netlink-dataplane-sidecar",
 		"YANET interface restoration and neighbour publication sidecar",
 		factory,
+		xcfg.WithKnownFields(),
 	)
 	if err != nil {
 		fmt.Printf("ERROR: %v\n", err)

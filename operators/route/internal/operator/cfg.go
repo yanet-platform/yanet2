@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
@@ -109,6 +110,11 @@ func (m *Config) LoggingConfig() *logging.Config {
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
+	}
+	for _, entry := range m.Static.Neighbours {
+		if err := hwroute.ValidateDevice(entry.Device); err != nil {
+			return fmt.Errorf("static neighbour device: %w", err)
+		}
 	}
 	if table := m.Readiness.RemoteNeighbourTable; table != "" {
 		if !m.NetlinkMonitor.Disabled {

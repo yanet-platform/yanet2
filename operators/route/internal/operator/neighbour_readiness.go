@@ -27,15 +27,22 @@ func NewNeighbourReadiness(table string, maxAge time.Duration, tracker *readines
 }
 
 // OnSnapshotReceived refreshes input age even for empty or unchanged snapshots.
-func (m *NeighbourReadiness) OnSnapshotReceived(table string) {
+//
+// Only semantic changes advance the generation. The result requests a reconcile
+// wake when a complete snapshot restores previously unavailable input.
+func (m *NeighbourReadiness) OnSnapshotReceived(table string, changed bool) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if table != m.table {
-		return
+		return false
 	}
+	recovered := m.receivedAt.IsZero() || time.Since(m.receivedAt) >= m.maxAge
 	m.receivedAt = time.Now()
-	m.generation++
+	if changed {
+		m.generation++
+	}
 	m.tracker.Set("neighbours", readinesspb.State_STATE_READY)
+	return recovered
 }
 
 // OnTableRemoved requires a new complete replacement after expected-source deletion.

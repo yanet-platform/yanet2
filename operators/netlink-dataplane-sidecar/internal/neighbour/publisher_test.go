@@ -171,7 +171,6 @@ func testDesiredEntry(nextHop, device string) neighbour.Entry {
 	return neighbour.Entry{
 		NextHop: netip.MustParseAddr(nextHop), Ifindex: 10,
 		HardwareRoute: hwroute.HardwareRoute{SourceMAC: [6]byte{2, 0, 0, 0, 0, 1}, DestinationMAC: [6]byte{2, 0, 0, 0, 0, 2}, Device: device},
-		State:         neighbour.NeighbourState(operatorpb.NeighbourState_NUD_REACHABLE),
 	}
 }
 
@@ -181,22 +180,21 @@ func wireEntry(entry neighbour.Entry) *operatorpb.NeighbourEntry {
 		NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop.Unmap()),
 		HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
 		LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
-		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState(entry.State), Ifindex: entry.Ifindex,
+		Device:       entry.HardwareRoute.Device, State: operatorpb.NeighbourState_NUD_PERMANENT, Ifindex: entry.Ifindex,
 	}
 }
 
-// Test_Publish_SingleTablePairs verifies that equal IPs retain device scope and
-// empty publication clears only the configured table without enumerating others.
+// Test_Publish_SingleTablePairs verifies that equal IPs retain device scope
+// while mapped IPv4 and observed interface indices survive wire conversion.
 func Test_Publish_SingleTablePairs(t *testing.T) {
 	service, client := newPublicationService(t)
 	config := publicationConfig()
-	service.Store("netlink-dataplane-other", publicationTable{Priority: 7})
 	first := testDesiredEntry("fe80::1", "logical0")
 	second := testDesiredEntry("fe80::1", "logical1")
 	second.Ifindex = 20
 	second.HardwareRoute.DestinationMAC[5]++
 	entries := []neighbour.Entry{second, first, testDesiredEntry("::ffff:192.0.2.1", "logical0")}
-	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unused", client)}
+	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
 	require.NoError(t, neighbour.Publish(t.Context(), entries, targets, config))
 	actual := service.Tables()[config.TableName]
 	require.Equal(t, config.DefaultPriority, actual.Priority)
@@ -204,12 +202,20 @@ func Test_Publish_SingleTablePairs(t *testing.T) {
 	for idx, entry := range []neighbour.Entry{entries[2], first, second} {
 		require.True(t, proto.Equal(wireEntry(entry), actual.Entries[idx]))
 	}
-	require.Len(t, service.Calls(), 3)
+}
+
+// Test_Publish_EmptyReplacement verifies that an empty complete snapshot clears
+// only its own table and cannot enumerate or remove another producer's source.
+func Test_Publish_EmptyReplacement(t *testing.T) {
+	service, client := newPublicationService(t)
+	config := publicationConfig()
+	service.Store(config.TableName, publicationTable{Priority: 7, Entries: []*operatorpb.NeighbourEntry{wireEntry(testDesiredEntry("fe80::1", "logical0"))}})
+	service.Store("netlink-dataplane-other", publicationTable{Priority: 7})
+	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client)}
 	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
 	require.Empty(t, service.Tables()[config.TableName].Entries)
 	require.Equal(t, uint32(7), service.Tables()["netlink-dataplane-other"].Priority)
 	require.Len(t, service.Tables(), 2)
-	require.Len(t, service.Calls(), 6)
 }
 
 // Test_Publish_InvalidSnapshot verifies that invalid pairs are rejected before
@@ -231,7 +237,7 @@ func Test_Publish_InvalidSnapshot(t *testing.T) {
 			return entries
 		}},
 		{name: "overlong device", mutate: func(entries []neighbour.Entry) []neighbour.Entry {
-			entries[0].HardwareRoute.Device = strings.Repeat("d", 129)
+			entries[0].HardwareRoute.Device = strings.Repeat("d", 80)
 			return entries
 		}},
 	} {

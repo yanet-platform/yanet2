@@ -23,6 +23,7 @@ import (
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/operator"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 // gatewayFIBSink records successful writes and can hold a failed RPC in flight.
@@ -184,24 +185,28 @@ func Test_GatewayActuator_StaleRetry(t *testing.T) {
 	require.Equal(t, uint64(3), updated.GetEntries()[0].GetNexthops()[0].GetDstMac().GetAddr())
 }
 
-// Test_GatewayActuator_RemoteGeneration verifies that neither deletion nor a
-// later complete snapshot authorizes writes from an older captured generation.
+// Test_GatewayActuator_RemoteGeneration verifies that changed input invalidates
+// captured work while equivalent heartbeats allow a FIB build to finish.
 func Test_GatewayActuator_RemoteGeneration(t *testing.T) {
-	for _, tc := range []struct {
+	for _, test := range []struct {
 		name        string
 		duringBuild bool
 		remove      bool
+		heartbeat   bool
 	}{
 		{name: "replacement before apply"},
 		{name: "deletion before apply", remove: true},
 		{name: "replacement during FIB build", duringBuild: true},
 		{name: "deletion during FIB build", duringBuild: true, remove: true},
+		{name: "equivalent heartbeat before apply", heartbeat: true},
+		{name: "equivalent heartbeat during FIB build", duringBuild: true, heartbeat: true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
 			input := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
 			fixture := newNeighbourServiceFixture(t,
 				operator.WithNeighbourServiceOnSnapshotReceived(input.OnSnapshotReceived),
+				operator.WithNeighbourServiceOnTableRemoved(input.OnTableRemoved),
 			)
 			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
 			routes := rib.NewRIB()
@@ -209,23 +214,33 @@ func Test_GatewayActuator_RemoteGeneration(t *testing.T) {
 			snapshot, available := source.Snapshot()
 			require.True(t, available)
 			invalidate := func() {
-				if tc.remove {
-					input.OnTableRemoved("remote")
+				if test.remove {
+					_, err := fixture.Client.RemoveTable(t.Context(), &operatorpb.RemoveNeighbourTableRequest{Name: "remote"})
+					require.NoError(t, err)
+				} else if test.heartbeat {
+					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
 				} else {
-					input.OnSnapshotReceived("remote")
+					require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100, "192.0.2.1")))
 				}
 			}
 			options := []operator.GatewayActuatorOption{operator.WithGatewayActuatorRemoteInput(input)}
-			if tc.duringBuild {
+			if test.duringBuild {
 				options = append(options, operator.WithGatewayActuatorOnFIBBuilt(func(string, operator.FIBBuildStats) { invalidate() }))
 			} else {
 				invalidate()
 			}
 			sink := &gatewayFIBSink{FIBs: make(chan *routepb.UpdateFIBRequest, 16)}
 			actuator, functions := newGatewayActuatorFixture(t, sink, options...)
-			require.Error(t, actuator.Apply(t.Context(), snapshot))
-			require.Empty(t, sink.FIBs)
-			require.Zero(t, functions.Updates.Load())
+			err := actuator.Apply(t.Context(), snapshot)
+			if test.heartbeat {
+				require.NoError(t, err)
+				require.Len(t, sink.FIBs, 1)
+				require.Equal(t, int64(1), functions.Updates.Load())
+			} else {
+				require.Error(t, err)
+				require.Empty(t, sink.FIBs)
+				require.Zero(t, functions.Updates.Load())
+			}
 		})
 	}
 }

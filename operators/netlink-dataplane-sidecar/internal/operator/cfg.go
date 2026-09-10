@@ -130,7 +130,16 @@ func validateGRPCTarget(target string) error {
 	if strings.TrimSpace(target) != target || target == "" {
 		return errors.New("target is empty or contains surrounding whitespace")
 	}
-	if _, port, err := net.SplitHostPort(target); err == nil {
+	scheme, _, hasScheme := strings.Cut(target, ":")
+	resolverURI := hasScheme && (scheme == "dns" || scheme == "passthrough" || scheme == "unix" || scheme == "unix-abstract")
+	if !resolverURI {
+		if !strings.ContainsAny(target, ":/[] \t\n\r?#") {
+			return nil
+		}
+		_, port, err := net.SplitHostPort(target)
+		if err != nil {
+			return err
+		}
 		portNumber, lookupErr := net.LookupPort("tcp", port)
 		if lookupErr != nil || portNumber <= 0 {
 			return fmt.Errorf("invalid port %q", port)
@@ -141,10 +150,35 @@ func validateGRPCTarget(target string) error {
 	if err != nil {
 		return err
 	}
-	if parsed.Scheme != "" && parsed.Host == "" && parsed.Path == "" && parsed.Opaque == "" {
+	if parsed.Scheme == "" {
+		return errors.New("target requires host:port or a resolver URI")
+	}
+	endpoint := strings.TrimPrefix(parsed.Path, "/")
+	if endpoint == "" {
+		endpoint = parsed.Opaque
+	}
+	if endpoint == "" || strings.TrimSpace(endpoint) != endpoint {
 		return errors.New("target URI has no endpoint")
 	}
-	return nil
+	switch parsed.Scheme {
+	case "dns", "passthrough":
+		_, port, err := net.SplitHostPort(endpoint)
+		if err != nil {
+			if parsed.Scheme == "dns" && !strings.ContainsAny(endpoint, "/: \t\n\r") {
+				return nil
+			}
+			return fmt.Errorf("resolver endpoint requires host:port: %w", err)
+		}
+		portNumber, err := net.LookupPort("tcp", port)
+		if err != nil || portNumber <= 0 {
+			return fmt.Errorf("invalid port %q", port)
+		}
+		return nil
+	case "unix", "unix-abstract":
+		return nil
+	default:
+		return fmt.Errorf("unsupported resolver scheme %q", parsed.Scheme)
+	}
 }
 
 // DefaultConfig supplies bounded scheduling and a stable neighbour-table name.

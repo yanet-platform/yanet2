@@ -47,6 +47,10 @@ func Test_Config_InvalidFields(t *testing.T) {
 		{name: "zero reconcile interval", mutate: func(config *sidecaroperator.Config) { config.Reconcile.Interval = xcfg.NonZero[time.Duration]{} }},
 		{name: "zero initial backoff", mutate: func(config *sidecaroperator.Config) { config.Reconcile.InitialBackoff = xcfg.NonZero[time.Duration]{} }},
 		{name: "zero max backoff", mutate: func(config *sidecaroperator.Config) { config.Reconcile.MaxBackoff = xcfg.NonZero[time.Duration]{} }},
+		{name: "negative registration interval", mutate: func(config *sidecaroperator.Config) { config.Register.Interval = xcfg.MustNonZero(-time.Second) }},
+		{name: "negative reconcile interval", mutate: func(config *sidecaroperator.Config) { config.Reconcile.Interval = xcfg.MustNonZero(-time.Second) }},
+		{name: "negative initial backoff", mutate: func(config *sidecaroperator.Config) { config.Reconcile.InitialBackoff = xcfg.MustNonZero(-time.Second) }},
+		{name: "negative max backoff", mutate: func(config *sidecaroperator.Config) { config.Reconcile.MaxBackoff = xcfg.MustNonZero(-time.Second) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			config := twoGatewayConfig()
@@ -56,12 +60,39 @@ func Test_Config_InvalidFields(t *testing.T) {
 	}
 }
 
-// Test_Config_NegativeScheduling verifies that YAML duration decoding cannot
-// admit negative heartbeat, reconciliation or retry delays.
+// Test_Config_NegativeScheduling verifies that YAML decoding invokes semantic
+// scheduling validation rather than accepting a syntactically valid duration.
 func Test_Config_NegativeScheduling(t *testing.T) {
-	for _, field := range []string{"register:\n  interval", "reconcile:\n  interval", "reconcile:\n  initial_backoff", "reconcile:\n  max_backoff", "neighbour_publish_timeout"} {
-		t.Run(field, func(t *testing.T) {
-			require.Error(t, xcfg.Decode([]byte(field+": -1s\n"), twoGatewayConfig()))
+	require.Error(t, xcfg.Decode([]byte("reconcile:\n  interval: -1s\n"), twoGatewayConfig()))
+}
+
+// Test_Config_ResolverEndpoints verifies that resolver URIs contain a usable
+// endpoint before lazy gRPC client construction can defer their failure.
+func Test_Config_ResolverEndpoints(t *testing.T) {
+	for _, test := range []struct {
+		name, target string
+		valid        bool
+	}{
+		{name: "empty DNS endpoint", target: "dns:///"},
+		{name: "DNS authority without endpoint", target: "dns://resolver.internal"},
+		{name: "DNS authority with empty path", target: "dns://resolver.internal/"},
+		{name: "DNS zero port", target: "dns:///gateway.internal:0"},
+		{name: "passthrough authority without endpoint", target: "passthrough://gateway.internal:8080"},
+		{name: "passthrough zero port", target: "passthrough:///[::1]:0"},
+		{name: "DNS hostname and port", target: "dns:///gateway.internal:8080", valid: true},
+		{name: "DNS default port", target: "dns:///gateway.internal", valid: true},
+		{name: "DNS authority and endpoint", target: "dns://127.0.0.1:53/gateway.internal:8080", valid: true},
+		{name: "passthrough IPv6 endpoint", target: "passthrough:///[::1]:8080", valid: true},
+		{name: "Unix socket", target: "unix:///run/yanet.sock", valid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := twoGatewayConfig()
+			config.Gateways[0].Endpoint = xcfg.MustNonEmptyString(test.target)
+			if test.valid {
+				require.NoError(t, config.Validate())
+			} else {
+				require.Error(t, config.Validate())
+			}
 		})
 	}
 }

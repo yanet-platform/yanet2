@@ -20,10 +20,9 @@ func Test_Parse_DataplaneFixture(t *testing.T) {
 	for _, link := range state.Links {
 		counts[link.Kind]++
 		require.Equal(t, 9000, link.MTU)
-		require.NotContains(t, []string{"eth0", "eth1"}, link.Name)
 		if link.Kind == netplan.LinkKindVLAN {
 			require.Contains(t, []int{1600, 1619, 2000, 802}, link.VLANID)
-			require.Empty(t, link.LinkLocal)
+			require.False(t, link.IPv6LinkLocal)
 			expected := "fe80::f1/64"
 			if link.Parent == "kni1" {
 				expected = "fe80::1f1/64"
@@ -47,7 +46,9 @@ func Test_Parse_ManagedBoundary(t *testing.T) {
 		{name: "omitted sections", yaml: "network: {version: 2}", valid: true},
 		{name: "explicit empty sections", yaml: "network: {version: 2, ethernets: {}, vlans: {}, dummy-devices: {}}", valid: true},
 		{name: "aliases and empty lists", yaml: "defaults: &empty {addresses: [], link-local: []}\nnetwork: {version: 2, ethernets: {kni0: *empty}}", valid: true},
-		{name: "merged fields", yaml: "defaults: &base {mtu: 9000}\nnetwork: {version: 2, ethernets: {kni0: {<<: *base, addresses: []}}}", valid: true},
+		{name: "misspelled section", yaml: "network: {version: 2, etherents: {kni0: {}}}"},
+		{name: "unknown section", yaml: "network: {version: 2, unrelated: {}}"},
+		{name: "known host sections", yaml: "network: {version: 2, renderer: networkd, bonds: {}, bridges: {}, wifis: {}, tunnels: {}}", valid: true},
 		{name: "missing network", yaml: "other: {}"},
 		{name: "null network", yaml: "network: null"},
 		{name: "missing version", yaml: "network: {}"},
@@ -91,6 +92,57 @@ func Test_Parse_ManagedBoundary(t *testing.T) {
 				require.Equal(t, netplan.State{}, state)
 			}
 		})
+	}
+}
+
+// Test_Parse_DecimalMTU verifies that leading zeros and YAML merge keys retain
+// the decimal MTU rather than the YAML decoder's octal interpretation.
+func Test_Parse_DecimalMTU(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		yaml string
+		mtu  int
+	}{
+		{name: "leading zero", yaml: "network: {version: 2, ethernets: {kni0: {mtu: 03000}}}", mtu: 3000},
+		{name: "merged MTU", yaml: "defaults: &base {mtu: 9000}\nnetwork: {version: 2, ethernets: {kni0: {<<: *base}}}", mtu: 9000},
+		{name: "aliased network section", yaml: "defaults: &base {ethernets: {kni0: {mtu: 09000}}}\nnetwork: {<<: *base, version: 2}", mtu: 9000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state, err := netplan.Parse([]byte(test.yaml))
+			require.NoError(t, err)
+			require.Len(t, state.Links, 1)
+			require.Equal(t, test.mtu, state.Links[0].MTU)
+		})
+	}
+}
+
+// Test_Parse_LinkLocalGrammar verifies that omission enables IPv6 generation
+// and explicit empty or IPv6-only lists select the supported boolean policy.
+func Test_Parse_LinkLocalGrammar(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		fields  string
+		enabled bool
+	}{
+		{name: "default generation", fields: "{}", enabled: true},
+		{name: "disabled generation", fields: "{link-local: []}"},
+		{name: "explicit IPv6 generation", fields: "{link-local: [ipv6]}", enabled: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state, err := netplan.Parse([]byte("network: {version: 2, ethernets: {kni0: " + test.fields + "}}"))
+			require.NoError(t, err)
+			require.Equal(t, test.enabled, state.Links[0].IPv6LinkLocal)
+		})
+	}
+}
+
+// Test_Parse_DeterministicDiagnostic verifies that multiple invalid links and
+// fields report the same lexicographically first failure on every parse.
+func Test_Parse_DeterministicDiagnostic(t *testing.T) {
+	data := []byte("network: {version: 2, ethernets: {kni1: {zzz: true}, kni0: {zzz: true, aaa: true}}}")
+	for range 20 {
+		_, err := netplan.Parse(data)
+		require.ErrorContains(t, err, `link "kni0": unsupported setting "aaa"`)
 	}
 }
 

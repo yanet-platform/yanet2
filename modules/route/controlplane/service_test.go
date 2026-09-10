@@ -81,6 +81,13 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{handle: &fakeHandle{}}
 }
 
+// UpdateCalls captures backend writes independently of the public read fixture.
+func (m *fakeBackend) UpdateCalls() [][]*routepb.FIBEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([][]*routepb.FIBEntry(nil), m.updateCalls...)
+}
+
 // UpdateModule records the call and derives the handle's counter names
 // straight off entries, without resolving overlaps: the fake has no LPM, so
 // a test exercising shadowed-nexthop exclusion must go through the real

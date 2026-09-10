@@ -2,7 +2,8 @@ package operatorpb
 
 import (
 	"errors"
-	"strings"
+
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 )
 
 // Neighbour replacement limits bound both publisher batches and receiver staging.
@@ -12,16 +13,13 @@ const (
 	NeighbourSnapshotEntries   = 1_000_000
 	NeighbourSnapshotBytes     = 128 * 1024 * 1024
 	NeighbourConcurrentStreams = 4
-	NeighbourNameBytes         = 128
+	NeighbourTableNameBytes    = 128
 )
 
 // ValidateNeighbourDevice checks a logical egress name at the publishing edge.
 func ValidateNeighbourDevice(device string) error {
-	if len(device) == 0 || len(device) > NeighbourNameBytes {
-		return errors.New("device name must contain 1..128 bytes")
+	if device == "" {
+		return errors.New("device name is required")
 	}
-	if strings.ContainsAny(device, "\x00 \t\n\r\v\f") {
-		return errors.New("device name contains whitespace or a NUL byte")
-	}
-	return nil
+	return hwroute.ValidateDevice(device)
 }

@@ -146,7 +146,7 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 
 type neighbourServiceOptions struct {
 	OnChanged          func()
-	OnSnapshotReceived func(string)
+	OnSnapshotReceived func(string, bool) bool
 	OnTableRemoved     func(string)
 	RemoteTable        string
 	RemoteDevices      []string
@@ -156,7 +156,7 @@ type neighbourServiceOptions struct {
 func newNeighbourServiceOptions() *neighbourServiceOptions {
 	return &neighbourServiceOptions{
 		OnChanged:          func() {},
-		OnSnapshotReceived: func(string) {},
+		OnSnapshotReceived: func(string, bool) bool { return false },
 		OnTableRemoved:     func(string) {},
 		ReplacementLimits: NeighbourReplacementLimits{
 			MaxEntries:           operatorpb.NeighbourSnapshotEntries,
@@ -195,7 +195,10 @@ func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
 }
 
 // WithNeighbourServiceOnSnapshotReceived observes successful full replacements.
-func WithNeighbourServiceOnSnapshotReceived(callback func(string)) NeighbourServiceOption {
+//
+// The callback receives whether the content changed and returns whether restored
+// input availability requires a reconcile wake even with equivalent content.
+func WithNeighbourServiceOnSnapshotReceived(callback func(string, bool) bool) NeighbourServiceOption {
 	return func(options *neighbourServiceOptions) { options.OnSnapshotReceived = callback }
 }
 

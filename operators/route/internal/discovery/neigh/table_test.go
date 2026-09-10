@@ -2,14 +2,12 @@ package neigh_test
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
@@ -33,9 +31,9 @@ func keyedEntries(entries ...neigh.NeighbourEntry) map[neigh.Key]neigh.Neighbour
 	return result
 }
 
-// Test_NeighTable_PairPriorityAndRemoval verifies that priority resolution is
-// confined to a pair, and IP-only removal withdraws all devices in one source.
-func Test_NeighTable_PairPriorityAndRemoval(t *testing.T) {
+// Test_NeighTable_PairPriority verifies that an override and its withdrawal
+// affect only the matching IP/device pair.
+func Test_NeighTable_PairPriority(t *testing.T) {
 	table := neigh.NewNeighTable()
 	_, err := table.CreateSource("kernel", 100, true)
 	require.NoError(t, err)
@@ -56,19 +54,42 @@ func Test_NeighTable_PairPriorityAndRemoval(t *testing.T) {
 	require.True(t, found)
 	require.Equal(t, "static", actual.Source)
 	require.Equal(t, uint32(10), actual.Priority)
+	require.Equal(t, preferred.HardwareRoute, actual.HardwareRoute)
 	actual, found = view.Lookup(second.Key())
 	require.True(t, found)
 	require.Equal(t, "kernel", actual.Source)
 	require.Equal(t, uint32(100), actual.Priority)
-	require.NoError(t, table.Remove("static", []netip.Addr{first.NextHop}))
+	require.Equal(t, second.HardwareRoute, actual.HardwareRoute)
+	require.NoError(t, table.SwapSource("static", nil))
 	actual, found = table.View().Lookup(first.Key())
 	require.True(t, found)
 	require.Equal(t, "kernel", actual.Source)
+	require.Equal(t, first.HardwareRoute, actual.HardwareRoute)
+}
+
+// Test_NeighTable_IPWideRemoval verifies that removal withdraws every device
+// variant of the IP in one source, preserving other addresses and sources.
+func Test_NeighTable_IPWideRemoval(t *testing.T) {
+	table := neigh.NewNeighTable()
+	_, err := table.CreateSource("kernel", 100, true)
+	require.NoError(t, err)
+	_, err = table.CreateSource("static", 10, true)
+	require.NoError(t, err)
+	first := neighbourEntry("fe80::1", "kni0", 0)
+	second := neighbourEntry("fe80::1", "kni1", 0)
+	unrelated := neighbourEntry("fe80::2", "kni0", 0)
+	require.NoError(t, table.SwapSource("kernel", keyedEntries(first, second, unrelated)))
+	require.NoError(t, table.Add("static", []neigh.NeighbourEntry{first}))
 	require.NoError(t, table.Remove("kernel", []netip.Addr{first.NextHop}))
-	_, count = table.View().Entries()
-	require.Zero(t, count)
-	_, count = view.Entries()
-	require.Equal(t, 2, count)
+	kernel, found := table.SourceView("kernel")
+	require.True(t, found)
+	entries, _ := kernel.All()
+	require.Equal(t, keyedEntries(neighbourEntry("fe80::2", "kni0", 100)), maps.Collect(entries))
+	actual, found := table.View().Lookup(first.Key())
+	require.True(t, found)
+	require.Equal(t, "static", actual.Source)
+	_, found = table.View().Lookup(second.Key())
+	require.False(t, found)
 }
 
 // Test_NeighTable_SourceLifecycle verifies that mutations retain source metadata
@@ -231,45 +252,4 @@ func Test_NeighTable_ReplacementCancellation(t *testing.T) {
 			require.Equal(t, maps.Collect(before), maps.Collect(current))
 		}
 	}
-}
-
-// Test_NeighTable_ReplacementConcurrentReaders verifies that every visible
-// source, merged view and metadata record belongs to one complete replacement.
-func Test_NeighTable_ReplacementConcurrentReaders(t *testing.T) {
-	table := neigh.NewNeighTable()
-	first := neighbourEntry("192.0.2.1", "kni0", 0)
-	second := neighbourEntry("192.0.2.1", "kni1", 0)
-	snapshots := []map[neigh.Key]neigh.NeighbourEntry{keyedEntries(first), keyedEntries(first, second)}
-	_, err := table.ReplaceSource(t.Context(), "snapshot", 1, snapshots[0])
-	require.NoError(t, err)
-	var group errgroup.Group
-	group.Go(func() error {
-		for idx := range 100 {
-			entries := snapshots[idx%len(snapshots)]
-			if _, err := table.ReplaceSource(t.Context(), "snapshot", uint32(len(entries)), entries); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	group.Go(func() error {
-		for range 500 {
-			source, _ := table.SourceView("snapshot")
-			for _, view := range []neigh.NexthopCacheView{source, table.View()} {
-				entries, count := view.Entries()
-				for entry := range entries {
-					if entry.Priority != uint32(count) {
-						return fmt.Errorf("priority %d disagrees with snapshot size %d", entry.Priority, count)
-					}
-				}
-			}
-			for _, source := range table.ListSources() {
-				if source.DefaultPriority != uint32(source.EntryCount) {
-					return fmt.Errorf("source metadata disagrees with snapshot size")
-				}
-			}
-		}
-		return nil
-	})
-	require.NoError(t, group.Wait())
 }

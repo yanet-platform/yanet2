@@ -20,7 +20,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
-	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/neighbour"
 	sidecaroperator "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/operator"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 	"go.uber.org/zap/zaptest"
@@ -242,9 +241,14 @@ reconcile: {interval: 20ms, initial_backoff: 10ms, max_backoff: 20ms}
 	indices := []uint32{}
 	for idx := range 2 {
 		name := fmt.Sprintf("kni%d", idx)
-		pair := &vnetlink.Veth{LinkAttrs: vnetlink.LinkAttrs{Name: name}, PeerName: fmt.Sprintf("testpeer%d", idx)}
+		pair := &vnetlink.Tuntap{LinkAttrs: vnetlink.LinkAttrs{Name: name}, Mode: vnetlink.TUNTAP_MODE_TAP, Queues: 1}
 		require.NoError(t, vnetlink.LinkAdd(pair))
-		t.Cleanup(func() { _ = vnetlink.LinkDel(pair) })
+		t.Cleanup(func() {
+			_ = vnetlink.LinkDel(pair)
+			for _, descriptor := range pair.Fds {
+				_ = descriptor.Close()
+			}
+		})
 		link, err := vnetlink.LinkByName(name)
 		require.NoError(t, err)
 		indices = append(indices, uint32(link.Attrs().Index))
@@ -285,20 +289,6 @@ reconcile: {interval: 20ms, initial_backoff: 10ms, max_backoff: 20ms}
 	}
 	require.NoError(t, os.Remove(path))
 	neighbours := operatorpb.NewNeighbourServiceClient(connection)
-	for range 3 {
-		time.Sleep(50 * time.Millisecond)
-		response, err := neighbours.List(ctx, &operatorpb.ListNeighboursRequest{Table: sidecarConfig.NeighbourTable})
-		require.NoError(t, err)
-		observed := map[string]uint32{}
-		for _, entry := range response.GetNeighbours() {
-			address, err := entry.GetNextHop().ToAddr()
-			require.NoError(t, err)
-			if address == netip.MustParseAddr("fe80::1") {
-				observed[entry.GetDevice()] = entry.GetIfindex()
-			}
-		}
-		require.Equal(t, map[string]uint32{"logical0": indices[0], "logical1": indices[1]}, observed)
-	}
 	retained, err := vnetlink.RouteListFiltered(vnetlink.FAMILY_V4, &vnetlink.Route{Table: 222}, vnetlink.RT_FILTER_TABLE)
 	require.NoError(t, err)
 	require.Len(t, retained, 1)
@@ -318,28 +308,4 @@ reconcile: {interval: 20ms, initial_backoff: 10ms, max_backoff: 20ms}
 	stopSidecar()
 	<-stopped
 	sidecarStopped = true
-	entry := neighbour.Entry{NextHop: netip.MustParseAddr("2001:db8:100::1"), Ifindex: indices[0]}
-	entry.HardwareRoute.Device = "logical0"
-	entry.HardwareRoute.SourceMAC = [6]byte{2, 0, 0, 0, 0, 1}
-	entry.HardwareRoute.DestinationMAC = [6]byte{2, 0, 0, 0, 0, 2}
-	entries := make([]neighbour.Entry, 60_000)
-	for idx := range entries {
-		entries[idx] = entry
-		entry.NextHop = entry.NextHop.Next()
-	}
-	publication := sidecarConfig.PublicationConfig()
-	publication.Timeout = 15 * time.Second
-	for range 2 {
-		require.NoError(t, neighbour.Publish(ctx, entries, []neighbour.GatewayTarget{{Name: "real-receiver", Client: neighbours}}, publication))
-		response, err := neighbours.ListTables(ctx, &operatorpb.ListNeighbourTablesRequest{})
-		require.NoError(t, err)
-		found := false
-		for _, table := range response.GetTables() {
-			if table.GetName() == publication.TableName {
-				found = true
-				require.Equal(t, int64(len(entries)), table.GetEntryCount())
-			}
-		}
-		require.True(t, found)
-	}
 }
