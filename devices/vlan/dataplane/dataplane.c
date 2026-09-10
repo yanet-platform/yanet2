@@ -35,7 +35,7 @@ vlan_output_handle(
 ) {
 	(void)dp_worker;
 
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+	struct cp_device *cp_device = device_ectx->abs_cp_device;
 	struct cp_device_vlan *cp_device_vlan =
 		container_of(cp_device, struct cp_device_vlan, cp_device);
 

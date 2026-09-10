@@ -369,6 +369,13 @@ struct device_entry_ectx {
 
 struct device_ectx {
 	struct cp_device *cp_device;
+	// The same device, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct cp_device *abs_cp_device;
 	struct counter_storage *counter_storage;
 	struct device_entry_ectx *input_pipelines;
 	struct device_entry_ectx *output_pipelines;
