@@ -133,11 +133,10 @@ impl TrafgenService {
             device: Some(Device { input: cmd.input, output: cmd.output }),
         };
         self.service
-            .client()
-            .update_device(request)
-            .await
-            .map_err(self.service.status("update"))?
-            .into_inner();
+            .unary("update", request, async |client, request| {
+                client.update_device(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated device '{}'.", cmd.config_name));
 
@@ -147,11 +146,10 @@ impl TrafgenService {
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_configs(ListConfigsRequest {})
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -179,11 +177,10 @@ impl TrafgenService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -205,11 +202,10 @@ impl TrafgenService {
 
         let request = UploadPcapRequest { name: cmd.config_name.clone(), pcap };
         self.service
-            .client()
-            .upload_pcap(request)
-            .await
-            .map_err(self.service.status("upload"))?
-            .into_inner();
+            .unary("upload", request, async |client, request| {
+                client.upload_pcap(request).await
+            })
+            .await?;
 
         output::success("upload", format_args!("Uploaded pcap to device '{}'.", cmd.config_name));
 
@@ -222,11 +218,8 @@ impl TrafgenService {
             rate_pps: cmd.rate,
         };
         self.service
-            .client()
-            .set_rate(request)
-            .await
-            .map_err(self.service.status("rate"))?
-            .into_inner();
+            .unary("rate", request, async |client, request| client.set_rate(request).await)
+            .await?;
 
         output::success(
             "rate",

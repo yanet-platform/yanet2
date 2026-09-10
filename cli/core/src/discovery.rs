@@ -225,11 +225,10 @@ pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<
     });
 
     let response = service
-        .client()
-        .list_services(ListServicesRequest {})
-        .await
-        .map_err(service.status("discover"))?
-        .into_inner();
+        .unary("discover", ListServicesRequest {}, async |client, request| {
+            client.list_services(request).await
+        })
+        .await?;
 
     let mut services: Vec<String> = response
         .services
