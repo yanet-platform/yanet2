@@ -6,7 +6,7 @@ use commonpb::pb::FunctionId;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -101,19 +101,10 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_functions().await?;
+            let names: Vec<String> = ids.iter().map(|id| id.name.clone()).collect();
             output::data(
                 || &ids,
-                || {
-                    if ids.is_empty() {
-                        output::empty(format_args!("No functions found."));
-                        return;
-                    }
-
-                    print!(
-                        "{}",
-                        serde_yaml::to_string(&ids).expect("function list YAML serialization must not fail")
-                    );
-                },
+                || display::print_names(&names, format_args!("No functions found.")),
             );
         }
         ModeCmd::Show(show) => {

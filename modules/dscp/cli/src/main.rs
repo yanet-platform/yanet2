@@ -10,7 +10,7 @@ use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -187,19 +187,11 @@ impl DscpService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No DSCP configurations found."),
-                        format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
-                for config in &response.configs {
-                    tree.add_empty_child(config.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No DSCP configurations found."),
+                    format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
+                )
             },
         );
 

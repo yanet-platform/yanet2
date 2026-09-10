@@ -12,7 +12,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -52,30 +52,6 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-/// Makes text that came off the wire safe to hand a terminal.
-///
-/// A name is stored as it was given, so it can carry an escape sequence or
-/// a newline. It is spelled out rather than dropped: two names that differ
-/// only in one must not read alike.
-fn escape_wire_text(value: &str) -> String {
-    value.escape_debug().to_string()
-}
-
-/// Orders the stored configuration names for a human reader.
-///
-/// The service builds its reply by walking a map, so the order it answers
-/// in changes between calls and would otherwise reshuffle the listing under
-/// an operator watching it.
-fn config_list_rows(configs: &[String]) -> Vec<ConfigRow> {
-    let mut names: Vec<&String> = configs.iter().collect();
-    names.sort();
-
-    names
-        .into_iter()
-        .map(|name| ConfigRow { config: escape_wire_text(name) })
-        .collect()
-}
-
 /// Renders a stored nanosecond timeout as the milliseconds an operator reads.
 ///
 /// Zero is a meaningful setting here, so a value below a millisecond keeps
@@ -91,12 +67,6 @@ fn format_timeout_millis(nanos: u64) -> String {
 
     let fraction = format!("{remainder:06}");
     format!("{millis}.{}", fraction.trim_end_matches('0'))
-}
-
-#[derive(Tabled)]
-struct ConfigRow {
-    #[tabled(rename = "Config")]
-    config: String,
 }
 
 #[derive(Tabled)]
@@ -116,9 +86,9 @@ impl SettingRow {
 /// Lays out one stored configuration for a human reader.
 fn config_rows(response: &ShowConfigResponse) -> Vec<SettingRow> {
     let mut rows = vec![
-        SettingRow::new("name", escape_wire_text(&response.name)),
-        SettingRow::new("map name v4", escape_wire_text(&response.map_name_v4)),
-        SettingRow::new("map name v6", escape_wire_text(&response.map_name_v6)),
+        SettingRow::new("name", display::escape_wire_text(&response.name)),
+        SettingRow::new("map name v4", display::escape_wire_text(&response.map_name_v4)),
+        SettingRow::new("map name v6", display::escape_wire_text(&response.map_name_v6)),
     ];
 
     let Some(sync_config) = response.sync_config.as_ref() else {
@@ -304,17 +274,13 @@ impl FWStateService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No FWState configurations found."),
-                        format_args!(
-                            "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
-                        ),
-                    );
-                    return;
-                }
-
-                ync::display::print_table_from_entries(config_list_rows(&response.configs));
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No FWState configurations found."),
+                    format_args!(
+                        "provision maps with 'yanet-cli-fwstatemap create --name <map> --kind <v4|v6>', then create a config with 'yanet-cli-fwstate update --name <name> --map-name-v4 <map> --map-name-v6 <map>'"
+                    ),
+                )
             },
         );
 
@@ -335,7 +301,7 @@ impl FWStateService {
 
         output::data(
             || &response,
-            || ync::display::print_table_from_entries(config_rows(&response)),
+            || display::print_table_from_entries(config_rows(&response)),
         );
 
         Ok(())
@@ -508,21 +474,6 @@ mod tests {
 
         let settings: Vec<String> = config_rows(&response).into_iter().map(|row| row.setting).collect();
         assert_eq!(vec!["name", "map name v4", "map name v6"], settings);
-    }
-
-    #[test]
-    fn test_escape_wire_text_spells_out_control_characters() {
-        assert_eq!("fwstate0", escape_wire_text("fwstate0"));
-        assert_eq!("a\\nb", escape_wire_text("a\nb"));
-        assert_eq!("\\u{1b}\\r[2J", escape_wire_text("\u{1b}\r[2J"));
-    }
-
-    #[test]
-    fn test_config_list_rows_are_ordered() {
-        let configs = ["fwstate2".to_string(), "fwstate0".to_string(), "fwstate1".to_string()];
-
-        let names: Vec<String> = config_list_rows(&configs).into_iter().map(|row| row.config).collect();
-        assert_eq!(vec!["fwstate0", "fwstate1", "fwstate2"], names);
     }
 
     #[test]

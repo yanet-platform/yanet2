@@ -19,7 +19,7 @@ use routemplspb::{
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -191,17 +191,11 @@ impl RouteMplsService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No route-mpls configurations found."),
-                        format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
-                    );
-                    return;
-                }
-
-                for name in &response.configs {
-                    println!("{name}");
-                }
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No route-mpls configurations found."),
+                    format_args!("create one with 'yanet-cli-route-mpls create --name <name>'"),
+                )
             },
         );
 

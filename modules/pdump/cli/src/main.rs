@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::{Error, ErrorKind},
     output::{self, CommonFormat},
 };
@@ -103,19 +103,11 @@ impl PdumpService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No pdump configurations found."),
-                        format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
-                    );
-                    return;
-                }
-
-                let mut tree = TreeBuilder::new("List Pdump Configs".to_owned());
-                for config in &response.configs {
-                    tree.add_empty_child(config.clone());
-                }
-                let _ = ptree::print_tree(&tree.build());
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No pdump configurations found."),
+                    format_args!("create one with 'yanet-cli-pdump set --name <name>'"),
+                )
             },
         );
 

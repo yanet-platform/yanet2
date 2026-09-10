@@ -10,7 +10,7 @@ use trafgenpb::{
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -154,19 +154,13 @@ impl TrafgenService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No trafgen configurations found."),
-                        format_args!(
-                            "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
-                        ),
-                    );
-                    return;
-                }
-
-                for name in &response.configs {
-                    println!("{name}");
-                }
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No trafgen configurations found."),
+                    format_args!(
+                        "create one with 'yanet-cli-device-trafgen update --name <name> --input <pipeline:weight> --output <pipeline:weight>'"
+                    ),
+                )
             },
         );
 
