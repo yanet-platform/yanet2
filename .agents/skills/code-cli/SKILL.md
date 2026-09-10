@@ -51,9 +51,11 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `cmd.connection.endpoint` itself. A pre-connect error label comes from
   `client::resolve_label`, a post-connect one from `Service::endpoint()` /
   `Connection::endpoint()`.
-- Every RPC: `self.service.unary("<verb>", request, async |client, request|
-  client.<rpc>(request).await).await?`; a mapper other than `status` goes
-  through `unary_with("<verb>", request, mapper, call)`.
+- Every unary RPC: `self.service.unary("<verb>", request, async |client,
+  request| client.<rpc>(request).await).await?`; a mapper other than
+  `status` goes through `unary_with("<verb>", request, mapper, call)`. A
+  streaming RPC keeps `self.service.client().<rpc>(request).await
+  .map_err(self.service.status("<verb>"))?.into_inner()`.
 - Generated code: `#[allow(clippy::std_instead_of_core, non_snake_case)]
   pub mod <x>pb { tonic::include_proto!("…"); }`; shared protos come
   through `extern_path` to `::commonpb::pb`.

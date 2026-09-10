@@ -391,7 +391,7 @@ impl NotFoundMapper {
 
 /// Maps `status` to an [`Error`] for `service`, rewriting a genuine resource
 /// `NotFound` into `<resource> not found` and passing the rest through.
-pub(crate) fn map_not_found(
+pub fn map_not_found(
     status: Status,
     action: impl Into<String>,
     endpoint: impl Into<String>,
