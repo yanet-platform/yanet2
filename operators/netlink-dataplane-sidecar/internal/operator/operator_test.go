@@ -20,6 +20,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 	sidecaroperator "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/operator"
@@ -158,6 +159,25 @@ func Test_NewOperator_HandleFactoryError(t *testing.T) {
 	command.Env = append(os.Environ(), "YANET_TEST_HANDLE_FAILURE=1")
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, "%s", output)
+}
+
+// Test_NewOperator_TLSFailureCleanup verifies that a failed real credential
+// load closes earlier resources and returns its cause without a typed-nil panic.
+func Test_NewOperator_TLSFailureCleanup(t *testing.T) {
+	config := twoGatewayConfig()
+	config.Gateways[1].TLS = &xgrpc.ClientTLSConfig{
+		CAFile: filepath.Join(t.TempDir(), "missing-ca.pem"),
+	}
+	handle := &fakeNetlinkHandle{}
+	runnable, err := sidecaroperator.NewOperator(config,
+		sidecaroperator.WithNetplanLoader(emptyNetplan),
+		sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) {
+			return handle, nil
+		}),
+	)
+	require.Nil(t, runnable)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.True(t, handle.Closed)
 }
 
 // Test_NewOperator_ConfiguresSharedSocketTimeout verifies that every shared

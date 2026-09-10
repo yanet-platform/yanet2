@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
+	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/operator"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -130,7 +132,7 @@ func Test_GatewayActuator_StaleRetry(t *testing.T) {
 	input := operator.NewNeighbourReadiness("remote", 250*time.Millisecond, tracker)
 	fixture := newNeighbourServiceFixture(t,
 		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0"}),
-		operator.WithNeighbourServiceOnSnapshotReceived(input.OnSnapshotReceived),
+		operator.WithNeighbourServiceReadiness(input),
 	)
 	routes := rib.NewRIB()
 	require.NoError(t, routes.AddUnicastRoute(netip.MustParsePrefix("203.0.113.0/24"), netip.MustParseAddr("192.0.2.1"), rib.RouteSourceStatic))
@@ -205,8 +207,7 @@ func Test_GatewayActuator_RemoteGeneration(t *testing.T) {
 			tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
 			input := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
 			fixture := newNeighbourServiceFixture(t,
-				operator.WithNeighbourServiceOnSnapshotReceived(input.OnSnapshotReceived),
-				operator.WithNeighbourServiceOnTableRemoved(input.OnTableRemoved),
+				operator.WithNeighbourServiceReadiness(input),
 			)
 			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
 			routes := rib.NewRIB()
@@ -241,6 +242,72 @@ func Test_GatewayActuator_RemoteGeneration(t *testing.T) {
 				require.Empty(t, sink.FIBs)
 				require.Zero(t, functions.Updates.Load())
 			}
+		})
+	}
+}
+
+// Test_GatewayActuator_CommitBeforeNotification verifies that committed data
+// already invalidates old FIB work while the receiver notification is paused.
+func Test_GatewayActuator_CommitBeforeNotification(t *testing.T) {
+	for _, operation := range []string{"replacement", "removal"} {
+		t.Run(operation, func(t *testing.T) {
+			tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
+			input := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
+			committed := make(chan struct{})
+			release := make(chan struct{})
+			resume := sync.OnceFunc(func() { close(release) })
+			var replacements atomic.Int32
+			fixture := newNeighbourServiceFixture(t,
+				operator.WithNeighbourServiceReadiness(input),
+				operator.WithNeighbourServiceOnSnapshotReceived(func(table string, changed bool) bool {
+					if replacements.Add(1) == 2 {
+						close(committed)
+						<-release
+					}
+					return false
+				}),
+				operator.WithNeighbourServiceOnTableRemoved(func(table string) {
+					close(committed)
+					<-release
+				}),
+			)
+			t.Cleanup(resume)
+			require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client,
+				replacementChunk("remote", 100, "192.0.2.1"),
+			))
+			source := operator.NewRouteSource(fixture.Table, gatewayRIBSnapshot{RIB: rib.NewRIB()},
+				operator.WithRouteSourceNeighbours("remote", input),
+			)
+			previous, available := source.Snapshot()
+			require.True(t, available)
+			result := make(chan error, 1)
+			go func() {
+				if operation == "removal" {
+					_, err := fixture.Client.RemoveTable(t.Context(), &operatorpb.RemoveNeighbourTableRequest{Name: "remote"})
+					result <- err
+				} else {
+					result <- sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100, "192.0.2.2"))
+				}
+			}()
+			awaitGatewayResult(t, committed)
+			current, available := input.Generation()
+			require.NotEqual(t, previous.NeighbourGeneration, current)
+			require.Equal(t, operation == "replacement", available)
+			captured, available := source.Snapshot()
+			require.Equal(t, operation == "replacement", available)
+			if available {
+				require.Equal(t, current, captured.NeighbourGeneration)
+				entry, found := captured.Neighbours.ViewByDevices(nil).Lookup(neigh.NewKey(netip.MustParseAddr("192.0.2.2"), "logical0"))
+				require.True(t, found)
+				require.Equal(t, netip.MustParseAddr("192.0.2.2"), entry.NextHop)
+			}
+			sink := &gatewayFIBSink{FIBs: make(chan *routepb.UpdateFIBRequest, 1)}
+			actuator, functions := newGatewayActuatorFixture(t, sink, operator.WithGatewayActuatorRemoteInput(input))
+			require.Error(t, actuator.Apply(t.Context(), previous))
+			require.Empty(t, sink.FIBs)
+			require.Zero(t, functions.Updates.Load())
+			resume()
+			require.NoError(t, awaitGatewayResult(t, result))
 		})
 	}
 }

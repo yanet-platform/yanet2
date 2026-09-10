@@ -7,9 +7,11 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
+	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
 
-// NeighbourReadiness observes complete expected-source input independently of FIB apply.
+// NeighbourReadiness commits complete input and its freshness together,
+// independently of FIB apply.
 type NeighbourReadiness struct {
 	mu         sync.Mutex
 	table      string
@@ -26,35 +28,46 @@ func NewNeighbourReadiness(table string, maxAge time.Duration, tracker *readines
 	return m
 }
 
-// OnSnapshotReceived refreshes input age even for empty or unchanged snapshots.
+// ReplaceSnapshot commits content and its authorization in one critical section.
 //
-// Only semantic changes advance the generation. The result requests a reconcile
-// wake when a complete snapshot restores previously unavailable input.
-func (m *NeighbourReadiness) OnSnapshotReceived(table string, changed bool) bool {
+// Empty and equivalent snapshots refresh input age. Only semantic changes
+// advance the generation; restored availability also requests a reconcile wake.
+func (m *NeighbourReadiness) ReplaceSnapshot(
+	ctx context.Context,
+	neighbours *neigh.NeighTable,
+	table string,
+	priority uint32,
+	entries map[neigh.Key]neigh.NeighbourEntry,
+) (changed bool, recovered bool, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if table != m.table {
-		return false
+	changed, err = neighbours.ReplaceSource(ctx, table, priority, entries)
+	if err != nil || table != m.table {
+		return changed, false, err
 	}
-	recovered := m.receivedAt.IsZero() || time.Since(m.receivedAt) >= m.maxAge
+	recovered = m.receivedAt.IsZero() || time.Since(m.receivedAt) >= m.maxAge
 	m.receivedAt = time.Now()
 	if changed {
 		m.generation++
 	}
 	m.tracker.Set("neighbours", readinesspb.State_STATE_READY)
-	return recovered
+	return changed, recovered, nil
 }
 
-// OnTableRemoved requires a new complete replacement after expected-source deletion.
-func (m *NeighbourReadiness) OnTableRemoved(table string) {
+// RemoveTable invalidates authorization atomically with expected-source deletion.
+func (m *NeighbourReadiness) RemoveTable(neighbours *neigh.NeighTable, table string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := neighbours.DeleteSource(table); err != nil {
+		return err
+	}
 	if table != m.table {
-		return
+		return nil
 	}
 	m.receivedAt = time.Time{}
 	m.generation++
 	m.tracker.SetWithReason("neighbours", readinesspb.State_STATE_NOT_READY, &readinesspb.Reason{Code: "SYNCING"})
+	return nil
 }
 
 // Available checks freshness at capture time without waiting for a sampling tick.

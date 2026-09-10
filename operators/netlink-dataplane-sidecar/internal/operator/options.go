@@ -30,7 +30,7 @@ type GatewayConnection interface {
 	Close() error
 }
 
-// GatewayDialer opens a connection using common gateway configuration.
+// GatewayDialer transfers one usable connection on success only.
 type GatewayDialer func(commonoperator.GatewayConfig) (GatewayConnection, error)
 
 // NetplanLoader reads and validates the desired configuration at startup.
@@ -54,7 +54,11 @@ func newOptions() *options {
 			return handle, nil
 		},
 		DialGateway: func(config commonoperator.GatewayConfig) (GatewayConnection, error) {
-			return commonoperator.DialGateway(config)
+			connection, err := commonoperator.DialGateway(config)
+			if err != nil {
+				return nil, err
+			}
+			return connection, nil
 		},
 		LoadNetplan:         netplan.ParseFile,
 		SubscribeNeighbours: netlink.NeighSubscribeWithOptions,

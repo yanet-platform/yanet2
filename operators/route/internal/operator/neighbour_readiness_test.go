@@ -36,8 +36,7 @@ func newReadinessFixture(t *testing.T, maxAge time.Duration) (*neighbourServiceF
 	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}, {Name: "fib:gateway:route0"}})
 	observer := operator.NewNeighbourReadiness("remote", maxAge, tracker)
 	fixture := newNeighbourServiceFixture(t,
-		operator.WithNeighbourServiceOnSnapshotReceived(observer.OnSnapshotReceived),
-		operator.WithNeighbourServiceOnTableRemoved(observer.OnTableRemoved),
+		operator.WithNeighbourServiceReadiness(observer),
 		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0", "logical1"}),
 	)
 	source := operator.NewRouteSource(fixture.Table, emptyRIBSnapshot{}, operator.WithRouteSourceNeighbours("remote", observer))
@@ -149,8 +148,7 @@ func Test_NeighbourReadiness_TableLifecycle(t *testing.T) {
 	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
 	observer := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
 	fixture := newNeighbourServiceFixture(t,
-		operator.WithNeighbourServiceOnSnapshotReceived(observer.OnSnapshotReceived),
-		operator.WithNeighbourServiceOnTableRemoved(observer.OnTableRemoved),
+		operator.WithNeighbourServiceReadiness(observer),
 		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0"}),
 	)
 	source := operator.NewRouteSource(fixture.Table, emptyRIBSnapshot{}, operator.WithRouteSourceNeighbours("remote", observer))
@@ -181,8 +179,7 @@ func Test_RouteSource_RejectsMixedGenerations(t *testing.T) {
 	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}})
 	observer := operator.NewNeighbourReadiness("remote", time.Minute, tracker)
 	fixture := newNeighbourServiceFixture(t,
-		operator.WithNeighbourServiceOnSnapshotReceived(observer.OnSnapshotReceived),
-		operator.WithNeighbourServiceOnTableRemoved(observer.OnTableRemoved),
+		operator.WithNeighbourServiceReadiness(observer),
 	)
 	input := replacementChunk("remote", 100, "192.0.2.1")
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))

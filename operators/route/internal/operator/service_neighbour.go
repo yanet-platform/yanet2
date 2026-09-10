@@ -43,6 +43,7 @@ type NeighbourService struct {
 	onSnapshotReceived func(string, bool) bool
 	onTableRemoved     func(string)
 	commitMu           sync.Mutex
+	readiness          *NeighbourReadiness
 	remoteTable        string
 	remoteDevices      map[string]bool
 }
@@ -69,6 +70,7 @@ func NewNeighbourService(
 		staged:             make(chan struct{}, opts.ReplacementLimits.MaxConcurrentStreams),
 		onSnapshotReceived: opts.OnSnapshotReceived,
 		onTableRemoved:     opts.OnTableRemoved,
+		readiness:          opts.Readiness,
 		remoteTable:        opts.RemoteTable,
 		remoteDevices:      devices,
 	}
@@ -164,9 +166,15 @@ func (m *NeighbourService) ReplaceNeighbours(
 func (m *NeighbourService) replaceSnapshot(ctx context.Context, table string, priority uint32, entries map[neigh.Key]neigh.NeighbourEntry) (bool, error) {
 	m.commitMu.Lock()
 	defer m.commitMu.Unlock()
-	changed, err := m.neighTable.ReplaceSource(ctx, table, priority, entries)
+	var changed, recovered bool
+	var err error
+	if m.readiness == nil {
+		changed, err = m.neighTable.ReplaceSource(ctx, table, priority, entries)
+	} else {
+		changed, recovered, err = m.readiness.ReplaceSnapshot(ctx, m.neighTable, table, priority, entries)
+	}
 	if err == nil {
-		changed = m.onSnapshotReceived(table, changed) || changed
+		changed = m.onSnapshotReceived(table, changed) || changed || recovered
 	}
 	return changed, err
 }
@@ -273,7 +281,13 @@ func (m *NeighbourService) RemoveTable(
 ) (*operatorpb.RemoveNeighbourTableResponse, error) {
 	m.commitMu.Lock()
 	defer m.commitMu.Unlock()
-	if err := m.neighTable.DeleteSource(req.GetName()); err != nil {
+	var err error
+	if m.readiness == nil {
+		err = m.neighTable.DeleteSource(req.GetName())
+	} else {
+		err = m.readiness.RemoveTable(m.neighTable, req.GetName())
+	}
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to remove neighbour table: %v", err)
 	}
 	m.onTableRemoved(req.GetName())
