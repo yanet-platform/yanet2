@@ -1,3 +1,5 @@
+use core::fmt::Arguments;
+
 use tabled::{
     Table, Tabled,
     settings::{
@@ -8,6 +10,52 @@ use tabled::{
     },
 };
 use terminal_size::terminal_size_of;
+
+use crate::output;
+
+/// Prints `names` one per line, sorted and escaped, or reports an empty
+/// list with `empty` through [`output::empty`].
+///
+/// Call it from the render closure of [`output::data`], like every other
+/// human renderer.
+pub fn print_names(names: &[String], empty: Arguments) {
+    if names.is_empty() {
+        output::empty(empty);
+        return;
+    }
+
+    print_sorted(names);
+}
+
+/// [`print_names`] whose empty report also carries `hint`, see
+/// [`output::empty_with_hint`].
+pub fn print_names_with_hint(names: &[String], empty: Arguments, hint: Arguments) {
+    if names.is_empty() {
+        output::empty_with_hint(empty, hint);
+        return;
+    }
+
+    print_sorted(names);
+}
+
+fn print_sorted(names: &[String]) {
+    for name in sorted_names(names) {
+        println!("{name}");
+    }
+}
+
+fn sorted_names(names: &[String]) -> Vec<String> {
+    let mut names: Vec<&str> = names.iter().map(String::as_str).collect();
+    names.sort_unstable();
+
+    names.into_iter().map(escape_wire_text).collect()
+}
+
+/// Spells out the non-printable characters, quotes and backslashes of text
+/// that came off the wire, so two names that differ cannot read alike.
+pub fn escape_wire_text(value: &str) -> String {
+    value.escape_debug().to_string()
+}
 
 /// Print a table to stdout.
 pub fn print_table_from_entries<I, T>(entries: I)
@@ -147,7 +195,27 @@ pub fn bar_len(count: u64, max_count: u64) -> usize {
 
 #[cfg(test)]
 mod test {
-    use super::{bar_len, wrap_words};
+    use super::{bar_len, escape_wire_text, sorted_names, wrap_words};
+
+    #[test]
+    fn test_escape_wire_text_spells_out_control_and_invisible_characters() {
+        assert_eq!("decap0", escape_wire_text("decap0"));
+        assert_eq!("a\\nb", escape_wire_text("a\nb"));
+        assert_eq!("\\u{1b}\\r[2J", escape_wire_text("\u{1b}\r[2J"));
+        assert_eq!("a\\u{200b}b", escape_wire_text("a\u{200b}b"));
+    }
+
+    #[test]
+    fn test_escape_wire_text_keeps_distinct_names_distinct() {
+        assert_ne!(escape_wire_text("a\\nb"), escape_wire_text("a\nb"));
+    }
+
+    #[test]
+    fn test_sorted_names_sorts_the_raw_names_before_escaping() {
+        let names = ["de\ncap".to_owned(), "a\u{7f}".to_owned(), "a}".to_owned()];
+
+        assert_eq!(vec!["a}", "a\\u{7f}", "de\\ncap"], sorted_names(&names));
+    }
 
     #[test]
     fn bar_len_scaling() {
