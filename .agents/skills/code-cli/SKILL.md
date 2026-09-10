@@ -85,8 +85,14 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   <path>`) or a filter pattern (`counters [PATTERN]…`); everything else
   is a flag. A file never has a flag. A YAML file positional loads with
   `ync::yaml::load::<T>(&path)`, its error already naming the path, mapped
-  with `service.invalid("<verb>", err.to_string())`; no private `load`
-  that opens and parses on its own.
+  with `service.invalid("<verb>", err.to_string())`. A wire-shaped request
+  file loads before the connection with `yaml::load_document::<T>(&path)`
+  plus `yaml::bind_name(&mut request.name, &cmd.name)`, both mapped with
+  `Error::invalid_argument("<verb>", label, …)` over a
+  `client::resolve_label` label; such a request type derives `Deserialize`
+  with `#[serde(default, deny_unknown_fields)]` from `build.rs`, so a sparse
+  file loads and a misspelled key is refused. No private `load` that opens
+  and parses on its own.
 - Flags: `--name/-n` names the object the binary manages (a config, a map,
   a sessions state) and nothing else; `-4/-6` family filters, mutually
   exclusive (nat64's address pair excepted); `--endpoint` and `--auth`
@@ -131,9 +137,20 @@ no `--yes`, no `--dry-run`.
   Tabled for <wire type>` (`LENGTH`, `fields` with `Cow::Borrowed` for `&str`
   and `Cow::Owned` for computed cells, `headers`). A local row struct only
   where the orphan rule blocks that (a type from a shared proto crate) or for
-  a document schema that also parses a file. A single object is a key/value
-  block, nested lists as sub-tables. Never a pretty-printed JSON, YAML or tree
-  dump in human mode.
+  a document schema that also parses a file. A table whose columns are only
+  known at run time is built as a `tabled::Table` and handed to
+  `display::print_table`, which styles and fits it the same way. A list of
+  bare names (a config
+  CLI's `list`) is `display::print_names(&names, empty)` or
+  `print_names_with_hint(&names, empty, hint)`, sorted and escaped. A single
+  object is a `display::KeyValue` block (`row`, `rows` for a list one item
+  per line, `print`). Never a pretty-printed JSON, YAML or tree dump in
+  human mode, except a config updated from a wire-shaped file, whose `show`
+  prints that YAML document so a redirected `show` feeds `update`.
+- A server stream or a paged dump leaves through `output::rows(header,
+  render)`: `push` per row, `finish(empty)` at the end; under `--format json`
+  every row is one JSON line. Wrapped text under a prefix with a hanging
+  indent is `display::print_hanging`, a histogram is `display::print_bars`.
 - Empty results: inside the render closure, `output::empty(…)` or
   `output::empty_with_hint(…, "create one with '<full command>'")` and an
   early return; never bare printing or a call-site guard. The primitive owns
@@ -142,14 +159,24 @@ no `--yes`, no `--dry-run`.
   sentence `<Verb-ed> <kind> '<name>'.` (name quoted, `config` for a module
   CLI's kind).
 - Colour and glyphs only via `output::is_colored()`, `output::dim`,
-  `output::paint_dim`; no `colored` dependency in a CLI crate (#2377).
+  `output::paint_dim` / `paint_bold` / `paint_ok` / `paint_warning` /
+  `paint_error`, and a
+  bracketed status mark with a Unicode and an ASCII face is a
+  `display::Mark`; no `colored` dependency in a CLI crate (#2377).
   `ync::init`, called by `entrypoint`, decides colour once for the process; a
   crate never calls `colored::control` outside its tests.
 - An unusable derived JSON shape (an enum as a number) is fixed on the wire
-  type: `field_attribute` in `build.rs` adds `#[serde(serialize_with = "…")]`,
-  the function lives in `main.rs`, the exception is owner-approved.
-- Ages, durations, sizes: `ync::humanfmt`; metrics: `ync::metrics`, its
-  `format_number` the one thousands-separator formatter.
+  type: `field_attribute` in `build.rs` adds `#[serde(serialize_with =
+  "commonpb::serde_with::timestamp")]` (or `duration`) for an instant,
+  `#[serde(deserialize_with = "filterpb::null_as_default")]` for a nullable
+  field, and for an enum field a `serialize_with` / `deserialize_with` pair
+  of functions in `main.rs` delegating to `commonpb::serde_with::declared_name`
+  and `from_declared_name` (`lowercase_name` renders an output-only field);
+  the exception is owner-approved.
+- Ages and instants: `ync::humanfmt` (`format_age`, `age_since`,
+  `format_timestamp`); a duration: `humantime::format_duration`; sizes:
+  `bytesize::ByteSize`; metrics: `ync::metrics`,
+  its `format_number` the one thousands-separator formatter.
 
 ## Errors and exit codes
 

@@ -508,9 +508,9 @@ impl<C> Service<C> {
 
     /// The endpoint this client reached.
     ///
-    /// Exposed for the few call sites that build errors through a helper
-    /// other than [`status`](Service::status) / [`invalid`](Service::invalid)
-    /// (for example a [`NotFoundMapper`](crate::errors::NotFoundMapper)).
+    /// Read it only for a payload or an error label built without
+    /// [`status`](Service::status), [`invalid`](Service::invalid) or
+    /// [`not_found`](Service::not_found).
     pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
