@@ -7,7 +7,7 @@ use clap::Parser;
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     errors::Error,
     output,
 };
@@ -33,38 +33,27 @@ fn main() -> std::process::ExitCode {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let mut service = InspectService::new(&cmd.globals.connection).await?;
-    let response = service.inspect().await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, "inspect", INSPECT_SERVICE, |channel| {
+        InspectServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    })
+    .await?;
+    let response = inspect(&mut service).await?;
 
     output::data(|| &response, || report::render(&response, cmd.memory));
 
     Ok(())
 }
 
-pub struct InspectService {
-    service: Service<InspectServiceClient<LayeredChannel>>,
-}
+type InspectService = Service<InspectServiceClient<LayeredChannel>>;
 
-impl InspectService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, "inspect", INSPECT_SERVICE, |channel| {
-            InspectServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
+async fn inspect(service: &mut InspectService) -> Result<InspectResponse, Error> {
+    let response = service
+        .unary("inspect", InspectRequest {}, async |client, request| {
+            client.inspect(request).await
         })
         .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn inspect(&mut self) -> Result<InspectResponse, Error> {
-        let response = self
-            .service
-            .unary("inspect", InspectRequest {}, async |client, request| {
-                client.inspect(request).await
-            })
-            .await?;
-
-        Ok(response)
-    }
+    Ok(response)
 }

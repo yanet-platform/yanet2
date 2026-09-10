@@ -4,7 +4,7 @@ use std::time;
 use commonpb::pb::GetMetricsRequest;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     display::print_names_with_hint,
     errors::Error,
     output, yaml,
@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// The fully-qualified gRPC service name used in error messages.
-const SERVICE_NAME: &str = "modules.balancer2.controlplane.balancerpb.v1.Balancer";
+pub const SERVICE_NAME: &str = "modules.balancer2.controlplane.balancerpb.v1.Balancer";
 
 pub fn client(channel: LayeredChannel) -> BalancerClient<LayeredChannel> {
     BalancerClient::new(channel)
@@ -32,293 +32,275 @@ pub fn client(channel: LayeredChannel) -> BalancerClient<LayeredChannel> {
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
-pub struct Balancer2Service {
-    service: Service<BalancerClient<LayeredChannel>>,
+pub type Balancer2Service = Service<BalancerClient<LayeredChannel>>;
+
+pub async fn handle(service: &mut Balancer2Service, mode: ModeCmd) -> Result<(), Error> {
+    match mode {
+        ModeCmd::Update(cmd) => update(service, cmd).await,
+        ModeCmd::List => list(service).await,
+        ModeCmd::Config(cmd) => config(service, cmd).await,
+        ModeCmd::Show(cmd) => show(service, cmd).await,
+        ModeCmd::Sessions(cmd) => match cmd.mode {
+            SessionsMode::List => sessions_list(service).await,
+            SessionsMode::Show(cmd) => sessions_show(service, cmd).await,
+            SessionsMode::Update(cmd) => sessions_update(service, cmd).await,
+        },
+        ModeCmd::Metrics(cmd) => metrics(service, cmd).await,
+        ModeCmd::Reals(cmd) => match cmd.mode {
+            RealsMode::Enable(cmd) => enable_real(service, cmd).await,
+            RealsMode::Disable(cmd) => disable_real(service, cmd).await,
+        },
+    }
 }
 
-impl Balancer2Service {
-    pub async fn connect(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn update(service: &mut Balancer2Service, cmd: UpdateCmd) -> Result<(), Error> {
+    let yaml_config: BalancerConfig =
+        yaml::load(&cmd.file).map_err(|err| service.invalid("update", err.to_string()))?;
+    let parts: ConfigParts = yaml_config
+        .try_into()
+        .map_err(|err: Box<dyn core::error::Error>| service.invalid("update", err.to_string()))?;
 
-        Ok(Self { service })
-    }
+    let request = UpdateConfigRequest {
+        config_name: cmd.name.clone(),
+        sessions_state_name: cmd.sessions,
+        vs: parts.vs,
+        timeouts: parts.timeouts,
+        addr: parts.addr,
+        wlc: parts.wlc,
+    };
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-    pub async fn handle(&mut self, mode: ModeCmd) -> Result<(), Error> {
-        match mode {
-            ModeCmd::Update(cmd) => self.update(cmd).await,
-            ModeCmd::List => self.list().await,
-            ModeCmd::Config(cmd) => self.config(cmd).await,
-            ModeCmd::Show(cmd) => self.show(cmd).await,
-            ModeCmd::Sessions(cmd) => match cmd.mode {
-                SessionsMode::List => self.sessions_list().await,
-                SessionsMode::Show(cmd) => self.sessions_show(cmd).await,
-                SessionsMode::Update(cmd) => self.sessions_update(cmd).await,
-            },
-            ModeCmd::Metrics(cmd) => self.metrics(cmd).await,
-            ModeCmd::Reals(cmd) => match cmd.mode {
-                RealsMode::Enable(cmd) => self.enable_real(cmd).await,
-                RealsMode::Disable(cmd) => self.disable_real(cmd).await,
-            },
-        }
-    }
+    output::success("update", format_args!("Updated config '{}'.", cmd.name));
 
-    async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let yaml_config: BalancerConfig =
-            yaml::load(&cmd.file).map_err(|err| self.service.invalid("update", err.to_string()))?;
-        let parts: ConfigParts = yaml_config
-            .try_into()
-            .map_err(|err: Box<dyn core::error::Error>| self.service.invalid("update", err.to_string()))?;
+    Ok(())
+}
 
-        let request = UpdateConfigRequest {
-            config_name: cmd.name.clone(),
-            sessions_state_name: cmd.sessions,
-            vs: parts.vs,
-            timeouts: parts.timeouts,
-            addr: parts.addr,
-            wlc: parts.wlc,
-        };
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
+async fn list(service: &mut Balancer2Service) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        output::success("update", format_args!("Updated config '{}'.", cmd.name));
-
-        Ok(())
-    }
-
-    async fn list(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
-
-        output::data(
-            || &response.names,
-            || {
-                print_names_with_hint(
-                    &response.names,
-                    format_args!("No balancer configurations found."),
-                    format_args!(
-                        "create one with 'yanet-cli-balancer2 update --name <name> --sessions <sessions-name> <path>'"
-                    ),
-                )
-            },
-        );
-
-        Ok(())
-    }
-
-    async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Error> {
-        let request = GetConfigRequest { config_name: cmd.name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "config",
-                request,
-                self.service.not_found("config", &format!("config '{}'", cmd.name)),
-                async |client, request| client.get_config(request).await,
+    output::data(
+        || &response.names,
+        || {
+            print_names_with_hint(
+                &response.names,
+                format_args!("No balancer configurations found."),
+                format_args!(
+                    "create one with 'yanet-cli-balancer2 update --name <name> --sessions <sessions-name> <path>'"
+                ),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response,
-            || {
-                let mut json_value =
-                    serde_json::to_value(&response).expect("balancer config JSON conversion must not fail");
-                display::prettify_json(&mut json_value);
-                let yaml =
-                    serde_yaml::to_string(&json_value).expect("balancer config YAML serialization must not fail");
-                print!("{yaml}");
-            },
-        );
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn config(service: &mut Balancer2Service, cmd: ConfigCmd) -> Result<(), Error> {
+    let request = GetConfigRequest { config_name: cmd.name.clone() };
+    let response = service
+        .unary_with(
+            "config",
+            request,
+            service.not_found("config", &format!("config '{}'", cmd.name)),
+            async |client, request| client.get_config(request).await,
+        )
+        .await?;
 
-    async fn show(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let opts = display::ShowOptions {
-            stats: cmd.stats || cmd.detail,
-            acl: cmd.acl || cmd.detail,
-            peers: cmd.peers || cmd.detail,
-            decap: cmd.decap || cmd.detail,
+    output::data(
+        || &response,
+        || {
+            let mut json_value =
+                serde_json::to_value(&response).expect("balancer config JSON conversion must not fail");
+            display::prettify_json(&mut json_value);
+            let yaml = serde_yaml::to_string(&json_value).expect("balancer config YAML serialization must not fail");
+            print!("{yaml}");
+        },
+    );
+
+    Ok(())
+}
+
+async fn show(service: &mut Balancer2Service, cmd: ShowCmd) -> Result<(), Error> {
+    let opts = display::ShowOptions {
+        stats: cmd.stats || cmd.detail,
+        acl: cmd.acl || cmd.detail,
+        peers: cmd.peers || cmd.detail,
+        decap: cmd.decap || cmd.detail,
+    };
+
+    let packet_handler_ref =
+        if cmd.device.is_some() || cmd.pipeline.is_some() || cmd.function.is_some() || cmd.chain.is_some() {
+            Some(PacketHandlerRef {
+                device: cmd.device,
+                pipeline: cmd.pipeline,
+                function: cmd.function,
+                chain: cmd.chain,
+            })
+        } else {
+            None
         };
 
-        let packet_handler_ref =
-            if cmd.device.is_some() || cmd.pipeline.is_some() || cmd.function.is_some() || cmd.chain.is_some() {
-                Some(PacketHandlerRef {
-                    device: cmd.device,
-                    pipeline: cmd.pipeline,
-                    function: cmd.function,
-                    chain: cmd.chain,
-                })
-            } else {
-                None
-            };
+    let name = cmd.name.clone();
+    let filter = cmd.filter.to_proto();
+    let request = GetStateRequest {
+        config_name: cmd.name,
+        packet_handler_ref,
+        filter,
+    };
+    let response = service
+        .unary("show", request, async |client, request| client.get_state(request).await)
+        .await?;
 
-        let name = cmd.name.clone();
-        let filter = cmd.filter.to_proto();
-        let request = GetStateRequest {
-            config_name: cmd.name,
-            packet_handler_ref,
-            filter,
-        };
-        let response = self
-            .service
-            .unary("show", request, async |client, request| client.get_state(request).await)
-            .await?;
+    output::data(
+        || &response.states,
+        || {
+            if response.states.is_empty() {
+                output::empty(format_args!("No balancer state found for '{name}'."));
+                return;
+            }
 
-        output::data(
-            || &response.states,
-            || {
-                if response.states.is_empty() {
-                    output::empty(format_args!("No balancer state found for '{name}'."));
-                    return;
-                }
+            display::print_table_view(&response.states, &opts);
+        },
+    );
 
-                display::print_table_view(&response.states, &opts);
-            },
-        );
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn sessions_list(service: &mut Balancer2Service) -> Result<(), Error> {
+    let response = service
+        .unary(
+            "sessions list",
+            ListSessionsStatesRequest {},
+            async |client, request| client.list_sessions_states(request).await,
+        )
+        .await?;
 
-    async fn sessions_list(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary(
-                "sessions list",
-                ListSessionsStatesRequest {},
-                async |client, request| client.list_sessions_states(request).await,
+    output::data(
+        || &response.names,
+        || {
+            print_names_with_hint(
+                &response.names,
+                format_args!("No session states found."),
+                format_args!("create one with 'yanet-cli-balancer2 sessions update --name <name> --capacity <n>'"),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response.names,
-            || {
-                print_names_with_hint(
-                    &response.names,
-                    format_args!("No session states found."),
-                    format_args!("create one with 'yanet-cli-balancer2 sessions update --name <name> --capacity <n>'"),
-                )
-            },
-        );
+    Ok(())
+}
 
-        Ok(())
+async fn sessions_show(service: &mut Balancer2Service, cmd: SessionsShowCmd) -> Result<(), Error> {
+    let name = cmd.name.clone();
+    let request = ListSessionsRequest {
+        sessions_state_name: cmd.name,
+        filter: cmd.filter.to_proto(),
+    };
+    log::trace!("list sessions request: {request:?}");
+
+    let mut stream = service
+        .client()
+        .list_sessions(request)
+        .await
+        .map_err(service.status("sessions show"))?
+        .into_inner();
+
+    let now = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .expect("system clock before UNIX epoch")
+        .as_secs() as i64;
+    let mut rows = output::rows(display::print_sessions_header, |session| {
+        display::print_session(session, now)
+    });
+
+    while let Some(session) = stream.message().await.map_err(service.status("sessions show"))? {
+        rows.push(&session);
     }
 
-    async fn sessions_show(&mut self, cmd: SessionsShowCmd) -> Result<(), Error> {
-        let name = cmd.name.clone();
-        let request = ListSessionsRequest {
-            sessions_state_name: cmd.name,
-            filter: cmd.filter.to_proto(),
-        };
-        log::trace!("list sessions request: {request:?}");
+    rows.finish(format_args!("No sessions found for '{name}'."));
 
-        let mut stream = self
-            .service
-            .client()
-            .list_sessions(request)
-            .await
-            .map_err(self.service.status("sessions show"))?
-            .into_inner();
+    Ok(())
+}
 
-        let now = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_secs() as i64;
-        let mut rows = output::rows(display::print_sessions_header, |session| {
-            display::print_session(session, now)
-        });
+async fn sessions_update(service: &mut Balancer2Service, cmd: SessionsUpdateCmd) -> Result<(), Error> {
+    let request = UpdateSessionsStateRequest {
+        sessions_state_name: cmd.name.clone(),
+        capacity: cmd.capacity,
+    };
+    service
+        .unary("sessions update", request, async |client, request| {
+            client.update_sessions_state(request).await
+        })
+        .await?;
 
-        while let Some(session) = stream.message().await.map_err(self.service.status("sessions show"))? {
-            rows.push(&session);
-        }
+    output::success(
+        "sessions update",
+        format_args!("Updated sessions state '{}' (capacity: {}).", cmd.name, cmd.capacity),
+    );
 
-        rows.finish(format_args!("No sessions found for '{name}'."));
+    Ok(())
+}
 
-        Ok(())
-    }
+async fn metrics(service: &mut Balancer2Service, _cmd: MetricsCmd) -> Result<(), Error> {
+    let response = service
+        .unary("metrics", GetMetricsRequest::default(), async |client, request| {
+            client.get_metrics(request).await
+        })
+        .await?;
 
-    async fn sessions_update(&mut self, cmd: SessionsUpdateCmd) -> Result<(), Error> {
-        let request = UpdateSessionsStateRequest {
-            sessions_state_name: cmd.name.clone(),
-            capacity: cmd.capacity,
-        };
-        self.service
-            .unary("sessions update", request, async |client, request| {
-                client.update_sessions_state(request).await
-            })
-            .await?;
+    output::data(
+        || &response,
+        || {
+            let mut json_value =
+                serde_json::to_value(&response).expect("balancer metrics JSON conversion must not fail");
+            display::prettify_json(&mut json_value);
+            let json = serde_json::to_string(&json_value).expect("balancer metrics JSON serialization must not fail");
+            println!("{json}");
 
-        output::success(
-            "sessions update",
-            format_args!("Updated sessions state '{}' (capacity: {}).", cmd.name, cmd.capacity),
-        );
+            if response.metrics.is_empty() {
+                output::empty(format_args!("No balancer metrics found."));
+            }
+        },
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    async fn metrics(&mut self, _cmd: MetricsCmd) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("metrics", GetMetricsRequest::default(), async |client, request| {
-                client.get_metrics(request).await
-            })
-            .await?;
+async fn enable_real(service: &mut Balancer2Service, cmd: EnableRealCmd) -> Result<(), Error> {
+    let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(true), cmd.weight);
+    send_real_updates(service, "enable", cmd.name, updates).await
+}
 
-        output::data(
-            || &response,
-            || {
-                let mut json_value =
-                    serde_json::to_value(&response).expect("balancer metrics JSON conversion must not fail");
-                display::prettify_json(&mut json_value);
-                let json =
-                    serde_json::to_string(&json_value).expect("balancer metrics JSON serialization must not fail");
-                println!("{json}");
+async fn disable_real(service: &mut Balancer2Service, cmd: DisableRealCmd) -> Result<(), Error> {
+    let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(false), None);
+    send_real_updates(service, "disable", cmd.name, updates).await
+}
 
-                if response.metrics.is_empty() {
-                    output::empty(format_args!("No balancer metrics found."));
-                }
-            },
-        );
+async fn send_real_updates(
+    service: &mut Balancer2Service,
+    action: &'static str,
+    config_name: String,
+    updates: Vec<RealUpdate>,
+) -> Result<(), Error> {
+    let request = UpdateRealsRequest {
+        config_name: config_name.clone(),
+        updates,
+    };
+    service
+        .unary(action, request, async |client, request| {
+            client.update_reals(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::success(action, format_args!("Updated reals of config '{config_name}'."));
 
-    async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Error> {
-        let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(true), cmd.weight);
-        self.send_real_updates("enable", cmd.name, updates).await
-    }
-
-    async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Error> {
-        let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(false), None);
-        self.send_real_updates("disable", cmd.name, updates).await
-    }
-
-    async fn send_real_updates(
-        &mut self,
-        action: &'static str,
-        config_name: String,
-        updates: Vec<RealUpdate>,
-    ) -> Result<(), Error> {
-        let request = UpdateRealsRequest {
-            config_name: config_name.clone(),
-            updates,
-        };
-        self.service
-            .unary(action, request, async |client, request| {
-                client.update_reals(request).await
-            })
-            .await?;
-
-        output::success(action, format_args!("Updated reals of config '{config_name}'."));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn build_real_updates(vs: &VsId, reals: &[IpAddr], enable: Option<bool>, weight: Option<u32>) -> Vec<RealUpdate> {

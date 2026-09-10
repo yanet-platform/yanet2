@@ -9,7 +9,7 @@ use netip::{Contiguous, IpNetwork};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -145,165 +145,152 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = DscpService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::PrefixAdd(cmd) => service.add_prefixes(cmd).await,
-        ModeCmd::PrefixRemove(cmd) => service.remove_prefixes(cmd).await,
-        ModeCmd::SetMarking(cmd) => service.set_dscp_marking(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::PrefixAdd(cmd) => add_prefixes(&mut service, cmd).await,
+        ModeCmd::PrefixRemove(cmd) => remove_prefixes(&mut service, cmd).await,
+        ModeCmd::SetMarking(cmd) => set_dscp_marking(&mut service, cmd).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
     }
 }
 
-pub struct DscpService {
-    service: Service<DscpServiceClient<LayeredChannel>>,
+type DscpService = Service<DscpServiceClient<LayeredChannel>>;
+
+async fn list_configs(service: &mut DscpService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
+
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No DSCP configurations found."),
+                format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
+            )
+        },
+    );
+
+    Ok(())
 }
 
-impl DscpService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn show_config(service: &mut DscpService, cmd: ShowConfigCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
-
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No DSCP configurations found."),
+    output::data(
+        || &response,
+        || {
+            let Some(config) = &response.config else {
+                output::empty_with_hint(
+                    format_args!("No DSCP configuration found for '{}'.", cmd.config_name),
                     format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
-                )
-            },
-        );
+                );
+                return;
+            };
 
-        Ok(())
-    }
+            config_block(config).print();
+        },
+    );
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
-            )
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response,
-            || {
-                let Some(config) = &response.config else {
-                    output::empty_with_hint(
-                        format_args!("No DSCP configuration found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
-                    );
-                    return;
-                };
+async fn add_prefixes(service: &mut DscpService, cmd: AddPrefixesCmd) -> Result<(), Error> {
+    let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
+    let request = AddPrefixesRequest {
+        name: cmd.config_name.clone(),
+        prefixes4,
+        prefixes6,
+    };
+    service
+        .unary("prefix-add", request, async |client, request| {
+            client.add_prefixes(request).await
+        })
+        .await?;
 
-                config_block(config).print();
-            },
-        );
+    output::success(
+        "prefix-add",
+        format_args!("Added {} prefix(es) to config '{}'.", cmd.prefix.len(), cmd.config_name),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Error> {
-        let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
-        let request = AddPrefixesRequest {
-            name: cmd.config_name.clone(),
-            prefixes4,
-            prefixes6,
-        };
-        self.service
-            .unary("prefix-add", request, async |client, request| {
-                client.add_prefixes(request).await
-            })
-            .await?;
+async fn remove_prefixes(service: &mut DscpService, cmd: RemovePrefixesCmd) -> Result<(), Error> {
+    let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
+    let request = RemovePrefixesRequest {
+        name: cmd.config_name.clone(),
+        prefixes4,
+        prefixes6,
+    };
+    service
+        .unary("prefix-remove", request, async |client, request| {
+            client.remove_prefixes(request).await
+        })
+        .await?;
 
-        output::success(
-            "prefix-add",
-            format_args!("Added {} prefix(es) to config '{}'.", cmd.prefix.len(), cmd.config_name),
-        );
+    output::success(
+        "prefix-remove",
+        format_args!(
+            "Removed {} prefix(es) from config '{}'.",
+            cmd.prefix.len(),
+            cmd.config_name
+        ),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Error> {
-        let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
-        let request = RemovePrefixesRequest {
-            name: cmd.config_name.clone(),
-            prefixes4,
-            prefixes6,
-        };
-        self.service
-            .unary("prefix-remove", request, async |client, request| {
-                client.remove_prefixes(request).await
-            })
-            .await?;
+async fn set_dscp_marking(service: &mut DscpService, cmd: SetDscpMarkingCmd) -> Result<(), Error> {
+    let request = SetDscpMarkingRequest {
+        name: cmd.config_name.clone(),
+        dscp_config: Some(DscpConfig {
+            flag: cmd.flag.into(),
+            mark: cmd.mark,
+        }),
+    };
+    service
+        .unary("set-marking", request, async |client, request| {
+            client.set_dscp_marking(request).await
+        })
+        .await?;
 
-        output::success(
-            "prefix-remove",
-            format_args!(
-                "Removed {} prefix(es) from config '{}'.",
-                cmd.prefix.len(),
-                cmd.config_name
-            ),
-        );
+    output::success(
+        "set-marking",
+        format_args!("Set marking on config '{}'.", cmd.config_name),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn set_dscp_marking(&mut self, cmd: SetDscpMarkingCmd) -> Result<(), Error> {
-        let request = SetDscpMarkingRequest {
-            name: cmd.config_name.clone(),
-            dscp_config: Some(DscpConfig {
-                flag: cmd.flag.into(),
-                mark: cmd.mark,
-            }),
-        };
-        self.service
-            .unary("set-marking", request, async |client, request| {
-                client.set_dscp_marking(request).await
-            })
-            .await?;
+async fn delete_config(service: &mut DscpService, cmd: DeleteConfigCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-        output::success(
-            "set-marking",
-            format_args!("Set marking on config '{}'.", cmd.config_name),
-        );
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
-        Ok(())
-    }
-
-    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service
-                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
-
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn config_block(config: &Config) -> display::KeyValue {

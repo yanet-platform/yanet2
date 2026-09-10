@@ -11,7 +11,7 @@ use serde::{Deserializer, Serializer};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{self, ConnectionArgs, LayeredChannel, Service},
+    client::{self, LayeredChannel, Service},
     completion, display,
     errors::Error,
     output, yaml,
@@ -112,101 +112,89 @@ fn client(channel: LayeredChannel) -> MirrorServiceClient<LayeredChannel> {
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
-pub struct MirrorService {
-    service: Service<MirrorServiceClient<LayeredChannel>>,
+type MirrorService = Service<MirrorServiceClient<LayeredChannel>>;
+
+async fn show_config(service: &mut MirrorService, cmd: ShowCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
+
+    output::data(
+        || &response,
+        || {
+            // The document is printed even without rules, so a
+            // redirected show yields a file update accepts, an
+            // undeclared mode number excepted.
+            print!(
+                "{}",
+                serde_yaml::to_string(&response).expect("mirror config YAML serialization must not fail")
+            );
+
+            if response.rules.is_empty() {
+                output::empty_with_hint(
+                    format_args!("No mirror rules found for '{}'.", cmd.config_name),
+                    format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
+                );
+            }
+        },
+    );
+
+    Ok(())
 }
 
-impl MirrorService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn list_configs(service: &mut MirrorService) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No mirror configurations found."),
+                format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
             )
-            .await?;
+        },
+    );
 
-        output::data(
-            || &response,
-            || {
-                // The document is printed even without rules, so a
-                // redirected show yields a file update accepts, an
-                // undeclared mode number excepted.
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("mirror config YAML serialization must not fail")
-                );
+    Ok(())
+}
 
-                if response.rules.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No mirror rules found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
-                    );
-                }
-            },
-        );
+async fn delete_config(service: &mut MirrorService, cmd: DeleteCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-        Ok(())
-    }
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
 
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No mirror configurations found."),
-                    format_args!("create one with 'yanet-cli-mirror update --name <name> <path>'"),
-                )
-            },
-        );
+async fn update_config(service: &mut MirrorService, cmd: UpdateCmd, request: UpdateConfigRequest) -> Result<(), Error> {
+    service
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
+        })
+        .await?;
 
-        Ok(())
-    }
+    output::success("update", format_args!("Updated config '{}'.", cmd.config));
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service.not_found("delete", &format!("config '{}'", cmd.config)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
-
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config));
-
-        Ok(())
-    }
-
-    pub async fn update_config(&mut self, cmd: UpdateCmd, request: UpdateConfigRequest) -> Result<(), Error> {
-        self.service
-            .unary("update", request, async |client, request| {
-                client.update_config(request).await
-            })
-            .await?;
-
-        output::success("update", format_args!("Updated config '{}'.", cmd.config));
-
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
@@ -227,16 +215,16 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         _ => None,
     };
 
-    let mut service = MirrorService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
         ModeCmd::Update(cmd) => {
             let request = update.expect("prepared for the update mode");
-            service.update_config(cmd, request).await
+            update_config(&mut service, cmd, request).await
         }
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::List => service.list_configs().await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
     }
 }
 

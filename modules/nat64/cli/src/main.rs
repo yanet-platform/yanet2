@@ -11,7 +11,7 @@ use netip::{Contiguous, Ipv6Network};
 use tonic::codec::CompressionEncoding;
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -191,233 +191,220 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = NAT64Service::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME, client).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
+        ModeCmd::List => list_configs(&mut service).await,
+        ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
+        ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
         ModeCmd::Prefix { cmd } => match cmd {
-            PrefixCmd::Add(cmd) => service.add_prefix(cmd).await,
-            PrefixCmd::Remove(cmd) => service.remove_prefix(cmd).await,
+            PrefixCmd::Add(cmd) => add_prefix(&mut service, cmd).await,
+            PrefixCmd::Remove(cmd) => remove_prefix(&mut service, cmd).await,
         },
         ModeCmd::Mapping { cmd } => match cmd {
-            MappingCmd::Add(cmd) => service.add_mapping(cmd).await,
-            MappingCmd::Remove(cmd) => service.remove_mapping(cmd).await,
+            MappingCmd::Add(cmd) => add_mapping(&mut service, cmd).await,
+            MappingCmd::Remove(cmd) => remove_mapping(&mut service, cmd).await,
         },
-        ModeCmd::Mtu(cmd) => service.set_mtu(cmd).await,
-        ModeCmd::Drop(cmd) => service.set_drop_unknown(cmd).await,
+        ModeCmd::Mtu(cmd) => set_mtu(&mut service, cmd).await,
+        ModeCmd::Drop(cmd) => set_drop_unknown(&mut service, cmd).await,
     }
 }
 
-pub struct NAT64Service {
-    service: Service<Nat64ServiceClient<LayeredChannel>>,
+type NAT64Service = Service<Nat64ServiceClient<LayeredChannel>>;
+
+async fn list_configs(service: &mut NAT64Service) -> Result<(), Error> {
+    let response = service
+        .unary("list", ListConfigsRequest {}, async |client, request| {
+            client.list_configs(request).await
+        })
+        .await?;
+
+    output::data(
+        || &response.configs,
+        || {
+            display::print_names_with_hint(
+                &response.configs,
+                format_args!("No NAT64 configurations found."),
+                format_args!("create one with 'yanet-cli-nat64 prefix add --name <name> --prefix <cidr>'"),
+            )
+        },
+    );
+
+    Ok(())
 }
 
-impl NAT64Service {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, client).await?;
+async fn show_config(service: &mut NAT64Service, cmd: ShowConfigCmd) -> Result<(), Error> {
+    let request = ShowConfigRequest { name: cmd.config_name.clone() };
+    let response = service
+        .unary_with(
+            "show",
+            request,
+            service.not_found("show", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.show_config(request).await,
+        )
+        .await?;
 
-        Ok(Self { service })
-    }
-
-    pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let response = self
-            .service
-            .unary("list", ListConfigsRequest {}, async |client, request| {
-                client.list_configs(request).await
-            })
-            .await?;
-
-        output::data(
-            || &response.configs,
-            || {
-                display::print_names_with_hint(
-                    &response.configs,
-                    format_args!("No NAT64 configurations found."),
+    output::data(
+        || &response,
+        || {
+            let Some(config) = &response.config else {
+                output::empty_with_hint(
+                    format_args!("No NAT64 configuration found for '{}'.", cmd.config_name),
                     format_args!("create one with 'yanet-cli-nat64 prefix add --name <name> --prefix <cidr>'"),
-                )
-            },
-        );
+                );
+                return;
+            };
 
-        Ok(())
-    }
+            config_block(config).print();
+        },
+    );
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self
-            .service
-            .unary_with(
-                "show",
-                request,
-                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.show_config(request).await,
-            )
-            .await?;
+    Ok(())
+}
 
-        output::data(
-            || &response,
-            || {
-                let Some(config) = &response.config else {
-                    output::empty_with_hint(
-                        format_args!("No NAT64 configuration found for '{}'.", cmd.config_name),
-                        format_args!("create one with 'yanet-cli-nat64 prefix add --name <name> --prefix <cidr>'"),
-                    );
-                    return;
-                };
+async fn delete_config(service: &mut NAT64Service, cmd: DeleteConfigCmd) -> Result<(), Error> {
+    let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+    service
+        .unary_with(
+            "delete",
+            request,
+            service.not_found("delete", &format!("config '{}'", cmd.config_name)),
+            async |client, request| client.delete_config(request).await,
+        )
+        .await?;
 
-                config_block(config).print();
-            },
-        );
+    output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.service
-            .unary_with(
-                "delete",
-                request,
-                self.service
-                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
-                async |client, request| client.delete_config(request).await,
-            )
-            .await?;
+async fn add_prefix(service: &mut NAT64Service, cmd: AddPrefixCmd) -> Result<(), Error> {
+    let request = AddPrefixRequest {
+        name: cmd.config_name.clone(),
+        prefix: Some(cmd.prefix.into()),
+    };
+    service
+        .unary("add prefix", request, async |client, request| {
+            client.add_prefix(request).await
+        })
+        .await?;
 
-        output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
+    output::success(
+        "add prefix",
+        format_args!("Added prefix {} to config '{}'.", cmd.prefix, cmd.config_name),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn add_prefix(&mut self, cmd: AddPrefixCmd) -> Result<(), Error> {
-        let request = AddPrefixRequest {
-            name: cmd.config_name.clone(),
-            prefix: Some(cmd.prefix.into()),
-        };
-        self.service
-            .unary("add prefix", request, async |client, request| {
-                client.add_prefix(request).await
-            })
-            .await?;
+async fn remove_prefix(service: &mut NAT64Service, cmd: RemovePrefixCmd) -> Result<(), Error> {
+    let request = RemovePrefixRequest {
+        name: cmd.config_name.clone(),
+        prefix: Some(cmd.prefix.into()),
+    };
+    service
+        .unary("remove prefix", request, async |client, request| {
+            client.remove_prefix(request).await
+        })
+        .await?;
 
-        output::success(
-            "add prefix",
-            format_args!("Added prefix {} to config '{}'.", cmd.prefix, cmd.config_name),
-        );
+    output::success(
+        "remove prefix",
+        format_args!("Removed prefix {} from config '{}'.", cmd.prefix, cmd.config_name),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn remove_prefix(&mut self, cmd: RemovePrefixCmd) -> Result<(), Error> {
-        let request = RemovePrefixRequest {
-            name: cmd.config_name.clone(),
-            prefix: Some(cmd.prefix.into()),
-        };
-        self.service
-            .unary("remove prefix", request, async |client, request| {
-                client.remove_prefix(request).await
-            })
-            .await?;
+async fn add_mapping(service: &mut NAT64Service, cmd: AddMappingCmd) -> Result<(), Error> {
+    let request = AddMappingRequest {
+        name: cmd.config_name.clone(),
+        ipv4: Some(cmd.ipv4.into()),
+        ipv6: Some(cmd.ipv6.into()),
+        prefix_index: cmd.prefix_index,
+    };
+    service
+        .unary("add mapping", request, async |client, request| {
+            client.add_mapping(request).await
+        })
+        .await?;
 
-        output::success(
-            "remove prefix",
-            format_args!("Removed prefix {} from config '{}'.", cmd.prefix, cmd.config_name),
-        );
+    output::success(
+        "add mapping",
+        format_args!(
+            "Added mapping {} -> {} (prefix {}) to config '{}'.",
+            cmd.ipv4, cmd.ipv6, cmd.prefix_index, cmd.config_name
+        ),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Error> {
-        let request = AddMappingRequest {
-            name: cmd.config_name.clone(),
-            ipv4: Some(cmd.ipv4.into()),
-            ipv6: Some(cmd.ipv6.into()),
-            prefix_index: cmd.prefix_index,
-        };
-        self.service
-            .unary("add mapping", request, async |client, request| {
-                client.add_mapping(request).await
-            })
-            .await?;
+async fn remove_mapping(service: &mut NAT64Service, cmd: RemoveMappingCmd) -> Result<(), Error> {
+    let request = RemoveMappingRequest {
+        name: cmd.config_name.clone(),
+        ipv4: Some(cmd.ipv4.into()),
+    };
+    service
+        .unary("remove mapping", request, async |client, request| {
+            client.remove_mapping(request).await
+        })
+        .await?;
 
-        output::success(
-            "add mapping",
-            format_args!(
-                "Added mapping {} -> {} (prefix {}) to config '{}'.",
-                cmd.ipv4, cmd.ipv6, cmd.prefix_index, cmd.config_name
-            ),
-        );
+    output::success(
+        "remove mapping",
+        format_args!("Removed mapping for {} from config '{}'.", cmd.ipv4, cmd.config_name),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn remove_mapping(&mut self, cmd: RemoveMappingCmd) -> Result<(), Error> {
-        let request = RemoveMappingRequest {
-            name: cmd.config_name.clone(),
-            ipv4: Some(cmd.ipv4.into()),
-        };
-        self.service
-            .unary("remove mapping", request, async |client, request| {
-                client.remove_mapping(request).await
-            })
-            .await?;
+async fn set_mtu(service: &mut NAT64Service, cmd: MtuCmd) -> Result<(), Error> {
+    let request = SetMtuRequest {
+        name: cmd.config_name.clone(),
+        mtu: Some(nat64pb::MtuConfig {
+            ipv4_mtu: cmd.ipv4_mtu,
+            ipv6_mtu: cmd.ipv6_mtu,
+        }),
+    };
+    service
+        .unary("set mtu", request, async |client, request| {
+            client.set_mtu(request).await
+        })
+        .await?;
 
-        output::success(
-            "remove mapping",
-            format_args!("Removed mapping for {} from config '{}'.", cmd.ipv4, cmd.config_name),
-        );
+    output::success(
+        "set mtu",
+        format_args!(
+            "Set MTU on config '{}' (IPv4: {}, IPv6: {}).",
+            cmd.config_name, cmd.ipv4_mtu, cmd.ipv6_mtu
+        ),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
-    pub async fn set_mtu(&mut self, cmd: MtuCmd) -> Result<(), Error> {
-        let request = SetMtuRequest {
-            name: cmd.config_name.clone(),
-            mtu: Some(nat64pb::MtuConfig {
-                ipv4_mtu: cmd.ipv4_mtu,
-                ipv6_mtu: cmd.ipv6_mtu,
-            }),
-        };
-        self.service
-            .unary("set mtu", request, async |client, request| {
-                client.set_mtu(request).await
-            })
-            .await?;
+async fn set_drop_unknown(service: &mut NAT64Service, cmd: DropCmd) -> Result<(), Error> {
+    let request = SetDropUnknownRequest {
+        name: cmd.config_name.clone(),
+        drop_unknown_prefix: cmd.drop_unknown_prefix,
+        drop_unknown_mapping: cmd.drop_unknown_mapping,
+    };
+    service
+        .unary("set drop", request, async |client, request| {
+            client.set_drop_unknown(request).await
+        })
+        .await?;
 
-        output::success(
-            "set mtu",
-            format_args!(
-                "Set MTU on config '{}' (IPv4: {}, IPv6: {}).",
-                cmd.config_name, cmd.ipv4_mtu, cmd.ipv6_mtu
-            ),
-        );
+    output::success(
+        "set drop",
+        format_args!(
+            "Set drop flags on config '{}' (unknown prefix: {}, unknown mapping: {}).",
+            cmd.config_name, cmd.drop_unknown_prefix, cmd.drop_unknown_mapping
+        ),
+    );
 
-        Ok(())
-    }
-
-    pub async fn set_drop_unknown(&mut self, cmd: DropCmd) -> Result<(), Error> {
-        let request = SetDropUnknownRequest {
-            name: cmd.config_name.clone(),
-            drop_unknown_prefix: cmd.drop_unknown_prefix,
-            drop_unknown_mapping: cmd.drop_unknown_mapping,
-        };
-        self.service
-            .unary("set drop", request, async |client, request| {
-                client.set_drop_unknown(request).await
-            })
-            .await?;
-
-        output::success(
-            "set drop",
-            format_args!(
-                "Set drop flags on config '{}' (unknown prefix: {}, unknown mapping: {}).",
-                cmd.config_name, cmd.drop_unknown_prefix, cmd.drop_unknown_mapping
-            ),
-        );
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn config_block(config: &Config) -> display::KeyValue {

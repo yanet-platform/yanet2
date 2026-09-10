@@ -6,7 +6,7 @@ use commonpb::pb::FunctionId;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     GlobalArgs,
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{LayeredChannel, Service},
     completion, display,
     errors::Error,
     output,
@@ -91,11 +91,11 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let action = cmd.mode.action();
-    let mut service = FunctionService::new(&cmd.globals.connection, action).await?;
+    let mut service = Service::connect_for(&cmd.globals.connection, action, FUNCTION_SERVICE, client).await?;
 
     match cmd.mode {
         ModeCmd::List => {
-            let ids = service.list_functions().await?;
+            let ids = list_functions(&mut service).await?;
             let names: Vec<String> = ids.iter().map(|id| id.name.clone()).collect();
             output::data(
                 || &ids,
@@ -103,7 +103,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
             );
         }
         ModeCmd::Show(show) => {
-            let function = service.get_function(&show.name).await?;
+            let function = get_function(&mut service, &show.name).await?;
             output::data(
                 || &function,
                 || {
@@ -125,12 +125,12 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         }
         ModeCmd::Update(update) => {
             let name = update.name.clone();
-            service.update_function(update).await?;
+            update_function(&mut service, update).await?;
             output::success("update function", format_args!("Updated function '{name}'."));
         }
         ModeCmd::Delete(delete) => {
             let name = delete.name.clone();
-            service.delete_function(delete).await?;
+            delete_function(&mut service, delete).await?;
             output::success("delete function", format_args!("Deleted function '{name}'."));
         }
     }
@@ -138,96 +138,84 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     Ok(())
 }
 
-pub struct FunctionService {
-    service: Service<FunctionServiceClient<LayeredChannel>>,
+type FunctionService = Service<FunctionServiceClient<LayeredChannel>>;
+
+async fn list_functions(service: &mut FunctionService) -> Result<Vec<FunctionId>, Error> {
+    let response = service
+        .unary_with(
+            "list functions",
+            ListFunctionsRequest {},
+            service.not_found("list functions", "requested function"),
+            async |client, request| client.list(request).await,
+        )
+        .await?;
+
+    Ok(response.ids)
 }
 
-impl FunctionService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, FUNCTION_SERVICE, client).await?;
+async fn get_function(service: &mut FunctionService, name: &str) -> Result<Function, Error> {
+    let request = GetFunctionRequest {
+        id: Some(FunctionId { name: name.to_string() }),
+    };
 
-        Ok(Self { service })
-    }
+    let response = service
+        .unary_with(
+            "show function",
+            request,
+            service.not_found("show function", &format!("function '{name}'")),
+            async |client, request| client.get(request).await,
+        )
+        .await?;
 
-    pub async fn list_functions(&mut self) -> Result<Vec<FunctionId>, Error> {
-        let response = self
-            .service
-            .unary_with(
-                "list functions",
-                ListFunctionsRequest {},
-                self.service.not_found("list functions", "requested function"),
-                async |client, request| client.list(request).await,
-            )
-            .await?;
+    let function = response.function.ok_or_else(|| {
+        Error::from_status(
+            Status::not_found(format!("function '{name}' not found")),
+            "show function",
+            service.endpoint(),
+            FUNCTION_SERVICE,
+        )
+    })?;
 
-        Ok(response.ids)
-    }
+    Ok(function)
+}
 
-    pub async fn get_function(&mut self, name: &str) -> Result<Function, Error> {
-        let request = GetFunctionRequest {
-            id: Some(FunctionId { name: name.to_string() }),
-        };
+async fn update_function(service: &mut FunctionService, cmd: UpdateCmd) -> Result<(), Error> {
+    let request = UpdateFunctionRequest {
+        function: Some(Function {
+            id: Some(FunctionId { name: cmd.name.clone() }),
+            chains: cmd.chains,
+        }),
+    };
 
-        let response = self
-            .service
-            .unary_with(
-                "show function",
-                request,
-                self.service.not_found("show function", &format!("function '{name}'")),
-                async |client, request| client.get(request).await,
-            )
-            .await?;
+    // Update is an upsert, so a chain module the live configuration cannot
+    // resolve is a failed precondition, never a missing function.
+    //
+    // The backend message is kept verbatim.
+    service
+        .unary("update function", request, async |client, request| {
+            client.update(request).await
+        })
+        .await?;
 
-        let function = response.function.ok_or_else(|| {
-            Error::from_status(
-                Status::not_found(format!("function '{name}' not found")),
-                "show function",
-                self.service.endpoint(),
-                FUNCTION_SERVICE,
-            )
-        })?;
+    Ok(())
+}
 
-        Ok(function)
-    }
+async fn delete_function(service: &mut FunctionService, cmd: DeleteCmd) -> Result<(), Error> {
+    let name = cmd.name;
 
-    pub async fn update_function(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
-        let request = UpdateFunctionRequest {
-            function: Some(Function {
-                id: Some(FunctionId { name: cmd.name.clone() }),
-                chains: cmd.chains,
-            }),
-        };
+    let request = DeleteFunctionRequest {
+        id: Some(FunctionId { name: name.clone() }),
+    };
+    service
+        .unary_with(
+            "delete function",
+            request,
+            service.not_found("delete function", &format!("function '{name}'")),
+            async |client, request| client.delete(request).await,
+        )
+        .await?;
 
-        // Update is an upsert, so a chain module the live configuration cannot
-        // resolve is a failed precondition, never a missing function.
-        //
-        // The backend message is kept verbatim.
-        self.service
-            .unary("update function", request, async |client, request| {
-                client.update(request).await
-            })
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn delete_function(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let name = cmd.name;
-
-        let request = DeleteFunctionRequest {
-            id: Some(FunctionId { name: name.clone() }),
-        };
-        self.service
-            .unary_with(
-                "delete function",
-                request,
-                self.service.not_found("delete function", &format!("function '{name}'")),
-                async |client, request| client.delete(request).await,
-            )
-            .await?;
-
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Completion candidates for a `--name` argument: the functions the module

@@ -30,8 +30,11 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `ync::entrypoint(|cmd: &Cmd| cmd.globals.options(), run)`. The scaffold
   owns completion before Tokio, parsing, output initialisation, the
   current-thread runtime, error rendering and the process status.
-- `run(cmd)` determines the action, builds the service object once and matches
-  `cmd.mode`; every handler returns `Result<(), Error>`.
+- `run(cmd)` determines the action, connects the service once and matches
+  `cmd.mode` onto the handlers: free functions taking `&mut <X>Service`,
+  where `type <X>Service = Service<<X>ServiceClient<LayeredChannel>>`, each
+  returning `Result<(), Error>`. A crate talking to several services keeps
+  a local struct holding them.
 - `const SERVICE_NAME: &str = "<proto package>.<Service>";` with the doc
   `/// The fully-qualified gRPC service name used in error messages.`. A crate
   that builds its client at a single site keeps the builder inline:
@@ -50,11 +53,11 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `cmd.globals.connection.endpoint` itself. A pre-connect error label comes from
   `client::resolve_label`, a post-connect one from `Service::endpoint()` /
   `Connection::endpoint()`.
-- Every unary RPC of a command handler: `self.service.unary("<verb>",
+- Every unary RPC of a command handler: `service.unary("<verb>",
   request, async |client, request| client.<rpc>(request).await).await?`; a
   mapper other than `status` goes through `unary_with("<verb>", request,
-  mapper, call)`. A streaming RPC keeps `self.service.client().<rpc>(request)
-  .await.map_err(self.service.status("<verb>"))?.into_inner()`, and a
+  mapper, call)`. A streaming RPC keeps `service.client().<rpc>(request)
+  .await.map_err(service.status("<verb>"))?.into_inner()`, and a
   completion lookup calls the raw client it is handed.
 - Generated code: `#[allow(clippy::std_instead_of_core, non_snake_case)]
   pub mod <x>pb { tonic::include_proto!("…"); }`; shared protos come
@@ -82,7 +85,7 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   <path>`) or a filter pattern (`counters [PATTERN]…`); everything else
   is a flag. A file never has a flag. A YAML file positional loads with
   `ync::yaml::load::<T>(&path)`, its error already naming the path, mapped
-  with `self.service.invalid("<verb>", err.to_string())`; no private `load`
+  with `service.invalid("<verb>", err.to_string())`; no private `load`
   that opens and parses on its own.
 - Flags: `--name/-n` names the object the binary manages (a config, a map,
   a sessions state) and nothing else; `-4/-6` family filters, mutually
@@ -154,9 +157,9 @@ no `--yes`, no `--dry-run`.
   or RPC error, 2 usage (clap), 3 not found or service not registered, 4
   connection or unavailable. No command invents a code (`ready`'s 2 for
   "not ready" is legacy until #2354).
-- A local rejection is `self.service.invalid("<verb>", message)` or
+- A local rejection is `service.invalid("<verb>", message)` or
   `Error::invalid_argument(verb, endpoint, message)`; a command addressing an
-  existing object passes `self.service.not_found("<verb>", "<resource>")` as
+  existing object passes `service.not_found("<verb>", "<resource>")` as
   the mapper of `unary_with`, so a missing object reads `<resource> not found`
   and exits 3. Hints via `.with_hint(…)`.
 
