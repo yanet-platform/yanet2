@@ -5,11 +5,12 @@ use core::{
     str::FromStr,
 };
 
+use commonpb::ip_octets;
 use filterpb::pb::PortRange;
 use netip::IpNetwork;
 use serde::{Deserialize, Deserializer};
 
-use crate::{balancerpb, ip_to_bytes};
+use crate::{Proto, balancerpb};
 
 fn deserialize_from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
@@ -69,15 +70,6 @@ pub enum Scheduler {
     Wrr,
     Wlc,
     Op,
-}
-
-// Mirrors main::Proto for YAML config; the two cannot share a type because of
-// orphan-rule + derive constraints.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Proto {
-    Tcp,
-    Udp,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -175,9 +167,9 @@ fn build_addr_config(v4: Option<Ipv4Addr>, v6: Option<Ipv6Addr>, decaps: &[IpAdd
         return None;
     }
     Some(balancerpb::AddrConfig {
-        source_ip4: v4.map(|a| ip_to_bytes(IpAddr::V4(a))).unwrap_or_default(),
-        source_ip6: v6.map(|a| ip_to_bytes(IpAddr::V6(a))).unwrap_or_default(),
-        decaps: decaps.iter().copied().map(ip_to_bytes).collect(),
+        source_ip4: v4.map(|a| ip_octets(IpAddr::V4(a))).unwrap_or_default(),
+        source_ip6: v6.map(|a| ip_octets(IpAddr::V6(a))).unwrap_or_default(),
+        decaps: decaps.iter().copied().map(ip_octets).collect(),
     })
 }
 
@@ -185,10 +177,7 @@ impl TryFrom<VirtualService> for balancerpb::VsConfig {
     type Error = Box<dyn Error>;
 
     fn try_from(vs: VirtualService) -> Result<Self, Self::Error> {
-        let proto = match vs.proto {
-            Proto::Tcp => balancerpb::TransportProto::Tcp,
-            Proto::Udp => balancerpb::TransportProto::Udp,
-        };
+        let proto = balancerpb::TransportProto::from(vs.proto);
         let scheduler = match vs.scheduler {
             Scheduler::Sh => balancerpb::VsScheduler::Sh,
             Scheduler::Wrr => balancerpb::VsScheduler::Wrr,
@@ -205,7 +194,7 @@ impl TryFrom<VirtualService> for balancerpb::VsConfig {
 
         Ok(Self {
             id: Some(balancerpb::VsIdentifier {
-                addr: ip_to_bytes(vs.addr),
+                addr: ip_octets(vs.addr),
                 port: u32::from(vs.port),
                 proto: proto as i32,
             }),
@@ -213,7 +202,7 @@ impl TryFrom<VirtualService> for balancerpb::VsConfig {
             allowed_sources,
             reals,
             flags: Some(vs.flags.into()),
-            peers: vs.peers.into_iter().map(ip_to_bytes).collect(),
+            peers: vs.peers.into_iter().map(ip_octets).collect(),
         })
     }
 }
@@ -247,7 +236,7 @@ impl From<Real> for balancerpb::RealConfig {
     fn from(real: Real) -> Self {
         Self {
             id: Some(balancerpb::RelativeRealIdentifier {
-                ip: ip_to_bytes(real.ip),
+                ip: ip_octets(real.ip),
                 port: u32::from(real.port),
             }),
             weight: real.weight,

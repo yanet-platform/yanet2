@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use commonpb::ip_from_octets;
 use tabled::Tabled;
 use ync::display::print_table_from_entries;
 
-use crate::{balancerpb, bytes_to_ip, format_ip_port};
+use crate::{balancerpb, format_ip_port};
 
 fn print_module_stats(state: &balancerpb::BalancerState) {
     println!("Module:");
@@ -130,8 +131,8 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     let Some(addr_port) = fmt_addr_port(&id.addr, id.port) else {
         return;
     };
-    let proto = proto_str(id.proto).unwrap_or("???");
-    let scheduler = scheduler_str(cfg.scheduler).unwrap_or("???");
+    let proto = proto_name(id.proto).unwrap_or_else(|| "???".to_owned());
+    let scheduler = scheduler_name(cfg.scheduler).unwrap_or_else(|| "???".to_owned());
     let flags = flags_str(cfg.flags.as_ref());
 
     println!("VS {}/{}:", addr_port, proto);
@@ -181,7 +182,7 @@ fn real_display_addr(real: &balancerpb::RealState) -> Option<(String, &balancerp
         log::warn!("dropped real row: missing real id");
         return None;
     };
-    let rip = match bytes_to_ip(&rid.ip) {
+    let rip = match ip_from_octets(&rid.ip) {
         Ok(ip) => ip,
         Err(e) => {
             log::warn!("dropped real row: invalid ip bytes: {e}");
@@ -288,7 +289,7 @@ fn print_vs_peers(cfg: &balancerpb::VsConfig) {
     }
     println!("  Peers:");
     for peer in &cfg.peers {
-        if let Ok(ip) = bytes_to_ip(peer) {
+        if let Ok(ip) = ip_from_octets(peer) {
             println!("    {}", ip);
         }
     }
@@ -299,19 +300,19 @@ fn print_decap(state: &balancerpb::BalancerState) {
         return;
     };
     if !addr.source_ip4.is_empty()
-        && let Ok(ip) = bytes_to_ip(&addr.source_ip4)
+        && let Ok(ip) = ip_from_octets(&addr.source_ip4)
     {
         println!("Source IPv4: {}", ip);
     }
     if !addr.source_ip6.is_empty()
-        && let Ok(ip) = bytes_to_ip(&addr.source_ip6)
+        && let Ok(ip) = ip_from_octets(&addr.source_ip6)
     {
         println!("Source IPv6: {}", ip);
     }
     if !addr.decaps.is_empty() {
         println!("Decap Addresses:");
         for a in &addr.decaps {
-            if let Ok(ip) = bytes_to_ip(a) {
+            if let Ok(ip) = ip_from_octets(a) {
                 println!("  {}", ip);
             }
         }
@@ -343,7 +344,7 @@ pub fn print_sessions_header() {
 /// Format a wire-format addr+port pair. Returns None on bad address bytes
 /// or u16 overflow; port 0 is omitted from the output.
 fn fmt_addr_port(addr: &[u8], port: u32) -> Option<String> {
-    let ip = bytes_to_ip(addr).ok()?;
+    let ip = ip_from_octets(addr).ok()?;
     let port = u16::try_from(port).ok()?;
     Some(format_ip_port(ip, port))
 }
@@ -356,7 +357,7 @@ pub fn print_session(session: &balancerpb::Session, now: i64) {
             Some(format!(
                 "{}/{}",
                 fmt_addr_port(&id.addr, id.port)?,
-                proto_str(id.proto).unwrap_or("???")
+                proto_name(id.proto).unwrap_or_else(|| "???".to_owned())
             ))
         })
         .unwrap_or_else(|| "-".to_string());
@@ -443,8 +444,8 @@ pub fn prettify_json(value: &mut serde_json::Value) {
             }
         }
         serde_json::Value::Object(map) => {
-            prettify_enum(map, "scheduler", scheduler_str);
-            prettify_enum(map, "proto", proto_str);
+            prettify_enum(map, "scheduler", scheduler_name);
+            prettify_enum(map, "proto", proto_name);
             for (_, v) in map.iter_mut() {
                 prettify_json(v);
             }
@@ -453,15 +454,11 @@ pub fn prettify_json(value: &mut serde_json::Value) {
     }
 }
 
-fn prettify_enum(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    to_str: fn(i32) -> Option<&'static str>,
-) {
+fn prettify_enum(map: &mut serde_json::Map<String, serde_json::Value>, key: &str, to_name: fn(i32) -> Option<String>) {
     if let Some(val) = map.get(key).and_then(|v| v.as_i64())
-        && let Some(name) = to_str(val as i32)
+        && let Some(name) = to_name(val as i32)
     {
-        map.insert(key.to_string(), serde_json::Value::String(name.to_string()));
+        map.insert(key.to_string(), serde_json::Value::String(name));
     }
 }
 
@@ -473,23 +470,21 @@ fn bytes_array_to_ip_string(arr: &[serde_json::Value]) -> Option<String> {
         .iter()
         .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
         .collect::<Option<Vec<_>>>()?;
-    Some(crate::bytes_to_ip(&bytes).ok()?.to_string())
+    Some(ip_from_octets(&bytes).ok()?.to_string())
 }
 
-fn proto_str(proto: i32) -> Option<&'static str> {
-    match balancerpb::TransportProto::try_from(proto).ok()? {
-        balancerpb::TransportProto::Tcp => Some("tcp"),
-        balancerpb::TransportProto::Udp => Some("udp"),
-    }
+/// The lowercase name of a declared transport protocol.
+fn proto_name(proto: i32) -> Option<String> {
+    let proto = balancerpb::TransportProto::try_from(proto).ok()?;
+
+    Some(proto.as_str_name().to_lowercase())
 }
 
-fn scheduler_str(scheduler: i32) -> Option<&'static str> {
-    match balancerpb::VsScheduler::try_from(scheduler).ok()? {
-        balancerpb::VsScheduler::Sh => Some("sh"),
-        balancerpb::VsScheduler::Wrr => Some("wrr"),
-        balancerpb::VsScheduler::Wlc => Some("wlc"),
-        balancerpb::VsScheduler::Op => Some("op"),
-    }
+/// The lowercase name of a declared scheduler.
+fn scheduler_name(scheduler: i32) -> Option<String> {
+    let scheduler = balancerpb::VsScheduler::try_from(scheduler).ok()?;
+
+    Some(scheduler.as_str_name().to_lowercase())
 }
 
 fn flags_str(flags: Option<&balancerpb::VsFlags>) -> String {
@@ -536,5 +531,23 @@ fn format_timestamp(ts: &prost_types::Timestamp) -> String {
     match ndt {
         Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
         None => "-".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_enum_names_are_the_lowercase_declared_spellings() {
+        assert_eq!(
+            Some("tcp".to_owned()),
+            proto_name(balancerpb::TransportProto::Tcp as i32)
+        );
+        assert_eq!(
+            Some("wrr".to_owned()),
+            scheduler_name(balancerpb::VsScheduler::Wrr as i32)
+        );
+        assert_eq!(None, proto_name(99));
     }
 }

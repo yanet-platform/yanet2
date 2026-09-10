@@ -136,8 +136,8 @@ impl From<UnrdupConfig> for Config {
 impl From<ServiceConfig> for Service {
     fn from(value: ServiceConfig) -> Self {
         Self {
-            vip: Some(addr_to_proto(value.vip)),
-            peers: value.peers.into_iter().map(addr_to_proto).collect(),
+            vip: Some(IpAddress::from(value.vip)),
+            peers: value.peers.into_iter().map(IpAddress::from).collect(),
             endpoints: value.endpoints.into_iter().map(Endpoint::from).collect(),
         }
     }
@@ -207,15 +207,6 @@ impl TryFrom<Protocol> for TransportProto {
             Protocol::Unspecified => Err("endpoint protocol is unspecified".into()),
         }
     }
-}
-
-fn addr_to_proto(addr: IpAddr) -> IpAddress {
-    let bytes = match addr {
-        IpAddr::V4(addr) => addr.octets().to_vec(),
-        IpAddr::V6(addr) => addr.octets().to_vec(),
-    };
-
-    IpAddress { addr: bytes }
 }
 
 const SERVICE_NAME: &str = "modules.unrdup.controlplane.unrduppb.v1.UnrdupService";

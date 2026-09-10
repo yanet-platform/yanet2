@@ -6,13 +6,15 @@ mod sessions;
 
 use core::{
     fmt::{self, Display, Formatter},
-    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{AddrParseError, IpAddr, SocketAddr},
     str::FromStr,
 };
 use std::path::PathBuf;
 
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, ValueEnum};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
+use commonpb::ip_octets;
+use serde::Deserialize;
 use ync::{GlobalArgs, client::Service, completion, errors::Error};
 
 use crate::service::{SERVICE_NAME, client, handle};
@@ -159,12 +161,21 @@ pub struct FilterFlags {
     pub real_port: Option<u16>,
 }
 
-// Mirrors config::Proto for CLI filter flags; the two cannot share a type
-// because of orphan-rule + derive constraints.
-#[derive(Debug, Clone, clap::ValueEnum)]
+/// A transport protocol as a flag value or a config file field.
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Proto {
     Tcp,
     Udp,
+}
+
+impl From<Proto> for balancerpb::TransportProto {
+    fn from(proto: Proto) -> Self {
+        match proto {
+            Proto::Tcp => Self::Tcp,
+            Proto::Udp => Self::Udp,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -237,46 +248,10 @@ impl Display for VsId {
 impl From<&VsId> for balancerpb::VsIdentifier {
     fn from(vs: &VsId) -> Self {
         Self {
-            addr: ip_to_bytes(vs.addr),
+            addr: ip_octets(vs.addr),
             port: u32::from(vs.port),
             proto: vs.proto as i32,
         }
-    }
-}
-
-pub fn ip_to_bytes(ip: IpAddr) -> Vec<u8> {
-    match ip {
-        IpAddr::V4(v4) => v4.octets().to_vec(),
-        IpAddr::V6(v6) => v6.octets().to_vec(),
-    }
-}
-
-#[derive(Debug)]
-pub enum BytesToIpError {
-    InvalidLength(usize),
-}
-
-impl Display for BytesToIpError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::InvalidLength(n) => write!(f, "invalid IP address length: {n}"),
-        }
-    }
-}
-
-impl core::error::Error for BytesToIpError {}
-
-pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, BytesToIpError> {
-    match bytes.len() {
-        4 => {
-            let arr = <[u8; 4]>::try_from(bytes).expect("length already checked");
-            Ok(Ipv4Addr::from(arr).into())
-        }
-        16 => {
-            let arr = <[u8; 16]>::try_from(bytes).expect("length already checked");
-            Ok(Ipv6Addr::from(arr).into())
-        }
-        n => Err(BytesToIpError::InvalidLength(n)),
     }
 }
 
@@ -302,13 +277,10 @@ impl FilterFlags {
         }
 
         Some(balancerpb::Filter {
-            vip: self.vip.map(ip_to_bytes),
+            vip: self.vip.map(ip_octets),
             vs_port: self.vs_port.map(u32::from),
-            proto: self.proto.as_ref().map(|p| match p {
-                Proto::Tcp => balancerpb::TransportProto::Tcp as i32,
-                Proto::Udp => balancerpb::TransportProto::Udp as i32,
-            }),
-            real_ip: self.real_ip.map(ip_to_bytes),
+            proto: self.proto.map(|proto| balancerpb::TransportProto::from(proto) as i32),
+            real_ip: self.real_ip.map(ip_octets),
             real_port: self.real_port.map(u32::from),
         })
     }
