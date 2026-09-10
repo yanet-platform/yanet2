@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -24,6 +23,12 @@ import (
 // message size: a config larger than the buffer streams through it in
 // pieces.
 const memoryListenerBufferSize = 1 << 20
+
+const maxRequestMessageBytes = 256 * 1024 * 1024
+
+// maxResponseMessageBytes accommodates server-owned metadata added to admitted
+// million-entry table snapshots, consistently across both proxy hops.
+const maxResponseMessageBytes = 512 * 1024 * 1024
 
 // backend is a live proxying connection to a registered upstream: the gRPC
 // connection plus the endpoint the registry tracks it by.
@@ -49,8 +54,8 @@ func newBackend(
 		grpc.WithDefaultCallOptions(
 			grpc.ForceCodecV2(proxy.Codec()),
 			grpc.UseCompressor(gzip.Name),
-			grpc.MaxCallRecvMsgSize(int(256*datasize.MB)),
-			grpc.MaxCallSendMsgSize(int(256*datasize.MB)),
+			grpc.MaxCallRecvMsgSize(maxResponseMessageBytes),
+			grpc.MaxCallSendMsgSize(maxRequestMessageBytes),
 		),
 		grpc.WithTransportCredentials(creds),
 	)

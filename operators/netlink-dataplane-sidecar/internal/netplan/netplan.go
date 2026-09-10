@@ -93,7 +93,7 @@ func Parse(data []byte) (State, error) {
 		switch name {
 		case "version", "renderer", "ethernets", "vlans", "dummy-devices",
 			"wifis", "modems", "bridges", "bonds", "tunnels", "vrfs",
-			"nm-devices", "virtual-ethernets", "openvswitch", "networkmanager":
+			"nm-devices", "virtual-ethernets", "openvswitch":
 		default:
 			return State{}, fmt.Errorf("network: unsupported setting %q", name)
 		}

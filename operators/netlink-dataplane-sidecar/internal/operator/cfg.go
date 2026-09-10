@@ -3,8 +3,6 @@ package operator
 import (
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -49,13 +47,10 @@ func (m *Config) PublicationConfig() neighbour.PublicationConfig {
 	return neighbour.PublicationConfig{TableName: m.NeighbourTable, DefaultPriority: m.NeighbourPriority, Timeout: m.NeighbourPublishTimeout}
 }
 
-// Validate rejects invalid transport and scheduling configuration at startup.
+// Validate rejects invalid publication and scheduling configuration at startup.
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
-	}
-	if err := validateListenEndpoint(m.Server.Endpoint.Unwrap()); err != nil {
-		return fmt.Errorf("invalid server endpoint: %w", err)
 	}
 	if err := m.Server.Validate(); err != nil {
 		return fmt.Errorf("invalid server configuration: %w", err)
@@ -91,9 +86,6 @@ func (m *Config) Validate() error {
 			return fmt.Errorf("duplicate gateway name %q", gateway.Name)
 		}
 		names[gateway.Name] = true
-		if err := validateGRPCTarget(gateway.Endpoint.Unwrap()); err != nil {
-			return fmt.Errorf("gateway %q: invalid endpoint: %w", gateway.Name, err)
-		}
 		if gateway.TLS != nil {
 			if err := gateway.TLS.Validate(); err != nil {
 				return fmt.Errorf("gateway %q: %w", gateway.Name, err)
@@ -106,79 +98,6 @@ func (m *Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-func validateListenEndpoint(endpoint string) error {
-	host, port, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(host) != host {
-		return errors.New("host contains surrounding whitespace")
-	}
-	if port == "0" {
-		return nil
-	}
-	portNumber, err := net.LookupPort("tcp", port)
-	if err != nil || portNumber <= 0 {
-		return fmt.Errorf("invalid port %q", port)
-	}
-	return nil
-}
-
-func validateGRPCTarget(target string) error {
-	if strings.TrimSpace(target) != target || target == "" {
-		return errors.New("target is empty or contains surrounding whitespace")
-	}
-	scheme, _, hasScheme := strings.Cut(target, ":")
-	resolverURI := hasScheme && (scheme == "dns" || scheme == "passthrough" || scheme == "unix" || scheme == "unix-abstract")
-	if !resolverURI {
-		if !strings.ContainsAny(target, ":/[] \t\n\r?#") {
-			return nil
-		}
-		_, port, err := net.SplitHostPort(target)
-		if err != nil {
-			return err
-		}
-		portNumber, lookupErr := net.LookupPort("tcp", port)
-		if lookupErr != nil || portNumber <= 0 {
-			return fmt.Errorf("invalid port %q", port)
-		}
-		return nil
-	}
-	parsed, err := url.Parse(target)
-	if err != nil {
-		return err
-	}
-	if parsed.Scheme == "" {
-		return errors.New("target requires host:port or a resolver URI")
-	}
-	endpoint := strings.TrimPrefix(parsed.Path, "/")
-	if endpoint == "" {
-		endpoint = parsed.Opaque
-	}
-	if endpoint == "" || strings.TrimSpace(endpoint) != endpoint {
-		return errors.New("target URI has no endpoint")
-	}
-	switch parsed.Scheme {
-	case "dns", "passthrough":
-		_, port, err := net.SplitHostPort(endpoint)
-		if err != nil {
-			if parsed.Scheme == "dns" && !strings.ContainsAny(endpoint, "/: \t\n\r") {
-				return nil
-			}
-			return fmt.Errorf("resolver endpoint requires host:port: %w", err)
-		}
-		portNumber, err := net.LookupPort("tcp", port)
-		if err != nil || portNumber <= 0 {
-			return fmt.Errorf("invalid port %q", port)
-		}
-		return nil
-	case "unix", "unix-abstract":
-		return nil
-	default:
-		return fmt.Errorf("unsupported resolver scheme %q", parsed.Scheme)
-	}
 }
 
 // DefaultConfig supplies bounded scheduling and a stable neighbour-table name.

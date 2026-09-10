@@ -48,6 +48,7 @@ func Test_Parse_ManagedBoundary(t *testing.T) {
 		{name: "aliases and empty lists", yaml: "defaults: &empty {addresses: [], link-local: []}\nnetwork: {version: 2, ethernets: {kni0: *empty}}", valid: true},
 		{name: "misspelled section", yaml: "network: {version: 2, etherents: {kni0: {}}}"},
 		{name: "unknown section", yaml: "network: {version: 2, unrelated: {}}"},
+		{name: "backend settings are not a network section", yaml: "network: {version: 2, networkmanager: {}}"},
 		{name: "known host sections", yaml: "network: {version: 2, renderer: networkd, bonds: {}, bridges: {}, wifis: {}, tunnels: {}}", valid: true},
 		{name: "missing network", yaml: "other: {}"},
 		{name: "null network", yaml: "network: null"},

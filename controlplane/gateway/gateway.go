@@ -326,8 +326,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			serverMetrics.StreamServerInterceptor(),
 			auth.StreamServerInterceptor(authManager, log),
 		),
-		grpc.MaxRecvMsgSize(1024 * 1024 * 256),
-		grpc.MaxSendMsgSize(1024 * 1024 * 256),
+		grpc.MaxRecvMsgSize(maxRequestMessageBytes),
+		grpc.MaxSendMsgSize(maxResponseMessageBytes),
 		grpc.ForceServerCodecV2(proxy.Codec()),
 		grpc.UnknownServiceHandler(
 			proxy.TransparentHandler(director),

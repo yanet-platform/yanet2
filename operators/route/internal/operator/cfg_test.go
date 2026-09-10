@@ -24,6 +24,7 @@ func Test_Config_DeviceNameBoundary(t *testing.T) {
 			{name: "79 bytes", device: strings.Repeat("d", 79), valid: true},
 			{name: "80 bytes", device: strings.Repeat("d", 80)},
 			{name: "embedded NUL", device: "logical0\x00other"},
+			{name: "logical name with whitespace", device: "logical \t\n\r\v\f1", valid: true},
 		} {
 			t.Run(input+"/"+test.name, func(t *testing.T) {
 				config := operator.DefaultConfig()

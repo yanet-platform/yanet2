@@ -25,8 +25,8 @@ func ValidateDevice(device string) error {
 	if len(device) > DeviceNameMaxLen {
 		return fmt.Errorf("device name exceeds %d bytes", DeviceNameMaxLen)
 	}
-	if strings.ContainsAny(device, "\x00 \t\n\r\v\f") {
-		return fmt.Errorf("device name contains whitespace or a NUL byte")
+	if strings.ContainsRune(device, '\x00') {
+		return fmt.Errorf("device name contains a NUL byte")
 	}
 	return nil
 }
