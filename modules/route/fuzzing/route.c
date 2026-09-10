@@ -130,6 +130,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		goto error_lpm_v6;
 	}
 	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
+	fuzz_params.module_ectx.abs_counter_storage = cs;
 
 	*cp_module = (struct cp_module *)config;
 	return 0;

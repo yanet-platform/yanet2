@@ -64,9 +64,7 @@ dscp_handle_packets(
 ) {
 	(void)dp_worker;
 	struct dscp_module_config *dscp_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
-		struct dscp_module_config,
-		cp_module
+		module_ectx->abs_cp_module, struct dscp_module_config, cp_module
 	);
 
 	if (dscp_config->dscp.flag != DSCP_MARK_NEVER) {

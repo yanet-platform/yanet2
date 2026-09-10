@@ -91,6 +91,7 @@ test_nat64_handle_packets(
 ) {
 	struct module_ectx module_ectx = {};
 	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+	module_ectx.abs_cp_module = cp_module;
 	nat64_handle_packets(dp_worker, &module_ectx, packet_front);
 }
 */

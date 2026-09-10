@@ -37,9 +37,7 @@ route_mpls_handle_packets(
 	(void)dp_worker;
 
 	struct module_config *module_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
-		struct module_config,
-		cp_module
+		module_ectx->abs_cp_module, struct module_config, cp_module
 	);
 
 	// The worker's per-tick force-poll can reach this handler with an empty

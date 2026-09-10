@@ -48,7 +48,7 @@ mirror_handle_packets(
 	struct packet_front *packet_front
 ) {
 	struct mirror_module_config *mirror_config = container_of(
-		ADDR_OF(&module_ectx->cp_module),
+		module_ectx->abs_cp_module,
 		struct mirror_module_config,
 		cp_module
 	);
@@ -145,7 +145,7 @@ mirror_handle_packets(
 		if (target != NULL) {
 			uint64_t *counters = counter_get_address(
 				target->counter_id,
-				ADDR_OF_NONNULL(&module_ectx->counter_storage)
+				module_ectx->abs_counter_storage
 			);
 			counters[0] += 1;
 			counters[1] += packet_data_len(packet);
