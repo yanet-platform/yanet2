@@ -181,14 +181,12 @@ impl RouteMplsService {
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -214,11 +212,10 @@ impl RouteMplsService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -248,11 +245,10 @@ impl RouteMplsService {
             rules: Vec::<Rule>::new(),
         };
         self.service
-            .client()
-            .create_config(request)
-            .await
-            .map_err(self.service.status("create"))?
-            .into_inner();
+            .unary("create", request, async |client, request| {
+                client.create_config(request).await
+            })
+            .await?;
 
         output::success("create", format_args!("Created config '{}'.", cmd.config_name));
 
@@ -262,11 +258,10 @@ impl RouteMplsService {
     pub async fn delete_config(&mut self, cmd: RouteDeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(self.service.status("delete"))?
-            .into_inner();
+            .unary("delete", request, async |client, request| {
+                client.delete_config(request).await
+            })
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
@@ -291,11 +286,10 @@ impl RouteMplsService {
             }],
         };
         self.service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?
-            .into_inner();
+            .unary("update", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated route in config '{}'.", cmd.config_name));
 
@@ -320,11 +314,10 @@ impl RouteMplsService {
             }],
         };
         self.service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("withdraw"))?
-            .into_inner();
+            .unary("withdraw", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success(
             "withdraw",

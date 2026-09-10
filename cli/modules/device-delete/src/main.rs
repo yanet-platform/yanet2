@@ -6,16 +6,13 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 use ynpb::pb::{DeleteDeviceRequest, ListDevicesRequest, device_service_client::DeviceServiceClient};
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "controlplane.ynpb.v1.DeviceService";
-
-/// Maps a genuine "device not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "device");
 
 fn client(channel: LayeredChannel) -> DeviceServiceClient<LayeredChannel> {
     DeviceServiceClient::new(channel)
@@ -51,10 +48,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 
     let name = cmd.name;
     service
-        .client()
-        .delete(DeleteDeviceRequest { name: name.clone() })
-        .await
-        .map_err(|status| NOT_FOUND.map(status, action, service.endpoint(), Some(&format!("device '{name}'"))))?;
+        .unary_with(
+            action,
+            DeleteDeviceRequest { name: name.clone() },
+            service.not_found(action, &format!("device '{name}'")),
+            async |client, request| client.delete(request).await,
+        )
+        .await?;
 
     output::success(action, format_args!("Deleted device '{name}'."));
 

@@ -51,8 +51,12 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   `cmd.connection.endpoint` itself. A pre-connect error label comes from
   `client::resolve_label`, a post-connect one from `Service::endpoint()` /
   `Connection::endpoint()`.
-- Every RPC: `self.service.client().<rpc>(request).await
-  .map_err(self.service.status("<verb>"))?.into_inner()`.
+- Every unary RPC of a command handler: `self.service.unary("<verb>",
+  request, async |client, request| client.<rpc>(request).await).await?`; a
+  mapper other than `status` goes through `unary_with("<verb>", request,
+  mapper, call)`. A streaming RPC keeps `self.service.client().<rpc>(request)
+  .await.map_err(self.service.status("<verb>"))?.into_inner()`, and a
+  completion lookup calls the raw client it is handed.
 - Generated code: `#[allow(clippy::std_instead_of_core, non_snake_case)]
   pub mod <x>pb { tonic::include_proto!("…"); }`; shared protos come
   through `extern_path` to `::commonpb::pb`.
@@ -153,9 +157,9 @@ no `--yes`, no `--dry-run`.
   "not ready" is legacy until #2354).
 - A local rejection is `self.service.invalid("<verb>", message)` or
   `Error::invalid_argument(verb, endpoint, message)`; a command addressing an
-  existing object maps its status through `NotFoundMapper::new(SERVICE_NAME,
-  "<resource>")` and `.map(status, verb, endpoint, resource)`, so a missing
-  object reads `<resource> not found` and exits 3. Hints via `.with_hint(…)`.
+  existing object passes `self.service.not_found("<verb>", "<resource>")` as
+  the mapper of `unary_with`, so a missing object reads `<resource> not found`
+  and exits 3. Hints via `.with_hint(…)`.
 
 ## Tests
 

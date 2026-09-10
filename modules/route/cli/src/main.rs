@@ -11,7 +11,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
     yaml,
 };
@@ -195,9 +195,6 @@ pub struct FibShowCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.route.controlplane.routepb.v1.RouteService";
 
-/// Rewrites a genuine missing-config `NotFound` into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
-
 fn client(channel: LayeredChannel) -> RouteServiceClient<LayeredChannel> {
     RouteServiceClient::new(channel)
         .send_compressed(CompressionEncoding::Gzip)
@@ -251,10 +248,10 @@ impl RouteService {
             entries: config.entries,
         };
         self.service
-            .client()
-            .update_fib(request)
-            .await
-            .map_err(self.service.status("update"))?;
+            .unary("update", request, async |client, request| {
+                client.update_fib(request).await
+            })
+            .await?;
 
         output::success(
             "update",
@@ -266,14 +263,15 @@ impl RouteService {
     pub async fn delete_fib(&mut self, cmd: FibDeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
 
-        self.service.client().delete_config(request).await.map_err(|status| {
-            NOT_FOUND.map(
-                status,
+        self.service
+            .unary_with(
                 "delete",
-                self.service.endpoint(),
-                Some(&format!("config '{}'", cmd.config_name)),
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
             )
-        })?;
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
         Ok(())
@@ -282,11 +280,10 @@ impl RouteService {
     pub async fn list_fibs(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_configs(ListConfigsRequest {})
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -316,11 +313,8 @@ impl RouteService {
 
         let response = self
             .service
-            .client()
-            .show_fib(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| client.show_fib(request).await)
+            .await?;
         let entries = response.entries;
 
         output::data(

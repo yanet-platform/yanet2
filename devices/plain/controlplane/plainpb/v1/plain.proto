@@ -6,7 +6,12 @@ import "common/commonpb/v1/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1;plainpb";
 
-service DevicePlainService { rpc UpdateDevice(UpdateDevicePlainRequest) returns (UpdateDevicePlainResponse); }
+service DevicePlainService {
+  rpc UpdateDevice(UpdateDevicePlainRequest) returns (UpdateDevicePlainResponse);
+
+  // ShowDevice returns the pipeline bindings of the plain device with the given name.
+  rpc ShowDevice(ShowDevicePlainRequest) returns (ShowDevicePlainResponse);
+}
 
 message UpdateDevicePlainRequest {
   // Accepted range: at most 79 bytes.
@@ -15,3 +20,10 @@ message UpdateDevicePlainRequest {
 }
 
 message UpdateDevicePlainResponse {}
+
+message ShowDevicePlainRequest {
+  // Accepted range: at most 79 bytes.
+  string name = 1;
+}
+
+message ShowDevicePlainResponse { common.commonpb.v1.Device device = 1; }

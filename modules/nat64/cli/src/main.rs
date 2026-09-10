@@ -13,7 +13,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 
@@ -25,9 +25,6 @@ pub mod nat64pb {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.nat64.controlplane.nat64pb.v1.NAT64Service";
-
-/// Maps a genuine "config not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
 fn client(channel: LayeredChannel) -> Nat64ServiceClient<LayeredChannel> {
     Nat64ServiceClient::new(channel)
@@ -232,16 +229,12 @@ impl NAT64Service {
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
-        log::debug!("list configs response: {response:?}");
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -267,22 +260,15 @@ impl NAT64Service {
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        log::trace!("show config request: {request:?}");
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "show",
-                    self.service.endpoint(),
-                    Some(&format!("config '{}'", cmd.config_name)),
-                )
-            })?
-            .into_inner();
-        log::debug!("show config response: {response:?}");
+            .unary_with(
+                "show",
+                request,
+                self.service.not_found("show", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.show_config(request).await,
+            )
+            .await?;
 
         output::data(
             || &response,
@@ -304,22 +290,15 @@ impl NAT64Service {
 
     pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        log::trace!("delete config request: {request:?}");
-        let response = self
-            .service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "delete",
-                    self.service.endpoint(),
-                    Some(&format!("config '{}'", cmd.config_name)),
-                )
-            })?
-            .into_inner();
-        log::debug!("delete config response: {response:?}");
+        self.service
+            .unary_with(
+                "delete",
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
@@ -331,12 +310,11 @@ impl NAT64Service {
             name: cmd.config_name.clone(),
             prefix: Some(cmd.prefix.into()),
         };
-        log::debug!("AddPrefixRequest: {request:?}");
         self.service
-            .client()
-            .add_prefix(request)
-            .await
-            .map_err(self.service.status("add prefix"))?;
+            .unary("add prefix", request, async |client, request| {
+                client.add_prefix(request).await
+            })
+            .await?;
 
         output::success(
             "add prefix",
@@ -351,12 +329,11 @@ impl NAT64Service {
             name: cmd.config_name.clone(),
             prefix: Some(cmd.prefix.into()),
         };
-        log::debug!("RemovePrefixRequest: {request:?}");
         self.service
-            .client()
-            .remove_prefix(request)
-            .await
-            .map_err(self.service.status("remove prefix"))?;
+            .unary("remove prefix", request, async |client, request| {
+                client.remove_prefix(request).await
+            })
+            .await?;
 
         output::success(
             "remove prefix",
@@ -373,12 +350,11 @@ impl NAT64Service {
             ipv6: Some(cmd.ipv6.into()),
             prefix_index: cmd.prefix_index,
         };
-        log::debug!("AddMappingRequest: {request:?}");
         self.service
-            .client()
-            .add_mapping(request)
-            .await
-            .map_err(self.service.status("add mapping"))?;
+            .unary("add mapping", request, async |client, request| {
+                client.add_mapping(request).await
+            })
+            .await?;
 
         output::success(
             "add mapping",
@@ -396,12 +372,11 @@ impl NAT64Service {
             name: cmd.config_name.clone(),
             ipv4: Some(cmd.ipv4.into()),
         };
-        log::debug!("RemoveMappingRequest: {request:?}");
         self.service
-            .client()
-            .remove_mapping(request)
-            .await
-            .map_err(self.service.status("remove mapping"))?;
+            .unary("remove mapping", request, async |client, request| {
+                client.remove_mapping(request).await
+            })
+            .await?;
 
         output::success(
             "remove mapping",
@@ -419,12 +394,11 @@ impl NAT64Service {
                 ipv6_mtu: cmd.ipv6_mtu,
             }),
         };
-        log::debug!("SetMtuRequest: {request:?}");
         self.service
-            .client()
-            .set_mtu(request)
-            .await
-            .map_err(self.service.status("set mtu"))?;
+            .unary("set mtu", request, async |client, request| {
+                client.set_mtu(request).await
+            })
+            .await?;
 
         output::success(
             "set mtu",
@@ -443,12 +417,11 @@ impl NAT64Service {
             drop_unknown_prefix: cmd.drop_unknown_prefix,
             drop_unknown_mapping: cmd.drop_unknown_mapping,
         };
-        log::debug!("SetDropUnknownRequest: {request:?}");
         self.service
-            .client()
-            .set_drop_unknown(request)
-            .await
-            .map_err(self.service.status("set drop"))?;
+            .unary("set drop", request, async |client, request| {
+                client.set_drop_unknown(request).await
+            })
+            .await?;
 
         output::success(
             "set drop",

@@ -21,7 +21,7 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
-use core::time::Duration;
+use core::{fmt::Debug, time::Duration};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -30,7 +30,7 @@ use std::{
 use http::{Uri, uri::PathAndQuery};
 use prost::Message;
 use tonic::{
-    Request, Status,
+    Request, Response, Status,
     client::Grpc,
     codec::CompressionEncoding,
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
@@ -41,7 +41,7 @@ use tower::Layer;
 use crate::{
     auth::{self, AuthArgs, interceptor::AuthService},
     config::{self, Settings},
-    errors::{Error, root_cause},
+    errors::{Error, map_not_found, root_cause},
     timeout::{TimeoutLayer, TimeoutService},
 };
 
@@ -537,6 +537,58 @@ impl<C> Service<C> {
             self.name,
         )
     }
+
+    /// Issues one unary RPC, mapping a failure through
+    /// [`status`](Service::status) under `action`.
+    ///
+    /// The request and the unwrapped response are logged at trace level.
+    pub async fn unary<Req, Resp, Call>(
+        &mut self,
+        action: &'static str,
+        request: Req,
+        call: Call,
+    ) -> Result<Resp, Error>
+    where
+        Req: Debug,
+        Resp: Debug,
+        Call: AsyncFnOnce(&mut C, Req) -> Result<Response<Resp>, Status>,
+    {
+        let map = self.status(action);
+
+        self.unary_with(action, request, map, call).await
+    }
+
+    /// [`unary`](Service::unary) with an explicit status mapper, such as
+    /// [`not_found`](Service::not_found).
+    pub async fn unary_with<Req, Resp, Map, Call>(
+        &mut self,
+        action: &'static str,
+        request: Req,
+        map: Map,
+        call: Call,
+    ) -> Result<Resp, Error>
+    where
+        Req: Debug,
+        Resp: Debug,
+        Map: FnOnce(Status) -> Error,
+        Call: AsyncFnOnce(&mut C, Req) -> Result<Response<Resp>, Status>,
+    {
+        log::trace!("{action} request: {request:?}");
+        let response = call(&mut self.client, request).await.map_err(map)?.into_inner();
+        log::trace!("{action} response: {response:?}");
+
+        Ok(response)
+    }
+
+    /// A closure mapping a gRPC [`Status`] to an [`Error`] that reads a genuine
+    /// resource `NotFound` as `<resource> not found`.
+    pub fn not_found(&self, action: &'static str, resource: &str) -> impl FnOnce(Status) -> Error + use<C> {
+        let endpoint = self.endpoint.clone();
+        let name = self.name;
+        let resource = resource.to_owned();
+
+        move |status| map_not_found(status, action, endpoint, name, &resource)
+    }
 }
 
 /// Invoke a unary RPC on an arbitrary gRPC service by its fully-qualified
@@ -603,7 +655,8 @@ mod test {
     use tokio::task::JoinHandle;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{
-        Status,
+        Code, Response, Status,
+        metadata::MetadataMap,
         transport::{Certificate, Identity, Server, ServerTlsConfig},
     };
     use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
@@ -893,5 +946,70 @@ mod test {
         let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
 
         assert_eq!("grpc://[::1]:8080", service.endpoint());
+    }
+
+    #[tokio::test]
+    async fn test_unary_unwraps_the_response() {
+        let mut service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
+
+        let doubled = service
+            .unary("show", 21u8, async |_, request| Ok(Response::new(request * 2)))
+            .await
+            .unwrap();
+
+        assert_eq!(42, doubled);
+    }
+
+    #[tokio::test]
+    async fn test_unary_maps_a_status_under_the_action() {
+        let mut service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
+
+        let err = service
+            .unary("show", (), async |_, ()| {
+                Err::<Response<()>, _>(Status::unavailable("down"))
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(ErrorKind::Unavailable, err.kind());
+        assert_eq!("show", err.action);
+    }
+
+    #[tokio::test]
+    async fn test_unary_with_uses_the_given_mapper() {
+        let mut service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
+        let not_found = service.not_found("show", "config 'x'");
+
+        let err = service
+            .unary_with("show", (), not_found, async |_, ()| {
+                Err::<Response<()>, _>(Status::not_found("missing"))
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(ErrorKind::NotFound, err.kind());
+        assert_eq!("config 'x' not found", err.message());
+    }
+
+    #[test]
+    fn test_not_found_passes_other_statuses_through() {
+        let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
+
+        let err = (service.not_found("show", "config 'x'"))(Status::unavailable("down"));
+
+        assert_eq!(ErrorKind::Unavailable, err.kind());
+        assert_eq!("down", err.message());
+    }
+
+    #[test]
+    fn test_not_found_passes_a_registry_miss_through() {
+        let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
+        let mut metadata = MetadataMap::new();
+        metadata.insert("x-yanet-error-reason", "service-unregistered".parse().unwrap());
+        let status = Status::with_metadata(Code::NotFound, "unknown service test.Service", metadata);
+
+        let err = (service.not_found("show", "config 'x'"))(status);
+
+        assert_eq!(ErrorKind::ServiceUnregistered, err.kind());
     }
 }

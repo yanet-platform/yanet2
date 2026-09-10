@@ -113,12 +113,11 @@ impl FWStateMapService {
             extra_bucket_count: cmd.extra_bucket_count.unwrap_or(0),
             worker_count: cmd.worker_count.unwrap_or(0),
         };
-        log::trace!("CreateMapRequest: {request:?}");
         self.service
-            .client()
-            .create_map(request)
-            .await
-            .map_err(self.service.status("create"))?;
+            .unary("create", request, async |client, request| {
+                client.create_map(request).await
+            })
+            .await?;
 
         output::success("create", format_args!("Created map '{}'.", cmd.map_name));
 
@@ -127,12 +126,11 @@ impl FWStateMapService {
 
     pub async fn map_delete(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteMapRequest { name: cmd.map_name.clone() };
-        log::trace!("DeleteMapRequest: {request:?}");
         self.service
-            .client()
-            .delete_map(request)
-            .await
-            .map_err(self.service.status("delete"))?;
+            .unary("delete", request, async |client, request| {
+                client.delete_map(request).await
+            })
+            .await?;
 
         output::success("delete", format_args!("Deleted map '{}'.", cmd.map_name));
 
@@ -140,14 +138,12 @@ impl FWStateMapService {
     }
 
     pub async fn map_list(&mut self, _cmd: ListCmd) -> Result<(), Error> {
-        let request = ListMapsRequest {};
         let response = self
             .service
-            .client()
-            .list_maps(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListMapsRequest {}, async |client, request| {
+                client.list_maps(request).await
+            })
+            .await?;
 
         // The wire response's kinds map has no defined iteration order and
         // HashMap serialization is keyed by name only, so a stable payload
@@ -200,14 +196,12 @@ impl FWStateMapService {
 
     pub async fn map_stats(&mut self, cmd: StatsCmd) -> Result<(), Error> {
         let request = GetMapStatsRequest { name: cmd.map_name.clone() };
-        log::trace!("GetMapStatsRequest: {request:?}");
         let response = self
             .service
-            .client()
-            .get_map_stats(request)
-            .await
-            .map_err(self.service.status("stats"))?
-            .into_inner();
+            .unary("stats", request, async |client, request| {
+                client.get_map_stats(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -233,12 +227,11 @@ impl FWStateMapService {
             worker_count: cmd.worker_count.unwrap_or(0),
             ..Default::default()
         };
-        log::trace!("InsertLayerRequest: {request:?}");
         self.service
-            .client()
-            .insert_layer(request)
-            .await
-            .map_err(self.service.status("insert-layer"))?;
+            .unary("insert-layer", request, async |client, request| {
+                client.insert_layer(request).await
+            })
+            .await?;
 
         output::success(
             "insert-layer",
@@ -263,20 +256,20 @@ impl FWStateMapService {
         // stream.
         let mut index = cmd.index as i64;
         loop {
+            let request = ListEntriesRequest {
+                map_name: cmd.map_name.clone(),
+                layer_index: cmd.layer,
+                include_expired: cmd.include_expired,
+                direction: direction as i32,
+                batch_size: cmd.batch,
+                index,
+            };
             let resp = self
                 .service
-                .client()
-                .list_entries(ListEntriesRequest {
-                    map_name: cmd.map_name.clone(),
-                    layer_index: cmd.layer,
-                    include_expired: cmd.include_expired,
-                    direction: direction as i32,
-                    batch_size: cmd.batch,
-                    index,
+                .unary("entries", request, async |client, request| {
+                    client.list_entries(request).await
                 })
-                .await
-                .map_err(self.service.status("entries"))?
-                .into_inner();
+                .await?;
 
             state.note_generation(resp.generation);
 

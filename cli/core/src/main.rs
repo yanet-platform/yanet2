@@ -286,11 +286,12 @@ async fn whoami(connection: &ConnectionArgs) -> Result<(String, Principal), Erro
     .await?;
 
     let response = service
-        .client()
-        .introspect_token(IntrospectTokenRequest { token: String::new() })
-        .await
-        .map_err(service.status("whoami"))?
-        .into_inner();
+        .unary(
+            "whoami",
+            IntrospectTokenRequest { token: String::new() },
+            async |client, request| client.introspect_token(request).await,
+        )
+        .await?;
 
     let principal = response.principal.ok_or_else(|| {
         Error::from_status(

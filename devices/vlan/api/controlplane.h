@@ -27,6 +27,16 @@ cp_device_vlan_new(
 int
 cp_device_vlan_free(struct cp_device *cp_device, yanet_error **err);
 
+// Read the vlan id of the live vlan device with the given name from
+// the active configuration generation.
+//
+// Returns 0 after storing the id, -1 with a not-found error when no
+// vlan device goes by that name.
+int
+cp_device_vlan_get_vlan(
+	struct agent *agent, const char *name, uint16_t *vlan, yanet_error **err
+);
+
 struct cp_device_vlan_config *
 cp_device_vlan_config_new(
 	const char *name,

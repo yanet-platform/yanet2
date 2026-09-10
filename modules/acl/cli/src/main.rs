@@ -266,11 +266,10 @@ impl ACLService {
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
             .service
-            .client()
-            .list_configs(ListConfigsRequest {})
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -296,11 +295,10 @@ impl ACLService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -338,11 +336,10 @@ impl ACLService {
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(self.service.status("delete"))?
-            .into_inner();
+            .unary("delete", request, async |client, request| {
+                client.delete_config(request).await
+            })
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
@@ -374,15 +371,11 @@ impl ACLService {
             fwtable_name_v6,
             ..Default::default()
         };
-        log::trace!("UpdateConfigRequest: {request:?}");
-        let response = self
-            .service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?
-            .into_inner();
-        log::debug!("UpdateConfigResponse: {response:?}");
+        self.service
+            .unary("update", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success(
             "update",
@@ -398,11 +391,10 @@ impl ACLService {
         };
         let response = self
             .service
-            .client()
-            .get_rules_counters(request)
-            .await
-            .map_err(self.service.status("rule-counters"))?
-            .into_inner();
+            .unary("rule-counters", request, async |client, request| {
+                client.get_rules_counters(request).await
+            })
+            .await?;
 
         output::data(
             || &response.counters,
@@ -468,11 +460,10 @@ impl ACLService {
 
         let response = self
             .metrics
-            .client()
-            .get_metrics_rules(request)
-            .await
-            .map_err(self.metrics.status("metrics-rules"))?
-            .into_inner();
+            .unary("metrics-rules", request, async |client, request| {
+                client.get_metrics_rules(request).await
+            })
+            .await?;
 
         let metrics = response.metrics;
 

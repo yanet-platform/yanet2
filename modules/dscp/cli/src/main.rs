@@ -11,7 +11,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
 };
 
@@ -141,9 +141,6 @@ pub struct DeleteConfigCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.dscp.controlplane.dscppb.v1.DscpService";
 
-/// Maps a genuine "config not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
-
 fn client(channel: LayeredChannel) -> DscpServiceClient<LayeredChannel> {
     DscpServiceClient::new(channel)
         .send_compressed(CompressionEncoding::Gzip)
@@ -180,16 +177,12 @@ impl DscpService {
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
-        log::debug!("list configs response: {response:?}");
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -215,15 +208,12 @@ impl DscpService {
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
-        log::trace!("show config request: {request:?}");
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
-        log::debug!("show config response: {response:?}");
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         output::data(
             || &response,
@@ -250,15 +240,11 @@ impl DscpService {
             prefixes4,
             prefixes6,
         };
-        log::trace!("AddPrefixesRequest: {request:?}");
-        let response = self
-            .service
-            .client()
-            .add_prefixes(request)
-            .await
-            .map_err(self.service.status("prefix-add"))?
-            .into_inner();
-        log::debug!("AddPrefixesResponse: {response:?}");
+        self.service
+            .unary("prefix-add", request, async |client, request| {
+                client.add_prefixes(request).await
+            })
+            .await?;
 
         output::success(
             "prefix-add",
@@ -275,15 +261,11 @@ impl DscpService {
             prefixes4,
             prefixes6,
         };
-        log::trace!("RemovePrefixesRequest: {request:?}");
-        let response = self
-            .service
-            .client()
-            .remove_prefixes(request)
-            .await
-            .map_err(self.service.status("prefix-remove"))?
-            .into_inner();
-        log::debug!("RemovePrefixesResponse: {response:?}");
+        self.service
+            .unary("prefix-remove", request, async |client, request| {
+                client.remove_prefixes(request).await
+            })
+            .await?;
 
         output::success(
             "prefix-remove",
@@ -305,15 +287,11 @@ impl DscpService {
                 mark: cmd.mark,
             }),
         };
-        log::trace!("SetDscpMarkingRequest: {request:?}");
-        let response = self
-            .service
-            .client()
-            .set_dscp_marking(request)
-            .await
-            .map_err(self.service.status("set-marking"))?
-            .into_inner();
-        log::debug!("SetDscpMarkingResponse: {response:?}");
+        self.service
+            .unary("set-marking", request, async |client, request| {
+                client.set_dscp_marking(request).await
+            })
+            .await?;
 
         output::success(
             "set-marking",
@@ -325,22 +303,15 @@ impl DscpService {
 
     pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        log::trace!("DeleteConfigRequest: {request:?}");
-        let response = self
-            .service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "delete",
-                    self.service.endpoint(),
-                    Some(&format!("config '{}'", cmd.config_name)),
-                )
-            })?
-            .into_inner();
-        log::debug!("DeleteConfigResponse: {response:?}");
+        self.service
+            .unary_with(
+                "delete",
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 

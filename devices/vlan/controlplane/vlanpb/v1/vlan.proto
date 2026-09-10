@@ -6,7 +6,12 @@ import "common/commonpb/v1/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1;vlanpb";
 
-service DeviceVlanService { rpc UpdateDevice(UpdateDeviceVlanRequest) returns (UpdateDeviceVlanResponse); }
+service DeviceVlanService {
+  rpc UpdateDevice(UpdateDeviceVlanRequest) returns (UpdateDeviceVlanResponse);
+
+  // ShowDevice returns the pipeline bindings and the vlan id of the vlan device with the given name.
+  rpc ShowDevice(ShowDeviceVlanRequest) returns (ShowDeviceVlanResponse);
+}
 
 message UpdateDeviceVlanRequest {
   // Accepted range: at most 79 bytes.
@@ -17,3 +22,13 @@ message UpdateDeviceVlanRequest {
 }
 
 message UpdateDeviceVlanResponse {}
+
+message ShowDeviceVlanRequest {
+  // Accepted range: at most 79 bytes.
+  string name = 1;
+}
+
+message ShowDeviceVlanResponse {
+  common.commonpb.v1.Device device = 1;
+  uint32 vlan = 2;
+}

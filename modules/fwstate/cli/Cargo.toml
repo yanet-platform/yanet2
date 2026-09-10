@@ -14,7 +14,6 @@ ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 tabled = { version = "0.21", default-features = false, features = ["ansi", "derive"] }
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 netip = "0.3"
-log = "0.4"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost = "0.14"

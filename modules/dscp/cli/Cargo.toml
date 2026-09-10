@@ -15,7 +15,6 @@ commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = 
 netip = "0.3"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-log = "0.4"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.14", features = ["gzip"] }
 tonic-prost = "0.14"

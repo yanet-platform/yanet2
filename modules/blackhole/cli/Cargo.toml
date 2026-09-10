@@ -11,7 +11,6 @@ workspace = true
 
 [dependencies]
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
-log = "0.4"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost = "0.14"

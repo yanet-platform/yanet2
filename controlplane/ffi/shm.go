@@ -525,6 +525,17 @@ func (m *DPConfig) Devices() []DeviceInfo {
 	return out
 }
 
+// Device returns the device of the given type and name from the dataplane
+// registry, or false when none matches.
+func (m *DPConfig) Device(deviceType, name string) (DeviceInfo, bool) {
+	for _, device := range m.Devices() {
+		if device.Type == deviceType && device.Name == name {
+			return device, true
+		}
+	}
+	return DeviceInfo{}, false
+}
+
 type ModuleReference struct {
 	Device     string
 	Pipeline   string

@@ -137,6 +137,8 @@ deploy/packages/
 .ai
 .cursor/
 .pi/
+/_bmad-output
+/_bmad/config.user.toml
 
 # Worktree symlinks: a worktree may symlink these trees into the main
 # checkout, and a directory-only pattern does not match a symlink.
@@ -155,6 +157,7 @@ deploy/packages/
 # Public skills are whitelisted below, so adding a new private skill needs
 # no change here.
 .agents/skills/*
+!.agents/skills/bmad-*/
 !.agents/skills/autopilot
 !.agents/skills/better-comment
 !.agents/skills/code-cli
@@ -162,6 +165,7 @@ deploy/packages/
 !.agents/skills/review-change
 !.agents/skills/ship-pr
 .claude/skills/*
+!.claude/skills/bmad-*
 !.claude/skills/autopilot
 !.claude/skills/better-comment
 !.claude/skills/code-cli

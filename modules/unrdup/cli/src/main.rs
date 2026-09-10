@@ -14,7 +14,7 @@ use unrduppb::{
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service as GrpcService},
     completion,
-    errors::{Error, NotFoundMapper},
+    errors::Error,
     output::{self, CommonFormat},
     yaml,
 };
@@ -228,9 +228,6 @@ fn addr_to_proto(addr: IpAddr) -> IpAddress {
 
 const SERVICE_NAME: &str = "modules.unrdup.controlplane.unrduppb.v1.UnrdupService";
 
-/// Maps a genuine "config not found" status into a friendly message.
-const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
-
 fn client(channel: LayeredChannel) -> UnrdupServiceClient<LayeredChannel> {
     UnrdupServiceClient::new(channel)
         .send_compressed(CompressionEncoding::Gzip)
@@ -265,16 +262,12 @@ impl UnrdupService {
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
-        let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
         let response = self
             .service
-            .client()
-            .list_configs(request)
-            .await
-            .map_err(self.service.status("list"))?
-            .into_inner();
-        log::debug!("list configs response: {response:?}");
+            .unary("list", ListConfigsRequest {}, async |client, request| {
+                client.list_configs(request).await
+            })
+            .await?;
 
         output::data(
             || &response.configs,
@@ -298,15 +291,12 @@ impl UnrdupService {
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        log::trace!("show config request: {request:?}");
         let response = self
             .service
-            .client()
-            .show_config(request)
-            .await
-            .map_err(self.service.status("show"))?
-            .into_inner();
-        log::debug!("show config response: {response:?}");
+            .unary("show", request, async |client, request| {
+                client.show_config(request).await
+            })
+            .await?;
 
         let config = response
             .config
@@ -336,15 +326,11 @@ impl UnrdupService {
             name: cmd.config_name.clone(),
             config: Some(Config::from(config)),
         };
-        log::trace!("update config request: {request:?}");
-        let response = self
-            .service
-            .client()
-            .update_config(request)
-            .await
-            .map_err(self.service.status("update"))?
-            .into_inner();
-        log::debug!("update config response: {response:?}");
+        self.service
+            .unary("update", request, async |client, request| {
+                client.update_config(request).await
+            })
+            .await?;
 
         output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
@@ -353,22 +339,15 @@ impl UnrdupService {
 
     pub async fn delete_config(&mut self, cmd: DeleteConfigCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        log::trace!("delete config request: {request:?}");
-        let response = self
-            .service
-            .client()
-            .delete_config(request)
-            .await
-            .map_err(|status| {
-                NOT_FOUND.map(
-                    status,
-                    "delete",
-                    self.service.endpoint(),
-                    Some(&format!("config '{}'", cmd.config_name)),
-                )
-            })?
-            .into_inner();
-        log::debug!("delete config response: {response:?}");
+        self.service
+            .unary_with(
+                "delete",
+                request,
+                self.service
+                    .not_found("delete", &format!("config '{}'", cmd.config_name)),
+                async |client, request| client.delete_config(request).await,
+            )
+            .await?;
 
         output::success("delete", format_args!("Deleted config '{}'.", cmd.config_name));
 
