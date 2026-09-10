@@ -9,13 +9,14 @@ const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 const SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 
-/// Formats a `Timestamp` as an age string relative to `now`.
+/// Returns how long ago a `Timestamp` was, relative to `now`.
 ///
 /// Returns `None` when `ts` is absent or the zero sentinel, leaving the
-/// caller to decide what sentinel to render. The output is capped at two
-/// units because humantime's year/month decomposition would otherwise leave
-/// a minute/second tail.
-pub fn format_age(ts: Option<&Timestamp>, now: SystemTime) -> Option<String> {
+/// caller to decide what an unknown age means. A timestamp ahead of `now`,
+/// as clock skew between the two hosts produces, reads as a zero age rather
+/// than a negative one, and the result is whole seconds: everything finer is
+/// noise for the decisions this age feeds.
+pub fn age(ts: Option<&Timestamp>, now: SystemTime) -> Option<Duration> {
     let ts = match ts {
         Some(ts) if ts.seconds != 0 || ts.nanos != 0 => ts,
         _ => return None,
@@ -23,7 +24,18 @@ pub fn format_age(ts: Option<&Timestamp>, now: SystemTime) -> Option<String> {
 
     let now_secs = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     let ts_secs = ts.seconds.max(0) as u64;
-    let age = now_secs.saturating_sub(ts_secs);
+
+    Some(Duration::from_secs(now_secs.saturating_sub(ts_secs)))
+}
+
+/// Formats a `Timestamp` as an age string relative to `now`.
+///
+/// Returns `None` when `ts` is absent or the zero sentinel, leaving the
+/// caller to decide what sentinel to render. The output is capped at two
+/// units because humantime's year/month decomposition would otherwise leave
+/// a minute/second tail.
+pub fn format_age(ts: Option<&Timestamp>, now: SystemTime) -> Option<String> {
+    let age = age(ts, now)?.as_secs();
 
     let rendered = humantime::format_duration(Duration::from_secs(round_age(age))).to_string();
     Some(rendered.split_whitespace().take(2).collect::<Vec<_>>().join(" "))
@@ -73,6 +85,25 @@ mod test {
             round_age(3 * SECONDS_PER_DAY + 5 * SECONDS_PER_HOUR + 40 * SECONDS_PER_MINUTE)
         );
         assert_eq!(SECONDS_PER_DAY, round_age(SECONDS_PER_DAY));
+    }
+
+    #[test]
+    fn test_age_reports_whole_elapsed_seconds() {
+        let now = SystemTime::now();
+        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let ts = Timestamp {
+            seconds: now_secs - 90,
+            nanos: 500_000_000,
+        };
+
+        assert_eq!(Some(Duration::from_secs(90)), age(Some(&ts), now));
+    }
+
+    #[test]
+    fn test_age_zero_sentinel_returns_none() {
+        let ts = Timestamp { seconds: 0, nanos: 0 };
+
+        assert_eq!(None, age(Some(&ts), SystemTime::now()));
     }
 
     #[test]

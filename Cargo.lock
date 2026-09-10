@@ -3385,7 +3385,10 @@ name = "yanet-cli-gateway"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
+ "humantime",
  "prost-types",
+ "serde",
  "tabled",
  "tonic",
  "yanet-cli",
@@ -3398,6 +3401,7 @@ version = "0.1.0"
 dependencies = [
  "bytesize",
  "clap",
+ "clap_complete",
  "tonic",
  "unicode-segmentation",
  "unicode-width",

@@ -1,12 +1,61 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bytesize::ByteSize;
+use clap::ValueEnum;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 use ync::{display, output};
 use ynpb::pb::{DevicePipelineInfo, InspectResponse, InstanceInfo, MemoryNode};
 
 use crate::memory::{MemoryTree, node_live};
+
+/// One block of the report, selectable on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Section {
+    Memory,
+    Device,
+    Pipeline,
+    Function,
+    Module,
+}
+
+/// How much of the instance the report shows: which blocks, whether each
+/// agent's memory contexts are expanded, and how many levels of the context
+/// tree are printed.
+#[derive(Debug, Clone)]
+pub struct View {
+    sections: Vec<Section>,
+    memory: bool,
+    depth: Option<usize>,
+}
+
+impl View {
+    pub fn new(sections: Vec<Section>, memory: bool, depth: Option<usize>) -> Self {
+        Self { sections, memory, depth }
+    }
+
+    /// Reports whether a block belongs to the report; selecting none selects
+    /// them all.
+    pub fn shows(&self, section: Section) -> bool {
+        self.sections.is_empty() || self.sections.contains(&section)
+    }
+
+    /// Reports whether memory contexts are expanded under each agent.
+    ///
+    /// Asking for a depth is asking for the tree the depth applies to.
+    fn expands_memory(&self) -> bool {
+        self.memory || self.depth.is_some()
+    }
+
+    /// Returns how many levels of the context tree are printed.
+    ///
+    /// The levels are counted from the topmost printed context, and the
+    /// subtree totals stay those of the whole tree, so a cut branch still
+    /// accounts for everything below it.
+    fn levels(&self) -> usize {
+        self.depth.unwrap_or(usize::MAX)
+    }
+}
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Style {
@@ -94,20 +143,29 @@ impl Record {
     }
 }
 
-pub fn render(response: &InspectResponse, memory: bool) {
+pub fn render(response: &InspectResponse, view: &View) {
     let Some(info) = &response.instance_info else {
         output::empty(format_args!("No instance information found."));
         return;
     };
 
     let colored = output::stdout_is_terminal() && output::is_colored();
-    let groups = vec![
-        memory_records(info, memory, colored),
-        device_records(info),
-        pipeline_records(info),
-        function_records(info),
-        module_records(info),
-    ];
+    let mut groups = Vec::new();
+    if view.shows(Section::Memory) {
+        groups.push(memory_records(info, view, colored));
+    }
+    if view.shows(Section::Device) {
+        groups.push(device_records(info));
+    }
+    if view.shows(Section::Pipeline) {
+        groups.push(pipeline_records(info));
+    }
+    if view.shows(Section::Function) {
+        groups.push(function_records(info));
+    }
+    if view.shows(Section::Module) {
+        groups.push(module_records(info));
+    }
 
     let width = display::terminal_width().filter(|&width| width > 0);
     let header = format!("YANET  instance {}  NUMA {}", info.instance_idx, info.numa_idx);
@@ -150,7 +208,8 @@ fn nonempty(records: Vec<Record>, kind: &'static str) -> Vec<Record> {
     }
 }
 
-fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Record> {
+fn memory_records(info: &InstanceInfo, view: &View, unicode: bool) -> Vec<Record> {
+    let details = view.expands_memory();
     let mut agents: Vec<_> = info.agents.iter().collect();
     agents.sort_by_key(|agent| &agent.name);
     let mut rows = Vec::new();
@@ -193,7 +252,13 @@ fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Reco
                 ],
             );
             if details {
-                rows.extend(memory_tree_records(row, &agent.name, &instance.memory_tree, unicode));
+                rows.extend(memory_tree_records(
+                    row,
+                    &agent.name,
+                    &instance.memory_tree,
+                    unicode,
+                    view.levels(),
+                ));
             } else {
                 rows.push(row);
             }
@@ -342,7 +407,13 @@ fn memory_fields(total: String, own: String, branch: bool) -> Vec<Field> {
     vec![total, Field::new("own", own)]
 }
 
-fn memory_tree_records(mut root: Record, agent_name: &str, nodes: &[MemoryNode], unicode: bool) -> Vec<Record> {
+fn memory_tree_records(
+    mut root: Record,
+    agent_name: &str,
+    nodes: &[MemoryNode],
+    unicode: bool,
+    levels: usize,
+) -> Vec<Record> {
     let tree = MemoryTree::new(nodes);
     let folded_root = match tree.roots.as_slice() {
         &[idx] if nodes[idx].parent_idx == u32::MAX && nodes[idx].name == agent_name => Some(idx),
@@ -368,12 +439,10 @@ fn memory_tree_records(mut root: Record, agent_name: &str, nodes: &[MemoryNode],
     let mut rows = vec![root];
 
     let roots = folded_root.map(|idx| &tree.children[idx]).unwrap_or(&tree.roots);
-    let mut pending: Vec<_> = roots
-        .iter()
-        .enumerate()
-        .rev()
-        .map(|(pos, &idx)| (idx, 0, pos + 1 == roots.len()))
-        .collect();
+    let mut pending: Vec<(usize, usize, bool)> = Vec::new();
+    if levels > 0 {
+        pending.extend(sibling_level(roots, 0));
+    }
     let mut continuation = Vec::new();
     while let Some((idx, depth, last)) = pending.pop() {
         continuation.truncate(depth);
@@ -404,15 +473,21 @@ fn memory_tree_records(mut root: Record, agent_name: &str, nodes: &[MemoryNode],
         });
         rows.push(row);
         continuation.push(!last);
-        pending.extend(
-            children
-                .iter()
-                .enumerate()
-                .rev()
-                .map(|(pos, &child)| (child, depth + 1, pos + 1 == children.len())),
-        );
+        if depth + 1 < levels {
+            pending.extend(sibling_level(children, depth + 1));
+        }
     }
     rows
+}
+
+/// Returns one level of the traversal stack: each sibling with its depth and
+/// whether it closes the level, ordered so that popping visits them in turn.
+fn sibling_level(siblings: &[usize], depth: usize) -> impl Iterator<Item = (usize, usize, bool)> + '_ {
+    siblings
+        .iter()
+        .enumerate()
+        .rev()
+        .map(move |(pos, &idx)| (idx, depth, pos + 1 == siblings.len()))
 }
 
 fn format_report(header: &str, groups: &[Vec<Record>], width: Option<usize>, colored: bool) -> String {
@@ -615,5 +690,99 @@ fn append_lines(out: &mut String, lines: Vec<Vec<Span>>, colored: bool) {
             out.push_str(&span.style.paint(&span.text, colored));
         }
         out.push('\n');
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Returns a memory context that allocated and never freed, so its live
+    /// bytes are exactly what it was given.
+    fn node(name: &str, parent_idx: u32, balloc_size: u64) -> MemoryNode {
+        MemoryNode {
+            name: name.to_string(),
+            parent_idx,
+            balloc_count: 0,
+            bfree_count: 0,
+            balloc_size,
+            bfree_size: 0,
+        }
+    }
+
+    /// Returns a chain of contexts under an agent's own root, one context per
+    /// level, so a depth cut is visible as a shorter chain.
+    fn chain() -> Vec<MemoryNode> {
+        vec![
+            node("agent", u32::MAX, 1),
+            node("filter", 0, 100),
+            node("lpm", 1, 20),
+            node("values", 2, 3),
+        ]
+    }
+
+    /// Returns the names printed for an agent's tree, the agent's own row
+    /// first.
+    fn printed(levels: usize) -> Vec<String> {
+        let root = Record::new("memory", "agent", Vec::new());
+
+        memory_tree_records(root, "agent", &chain(), true, levels)
+            .into_iter()
+            .map(|row| row.name)
+            .collect()
+    }
+
+    #[test]
+    fn test_memory_tree_records_prints_every_level_by_default() {
+        assert_eq!(vec!["agent", "filter", "lpm", "values"], printed(usize::MAX));
+    }
+
+    #[test]
+    fn test_memory_tree_records_depth_caps_printed_levels() {
+        assert_eq!(vec!["agent", "filter"], printed(1));
+        assert_eq!(vec!["agent", "filter", "lpm"], printed(2));
+    }
+
+    #[test]
+    fn test_memory_tree_records_zero_depth_prints_no_contexts() {
+        assert_eq!(vec!["agent"], printed(0));
+    }
+
+    #[test]
+    fn test_memory_tree_records_cut_branch_keeps_its_whole_subtree_total() {
+        let root = Record::new("memory", "agent", Vec::new());
+        let rows = memory_tree_records(root, "agent", &chain(), true, 1);
+
+        let total = &rows[1].fields[0];
+
+        assert_eq!("total", total.label);
+        assert_eq!("123 B", total.value);
+    }
+
+    #[test]
+    fn test_view_without_selection_shows_every_section() {
+        let view = View::new(Vec::new(), false, None);
+
+        assert!(view.shows(Section::Memory));
+        assert!(view.shows(Section::Device));
+        assert!(view.shows(Section::Pipeline));
+        assert!(view.shows(Section::Function));
+        assert!(view.shows(Section::Module));
+    }
+
+    #[test]
+    fn test_view_shows_only_the_selected_sections() {
+        let view = View::new(vec![Section::Memory, Section::Module], false, None);
+
+        assert!(view.shows(Section::Memory));
+        assert!(view.shows(Section::Module));
+        assert!(!view.shows(Section::Device));
+    }
+
+    #[test]
+    fn test_view_depth_expands_memory_contexts() {
+        assert!(!View::new(Vec::new(), false, None).expands_memory());
+        assert!(View::new(Vec::new(), true, None).expands_memory());
+        assert!(View::new(Vec::new(), false, Some(1)).expands_memory());
     }
 }
