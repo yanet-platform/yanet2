@@ -12,7 +12,10 @@ use std::{
 
 use clap::{CommandFactory, Parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
-use commonpb::pb::{IpAddress, MacAddress};
+use commonpb::{
+    pb::{IpAddress, MacAddress},
+    serde_with,
+};
 use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -394,10 +397,9 @@ impl NeighbourService {
 ///
 /// An unrecognized discriminant falls back to `NeighbourState::NudUnknown`.
 fn state_name(value: i32) -> &'static str {
-    let name = NeighbourState::try_from(value)
-        .unwrap_or(NeighbourState::NudUnknown)
-        .as_str_name();
-    name.strip_prefix("NUD_").unwrap_or(name)
+    let state = NeighbourState::try_from(value).unwrap_or(NeighbourState::NudUnknown);
+
+    serde_with::short_name(state.as_str_name(), "NUD_")
 }
 
 /// Serializes the `state` field of `NeighbourEntry` as its proto-defined

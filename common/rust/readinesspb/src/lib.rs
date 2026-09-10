@@ -15,62 +15,9 @@ pub fn serialize_state<S>(value: &i32, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    let name = pb::State::try_from(*value)
-        .unwrap_or_default()
-        .as_str_name()
-        .strip_prefix("STATE_")
-        .unwrap_or("unspecified")
-        .to_lowercase();
+    let state = pb::State::try_from(*value).unwrap_or_default();
 
-    serializer.serialize_str(&name)
-}
-
-/// Serializes an `Option<prost_types::Timestamp>` as `{"seconds": i64, "nanos":
-/// i32}` or `null` when absent.
-pub fn serialize_timestamp<S>(value: &Option<prost_types::Timestamp>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    use serde::Serialize;
-
-    match value {
-        Some(ts) => {
-            #[derive(serde::Serialize)]
-            struct Ts {
-                seconds: i64,
-                nanos: i32,
-            }
-            Ts { seconds: ts.seconds, nanos: ts.nanos }.serialize(serializer)
-        }
-        None => serializer.serialize_none(),
-    }
-}
-
-/// Preserves nanoseconds when serializing an optional duration.
-///
-/// The output is an object with integer seconds and nanoseconds, or null when
-/// no duration is present.
-pub fn serialize_duration<S>(value: &Option<prost_types::Duration>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    use serde::Serialize;
-
-    match value {
-        Some(duration) => {
-            #[derive(serde::Serialize)]
-            struct Dur {
-                seconds: i64,
-                nanos: i32,
-            }
-            Dur {
-                seconds: duration.seconds,
-                nanos: duration.nanos,
-            }
-            .serialize(serializer)
-        }
-        None => serializer.serialize_none(),
-    }
+    commonpb::serde_with::lowercase_name(state.as_str_name(), "STATE_", serializer)
 }
 
 #[cfg(test)]

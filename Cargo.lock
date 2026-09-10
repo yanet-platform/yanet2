@@ -3110,6 +3110,7 @@ version = "0.1.0"
 dependencies = [
  "netip",
  "prost",
+ "prost-types",
  "serde",
  "serde_json",
  "tonic",
@@ -3138,6 +3139,7 @@ dependencies = [
  "serde_json",
  "tonic",
  "tonic-prost-build",
+ "yanet-commonpb",
 ]
 
 [[package]]

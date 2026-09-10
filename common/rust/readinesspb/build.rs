@@ -1,7 +1,7 @@
 use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=common/readinesspb/v1/readiness.proto");
+    println!("cargo:rerun-if-changed=../../../common/readinesspb/v1/readiness.proto");
 
     tonic_prost_build::configure()
         .emit_rerun_if_changed(false)
@@ -16,15 +16,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
         .field_attribute(
             "common.readinesspb.v1.Scope.observed_at",
-            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"commonpb::serde_with::timestamp\")]",
         )
         .field_attribute(
             "common.readinesspb.v1.Scope.last_transition_time",
-            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"commonpb::serde_with::timestamp\")]",
         )
         .field_attribute(
             "common.readinesspb.v1.Scope.expected_observation_interval",
-            "#[serde(serialize_with = \"crate::serialize_duration\")]",
+            "#[serde(serialize_with = \"commonpb::serde_with::duration\")]",
         )
         .enum_attribute(".", "#[derive(serde::Serialize)]")
         .compile_protos(&["common/readinesspb/v1/readiness.proto"], &["../../.."])

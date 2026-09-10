@@ -8,6 +8,8 @@ use core::{
 use netip::{Contiguous, IpNetwork, Ipv4Network, Ipv6Network, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+pub mod serde_with;
+
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod pb {
     tonic::include_proto!("common.commonpb.v1");
