@@ -200,12 +200,14 @@ impl TrafgenService {
                 .invalid("upload", format!("failed to read pcap {}: {err}", cmd.pcap.display()))
         })?;
 
+        // The request carries the whole capture, which the unary helper
+        // would trace-log byte by byte.
         let request = UploadPcapRequest { name: cmd.config_name.clone(), pcap };
         self.service
-            .unary("upload", request, async |client, request| {
-                client.upload_pcap(request).await
-            })
-            .await?;
+            .client()
+            .upload_pcap(request)
+            .await
+            .map_err(self.service.status("upload"))?;
 
         output::success("upload", format_args!("Uploaded pcap to device '{}'.", cmd.config_name));
 
