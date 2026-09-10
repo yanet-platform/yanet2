@@ -40,8 +40,15 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
 
+/// Covers a one-million-entry table plus receiver-owned source and timestamps.
+///
+/// The 128 MiB publication budget excludes that per-entry metadata. The unary
+/// response budget also includes every entry's receiver-owned fields.
+const MAX_LIST_RESPONSE_BYTES: usize = 512 * 1024 * 1024;
+
 fn client(channel: LayeredChannel) -> NeighbourServiceClient<LayeredChannel> {
     NeighbourServiceClient::new(channel)
+        .max_decoding_message_size(MAX_LIST_RESPONSE_BYTES)
         .send_compressed(CompressionEncoding::Gzip)
         .accept_compressed(CompressionEncoding::Gzip)
 }
@@ -375,6 +382,9 @@ async fn remove_table(service: &mut NeighbourService, cmd: RemoveTableCmd) -> Re
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test;
 
 /// Returns the proto-defined name for a `NeighbourState` discriminant,
 /// stripped of its `NUD_` prefix (e.g. `"REACHABLE"`).
