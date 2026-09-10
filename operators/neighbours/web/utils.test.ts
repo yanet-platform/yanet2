@@ -1,7 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { resolveSubmitTable, validateMAC, validateNextHop, sortComparators } from './utils';
+import { getNeighbourId, getIPWideRemovalRows, resolveSubmitTable, validateMAC, validateNextHop, sortComparators } from './utils';
+import { getMergeDebug } from './mergeDebug';
 import { MERGED_TAB } from './types';
 import type { Neighbour } from '@yanet/core/api/neighbours';
+
+describe('neighbour pair identity', () => {
+    it('keeps equal next hops on different devices independently selectable', () => {
+        const first = { next_hop: 'fe80::1', device: 'kni0' };
+        const second = { next_hop: 'fe80::1', device: 'kni1' };
+        expect(getNeighbourId(first)).not.toBe(getNeighbourId(second));
+        const selected = new Set([getNeighbourId(second)]);
+        expect([first, second].filter((row) => selected.has(getNeighbourId(row)))).toEqual([second]);
+    });
+
+    it('canonicalizes mapped IPv4 and equivalent IPv6 spellings', () => {
+        expect(getNeighbourId({ next_hop: '::ffff:192.0.2.1', device: 'kni0' }))
+            .toBe(getNeighbourId({ next_hop: '192.0.2.1', device: 'kni0' }));
+        expect(getNeighbourId({ next_hop: 'FE80:0:0:0:0:0:0:1', device: 'kni0' }))
+            .toBe(getNeighbourId({ next_hop: 'fe80::1', device: 'kni0' }));
+    });
+
+    it('expands removal to unselected devices sharing a selected IP', () => {
+        const selected = { next_hop: '192.0.2.1', device: 'kni0' };
+        const sibling = { next_hop: '::ffff:192.0.2.1', device: 'kni1' };
+        const unrelated = { next_hop: '192.0.2.2', device: 'kni1' };
+        expect(getIPWideRemovalRows([selected, sibling, unrelated], [selected])).toEqual([selected, sibling]);
+    });
+
+    it('compares merge candidates only within the winning device scope', () => {
+        const winner = { next_hop: '192.0.2.1', device: 'kni0', source: 'static', link_addr: '02:00:00:00:00:01' };
+        const samePair = { ...winner, next_hop: '::ffff:192.0.2.1', source: 'remote' };
+        const otherDevice = { ...samePair, device: 'kni1', link_addr: '02:00:00:00:00:02' };
+        const result = getMergeDebug(winner, new Map([['remote', [otherDevice, samePair]]]), [{ name: 'remote', default_priority: 100 }]);
+        expect(result.shadowed.map((candidate) => candidate.entry)).toEqual([samePair]);
+        expect(result.macConflict).toBe(false);
+    });
+});
 
 describe('resolveSubmitTable', () => {
     const makeNeighbour = (source?: string): Neighbour => ({ source });
