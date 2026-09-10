@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use commonpb::ip_from_octets;
 use tabled::Tabled;
-use ync::display::print_table_from_entries;
+use ync::{display::print_table_from_entries, humanfmt};
 
 use crate::{balancerpb, format_ip_port};
 
@@ -104,10 +104,7 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
         println!("Active Sessions: {}", state.active_sessions);
         println!(
             "Last Packet: {}",
-            state
-                .last_packet_timestamp
-                .as_ref()
-                .map_or_else(|| "N/A".to_string(), format_timestamp),
+            humanfmt::format_timestamp(state.last_packet_timestamp.as_ref()).unwrap_or_else(|| "N/A".to_string()),
         );
         println!();
     }
@@ -144,7 +141,10 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     if opts.stats {
         println!("  Active Sessions: {}", vs.active_sessions);
         if let Some(ts) = &vs.last_packet_timestamp {
-            println!("  Last Packet: {}", format_timestamp(ts));
+            println!(
+                "  Last Packet: {}",
+                humanfmt::format_timestamp(Some(ts)).unwrap_or_else(|| "N/A".to_string())
+            );
         }
         if let Some(stats) = &vs.stats {
             print_vs_stats(stats);
@@ -221,10 +221,7 @@ fn real_stats_row(real: &balancerpb::RealState) -> Option<RealStatsRow> {
         bytes: rs.map_or(0, |s| s.bytes),
         active_sessions: real.active_sessions,
         created_sessions: rs.map_or(0, |s| s.created_sessions),
-        last_packet: real
-            .last_packet_timestamp
-            .as_ref()
-            .map_or_else(|| "-".to_string(), format_timestamp),
+        last_packet: humanfmt::format_timestamp(real.last_packet_timestamp.as_ref()).unwrap_or_else(|| "-".to_string()),
         disabled_pkts: rs.map_or(0, |s| s.packets_real_disabled),
         icmp_pkts: rs.map_or(0, |s| s.error_icmp_packets),
     })
@@ -520,17 +517,6 @@ fn print_ref_inline(r: &balancerpb::PacketHandlerRef) {
     }
     if !parts.is_empty() {
         println!("{}", parts.join(" | "));
-    }
-}
-
-fn format_timestamp(ts: &prost_types::Timestamp) -> String {
-    if ts.seconds == 0 && ts.nanos == 0 {
-        return "N/A".to_string();
-    }
-    let ndt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
-    match ndt {
-        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
-        None => "-".to_string(),
     }
 }
 

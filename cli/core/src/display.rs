@@ -315,6 +315,22 @@ where
     println!();
 }
 
+/// Prints one bar row per `(label, count)`: the label, the count
+/// right-aligned in brackets and a bar scaled to the largest count.
+pub fn print_bars<I>(rows: I)
+where
+    I: IntoIterator<Item = (String, u64)>,
+{
+    let rows: Vec<(String, u64)> = rows.into_iter().collect();
+    let max_count = rows.iter().map(|(_, count)| *count).max().unwrap_or(0);
+    let count_width = rows.iter().map(|(_, count)| count.to_string().len()).max().unwrap_or(0);
+
+    for (label, count) in rows {
+        let bars = "∎".repeat(bar_len(count, max_count));
+        println!("  {label} [ {count:>count_width$} ] {bars}");
+    }
+}
+
 /// Returns the bar length for a histogram bucket, scaled to `BAR_MAX`.
 ///
 /// Returns `0` when `max_count` is `0`. Non-zero counts that round to `0`

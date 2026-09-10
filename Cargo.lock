@@ -2653,7 +2653,6 @@ dependencies = [
 name = "yanet-cli-balancer2"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "clap_complete",
  "log",

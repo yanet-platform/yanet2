@@ -8,6 +8,7 @@ use ync::{
     GlobalArgs,
     client::{self, Connection},
     discovery::Family,
+    display,
     errors::Error,
     output,
 };
@@ -151,7 +152,7 @@ async fn run_probe(connection: &Connection, name: &str, tags: Vec<MetricTag>) ->
 
             if !scalars.is_empty() {
                 let rows: Vec<MetricRow> = scalars.iter().map(|m| MetricRow::from(*m)).collect();
-                ync::display::print_table_from_entries(rows);
+                display::print_table_from_entries(rows);
             }
 
             if !histograms.is_empty() {
@@ -262,8 +263,6 @@ fn print_histogram(name: &str, labels: &[Label], histogram: &Histogram) {
         return;
     }
 
-    let max_count = buckets.iter().map(|b| b.count).max().unwrap_or(0);
-
     let bounds: Vec<(String, String)> = buckets
         .iter()
         .enumerate()
@@ -275,13 +274,13 @@ fn print_histogram(name: &str, labels: &[Label], histogram: &Histogram) {
 
     let wl = bounds.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
     let wu = bounds.iter().map(|(_, u)| u.len()).max().unwrap_or(0);
-    let wc = buckets.iter().map(|b| b.count.to_string().len()).max().unwrap_or(0);
 
-    for (bucket, (lower, upper)) in buckets.iter().zip(bounds.iter()) {
-        let bars = "∎".repeat(ync::display::bar_len(bucket.count, max_count));
-        let count = bucket.count;
-        println!("  {lower:>wl$} .. {upper:>wu$} [ {count:>wc$} ] {bars}");
-    }
+    display::print_bars(
+        buckets
+            .iter()
+            .zip(&bounds)
+            .map(|(bucket, (lower, upper))| (format!("{lower:>wl$} .. {upper:>wu$}"), bucket.count)),
+    );
 
     println!("  count = {}", histogram.total_count);
     println!();
