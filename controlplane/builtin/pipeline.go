@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
@@ -15,19 +16,24 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-const agentName = "pipeline"
+const pipelineAgentName = "pipeline"
 
-// Pipeline agent is not persistent: it is created
-// on every call of update/assign/delete.
-// Memory, allocated for pipeline agent, will be free after
-// corresponding call is done. So, on every call we need to allocate
-// memory for temporary operations only. For now, 1MB is
-// sufficient.
-const defaultAgentMemory = datasize.MB
+// A token reservation: attaching refuses a zero size, and an arena that can
+// hand back no block at all is reported as fully occupied.
+//
+// An update or a delete clones the touched generation from the global
+// configuration pool, so no call ever allocates from the agent's own arena.
+// The arena outlives its call — detaching releases nothing — and is
+// reclaimed only when the next attach under the same name supersedes it.
+const pipelineAgentMemory = 4 * datasize.KB
 
 // Pipeline is an in-process gRPC service for managing pipelines.
 type Pipeline struct {
 	ynpb.UnimplementedPipelineServiceServer
+
+	// One attach-through-mutation lifetime at a time under the fixed agent
+	// name, because a concurrent attach reclaims the agent still in use.
+	mu sync.Mutex
 
 	instanceID uint32
 	shm        *ffi.SharedMemory
@@ -171,7 +177,10 @@ func (m *Pipeline) Update(
 		pipeline.Functions[idx] = reqFunctionId.Name
 	}
 
-	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	agent, err := m.shm.AgentAttach(pipelineAgentName, m.instanceID, pipelineAgentMemory)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -201,7 +210,10 @@ func (m *Pipeline) Delete(
 	}
 	pipelineName := reqId.Name
 
-	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	agent, err := m.shm.AgentAttach(pipelineAgentName, m.instanceID, pipelineAgentMemory)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
