@@ -1,6 +1,5 @@
-//! Text-layout helpers: the scope-name column width and whitespace
-//! normalization. Word wrapping itself lives in `ync::display::wrap_words`,
-//! shared with the core CLI's own output helpers.
+//! The scope-name column width. Word wrapping and whitespace
+//! normalization live in ync's display helpers, shared with every CLI.
 
 const MIN_NAME_WIDTH: usize = 12;
 const MAX_NAME_WIDTH: usize = 40;
@@ -17,16 +16,6 @@ pub fn name_width<'a>(names: impl IntoIterator<Item = &'a str>) -> usize {
         .max()
         .unwrap_or(MIN_NAME_WIDTH)
         .clamp(MIN_NAME_WIDTH, MAX_NAME_WIDTH)
-}
-
-/// Collapses every run of whitespace in `text` — including embedded
-/// newlines — into a single ASCII space.
-///
-/// Used on the non-wrapping (non-TTY) render path, where reason text is
-/// printed as one grep-friendly line; the source message (a Go
-/// `err.Error()`) may otherwise carry embedded newlines.
-pub fn normalize_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -52,23 +41,5 @@ mod test {
     #[test]
     fn name_width_empty_defaults_to_minimum() {
         assert_eq!(MIN_NAME_WIDTH, name_width(core::iter::empty()));
-    }
-
-    #[test]
-    fn normalize_whitespace_collapses_embedded_newlines() {
-        assert_eq!(
-            "rpc error: connection refused extra detail",
-            normalize_whitespace("rpc error: connection refused\nextra detail")
-        );
-    }
-
-    #[test]
-    fn normalize_whitespace_collapses_runs_of_spaces() {
-        assert_eq!("a b", normalize_whitespace("a    b"));
-    }
-
-    #[test]
-    fn normalize_whitespace_empty_text_returns_empty() {
-        assert_eq!("", normalize_whitespace(""));
     }
 }

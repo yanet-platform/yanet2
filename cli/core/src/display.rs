@@ -248,6 +248,73 @@ fn apply_style(table: &mut Table) {
     }
 }
 
+/// A bracketed mark with a Unicode and an ASCII face and the colour it
+/// wears on a coloured render.
+#[derive(Debug, Clone, Copy)]
+pub struct Mark {
+    pub unicode: &'static str,
+    pub ascii: &'static str,
+    pub color: fn(&str) -> String,
+}
+
+impl Mark {
+    /// The bare face of a `colored` or plain render.
+    pub fn text(&self, colored: bool) -> &'static str {
+        if colored { self.unicode } else { self.ascii }
+    }
+
+    /// The face of a `colored` or plain render, painted when coloured.
+    pub fn styled(&self, colored: bool) -> String {
+        self.paint(self.text(colored), colored)
+    }
+
+    /// Paints `text` in the mark's colour, or returns it as is on a plain
+    /// render.
+    pub fn paint(&self, text: &str, colored: bool) -> String {
+        if colored { (self.color)(text) } else { text.to_owned() }
+    }
+}
+
+/// Collapses every run of whitespace, embedded newlines included, into
+/// one space.
+///
+/// Meant for the non-wrapping path, where a message that arrived with
+/// embedded newlines still has to print as one grep-friendly line.
+pub fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Prints `texts` after a prefix `indent` columns wide already on the
+/// line, later lines hanging under it, each line through `paint`.
+///
+/// Every text wraps to `wrap_width` when given, otherwise it prints as one
+/// whitespace-normalised line. The line is ended even when `texts` is
+/// empty, so a caller never ends it itself.
+pub fn print_hanging<I, P>(indent: usize, wrap_width: Option<usize>, texts: I, paint: P)
+where
+    I: IntoIterator<Item = String>,
+    P: Fn(&str) -> String,
+{
+    let mut first = true;
+
+    for text in texts {
+        let lines = match wrap_width {
+            Some(width) if width > indent => wrap_words(&text, width - indent),
+            _ => vec![normalize_whitespace(&text)],
+        };
+
+        for line in lines {
+            if !first {
+                print!("\n{:indent$}", "");
+            }
+            print!("{}", paint(&line));
+            first = false;
+        }
+    }
+
+    println!();
+}
+
 /// Returns the bar length for a histogram bucket, scaled to `BAR_MAX`.
 ///
 /// Returns `0` when `max_count` is `0`. Non-zero counts that round to `0`
@@ -271,7 +338,32 @@ pub fn bar_len(count: u64, max_count: u64) -> usize {
 
 #[cfg(test)]
 mod test {
-    use super::{KeyValue, bar_len, escape_wire_text, sorted_names, wrap_words};
+    use super::{KeyValue, Mark, bar_len, escape_wire_text, normalize_whitespace, sorted_names, wrap_words};
+
+    #[test]
+    fn test_mark_faces_and_paint_follow_the_color_flag() {
+        let mark = Mark {
+            unicode: "[✓]",
+            ascii: "[ok]",
+            color: |text| format!("<{text}>"),
+        };
+
+        assert_eq!("[✓]", mark.text(true));
+        assert_eq!("[ok]", mark.text(false));
+        assert_eq!("<[✓]>", mark.styled(true));
+        assert_eq!("[ok]", mark.styled(false));
+        assert_eq!("<ready>", mark.paint("ready", true));
+        assert_eq!("ready", mark.paint("ready", false));
+    }
+
+    #[test]
+    fn test_normalize_whitespace_collapses_runs_and_newlines() {
+        assert_eq!(
+            "rpc error: connection refused extra detail",
+            normalize_whitespace("rpc error:  connection refused\nextra detail")
+        );
+        assert_eq!("", normalize_whitespace(""));
+    }
 
     #[test]
     fn test_key_value_escapes_every_cell_and_marks_an_empty_list() {

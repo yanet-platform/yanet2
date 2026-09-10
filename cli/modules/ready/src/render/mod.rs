@@ -13,9 +13,12 @@ use std::time::SystemTime;
 
 use colored::Colorize;
 use readinesspb::pb::{Reason, Scope, State};
-use ync::{display, humanfmt, output};
+use ync::{
+    display::{self, Mark},
+    humanfmt, output,
+};
 
-use self::{age::is_stale, layout::normalize_whitespace};
+use self::age::is_stale;
 pub use self::{
     layout::name_width,
     watch::{
@@ -49,8 +52,8 @@ fn reason_indent(colored: bool) -> usize {
 /// arrow, the header/summary dash, the summary separator, and the
 /// watching-suffix ellipsis.
 ///
-/// Chosen once from the same `colored` flag as [`StateStyle`] so every
-/// symbol in the render degrades to plain ASCII together — no glyph can
+/// Chosen once from the same `colored` flag the marks are painted with, so
+/// every symbol in the render degrades to plain ASCII together — no glyph can
 /// drift out of sync with the marks in a non-UTF-8 locale or piped run.
 struct Symbols {
     arrow: &'static str,
@@ -150,13 +153,17 @@ pub fn print_watching_line() {
 
 /// Builds the green all-ready banner's text.
 ///
-/// Reuses [`StateStyle`] for `State::Ready` rather than a bespoke mark, so
+/// Reuses [`state_mark`] for `State::Ready` rather than a bespoke mark, so
 /// this line's glyph and color can never drift from the `READY` marks used
 /// everywhere else in the render.
 fn all_ready_line(colored: bool) -> String {
-    let style = StateStyle::new(State::Ready, colored);
+    let mark = state_mark(State::Ready);
 
-    format!("{} {}", style.styled_mark(), style.paint("all subsystems are ready"))
+    format!(
+        "{} {}",
+        mark.styled(colored),
+        mark.paint("all subsystems are ready", colored)
+    )
 }
 
 /// Prints the distinct banner aggregate `--watch` shows each time the whole
@@ -215,41 +222,30 @@ fn print_scope_row(
 /// This is the single place the state → (mark, color) map lives. Both the
 /// snapshot block and the `--watch` transition log build their cells from
 /// here, so a state can never be green in one render and yellow in the
-/// other. `colored` is supplied by the caller — the global color gate is
-/// read once at the top of a render, never here.
-struct StateStyle {
-    mark: &'static str,
-    color: fn(&str) -> String,
-    colored: bool,
-}
-
-impl StateStyle {
-    fn new(state: State, colored: bool) -> Self {
-        let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = match state {
-            State::Ready => ("[✓]", "[ok]", |s| s.green().to_string()),
-            State::Degraded => ("[~]", "[!!]", |s| s.yellow().to_string()),
-            State::NotReady => ("[✗]", "[xx]", |s| s.red().to_string()),
-            State::Unknown | State::Unspecified => ("[?]", "[??]", output::paint_dim),
-        };
-
-        let mark = if colored { unicode_mark } else { ascii_mark };
-
-        Self { mark, color, colored }
-    }
-
-    /// Returns the mark glyph in the state's color.
-    fn styled_mark(&self) -> String {
-        self.paint(self.mark)
-    }
-
-    /// Paints `text` in the state's color, or returns it as-is when the
-    /// render is not colored.
-    fn paint(&self, text: &str) -> String {
-        if self.colored {
-            (self.color)(text)
-        } else {
-            text.to_string()
-        }
+/// other. `colored` is supplied by the caller at every use — the global
+/// color gate is read once at the top of a render, never here.
+fn state_mark(state: State) -> Mark {
+    match state {
+        State::Ready => Mark {
+            unicode: "[✓]",
+            ascii: "[ok]",
+            color: output::paint_ok,
+        },
+        State::Degraded => Mark {
+            unicode: "[~]",
+            ascii: "[!!]",
+            color: output::paint_warning,
+        },
+        State::NotReady => Mark {
+            unicode: "[✗]",
+            ascii: "[xx]",
+            color: output::paint_error,
+        },
+        State::Unknown | State::Unspecified => Mark {
+            unicode: "[?]",
+            ascii: "[??]",
+            color: output::paint_dim,
+        },
     }
 }
 
@@ -260,10 +256,10 @@ impl StateStyle {
 /// for colored Unicode marks, 4 chars / 9+ chars for the ASCII fallback) so
 /// a double-width glyph can never shift a column.
 fn state_cells(state: State, colored: bool) -> (String, String) {
-    let style = StateStyle::new(state, colored);
+    let mark = state_mark(state);
     let label_cell = format!("{:<width$}", label(state), width = STATE_WIDTH);
 
-    (style.styled_mark(), style.paint(&label_cell))
+    (mark.styled(colored), mark.paint(&label_cell, colored))
 }
 
 /// Paints `text` in the grey reserved for secondary text.
@@ -315,20 +311,11 @@ fn format_reason(reason: &Reason) -> String {
 /// hanging indent when `wrap_width` is `Some` (stdout is a TTY); otherwise
 /// it prints as one long, grep-friendly line.
 fn print_reason_lines(reasons: &[Reason], colored: bool, wrap_width: Option<usize>) {
-    let reason_indent = reason_indent(colored);
-    let indent = " ".repeat(reason_indent);
+    let indent = reason_indent(colored);
 
     for reason in reasons {
-        let text = format_reason(reason);
-
-        let lines = match wrap_width {
-            Some(width) if width > reason_indent => display::wrap_words(&text, width - reason_indent),
-            _ => vec![normalize_whitespace(&text)],
-        };
-
-        for line in lines {
-            println!("{indent}{}", dim(&line, colored));
-        }
+        print!("{:indent$}", "");
+        display::print_hanging(indent, wrap_width, [format_reason(reason)], |line| dim(line, colored));
     }
 }
 
