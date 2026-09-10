@@ -5,7 +5,6 @@ import (
 
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
-	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
 	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
@@ -22,7 +21,7 @@ type NetlinkHandle interface {
 	Close()
 }
 
-// NetlinkHandleFactory creates the one shared handle owned by an Operator.
+// NetlinkHandleFactory transfers one usable shared handle on success only.
 type NetlinkHandleFactory func() (NetlinkHandle, error)
 
 // GatewayConnection supports generated gRPC clients and explicit cleanup.
@@ -48,7 +47,11 @@ type options struct {
 func newOptions() *options {
 	return &options{
 		NewNetlinkHandle: func() (NetlinkHandle, error) {
-			return netlink.NewHandle(unix.NETLINK_ROUTE)
+			handle, err := netreconcile.NewHandle()
+			if err != nil {
+				return nil, err
+			}
+			return handle, nil
 		},
 		DialGateway: func(config commonoperator.GatewayConfig) (GatewayConnection, error) {
 			return commonoperator.DialGateway(config)
@@ -83,7 +86,7 @@ func WithGatewayDialer(dialer GatewayDialer) Option {
 	}
 }
 
-var _ NetlinkHandle = (*netlink.Handle)(nil)
+var _ NetlinkHandle = (*netreconcile.Handle)(nil)
 
 // WithNetplanLoader replaces startup configuration loading.
 func WithNetplanLoader(loader NetplanLoader) Option {

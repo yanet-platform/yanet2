@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	netreconcile "github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netlink"
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
@@ -101,8 +102,8 @@ func (m *fakeBackend) LinkSetMTU(link vnetlink.Link, mtu int) error {
 		}
 	}
 	for _, child := range m.Links {
-		if child.Attrs().ParentIndex == link.Attrs().Index && child.Attrs().MTU > mtu {
-			return errors.New("parent MTU is smaller than child")
+		if child.Type() == "vlan" && child.Attrs().ParentIndex == link.Attrs().Index && child.Attrs().MTU > mtu {
+			child.Attrs().MTU = mtu
 		}
 	}
 	link.Attrs().MTU = mtu
@@ -164,11 +165,127 @@ func (m *fakeBackend) AddrReplace(link vnetlink.Link, address *vnetlink.Addr) er
 
 func (m *fakeBackend) AddrDel(link vnetlink.Link, address *vnetlink.Addr) error {
 	name := link.Attrs().Name
+	if err := m.Failures["delete-address:"+address.String()]; err != nil {
+		return err
+	}
 	m.Addresses[name] = slices.DeleteFunc(m.Addresses[name], func(candidate vnetlink.Addr) bool {
 		return candidate.String() == address.String()
 	})
 	m.Operations = append(m.Operations, "delete-address:"+name+":"+address.String())
 	return nil
+}
+
+// Test_Reconciler_RejectsNonEthernetKNI verifies that TUN and veth objects cannot
+// acquire managed addresses or IPv6 settings through a matching interface name.
+func Test_Reconciler_RejectsNonEthernetKNI(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		link vnetlink.Link
+	}{
+		{name: "TUN interface", link: &vnetlink.Tuntap{LinkAttrs: baseLink("kni0", 1).LinkAttrs, Mode: vnetlink.TUNTAP_MODE_TUN}},
+		{name: "unknown tuntap mode", link: &vnetlink.Tuntap{LinkAttrs: baseLink("kni0", 1).LinkAttrs}},
+		{name: "veth interface", link: &vnetlink.Veth{LinkAttrs: baseLink("kni0", 1).LinkAttrs}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := newFakeBackend()
+			backend.Links["kni0"] = test.link
+			err := netreconcile.NewReconciler(backend, backend).Apply(t.Context(), netplan.State{Links: []netplan.Link{{Name: "kni0"}}})
+			require.Error(t, err)
+			require.Empty(t, backend.Operations)
+			require.Empty(t, backend.Settings)
+		})
+	}
+}
+
+// Test_Reconciler_PolicyBeforeIPv6Enable verifies that an already-up interface
+// cannot generate link-local addresses or accept RAs under inherited settings.
+func Test_Reconciler_PolicyBeforeIPv6Enable(t *testing.T) {
+	backend := newFakeBackend()
+	link := baseLink("kni0", 1)
+	link.Flags = net.FlagUp
+	backend.Links["kni0"] = link
+	backend.Settings["kni0/disable_ipv6"] = "1"
+	backend.Settings["kni0/addr_gen_mode"] = "0"
+	backend.Settings["kni0/accept_ra"] = "1"
+	checked := false
+	backend.BeforeSysctl = func(name, setting string) {
+		if setting == "disable_ipv6" {
+			checked = true
+			require.Equal(t, "1", backend.Settings[name+"/addr_gen_mode"])
+			require.Equal(t, "0", backend.Settings[name+"/accept_ra"])
+		}
+	}
+	acceptRA := false
+	state := netplan.State{Links: []netplan.Link{{Name: "kni0", AcceptRA: &acceptRA}}}
+	require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+	require.True(t, checked)
+}
+
+// Test_Reconciler_RepairsFailedDAD verifies that a failed explicit global or
+// link-local IPv6 address is replaced rather than mistaken for converged state.
+func Test_Reconciler_RepairsFailedDAD(t *testing.T) {
+	for _, prefix := range []string{"fe80::f1/64", "2001:db8::1/64"} {
+		t.Run(prefix, func(t *testing.T) {
+			backend := newFakeBackend()
+			backend.Links["kni0"] = baseLink("kni0", 1)
+			failed := mustAddr(prefix)
+			failed.Flags = unix.IFA_F_DADFAILED
+			backend.Addresses["kni0"] = []vnetlink.Addr{failed}
+			state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix(prefix)}}}}
+			require.NoError(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state))
+			require.Equal(t, []vnetlink.Addr{mustAddr(prefix)}, backend.Addresses["kni0"])
+			require.Less(t, slices.Index(backend.Operations, "delete-address:kni0:"+prefix), slices.Index(backend.Operations, "address:kni0:"+prefix))
+		})
+	}
+}
+
+// Test_Reconciler_FailedDADRepairError verifies that either repair failure
+// remains a failed apply and cannot authorize unlisted-address cleanup.
+func Test_Reconciler_FailedDADRepairError(t *testing.T) {
+	for _, operation := range []string{"delete-address:fe80::f1/64", "address:fe80::f1/64"} {
+		t.Run(operation, func(t *testing.T) {
+			backend := newFakeBackend()
+			backend.Links["kni0"] = baseLink("kni0", 1)
+			failed := mustAddr("fe80::f1/64")
+			failed.Flags = unix.IFA_F_DADFAILED
+			unlisted := mustAddr("fe80::abcd/64")
+			backend.Addresses["kni0"] = []vnetlink.Addr{failed, unlisted}
+			injected := errors.New("repair failed")
+			backend.Failures[operation] = injected
+			state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
+			require.ErrorIs(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state), injected)
+			require.Contains(t, backend.Addresses["kni0"], unlisted)
+		})
+	}
+}
+
+// Test_Reconciler_TentativeAddressBlocksConvergence verifies that pending DAD
+// waits for another observation without repeatedly deleting the desired address.
+func Test_Reconciler_TentativeAddressBlocksConvergence(t *testing.T) {
+	backend := newFakeBackend()
+	link := baseLink("kni0", 1)
+	link.Flags = net.FlagUp
+	backend.Links["kni0"] = link
+	address := mustAddr("fe80::f1/64")
+	address.Flags = unix.IFA_F_TENTATIVE
+	backend.Addresses["kni0"] = []vnetlink.Addr{address}
+	state := netplan.State{Links: []netplan.Link{{Name: "kni0", Addresses: []netip.Prefix{netip.MustParsePrefix("fe80::f1/64")}}}}
+	require.ErrorContains(t, netreconcile.NewReconciler(backend, backend).Apply(t.Context(), state), "duplicate address detection")
+	require.Empty(t, backend.Operations)
+}
+
+// Test_Reconciler_CancellationDuringLookup verifies that cancellation at the
+// final identity lookup prevents the next otherwise necessary MTU mutation.
+func Test_Reconciler_CancellationDuringLookup(t *testing.T) {
+	backend := newFakeBackend()
+	backend.Links["kni0"] = baseLink("kni0", 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	backend.BeforeLookup = func(string) { cancel() }
+	state := netplan.State{Links: []netplan.Link{{Name: "kni0", MTU: 9000}}}
+	require.ErrorIs(t, netreconcile.NewReconciler(backend, backend).Apply(ctx, state), context.Canceled)
+	require.Equal(t, 1500, backend.Links["kni0"].Attrs().MTU)
+	require.Empty(t, backend.Operations)
 }
 
 func (m *fakeBackend) SetIPv6(ctx context.Context, name, setting, value string, validate func() error) error {

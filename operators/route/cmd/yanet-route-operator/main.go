@@ -8,6 +8,7 @@ import (
 	_ "google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	op "github.com/yanet-platform/yanet2/operators/route/internal/operator"
 )
 
@@ -16,6 +17,7 @@ func main() {
 		"yanet-route-operator",
 		"YANET route operator — owns RIB, neighbour tables and FIB build",
 		factory,
+		xcfg.WithKnownFields(),
 	)
 	if err != nil {
 		fmt.Printf("ERROR: %v\n", err)

@@ -12,7 +12,24 @@ import (
 	"cmp"
 	"fmt"
 	"net"
+	"strings"
 )
+
+// DeviceNameMaxLen reserves the terminator in the dataplane's 80-byte name.
+const DeviceNameMaxLen = 79
+
+// ValidateDevice preserves logical device identity across the C ABI boundary.
+//
+// An empty name retains the legacy unscoped forwarding contract.
+func ValidateDevice(device string) error {
+	if len(device) > DeviceNameMaxLen {
+		return fmt.Errorf("device name exceeds %d bytes", DeviceNameMaxLen)
+	}
+	if strings.ContainsAny(device, "\x00 \t\n\r\v\f") {
+		return fmt.Errorf("device name contains whitespace or a NUL byte")
+	}
+	return nil
+}
 
 // HardwareRoute represents a route in the Layer 2 (L2) networking stack.
 //

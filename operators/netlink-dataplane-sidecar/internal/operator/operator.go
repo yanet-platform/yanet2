@@ -1,7 +1,6 @@
 package operator
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -16,13 +15,8 @@ import (
 
 const netlinkSocketTimeout = 5 * time.Second
 
-// Operator is the sidecar's lifecycle wrapper around the common framework.
-type Operator struct {
-	app *commonoperator.Operator[State]
-}
-
 // NewOperator constructs the sidecar and transfers all opened resources to it.
-func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) {
+func NewOperator(cfg *Config, options ...Option) (_ *commonoperator.Operator[State], resultErr error) {
 	if cfg == nil {
 		return nil, errors.New("construct netlink dataplane sidecar: config is nil")
 	}
@@ -51,9 +45,6 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 
 	handle, err := opts.NewNetlinkHandle()
 	if err != nil {
-		if handle != nil {
-			handle.Close()
-		}
 		return nil, fmt.Errorf("create netlink handle: %w", err)
 	}
 	if handle == nil {
@@ -99,8 +90,8 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 		targets,
 		cfg.LinkMap,
 		cfg.PublicationConfig(),
+		connections,
 	)
-	actuator.SetRuntimeResources(connections, handle)
 
 	eventWorker := NewNeighbourEventWorker(
 		source.Notify,
@@ -126,17 +117,7 @@ func NewOperator(cfg *Config, options ...Option) (_ *Operator, resultErr error) 
 	)
 
 	resourcesOwned = false
-	return &Operator{app: app}, nil
-}
-
-// Run drives the sidecar until cancellation or a worker failure.
-func (m *Operator) Run(ctx context.Context) error {
-	return m.app.Run(ctx)
-}
-
-// Close releases gateway connections and the shared netlink handle.
-func (m *Operator) Close() error {
-	return m.app.Close()
+	return app, nil
 }
 
 func validateDependencies(options *options) error {

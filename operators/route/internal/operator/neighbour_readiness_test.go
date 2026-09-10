@@ -30,42 +30,86 @@ func neighbourScope(tracker *readiness.Tracker) *readinesspb.Scope {
 	return nil
 }
 
-// Test_NeighbourReadiness_ReceiverLifecycle verifies that only valid committed
-// expected-table snapshots unlock FIB capture and refresh the silence budget.
-func Test_NeighbourReadiness_ReceiverLifecycle(t *testing.T) {
+// newReadinessFixture connects real snapshot commits to freshness and FIB capture.
+func newReadinessFixture(t *testing.T, maxAge time.Duration) (*neighbourServiceFixture, *operator.NeighbourReadiness, *operator.RouteSource, *readiness.Tracker) {
+	t.Helper()
 	tracker := readiness.NewTracker([]readiness.ScopeSpec{{Name: "neighbours"}, {Name: "fib:gateway:route0"}})
-	observer := operator.NewNeighbourReadiness("remote", 100*time.Millisecond, tracker)
+	observer := operator.NewNeighbourReadiness("remote", maxAge, tracker)
 	fixture := newNeighbourServiceFixture(t,
 		operator.WithNeighbourServiceOnSnapshotReceived(observer.OnSnapshotReceived),
 		operator.WithNeighbourServiceOnTableRemoved(observer.OnTableRemoved),
 		operator.WithNeighbourServiceRemoteSource("remote", []string{"logical0", "logical1"}),
 	)
 	source := operator.NewRouteSource(fixture.Table, emptyRIBSnapshot{}, operator.WithRouteSourceNeighbours("remote", observer))
+	return fixture, observer, source, tracker
+}
+
+// Test_NeighbourReadiness_FirstSnapshot verifies that a valid empty snapshot is
+// sufficient input while an unobserved source keeps FIB capture blocked.
+func Test_NeighbourReadiness_FirstSnapshot(t *testing.T) {
+	fixture, observer, source, tracker := newReadinessFixture(t, time.Minute)
 	_, ready := source.Snapshot()
 	require.False(t, ready)
 	require.Equal(t, "SYNCING", neighbourScope(tracker).GetReasons()[0].GetCode())
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- observer.Run(ctx) }()
-	t.Cleanup(func() { cancel(); require.ErrorIs(t, <-done, context.Canceled) })
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
+	require.True(t, observer.Available())
+	_, ready = source.Snapshot()
+	require.True(t, ready)
+	require.Equal(t, readinesspb.State_STATE_READY, neighbourScope(tracker).GetState())
+}
+
+// Test_NeighbourReadiness_WrongTable verifies that another publisher cannot
+// unlock the configured remote source.
+func Test_NeighbourReadiness_WrongTable(t *testing.T) {
+	fixture, observer, source, _ := newReadinessFixture(t, time.Minute)
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("other", 100)))
 	require.False(t, observer.Available())
+	_, ready := source.Snapshot()
+	require.False(t, ready)
+}
+
+// Test_NeighbourReadiness_EquivalentHeartbeat verifies that fresh equivalent
+// commits retain timestamps and generation without waking another build.
+func Test_NeighbourReadiness_EquivalentHeartbeat(t *testing.T) {
+	fixture, observer, _, _ := newReadinessFixture(t, 200*time.Millisecond)
 	input := replacementChunk("remote", 100, "192.0.2.1")
 	input.Entries[0].Ifindex = 10
 	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
 	before := sourceEntries(t, fixture.Table, "remote")
-	_, ready = source.Snapshot()
-	require.True(t, ready)
-	require.Equal(t, readinesspb.State_STATE_READY, neighbourScope(tracker).GetState())
+	generation, available := observer.Generation()
+	require.True(t, available)
+	changes := fixture.Changes.Load()
+	for range 3 {
+		time.Sleep(90 * time.Millisecond)
+		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
+		current, available := observer.Generation()
+		require.True(t, available)
+		require.Equal(t, generation, current)
+		require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
+		require.Equal(t, changes, fixture.Changes.Load())
+	}
+}
+
+// Test_NeighbourReadiness_FIBFailure verifies that input health is independent
+// of the result of installing a FIB on the gateway.
+func Test_NeighbourReadiness_FIBFailure(t *testing.T) {
+	fixture, observer, _, tracker := newReadinessFixture(t, time.Minute)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
 	tracker.Set("fib:gateway:route0", readinesspb.State_STATE_NOT_READY)
 	require.True(t, observer.Available())
-	for range 5 {
-		time.Sleep(30 * time.Millisecond)
-		require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
-		require.True(t, observer.Available())
-		require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
-	}
+	require.Equal(t, readinesspb.State_STATE_READY, neighbourScope(tracker).GetState())
+}
+
+// Test_NeighbourReadiness_Expiry verifies that silence expires input even when
+// rejected replacements arrive, preserving the last committed diagnostics.
+func Test_NeighbourReadiness_Expiry(t *testing.T) {
+	fixture, observer, source, tracker := newReadinessFixture(t, 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- observer.Run(ctx) }()
+	t.Cleanup(func() { cancel(); require.ErrorIs(t, <-done, context.Canceled) })
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100, "192.0.2.1")))
+	before := sourceEntries(t, fixture.Table, "remote")
 	invalid := replacementChunk("remote", 100, "192.0.2.2")
 	invalid.Entries[0].Device = "unknown"
 	require.Error(t, sendNeighbourSnapshot(t.Context(), fixture.Client, invalid))
@@ -73,16 +117,29 @@ func Test_NeighbourReadiness_ReceiverLifecycle(t *testing.T) {
 		reasons := neighbourScope(tracker).GetReasons()
 		return !observer.Available() && len(reasons) == 1 && reasons[0].GetCode() == "STALE"
 	}, time.Second, time.Millisecond)
-	_, ready = source.Snapshot()
+	_, ready := source.Snapshot()
 	require.False(t, ready)
 	require.Equal(t, before, sourceEntries(t, fixture.Table, "remote"))
 	require.Error(t, sendNeighbourSnapshot(t.Context(), fixture.Client, invalid))
 	require.False(t, observer.Available())
-	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, replacementChunk("remote", 100)))
-	snapshot, ready := source.Snapshot()
+}
+
+// Test_NeighbourReadiness_RecoveryWake verifies that an equivalent snapshot
+// after expiry wakes pending work without changing its content generation.
+func Test_NeighbourReadiness_RecoveryWake(t *testing.T) {
+	fixture, observer, source, tracker := newReadinessFixture(t, 100*time.Millisecond)
+	input := replacementChunk("remote", 100, "192.0.2.1")
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
+	generation, _ := observer.Generation()
+	changes := fixture.Changes.Load()
+	require.Eventually(t, func() bool { return !observer.Available() }, time.Second, time.Millisecond)
+	require.NoError(t, sendNeighbourSnapshot(t.Context(), fixture.Client, input))
+	current, available := observer.Generation()
+	require.True(t, available)
+	require.Equal(t, generation, current)
+	require.Equal(t, changes+1, fixture.Changes.Load())
+	_, ready := source.Snapshot()
 	require.True(t, ready)
-	_, count := snapshot.Neighbours.ViewByDevices(nil).Entries()
-	require.Zero(t, count)
 	require.Equal(t, readinesspb.State_STATE_READY, neighbourScope(tracker).GetState())
 }
 

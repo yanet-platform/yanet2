@@ -223,6 +223,17 @@ func newFakeBackend() *fakeBackend {
 	}
 }
 
+// UpdateCalls captures backend builds independently of the public read fixture.
+func (m *fakeBackend) UpdateCalls() [][]*routepb.FIBEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entries := make([][]*routepb.FIBEntry, len(m.newFIBCalls))
+	for idx, call := range m.newFIBCalls {
+		entries[idx] = call.entries
+	}
+	return entries
+}
+
 var _ route.Backend = (*fakeBackend)(nil)
 
 // seedRestart marks name as already published under devices, by both

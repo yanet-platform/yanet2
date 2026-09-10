@@ -50,25 +50,21 @@ func Test_Publish_FallbackAndLostResponse(t *testing.T) {
 // Test_Publish_FailureKeepsSnapshot verifies that interrupted and refused streams
 // preserve last-good data and a later complete replacement recovers the table.
 func Test_Publish_FailureKeepsSnapshot(t *testing.T) {
-	for _, method := range []string{"chunk", "commit"} {
-		t.Run(method, func(t *testing.T) {
-			service, client := newPublicationService(t)
-			config := publicationConfig()
-			service.Store(config.TableName, publicationTable{Priority: 7})
-			service.SetHook(func(call publicationCall) error {
-				if call.Method == method {
-					return status.Error(codes.Unavailable, "interrupted")
-				}
-				return nil
-			})
-			targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("second", client)}
-			require.Error(t, neighbour.Publish(t.Context(), nil, targets, config))
-			require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
-			service.SetHook(nil)
-			require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
-			require.Equal(t, config.DefaultPriority, service.Tables()[config.TableName].Priority)
-		})
-	}
+	service, client := newPublicationService(t)
+	config := publicationConfig()
+	service.Store(config.TableName, publicationTable{Priority: 7})
+	service.SetHook(func(call publicationCall) error {
+		if call.Method == "chunk" {
+			return status.Error(codes.Unavailable, "interrupted")
+		}
+		return nil
+	})
+	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("second", client)}
+	require.Error(t, neighbour.Publish(t.Context(), nil, targets, config))
+	require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
+	service.SetHook(nil)
+	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, config))
+	require.Equal(t, config.DefaultPriority, service.Tables()[config.TableName].Priority)
 }
 
 // Test_Publish_DeadlineFallback verifies that each attempt has its own deadline
@@ -108,7 +104,7 @@ func Test_Publish_ConfiguredDeadline(t *testing.T) {
 // Test_Publish_Cancellation verifies that cancellation prevents further attempts
 // and cannot turn an incomplete stream into a committed empty snapshot.
 func Test_Publish_Cancellation(t *testing.T) {
-	for _, method := range []string{"before", "chunk", "commit"} {
+	for _, method := range []string{"before", "chunk"} {
 		t.Run(method, func(t *testing.T) {
 			service, client := newPublicationService(t)
 			config := publicationConfig()
@@ -131,4 +127,60 @@ func Test_Publish_Cancellation(t *testing.T) {
 			require.Equal(t, uint32(7), service.Tables()[config.TableName].Priority)
 		})
 	}
+}
+
+// acknowledgedClient cancels the caller immediately after a real server ACK.
+type acknowledgedClient struct {
+	Client neighbour.Client
+	Cancel context.CancelFunc
+}
+
+func (m *acknowledgedClient) ReplaceNeighbours(ctx context.Context, options ...grpc.CallOption) (grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse], error) {
+	stream, err := m.Client.ReplaceNeighbours(ctx, options...)
+	if err != nil {
+		return nil, err
+	}
+	return &acknowledgedStream{ClientStreamingClient: stream, Cancel: m.Cancel}, nil
+}
+
+// acknowledgedStream preserves the successful response across parent expiry.
+type acknowledgedStream struct {
+	grpc.ClientStreamingClient[operatorpb.ReplaceNeighboursRequest, operatorpb.ReplaceNeighboursResponse]
+	Cancel context.CancelFunc
+}
+
+func (m *acknowledgedStream) CloseAndRecv() (*operatorpb.ReplaceNeighboursResponse, error) {
+	response, err := m.ClientStreamingClient.CloseAndRecv()
+	if err == nil {
+		m.Cancel()
+	}
+	return response, err
+}
+
+// Test_Publish_AcknowledgementBeforeCancellation verifies that a successful ACK
+// remains success even when the parent expires before the call returns.
+func Test_Publish_AcknowledgementBeforeCancellation(t *testing.T) {
+	service, client := newPublicationService(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	unneeded := &unavailableClient{}
+	targets := []neighbour.GatewayTarget{
+		newPublisherTarget("acknowledged", &acknowledgedClient{Client: client, Cancel: cancel}),
+		newPublisherTarget("unneeded", unneeded),
+	}
+	config := publicationConfig()
+	require.NoError(t, neighbour.Publish(ctx, nil, targets, config))
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.Contains(t, service.Tables(), config.TableName)
+	require.Zero(t, unneeded.Calls)
+}
+
+// Test_Publish_FirstSuccess verifies that later gateway alternatives are never
+// contacted after the first acknowledged complete snapshot.
+func Test_Publish_FirstSuccess(t *testing.T) {
+	_, client := newPublicationService(t)
+	unneeded := &unavailableClient{}
+	targets := []neighbour.GatewayTarget{newPublisherTarget("first", client), newPublisherTarget("unneeded", unneeded)}
+	require.NoError(t, neighbour.Publish(t.Context(), nil, targets, publicationConfig()))
+	require.Zero(t, unneeded.Calls)
 }

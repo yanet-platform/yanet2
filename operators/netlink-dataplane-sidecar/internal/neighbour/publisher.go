@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -25,7 +24,7 @@ func ValidateTableName(tableName string) error {
 	if !strings.HasPrefix(tableName, ownedTablePrefix) {
 		return fmt.Errorf("neighbour table %q is outside reserved %q namespace", tableName, ownedTablePrefix)
 	}
-	if len(tableName) <= len(ownedTablePrefix) || len(tableName) > operatorpb.NeighbourNameBytes {
+	if len(tableName) <= len(ownedTablePrefix) || len(tableName) > operatorpb.NeighbourTableNameBytes {
 		return errors.New("neighbour table name requires a suffix and at most 128 bytes")
 	}
 	for _, character := range tableName {
@@ -92,7 +91,7 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget, conf
 			return errors.New("route neighbour client is nil")
 		}
 	}
-	requests, err := prepareRequests(ctx, entries, config)
+	desired, err := prepareEntries(ctx, entries, config)
 	if err != nil {
 		return err
 	}
@@ -102,7 +101,7 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget, conf
 			return errors.Join(failures, err)
 		}
 		attempt, cancel := context.WithTimeout(ctx, config.Timeout)
-		err := publishTarget(attempt, requests, target.Client)
+		err := publishTarget(attempt, desired, config, target.Client)
 		cancel()
 		if err == nil {
 			return nil
@@ -112,15 +111,10 @@ func Publish(ctx context.Context, entries []Entry, targets []GatewayTarget, conf
 	return failures
 }
 
-func prepareRequests(ctx context.Context, entries []Entry, config PublicationConfig) ([]*operatorpb.ReplaceNeighboursRequest, error) {
+func prepareEntries(ctx context.Context, entries []Entry, config PublicationConfig) ([]Entry, error) {
 	if len(entries) > operatorpb.NeighbourSnapshotEntries {
 		return nil, errors.New("neighbour snapshot exceeds entry limit")
 	}
-	type key struct {
-		NextHop netip.Addr
-		Device  string
-	}
-	seen := map[key]bool{}
 	desired := slices.Clone(entries)
 	for idx := range desired {
 		if err := ctx.Err(); err != nil {
@@ -134,11 +128,6 @@ func prepareRequests(ctx context.Context, entries []Entry, config PublicationCon
 		if err := operatorpb.ValidateNeighbourDevice(entry.HardwareRoute.Device); err != nil {
 			return nil, err
 		}
-		identity := key{entry.NextHop, entry.HardwareRoute.Device}
-		if seen[identity] {
-			return nil, fmt.Errorf("duplicate desired next hop/device %s/%s", identity.NextHop, identity.Device)
-		}
-		seen[identity] = true
 	}
 	slices.SortFunc(desired, func(left, right Entry) int {
 		if order := left.NextHop.Compare(right.NextHop); order != 0 {
@@ -146,37 +135,53 @@ func prepareRequests(ctx context.Context, entries []Entry, config PublicationCon
 		}
 		return strings.Compare(left.HardwareRoute.Device, right.HardwareRoute.Device)
 	})
-	requests := []*operatorpb.ReplaceNeighboursRequest{}
+	for idx := 1; idx < len(desired); idx++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		left, right := desired[idx-1], desired[idx]
+		if left.NextHop == right.NextHop && left.HardwareRoute.Device == right.HardwareRoute.Device {
+			return nil, fmt.Errorf("duplicate desired next hop/device %s/%s", right.NextHop, right.HardwareRoute.Device)
+		}
+	}
 	totalBytes := 0
 	for start := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		end := min(start+operatorpb.NeighbourChunkEntries, len(desired))
-		request := &operatorpb.ReplaceNeighboursRequest{Table: config.TableName, DefaultPriority: config.DefaultPriority}
-		for _, entry := range desired[start:end] {
-			request.Entries = append(request.Entries, &operatorpb.NeighbourEntry{
-				NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
-				LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
-				HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
-				State:        operatorpb.NeighbourState(entry.State), Device: entry.HardwareRoute.Device,
-				Ifindex: entry.Ifindex,
-			})
-		}
+		request := replacementChunk(desired[start:end], config)
 		chunkBytes := proto.Size(request)
 		if chunkBytes > operatorpb.NeighbourChunkBytes || chunkBytes > operatorpb.NeighbourSnapshotBytes-totalBytes {
 			return nil, errors.New("neighbour snapshot exceeds byte limit")
 		}
 		totalBytes += chunkBytes
-		requests = append(requests, request)
 		if end == len(desired) {
-			return requests, nil
+			return desired, nil
 		}
 		start = end
 	}
 }
 
-func publishTarget(ctx context.Context, requests []*operatorpb.ReplaceNeighboursRequest, client Client) error {
+func replacementChunk(entries []Entry, config PublicationConfig) *operatorpb.ReplaceNeighboursRequest {
+	request := &operatorpb.ReplaceNeighboursRequest{
+		Table: config.TableName, DefaultPriority: config.DefaultPriority,
+		Entries: make([]*operatorpb.NeighbourEntry, 0, len(entries)),
+	}
+	for _, entry := range entries {
+		request.Entries = append(request.Entries, &operatorpb.NeighbourEntry{
+			NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
+			LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
+			HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
+			State:        operatorpb.NeighbourState_NUD_PERMANENT,
+			Device:       entry.HardwareRoute.Device,
+			Ifindex:      entry.Ifindex,
+		})
+	}
+	return request
+}
+
+func publishTarget(ctx context.Context, entries []Entry, config PublicationConfig, client Client) error {
 	stream, err := client.ReplaceNeighbours(ctx)
 	if err != nil {
 		return err
@@ -184,10 +189,12 @@ func publishTarget(ctx context.Context, requests []*operatorpb.ReplaceNeighbours
 	if stream == nil {
 		return errors.New("replace neighbours: incomplete stream")
 	}
-	for _, request := range requests {
+	for start := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		end := min(start+operatorpb.NeighbourChunkEntries, len(entries))
+		request := replacementChunk(entries[start:end], config)
 		if err := stream.Send(request); err != nil {
 			if errors.Is(err, io.EOF) {
 				if _, terminal := stream.CloseAndRecv(); terminal != nil {
@@ -196,6 +203,10 @@ func publishTarget(ctx context.Context, requests []*operatorpb.ReplaceNeighbours
 			}
 			return err
 		}
+		if end == len(entries) {
+			break
+		}
+		start = end
 	}
 	response, err := stream.CloseAndRecv()
 	if err != nil {
@@ -204,5 +215,5 @@ func publishTarget(ctx context.Context, requests []*operatorpb.ReplaceNeighbours
 	if response == nil {
 		return errors.New("replace neighbours: incomplete response")
 	}
-	return ctx.Err()
+	return nil
 }

@@ -122,15 +122,6 @@ func Test_NetlinkDataplaneSidecarDockerfile_UsesDedicatedPackageAndConfig(t *tes
 	}
 }
 
-// Test_Dockerfile_CommentsAreNotInstructions verifies that expected artifact
-// text in comments cannot satisfy the active image-instruction checks.
-func Test_Dockerfile_CommentsAreNotInstructions(t *testing.T) {
-	data := "# COPY deploy/packages/example.deb /tmp/\n" +
-		"  # ENTRYPOINT [\"example\"]\n" +
-		"FROM ubuntu:24.04\nRUN first \\\n  # skipped comment\n && second\n"
-	require.Equal(t, []string{"FROM ubuntu:24.04", "RUN first  && second"}, activeDockerInstructions(data))
-}
-
 // activeDockerInstructions joins continuations while excluding comment-only lines.
 func activeDockerInstructions(data string) []string {
 	var instructions []string

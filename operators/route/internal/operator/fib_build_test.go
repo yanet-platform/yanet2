@@ -59,7 +59,11 @@ func Test_BuildFIB_BestPerSourceFiltersWorse(t *testing.T) {
 	require.Equal(t, 2, stats.TotalRoutes)
 	require.Equal(t, 1, stats.FilteredRoutes)
 	require.Len(t, fib.Entries, 1)
-	require.Len(t, fib.Entries[0].Nexthops, 1)
+	require.Equal(t, []neigh.HardwareRoute{{
+		SourceMAC:      mustParseMAC(t, "0a:00:00:00:00:01"),
+		DestinationMAC: mustParseMAC(t, "0a:00:00:00:10:00"),
+		Device:         "eth1",
+	}}, fib.Entries[0].Nexthops)
 }
 
 // Test_BuildFIB_EqualCostECMPPreserved verifies that equal-cost routes from

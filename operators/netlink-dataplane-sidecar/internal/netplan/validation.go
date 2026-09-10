@@ -87,11 +87,6 @@ func (m State) Validate() error {
 		if err := ValidateAddresses(link.Addresses); err != nil {
 			return fmt.Errorf("link %q: %w", link.Name, err)
 		}
-		for _, family := range link.LinkLocal {
-			if family != "ipv6" {
-				return fmt.Errorf("link %q: unsupported link-local family %q", link.Name, family)
-			}
-		}
 		if _, duplicate := links[link.Name]; duplicate {
 			return fmt.Errorf("duplicate managed link name %q", link.Name)
 		}

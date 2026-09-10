@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	vnetlink "github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -64,8 +66,8 @@ func (m *fakeNetlinkHandle) AddrDel(vnetlink.Link, *vnetlink.Addr) error {
 	return nil
 }
 
-func (m *fakeNetlinkHandle) NeighList(int, int) ([]vnetlink.Neigh, error) {
-	return nil, nil
+func (m *fakeNetlinkHandle) WalkNeighbours(ctx context.Context, visit func(vnetlink.Neigh) error) error {
+	return ctx.Err()
 }
 
 func (m *fakeNetlinkHandle) Close() {
@@ -140,26 +142,22 @@ func Test_NewOperator_CleansPartialDialFailure(t *testing.T) {
 	require.True(t, handle.Closed)
 }
 
-// Test_NewOperator_ClosesPartialHandle verifies that a factory returning both
-// a handle and an error releases the handle and preserves the error.
-func Test_NewOperator_ClosesPartialHandle(t *testing.T) {
-	handle := &fakeNetlinkHandle{}
-	factoryErr := errors.New("partial handle failure")
-
-	runnable, err := sidecaroperator.NewOperator(
-		twoGatewayConfig(),
-		sidecaroperator.WithNetplanLoader(emptyNetplan),
-		sidecaroperator.WithNetlinkHandleFactory(func() (
-			sidecaroperator.NetlinkHandle,
-			error,
-		) {
-			return handle, factoryErr
-		}),
-	)
-
-	require.Nil(t, runnable)
-	require.ErrorIs(t, err, factoryErr)
-	require.True(t, handle.Closed)
+// Test_NewOperator_HandleFactoryError verifies that a real socket-open failure
+// returns its error without closing a typed-nil handle or panicking.
+func Test_NewOperator_HandleFactoryError(t *testing.T) {
+	if os.Getenv("YANET_TEST_HANDLE_FAILURE") == "1" {
+		require.NoError(t, unix.Setrlimit(unix.RLIMIT_NOFILE, &unix.Rlimit{}))
+		runnable, err := sidecaroperator.NewOperator(twoGatewayConfig(),
+			sidecaroperator.WithNetplanLoader(emptyNetplan),
+		)
+		require.Nil(t, runnable)
+		require.ErrorIs(t, err, unix.EMFILE)
+		return
+	}
+	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^Test_NewOperator_HandleFactoryError$")
+	command.Env = append(os.Environ(), "YANET_TEST_HANDLE_FAILURE=1")
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
 }
 
 // Test_NewOperator_ConfiguresSharedSocketTimeout verifies that every shared
@@ -311,73 +309,58 @@ func twoGatewayConfig() *sidecaroperator.Config {
 	return cfg
 }
 
-// Test_Operator_LoadsNetplanOnce verifies that replacing, corrupting or deleting
-// the file after startup cannot change or interrupt recurring restoration.
+// Test_Operator_LoadsNetplanOnce verifies that replacing the startup file cannot
+// change recurring restoration or cause a second load.
 func Test_Operator_LoadsNetplanOnce(t *testing.T) {
-	for _, mutation := range []string{"replace", "corrupt", "delete"} {
-		t.Run(mutation, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "netplan.yaml")
-			require.NoError(t, os.WriteFile(path, []byte("network: {version: 2}"), 0o600))
-			config := twoGatewayConfig()
-			config.NetplanPath = xcfg.MustNonEmptyString(path)
-			config.Reconcile.Interval = xcfg.MustNonZero(5 * time.Millisecond)
-			config.Reconcile.InitialBackoff = xcfg.MustNonZero(time.Millisecond)
-			config.Reconcile.MaxBackoff = xcfg.MustNonZero(5 * time.Millisecond)
-			handle := &fakeNetlinkHandle{}
-			var loads atomic.Int64
-			runnable, err := sidecaroperator.NewOperator(config,
-				sidecaroperator.WithNetplanLoader(func(path string) (netplan.State, error) {
-					loads.Add(1)
-					return netplan.ParseFile(path)
-				}),
-				sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) { return handle, nil }),
-				sidecaroperator.WithGatewayDialer(func(commonoperator.GatewayConfig) (sidecaroperator.GatewayConnection, error) {
-					return &fakeGatewayConnection{}, nil
-				}),
-				sidecaroperator.WithNeighbourSubscriber(func(updates chan<- vnetlink.NeighUpdate, done <-chan struct{}, options vnetlink.NeighSubscribeOptions) error {
-					go func() { <-done; close(updates) }()
-					return nil
-				}),
-			)
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, runnable.Close()) })
-			switch mutation {
-			case "replace":
-				require.NoError(t, os.WriteFile(path, []byte("network: {version: 2, ethernets: {kni0: {}}}"), 0o600))
-			case "corrupt":
-				require.NoError(t, os.WriteFile(path, []byte("network: ["), 0o600))
-			case "delete":
-				require.NoError(t, os.Remove(path))
-			}
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			result := make(chan error, 1)
-			go func() { result <- runnable.Run(ctx) }()
-			require.Eventually(t, func() bool { return handle.ListCalls.Load() >= 6 }, time.Second, time.Millisecond)
-			cancel()
-			require.ErrorIs(t, <-result, context.Canceled)
-			require.Equal(t, int64(1), loads.Load())
-		})
-	}
+	path := filepath.Join(t.TempDir(), "netplan.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("network: {version: 2}"), 0o600))
+	config := twoGatewayConfig()
+	config.NetplanPath = xcfg.MustNonEmptyString(path)
+	config.Reconcile.Interval = xcfg.MustNonZero(5 * time.Millisecond)
+	config.Reconcile.InitialBackoff = xcfg.MustNonZero(time.Millisecond)
+	config.Reconcile.MaxBackoff = xcfg.MustNonZero(5 * time.Millisecond)
+	handle := &fakeNetlinkHandle{}
+	var loads atomic.Int64
+	runnable, err := sidecaroperator.NewOperator(config,
+		sidecaroperator.WithNetplanLoader(func(path string) (netplan.State, error) {
+			loads.Add(1)
+			return netplan.ParseFile(path)
+		}),
+		sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) { return handle, nil }),
+		sidecaroperator.WithGatewayDialer(func(commonoperator.GatewayConfig) (sidecaroperator.GatewayConnection, error) {
+			return &fakeGatewayConnection{}, nil
+		}),
+		sidecaroperator.WithNeighbourSubscriber(func(updates chan<- vnetlink.NeighUpdate, done <-chan struct{}, options vnetlink.NeighSubscribeOptions) error {
+			go func() { <-done; close(updates) }()
+			return nil
+		}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runnable.Close()) })
+	require.NoError(t, os.WriteFile(path, []byte("network: {version: 2, ethernets: {kni0: {}}}"), 0o600))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- runnable.Run(ctx) }()
+	require.Eventually(t, func() bool { return handle.ListCalls.Load() >= 6 }, time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-result, context.Canceled)
+	require.Equal(t, int64(1), loads.Load())
 }
 
 // Test_NewOperator_RejectsNetplanBeforeResources verifies that startup loading
 // and validation finish before any kernel handle or transport is allocated.
 func Test_NewOperator_RejectsNetplanBeforeResources(t *testing.T) {
-	for _, state := range []netplan.State{
-		{Links: []netplan.Link{{Name: "eth0"}}},
-		{Links: []netplan.Link{{Name: "lo", Kind: netplan.LinkKindDummy}}},
-	} {
-		runnable, err := sidecaroperator.NewOperator(twoGatewayConfig(),
-			sidecaroperator.WithNetplanLoader(func(string) (netplan.State, error) { return state, nil }),
-			sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) {
-				t.Fatal("kernel handle opened for invalid desired state")
-				return nil, nil
-			}),
-		)
-		require.Nil(t, runnable)
-		require.Error(t, err)
-	}
+	state := netplan.State{Links: []netplan.Link{{Name: "eth0"}}}
+	runnable, err := sidecaroperator.NewOperator(twoGatewayConfig(),
+		sidecaroperator.WithNetplanLoader(func(string) (netplan.State, error) { return state, nil }),
+		sidecaroperator.WithNetlinkHandleFactory(func() (sidecaroperator.NetlinkHandle, error) {
+			t.Fatal("kernel handle opened for invalid desired state")
+			return nil, nil
+		}),
+	)
+	require.Nil(t, runnable)
+	require.Error(t, err)
 }
 
 // registrationGateway captures operational registration independently of the

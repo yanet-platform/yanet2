@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	vnetlink "github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"github.com/yanet-platform/yanet2/operators/netlink-dataplane-sidecar/internal/netplan"
 )
@@ -217,6 +218,9 @@ func (m *Reconciler) resolve(ctx context.Context, expected LinkIdentity) (vnetli
 	if err != nil {
 		return nil, fmt.Errorf("revalidate link %q: %w", expected.Name, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	current, err := IdentifyLink(link)
 	if err != nil {
 		return nil, err
@@ -279,8 +283,8 @@ func (m *Reconciler) configureLink(ctx context.Context, wanted netplan.Link, ide
 		_, err := m.resolveConfigured(ctx, wanted, identities)
 		return err
 	}
-	settings := []struct{ Name, Value string }{{"addr_gen_mode", "1"}, {"disable_ipv6", "0"}}
-	if slices.Contains(wanted.LinkLocal, "ipv6") {
+	settings := []struct{ Name, Value string }{{"addr_gen_mode", "1"}}
+	if wanted.IPv6LinkLocal {
 		settings[0].Value = "0"
 	}
 	if wanted.AcceptRA != nil {
@@ -291,6 +295,7 @@ func (m *Reconciler) configureLink(ctx context.Context, wanted netplan.Link, ide
 		}
 		settings = append(settings, struct{ Name, Value string }{"accept_ra", value})
 	}
+	settings = append(settings, struct{ Name, Value string }{"disable_ipv6", "0"})
 	for _, setting := range settings {
 		if err := m.sysctl.SetIPv6(ctx, wanted.Name, setting.Name, setting.Value, validate); err != nil {
 			return err
@@ -319,6 +324,16 @@ func (m *Reconciler) configureLink(ctx context.Context, wanted netplan.Link, ide
 			if bits != desired.Bits() && desired.Addr().Is6() {
 				return fmt.Errorf("IPv6 address %s has incompatible prefix length %d", desired.Addr(), bits)
 			}
+			if desired.Addr().Is6() && address.Flags&unix.IFA_F_DADFAILED != 0 {
+				link, err = m.resolveConfigured(ctx, wanted, identities)
+				if err != nil {
+					return err
+				}
+				if err := m.backend.AddrDel(link, &address); err != nil {
+					return fmt.Errorf("remove failed-DAD address %s: %w", desired, err)
+				}
+				continue
+			}
 			present = present || bits == desired.Bits()
 		}
 		if present {
@@ -335,7 +350,25 @@ func (m *Reconciler) configureLink(ctx context.Context, wanted netplan.Link, ide
 			return fmt.Errorf("ensure address %s: %w", desired, err)
 		}
 	}
-	if wanted.Kind != netplan.LinkKindLoopback && !slices.Contains(wanted.LinkLocal, "ipv6") {
+	link, err = m.resolveConfigured(ctx, wanted, identities)
+	if err != nil {
+		return err
+	}
+	addresses, err = m.backend.AddrList(link, vnetlink.FAMILY_V6)
+	if err != nil {
+		return fmt.Errorf("check IPv6 address readiness: %w", err)
+	}
+	for _, address := range addresses {
+		if address.IPNet == nil || address.Flags&(unix.IFA_F_DADFAILED|unix.IFA_F_TENTATIVE) == 0 {
+			continue
+		}
+		if slices.ContainsFunc(wanted.Addresses, func(prefix netip.Prefix) bool {
+			return prefix.Addr().Is6() && address.IP.Equal(prefix.Addr().AsSlice())
+		}) {
+			return fmt.Errorf("desired IPv6 address %s has not completed duplicate address detection", address.IP)
+		}
+	}
+	if wanted.Kind != netplan.LinkKindLoopback && !wanted.IPv6LinkLocal {
 		return m.removeUnlistedIPv6LL(ctx, wanted, identities)
 	}
 	return validate()

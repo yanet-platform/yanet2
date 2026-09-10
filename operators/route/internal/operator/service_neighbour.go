@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/hwroute"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
@@ -39,7 +40,7 @@ type NeighbourService struct {
 	onChanged          func()
 	limits             NeighbourReplacementLimits
 	staged             chan struct{}
-	onSnapshotReceived func(string)
+	onSnapshotReceived func(string, bool) bool
 	onTableRemoved     func(string)
 	commitMu           sync.Mutex
 	remoteTable        string
@@ -165,7 +166,7 @@ func (m *NeighbourService) replaceSnapshot(ctx context.Context, table string, pr
 	defer m.commitMu.Unlock()
 	changed, err := m.neighTable.ReplaceSource(ctx, table, priority, entries)
 	if err == nil {
-		m.onSnapshotReceived(table)
+		changed = m.onSnapshotReceived(table, changed) || changed
 	}
 	return changed, err
 }
@@ -339,8 +340,8 @@ func parseNeighbourEntry(entry *operatorpb.NeighbourEntry) (neigh.NeighbourEntry
 		entry.GetHardwareAddr().GetAddr()>>48 != 0 || entry.GetLinkAddr().GetAddr()>>48 != 0 {
 		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, "both MAC addresses must be present EUI-48 values")
 	}
-	if len(entry.GetDevice()) > operatorpb.NeighbourNameBytes {
-		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, "device exceeds 128 bytes")
+	if err := hwroute.ValidateDevice(entry.GetDevice()); err != nil {
+		return neigh.NeighbourEntry{}, status.Error(codes.InvalidArgument, err.Error())
 	}
 	return neigh.NeighbourEntry{
 		NextHop: address.Unmap(),
