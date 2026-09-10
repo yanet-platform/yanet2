@@ -13,7 +13,7 @@ use unrduppb::{
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service as GrpcService},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
     yaml,
@@ -272,17 +272,11 @@ impl UnrdupService {
         output::data(
             || &response.configs,
             || {
-                if response.configs.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No unrdup configurations found."),
-                        format_args!("create one with 'yanet-cli-unrdup update --name <name> <path>'"),
-                    );
-                    return;
-                }
-
-                for name in &response.configs {
-                    println!("{name}");
-                }
+                display::print_names_with_hint(
+                    &response.configs,
+                    format_args!("No unrdup configurations found."),
+                    format_args!("create one with 'yanet-cli-unrdup update --name <name> <path>'"),
+                )
             },
         );
 

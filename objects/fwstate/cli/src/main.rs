@@ -12,7 +12,7 @@ use serde::Serialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -173,21 +173,11 @@ impl FWStateMapService {
         output::data(
             || &listed,
             || {
-                if response.maps.is_empty() {
-                    output::empty_with_hint(
-                        format_args!("No fwstate-map objects found."),
-                        format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
-                    );
-                    return;
-                }
-
-                // The human render keeps the plain name list; the family
-                // pairs above are the structured payload for JSON output.
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&response.maps)
-                        .expect("fwstate-map list JSON serialization must not fail")
-                );
+                display::print_names_with_hint(
+                    &response.maps,
+                    format_args!("No fwstate-map objects found."),
+                    format_args!("create one with 'yanet-cli-fwstatemap create --name <name> --kind <v4|v6>'"),
+                )
             },
         );
 

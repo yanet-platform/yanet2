@@ -6,7 +6,7 @@ use commonpb::pb::{FunctionId, PipelineId};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
-    completion,
+    completion, display,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -99,19 +99,10 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_pipelines().await?;
+            let names: Vec<String> = ids.iter().map(|id| id.name.clone()).collect();
             output::data(
                 || &ids,
-                || {
-                    if ids.is_empty() {
-                        output::empty(format_args!("No pipelines found."));
-                        return;
-                    }
-
-                    print!(
-                        "{}",
-                        serde_yaml::to_string(&ids).expect("pipeline list YAML serialization must not fail")
-                    );
-                },
+                || display::print_names(&names, format_args!("No pipelines found.")),
             );
         }
         ModeCmd::Show(show) => {
