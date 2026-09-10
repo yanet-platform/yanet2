@@ -84,6 +84,28 @@ func NewDeviceConfig(
 	}, nil
 }
 
+// LookupVlan returns the vlan id of the live vlan device with the given
+// name.
+//
+// A name with no vlan device reports ffi.ErrNotFound.
+func LookupVlan(agent *ffi.Agent, name string) (uint16, error) {
+	if agent == nil {
+		return 0, fmt.Errorf("agent cannot be nil")
+	}
+
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	var cVlan C.uint16_t
+	var cErr *C.struct_yanet_error
+	rc := C.cp_device_vlan_get_vlan((*C.struct_agent)(agent.AsRawPtr()), cName, &cVlan, &cErr)
+	if rc != 0 {
+		return 0, fmt.Errorf("failed to look up vlan device: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+
+	return uint16(cVlan), nil
+}
+
 func (m *DeviceConfig) asRawPtr() *C.struct_cp_device {
 	return (*C.struct_cp_device)(m.ptr.AsRawPtr())
 }
