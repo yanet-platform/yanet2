@@ -71,6 +71,13 @@ stream completion. The legacy unary `List` retains its 512 MiB response envelope
 and rejects larger views with an instruction to use streaming. Streaming clients
 require a route operator and gateway built with the updated service descriptor.
 
+The receiver admits at most four concurrent streaming list readers across named
+and merged views, independently of replacement admission. Each read has a five-minute
+server lifetime even without a client deadline. Admission is checked before acquiring
+a snapshot; a timed-out or cancelled read releases its snapshot and admission slot
+after the transport send exits. Excess reads fail with `ResourceExhausted`, and
+expired reads with `DeadlineExceeded`. Web prefetch uses at most two reads at a time.
+
 ## Receiver configuration and readiness
 
 Configure the route operator with local netlink monitoring disabled, explicit
