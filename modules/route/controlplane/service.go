@@ -414,7 +414,11 @@ func (m *RouteService) UpdateFIB(
 
 	module, err := m.backend.UpdateModule(name, entries)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to apply FIB for %q: %v", name, err)
+		code := codes.Internal
+		if errors.Is(err, ErrTooManyNexthops) {
+			code = codes.InvalidArgument
+		}
+		return nil, status.Errorf(code, "failed to apply FIB for %q: %v", name, err)
 	}
 
 	// The exported set is the reachable one, read back off the handle

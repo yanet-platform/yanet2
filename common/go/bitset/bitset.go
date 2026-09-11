@@ -9,6 +9,9 @@ import (
 // MaxBitsetWords specifies the number of 64-bit words in the bitset.
 const MaxBitsetWords = 16
 
+// MaxBits is the number of distinct indexes a TinyBitset can hold.
+const MaxBits = 64 * MaxBitsetWords
+
 // TinyBitset implements constant-length bitset.
 //
 // This structure is designed to be used as a comparable key in maps.
@@ -28,8 +31,8 @@ func (m *TinyBitset) Count() uint {
 
 // Insert inserts the given index into the bitset.
 func (m *TinyBitset) Insert(idx uint32) {
-	if idx >= 64*MaxBitsetWords {
-		panic(fmt.Sprintf("index %d is too big: must be less than %d", idx, 64*MaxBitsetWords))
+	if idx >= MaxBits {
+		panic(fmt.Sprintf("index %d is too big: must be less than %d", idx, MaxBits))
 	}
 
 	m.words[idx/64] |= 1 << (idx % 64)

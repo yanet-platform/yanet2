@@ -17,6 +17,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -1145,6 +1146,40 @@ func TestRoute_ECMPDistinctSourceMACRemainsSeparate(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, fib, 1)
 	require.Len(t, fib[0].Nexthops, 2, "nexthops differing only in src_mac must remain distinct routes")
+}
+
+// Test_UpdateFIB_MoreThan1024DistinctNexthops verifies that a FIB with more
+// distinct nexthops than one config can index is refused, not panicked on.
+//
+// Thirty refusals in a row on the 2 MB agent arena prove every refused
+// config is freed, since a leaked one would exhaust the arena. The fake
+// backend never builds the route-list key, so this runs on the real one.
+func Test_UpdateFIB_MoreThan1024DistinctNexthops(t *testing.T) {
+	const nexthopCount = bitset.MaxBits + 1
+
+	_, _, backend := setupRouteHarness(t, "port0")
+
+	entries := make([]FIBEntry, 0, nexthopCount)
+	for idx := range nexthopCount {
+		entries = append(entries, FIBEntry{
+			Prefix: netip.PrefixFrom(netip.AddrFrom4([4]byte{10, 0, byte(idx >> 8), byte(idx)}), 32),
+			Nexthops: []FIBNexthop{{
+				DstMAC: net.HardwareAddr{0xde, 0xad, 0xbe, 0xef, byte(idx >> 8), byte(idx)},
+				SrcMAC: routeNextHop.SrcMAC,
+				Device: "port0",
+			}},
+		})
+	}
+
+	for range 30 {
+		_, err := backend.UpdateModule("cfg", toFIBEntries(t, entries))
+		require.ErrorIs(t, err, route.ErrTooManyNexthops)
+	}
+
+	handle := applyFIB(t, backend, "cfg", entries[:bitset.MaxBits])
+	fib, err := handle.DumpFIB()
+	require.NoError(t, err)
+	require.Len(t, fib, bitset.MaxBits)
 }
 
 // TestUpdateFIB_EmptyNexthopEntryDoesNotDisplaceEarlierEntry verifies the
