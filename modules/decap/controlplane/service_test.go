@@ -16,7 +16,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
@@ -62,9 +61,33 @@ func prefixStrings[T interface{ ToPrefix() (netip.Prefix, error) }](t *testing.T
 
 var errInjectedBackend = errors.New("injected backend failure")
 
+// mockModuleHandle counts Free calls so tests can assert a release happened.
+type mockModuleHandle struct {
+	freed atomic.Int64
+}
+
+func (m *mockModuleHandle) Free() error {
+	m.freed.Add(1)
+	return nil
+}
+
+// refusingOnceHandle refuses its first Free with ffi.ErrStillReferenced, then succeeds.
+type refusingOnceHandle struct {
+	numCalls atomic.Int64
+	freed    atomic.Int64
+}
+
+func (m *refusingOnceHandle) Free() error {
+	if m.numCalls.Add(1) == 1 {
+		return ffi.ErrStillReferenced
+	}
+	m.freed.Add(1)
+	return nil
+}
+
 // mockBackend records the last handle it minted and the name it last saw in DeleteModule.
 type mockBackend struct {
-	lastHandle  atomic.Pointer[testutils.FreeSequence]
+	lastHandle  atomic.Pointer[mockModuleHandle]
 	deletedName string
 }
 
@@ -72,7 +95,7 @@ func (m *mockBackend) UpdateModule(
 	name string,
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
-	handle := testutils.NewFreeSequence()
+	handle := &mockModuleHandle{}
 	m.lastHandle.Store(handle)
 	return handle, nil
 }
@@ -98,13 +121,12 @@ func (m *refusingDeleteBackend) DeleteModule(name string) error {
 	return errInjectedBackend
 }
 
-// parkingBackend hands out the given handle on its first update and fresh
-// releasable ones afterwards, so a handle that refuses its first free must
-// be parked before it can be reclaimed.
+// parkingBackend refuses to release the first handle it mints, then releases
+// normally, so that handle must be parked before it can be reclaimed.
 type parkingBackend struct {
 	mockBackend
 	numCalls atomic.Int64
-	first    *testutils.FreeSequence
+	first    refusingOnceHandle
 }
 
 func (m *parkingBackend) UpdateModule(
@@ -112,9 +134,9 @@ func (m *parkingBackend) UpdateModule(
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
 	if m.numCalls.Add(1) == 1 {
-		return m.first, nil
+		return &m.first, nil
 	}
-	return testutils.NewFreeSequence(), nil
+	return &mockModuleHandle{}, nil
 }
 
 // blockingBackend holds every update until released, modeling a slow
@@ -146,7 +168,7 @@ func (m *flakyBackend) UpdateModule(
 	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
-	return testutils.NewFreeSequence(), nil
+	return &mockModuleHandle{}, nil
 }
 
 func (m *flakyBackend) DeleteModule(name string) error {
@@ -341,7 +363,7 @@ func Test_DecapService_DeleteConfig_RemovesConfig(t *testing.T) {
 	require.NotNil(t, resp)
 	require.NoError(t, err)
 	assert.Equal(t, "decap0", backend.deletedName)
-	assert.Equal(t, int64(1), handle.Freed())
+	assert.Equal(t, int64(1), handle.freed.Load())
 
 	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
 	require.NoError(t, err)
@@ -382,7 +404,7 @@ func Test_DecapService_DeleteConfig_Referenced(t *testing.T) {
 // Test_DecapService_DeleteConfig_ParksThenReclaims verifies that a handle
 // refused on delete is parked and reclaimed by the next successful update.
 func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
-	backend := &parkingBackend{first: testutils.NewFreeSequence(ffi.ErrStillReferenced)}
+	backend := &parkingBackend{}
 	svc := NewDecapService(backend)
 	ctx := t.Context()
 
@@ -395,8 +417,8 @@ func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
 	resp, err := svc.DeleteConfig(ctx, &decappb.DeleteConfigRequest{Name: "decap0"})
 	require.NotNil(t, resp)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), backend.first.Calls())
-	assert.Equal(t, int64(0), backend.first.Freed())
+	assert.Equal(t, int64(1), backend.first.numCalls.Load())
+	assert.Equal(t, int64(0), backend.first.freed.Load())
 
 	// A later successful update reclaims deferred handles first.
 	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
@@ -404,8 +426,8 @@ func Test_DecapService_DeleteConfig_ParksThenReclaims(t *testing.T) {
 		Prefixes4: mustPrefixes4(t, "10.0.1.0/24"),
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), backend.first.Calls())
-	assert.Equal(t, int64(1), backend.first.Freed())
+	assert.Equal(t, int64(2), backend.first.numCalls.Load())
+	assert.Equal(t, int64(1), backend.first.freed.Load())
 }
 
 // Test_DecapService_ListConfigs_DuringSlowUpdate verifies that reads
