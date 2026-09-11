@@ -91,6 +91,12 @@ decap_handle_packets(
 	}
 }
 
+static void
+decap_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_decap() {
 	struct decap_module *module =
@@ -104,6 +110,7 @@ new_module_decap() {
 		module->module.name, sizeof(module->module.name), "%s", "decap"
 	);
 	module->module.handler = decap_handle_packets;
+	module->module.commit_handler = decap_module_commit;
 
 	return &module->module;
 }

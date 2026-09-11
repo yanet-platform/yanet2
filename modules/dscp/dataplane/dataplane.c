@@ -85,6 +85,12 @@ struct dscp_module {
 	struct module module;
 };
 
+static void
+dscp_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_dscp() {
 	struct dscp_module *module =
@@ -98,6 +104,7 @@ new_module_dscp() {
 		module->module.name, sizeof(module->module.name), "%s", "dscp"
 	);
 	module->module.handler = dscp_handle_packets;
+	module->module.commit_handler = dscp_module_commit;
 
 	return &module->module;
 }

@@ -111,6 +111,12 @@ struct pdump_module {
 	struct module module;
 };
 
+static void
+pdump_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_pdump() {
 	struct pdump_module *module =
@@ -124,6 +130,7 @@ new_module_pdump() {
 		module->module.name, sizeof(module->module.name), "%s", "pdump"
 	);
 	module->module.handler = pdump_handle_packets;
+	module->module.commit_handler = pdump_module_commit;
 
 	return &module->module;
 }

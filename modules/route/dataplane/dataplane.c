@@ -256,6 +256,12 @@ route_handle_packets(
 	}
 }
 
+static void
+route_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_route() {
 	struct route_module *module =
@@ -269,6 +275,7 @@ new_module_route() {
 		module->module.name, sizeof(module->module.name), "%s", "route"
 	);
 	module->module.handler = route_handle_packets;
+	module->module.commit_handler = route_module_commit;
 
 	return &module->module;
 }

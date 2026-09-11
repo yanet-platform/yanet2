@@ -170,6 +170,14 @@ struct forward_module {
 	struct module module;
 };
 
+static void
+forward_module_commit(
+	struct dp_config *dp_config, struct cp_module *cp_module
+) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_forward() {
 	struct forward_module *module =
@@ -186,6 +194,7 @@ new_module_forward() {
 		"forward"
 	);
 	module->module.handler = forward_handle_packets;
+	module->module.commit_handler = forward_module_commit;
 
 	return &module->module;
 }

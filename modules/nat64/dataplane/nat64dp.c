@@ -3241,6 +3241,12 @@ nat64_handle_packets(
 	}
 }
 
+static void
+nat64_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_nat64() {
 
@@ -3259,6 +3265,7 @@ new_module_nat64() {
 		module->module.name, sizeof(module->module.name), "%s", "nat64"
 	);
 	module->module.handler = nat64_handle_packets;
+	module->module.commit_handler = nat64_module_commit;
 
 	return &module->module;
 }

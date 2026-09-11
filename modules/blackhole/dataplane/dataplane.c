@@ -21,6 +21,14 @@ blackhole_handle_packets(
 	}
 }
 
+static void
+blackhole_module_commit(
+	struct dp_config *dp_config, struct cp_module *cp_module
+) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_blackhole() {
 	struct module *module = (struct module *)malloc(sizeof(*module));
@@ -31,6 +39,7 @@ new_module_blackhole() {
 
 	snprintf(module->name, sizeof(module->name), "%s", "blackhole");
 	module->handler = blackhole_handle_packets;
+	module->commit_handler = blackhole_module_commit;
 
 	return module;
 }

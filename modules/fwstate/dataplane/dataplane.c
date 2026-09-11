@@ -683,6 +683,14 @@ struct fwstate_module {
 	struct module module;
 };
 
+static void
+fwstate_module_commit(
+	struct dp_config *dp_config, struct cp_module *cp_module
+) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_fwstate() {
 	struct fwstate_module *module =
@@ -699,6 +707,7 @@ new_module_fwstate() {
 		FWSTATE_MODULE_NAME
 	);
 	module->module.handler = fwstate_handle_packets;
+	module->module.commit_handler = fwstate_module_commit;
 
 	return &module->module;
 }

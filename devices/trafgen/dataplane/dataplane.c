@@ -166,6 +166,14 @@ trafgen_output_handle(
 	packet_front_pass(packet_front);
 }
 
+static void
+trafgen_device_commit(
+	struct dp_config *dp_config, struct cp_device *cp_device
+) {
+	(void)dp_config;
+	(void)cp_device;
+}
+
 struct device *
 new_device_trafgen() {
 	struct device_trafgen *device =
@@ -183,6 +191,7 @@ new_device_trafgen() {
 	);
 	device->device.input_handler = trafgen_input_handle;
 	device->device.output_handler = trafgen_output_handle;
+	device->device.commit_handler = trafgen_device_commit;
 
 	return &device->device;
 }
