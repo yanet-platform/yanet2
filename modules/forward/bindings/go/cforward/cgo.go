@@ -9,9 +9,7 @@ package cforward
 import "C"
 
 import (
-	"errors"
 	"fmt"
-	"syscall"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -49,30 +47,14 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-// Free destroys the module config when it is dangling — referenced by no live
-// configuration generation — and reports nil. While a live generation
-// still references it the free is refused with ffi.ErrStillReferenced
-// and the handle stays usable: the caller must remember it and free it
-// again once the generations holding it drain. Safe to call multiple
-// times: subsequent calls are no-ops reporting nil.
+// Free destroys the module config, or reports ffi.ErrStillReferenced while a
+// live generation still holds it. Safe to call multiple times.
 func (m *ModuleConfig) Free() error {
-	ptr := m.asRawPtr()
-	if ptr == nil {
-		return nil
-	}
-	var cErr *C.yanet_error
-	rc, errno := C.forward_module_config_free(ptr, &cErr)
-	if rc == 0 {
-		m.ptr = ffi.ModuleConfig{}
-		return nil
-	}
-	if errors.Is(errno, syscall.EAGAIN) {
-		// The refused attempt allocated an error chain; release it
-		// rather than leaking one per attempt. The object is intact.
-		C.yanet_error_free(cErr)
-		return ffi.ErrStillReferenced
-	}
-	return fmt.Errorf("failed to free module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	return m.ptr.Free(func(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
+		var cErr *C.yanet_error
+		rc, errno := C.forward_module_config_free((*C.struct_cp_module)(ptr), &cErr)
+		return int(rc), unsafe.Pointer(cErr), errno
+	})
 }
 
 // update maps 1:1 to forward_module_config_update.

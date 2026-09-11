@@ -21,8 +21,10 @@ package ffi
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -55,6 +57,36 @@ func (m ModuleConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
+// Free destroys the module config through the typed free the module
+// supplies and forgets the pointer once it is gone.
+//
+// The typed free succeeds only once no live generation references the
+// config. A refused attempt reports ErrStillReferenced, releases the error
+// chain it allocated and leaves the handle usable, so the owner can retry
+// once the generations holding it drain. Repeated calls after a success
+// are no-ops reporting nil. The handle to free is the binding's own, not
+// a copy handed out for publishing, which would keep the original live
+// after the object is gone.
+func (m *ModuleConfig) Free(
+	free func(ptr unsafe.Pointer) (rc int, cErr unsafe.Pointer, errno error),
+) error {
+	if m.ptr == nil {
+		return nil
+	}
+
+	rc, cErr, errno := free(unsafe.Pointer(m.ptr))
+	if rc == 0 {
+		m.ptr = nil
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		cerrors.Free(cErr)
+		return ErrStillReferenced
+	}
+
+	return fmt.Errorf("failed to free module config: %w", freeFailure(cErr, errno))
+}
+
 // ShmDeviceConfig is a Go wrapper around a C cp_device pointer, representing
 // a device's shared memory configuration.
 //
@@ -79,6 +111,39 @@ func NewShmDeviceConfig(ptr unsafe.Pointer) ShmDeviceConfig {
 // across CGo package boundaries.
 func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
+}
+
+// Free destroys the device config through the typed free the device
+// supplies and forgets the pointer once it is gone.
+//
+// The refusal contract is the one of a module config's free.
+func (m *ShmDeviceConfig) Free(
+	free func(ptr unsafe.Pointer) (rc int, cErr unsafe.Pointer, errno error),
+) error {
+	if m.ptr == nil {
+		return nil
+	}
+
+	rc, cErr, errno := free(unsafe.Pointer(m.ptr))
+	if rc == 0 {
+		m.ptr = nil
+		return nil
+	}
+	if errors.Is(errno, syscall.EAGAIN) {
+		cerrors.Free(cErr)
+		return ErrStillReferenced
+	}
+
+	return fmt.Errorf("failed to free device config: %w", freeFailure(cErr, errno))
+}
+
+// freeFailure reads the C error of a failed free, falling back to the
+// errno when the free reported none.
+func freeFailure(cErr unsafe.Pointer, errno error) error {
+	if err := cerrors.FromC(cErr); err != nil {
+		return err
+	}
+	return errno
 }
 
 // MaxDeviceNameLen is the size of the C-side device name buffer, including

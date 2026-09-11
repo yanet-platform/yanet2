@@ -98,3 +98,12 @@ func FromC(cErr unsafe.Pointer) error {
 		kind: Kind(C.yanet_error_kind(err)),
 	}
 }
+
+// Free releases a C error without reading it, for an outcome the caller
+// classifies from the return code alone.
+func Free(cErr unsafe.Pointer) {
+	if cErr == nil {
+		return
+	}
+	C.yanet_error_free((*C.yanet_error)(cErr))
+}
