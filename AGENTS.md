@@ -30,7 +30,7 @@ make ai/agents                                     # regenerate agent charters f
 ## Layout
 
 - `dataplane/` — DPDK binary (`main.c`, `config.c`, `dpdk.c`, `worker.c`, `drivers/`).
-- `controlplane/` — gateway (`gateway/`), built-in services (`builtin/`), CGO shm bindings (`ffi/`), root protos (`ynpb/`), control-plane package (`yncp/`), entrypoint (`cmd/yncp-director`).
+- `controlplane/` — gateway (`gateway/`), built-in services (`builtin/`), CGO shm bindings (`ffi/`), published-config store shared by module services (`configstore/`), root protos (`ynpb/`), control-plane package (`yncp/`), entrypoint (`cmd/yncp-director`).
 - `modules/` — packet-processing modules; `devices/` — device adapters (`plain`, `vlan`, `trafgen`), same layout.
 - `operators/` — long-running Go orchestration daemons above the gateway: `pipeline`, `decap`, `forward`, `route` (each `cmd/` + `internal/` + `operatorpb/` + Rust `cli/`), `bird-adapter`, `neighbours` (web only here; process in the private repo).
 - `lib/` — C support libs (`controlplane`, `counters`, `dataplane`, `dataplane_ut`, `errors`, `filter`, `fwstate`, `logging`, `utils`); `api/` — public C API headers; `bindings/go/` — root CGO agent bindings.
