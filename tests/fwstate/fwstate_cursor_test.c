@@ -7,9 +7,9 @@
  */
 
 #include "common/memory.h"
-#include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
 #include "lib/fwstate/types.h"
+#include "lib/statemap/fwmap.h"
 #include "test_utils.h"
 
 #include <assert.h>

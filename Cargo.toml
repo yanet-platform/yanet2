@@ -32,6 +32,7 @@ members = [
     "modules/dscp/cli",
     "modules/forward/cli",
     "modules/fwstate/cli",
+    "modules/l3b/cli",
     "modules/mirror/cli",
     "modules/nat64/cli",
     "modules/pdump/cli",

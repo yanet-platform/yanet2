@@ -11,6 +11,7 @@ subdir('pdump')
 subdir('balancer2')
 subdir('blackhole')
 subdir('unrdup')
+subdir('l3b')
 
 foreach extra_module : get_option('extra_modules')
   subdir(extra_module)

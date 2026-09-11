@@ -13,9 +13,6 @@
 #include "common/numutils.h"
 #include "common/rwlock.h"
 
-// Per user includes
-#include "ops.h"
-
 // Constants and Global Registry
 // ============================================================================
 
@@ -42,6 +39,7 @@ typedef enum {
 	FWMAP_PROMOTE_VALUE_FWSTATE,
 	FWMAP_KEY_EQUAL_FW4,
 	FWMAP_KEY_EQUAL_FW6,
+	FWMAP_PROMOTE_VALUE_KEEP_OLD,
 	FWMAP_FUNC_COUNT
 } fwmap_func_id_t;
 // NOLINTEND(readability-identifier-naming)
@@ -49,7 +47,7 @@ typedef enum {
 static_assert(FWMAP_FUNC_COUNT < 255, "Too many functions");
 
 // Global function registry (declared here, defined at the bottom).
-static void *fwmap_func_registry[FWMAP_FUNC_COUNT];
+extern void *fwmap_func_registry[FWMAP_FUNC_COUNT];
 
 // Hash function type.
 typedef uint64_t (*fwmap_hash_fn_t)(
@@ -286,6 +284,17 @@ fwmap_default_promote_value(
 	(void)dst, (void)old_value, (void)new_value, (void)size;
 	// nop
 	return;
+}
+
+// First write wins: a fresh layer entry inherits the value the deeper
+// layer already carries, ignoring the value this insert proposed. The
+// typedef names the incoming value first, the stale one second.
+static inline void
+fwmap_promote_value_keep_old(
+	void *dst, const void *new_value, const void *old_value, size_t size
+) {
+	(void)new_value;
+	memcpy(dst, old_value, size);
 }
 
 // Helper function to set default function IDs for uninitialized fields
@@ -1299,20 +1308,19 @@ fwmap_put_safe(
 	return result;
 }
 
-// Global function registry - statically initialized.
-static void *fwmap_func_registry[FWMAP_FUNC_COUNT] = {
-	[FWMAP_UNINITIALIZED] = NULL,
-	[FWMAP_HASH_FNV1A] = (void *)fwmap_hash_fnv1a,
-	[FWMAP_KEY_EQUAL_DEFAULT] = (void *)fwmap_default_key_equal,
-	[FWMAP_RAND_DEFAULT] = (void *)fwmap_rand_default,
-	[FWMAP_RAND_SECURE] = (void *)fwmap_rand_secure,
-	[FWMAP_COPY_KEY_DEFAULT] = (void *)fwmap_default_copy_key,
-	[FWMAP_UPDATE_VALUE_DEFAULT] = (void *)fwmap_default_update_value,
-	[FWMAP_PROMOTE_VALUE_DEFAULT] = (void *)fwmap_default_promote_value,
-	[FWMAP_COPY_KEY_FW4] = (void *)fwmap_copy_key_fw4,
-	[FWMAP_COPY_KEY_FW6] = (void *)fwmap_copy_key_fw6,
-	[FWMAP_UPDATE_VALUE_FWSTATE] = (void *)fwmap_update_value_fwstate,
-	[FWMAP_PROMOTE_VALUE_FWSTATE] = (void *)fwmap_promote_value_fwstate,
-	[FWMAP_KEY_EQUAL_FW4] = (void *)fwmap_fw4_key_equal,
-	[FWMAP_KEY_EQUAL_FW6] = (void *)fwmap_fw6_key_equal
-};
+/*
+ * Global function registry, defined once in the statemap library.
+ *
+ * The registry maps the stable fwmap_func_id_t identifiers stored in shared
+ * memory to the callback implementations of this process. The generic
+ * entries are installed by the library itself; consumers with domain-specific
+ * callbacks (fwstate's fw4/fw6 keys and state values) install theirs at
+ * startup through fwmap_func_registry_set, keeping the id space stable across
+ * processes without a compile-time dependency between the libraries.
+ */
+extern void *fwmap_func_registry[FWMAP_FUNC_COUNT];
+
+// Install a callback under its registry id. Startup-time only: entries are
+// read without synchronization once traffic flows.
+void
+fwmap_func_registry_set(fwmap_func_id_t id, void *fn);

@@ -1,4 +1,4 @@
-#include "lib/fwstate/fwmap.h"
+#include "lib/statemap/fwmap.h"
 #include "test_utils.h"
 #include <pthread.h>
 #include <stdlib.h>

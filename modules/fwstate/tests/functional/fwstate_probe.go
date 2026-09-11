@@ -5,7 +5,7 @@ package fwstate_test
 //
 //#include <string.h>
 //
-//#include "lib/fwstate/fwmap.h"
+//#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/types.h"
 //
 // // yanet_test_fwstate_insert_ipv6 inserts one synthetic TCP state entry

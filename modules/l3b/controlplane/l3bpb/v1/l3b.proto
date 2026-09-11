@@ -1,0 +1,212 @@
+syntax = "proto3";
+
+package modules.l3b.controlplane.l3bpb.v1;
+
+import "common/filterpb/v1/filter.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1;l3bpb";
+
+// L3bService manages named virtual services and the module configurations
+// that route traffic to them. Virtual services are named in the same manner
+// as module configurations.
+service L3bService {
+  // CreateService creates a named virtual service.
+  rpc CreateService(CreateServiceRequest) returns (CreateServiceResponse);
+
+  // UpdateService replaces an existing named virtual service.
+  rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
+
+  // DeleteService removes a named virtual service.
+  rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse);
+
+  // ListServices returns the names of all virtual services.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+
+  // UpdateModuleConfig installs destination filter rules and the named
+  // virtual services they route to into a module configuration.
+  rpc UpdateModuleConfig(UpdateModuleConfigRequest) returns (UpdateModuleConfigResponse);
+
+  // ListModuleConfigs returns the names of all module configurations.
+  rpc ListModuleConfigs(ListModuleConfigsRequest) returns (ListModuleConfigsResponse);
+
+  // UpdateRealServerState enables or disables a single real server within a
+  // named virtual service.
+  rpc UpdateRealServerState(UpdateRealServerStateRequest) returns (UpdateRealServerStateResponse);
+
+  // UpdateRealServerWeight sets the weight of a single real server within a
+  // named virtual service; the scheduler rebuilds the ring so that a server
+  // appears as many times as its weight.
+  rpc UpdateRealServerWeight(UpdateRealServerWeightRequest) returns (UpdateRealServerWeightResponse);
+
+  // ListSessions pages through the session records of a named virtual
+  // service.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // GetService inspects a named virtual service: its scheduler masks and
+  // the live list of real servers with addresses, weights and states.
+  rpc GetService(GetServiceRequest) returns (GetServiceResponse);
+}
+
+// RealServer is a backend reached through an IP-in-IP tunnel. The address
+// family is inferred from the byte length of destination_address (4 for IPv4,
+// 16 for IPv6).
+message RealServer {
+  bytes destination_address = 1;
+  common.filterpb.v1.IPNet source_network = 2;
+}
+
+// SourceFilterRule is the source-side match criteria of a service.
+message SourceFilterRule {
+  repeated common.filterpb.v1.IPNet net6s = 1;
+  repeated common.filterpb.v1.IPNet net4s = 2;
+  repeated common.filterpb.v1.PortRange port_ranges = 3;
+}
+
+// DestinationFilterRule routes matching packets to a named virtual service.
+message DestinationFilterRule {
+  repeated common.filterpb.v1.IPNet net6s = 1;
+  repeated common.filterpb.v1.IPNet net4s = 2;
+  repeated common.filterpb.v1.ProtoRange proto_ranges = 3;
+  string service = 4;
+}
+
+// VirtualService describes a named virtual service. The real server ring
+// capacity is derived from the real server count and the maximum weight (see
+// UpdateRealServerWeight).
+message VirtualService {
+  string name = 1;
+  repeated SourceFilterRule source_filter_rules = 2;
+  repeated RealServer real_servers = 3;
+  uint32 hash_mask = 4;
+  uint32 index_mask = 5;
+  // Hash index size of the service's session table; zero selects the default.
+  uint32 session_index_size = 6;
+  // Scheduling mode bits: bit 0 selects one-packet scheduling, deriving the
+  // ring slot from the module link's per-worker packet counter instead of
+  // the packet hash.
+  uint32 scheduler_flags = 7;
+  // Service behavior flags: bit 0 clamps the TCP MSS option of SYN packets,
+  // bit 1 selects pure L3 balancing (the client's ports stay out of the
+  // session identity; classification uses the full port range).
+  uint32 flags = 8;
+  // Session lifetime policy in seconds; every zero field selects its
+  // default. A record's deadline follows the packet that touched it last:
+  // TCP by its flags, UDP its own value, everything else the catch-all.
+  SessionTimeouts session_timeouts = 9;
+  // Outer-header DSCP marking, (dscp << 2) | mode with mode 0 inheriting
+  // the inner DSCP, 1 marking only a zero DSCP and 2 marking always.
+  uint32 dscp_flags = 10;
+}
+
+// Session lifetime policy of a virtual service, in seconds.
+message SessionTimeouts {
+  uint32 tcp = 1;
+  uint32 tcp_syn = 2;
+  uint32 tcp_syn_ack = 3;
+  uint32 tcp_fin = 4;
+  uint32 udp = 5;
+  uint32 other = 6;
+}
+
+// ModuleConfig describes a named module configuration. The virtual services
+// linked into it are exactly those its destination_filter_rules name.
+message ModuleConfig {
+  string name = 1;
+  repeated DestinationFilterRule destination_filter_rules = 2;
+}
+
+message CreateServiceRequest { VirtualService service = 1; }
+
+message CreateServiceResponse {}
+
+message UpdateServiceRequest { VirtualService service = 1; }
+
+message UpdateServiceResponse {}
+
+message DeleteServiceRequest { string name = 1; }
+
+message DeleteServiceResponse { bool deleted = 1; }
+
+message ListServicesRequest {}
+
+message ListServicesResponse { repeated string services = 1; }
+
+message UpdateModuleConfigRequest { ModuleConfig config = 1; }
+
+message UpdateModuleConfigResponse {}
+
+message ListModuleConfigsRequest {}
+
+message ListModuleConfigsResponse { repeated string configs = 1; }
+
+message UpdateRealServerStateRequest {
+  string service = 1;
+  uint32 real_server_index = 2;
+  bool enabled = 3;
+}
+
+message UpdateRealServerStateResponse {}
+
+message UpdateRealServerWeightRequest {
+  string service = 1;
+  uint32 real_server_index = 2;
+  uint32 weight = 3;
+}
+
+message UpdateRealServerWeightResponse {}
+
+// SessionRecord is one client flow pinned to a real server.
+message SessionRecord {
+  // Source address of the client flow; 4 or 16 bytes.
+  bytes source_address = 1;
+  // Source port of the client flow.
+  uint32 source_port = 2;
+  // Destination address of the pinned real server; 4 or 16 bytes.
+  bytes real_address = 3;
+  // Absolute record deadline in nanoseconds since the epoch.
+  uint64 expires_at = 4;
+}
+
+message ListSessionsRequest {
+  // Name of the virtual service whose sessions are listed.
+  string service = 1;
+  // Continuation token from a previous response; 0 starts from the
+  // beginning.
+  uint64 cursor = 2;
+  // Maximum number of records to return; 0 selects a server default.
+  uint32 limit = 3;
+}
+
+message ListSessionsResponse {
+  repeated SessionRecord sessions = 1;
+  // Continuation token for the next page; 0 when the listing is complete.
+  uint64 next_cursor = 2;
+  // Dataplane time in nanoseconds, the reference point of expires_at.
+  uint64 now_ns = 3;
+}
+
+// RealServerState is the live status of one real server of a service.
+message RealServerState {
+  // Destination address of the real server tunnel; 4 or 16 bytes.
+  bytes destination_address = 1;
+  // Source network the outer source address is derived from.
+  common.filterpb.v1.IPNet source_network = 2;
+  // Current scheduler weight of the real server.
+  uint32 weight = 3;
+  // Whether the real server currently takes traffic.
+  bool enabled = 4;
+}
+
+message GetServiceRequest {
+  // Name of the virtual service to inspect.
+  string name = 1;
+}
+
+message GetServiceResponse {
+  // Scheduler hash mask.
+  uint32 hash_mask = 1;
+  // Scheduler index mask.
+  uint32 index_mask = 2;
+  // Real servers in service index order.
+  repeated RealServerState real_servers = 3;
+}

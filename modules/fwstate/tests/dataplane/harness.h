@@ -13,9 +13,9 @@
 #include "lib/dataplane/time/clock.h"
 #include "lib/errors/errors.h"	// IWYU pragma: export
 #include "lib/fwstate/config.h" // IWYU pragma: export
-#include "lib/fwstate/fwmap.h"	// IWYU pragma: export
 #include "lib/fwstate/layermap.h"
-#include "lib/fwstate/types.h" // IWYU pragma: export
+#include "lib/fwstate/types.h"	// IWYU pragma: export
+#include "lib/statemap/fwmap.h" // IWYU pragma: export
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h" // IWYU pragma: export
 #include "objects/fwstate/api/fwstate_map_v4_object.h"
