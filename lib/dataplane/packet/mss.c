@@ -182,7 +182,9 @@ clamp_mss_option(
  */
 static enum packet_set_mss_result
 insert_mss_gap(struct rte_mbuf *mbuf, uint16_t prefix_len) {
-	if (unlikely(rte_pktmbuf_prepend(mbuf, TCP_OPTION_MSS_LEN) == NULL)) {
+	if (unlikely(
+		    packet_headroom_prepend(mbuf, TCP_OPTION_MSS_LEN) == NULL
+	    )) {
 		return packet_set_mss_no_headroom;
 	}
 	memmove(rte_pktmbuf_mtod(mbuf, char *),

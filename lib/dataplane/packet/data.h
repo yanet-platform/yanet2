@@ -33,6 +33,22 @@ packet_data_offset(struct packet *packet) {
 	return packet_to_mbuf(packet)->data_off;
 }
 
+// Grows the frame upwards and returns NULL once the room above the packet
+// descriptor sharing the headroom is spent.
+static inline char *
+packet_headroom_prepend(struct rte_mbuf *mbuf, uint16_t len) {
+	if (rte_pktmbuf_headroom(mbuf) < sizeof(struct packet) + len) {
+		return NULL;
+	}
+	return rte_pktmbuf_prepend(mbuf, len);
+}
+
+// A headroom too small for the descriptor would refuse every prepend.
+_Static_assert(
+	RTE_PKTMBUF_HEADROOM > sizeof(struct packet),
+	"the packet descriptor must fit inside the mbuf headroom"
+);
+
 // Refresh the cached first-segment length after the mbuf was resized.
 //
 // Call this only while the packet is not linked in a counted packet_front

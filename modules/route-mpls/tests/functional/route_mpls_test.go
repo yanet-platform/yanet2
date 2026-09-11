@@ -429,6 +429,18 @@ func catchAllForwardRules(device string) []cforward.ForwardRule {
 	}
 }
 
+// loopForwardRules returns one forward rule that sends every IPv4 packet back
+// into the device's input stage, so the chain runs on it again.
+func loopForwardRules(device string) []cforward.ForwardRule {
+	return []cforward.ForwardRule{{
+		Target:  device,
+		Mode:    cforward.ModeIn,
+		Counter: "loop4",
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+	}}
+}
+
 // deployRules builds a one-device harness with route-mpls and forward loaded,
 // publishes rules as the route-mpls config and wires the ingress topology.
 //
@@ -438,13 +450,35 @@ func catchAllForwardRules(device string) []cforward.ForwardRule {
 func deployRules(t *testing.T, rules []croutempls.Rule) *dataplaneut.Harness {
 	t.Helper()
 
+	return deployChain(t, rules, catchAllForwardRules(mplsDevice), 0)
+}
+
+// deployLoop is deployRules with the forward stage sending every IPv4 packet
+// back into the ingress device under the given redirect limit.
+func deployLoop(t *testing.T, rules []croutempls.Rule, recircLimit uint16) *dataplaneut.Harness {
+	t.Helper()
+
+	return deployChain(t, rules, loopForwardRules(mplsDevice), recircLimit)
+}
+
+// deployChain builds the harness behind deployRules and deployLoop with the
+// given forward rules as the chain's second stage.
+func deployChain(
+	t *testing.T,
+	rules []croutempls.Rule,
+	sinkRules []cforward.ForwardRule,
+	recircLimit uint16,
+) *dataplaneut.Harness {
+	t.Helper()
+
 	config := dataplaneut.Config{
-		CPMemory:      uint64(mplsCPSize),
-		DPMemory:      uint64(mplsDPSize),
-		WorkerCount:   1,
-		Devices:       []string{mplsDevice},
-		Modules:       []string{"route_mpls", "forward"},
-		DevicesToLoad: []string{"plain"},
+		CPMemory:          uint64(mplsCPSize),
+		DPMemory:          uint64(mplsDPSize),
+		WorkerCount:       1,
+		PacketRecircLimit: recircLimit,
+		Devices:           []string{mplsDevice},
+		Modules:           []string{"route_mpls", "forward"},
+		DevicesToLoad:     []string{"plain"},
 	}
 	harness, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)
@@ -459,7 +493,7 @@ func deployRules(t *testing.T, rules []croutempls.Rule) *dataplaneut.Harness {
 	t.Cleanup(func() { _ = handle.Free() })
 
 	sinkName := mplsConfigName + "-sink"
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllForwardRules(mplsDevice))
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -517,6 +551,42 @@ func requireNexthopCounter(
 	t.Helper()
 
 	dataplaneut.RequireRuleCounter(t, harness, counterPath(), name, wantPackets, wantBytes)
+}
+
+// Test_RouteMPLS_EncapLoop_StopsBeforeThePacketDescriptor verifies that a
+// packet re-encapsulated on every loop pass is dropped once the headroom
+// above the packet descriptor is spent.
+//
+// Each IPv4 tunnel pass prepends 32 bytes into the 256-byte headroom whose
+// first 56 bytes hold the descriptor, so the seventh pass is refused.
+// Without the guard the eighth pass overwrites the descriptor's list and
+// mbuf pointers.
+func Test_RouteMPLS_EncapLoop_StopsBeforeThePacketDescriptor(t *testing.T) {
+	const (
+		tunnelHeaderSize = 4 + 20 + 8
+		refusedPass      = 7
+		// Well above the refused pass, so the redirect budget never ends
+		// the loop first.
+		recircLimit = 12
+	)
+
+	frame := ip4Frame(t, "10.1.1.5")
+	// The tunnel destination sits inside the matched prefix, so the
+	// encapsulated packet matches again on the next pass.
+	harness := deployLoop(t, []croutempls.Rule{rule4("10.0.0.0/8", tunnel4.nexthop(1))}, recircLimit)
+
+	result, err := harness.HandlePackets(frame.packet)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "a packet out of headroom must not leave the chain")
+	require.Len(t, result.Drop, 1, "the refused encapsulation must drop the packet")
+
+	// Every pass accounts the frame before encapsulating it, carrying the
+	// tunnel headers of the passes before.
+	bytes := uint64(0)
+	for pass := range refusedPass {
+		bytes += frame.size() + uint64(pass*tunnelHeaderSize)
+	}
+	requireNexthopCounter(t, harness, tunnel4.counter, refusedPass, bytes)
 }
 
 // Test_RouteMPLS_Encap verifies that a packet matching a tunnel nexthop is

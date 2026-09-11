@@ -16,7 +16,7 @@ int
 packet_prepend(struct packet *packet, const void *header, const size_t size) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (rte_pktmbuf_prepend(mbuf, size) == NULL) {
+	if (packet_headroom_prepend(mbuf, size) == NULL) {
 		return -1;
 	}
 	memcpy(rte_pktmbuf_mtod(mbuf, char *), header, size);
@@ -37,7 +37,7 @@ packet_network_prepend(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (rte_pktmbuf_prepend(mbuf, size) == NULL) {
+	if (packet_headroom_prepend(mbuf, size) == NULL) {
 		return -1;
 	}
 	memmove(rte_pktmbuf_mtod(mbuf, char *),
