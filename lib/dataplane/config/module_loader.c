@@ -73,6 +73,7 @@ dp_load_module(
 
 	strtcpy(dp_module->name, module->name, sizeof(dp_module->name));
 	dp_module->handler = module->handler;
+	dp_module->commit_handler = module->commit_handler;
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
 
@@ -115,6 +116,7 @@ dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	strtcpy(dp_device->name, device->name, sizeof(dp_device->name));
 	dp_device->input_handler = device->input_handler;
 	dp_device->output_handler = device->output_handler;
+	dp_device->commit_handler = device->commit_handler;
 
 	SET_OFFSET_OF(&dp_config->dp_devices, dp_devices);
 

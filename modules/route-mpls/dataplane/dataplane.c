@@ -187,6 +187,14 @@ route_mpls_handle_packets(
 	}
 }
 
+static void
+route_mpls_module_commit(
+	struct dp_config *dp_config, struct cp_module *cp_module
+) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_route_mpls() {
 	struct route_module *module =
@@ -203,6 +211,7 @@ new_module_route_mpls() {
 		"route-mpls"
 	);
 	module->module.handler = route_mpls_handle_packets;
+	module->module.commit_handler = route_mpls_module_commit;
 
 	return &module->module;
 }

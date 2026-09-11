@@ -152,6 +152,12 @@ struct device_vlan {
 	struct device device;
 };
 
+static void
+vlan_device_commit(struct dp_config *dp_config, struct cp_device *cp_device) {
+	(void)dp_config;
+	(void)cp_device;
+}
+
 struct device *
 new_device_vlan() {
 	struct device_vlan *device_vlan =
@@ -169,6 +175,7 @@ new_device_vlan() {
 	);
 	device_vlan->device.input_handler = vlan_input_handle;
 	device_vlan->device.output_handler = vlan_output_handle;
+	device_vlan->device.commit_handler = vlan_device_commit;
 
 	return &device_vlan->device;
 }

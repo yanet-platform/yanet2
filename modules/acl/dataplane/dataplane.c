@@ -654,6 +654,12 @@ acl_handle_packets(
 	}
 }
 
+static void
+acl_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_acl() {
 	struct acl_module *module =
@@ -665,6 +671,7 @@ new_module_acl() {
 
 	snprintf(module->module.name, sizeof(module->module.name), "%s", "acl");
 	module->module.handler = acl_handle_packets;
+	module->module.commit_handler = acl_module_commit;
 
 	return &module->module;
 }

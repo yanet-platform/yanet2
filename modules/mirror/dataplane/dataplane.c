@@ -185,6 +185,12 @@ struct mirror_module {
 	struct module module;
 };
 
+static void
+mirror_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_mirror() {
 	struct mirror_module *module =
@@ -198,6 +204,7 @@ new_module_mirror() {
 		module->module.name, sizeof(module->module.name), "%s", "mirror"
 	);
 	module->module.handler = mirror_handle_packets;
+	module->module.commit_handler = mirror_module_commit;
 
 	return &module->module;
 }

@@ -4,8 +4,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "common/container_of.h"
+#include "lib/controlplane/config/cp_device.h"
+#include "lib/controlplane/config/cp_module.h"
+#include "lib/controlplane/config/registry.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/pipeline/pipeline.h"
+#include "lib/logging/log.h"
 
 struct dp_config *
 dp_config_nextk(struct dp_config *current, uint32_t k) {
@@ -65,10 +70,123 @@ dp_config_wait_for_worker_ectx(
 	}
 }
 
+// Serializes commit passes within one dataplane process.
+//
+// Every assigner thread of the process contends here before reading the
+// commit bookkeeping, so exactly one thread runs the handlers for a
+// shared config and generation while the others observe the recorded
+// outcome and skip — the single-writer guarantee the handlers rely on.
+static pthread_mutex_t commit_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// Runs the module commit handlers of a generation.
+//
+// Modules are visited in registry order; an item whose dataplane
+// slot index falls outside the loaded array is skipped with an error
+// logged. That path is unreachable in practice — the indices are
+// validated when the config is built — so the skip is purely
+// defensive.
+static void
+dp_config_commit_gen_modules(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+) {
+	struct cp_module_registry *module_registry =
+		&config_gen->module_registry;
+	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
+
+	for (uint64_t idx = 0; idx < module_registry->registry.capacity;
+	     ++idx) {
+		struct registry_item *item =
+			registry_get(&module_registry->registry, idx);
+		if (item == NULL) {
+			continue;
+		}
+		struct cp_module *cp_module =
+			container_of(item, struct cp_module, config_item);
+		if (cp_module->dp_module_idx >= dp_config->module_count) {
+			LOG(ERROR,
+			    "commit skipped for module '%s:%s': no dataplane "
+			    "module",
+			    cp_module->type,
+			    cp_module->name);
+			continue;
+		}
+		struct dp_module *dp_module =
+			dp_modules + cp_module->dp_module_idx;
+		if (dp_module->commit_handler != NULL) {
+			dp_module->commit_handler(dp_config, cp_module);
+		}
+	}
+}
+
+// Runs the device commit handlers of a generation, after every module
+// handler; devices are visited in registry order, with the same
+// defensive skip of an out-of-range slot index as the module pass.
+static void
+dp_config_commit_gen_devices(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+) {
+	struct cp_device_registry *device_registry =
+		&config_gen->device_registry;
+	struct dp_device *dp_devices = ADDR_OF(&dp_config->dp_devices);
+
+	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+	     ++idx) {
+		struct registry_item *item =
+			registry_get(&device_registry->registry, idx);
+		if (item == NULL) {
+			continue;
+		}
+		struct cp_device *cp_device =
+			container_of(item, struct cp_device, config_item);
+		if (cp_device->dp_device_idx >= dp_config->device_count) {
+			LOG(ERROR,
+			    "commit skipped for device '%s:%s': no dataplane "
+			    "device",
+			    cp_device->type,
+			    cp_device->name);
+			continue;
+		}
+		struct dp_device *dp_device =
+			dp_devices + cp_device->dp_device_idx;
+		if (dp_device->commit_handler != NULL) {
+			dp_device->commit_handler(dp_config, cp_device);
+		}
+	}
+}
+
+void
+dp_config_commit_gen(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+) {
+	if (config_gen == NULL) {
+		return;
+	}
+
+	// Generation sequence, encoded so zero still means "none".
+	const uint64_t gen_seq = config_gen->gen + 1;
+
+	pthread_mutex_lock(&commit_lock);
+	if (dp_config->committed_gen_seq == gen_seq) {
+		pthread_mutex_unlock(&commit_lock);
+		return;
+	}
+
+	dp_config_commit_gen_modules(dp_config, config_gen);
+	dp_config_commit_gen_devices(dp_config, config_gen);
+
+	// Plain store: the record is touched only under this lock, by
+	// this process's assigner threads or harness round driver; no
+	// reader in another process exists.
+	dp_config->committed_gen_seq = gen_seq;
+	pthread_mutex_unlock(&commit_lock);
+}
+
 void
 dp_config_assign_worker_ectxs(
 	struct dp_config *dp_config, struct cp_config_gen *config_gen
 ) {
+	dp_config_commit_gen(dp_config, config_gen);
+
 	// The loop bound and the array it indexes come from one observation.
 	struct dp_worker *const *workers = ADDR_OF(&dp_config->workers);
 	const uint64_t worker_count = dp_config->worker_count;

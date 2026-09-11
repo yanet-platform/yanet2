@@ -22,12 +22,14 @@ struct rte_mempool;
 struct dp_module {
 	char name[80];
 	module_handler handler;
+	module_commit_handler commit_handler;
 };
 
 struct dp_device {
 	char name[DEVICE_TYPE_LEN];
 	device_handler input_handler;
 	device_handler output_handler;
+	device_commit_handler commit_handler;
 };
 
 /*
@@ -171,6 +173,19 @@ struct dp_config {
 	uint64_t port_count;
 	struct dp_port_counters *port_counters;
 
+	// Commit-pass bookkeeping, mutated only under the process-wide
+	// commit lock shared by every commit pass.
+	//
+	// The record stores the encoded generation sequence: 0 means
+	// none, otherwise the generation number plus one. Generation
+	// numbers advance monotonically per zone — a superseded
+	// generation is freed only after every worker moved to its
+	// successor — so the record names exactly one generation: the
+	// last whose commit handlers ran. It is written and read only
+	// under the commit lock, by one process's assigner threads or
+	// harness round driver; no reader in another process exists.
+	uint64_t committed_gen_seq;
+
 	// Selects the synchronous generation hand-off used by in-process
 	// harnesses; production leaves it clear.
 	//
@@ -246,6 +261,18 @@ dp_config_lookup_object(
 // set.
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
+
+// Run the generation's commit handlers once.
+//
+// Runs inside the dataplane address space during config deliverance,
+// from exactly one thread per shared config: a process-wide lock plus
+// the per-zone record above make the pass single-writer, so two
+// assigner threads observing the same generation do not both run it.
+// An absent generation commits nothing.
+void
+dp_config_commit_gen(
+	struct dp_config *dp_config, struct cp_config_gen *config_gen
+);
 
 // Deliver each worker of dp_config the execution context built for it in
 // config_gen.

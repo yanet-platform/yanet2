@@ -835,6 +835,12 @@ unrdup_handle_packets(
 	}
 }
 
+static void
+unrdup_module_commit(struct dp_config *dp_config, struct cp_module *cp_module) {
+	(void)dp_config;
+	(void)cp_module;
+}
+
 struct module *
 new_module_unrdup() {
 	struct unrdup_module *module =
@@ -848,6 +854,7 @@ new_module_unrdup() {
 		module->module.name, sizeof(module->module.name), "%s", "unrdup"
 	);
 	module->module.handler = unrdup_handle_packets;
+	module->module.commit_handler = unrdup_module_commit;
 
 	return &module->module;
 }

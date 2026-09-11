@@ -106,6 +106,20 @@ zone_test = executable(
 )
 test('zone', zone_test, suite: 'lib_dataplane')
 
+commit_test = executable(
+  'commit_test',
+  'commit_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_config_dp_dep,
+    lib_config_cp_dep,
+    lib_logging_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('commit', commit_test, suite: 'lib_dataplane')
+
 worker_clone_test = executable(
   'worker_clone_test',
   'worker_clone_test.c',

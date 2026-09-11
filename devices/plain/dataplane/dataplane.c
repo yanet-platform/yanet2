@@ -39,6 +39,12 @@ struct device_plain {
 	struct device device;
 };
 
+static void
+plain_device_commit(struct dp_config *dp_config, struct cp_device *cp_device) {
+	(void)dp_config;
+	(void)cp_device;
+}
+
 struct device *
 new_device_plain() {
 	struct device_plain *device_plain =
@@ -56,6 +62,7 @@ new_device_plain() {
 	);
 	device_plain->device.input_handler = plain_input_handle;
 	device_plain->device.output_handler = plain_output_handle;
+	device_plain->device.commit_handler = plain_device_commit;
 
 	return &device_plain->device;
 }
