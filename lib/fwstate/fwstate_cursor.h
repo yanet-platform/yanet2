@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "fwmap.h"
+#include "lib/statemap/fwmap.h"
 #include "types.h"
 
 typedef struct fwstate_cursor {

@@ -2,6 +2,7 @@ package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
+//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
@@ -9,9 +10,9 @@ package cfwstate
 //#include "common/numutils.h"
 //#include "lib/errors/errors.h"
 //#include "lib/fwstate/config.h"
-//#include "lib/fwstate/fwmap.h"
+//#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
-//#include "lib/fwstate/fwtable.h"
+//#include "lib/statemap/fwtable.h"
 //#include "objects/fwstate/api/fwstate_map_v4_object.h"
 //#include "objects/fwstate/api/fwstate_map_v6_object.h"
 //

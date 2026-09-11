@@ -8,6 +8,11 @@
 
 #include "types.h"
 
+// Install fwstate's fwmap callbacks into the statemap registry; idempotent,
+// and run by every fwstate table creation path (see registry.c).
+void
+fwstate_fwmap_registry_ensure(void);
+
 /*
  * NOTE: the `size` argument of every callback below is currently ignored
  * (the hard-cast makes it redundant). A temporary assert is kept as a

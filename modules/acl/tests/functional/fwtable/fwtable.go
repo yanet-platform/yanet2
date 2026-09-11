@@ -5,12 +5,13 @@ package fwtable
 
 //#cgo CFLAGS: -I../../../../../ -I../../../../../lib
 //#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
+//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include <stdint.h>
 //#include <string.h>
 //
-//#include "lib/fwstate/fwtable.h"
+//#include "lib/statemap/fwtable.h"
 //#include "lib/fwstate/types.h"
 //#include "objects/fwstate/api/fwstate_map_v4_object.h"
 //

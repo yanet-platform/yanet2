@@ -7,9 +7,9 @@
 #include "lib/controlplane/config/cp_object.h"
 
 #include "lib/errors/errors.h"
-#include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
-#include "lib/fwstate/fwtable.h"
+#include "lib/statemap/fwmap.h"
+#include "lib/statemap/fwtable.h"
 
 #define FWSTATE_MAP_V6_OBJECT_TYPE "fwstate_map_v6"
 

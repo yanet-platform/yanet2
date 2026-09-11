@@ -195,6 +195,7 @@ deploy/packages/
 !/modules/dscp/
 !/modules/forward/
 !/modules/fwstate/
+!/modules/l3b/
 !/modules/mirror/
 !/modules/nat64/
 !/modules/pdump/
