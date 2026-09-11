@@ -456,7 +456,7 @@ func Test_DscpService_DeleteConfig_ParksThenReclaims(t *testing.T) {
 	response, err := service.DeleteConfig(ctx, &dscppb.DeleteConfigRequest{Name: "dscp0"})
 	require.NotNil(t, response)
 	require.NoError(t, err)
-	require.Len(t, service.deferred, 1)
+	assert.Equal(t, int64(1), backend.first.numCalls.Load())
 	assert.Equal(t, int64(0), backend.first.freed.Load())
 
 	// A later successful update reclaims deferred handles first.
@@ -465,7 +465,7 @@ func Test_DscpService_DeleteConfig_ParksThenReclaims(t *testing.T) {
 		Prefixes4: mustPrefixes4(t, "10.0.1.0/24"),
 	})
 	require.NoError(t, err)
-	assert.Empty(t, service.deferred)
+	assert.Equal(t, int64(2), backend.first.numCalls.Load())
 	assert.Equal(t, int64(1), backend.first.freed.Load())
 }
 

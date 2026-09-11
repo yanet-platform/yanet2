@@ -5,20 +5,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"math"
 	"net/netip"
 	"slices"
-	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
+
+// errUnchanged is reported by a mutation callback that found nothing to
+// publish, so the current config stays as it is.
+var errUnchanged = errors.New("config unchanged")
 
 // NAT64ServiceOption configures the NAT64Service constructor.
 type NAT64ServiceOption func(*nat64ServiceOptions)
@@ -44,16 +46,9 @@ func WithNAT64ServiceLog(log *zap.Logger) NAT64ServiceOption {
 type NAT64Service struct {
 	nat64pb.UnimplementedNAT64ServiceServer
 
-	mu sync.Mutex
-
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-	backend  Backend
-	configs  map[string]config
-	log      *zap.Logger
+	backend Backend
+	configs *configstore.Store[*config]
+	log     *zap.Logger
 }
 
 type config struct {
@@ -69,13 +64,6 @@ func (m *config) Free() error {
 		return nil
 	}
 	return m.Module.Free()
-}
-
-func (m config) Clone() config {
-	return config{
-		Config: m.Config.Clone(),
-		Module: m.Module,
-	}
 }
 
 // NAT64Config represents the configuration for a NAT64 instance
@@ -140,16 +128,13 @@ func NewNAT64Service(backend Backend, options ...NAT64ServiceOption) *NAT64Servi
 	return &NAT64Service{
 		backend: backend,
 		log:     opts.Log,
-		configs: map[string]config{},
+		configs: configstore.NewStore[*config](),
 	}
 }
 
 func (m *NAT64Service) ListConfigs(ctx context.Context, req *nat64pb.ListConfigsRequest) (*nat64pb.ListConfigsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	return &nat64pb.ListConfigsResponse{
-		Configs: slices.Sorted(maps.Keys(m.configs)),
+		Configs: m.configs.Names(),
 	}, nil
 }
 
@@ -161,10 +146,7 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 	response := &nat64pb.ShowConfigResponse{}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	inst, ok := m.configs[name]
+	inst, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
@@ -211,17 +193,17 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	err = m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		next := nextConfig(current, ok)
+		if slices.ContainsFunc(next.Config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
+			return nil, errUnchanged
+		}
+		next.Config.Prefixes = append(next.Config.Prefixes, prefix)
 
-	inst := m.instanceFor(name).Clone()
-	if slices.ContainsFunc(inst.Config.Prefixes, func(existing []byte) bool { return bytes.Equal(existing, prefix) }) {
-		return &nat64pb.AddPrefixResponse{}, nil
-	}
-	inst.Config.Prefixes = append(inst.Config.Prefixes, prefix)
-
-	if err := m.updateModuleConfig(name, inst); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		return m.publish(name, next)
+	})
+	if err != nil && !errors.Is(err, errUnchanged) {
+		return nil, err
 	}
 
 	return &nat64pb.AddPrefixResponse{}, nil
@@ -238,31 +220,30 @@ func (m *NAT64Service) RemovePrefix(ctx context.Context, req *nat64pb.RemovePref
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	inst, ok := m.configs[name]
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	next := inst.Clone()
-
-	removeIdx := -1
-	for idx, storedPrefix := range next.Config.Prefixes {
-		if bytes.Equal(storedPrefix, prefix) {
-			removeIdx = idx
-			break
+	err = m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 		}
-	}
-	if removeIdx == -1 {
-		return nil, status.Errorf(codes.NotFound, "prefix not found in config %q", name)
-	}
+		next := nextConfig(current, ok)
 
-	next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
-	next.Config.Mappings = adjustMappingsAfterPrefixRemove(next.Config.Mappings, uint32(removeIdx))
+		removeIdx := -1
+		for idx, storedPrefix := range next.Config.Prefixes {
+			if bytes.Equal(storedPrefix, prefix) {
+				removeIdx = idx
+				break
+			}
+		}
+		if removeIdx == -1 {
+			return nil, status.Errorf(codes.NotFound, "prefix not found in config %q", name)
+		}
 
-	if err := m.updateModuleConfig(name, next); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		next.Config.Prefixes = slices.Delete(next.Config.Prefixes, removeIdx, removeIdx+1)
+		next.Config.Mappings = adjustMappingsAfterPrefixRemove(next.Config.Mappings, uint32(removeIdx))
+
+		return m.publish(name, next)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &nat64pb.RemovePrefixResponse{}, nil
@@ -286,27 +267,27 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		next := nextConfig(current, ok)
+		if req.PrefixIndex >= uint32(len(next.Config.Prefixes)) {
+			return nil, status.Errorf(
+				codes.InvalidArgument,
+				"invalid prefix index: got %d, prefixes count %d",
+				req.PrefixIndex,
+				len(next.Config.Prefixes),
+			)
+		}
+		next.Config.Mappings = slices.DeleteFunc(next.Config.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
+		next.Config.Mappings = append(next.Config.Mappings, Mapping{
+			IPv4:        ipv4,
+			IPv6:        ipv6,
+			PrefixIndex: req.PrefixIndex,
+		})
 
-	inst := m.instanceFor(name).Clone()
-	if req.PrefixIndex >= uint32(len(inst.Config.Prefixes)) {
-		return nil, status.Errorf(
-			codes.InvalidArgument,
-			"invalid prefix index: got %d, prefixes count %d",
-			req.PrefixIndex,
-			len(inst.Config.Prefixes),
-		)
-	}
-	inst.Config.Mappings = slices.DeleteFunc(inst.Config.Mappings, func(existing Mapping) bool { return existing.IPv4 == ipv4 })
-	inst.Config.Mappings = append(inst.Config.Mappings, Mapping{
-		IPv4:        ipv4,
-		IPv6:        ipv6,
-		PrefixIndex: req.PrefixIndex,
+		return m.publish(name, next)
 	})
-
-	if err := m.updateModuleConfig(name, inst); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+	if err != nil {
+		return nil, err
 	}
 
 	return &nat64pb.AddMappingResponse{}, nil
@@ -323,24 +304,23 @@ func (m *NAT64Service) RemoveMapping(ctx context.Context, req *nat64pb.RemoveMap
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+		}
+		next := nextConfig(current, ok)
 
-	inst, ok := m.configs[name]
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	next := inst.Clone()
+		next.Config.Mappings = slices.DeleteFunc(next.Config.Mappings, func(mapping Mapping) bool {
+			return mapping.IPv4 == ipv4
+		})
+		if len(next.Config.Mappings) == len(current.Config.Mappings) {
+			return nil, status.Errorf(codes.NotFound, "mapping for %s not found in config %q", ipv4, name)
+		}
 
-	next.Config.Mappings = slices.DeleteFunc(next.Config.Mappings, func(mapping Mapping) bool {
-		return mapping.IPv4 == ipv4
+		return m.publish(name, next)
 	})
-	if len(next.Config.Mappings) == len(inst.Config.Mappings) {
-		return nil, status.Errorf(codes.NotFound, "mapping for %s not found in config %q", ipv4, name)
-	}
-
-	if err := m.updateModuleConfig(name, next); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+	if err != nil {
+		return nil, err
 	}
 
 	return &nat64pb.RemoveMappingResponse{}, nil
@@ -362,17 +342,17 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		next := nextConfig(current, ok)
+		next.Config.MTU = MTUConfig{
+			IPv4MTU: req.Mtu.Ipv4Mtu,
+			IPv6MTU: req.Mtu.Ipv6Mtu,
+		}
 
-	inst := m.instanceFor(name).Clone()
-	inst.Config.MTU = MTUConfig{
-		IPv4MTU: req.Mtu.Ipv4Mtu,
-		IPv6MTU: req.Mtu.Ipv6Mtu,
-	}
-
-	if err := m.updateModuleConfig(name, inst); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		return m.publish(name, next)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &nat64pb.SetMTUResponse{}, nil
@@ -384,15 +364,15 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	err := m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		next := nextConfig(current, ok)
+		next.Config.DropUnknownPrefix = req.DropUnknownPrefix
+		next.Config.DropUnknownMapping = req.DropUnknownMapping
 
-	inst := m.instanceFor(name).Clone()
-	inst.Config.DropUnknownPrefix = req.DropUnknownPrefix
-	inst.Config.DropUnknownMapping = req.DropUnknownMapping
-
-	if err := m.updateModuleConfig(name, inst); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		return m.publish(name, next)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &nat64pb.SetDropUnknownResponse{}, nil
@@ -444,50 +424,38 @@ func (m *NAT64Service) DeleteConfig(ctx context.Context, req *nat64pb.DeleteConf
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	inst, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*config) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config: %v", err)
 	}
-
-	// The delete retired the generation holding the published module.
-	// Retry the deferred ones, then retire this one.
-	m.reclaimDeferred()
-	m.parkOrFree(inst.Module)
-
-	delete(m.configs, name)
 
 	return &nat64pb.DeleteConfigResponse{}, nil
 }
 
-func (m *NAT64Service) instanceFor(name string) config {
-	inst, ok := m.configs[name]
+// nextConfig returns the config a mutation starts from: a deep copy of the
+// current one, or the defaults when the name is new.
+func nextConfig(current *config, ok bool) *config {
 	if !ok {
-		return config{
-			Config: defaultNAT64Config(),
-		}
+		return &config{Config: defaultNAT64Config()}
 	}
-	return inst
+	return &config{Config: current.Config.Clone()}
 }
 
-func (m *NAT64Service) updateModuleConfig(name string, inst config) error {
-	module, err := m.backend.UpdateModule(name, &inst.Config)
+// publish writes the next config to the dataplane and attaches the
+// published handle to it.
+func (m *NAT64Service) publish(name string, next *config) (*config, error) {
+	module, err := m.backend.UpdateModule(name, &next.Config)
 	if err != nil {
-		return err
+		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
+	next.Module = module
 
-	m.reclaimDeferred()
-	m.parkOrFree(inst.Module)
-	inst.Module = module
-	m.configs[name] = inst
-
-	return nil
+	return next, nil
 }
 
 func adjustMappingsAfterPrefixRemove(mappings []Mapping, removed uint32) []Mapping {
@@ -504,38 +472,11 @@ func adjustMappingsAfterPrefixRemove(mappings []Mapping, removed uint32) []Mappi
 	return out
 }
 
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.mu.
-func (m *NAT64Service) parkOrFree(handle ModuleHandle) {
-	if handle == nil {
-		return
-	}
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
 func (m *NAT64Service) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *NAT64Service) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }

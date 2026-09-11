@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
@@ -14,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
@@ -53,25 +53,29 @@ type config struct {
 	Handle     *ctrafgen.DeviceConfig
 }
 
+// Free releases the device handle held by the config.
+//
+// It is safe to call even when no handle is held.
+func (m *config) Free() error {
+	if m.Handle == nil {
+		return nil
+	}
+	return m.Handle.Free()
+}
+
 // TrafgenService implements the TrafgenService gRPC server.
 type TrafgenService struct {
 	trafgenpb.UnimplementedTrafgenServiceServer
 
-	mu sync.Mutex
-	// deferred holds superseded devices whose free was refused because
-	// a live configuration generation still referenced them. This
-	// service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []*ctrafgen.DeviceConfig
-	backend  Backend
-	configs  map[string]*config
+	backend Backend
+	configs *configstore.Store[*config]
 }
 
 // NewTrafgenService constructs a TrafgenService backed by the given Backend.
 func NewTrafgenService(backend Backend) *TrafgenService {
 	return &TrafgenService{
 		backend: backend,
-		configs: map[string]*config{},
+		configs: configstore.NewStore[*config](),
 	}
 }
 
@@ -97,17 +101,15 @@ func (m *TrafgenService) UpdateDevice(
 	input := pipelinesFromProto(req.GetDevice().GetInput())
 	output := pipelinesFromProto(req.GetDevice().GetOutput())
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var packets [][]byte
-	var ratePps uint64
-	if old, ok := m.configs[name]; ok {
-		packets = old.Packets
-		ratePps = old.RatePps
-	}
-
-	if err := m.apply(name, packets, ratePps, input, output); err != nil {
+	err := m.publish(name, func(current *config, ok bool) *config {
+		next := &config{Input: input, Output: output}
+		if ok {
+			next.Packets = current.Packets
+			next.RatePps = current.RatePps
+		}
+		return next
+	})
+	if err != nil {
 		code := codes.Internal
 		if errors.Is(err, ffi.ErrFailedPrecondition) {
 			// The device names an entity of the graph it runs that the
@@ -125,15 +127,7 @@ func (m *TrafgenService) ListConfigs(
 	ctx context.Context,
 	req *trafgenpb.ListConfigsRequest,
 ) (*trafgenpb.ListConfigsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	names := make([]string, 0, len(m.configs))
-	for name := range m.configs {
-		names = append(names, name)
-	}
-
-	return &trafgenpb.ListConfigsResponse{Configs: names}, nil
+	return &trafgenpb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 // ShowConfig returns the loaded frame statistics and target rate for a config.
@@ -146,10 +140,7 @@ func (m *TrafgenService) ShowConfig(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
+	entry, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
@@ -171,10 +162,7 @@ func (m *TrafgenService) ShowPackets(
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
+	entry, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
@@ -207,18 +195,16 @@ func (m *TrafgenService) UploadPcap(
 		return nil, status.Error(codes.InvalidArgument, "pcap contains no packets")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var ratePps uint64
-	var input, output []Pipeline
-	if old, ok := m.configs[name]; ok {
-		ratePps = old.RatePps
-		input = old.Input
-		output = old.Output
-	}
-
-	if err := m.apply(name, packets, ratePps, input, output); err != nil {
+	err = m.publish(name, func(current *config, ok bool) *config {
+		next := &config{Packets: packets}
+		if ok {
+			next.RatePps = current.RatePps
+			next.Input = current.Input
+			next.Output = current.Output
+		}
+		return next
+	})
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update device config %q: %v", name, err,
@@ -242,18 +228,16 @@ func (m *TrafgenService) SetRate(
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var packets [][]byte
-	var input, output []Pipeline
-	if old, ok := m.configs[name]; ok {
-		packets = old.Packets
-		input = old.Input
-		output = old.Output
-	}
-
-	if err := m.apply(name, packets, req.GetRatePps(), input, output); err != nil {
+	err := m.publish(name, func(current *config, ok bool) *config {
+		next := &config{RatePps: req.GetRatePps()}
+		if ok {
+			next.Packets = current.Packets
+			next.Input = current.Input
+			next.Output = current.Output
+		}
+		return next
+	})
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to update device config %q: %v", name, err,
@@ -263,47 +247,27 @@ func (m *TrafgenService) SetRate(
 	return &trafgenpb.SetRateResponse{}, nil
 }
 
-// apply publishes the full device state through the backend and, on success,
-// stores the new config. The caller must hold m.mu.
+// publish builds the next device state from the current one and writes it
+// to the dataplane, attaching the published handle and frame statistics.
 //
-// The publish retired the generations holding this service's deferred
-// devices; they are retried here, and the superseded handle is retired
-// after: freed outright when dangling, parked while a pinned generation
-// still references it.
-func (m *TrafgenService) apply(
-	name string,
-	packets [][]byte,
-	ratePps uint64,
-	input, output []Pipeline,
-) error {
-	frames, lengths := flattenFrames(packets)
+// The caller's builder returns the packets, rate and pipelines of the new
+// state and may carry any of them over from the current config.
+func (m *TrafgenService) publish(name string, next func(current *config, ok bool) *config) error {
+	return m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		cfg := next(current, ok)
+		frames, lengths := flattenFrames(cfg.Packets)
 
-	handle, err := m.backend.UpdateDevice(name, input, output, frames, lengths, ratePps)
-	if err != nil {
-		return fmt.Errorf("failed to update device config %q: %w", name, err)
-	}
+		handle, err := m.backend.UpdateDevice(name, cfg.Input, cfg.Output, frames, lengths, cfg.RatePps)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update device config %q: %w", name, err)
+		}
 
-	var oldHandle *ctrafgen.DeviceConfig
-	if old, ok := m.configs[name]; ok {
-		oldHandle = old.Handle
-	}
+		cfg.FrameCount = uint32(len(cfg.Packets))
+		cfg.TotalBytes = uint64(len(frames))
+		cfg.Handle = handle
 
-	m.configs[name] = &config{
-		RatePps:    ratePps,
-		FrameCount: uint32(len(packets)),
-		TotalBytes: uint64(len(frames)),
-		Packets:    packets,
-		Input:      input,
-		Output:     output,
-		Handle:     handle,
-	}
-
-	m.reclaimDeferred()
-	if oldHandle != nil {
-		m.parkOrFree(oldHandle)
-	}
-
-	return nil
+		return cfg, nil
+	})
 }
 
 // pipelinesFromProto converts the wire pipeline assignments into the service
@@ -376,35 +340,11 @@ func parsePcap(pcap []byte) ([][]byte, error) {
 	return packets, nil
 }
 
-// parkOrFree frees the device when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.mu.
-func (m *TrafgenService) parkOrFree(handle *ctrafgen.DeviceConfig) {
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred device, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this service's superseded devices; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
+// ReclaimDeferred retries every superseded device whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
 func (m *TrafgenService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *TrafgenService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
-		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+	m.configs.ReclaimDeferred()
 }

@@ -6,13 +6,12 @@ import (
 	"errors"
 	"net/netip"
 	"slices"
-	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
@@ -33,15 +32,8 @@ type Backend interface {
 type DscpService struct {
 	dscppb.UnimplementedDscpServiceServer
 
-	mu sync.RWMutex
-
-	// deferred holds superseded module handles whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
-	deferred []ModuleHandle
-	backend  Backend
-	configs  map[string]*config
+	backend Backend
+	configs *configstore.Store[*config]
 }
 
 type config struct {
@@ -65,12 +57,13 @@ func (m *config) Free() error {
 	return m.Module.Free()
 }
 
+// Clone copies the prefix sets and marking but never the published handle,
+// so a copy never inherits ownership of the shared-memory config.
 func (m *config) Clone() *config {
 	return &config{
 		Prefixes4: slices.Clone(m.Prefixes4),
 		Prefixes6: slices.Clone(m.Prefixes6),
 		Config:    m.Config,
-		Module:    m.Module,
 	}
 }
 
@@ -82,7 +75,7 @@ type dscpConfig struct {
 func NewDscpService(backend Backend) *DscpService {
 	return &DscpService{
 		backend: backend,
-		configs: map[string]*config{},
+		configs: configstore.NewStore[*config](),
 	}
 }
 
@@ -90,18 +83,7 @@ func (m *DscpService) ListConfigs(
 	ctx context.Context,
 	request *dscppb.ListConfigsRequest,
 ) (*dscppb.ListConfigsResponse, error) {
-	response := &dscppb.ListConfigsResponse{
-		Configs: make([]string, 0),
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
-	}
-
-	return response, nil
+	return &dscppb.ListConfigsResponse{Configs: m.configs.Names()}, nil
 }
 
 func (m *DscpService) ShowConfig(
@@ -115,10 +97,7 @@ func (m *DscpService) ShowConfig(
 	name := request.GetName()
 	response := &dscppb.ShowConfigResponse{}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	config, ok := m.configs[name]
+	config, ok := m.configs.Get(name)
 	if !ok {
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
@@ -162,18 +141,11 @@ func (m *DscpService) AddPrefixes(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cfg := &config{}
-	if currConfig, ok := m.configs[name]; ok {
-		cfg = currConfig.Clone()
-	}
-
-	cfg.Prefixes4 = mergePrefixes(cfg.Prefixes4, toAdd4)
-	cfg.Prefixes6 = mergePrefixes(cfg.Prefixes6, toAdd6)
-
-	if err := m.updateModuleConfig(name, cfg); err != nil {
+	err = m.publish(name, func(cfg *config) {
+		cfg.Prefixes4 = mergePrefixes(cfg.Prefixes4, toAdd4)
+		cfg.Prefixes6 = mergePrefixes(cfg.Prefixes6, toAdd6)
+	})
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -216,20 +188,11 @@ func (m *DscpService) RemovePrefixes(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Create a new config to-be-updated either from scratch or from the
-	// current config.
-	cfg := &config{}
-	if currConfig, ok := m.configs[name]; ok {
-		cfg = currConfig.Clone()
-	}
-
-	cfg.Prefixes4 = removePrefixes(cfg.Prefixes4, toRemove4)
-	cfg.Prefixes6 = removePrefixes(cfg.Prefixes6, toRemove6)
-
-	if err := m.updateModuleConfig(name, cfg); err != nil {
+	err = m.publish(name, func(cfg *config) {
+		cfg.Prefixes4 = removePrefixes(cfg.Prefixes4, toRemove4)
+		cfg.Prefixes6 = removePrefixes(cfg.Prefixes6, toRemove6)
+	})
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -258,19 +221,13 @@ func (m *DscpService) SetDscpMarking(
 	flag := uint8(request.GetDscpConfig().GetFlag())
 	mark := uint8(request.GetDscpConfig().GetMark())
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cfg := &config{}
-	if currConfig, ok := m.configs[name]; ok {
-		cfg = currConfig.Clone()
-	}
-	cfg.Config = dscpConfig{
-		Flag: flag,
-		Mark: mark,
-	}
-
-	if err := m.updateModuleConfig(name, cfg); err != nil {
+	err := m.publish(name, func(cfg *config) {
+		cfg.Config = dscpConfig{
+			Flag: flag,
+			Mark: mark,
+		}
+	})
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update module config %q: %v", name, err)
 	}
 
@@ -289,87 +246,52 @@ func (m *DscpService) DeleteConfig(
 
 	name := request.GetName()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
-	if !ok {
+	err := m.configs.Delete(name, func(*config) error {
+		return m.backend.DeleteModule(name)
+	})
+	if errors.Is(err, configstore.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "config not found")
 	}
-
-	if err := m.backend.DeleteModule(name); err != nil {
+	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
 			"failed to delete module config %q: %v", name, err,
 		)
 	}
 
-	// The delete retired the generation holding the published module.
-	// Retry the deferred ones, then retire this one.
-	m.reclaimDeferred()
-	m.parkOrFree(entry.Module)
-
-	delete(m.configs, name)
-
 	return &dscppb.DeleteConfigResponse{}, nil
 }
 
-func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
-	module, err := m.backend.UpdateModule(
-		name,
-		slices.Concat(cfg.Prefixes4, cfg.Prefixes6),
-		cfg.Config.Flag,
-		cfg.Config.Mark,
-	)
-	if err != nil {
-		return err
-	}
-
-	m.reclaimDeferred()
-	m.parkOrFree(cfg.Module)
-
-	m.configs[name] = &config{
-		Prefixes4: cfg.Prefixes4,
-		Prefixes6: cfg.Prefixes6,
-		Config:    cfg.Config,
-		Module:    module,
-	}
-
-	return nil
-}
-
-// parkOrFree frees the handle when it is dangling and parks it for
-// retry when a live generation still references it. The caller must
-// hold m.mu.
-func (m *DscpService) parkOrFree(handle ModuleHandle) {
-	if handle == nil {
-		return
-	}
-	if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-		m.deferred = append(m.deferred, handle)
-	}
-}
-
-// ReclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. It is the
-// reclamation handler for this module's superseded configs; the service
-// itself runs it after each successful publish, and anything else may
-// call it at any time.
-func (m *DscpService) ReclaimDeferred() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reclaimDeferred()
-}
-
-// reclaimDeferred is ReclaimDeferred without the lock. The caller must
-// hold m.mu.
-func (m *DscpService) reclaimDeferred() {
-	kept := m.deferred[:0]
-	for _, handle := range m.deferred {
-		if err := handle.Free(); errors.Is(err, ffi.ErrStillReferenced) {
-			kept = append(kept, handle)
+// publish applies a mutation to a copy of the named config, starting from
+// an empty one when the name is new, and publishes the result.
+func (m *DscpService) publish(name string, mutate func(cfg *config)) error {
+	return m.configs.Update(name, func(current *config, ok bool) (*config, error) {
+		cfg := &config{}
+		if ok {
+			cfg = current.Clone()
 		}
-	}
-	clear(m.deferred[len(kept):])
-	m.deferred = kept
+		mutate(cfg)
+
+		module, err := m.backend.UpdateModule(
+			name,
+			slices.Concat(cfg.Prefixes4, cfg.Prefixes6),
+			cfg.Config.Flag,
+			cfg.Config.Mark,
+		)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Module = module
+
+		return cfg, nil
+	})
+}
+
+// ReclaimDeferred retries every superseded config whose free was refused,
+// releasing the ones whose generations have drained.
+//
+// The service runs it after each successful publish, and anything else
+// may call it at any time.
+func (m *DscpService) ReclaimDeferred() {
+	m.configs.ReclaimDeferred()
 }
